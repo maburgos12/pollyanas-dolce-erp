@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini-ERP Pastelerías</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo-section">
+                    <div class="logo">🍰</div>
+                    <div>
+                        <h1>Mini-ERP Pastelerías</h1>
+                        <p>Sistema Integral de Control Administrativo • 8 Sucursales</p>
+                    </div>
+                </div>
+                <div class="location">
+                    <strong>Almacén Central</strong><br>
+                    Los Mochis, Sinaloa
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <nav class="menu">
+                    <a href="/" class="menu-item active">
+                        <span class="icon">📊</span>
+                        <span>Dashboard</span>
+                    </a>
+                    <a href="/recetas/" class="menu-item">
+                        <span class="icon">📋</span>
+                        <span>Recetas</span>
+                    </a>
+                    <a href="/admin/" class="menu-item">
+                        <span class="icon">⚙️</span>
+                        <span>Administración</span>
+                    </a>
+                    <a href="/logout/" class="menu-item">
+                        <span class="icon">🚪</span>
+                        <span>Salir</span>
+                    </a>
+                </nav>
+                
+                <div class="info-box">
+                    <span class="lightbulb">💡</span>
+                    <strong>Sistema Interactivo</strong>
+                    <p>Basado en datos reales de tu ERP Pastelerías</p>
+                </div>
+            </aside>
+
+            <!-- Dashboard Content -->
+            <main class="dashboard">
+                <h2>Panel de Control</h2>
+                
+                <div class="cards-grid">
+                    <div class="card card-blue">
+                        <div class="card-content">
+                            <div>
+                                <p class="card-label">Insumos Activos</p>
+                                <h3 class="card-number">{{ insumos_count }}</h3>
+                                <p class="card-subtitle">en inventario</p>
+                            </div>
+                            <div class="card-icon">📦</div>
+                        </div>
+                    </div>
+
+                    <div class="card card-orange">
+                        <div class="card-content">
+                            <div>
+                                <p class="card-label">Alertas de Stock</p>
+                                <h3 class="card-number">{{ alertas_count }}</h3>
+                                <p class="card-subtitle">requieren compra</p>
+                            </div>
+                            <div class="card-icon">⚠️</div>
+                        </div>
+                    </div>
+
+                    <div class="card card-green">
+                        <div class="card-content">
+                            <div>
+                                <p class="card-label">Valor en Almacén</p>
+                                <h3 class="card-number">${{ valor_inventario }}</h3>
+                                <p class="card-subtitle">MXN</p>
+                            </div>
+                            <div class="card-icon">💰</div>
+                        </div>
+                    </div>
+
+                    <div class="card card-purple">
+                        <div class="card-content">
+                            <div>
+                                <p class="card-label">Recetas Activas</p>
+                                <h3 class="card-number">{{ recetas_count }}</h3>
+                                <p class="card-subtitle">en producción</p>
+                            </div>
+                            <div class="card-icon">🍰</div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="/static/js/script.js"></script>
+</body>
+</html>

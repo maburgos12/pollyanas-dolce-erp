@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Matching pendientes{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Matching pendientes</h3>
+  <form class="d-flex" method="get">
+    <input class="form-control me-2" name="q" placeholder="Filtrar ingrediente" value="{{ q }}">
+    <button class="btn btn-outline-primary" type="submit">Filtrar</button>
+  </form>
+</div>
+
+<div class="alert alert-info">
+  En Sprint 1 el selector de insumos está limitado a 500 (para que cargue rápido). En Sprint 2 se agrega autocomplete/búsqueda.
+</div>
+
+<div class="table-responsive">
+  <table class="table table-sm table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Receta</th>
+        <th>Ingrediente</th>
+        <th>Score</th>
+        <th>Acción</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for l in page.object_list %}
+      <tr>
+        <td><a href="{% url 'receta_detail' l.receta.id %}">{{ l.receta.nombre }}</a></td>
+        <td>{{ l.insumo_texto }}</td>
+        <td><span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span></td>
+        <td>
+          <form method="post" action="{% url 'aprobar_matching' l.id %}" class="d-flex gap-2">
+            {% csrf_token %}
+            <select name="insumo_id" class="form-select form-select-sm" required>
+              <option value="">Selecciona...</option>
+              {% for i in insumos %}
+                <option value="{{ i.id }}">{{ i.nombre }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-sm btn-success" type="submit">Aprobar</button>
+          </form>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="text-muted">No hay pendientes</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<nav>
+  <ul class="pagination">
+    {% if page.has_previous %}
+      <li class="page-item"><a class="page-link" href="?q={{ q }}&page={{ page.previous_page_number }}">Anterior</a></li>
+    {% endif %}
+    <li class="page-item disabled"><a class="page-link">Página {{ page.number }} de {{ page.paginator.num_pages }}</a></li>
+    {% if page.has_next %}
+      <li class="page-item"><a class="page-link" href="?q={{ q }}&page={{ page.next_page_number }}">Siguiente</a></li>
+    {% endif %}
+  </ul>
+</nav>
+{% endblock %}

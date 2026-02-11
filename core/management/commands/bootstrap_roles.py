@@ -1,0 +1,81 @@
+from django.core.management.base import BaseCommand
+from django.contrib.auth.models import Group, Permission
+from django.contrib.contenttypes.models import ContentType
+
+ROLE_PERMS = {
+    "DG": [
+        # Sprint 1: solo lectura
+        "core.view_auditlog",
+        "recetas.view_receta",
+        "recetas.view_lineareceta",
+        "maestros.view_insumo",
+        "maestros.view_costoinsumo",
+    ],
+    "ADMIN": [
+        "core.view_auditlog",
+        "recetas.view_receta",
+        "recetas.view_lineareceta",
+        "recetas.change_lineareceta",  # aprobar matching
+        "maestros.view_insumo",
+        "maestros.view_costoinsumo",
+    ],
+    "COMPRAS": [
+        "recetas.view_receta",
+        "recetas.view_lineareceta",
+        "maestros.add_insumo",
+        "maestros.change_insumo",
+        "maestros.add_costoinsumo",
+        "maestros.change_costoinsumo",
+        "maestros.view_insumo",
+        "maestros.view_costoinsumo",
+    ],
+    "ALMACEN": [
+        "recetas.view_receta",
+        "recetas.view_lineareceta",
+        "maestros.view_insumo",
+        "maestros.view_costoinsumo",
+    ],
+    "PRODUCCION": [
+        "recetas.view_receta",
+        "recetas.view_lineareceta",
+    ],
+    "VENTAS": [
+        "recetas.view_receta",
+        "recetas.view_lineareceta",
+    ],
+    "LOGISTICA": [
+        "recetas.view_receta",
+        "recetas.view_lineareceta",
+    ],
+    "RRHH": [
+        "recetas.view_receta",
+        "recetas.view_lineareceta",
+    ],
+    "LECTURA": [
+        "recetas.view_receta",
+        "recetas.view_lineareceta",
+        "maestros.view_insumo",
+        "maestros.view_costoinsumo",
+    ],
+}
+
+class Command(BaseCommand):
+    help = "Crea grupos/roles y asigna permisos básicos para Sprint 1."
+
+    def handle(self, *args, **options):
+        created = 0
+        for role, perm_codes in ROLE_PERMS.items():
+            group, was_created = Group.objects.get_or_create(name=role)
+            if was_created:
+                created += 1
+            perms = []
+            for code in perm_codes:
+                try:
+                    app_label, codename = code.split(".", 1)
+                    perm = Permission.objects.get(content_type__app_label=app_label, codename=codename)
+                    perms.append(perm)
+                except Exception:
+                    self.stdout.write(self.style.WARNING(f"Permiso no encontrado: {code}"))
+            group.permissions.set(perms)
+            group.save()
+        self.stdout.write(self.style.SUCCESS(f"Roles listos. Nuevos grupos creados: {created}"))

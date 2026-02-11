@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Mini-ERP{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <!-- Header Azul -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo-section">
+                <div class="logo">🍰</div>
+                <div>
+                    <h1>ERP - Administración</h1>
+                    <p>Pollyana's Dolce</p>
+                </div>
+            </div>
+            <div class="user-info">
+                <span>{{ user.first_name|default:user.username }}</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="wrapper">
+        <aside class="sidebar">
+            <nav class="menu">
+                <a href="/" class="menu-item active"><span class="icon">📊</span> Dashboard</a>
+                <div class="section">Maestros</div>
+                <a href="/maestros/proveedores/" class="menu-item"><span class="icon">🏭</span> Proveedores</a>
+                <a href="/maestros/insumos/" class="menu-item"><span class="icon">📦</span> Insumos</a>
+                <div class="section">Compras</div>
+                <a href="/compras/" class="menu-item"><span class="icon">🛒</span> Órdenes de Compra</a>
+                <div class="section">Inventario</div>
+                <a href="/inventario/" class="menu-item"><span class="icon">📊</span> Stock</a>
+                <div class="section">Producción</div>
+                <a href="/recetas/" class="menu-item"><span class="icon">🍰</span> Recetas</a>
+                <hr>
+                <a href="/admin/" class="menu-item"><span class="icon">⚙️</span> Administración</a>
+                <a href="/logout/" class="menu-item"><span class="icon">🚪</span> Salir</a>
+            </nav>
+            <div class="info-box">
+                <strong>💡 Sistema Interactivo</strong>
+                <p>Gestiona tu ERP de pastelerías</p>
+            </div>
+        </aside>
+        <main class="content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>

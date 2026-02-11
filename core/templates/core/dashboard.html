@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h3 class="mb-3">Dashboard</h3>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Recetas y Costeo</h5>
+        <p class="card-text">Ver recetas, costos y detalle de insumos.</p>
+        {% if can_view_recetas %}
+          <a class="btn btn-primary" href="{% url 'recetas_list' %}">Ir a Recetas</a>
+        {% else %}
+          <span class="text-muted">Sin permisos</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Matching pendiente</h5>
+        <p class="card-text">Aprobar coincidencias de insumos (needs_review).</p>
+        {% if can_review_matching %}
+          <a class="btn btn-outline-primary" href="{% url 'matching_pendientes' %}">Pendientes</a>
+        {% else %}
+          <span class="text-muted">Sin permisos</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">MRP (Explosión de insumos)</h5>
+        <p class="card-text">Simula requerimientos por receta.</p>
+        <a class="btn btn-outline-success" href="{% url 'mrp_form' %}">Abrir MRP</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Admin</h5>
+        <p class="card-text">Administración interna del sistema (Django Admin).</p>
+        <a class="btn btn-outline-dark" href="/admin/">Abrir Admin</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

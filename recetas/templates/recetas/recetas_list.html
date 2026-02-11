@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Recetas{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Recetas</h3>
+  <form class="d-flex" method="get">
+    <input class="form-control me-2" name="q" placeholder="Buscar" value="{{ q }}">
+    <button class="btn btn-outline-primary" type="submit">Buscar</button>
+  </form>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-sm table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Receta</th>
+        <th>Hoja</th>
+        <th>Pendientes</th>
+        <th class="text-end">Costo total (estimado)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in page.object_list %}
+      <tr>
+        <td><a href="{% url 'receta_detail' r.id %}">{{ r.nombre }}</a></td>
+        <td>{{ r.sheet_name }}</td>
+        <td>
+          {% if r.pendientes_matching > 0 %}
+            <span class="badge bg-warning text-dark">{{ r.pendientes_matching }}</span>
+          {% else %}
+            <span class="badge bg-success">0</span>
+          {% endif %}
+        </td>
+        <td class="text-end">${{ r.costo_total_estimado|floatformat:2 }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="text-muted">Sin recetas</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<nav>
+  <ul class="pagination">
+    {% if page.has_previous %}
+      <li class="page-item"><a class="page-link" href="?q={{ q }}&page={{ page.previous_page_number }}">Anterior</a></li>
+    {% endif %}
+    <li class="page-item disabled"><a class="page-link">Página {{ page.number }} de {{ page.paginator.num_pages }}</a></li>
+    {% if page.has_next %}
+      <li class="page-item"><a class="page-link" href="?q={{ q }}&page={{ page.next_page_number }}">Siguiente</a></li>
+    {% endif %}
+  </ul>
+</nav>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}MRP{% endblock %}
+{% block content %}
+<h3 class="mb-3">MRP - Explosión de insumos</h3>
+
+<form method="post" class="row g-2 align-items-end">
+  {% csrf_token %}
+  <div class="col-md-6">
+    <label class="form-label">Receta</label>
+    <select name="receta_id" class="form-select" required>
+      <option value="">Selecciona...</option>
+      {% for r in recetas %}
+        <option value="{{ r.id }}" {% if resultado and resultado.receta.id == r.id %}selected{% endif %}>{{ r.nombre }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label">Multiplicador</label>
+    <input class="form-control" name="multiplicador" value="{% if resultado %}{{ resultado.multiplicador }}{% else %}1{% endif %}">
+  </div>
+  <div class="col-md-3">
+    <button class="btn btn-success w-100" type="submit">Calcular</button>
+  </div>
+</form>
+
+{% if resultado %}
+  <hr class="my-4">
+  <h5>{{ resultado.receta.nombre }} × {{ resultado.multiplicador }}</h5>
+  <div class="table-responsive">
+    <table class="table table-sm table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Insumo</th>
+          <th class="text-end">Cantidad</th>
+          <th>Unidad</th>
+          <th class="text-end">Costo estimado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in resultado.items %}
+        <tr>
+          <td>{{ it.nombre }}</td>
+          <td class="text-end">{{ it.cantidad }}</td>
+          <td>{{ it.unidad }}</td>
+          <td class="text-end">${{ it.costo|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="fw-bold text-end">Costo total estimado: ${{ resultado.costo_total|floatformat:2 }}</div>
+{% endif %}
+{% endblock %}

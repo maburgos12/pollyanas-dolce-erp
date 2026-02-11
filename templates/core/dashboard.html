@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Panel de Control</h2>
+<div class="cards-grid">
+    <a href="/maestros/insumos/" class="card card-blue"><h3>{{ insumos_count }}</h3><p>Insumos Activos</p></a>
+    <a href="#" class="card card-orange"><h3>{{ alertas_count }}</h3><p>Alertas de Stock</p></a>
+    <a href="/recetas/" class="card card-green"><h3>{{ recetas_count }}</h3><p>Recetas Activas</p></a>
+    <a href="/maestros/proveedores/" class="card card-purple"><h3>{{ proveedores_count }}</h3><p>Proveedores</p></a>
+</div>
+{% endblock %}

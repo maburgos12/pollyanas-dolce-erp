@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ receta.nombre }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h3 class="mb-0">{{ receta.nombre }}</h3>
+    <div class="text-muted">Hoja: {{ receta.sheet_name }}</div>
+  </div>
+  <a class="btn btn-outline-secondary" href="{% url 'recetas_list' %}">Volver</a>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-sm table-striped align-middle">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Ingrediente (texto)</th>
+        <th>Insumo ligado</th>
+        <th class="text-end">Cantidad</th>
+        <th>Unidad</th>
+        <th class="text-end">Costo (excel)</th>
+        <th>Match</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for l in lineas %}
+      <tr>
+        <td>{{ l.posicion }}</td>
+        <td>{{ l.insumo_texto }}</td>
+        <td>{% if l.insumo %}{{ l.insumo.nombre }}{% else %}<span class="text-danger">Sin match</span>{% endif %}</td>
+        <td class="text-end">{{ l.cantidad }}</td>
+        <td>{{ l.unidad_texto }}</td>
+        <td class="text-end">{% if l.costo_linea_excel %}${{ l.costo_linea_excel|floatformat:2 }}{% endif %}</td>
+        <td>
+          {% if l.match_status == "AUTO_APPROVED" %}
+            <span class="badge bg-success">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span>
+          {% elif l.match_status == "NEEDS_REVIEW" %}
+            <span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span>
+          {% else %}
+            <span class="badge bg-danger">NO_MATCH</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
