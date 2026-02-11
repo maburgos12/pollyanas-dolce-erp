@@ -445,3 +445,5 @@ LINE 1: ...user"."is_active", "auth_user"."date_joined" FROM "auth_user...
                                                              ^
 
 INFO 2026-02-10 22:16:38,841 django.utils.autoreload Watching for file changes with StatReloader
+INFO 2026-02-11 13:27:27,137 django.utils.autoreload Watching for file changes with StatReloader
+INFO 2026-02-11 13:27:27,671 django.utils.autoreload Watching for file changes with StatReloader
