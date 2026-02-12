@@ -2,14 +2,19 @@
 from pathlib import Path
 import os
 from decouple import config as env_config
+import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Security
 SECRET_KEY = env_config("SECRET_KEY", default="django-insecure-dev-key-change-me")
 DEBUG = env_config("DEBUG", default=True, cast=bool)
 
-ALLOWED_HOSTS = [h.strip() for h in env_config("ALLOWED_HOSTS", default="localhost,127.0.0.1,0.0.0.0").split(",") if h.strip()]
+# Hosts
+ALLOWED_HOSTS_STR = env_config("ALLOWED_HOSTS", default="localhost,127.0.0.1,0.0.0.0")
+ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS_STR.split(",") if h.strip()]
 
+# Apps
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -17,17 +22,16 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-
     "rest_framework",
     "corsheaders",
     "django_filters",
-
     "core",
     "maestros",
     "recetas",
     "api",
 ]
 
+# Middleware
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -41,6 +45,7 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "config.urls"
 
+# Templates
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -59,17 +64,25 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": env_config("DB_NAME", default="pastelerias_erp"),
-        "USER": env_config("DB_USER", default="postgres"),
-        "PASSWORD": env_config("DB_PASSWORD", default="postgres"),
-        "HOST": env_config("DB_HOST", default="db"),
-        "PORT": env_config("DB_PORT", default="5432"),
+# Database - Use DATABASE_URL if available (Railway), otherwise use individual env vars
+DATABASE_URL = env_config("DATABASE_URL", default=None)
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.config(default=DATABASE_URL, conn_max_age=600)
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": env_config("DB_NAME", default="pastelerias_erp"),
+            "USER": env_config("DB_USER", default="postgres"),
+            "PASSWORD": env_config("DB_PASSWORD", default="postgres"),
+            "HOST": env_config("DB_HOST", default="localhost"),
+            "PORT": env_config("DB_PORT", default="5432"),
+        }
+    }
 
+# Password validators
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -77,22 +90,26 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+# Internationalization
 LANGUAGE_CODE = "es-mx"
 TIME_ZONE = env_config("TIME_ZONE", default="America/Mazatlan")
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+# Static files
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 if os.path.exists(BASE_DIR / "static"):
     STATICFILES_DIRS = [BASE_DIR / "static"]
 else:
     STATICFILES_DIRS = []
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# CORS (para consumo interno / API)
+# CORS
 CORS_ALLOW_ALL_ORIGINS = True
 
+# REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
@@ -116,17 +133,11 @@ LOGGING = {
         "verbose": {"format": "{levelname} {asctime} {name} {message}", "style": "{"},
     },
     "handlers": {
-        "file": {
-            "level": "INFO",
-            "class": "logging.FileHandler",
-            "filename": str(LOG_DIR / "app.log"),
-            "formatter": "verbose",
-        },
         "console": {
             "level": "INFO",
             "class": "logging.StreamHandler",
             "formatter": "verbose",
         },
     },
-    "root": {"handlers": ["console", "file"], "level": "INFO"},
+    "root": {"handlers": ["console"], "level": "INFO"},
 }
