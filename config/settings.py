@@ -1,4 +1,4 @@
-"""Django settings - WORKS ON RAILWAY"""
+"""Django settings - Render Production"""
 import os
 import dj_database_url
 
@@ -50,8 +50,18 @@ TEMPLATES = [{
     },
 }]
 
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost/pastelerias_erp")
-DATABASES = {"default": dj_database_url.config(default=DB_URL, conn_max_age=600)}
+# Database - use SQLite if DATABASE_URL not set
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if DATABASE_URL:
+    DATABASES = {"default": dj_database_url.config(default=DATABASE_URL, conn_max_age=600)}
+else:
+    # Use SQLite as fallback (no external DB needed)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -83,7 +93,6 @@ LOGGING = {
     "root": {"handlers": ["console"], "level": "WARNING"},
 }
 
-# Security - disable for Railway
 SECURE_HSTS_SECONDS = 0
 SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = False
