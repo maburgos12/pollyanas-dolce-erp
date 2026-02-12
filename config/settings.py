@@ -1,4 +1,4 @@
-"""Django settings for pastelerias_erp_sprint1."""
+"""Django settings for pastelerias_erp_sprint1 - Production Ready."""
 from pathlib import Path
 import os
 from decouple import config as env_config
@@ -6,15 +6,19 @@ import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Security
-SECRET_KEY = env_config("SECRET_KEY", default="django-insecure-dev-key-change-me")
-DEBUG = env_config("DEBUG", default=True, cast=bool)
+# ============================================================================
+# SECURITY SETTINGS
+# ============================================================================
+SECRET_KEY = env_config("SECRET_KEY", default="django-insecure-dev-key-change-me").strip()
+DEBUG = env_config("DEBUG", default="False").lower() in ("true", "1", "yes")
 
-# Hosts
-ALLOWED_HOSTS_STR = env_config("ALLOWED_HOSTS", default="localhost,127.0.0.1,0.0.0.0")
+# Parse ALLOWED_HOSTS safely
+ALLOWED_HOSTS_STR = env_config("ALLOWED_HOSTS", default="localhost,127.0.0.1,0.0.0.0").strip()
 ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS_STR.split(",") if h.strip()]
 
-# Apps
+# ============================================================================
+# INSTALLED APPS
+# ============================================================================
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -31,7 +35,9 @@ INSTALLED_APPS = [
     "api",
 ]
 
-# Middleware
+# ============================================================================
+# MIDDLEWARE
+# ============================================================================
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -44,8 +50,11 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "config.urls"
+WSGI_APPLICATION = "config.wsgi.application"
 
-# Templates
+# ============================================================================
+# TEMPLATES
+# ============================================================================
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -62,27 +71,36 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "config.wsgi.application"
+# ============================================================================
+# DATABASE - Smart routing for Railway and Local
+# ============================================================================
+DATABASE_URL = env_config("DATABASE_URL", default="").strip()
 
-# Database - Use DATABASE_URL if available (Railway), otherwise use individual env vars
-DATABASE_URL = env_config("DATABASE_URL", default=None)
 if DATABASE_URL:
+    # Railway mode: use DATABASE_URL
     DATABASES = {
-        "default": dj_database_url.config(default=DATABASE_URL, conn_max_age=600)
+        "default": dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
     }
 else:
+    # Local/Docker mode: use individual env vars
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": env_config("DB_NAME", default="pastelerias_erp"),
-            "USER": env_config("DB_USER", default="postgres"),
-            "PASSWORD": env_config("DB_PASSWORD", default="postgres"),
-            "HOST": env_config("DB_HOST", default="localhost"),
-            "PORT": env_config("DB_PORT", default="5432"),
+            "NAME": env_config("DB_NAME", default="pastelerias_erp").strip(),
+            "USER": env_config("DB_USER", default="postgres").strip(),
+            "PASSWORD": env_config("DB_PASSWORD", default="postgres").strip(),
+            "HOST": env_config("DB_HOST", default="localhost").strip(),
+            "PORT": env_config("DB_PORT", default="5432").strip(),
         }
     }
 
-# Password validators
+# ============================================================================
+# PASSWORD VALIDATION
+# ============================================================================
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -90,26 +108,30 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# Internationalization
+# ============================================================================
+# INTERNATIONALIZATION
+# ============================================================================
 LANGUAGE_CODE = "es-mx"
-TIME_ZONE = env_config("TIME_ZONE", default="America/Mazatlan")
+# Strip whitespace from timezone to prevent "Incorrect timezone setting" error
+TIME_ZONE = env_config("TIME_ZONE", default="UTC").strip()
+if not TIME_ZONE or TIME_ZONE.isspace():
+    TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# Static files
+# ============================================================================
+# STATIC FILES
+# ============================================================================
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-if os.path.exists(BASE_DIR / "static"):
-    STATICFILES_DIRS = [BASE_DIR / "static"]
-else:
-    STATICFILES_DIRS = []
-
+STATICFILES_DIRS = [BASE_DIR / "static"] if os.path.exists(BASE_DIR / "static") else []
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# CORS
+# ============================================================================
+# CORS & API
+# ============================================================================
 CORS_ALLOW_ALL_ORIGINS = True
 
-# REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
@@ -122,10 +144,9 @@ REST_FRAMEWORK = {
     ],
 }
 
-# Logging
-LOG_DIR = BASE_DIR / "logs"
-os.makedirs(LOG_DIR, exist_ok=True)
-
+# ============================================================================
+# LOGGING - Console only in production
+# ============================================================================
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
