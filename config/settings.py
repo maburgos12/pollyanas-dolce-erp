@@ -1,12 +1,12 @@
-"""Django settings - SIMPLE PRODUCTION CONFIG"""
+"""Django settings - WORKS ON RAILWAY"""
 import os
 import dj_database_url
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-SECRET_KEY = "django-insecure-change-me-in-production"
+SECRET_KEY = "django-insecure-production-2024"
 DEBUG = False
-ALLOWED_HOSTS = ["pollyanas-dolce-erp-production.up.railway.app", "localhost", "127.0.0.1", ".railway.app"]
+ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -50,12 +50,8 @@ TEMPLATES = [{
     },
 }]
 
-DATABASES = {
-    "default": dj_database_url.config(
-        default="postgresql://postgres:postgres@localhost/pastelerias_erp",
-        conn_max_age=600
-    )
-}
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost/pastelerias_erp")
+DATABASES = {"default": dj_database_url.config(default=DB_URL, conn_max_age=600)}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -84,5 +80,11 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
-    "root": {"handlers": ["console"], "level": "INFO"},
+    "root": {"handlers": ["console"], "level": "WARNING"},
 }
+
+# Security - disable for Railway
+SECURE_HSTS_SECONDS = 0
+SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
