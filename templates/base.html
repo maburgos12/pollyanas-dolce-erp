@@ -3,51 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Mini-ERP{% endblock %}</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <title>{% block title %}ERP - Pollyanas Dolce{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+    {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <!-- Header Azul -->
-    <header class="header">
-        <div class="header-content">
-            <div class="logo-section">
-                <div class="logo">🍰</div>
-                <div>
-                    <h1>ERP - Administración</h1>
-                    <p>Pollyana's Dolce</p>
-                </div>
-            </div>
-            <div class="user-info">
-                <span>{{ user.first_name|default:user.username }}</span>
-            </div>
-        </div>
-    </header>
-
-    <div class="wrapper">
+    {% load static %}
+    <div class="layout-wrapper">
+        <!-- Sidebar -->
         <aside class="sidebar">
-            <nav class="menu">
-                <a href="/" class="menu-item active"><span class="icon">📊</span> Dashboard</a>
-                <div class="section">Maestros</div>
-                <a href="/maestros/proveedores/" class="menu-item"><span class="icon">🏭</span> Proveedores</a>
-                <a href="/maestros/insumos/" class="menu-item"><span class="icon">📦</span> Insumos</a>
-                <div class="section">Compras</div>
-                <a href="/compras/" class="menu-item"><span class="icon">🛒</span> Órdenes de Compra</a>
-                <div class="section">Inventario</div>
-                <a href="/inventario/" class="menu-item"><span class="icon">📊</span> Stock</a>
-                <div class="section">Producción</div>
-                <a href="/recetas/" class="menu-item"><span class="icon">🍰</span> Recetas</a>
-                <hr>
-                <a href="/admin/" class="menu-item"><span class="icon">⚙️</span> Administración</a>
-                <a href="/logout/" class="menu-item"><span class="icon">🚪</span> Salir</a>
+            <div class="sidebar-header">
+                <div class="sidebar-logo">🍰</div>
+                <div class="sidebar-tagline">Pollyanas Dolce</div>
+            </div>
+            
+            <nav>
+                <ul class="sidebar-nav">
+                    <li><a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"><span>📊</span> Dashboard</a></li>
+                    <li><a href="{% url 'maestros:proveedores' %}" class="{% if 'proveedores' in request.path %}active{% endif %}"><span>🏢</span> Proveedores</a></li>
+                    <li><a href="{% url 'maestros:insumos' %}" class="{% if 'insumos' in request.path %}active{% endif %}"><span>📦</span> Insumos</a></li>
+                    <li><a href="{% url 'recetas:recetas' %}" class="{% if 'recetas' in request.path %}active{% endif %}"><span>👨‍🍳</span> Recetas</a></li>
+                    <li><a href="#"><span>⚙️</span> Configuración</a></li>
+                </ul>
             </nav>
-            <div class="info-box">
-                <strong>💡 Sistema Interactivo</strong>
-                <p>Gestiona tu ERP de pastelerías</p>
+
+            <div style="position: absolute; bottom: 20px; width: calc(100% - 40px); border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                <p style="font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 10px;">{{ user.username|upper }}</p>
+                <a href="{% url 'logout' %}" style="color: var(--secondary); text-decoration: none; font-size: 12px;">🚪 Cerrar sesión</a>
             </div>
         </aside>
-        <main class="content">
-            {% block content %}{% endblock %}
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="header">
+                <h1 class="header-title">{% block page_title %}ERP - Administración{% endblock %}</h1>
+                <div class="header-user">
+                    <span>👤 {{ user.username }}</span>
+                </div>
+            </header>
+
+            <div class="container">
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+
+                {% block content %}{% endblock %}
+            </div>
         </main>
     </div>
+
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

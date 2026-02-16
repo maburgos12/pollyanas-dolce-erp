@@ -1,56 +1,60 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% load static %}
+
+{% block title %}Dashboard - Pollyanas Dolce ERP{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
 {% block content %}
-<h3 class="mb-3">Dashboard</h3>
-
-<div class="row g-3">
-  <div class="col-md-6">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px;">
     <div class="card">
-      <div class="card-body">
-        <h5 class="card-title">Recetas y Costeo</h5>
-        <p class="card-text">Ver recetas, costos y detalle de insumos.</p>
+        <div style="font-size: 32px; margin-bottom: 10px;">📦</div>
+        <div style="font-size: 12px; color: #718096; margin-bottom: 5px;">Insumos Activos</div>
+        <div style="font-size: 28px; font-weight: 700; color: #6b21a8;">{{ insumos_count }}</div>
+    </div>
+
+    <div class="card">
+        <div style="font-size: 32px; margin-bottom: 10px;">👨‍🍳</div>
+        <div style="font-size: 12px; color: #718096; margin-bottom: 5px;">Recetas</div>
+        <div style="font-size: 28px; font-weight: 700; color: #a855f7;">{{ recetas_count }}</div>
+    </div>
+
+    <div class="card">
+        <div style="font-size: 32px; margin-bottom: 10px;">🏢</div>
+        <div style="font-size: 12px; color: #718096; margin-bottom: 5px;">Proveedores</div>
+        <div style="font-size: 28px; font-weight: 700; color: #ec4899;">{{ proveedores_count }}</div>
+    </div>
+
+    <div class="card">
+        <div style="font-size: 32px; margin-bottom: 10px;">⚠️</div>
+        <div style="font-size: 12px; color: #718096; margin-bottom: 5px;">Alertas</div>
+        <div style="font-size: 28px; font-weight: 700; color: #f59e0b;">{{ alertas_count }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">📊 Acceso Rápido</div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
         {% if can_view_recetas %}
-          <a class="btn btn-primary" href="{% url 'recetas_list' %}">Ir a Recetas</a>
-        {% else %}
-          <span class="text-muted">Sin permisos</span>
+            <a href="{% url 'recetas:recetas' %}" class="btn btn-primary">
+                <span>👨‍🍳</span> Ver Recetas
+            </a>
         {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="col-md-6">
-    <div class="card">
-      <div class="card-body">
-        <h5 class="card-title">Matching pendiente</h5>
-        <p class="card-text">Aprobar coincidencias de insumos (needs_review).</p>
+        
+        {% if can_import %}
+            <a href="#" class="btn btn-secondary">
+                <span>📤</span> Importar Datos
+            </a>
+        {% endif %}
+        
         {% if can_review_matching %}
-          <a class="btn btn-outline-primary" href="{% url 'matching_pendientes' %}">Pendientes</a>
-        {% else %}
-          <span class="text-muted">Sin permisos</span>
+            <a href="#" class="btn btn-secondary">
+                <span>🔍</span> Revisar Matching
+            </a>
         {% endif %}
-      </div>
+        
+        <a href="{% url 'logout' %}" class="btn btn-danger">
+            <span>🚪</span> Cerrar Sesión
+        </a>
     </div>
-  </div>
-
-  <div class="col-md-6">
-    <div class="card">
-      <div class="card-body">
-        <h5 class="card-title">MRP (Explosión de insumos)</h5>
-        <p class="card-text">Simula requerimientos por receta.</p>
-        <a class="btn btn-outline-success" href="{% url 'mrp_form' %}">Abrir MRP</a>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-md-6">
-    <div class="card">
-      <div class="card-body">
-        <h5 class="card-title">Admin</h5>
-        <p class="card-text">Administración interna del sistema (Django Admin).</p>
-        <a class="btn btn-outline-dark" href="/admin/">Abrir Admin</a>
-      </div>
-    </div>
-  </div>
-
 </div>
 {% endblock %}
