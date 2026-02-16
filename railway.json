@@ -6,7 +6,7 @@
   "deploy": {
     "numReplicas": 1,
     "restartPolicyType": "always",
-    "healthcheckPath": "/health/",
-    "startCommand": "./start.sh"
+    "healthcheckPath": "/login/",
+    "startCommand": "bash ./start.sh"
   }
 }
