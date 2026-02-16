@@ -11,4 +11,4 @@
     "healthcheckTimeout": 10,
     "startCommand": "./start.sh"
   }
-
+}
