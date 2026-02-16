@@ -24,10 +24,6 @@ COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
 COPY . .
-
-# Collect static files during build
-RUN python manage.py collectstatic --noinput || echo "Warning: collectstatic failed, continuing anyway"
-
 RUN chmod +x start.sh
 
 EXPOSE 8000

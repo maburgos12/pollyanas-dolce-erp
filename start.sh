@@ -4,6 +4,9 @@ set -e
 echo "Running migrations..."
 python manage.py migrate
 
+echo "Collecting static files..."
+python manage.py collectstatic --noinput
+
 echo "DEBUG: CREATE_SUPERUSER=${CREATE_SUPERUSER}"
 echo "DEBUG: USERNAME=${DJANGO_SUPERUSER_USERNAME:-EMPTY}"
 echo "DEBUG: EMAIL=${DJANGO_SUPERUSER_EMAIL:-EMPTY}"
