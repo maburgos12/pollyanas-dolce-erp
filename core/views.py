@@ -26,6 +26,9 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="login")
 def dashboard(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_authenticated:
+        return redirect("login")
+
     u = request.user
     insumos_count = Insumo.objects.filter(activo=True).count()
     recetas_count = Receta.objects.all().count()
