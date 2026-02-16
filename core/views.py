@@ -1,4 +1,4 @@
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
@@ -41,3 +41,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "alertas_count": 0,
     }
     return render(request, "core/dashboard.html", ctx)
+
+
+def health_check(_request: HttpRequest) -> JsonResponse:
+    return JsonResponse({"status": "ok"})

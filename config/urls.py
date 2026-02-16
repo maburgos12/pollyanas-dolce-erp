@@ -4,6 +4,7 @@ from core import views as core_views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("health/", core_views.health_check, name="health"),
     path("login/", core_views.login_view, name="login"),
     path("logout/", core_views.logout_view, name="logout"),
 

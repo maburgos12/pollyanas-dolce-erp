@@ -8,11 +8,11 @@ echo "ALLOWED_HOSTS: ${ALLOWED_HOSTS}"
 
 echo ""
 echo "=== Step 1: Running migrations ==="
-python manage.py migrate || true
+python manage.py migrate
 
 echo ""
 echo "=== Step 2: Collecting static files ==="
-python manage.py collectstatic --noinput --clear || true
+python manage.py collectstatic --noinput --clear
 
 echo ""
 echo "=== Step 3: Starting Gunicorn ==="

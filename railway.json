@@ -7,6 +7,6 @@
     "numReplicas": 1,
     "restartPolicyType": "always",
     "healthcheckPath": "/health/",
-    "startCommand": "gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 60"
+    "startCommand": "./start.sh"
   }
 }
