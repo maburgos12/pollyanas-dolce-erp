@@ -14,11 +14,19 @@ def login_view(request: HttpRequest) -> HttpResponse:
         username = request.POST.get("username", "")
         password = request.POST.get("password", "")
         
+        logger.info(f"Login attempt: username={username}")
+        
         if username and password:
             user = authenticate(request, username=username, password=password)
+            logger.info(f"Authentication result: user={user}")
             if user is not None and user.is_active:
                 login(request, user)
+                logger.info(f"Login successful for user={username}")
                 return redirect("dashboard")
+            else:
+                logger.warning(f"Authentication failed for username={username}")
+        else:
+            logger.warning(f"Missing username or password")
         
         return render(request, "core/login.html", {"error": "Credenciales inválidas"})
     

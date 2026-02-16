@@ -127,7 +127,10 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
-    "root": {"handlers": ["console"], "level": "WARNING"},
+    "loggers": {
+        "core": {"handlers": ["console"], "level": "INFO"},
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
 }
 
 SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000" if not DEBUG else "0"))
