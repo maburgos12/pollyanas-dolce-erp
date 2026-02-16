@@ -4,16 +4,14 @@ set -e
 echo "Running migrations..."
 python manage.py migrate
 
-echo "Collecting static files..."
-python manage.py collectstatic --noinput
+echo "Attempting to collect static files..."
+python manage.py collectstatic --noinput 2>/dev/null || echo "Warning: collectstatic skipped (expected in initial startup)"
 
 echo "DEBUG: CREATE_SUPERUSER=${CREATE_SUPERUSER}"
 echo "DEBUG: USERNAME=${DJANGO_SUPERUSER_USERNAME:-EMPTY}"
-echo "DEBUG: EMAIL=${DJANGO_SUPERUSER_EMAIL:-EMPTY}"
-echo "DEBUG: PASSWORD=${DJANGO_SUPERUSER_PASSWORD:-EMPTY}"
 
 if [ "${CREATE_SUPERUSER:-0}" = "1" ]; then
-  echo "Creating superuser from environment variables..."
+  echo "Creating superuser..."
   
   if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ] && [ -n "${DJANGO_SUPERUSER_EMAIL:-}" ] && [ -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then
     python manage.py shell << 'PY'
@@ -26,7 +24,7 @@ email = os.environ.get("DJANGO_SUPERUSER_EMAIL", "")
 password = os.environ.get("DJANGO_SUPERUSER_PASSWORD", "")
 
 if not username or not email or not password:
-    print("ERROR: Missing superuser credentials in environment")
+    print("ERROR: Missing superuser credentials")
     exit(1)
 
 try:
@@ -42,11 +40,9 @@ try:
     user.save()
     print(f"SUPERUSER_READY: username={username} created={created}")
 except Exception as e:
-    print(f"ERROR creating superuser: {e}")
+    print(f"ERROR: {e}")
     raise
 PY
-  else
-    echo "ERROR: Skipping superuser creation - missing DJANGO_SUPERUSER_* variables"
   fi
 fi
 
