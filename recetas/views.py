@@ -48,7 +48,7 @@ def aprobar_matching(request: HttpRequest, linea_id: int) -> HttpResponse:
     insumo_id = request.POST.get("insumo_id")
     if not insumo_id:
         messages.error(request, "Selecciona un insumo para aprobar.")
-        return redirect("matching_pendientes")
+        return redirect("recetas:matching_pendientes")
 
     insumo = get_object_or_404(Insumo, pk=insumo_id)
     linea.insumo = insumo
@@ -59,7 +59,7 @@ def aprobar_matching(request: HttpRequest, linea_id: int) -> HttpResponse:
     linea.aprobado_en = timezone.now()
     linea.save()
     messages.success(request, f"Matching aprobado: {linea.insumo_texto} → {insumo.nombre}")
-    return redirect("matching_pendientes")
+    return redirect("recetas:matching_pendientes")
 
 @login_required
 def mrp_form(request: HttpRequest) -> HttpResponse:

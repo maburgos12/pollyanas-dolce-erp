@@ -26,11 +26,11 @@
     <tbody>
       {% for l in page.object_list %}
       <tr>
-        <td><a href="{% url 'receta_detail' l.receta.id %}">{{ l.receta.nombre }}</a></td>
+        <td><a href="{% url 'recetas:receta_detail' l.receta.id %}">{{ l.receta.nombre }}</a></td>
         <td>{{ l.insumo_texto }}</td>
         <td><span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span></td>
         <td>
-          <form method="post" action="{% url 'aprobar_matching' l.id %}" class="d-flex gap-2">
+          <form method="post" action="{% url 'recetas:aprobar_matching' l.id %}" class="d-flex gap-2">
             {% csrf_token %}
             <select name="insumo_id" class="form-select form-select-sm" required>
               <option value="">Selecciona...</option>

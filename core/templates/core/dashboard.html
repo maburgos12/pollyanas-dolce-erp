@@ -35,19 +35,21 @@
     <div class="card-header">📊 Acceso Rápido</div>
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
         {% if can_view_recetas %}
-            <a href="{% url 'recetas:recetas' %}" class="btn btn-primary">
+            <a href="{% url 'recetas:recetas_list' %}" class="btn btn-primary">
                 <span>👨‍🍳</span> Ver Recetas
             </a>
         {% endif %}
         
-        {% if can_import %}
-            <a href="#" class="btn btn-secondary">
-                <span>📤</span> Importar Datos
-            </a>
-        {% endif %}
-        
+        <a href="{% url 'compras:solicitudes' %}" class="btn btn-secondary">
+            <span>🛒</span> Compras
+        </a>
+
+        <a href="{% url 'inventario:existencias' %}" class="btn btn-secondary">
+            <span>📚</span> Inventario
+        </a>
+
         {% if can_review_matching %}
-            <a href="#" class="btn btn-secondary">
+            <a href="{% url 'recetas:matching_pendientes' %}" class="btn btn-secondary">
                 <span>🔍</span> Revisar Matching
             </a>
         {% endif %}

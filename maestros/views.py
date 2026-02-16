@@ -29,18 +29,18 @@ class ProveedorCreateView(LoginRequiredMixin, CreateView):
     model = Proveedor
     template_name = 'maestros/proveedor_form.html'
     fields = ['nombre', 'lead_time_dias', 'activo']
-    success_url = reverse_lazy('proveedor_list')
+    success_url = reverse_lazy('maestros:proveedor_list')
 
 class ProveedorUpdateView(LoginRequiredMixin, UpdateView):
     model = Proveedor
     template_name = 'maestros/proveedor_form.html'
     fields = ['nombre', 'lead_time_dias', 'activo']
-    success_url = reverse_lazy('proveedor_list')
+    success_url = reverse_lazy('maestros:proveedor_list')
 
 class ProveedorDeleteView(LoginRequiredMixin, DeleteView):
     model = Proveedor
     template_name = 'maestros/proveedor_confirm_delete.html'
-    success_url = reverse_lazy('proveedor_list')
+    success_url = reverse_lazy('maestros:proveedor_list')
 
 # ============ INSUMOS ============
 
@@ -66,7 +66,7 @@ class InsumoCreateView(LoginRequiredMixin, CreateView):
     model = Insumo
     template_name = 'maestros/insumo_form.html'
     fields = ['codigo', 'nombre', 'unidad_base', 'proveedor_principal', 'activo']
-    success_url = reverse_lazy('insumo_list')
+    success_url = reverse_lazy('maestros:insumo_list')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -78,7 +78,7 @@ class InsumoUpdateView(LoginRequiredMixin, UpdateView):
     model = Insumo
     template_name = 'maestros/insumo_form.html'
     fields = ['codigo', 'nombre', 'unidad_base', 'proveedor_principal', 'activo']
-    success_url = reverse_lazy('insumo_list')
+    success_url = reverse_lazy('maestros:insumo_list')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -89,4 +89,4 @@ class InsumoUpdateView(LoginRequiredMixin, UpdateView):
 class InsumoDeleteView(LoginRequiredMixin, DeleteView):
     model = Insumo
     template_name = 'maestros/insumo_confirm_delete.html'
-    success_url = reverse_lazy('insumo_list')
+    success_url = reverse_lazy('maestros:insumo_list')

@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -8,7 +9,6 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    {% load static %}
     <div class="layout-wrapper">
         <!-- Sidebar -->
         <aside class="sidebar">
@@ -20,10 +20,12 @@
             <nav>
                 <ul class="sidebar-nav">
                     <li><a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"><span>📊</span> Dashboard</a></li>
-                    <li><a href="{% url 'maestros:proveedores' %}" class="{% if 'proveedores' in request.path %}active{% endif %}"><span>🏢</span> Proveedores</a></li>
-                    <li><a href="{% url 'maestros:insumos' %}" class="{% if 'insumos' in request.path %}active{% endif %}"><span>📦</span> Insumos</a></li>
-                    <li><a href="{% url 'recetas:recetas' %}" class="{% if 'recetas' in request.path %}active{% endif %}"><span>👨‍🍳</span> Recetas</a></li>
-                    <li><a href="#"><span>⚙️</span> Configuración</a></li>
+                    <li><a href="{% url 'maestros:proveedor_list' %}" class="{% if 'proveedores' in request.path %}active{% endif %}"><span>🏢</span> Proveedores</a></li>
+                    <li><a href="{% url 'maestros:insumo_list' %}" class="{% if 'insumos' in request.path %}active{% endif %}"><span>📦</span> Insumos</a></li>
+                    <li><a href="{% url 'recetas:recetas_list' %}" class="{% if 'recetas' in request.path %}active{% endif %}"><span>👨‍🍳</span> Recetas</a></li>
+                    <li><a href="{% url 'compras:solicitudes' %}" class="{% if 'compras' in request.path %}active{% endif %}"><span>🛒</span> Compras</a></li>
+                    <li><a href="{% url 'inventario:existencias' %}" class="{% if 'inventario' in request.path %}active{% endif %}"><span>📚</span> Inventario</a></li>
+                    <li><a href="{% url 'reportes:costo_receta' %}" class="{% if 'reportes' in request.path %}active{% endif %}"><span>📈</span> Reportes</a></li>
                 </ul>
             </nav>
 

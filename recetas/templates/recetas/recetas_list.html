@@ -22,7 +22,7 @@
     <tbody>
       {% for r in page.object_list %}
       <tr>
-        <td><a href="{% url 'receta_detail' r.id %}">{{ r.nombre }}</a></td>
+        <td><a href="{% url 'recetas:receta_detail' r.id %}">{{ r.nombre }}</a></td>
         <td>{{ r.sheet_name }}</td>
         <td>
           {% if r.pendientes_matching > 0 %}

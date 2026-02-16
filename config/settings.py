@@ -38,6 +38,9 @@ INSTALLED_APPS = [
     "core",
     "maestros",
     "recetas",
+    "compras",
+    "inventario",
+    "reportes",
     "api",
 ]
 
@@ -138,5 +141,4 @@ SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=not DEBUG)
 SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", default=not DEBUG)
 CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=not DEBUG)
-
 
