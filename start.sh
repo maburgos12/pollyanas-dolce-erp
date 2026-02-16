@@ -4,9 +4,6 @@ set -e
 echo "Running migrations..."
 python manage.py migrate
 
-echo "Attempting to collect static files..."
-python manage.py collectstatic --noinput 2>/dev/null || echo "Warning: collectstatic skipped (expected in initial startup)"
-
 echo "DEBUG: CREATE_SUPERUSER=${CREATE_SUPERUSER}"
 echo "DEBUG: USERNAME=${DJANGO_SUPERUSER_USERNAME:-EMPTY}"
 
