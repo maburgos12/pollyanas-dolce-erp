@@ -11,3 +11,9 @@ node_modules/
 .pytest_cache
 .idea
 venv/
+docs/
+test_data/
+README.md
+.github/
+entrypoint.sh
+docker-compose.yml
