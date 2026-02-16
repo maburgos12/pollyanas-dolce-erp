@@ -3,12 +3,12 @@ from django.middleware.security import SecurityMiddleware as DjangoSecurityMiddl
 
 
 class HealthCheckSecurityMiddleware(DjangoSecurityMiddleware):
-    """Security middleware that excludes /health/ from SSL redirect."""
+    """Security middleware that excludes /ping and /health/ from SSL redirect."""
     
     def process_request(self, request: HttpRequest) -> HttpResponse | None:
         # Skip SSL redirect for health checks
-        if request.path == "/health/":
-            # Temporarily disable SSL redirect for this path
+        if request.path in ("/ping", "/health/"):
+            # Temporarily disable SSL redirect for these paths
             original_redirect = self.redirect_to_https
             self.redirect_to_https = False
             response = super().process_request(request)
