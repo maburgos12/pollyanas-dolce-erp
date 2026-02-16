@@ -1,9 +1,13 @@
+import logging
+
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from maestros.models import Insumo, Proveedor
 from recetas.models import Receta
+
+logger = logging.getLogger(__name__)
 
 def login_view(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
@@ -24,25 +28,34 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     logout(request)
     return redirect("login")
 
-@login_required(login_url="login")
 def dashboard(request: HttpRequest) -> HttpResponse:
     if not request.user.is_authenticated:
-        return redirect("login")
+        return redirect("/login/")
 
     u = request.user
-    insumos_count = Insumo.objects.filter(activo=True).count()
-    recetas_count = Receta.objects.all().count()
-    proveedores_count = Proveedor.objects.all().count()
-    
     ctx = {
-        "can_view_recetas": u.has_perm("recetas.view_receta"),
-        "can_import": u.is_superuser or u.groups.filter(name__in=["ADMIN", "COMPRAS"]).exists(),
-        "can_review_matching": u.is_superuser or u.groups.filter(name__in=["ADMIN"]).exists(),
-        "insumos_count": insumos_count,
-        "recetas_count": recetas_count,
-        "proveedores_count": proveedores_count,
+        "can_view_recetas": False,
+        "can_import": False,
+        "can_review_matching": False,
+        "insumos_count": 0,
+        "recetas_count": 0,
+        "proveedores_count": 0,
         "alertas_count": 0,
     }
+    try:
+        ctx.update(
+            {
+                "can_view_recetas": u.has_perm("recetas.view_receta"),
+                "can_import": u.is_superuser or u.groups.filter(name__in=["ADMIN", "COMPRAS"]).exists(),
+                "can_review_matching": u.is_superuser or u.groups.filter(name__in=["ADMIN"]).exists(),
+                "insumos_count": Insumo.objects.filter(activo=True).count(),
+                "recetas_count": Receta.objects.count(),
+                "proveedores_count": Proveedor.objects.count(),
+            }
+        )
+    except Exception:
+        logger.exception("Dashboard failed to build full context")
+
     return render(request, "core/dashboard.html", ctx)
 
 
