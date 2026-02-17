@@ -4,6 +4,9 @@ set -e
 echo "Running migrations..."
 python manage.py migrate
 
+echo "Bootstrapping roles..."
+python manage.py bootstrap_roles
+
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
