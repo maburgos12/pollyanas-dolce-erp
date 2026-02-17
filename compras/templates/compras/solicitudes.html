@@ -1,16 +1,36 @@
 {% extends "base.html" %}
 {% block title %}Compras - Solicitudes{% endblock %}
 {% block page_title %}Compras · Solicitudes{% endblock %}
+
 {% block content %}
-<div class="card">
-  <div class="card-header">Solicitudes de compra</div>
-  <p>Modulo inicial listo para captura de solicitudes por area.</p>
-  <ul>
-    <li>Solicitante</li>
-    <li>Insumo</li>
-    <li>Cantidad</li>
-    <li>Fecha requerida</li>
-    <li>Estatus</li>
-  </ul>
-</div>
+<nav class="module-tabs">
+  <a class="module-tab active" href="{% url 'compras:solicitudes' %}">Solicitudes</a>
+  <a class="module-tab" href="{% url 'compras:ordenes' %}">Órdenes</a>
+  <a class="module-tab" href="{% url 'compras:recepciones' %}">Recepciones</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Solicitudes de Compra</div>
+  <p class="muted">Captura de requerimientos por área para aprobación y generación de orden.</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Área</th>
+          <th>Solicitante</th>
+          <th>Insumo</th>
+          <th class="text-end">Cantidad</th>
+          <th>Fecha requerida</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>SOL-0001</td><td>Producción</td><td>Carolina C.</td><td>Harina integral</td><td class="text-end">45 kg</td><td>18-Feb-2026</td><td><span class="badge bg-warning">Pendiente</span></td></tr>
+        <tr><td>SOL-0002</td><td>Compras</td><td>Jorge P.</td><td>Mantequilla sin sal</td><td class="text-end">28 kg</td><td>17-Feb-2026</td><td><span class="badge bg-primary">En revisión</span></td></tr>
+        <tr><td>SOL-0003</td><td>Ventas</td><td>Johanna L.</td><td>Caja cupcake 6 pzas</td><td class="text-end">300 pza</td><td>19-Feb-2026</td><td><span class="badge bg-success">Aprobada</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

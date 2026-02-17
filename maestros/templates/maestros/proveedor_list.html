@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Maestros - Proveedores{% endblock %}
+{% block page_title %}Maestros · Proveedores{% endblock %}
+
+{% block content %}
+<nav class="module-tabs">
+  <a class="module-tab active" href="{% url 'maestros:proveedor_list' %}">Proveedores</a>
+  <a class="module-tab" href="{% url 'maestros:insumo_list' %}">Insumos</a>
+</nav>
+
+<section class="card">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="page-section-title mb-0">Catálogo de Proveedores</div>
+    <a class="btn btn-primary" href="{% url 'maestros:proveedor_create' %}">+ Nuevo proveedor</a>
+  </div>
+
+  <form method="get" class="d-flex gap-2 mb-3">
+    <input class="form-control" name="q" value="{{ search_query }}" placeholder="Buscar proveedor...">
+    <button class="btn btn-outline-primary" type="submit">Buscar</button>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Proveedor</th>
+          <th class="text-end">Lead time (días)</th>
+          <th>Estatus</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in proveedores %}
+          <tr>
+            <td>{{ p.nombre }}</td>
+            <td class="text-end">{{ p.lead_time_dias }}</td>
+            <td>{% if p.activo %}<span class="badge bg-success">Activo</span>{% else %}<span class="badge bg-danger">Inactivo</span>{% endif %}</td>
+            <td>
+              <a href="{% url 'maestros:proveedor_update' p.id %}" class="btn btn-outline-primary">Editar</a>
+              <a href="{% url 'maestros:proveedor_delete' p.id %}" class="btn btn-danger">Eliminar</a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="text-muted">No hay proveedores registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,16 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Inventario - Ajustes{% endblock %}
 {% block page_title %}Inventario · Ajustes{% endblock %}
+
 {% block content %}
-<div class="card">
-  <div class="card-header">Ajustes de inventario</div>
-  <p>Pantalla inicial para capturar diferencias por conteo fisico.</p>
-  <ul>
-    <li>Insumo</li>
-    <li>Cantidad ajustada</li>
-    <li>Motivo</li>
-    <li>Autorizacion</li>
-    <li>Fecha</li>
-  </ul>
-</div>
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
+  <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
+  <a class="module-tab active" href="{% url 'inventario:ajustes' %}">Ajustes</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Ajustes por Conteo Físico</div>
+  <p class="muted">Registro de diferencias detectadas en conteo, con motivo y autorización.</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Insumo</th>
+          <th class="text-end">Cantidad sistema</th>
+          <th class="text-end">Cantidad física</th>
+          <th>Motivo</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>AJ-030</td><td>Chocolate semiamargo</td><td class="text-end">12.0 kg</td><td class="text-end">11.4 kg</td><td>Merma por humedad</td><td><span class="badge bg-primary">Pendiente aprobación</span></td></tr>
+        <tr><td>AJ-031</td><td>Caja cupcake 6 pzas</td><td class="text-end">410 pza</td><td class="text-end">430 pza</td><td>Captura tardía de recepción</td><td><span class="badge bg-success">Aplicado</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

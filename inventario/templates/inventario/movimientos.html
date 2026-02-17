@@ -1,16 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Inventario - Movimientos{% endblock %}
 {% block page_title %}Inventario · Movimientos{% endblock %}
+
 {% block content %}
-<div class="card">
-  <div class="card-header">Movimientos de inventario</div>
-  <p>Bitacora de entradas, salidas y consumos de produccion.</p>
-  <ul>
-    <li>Fecha</li>
-    <li>Tipo</li>
-    <li>Insumo</li>
-    <li>Cantidad</li>
-    <li>Referencia</li>
-  </ul>
-</div>
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
+  <a class="module-tab active" href="{% url 'inventario:movimientos' %}">Movimientos</a>
+  <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Bitácora de Movimientos</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Tipo</th>
+          <th>Insumo</th>
+          <th class="text-end">Cantidad</th>
+          <th>Referencia</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>16-Feb-2026 09:10</td><td><span class="badge bg-success">Entrada</span></td><td>Mantequilla sin sal</td><td class="text-end">+15 kg</td><td>REC-1302</td></tr>
+        <tr><td>16-Feb-2026 11:42</td><td><span class="badge bg-warning">Consumo</span></td><td>Harina integral</td><td class="text-end">-8 kg</td><td>OP-589</td></tr>
+        <tr><td>16-Feb-2026 12:30</td><td><span class="badge bg-danger">Salida</span></td><td>Azúcar refinada</td><td class="text-end">-6 kg</td><td>TRF-SUC2</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

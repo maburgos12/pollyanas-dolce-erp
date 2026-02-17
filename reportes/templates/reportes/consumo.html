@@ -1,9 +1,32 @@
 {% extends "base.html" %}
 {% block title %}Reportes - Consumo{% endblock %}
-{% block page_title %}Reportes · Consumo por periodo{% endblock %}
+{% block page_title %}Reportes · Consumo por Periodo{% endblock %}
+
 {% block content %}
-<div class="card">
-  <div class="card-header">Consumo por periodo</div>
-  <p>Reporte inicial para consolidar consumos por rango de fechas.</p>
-</div>
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'reportes:costo_receta' %}">Costo receta</a>
+  <a class="module-tab active" href="{% url 'reportes:consumo' %}">Consumo</a>
+  <a class="module-tab" href="{% url 'reportes:faltantes' %}">Faltantes</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Consumo de Insumos (Últimos 30 días)</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Insumo</th>
+          <th class="text-end">Consumo</th>
+          <th class="text-end">Costo total</th>
+          <th>Variación vs mes anterior</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Harina integral</td><td class="text-end">326 kg</td><td class="text-end">$11,214.00</td><td><span class="badge bg-warning">+8%</span></td></tr>
+        <tr><td>Mantequilla sin sal</td><td class="text-end">142 kg</td><td class="text-end">$15,876.00</td><td><span class="badge bg-danger">+16%</span></td></tr>
+        <tr><td>Chocolate semiamargo</td><td class="text-end">78 kg</td><td class="text-end">$12,012.00</td><td><span class="badge bg-success">-4%</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

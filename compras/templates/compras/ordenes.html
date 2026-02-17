@@ -1,16 +1,35 @@
 {% extends "base.html" %}
-{% block title %}Compras - Ordenes{% endblock %}
-{% block page_title %}Compras · Ordenes{% endblock %}
+{% block title %}Compras - Órdenes{% endblock %}
+{% block page_title %}Compras · Órdenes{% endblock %}
+
 {% block content %}
-<div class="card">
-  <div class="card-header">Ordenes de compra</div>
-  <p>Modulo inicial para emision y seguimiento de ordenes a proveedores.</p>
-  <ul>
-    <li>Proveedor</li>
-    <li>Fecha de emision</li>
-    <li>Partidas</li>
-    <li>Monto estimado</li>
-    <li>Estatus</li>
-  </ul>
-</div>
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'compras:solicitudes' %}">Solicitudes</a>
+  <a class="module-tab active" href="{% url 'compras:ordenes' %}">Órdenes</a>
+  <a class="module-tab" href="{% url 'compras:recepciones' %}">Recepciones</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Órdenes de Compra</div>
+  <p class="muted">Consolidación de solicitudes aprobadas y envío a proveedor.</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>OC</th>
+          <th>Proveedor</th>
+          <th>Emisión</th>
+          <th>Entrega estimada</th>
+          <th class="text-end">Monto estimado</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>OC-2408</td><td>Distribuidora Norte</td><td>15-Feb-2026</td><td>18-Feb-2026</td><td class="text-end">$14,850.00</td><td><span class="badge bg-warning">Parcial</span></td></tr>
+        <tr><td>OC-2409</td><td>Empaques del Pacífico</td><td>16-Feb-2026</td><td>20-Feb-2026</td><td class="text-end">$8,420.00</td><td><span class="badge bg-primary">Enviada</span></td></tr>
+        <tr><td>OC-2410</td><td>Lácteos Selectos</td><td>16-Feb-2026</td><td>17-Feb-2026</td><td class="text-end">$5,980.00</td><td><span class="badge bg-success">Confirmada</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

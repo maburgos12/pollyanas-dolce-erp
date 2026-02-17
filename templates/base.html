@@ -10,54 +10,49 @@
 </head>
 <body>
     <div class="layout-wrapper">
-        <!-- Sidebar -->
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-logo">🍰</div>
-                <div class="sidebar-tagline">Pollyanas Dolce</div>
+                <div class="sidebar-brand">Pollyana's Dolce</div>
+                <div class="sidebar-tagline">ERP OPERATIVO</div>
             </div>
-            
+
             <nav>
                 <ul class="sidebar-nav">
-                    <li><a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"><span>📊</span> Dashboard</a></li>
-                    <li><a href="{% url 'maestros:proveedor_list' %}" class="{% if 'proveedores' in request.path %}active{% endif %}"><span>🏢</span> Proveedores</a></li>
-                    <li><a href="{% url 'maestros:insumo_list' %}" class="{% if 'insumos' in request.path %}active{% endif %}"><span>📦</span> Insumos</a></li>
-                    <li><a href="{% url 'recetas:recetas_list' %}" class="{% if 'recetas' in request.path %}active{% endif %}"><span>👨‍🍳</span> Recetas</a></li>
-                    <li><a href="{% url 'compras:solicitudes' %}" class="{% if 'compras' in request.path %}active{% endif %}"><span>🛒</span> Compras</a></li>
-                    <li><a href="{% url 'inventario:existencias' %}" class="{% if 'inventario' in request.path %}active{% endif %}"><span>📚</span> Inventario</a></li>
-                    <li><a href="{% url 'reportes:costo_receta' %}" class="{% if 'reportes' in request.path %}active{% endif %}"><span>📈</span> Reportes</a></li>
+                    <li><a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"><span>📊</span><span>Dashboard</span></a></li>
+                    <li><a href="{% url 'maestros:proveedor_list' %}" class="{% if '/maestros/' in request.path %}active{% endif %}"><span>🗂️</span><span>Maestros</span></a></li>
+                    <li><a href="{% url 'recetas:recetas_list' %}" class="{% if '/recetas/' in request.path %}active{% endif %}"><span>🧁</span><span>Recetas</span></a></li>
+                    <li><a href="{% url 'compras:solicitudes' %}" class="{% if '/compras/' in request.path %}active{% endif %}"><span>🛒</span><span>Compras</span></a></li>
+                    <li><a href="{% url 'inventario:existencias' %}" class="{% if '/inventario/' in request.path %}active{% endif %}"><span>📦</span><span>Inventario</span></a></li>
+                    <li><a href="{% url 'reportes:costo_receta' %}" class="{% if '/reportes/' in request.path %}active{% endif %}"><span>📈</span><span>Reportes</span></a></li>
+                    <li><a href="{% url 'admin:index' %}"><span>⚙️</span><span>Administración</span></a></li>
                 </ul>
             </nav>
 
-            <div style="position: absolute; bottom: 20px; width: calc(100% - 40px); border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
-                <p style="font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 10px;">{{ user.username|upper }}</p>
-                <a href="{% url 'logout' %}" style="color: var(--secondary); text-decoration: none; font-size: 12px;">🚪 Cerrar sesión</a>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">{{ user.username }}</div>
+                <a href="{% url 'logout' %}" class="logout-link">Cerrar sesión</a>
             </div>
         </aside>
 
-        <!-- Main Content -->
         <main class="main-content">
             <header class="header">
-                <h1 class="header-title">{% block page_title %}ERP - Administración{% endblock %}</h1>
-                <div class="header-user">
-                    <span>👤 {{ user.username }}</span>
+                <h1 class="header-title">{% block page_title %}Dashboard{% endblock %}</h1>
+                <div class="header-meta">
+                    {% now "l, j \d\e F \d\e Y" %}
                 </div>
             </header>
 
             <div class="container">
                 {% if messages %}
                     {% for message in messages %}
-                        <div class="alert alert-{{ message.tags }}">
-                            {{ message }}
-                        </div>
+                        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
                     {% endfor %}
                 {% endif %}
-
                 {% block content %}{% endblock %}
             </div>
         </main>
     </div>
-
     {% block extra_js %}{% endblock %}
 </body>
 </html>

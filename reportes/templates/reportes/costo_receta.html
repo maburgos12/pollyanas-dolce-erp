@@ -1,9 +1,32 @@
 {% extends "base.html" %}
 {% block title %}Reportes - Costo por receta{% endblock %}
-{% block page_title %}Reportes · Costo por receta{% endblock %}
+{% block page_title %}Reportes · Costo por Receta{% endblock %}
+
 {% block content %}
-<div class="card">
-  <div class="card-header">Costo por receta</div>
-  <p>Reporte inicial para analizar costo estimado por receta y variacion.</p>
-</div>
+<nav class="module-tabs">
+  <a class="module-tab active" href="{% url 'reportes:costo_receta' %}">Costo receta</a>
+  <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
+  <a class="module-tab" href="{% url 'reportes:faltantes' %}">Faltantes</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Costo Estimado por Receta</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Receta</th>
+          <th class="text-end">Costo unitario</th>
+          <th class="text-end">Margen objetivo</th>
+          <th class="text-end">Precio sugerido</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Cheesecake frutos rojos</td><td class="text-end">$198.40</td><td class="text-end">38%</td><td class="text-end">$319.00</td></tr>
+        <tr><td>Pastel chocolate 3 leches</td><td class="text-end">$241.10</td><td class="text-end">35%</td><td class="text-end">$371.00</td></tr>
+        <tr><td>Cupcake vainilla premium</td><td class="text-end">$26.30</td><td class="text-end">42%</td><td class="text-end">$45.00</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

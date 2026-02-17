@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Maestros - Eliminar proveedor{% endblock %}
+{% block page_title %}Maestros · Eliminar proveedor{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">Eliminar proveedor</div>
+  <p>¿Confirmas eliminar a <strong>{{ object.nombre }}</strong>?</p>
+  <form method="post">
+    {% csrf_token %}
+    <div class="quick-actions">
+      <button class="btn btn-danger" type="submit">Sí, eliminar</button>
+      <a class="btn btn-secondary" href="{% url 'maestros:proveedor_list' %}">Cancelar</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,9 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Reportes - Faltantes{% endblock %}
-{% block page_title %}Reportes · Faltantes{% endblock %}
+{% block page_title %}Reportes · Faltantes Críticos{% endblock %}
+
 {% block content %}
-<div class="card">
-  <div class="card-header">Faltantes</div>
-  <p>Vista inicial para detectar insumos por debajo del minimo.</p>
-</div>
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'reportes:costo_receta' %}">Costo receta</a>
+  <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
+  <a class="module-tab active" href="{% url 'reportes:faltantes' %}">Faltantes</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Insumos Debajo de Mínimo</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Insumo</th>
+          <th class="text-end">Stock actual</th>
+          <th class="text-end">Mínimo</th>
+          <th class="text-end">Sugerencia compra</th>
+          <th>Criticidad</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Mantequilla sin sal</td><td class="text-end">22.5 kg</td><td class="text-end">25.0 kg</td><td class="text-end">40.0 kg</td><td><span class="badge bg-danger">Alta</span></td></tr>
+        <tr><td>Frambuesa congelada</td><td class="text-end">8.0 kg</td><td class="text-end">15.0 kg</td><td class="text-end">24.0 kg</td><td><span class="badge bg-warning">Media</span></td></tr>
+        <tr><td>Capsulas cupcake</td><td class="text-end">510 pza</td><td class="text-end">800 pza</td><td class="text-end">1,200 pza</td><td><span class="badge bg-warning">Media</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}
