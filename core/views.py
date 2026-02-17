@@ -1,13 +1,25 @@
 import logging
 
 from django.db.models import F
+from django.core.paginator import Paginator
+from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
-from django.contrib.auth.decorators import login_required
+from core.access import (
+    can_view_audit,
+    can_manage_compras,
+    can_manage_inventario,
+    can_view_compras,
+    can_view_inventario,
+    can_view_maestros,
+    can_view_recetas,
+    can_view_reportes,
+)
 from maestros.models import Insumo, Proveedor
 from recetas.models import Receta
 from inventario.models import ExistenciaInsumo
+from core.models import AuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +74,13 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "recetas_count": Receta.objects.count(),
                 "proveedores_count": Proveedor.objects.count(),
                 "alertas_count": ExistenciaInsumo.objects.filter(stock_actual__lt=F("punto_reorden")).count(),
+                "can_view_maestros": can_view_maestros(u),
+                "can_view_recetas": can_view_recetas(u),
+                "can_view_compras": can_view_compras(u),
+                "can_manage_compras": can_manage_compras(u),
+                "can_view_inventario": can_view_inventario(u),
+                "can_manage_inventario": can_manage_inventario(u),
+                "can_view_reportes": can_view_reportes(u),
             }
         )
     except Exception:
@@ -72,3 +91,48 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
 def health_check(_request: HttpRequest) -> JsonResponse:
     return JsonResponse({"status": "ok"})
+
+
+def audit_log_view(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_authenticated:
+        return redirect("/login/")
+    if not can_view_audit(request.user):
+        raise PermissionDenied("No tienes permisos para ver la bitácora.")
+
+    logs = AuditLog.objects.select_related("user").all()
+
+    model = (request.GET.get("model") or "").strip()
+    action = (request.GET.get("action") or "").strip()
+    username = (request.GET.get("username") or "").strip()
+    date_from = (request.GET.get("date_from") or "").strip()
+    date_to = (request.GET.get("date_to") or "").strip()
+    q = (request.GET.get("q") or "").strip()
+
+    if model:
+        logs = logs.filter(model=model)
+    if action:
+        logs = logs.filter(action=action)
+    if username:
+        logs = logs.filter(user__username__icontains=username)
+    if date_from:
+        logs = logs.filter(timestamp__date__gte=date_from)
+    if date_to:
+        logs = logs.filter(timestamp__date__lte=date_to)
+    if q:
+        logs = logs.filter(object_id__icontains=q)
+
+    page = Paginator(logs, 30).get_page(request.GET.get("page"))
+    context = {
+        "page": page,
+        "models": AuditLog.objects.order_by("model").values_list("model", flat=True).distinct(),
+        "actions": AuditLog.objects.order_by("action").values_list("action", flat=True).distinct(),
+        "filters": {
+            "model": model,
+            "action": action,
+            "username": username,
+            "date_from": date_from,
+            "date_to": date_to,
+            "q": q,
+        },
+    }
+    return render(request, "core/auditoria.html", context)

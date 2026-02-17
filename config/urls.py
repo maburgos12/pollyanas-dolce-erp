@@ -8,6 +8,7 @@ urlpatterns = [
     path("health/", core_views.health_check, name="health"),
     path("login/", core_views.login_view, name="login"),
     path("logout/", core_views.logout_view, name="logout"),
+    path("auditoria/", core_views.audit_log_view, name="audit_log"),
 
     path("", RedirectView.as_view(url="/login/", permanent=False)),
     path("dashboard/", core_views.dashboard, name="dashboard"),

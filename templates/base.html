@@ -36,6 +36,9 @@
                     {% if ui_access.can_view_reportes %}
                     <li><a href="{% url 'reportes:costo_receta' %}" class="{% if '/reportes/' in request.path %}active{% endif %}"><span>📈</span><span>Reportes</span></a></li>
                     {% endif %}
+                    {% if ui_access.can_view_audit %}
+                    <li><a href="{% url 'audit_log' %}" class="{% if '/auditoria/' in request.path %}active{% endif %}"><span>🧾</span><span>Bitácora</span></a></li>
+                    {% endif %}
                     <li><a href="{% url 'admin:index' %}"><span>⚙️</span><span>Administración</span></a></li>
                 </ul>
             </nav>

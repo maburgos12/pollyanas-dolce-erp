@@ -56,3 +56,7 @@ def can_view_recetas(user: AbstractBaseUser) -> bool:
         ROLE_PRODUCCION,
         ROLE_LECTURA,
     )
+
+
+def can_view_audit(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN)

@@ -1,4 +1,5 @@
 from core.access import (
+    can_view_audit,
     can_manage_compras,
     can_manage_inventario,
     can_view_compras,
@@ -20,5 +21,6 @@ def ui_access(request):
             "can_view_inventario": can_view_inventario(user),
             "can_manage_inventario": can_manage_inventario(user),
             "can_view_reportes": can_view_reportes(user),
+            "can_view_audit": can_view_audit(user),
         }
     }

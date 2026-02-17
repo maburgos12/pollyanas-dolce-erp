@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Bitácora - ERP{% endblock %}
+{% block page_title %}Bitácora de Auditoría{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">Filtros</div>
+  <form method="get" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;">
+    <select class="input-field" name="model">
+      <option value="">Modelo</option>
+      {% for m in models %}
+      <option value="{{ m }}" {% if filters.model == m %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+    </select>
+
+    <select class="input-field" name="action">
+      <option value="">Acción</option>
+      {% for a in actions %}
+      <option value="{{ a }}" {% if filters.action == a %}selected{% endif %}>{{ a }}</option>
+      {% endfor %}
+    </select>
+
+    <input class="input-field" name="username" value="{{ filters.username }}" placeholder="Usuario">
+    <input class="input-field" type="date" name="date_from" value="{{ filters.date_from }}">
+    <input class="input-field" type="date" name="date_to" value="{{ filters.date_to }}">
+    <input class="input-field" name="q" value="{{ filters.q }}" placeholder="Object ID contiene...">
+
+    <button class="btn btn-primary" type="submit">Aplicar</button>
+    <a class="btn btn-secondary" href="{% url 'audit_log' %}">Limpiar</a>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Eventos</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Usuario</th>
+          <th>Acción</th>
+          <th>Modelo</th>
+          <th>Object ID</th>
+          <th>Payload</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in page.object_list %}
+        <tr>
+          <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+          <td>{% if log.user %}{{ log.user.username }}{% else %}-{% endif %}</td>
+          <td><span class="badge bg-primary">{{ log.action }}</span></td>
+          <td>{{ log.model }}</td>
+          <td>{{ log.object_id }}</td>
+          <td><code>{{ log.payload }}</code></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="text-muted">Sin eventos para los filtros seleccionados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <ul class="pagination">
+    {% if page.has_previous %}
+      <li class="page-item"><a class="page-link" href="?page={{ page.previous_page_number }}&model={{ filters.model }}&action={{ filters.action }}&username={{ filters.username }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&q={{ filters.q }}">Anterior</a></li>
+    {% endif %}
+    <li class="page-item disabled"><span class="page-link">Página {{ page.number }} de {{ page.paginator.num_pages }}</span></li>
+    {% if page.has_next %}
+      <li class="page-item"><a class="page-link" href="?page={{ page.next_page_number }}&model={{ filters.model }}&action={{ filters.action }}&username={{ filters.username }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&q={{ filters.q }}">Siguiente</a></li>
+    {% endif %}
+  </ul>
+</section>
+{% endblock %}
