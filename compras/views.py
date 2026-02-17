@@ -103,8 +103,29 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             )
         return redirect("compras:solicitudes")
 
+    solicitudes = list(SolicitudCompra.objects.select_related("insumo")[:50])
+    insumo_ids = [s.insumo_id for s in solicitudes]
+    existencias = {
+        e.insumo_id: e
+        for e in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)
+    }
+    for s in solicitudes:
+        ex = existencias.get(s.insumo_id)
+        stock_actual = ex.stock_actual if ex else Decimal("0")
+        punto_reorden = ex.punto_reorden if ex else Decimal("0")
+        if stock_actual <= Decimal("0"):
+            s.reabasto_nivel = "critico"
+            s.reabasto_texto = "Sin stock"
+        elif stock_actual < punto_reorden:
+            s.reabasto_nivel = "bajo"
+            s.reabasto_texto = "Bajo reorden"
+        else:
+            s.reabasto_nivel = "ok"
+            s.reabasto_texto = "Stock suficiente"
+        s.reabasto_detalle = f"Stock {stock_actual} / Reorden {punto_reorden}"
+
     context = {
-        "solicitudes": SolicitudCompra.objects.select_related("insumo")[:50],
+        "solicitudes": solicitudes,
         "insumo_options": _build_insumo_options(),
         "status_choices": SolicitudCompra.STATUS_CHOICES,
         "can_manage_compras": can_manage_compras(request.user),

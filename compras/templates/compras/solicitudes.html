@@ -52,6 +52,7 @@
           <th>Área</th>
           <th>Solicitante</th>
           <th>Insumo</th>
+          <th>Reabasto</th>
           <th class="text-end">Cantidad</th>
           <th>Fecha requerida</th>
           <th>Estatus</th>
@@ -65,6 +66,15 @@
           <td>{{ s.area }}</td>
           <td>{{ s.solicitante }}</td>
           <td>{{ s.insumo.nombre }}</td>
+          <td>
+            {% if s.reabasto_nivel == 'critico' %}
+              <span class="badge-rojo" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
+            {% elif s.reabasto_nivel == 'bajo' %}
+              <span class="badge-amarillo" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
+            {% else %}
+              <span class="badge-verde" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
+            {% endif %}
+          </td>
           <td class="text-end">{{ s.cantidad }}</td>
           <td>{{ s.fecha_requerida }}</td>
           <td>
@@ -89,7 +99,7 @@
           {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="8" class="text-muted">Sin solicitudes capturadas.</td></tr>
+        <tr><td colspan="{% if can_manage_compras %}9{% else %}8{% endif %}" class="text-muted">Sin solicitudes capturadas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
