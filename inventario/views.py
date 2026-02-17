@@ -242,3 +242,64 @@ def ajustes(request: HttpRequest) -> HttpResponse:
         "can_manage_inventario": can_manage_inventario(request.user),
     }
     return render(request, "inventario/ajustes.html", context)
+
+
+@login_required
+def alertas(request: HttpRequest) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+
+    nivel = (request.GET.get("nivel") or "alerta").lower()
+    valid_levels = {"alerta", "critico", "bajo", "ok", "all"}
+    if nivel not in valid_levels:
+        nivel = "alerta"
+
+    existencias = list(
+        ExistenciaInsumo.objects.select_related("insumo", "insumo__unidad_base").order_by("insumo__nombre")[:500]
+    )
+
+    rows = []
+    criticos_count = 0
+    bajo_reorden_count = 0
+    ok_count = 0
+
+    for e in existencias:
+        stock = e.stock_actual
+        reorden = e.punto_reorden
+        diferencia = stock - reorden
+        if stock <= 0:
+            nivel_row = "critico"
+            etiqueta = "Sin stock"
+            criticos_count += 1
+        elif stock < reorden:
+            nivel_row = "bajo"
+            etiqueta = "Bajo reorden"
+            bajo_reorden_count += 1
+        else:
+            nivel_row = "ok"
+            etiqueta = "Stock suficiente"
+            ok_count += 1
+
+        include = False
+        if nivel == "all":
+            include = True
+        elif nivel == "alerta":
+            include = nivel_row in {"critico", "bajo"}
+        elif nivel == nivel_row:
+            include = True
+
+        if include:
+            e.alerta_nivel = nivel_row
+            e.alerta_etiqueta = etiqueta
+            e.alerta_diferencia = diferencia
+            rows.append(e)
+
+    context = {
+        "rows": rows,
+        "nivel": nivel,
+        "criticos_count": criticos_count,
+        "bajo_reorden_count": bajo_reorden_count,
+        "ok_count": ok_count,
+        "total_count": len(existencias),
+    }
+    return render(request, "inventario/alertas.html", context)

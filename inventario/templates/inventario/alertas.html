@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Inventario - Alertas{% endblock %}
+{% block page_title %}Inventario · Alertas{% endblock %}
+
+{% block content %}
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
+  <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
+  <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
+  <a class="module-tab active" href="{% url 'inventario:alertas' %}">Alertas</a>
+</nav>
+
+<div class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-number is-danger">{{ criticos_count }}</div>
+    <div class="kpi-label">Críticos</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ bajo_reorden_count }}</div>
+    <div class="kpi-label">Bajo reorden</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-success">{{ ok_count }}</div>
+    <div class="kpi-label">Stock suficiente</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number">{{ total_count }}</div>
+    <div class="kpi-label">Total insumos con existencia</div>
+  </article>
+</div>
+
+<section class="card">
+  <div class="card-header">Panel de Alertas</div>
+  <div class="d-flex gap-2 mb-3">
+    <a href="{% url 'inventario:alertas' %}" class="btn {% if nivel == 'alerta' %}btn-primary{% else %}btn-secondary{% endif %}">Solo alertas</a>
+    <a href="{% url 'inventario:alertas' %}?nivel=critico" class="btn {% if nivel == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
+    <a href="{% url 'inventario:alertas' %}?nivel=bajo" class="btn {% if nivel == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
+    <a href="{% url 'inventario:alertas' %}?nivel=ok" class="btn {% if nivel == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
+    <a href="{% url 'inventario:alertas' %}?nivel=all" class="btn {% if nivel == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Insumo</th>
+          <th>Unidad</th>
+          <th class="text-end">Stock actual</th>
+          <th class="text-end">Punto reorden</th>
+          <th class="text-end">Diferencia</th>
+          <th>Nivel</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in rows %}
+        <tr>
+          <td>{{ e.insumo.nombre }}</td>
+          <td>{% if e.insumo.unidad_base %}{{ e.insumo.unidad_base.codigo }}{% else %}-{% endif %}</td>
+          <td class="text-end">{{ e.stock_actual }}</td>
+          <td class="text-end">{{ e.punto_reorden }}</td>
+          <td class="text-end">{{ e.alerta_diferencia }}</td>
+          <td>
+            {% if e.alerta_nivel == 'critico' %}
+              <span class="badge-rojo">{{ e.alerta_etiqueta }}</span>
+            {% elif e.alerta_nivel == 'bajo' %}
+              <span class="badge-amarillo">{{ e.alerta_etiqueta }}</span>
+            {% else %}
+              <span class="badge-verde">{{ e.alerta_etiqueta }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6" class="text-muted">No hay insumos para el filtro seleccionado.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
