@@ -45,6 +45,7 @@
           <th class="text-end">Cantidad</th>
           <th>Fecha requerida</th>
           <th>Estatus</th>
+          {% if can_manage_compras %}<th>Flujo</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -56,10 +57,29 @@
           <td>{{ s.insumo.nombre }}</td>
           <td class="text-end">{{ s.cantidad }}</td>
           <td>{{ s.fecha_requerida }}</td>
-          <td><span class="badge bg-primary">{{ s.get_estatus_display }}</span></td>
+          <td>
+            {% if s.estatus == 'APROBADA' %}
+              <span class="badge bg-success">{{ s.get_estatus_display }}</span>
+            {% elif s.estatus == 'RECHAZADA' %}
+              <span class="badge bg-danger">{{ s.get_estatus_display }}</span>
+            {% else %}
+              <span class="badge bg-warning">{{ s.get_estatus_display }}</span>
+            {% endif %}
+          </td>
+          {% if can_manage_compras %}
+          <td>
+            {% if s.estatus == 'BORRADOR' %}
+              <form method="post" action="{% url 'compras:solicitud_estatus' s.id 'EN_REVISION' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-secondary" type="submit">Enviar revisión</button></form>
+            {% endif %}
+            {% if s.estatus == 'BORRADOR' or s.estatus == 'EN_REVISION' %}
+              <form method="post" action="{% url 'compras:solicitud_estatus' s.id 'APROBADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-success" type="submit">Aprobar</button></form>
+              <form method="post" action="{% url 'compras:solicitud_estatus' s.id 'RECHAZADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-danger" type="submit">Rechazar</button></form>
+            {% endif %}
+          </td>
+          {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="7" class="text-muted">Sin solicitudes capturadas.</td></tr>
+        <tr><td colspan="8" class="text-muted">Sin solicitudes capturadas.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -44,6 +44,7 @@
           <th>Conformidad</th>
           <th>Estatus</th>
           <th>Observaciones</th>
+          {% if can_manage_compras %}<th>Flujo</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -54,11 +55,29 @@
           <td>{{ r.orden.proveedor.nombre }}</td>
           <td>{{ r.fecha_recepcion }}</td>
           <td>{{ r.conformidad_pct }}%</td>
-          <td><span class="badge bg-primary">{{ r.get_estatus_display }}</span></td>
+          <td>
+            {% if r.estatus == 'CERRADA' %}
+              <span class="badge bg-success">{{ r.get_estatus_display }}</span>
+            {% elif r.estatus == 'DIFERENCIAS' %}
+              <span class="badge bg-warning">{{ r.get_estatus_display }}</span>
+            {% else %}
+              <span class="badge bg-primary">{{ r.get_estatus_display }}</span>
+            {% endif %}
+          </td>
           <td>{{ r.observaciones|default:"-" }}</td>
+          {% if can_manage_compras %}
+          <td>
+            {% if r.estatus == 'PENDIENTE' %}
+              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'DIFERENCIAS' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-secondary" type="submit">Con diferencias</button></form>
+              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-success" type="submit">Cerrar</button></form>
+            {% elif r.estatus == 'DIFERENCIAS' %}
+              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-primary" type="submit">Cerrar</button></form>
+            {% endif %}
+          </td>
+          {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="7" class="text-muted">Sin recepciones registradas.</td></tr>
+        <tr><td colspan="8" class="text-muted">Sin recepciones registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>

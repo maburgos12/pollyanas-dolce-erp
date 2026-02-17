@@ -48,6 +48,7 @@
           <th>Entrega estimada</th>
           <th class="text-end">Monto</th>
           <th>Estatus</th>
+          {% if can_manage_compras %}<th>Flujo</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -59,10 +60,32 @@
           <td>{{ o.fecha_emision }}</td>
           <td>{{ o.fecha_entrega_estimada|default:"-" }}</td>
           <td class="text-end">${{ o.monto_estimado }}</td>
-          <td><span class="badge bg-primary">{{ o.get_estatus_display }}</span></td>
+          <td>
+            {% if o.estatus == 'CERRADA' or o.estatus == 'CONFIRMADA' %}
+              <span class="badge bg-success">{{ o.get_estatus_display }}</span>
+            {% elif o.estatus == 'PARCIAL' %}
+              <span class="badge bg-warning">{{ o.get_estatus_display }}</span>
+            {% else %}
+              <span class="badge bg-primary">{{ o.get_estatus_display }}</span>
+            {% endif %}
+          </td>
+          {% if can_manage_compras %}
+          <td>
+            {% if o.estatus == 'BORRADOR' %}
+              <form method="post" action="{% url 'compras:orden_estatus' o.id 'ENVIADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-secondary" type="submit">Enviar</button></form>
+            {% endif %}
+            {% if o.estatus == 'ENVIADA' %}
+              <form method="post" action="{% url 'compras:orden_estatus' o.id 'CONFIRMADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-success" type="submit">Confirmar</button></form>
+              <form method="post" action="{% url 'compras:orden_estatus' o.id 'PARCIAL' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-secondary" type="submit">Parcial</button></form>
+            {% endif %}
+            {% if o.estatus == 'CONFIRMADA' or o.estatus == 'PARCIAL' %}
+              <form method="post" action="{% url 'compras:orden_estatus' o.id 'CERRADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-primary" type="submit">Cerrar</button></form>
+            {% endif %}
+          </td>
+          {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="7" class="text-muted">Sin órdenes registradas.</td></tr>
+        <tr><td colspan="8" class="text-muted">Sin órdenes registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
