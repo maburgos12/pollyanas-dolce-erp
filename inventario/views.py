@@ -1,10 +1,12 @@
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
+from core.access import can_manage_inventario, can_view_inventario
 from maestros.models import Insumo
 
 from .models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
@@ -29,7 +31,12 @@ def _apply_movimiento(movimiento: MovimientoInventario) -> None:
 
 @login_required
 def existencias(request: HttpRequest) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+
     if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied("No tienes permisos para editar existencias.")
         insumo_id = request.POST.get("insumo_id")
         if insumo_id:
             existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo_id=insumo_id)
@@ -42,13 +49,19 @@ def existencias(request: HttpRequest) -> HttpResponse:
     context = {
         "existencias": ExistenciaInsumo.objects.select_related("insumo", "insumo__unidad_base")[:200],
         "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
+        "can_manage_inventario": can_manage_inventario(request.user),
     }
     return render(request, "inventario/existencias.html", context)
 
 
 @login_required
 def movimientos(request: HttpRequest) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+
     if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied("No tienes permisos para registrar movimientos.")
         insumo_id = request.POST.get("insumo_id")
         if insumo_id:
             movimiento = MovimientoInventario.objects.create(
@@ -65,13 +78,19 @@ def movimientos(request: HttpRequest) -> HttpResponse:
         "movimientos": MovimientoInventario.objects.select_related("insumo")[:100],
         "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
         "tipo_choices": MovimientoInventario.TIPO_CHOICES,
+        "can_manage_inventario": can_manage_inventario(request.user),
     }
     return render(request, "inventario/movimientos.html", context)
 
 
 @login_required
 def ajustes(request: HttpRequest) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+
     if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied("No tienes permisos para registrar ajustes.")
         insumo_id = request.POST.get("insumo_id")
         if insumo_id:
             ajuste = AjusteInventario.objects.create(
@@ -100,5 +119,6 @@ def ajustes(request: HttpRequest) -> HttpResponse:
         "ajustes": AjusteInventario.objects.select_related("insumo")[:100],
         "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
         "status_choices": AjusteInventario.STATUS_CHOICES,
+        "can_manage_inventario": can_manage_inventario(request.user),
     }
     return render(request, "inventario/ajustes.html", context)

@@ -11,6 +11,7 @@
 
 <section class="card">
   <div class="card-header">Nueva Orden de Compra</div>
+  {% if can_manage_compras %}
   <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
     {% csrf_token %}
     <select class="input-field" name="solicitud_id">
@@ -29,6 +30,9 @@
     </select>
     <button class="btn btn-primary" type="submit">Guardar orden</button>
   </form>
+  {% else %}
+  <p class="muted">Tu perfil está en modo lectura para Compras.</p>
+  {% endif %}
 </section>
 
 <section class="card">

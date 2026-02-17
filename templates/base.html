@@ -21,11 +21,21 @@
             <nav>
                 <ul class="sidebar-nav">
                     <li><a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"><span>📊</span><span>Dashboard</span></a></li>
+                    {% if ui_access.can_view_maestros %}
                     <li><a href="{% url 'maestros:proveedor_list' %}" class="{% if '/maestros/' in request.path %}active{% endif %}"><span>🗂️</span><span>Maestros</span></a></li>
+                    {% endif %}
+                    {% if ui_access.can_view_recetas %}
                     <li><a href="{% url 'recetas:recetas_list' %}" class="{% if '/recetas/' in request.path %}active{% endif %}"><span>🧁</span><span>Recetas</span></a></li>
+                    {% endif %}
+                    {% if ui_access.can_view_compras %}
                     <li><a href="{% url 'compras:solicitudes' %}" class="{% if '/compras/' in request.path %}active{% endif %}"><span>🛒</span><span>Compras</span></a></li>
+                    {% endif %}
+                    {% if ui_access.can_view_inventario %}
                     <li><a href="{% url 'inventario:existencias' %}" class="{% if '/inventario/' in request.path %}active{% endif %}"><span>📦</span><span>Inventario</span></a></li>
+                    {% endif %}
+                    {% if ui_access.can_view_reportes %}
                     <li><a href="{% url 'reportes:costo_receta' %}" class="{% if '/reportes/' in request.path %}active{% endif %}"><span>📈</span><span>Reportes</span></a></li>
+                    {% endif %}
                     <li><a href="{% url 'admin:index' %}"><span>⚙️</span><span>Administración</span></a></li>
                 </ul>
             </nav>

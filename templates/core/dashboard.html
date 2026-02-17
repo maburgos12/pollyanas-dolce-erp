@@ -26,11 +26,19 @@
 <section class="card">
     <div class="card-header">Accesos Operativos</div>
     <div class="quick-actions">
-        <a href="{% url 'maestros:insumo_list' %}" class="btn btn-secondary">📦 Catálogo de insumos</a>
-        <a href="{% url 'maestros:proveedor_list' %}" class="btn btn-secondary">🏢 Catálogo de proveedores</a>
-        <a href="{% url 'compras:solicitudes' %}" class="btn btn-primary">🛒 Flujo de compras</a>
-        <a href="{% url 'inventario:existencias' %}" class="btn btn-primary">📚 Control de inventario</a>
-        <a href="{% url 'reportes:costo_receta' %}" class="btn btn-secondary">📈 Reportes ejecutivos</a>
+        {% if can_view_maestros %}
+            <a href="{% url 'maestros:insumo_list' %}" class="btn btn-secondary">📦 Catálogo de insumos</a>
+            <a href="{% url 'maestros:proveedor_list' %}" class="btn btn-secondary">🏢 Catálogo de proveedores</a>
+        {% endif %}
+        {% if can_view_compras %}
+            <a href="{% url 'compras:solicitudes' %}" class="btn btn-primary">🛒 Flujo de compras</a>
+        {% endif %}
+        {% if can_view_inventario %}
+            <a href="{% url 'inventario:existencias' %}" class="btn btn-primary">📚 Control de inventario</a>
+        {% endif %}
+        {% if can_view_reportes %}
+            <a href="{% url 'reportes:costo_receta' %}" class="btn btn-secondary">📈 Reportes ejecutivos</a>
+        {% endif %}
         {% if can_view_recetas %}
             <a href="{% url 'recetas:recetas_list' %}" class="btn btn-secondary">🧁 Recetas y costeo</a>
         {% endif %}

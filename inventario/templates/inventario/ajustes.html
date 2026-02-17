@@ -11,6 +11,7 @@
 
 <section class="card">
   <div class="card-header">Nuevo Ajuste</div>
+  {% if can_manage_inventario %}
   <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
     {% csrf_token %}
     <select class="input-field" name="insumo_id" required>
@@ -25,6 +26,9 @@
     </select>
     <button class="btn btn-primary" type="submit">Registrar ajuste</button>
   </form>
+  {% else %}
+  <p class="muted">Tu perfil está en modo lectura para Inventario.</p>
+  {% endif %}
 </section>
 
 <section class="card">
