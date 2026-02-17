@@ -1,10 +1,84 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Pollyanas Dolce ERP{% endblock %}
+{% block page_title %}Dashboard Ejecutivo{% endblock %}
+
 {% block content %}
-<h2>Panel de Control</h2>
-<div class="cards-grid">
-    <a href="/maestros/insumos/" class="card card-blue"><h3>{{ insumos_count }}</h3><p>Insumos Activos</p></a>
-    <a href="#" class="card card-orange"><h3>{{ alertas_count }}</h3><p>Alertas de Stock</p></a>
-    <a href="/recetas/" class="card card-green"><h3>{{ recetas_count }}</h3><p>Recetas Activas</p></a>
-    <a href="/maestros/proveedores/" class="card card-purple"><h3>{{ proveedores_count }}</h3><p>Proveedores</p></a>
+<div class="kpi-grid">
+    <article class="kpi-card">
+        <div class="kpi-number">{{ insumos_count }}</div>
+        <div class="kpi-label">Insumos Activos</div>
+    </article>
+    <article class="kpi-card">
+        <div class="kpi-number is-success">{{ recetas_count }}</div>
+        <div class="kpi-label">Recetas Activas</div>
+    </article>
+    <article class="kpi-card">
+        <div class="kpi-number is-warning">{{ proveedores_count }}</div>
+        <div class="kpi-label">Proveedores Vigentes</div>
+    </article>
+    <article class="kpi-card">
+        <div class="kpi-number is-danger">{{ alertas_count }}</div>
+        <div class="kpi-label">Alertas de Stock</div>
+    </article>
 </div>
+
+<section class="card">
+    <div class="card-header">Accesos Operativos</div>
+    <div class="quick-actions">
+        <a href="{% url 'maestros:insumo_list' %}" class="btn btn-secondary">📦 Catálogo de insumos</a>
+        <a href="{% url 'maestros:proveedor_list' %}" class="btn btn-secondary">🏢 Catálogo de proveedores</a>
+        <a href="{% url 'compras:solicitudes' %}" class="btn btn-primary">🛒 Flujo de compras</a>
+        <a href="{% url 'inventario:existencias' %}" class="btn btn-primary">📚 Control de inventario</a>
+        <a href="{% url 'reportes:costo_receta' %}" class="btn btn-secondary">📈 Reportes ejecutivos</a>
+        {% if can_view_recetas %}
+            <a href="{% url 'recetas:recetas_list' %}" class="btn btn-secondary">🧁 Recetas y costeo</a>
+        {% endif %}
+        {% if can_review_matching %}
+            <a href="{% url 'recetas:matching_pendientes' %}" class="btn btn-secondary">🔎 Revisar matching</a>
+        {% endif %}
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">Resumen Fase 1</div>
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Módulo</th>
+                    <th>Estado</th>
+                    <th>Alcance sprint</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Maestros</td>
+                    <td><span class="badge bg-success">Activo</span></td>
+                    <td>ABM básico de insumos y proveedores</td>
+                </tr>
+                <tr>
+                    <td>Recetas</td>
+                    <td><span class="badge bg-success">Activo</span></td>
+                    <td>Listado, detalle, matching y MRP inicial</td>
+                </tr>
+                <tr>
+                    <td>Compras</td>
+                    <td><span class="badge bg-warning">Diseño funcional</span></td>
+                    <td>Solicitudes, órdenes y recepciones estructuradas</td>
+                </tr>
+                <tr>
+                    <td>Inventario</td>
+                    <td><span class="badge bg-warning">Diseño funcional</span></td>
+                    <td>Existencias, movimientos y ajustes listos para integrar lógica</td>
+                </tr>
+                <tr>
+                    <td>Reportes</td>
+                    <td><span class="badge bg-warning">Diseño funcional</span></td>
+                    <td>Costo receta, consumo y faltantes para visión ejecutiva</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
 {% endblock %}
