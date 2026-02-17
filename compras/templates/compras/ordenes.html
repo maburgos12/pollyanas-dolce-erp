@@ -14,8 +14,8 @@
   {% if can_manage_compras %}
   <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
     {% csrf_token %}
-    <select class="input-field" name="solicitud_id">
-      <option value="">Solicitud (opcional)</option>
+    <select class="input-field" name="solicitud_id" required>
+      <option value="">Solicitud aprobada</option>
       {% for s in solicitudes %}<option value="{{ s.id }}">{{ s.folio }} - {{ s.insumo.nombre }}</option>{% endfor %}
     </select>
     <select class="input-field" name="proveedor_id" required>

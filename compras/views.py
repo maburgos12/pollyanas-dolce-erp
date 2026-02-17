@@ -1,5 +1,6 @@
 from decimal import Decimal, InvalidOperation
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
@@ -97,9 +98,18 @@ def ordenes(request: HttpRequest) -> HttpResponse:
         proveedor_id = request.POST.get("proveedor_id")
         if proveedor_id:
             solicitud_raw = request.POST.get("solicitud_id")
+            if not solicitud_raw:
+                messages.error(request, "Debes seleccionar una solicitud aprobada para crear una orden.")
+                return redirect("compras:ordenes")
+
+            solicitud = get_object_or_404(SolicitudCompra, pk=solicitud_raw)
+            if solicitud.estatus != SolicitudCompra.STATUS_APROBADA:
+                messages.error(request, f"La solicitud {solicitud.folio} no está aprobada.")
+                return redirect("compras:ordenes")
+
             orden = OrdenCompra.objects.create(
                 proveedor_id=proveedor_id,
-                solicitud_id=solicitud_raw or None,
+                solicitud=solicitud,
                 fecha_emision=request.POST.get("fecha_emision") or None,
                 fecha_entrega_estimada=request.POST.get("fecha_entrega_estimada") or None,
                 monto_estimado=_to_decimal(request.POST.get("monto_estimado"), "0"),
@@ -117,7 +127,7 @@ def ordenes(request: HttpRequest) -> HttpResponse:
     context = {
         "ordenes": OrdenCompra.objects.select_related("proveedor", "solicitud")[:50],
         "proveedores": Proveedor.objects.filter(activo=True).order_by("nombre")[:200],
-        "solicitudes": SolicitudCompra.objects.order_by("-creado_en")[:200],
+        "solicitudes": SolicitudCompra.objects.filter(estatus=SolicitudCompra.STATUS_APROBADA).order_by("-creado_en")[:200],
         "status_choices": OrdenCompra.STATUS_CHOICES,
         "can_manage_compras": can_manage_compras(request.user),
     }
@@ -134,8 +144,13 @@ def recepciones(request: HttpRequest) -> HttpResponse:
             raise PermissionDenied("No tienes permisos para registrar recepciones.")
         orden_id = request.POST.get("orden_id")
         if orden_id:
+            orden = get_object_or_404(OrdenCompra, pk=orden_id)
+            if orden.estatus in {OrdenCompra.STATUS_BORRADOR, OrdenCompra.STATUS_CERRADA}:
+                messages.error(request, f"La orden {orden.folio} no admite recepciones en estatus {orden.get_estatus_display()}.")
+                return redirect("compras:recepciones")
+
             recepcion = RecepcionCompra.objects.create(
-                orden_id=orden_id,
+                orden=orden,
                 fecha_recepcion=request.POST.get("fecha_recepcion") or None,
                 conformidad_pct=_to_decimal(request.POST.get("conformidad_pct"), "100"),
                 estatus=request.POST.get("estatus") or RecepcionCompra.STATUS_PENDIENTE,
@@ -148,11 +163,22 @@ def recepciones(request: HttpRequest) -> HttpResponse:
                 recepcion.id,
                 {"folio": recepcion.folio, "estatus": recepcion.estatus},
             )
+            if recepcion.estatus == RecepcionCompra.STATUS_CERRADA and orden.estatus != OrdenCompra.STATUS_CERRADA:
+                orden_prev = orden.estatus
+                orden.estatus = OrdenCompra.STATUS_CERRADA
+                orden.save(update_fields=["estatus"])
+                log_event(
+                    request.user,
+                    "APPROVE",
+                    "compras.OrdenCompra",
+                    orden.id,
+                    {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": orden.folio, "source": recepcion.folio},
+                )
         return redirect("compras:recepciones")
 
     context = {
         "recepciones": RecepcionCompra.objects.select_related("orden", "orden__proveedor")[:50],
-        "ordenes": OrdenCompra.objects.select_related("proveedor").order_by("-creado_en")[:200],
+        "ordenes": OrdenCompra.objects.select_related("proveedor").exclude(estatus=OrdenCompra.STATUS_BORRADOR).exclude(estatus=OrdenCompra.STATUS_CERRADA).order_by("-creado_en")[:200],
         "status_choices": RecepcionCompra.STATUS_CHOICES,
         "can_manage_compras": can_manage_compras(request.user),
     }
@@ -188,6 +214,16 @@ def actualizar_orden_estatus(request: HttpRequest, pk: int, estatus: str) -> Htt
 
     orden = get_object_or_404(OrdenCompra, pk=pk)
     prev = orden.estatus
+
+    if estatus == OrdenCompra.STATUS_CERRADA:
+        has_closed_recepcion = RecepcionCompra.objects.filter(
+            orden=orden,
+            estatus=RecepcionCompra.STATUS_CERRADA,
+        ).exists()
+        if not has_closed_recepcion:
+            messages.error(request, f"No puedes cerrar {orden.folio} sin al menos una recepción cerrada.")
+            return redirect("compras:ordenes")
+
     if _can_transition_orden(prev, estatus):
         orden.estatus = estatus
         orden.save(update_fields=["estatus"])
