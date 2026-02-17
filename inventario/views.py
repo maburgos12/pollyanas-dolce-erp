@@ -1,5 +1,6 @@
 from decimal import Decimal, InvalidOperation
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
@@ -43,8 +44,14 @@ def existencias(request: HttpRequest) -> HttpResponse:
             existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo_id=insumo_id)
             prev_stock = existencia.stock_actual
             prev_reorden = existencia.punto_reorden
-            existencia.stock_actual = _to_decimal(request.POST.get("stock_actual"), "0")
-            existencia.punto_reorden = _to_decimal(request.POST.get("punto_reorden"), "0")
+            new_stock = _to_decimal(request.POST.get("stock_actual"), "0")
+            new_reorden = _to_decimal(request.POST.get("punto_reorden"), "0")
+            if new_stock < 0 or new_reorden < 0:
+                messages.error(request, "Stock actual y punto de reorden no pueden ser negativos.")
+                return redirect("inventario:existencias")
+
+            existencia.stock_actual = new_stock
+            existencia.punto_reorden = new_reorden
             existencia.actualizado_en = timezone.now()
             existencia.save()
             log_event(
@@ -80,11 +87,29 @@ def movimientos(request: HttpRequest) -> HttpResponse:
             raise PermissionDenied("No tienes permisos para registrar movimientos.")
         insumo_id = request.POST.get("insumo_id")
         if insumo_id:
+            tipo = request.POST.get("tipo") or MovimientoInventario.TIPO_ENTRADA
+            if tipo == MovimientoInventario.TIPO_AJUSTE:
+                messages.error(request, "El tipo AJUSTE se genera automáticamente desde la pantalla de ajustes.")
+                return redirect("inventario:movimientos")
+
+            cantidad = _to_decimal(request.POST.get("cantidad"), "0")
+            if cantidad <= 0:
+                messages.error(request, "La cantidad del movimiento debe ser mayor a cero.")
+                return redirect("inventario:movimientos")
+
+            existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo_id=insumo_id)
+            if tipo in {MovimientoInventario.TIPO_SALIDA, MovimientoInventario.TIPO_CONSUMO} and existencia.stock_actual < cantidad:
+                messages.error(
+                    request,
+                    f"Stock insuficiente para {tipo.lower()}: disponible={existencia.stock_actual}, solicitado={cantidad}.",
+                )
+                return redirect("inventario:movimientos")
+
             movimiento = MovimientoInventario.objects.create(
                 fecha=request.POST.get("fecha") or timezone.now(),
-                tipo=request.POST.get("tipo") or MovimientoInventario.TIPO_ENTRADA,
+                tipo=tipo,
                 insumo_id=insumo_id,
-                cantidad=_to_decimal(request.POST.get("cantidad"), "0"),
+                cantidad=cantidad,
                 referencia=request.POST.get("referencia", "").strip(),
             )
             _apply_movimiento(movimiento)
@@ -105,7 +130,11 @@ def movimientos(request: HttpRequest) -> HttpResponse:
     context = {
         "movimientos": MovimientoInventario.objects.select_related("insumo")[:100],
         "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
-        "tipo_choices": MovimientoInventario.TIPO_CHOICES,
+        "tipo_choices": [
+            (value, label)
+            for value, label in MovimientoInventario.TIPO_CHOICES
+            if value != MovimientoInventario.TIPO_AJUSTE
+        ],
         "can_manage_inventario": can_manage_inventario(request.user),
     }
     return render(request, "inventario/movimientos.html", context)
@@ -121,10 +150,16 @@ def ajustes(request: HttpRequest) -> HttpResponse:
             raise PermissionDenied("No tienes permisos para registrar ajustes.")
         insumo_id = request.POST.get("insumo_id")
         if insumo_id:
+            cantidad_sistema = _to_decimal(request.POST.get("cantidad_sistema"), "0")
+            cantidad_fisica = _to_decimal(request.POST.get("cantidad_fisica"), "0")
+            if cantidad_sistema < 0 or cantidad_fisica < 0:
+                messages.error(request, "Las cantidades del ajuste no pueden ser negativas.")
+                return redirect("inventario:ajustes")
+
             ajuste = AjusteInventario.objects.create(
                 insumo_id=insumo_id,
-                cantidad_sistema=_to_decimal(request.POST.get("cantidad_sistema"), "0"),
-                cantidad_fisica=_to_decimal(request.POST.get("cantidad_fisica"), "0"),
+                cantidad_sistema=cantidad_sistema,
+                cantidad_fisica=cantidad_fisica,
                 motivo=request.POST.get("motivo", "").strip() or "Sin motivo",
                 estatus=request.POST.get("estatus") or AjusteInventario.STATUS_PENDIENTE,
             )
@@ -161,24 +196,30 @@ def ajustes(request: HttpRequest) -> HttpResponse:
                     },
                 )
 
-                movimiento_ajuste = MovimientoInventario.objects.create(
-                    tipo=MovimientoInventario.TIPO_AJUSTE,
-                    insumo_id=ajuste.insumo_id,
-                    cantidad=abs(ajuste.cantidad_fisica - ajuste.cantidad_sistema),
-                    referencia=ajuste.folio,
-                )
-                log_event(
-                    request.user,
-                    "CREATE",
-                    "inventario.MovimientoInventario",
-                    movimiento_ajuste.id,
-                    {
-                        "tipo": movimiento_ajuste.tipo,
-                        "insumo_id": movimiento_ajuste.insumo_id,
-                        "cantidad": str(movimiento_ajuste.cantidad),
-                        "referencia": movimiento_ajuste.referencia,
-                    },
-                )
+                delta = ajuste.cantidad_fisica - ajuste.cantidad_sistema
+                if delta != 0:
+                    movimiento_ajuste = MovimientoInventario.objects.create(
+                        tipo=(
+                            MovimientoInventario.TIPO_ENTRADA
+                            if delta > 0
+                            else MovimientoInventario.TIPO_SALIDA
+                        ),
+                        insumo_id=ajuste.insumo_id,
+                        cantidad=abs(delta),
+                        referencia=ajuste.folio,
+                    )
+                    log_event(
+                        request.user,
+                        "CREATE",
+                        "inventario.MovimientoInventario",
+                        movimiento_ajuste.id,
+                        {
+                            "tipo": movimiento_ajuste.tipo,
+                            "insumo_id": movimiento_ajuste.insumo_id,
+                            "cantidad": str(movimiento_ajuste.cantidad),
+                            "referencia": movimiento_ajuste.referencia,
+                        },
+                    )
         return redirect("inventario:ajustes")
 
     context = {
