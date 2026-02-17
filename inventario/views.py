@@ -7,6 +7,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from core.access import can_manage_inventario, can_view_inventario
+from core.audit import log_event
 from maestros.models import Insumo
 
 from .models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
@@ -40,10 +41,25 @@ def existencias(request: HttpRequest) -> HttpResponse:
         insumo_id = request.POST.get("insumo_id")
         if insumo_id:
             existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo_id=insumo_id)
+            prev_stock = existencia.stock_actual
+            prev_reorden = existencia.punto_reorden
             existencia.stock_actual = _to_decimal(request.POST.get("stock_actual"), "0")
             existencia.punto_reorden = _to_decimal(request.POST.get("punto_reorden"), "0")
             existencia.actualizado_en = timezone.now()
             existencia.save()
+            log_event(
+                request.user,
+                "UPDATE",
+                "inventario.ExistenciaInsumo",
+                existencia.id,
+                {
+                    "insumo_id": existencia.insumo_id,
+                    "from_stock": str(prev_stock),
+                    "to_stock": str(existencia.stock_actual),
+                    "from_reorden": str(prev_reorden),
+                    "to_reorden": str(existencia.punto_reorden),
+                },
+            )
         return redirect("inventario:existencias")
 
     context = {
@@ -72,6 +88,18 @@ def movimientos(request: HttpRequest) -> HttpResponse:
                 referencia=request.POST.get("referencia", "").strip(),
             )
             _apply_movimiento(movimiento)
+            log_event(
+                request.user,
+                "CREATE",
+                "inventario.MovimientoInventario",
+                movimiento.id,
+                {
+                    "tipo": movimiento.tipo,
+                    "insumo_id": movimiento.insumo_id,
+                    "cantidad": str(movimiento.cantidad),
+                    "referencia": movimiento.referencia,
+                },
+            )
         return redirect("inventario:movimientos")
 
     context = {
@@ -100,18 +128,56 @@ def ajustes(request: HttpRequest) -> HttpResponse:
                 motivo=request.POST.get("motivo", "").strip() or "Sin motivo",
                 estatus=request.POST.get("estatus") or AjusteInventario.STATUS_PENDIENTE,
             )
+            log_event(
+                request.user,
+                "CREATE",
+                "inventario.AjusteInventario",
+                ajuste.id,
+                {
+                    "folio": ajuste.folio,
+                    "insumo_id": ajuste.insumo_id,
+                    "cantidad_sistema": str(ajuste.cantidad_sistema),
+                    "cantidad_fisica": str(ajuste.cantidad_fisica),
+                    "estatus": ajuste.estatus,
+                },
+            )
 
             if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
                 existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo_id=ajuste.insumo_id)
+                prev_stock = existencia.stock_actual
                 existencia.stock_actual = ajuste.cantidad_fisica
                 existencia.actualizado_en = timezone.now()
                 existencia.save()
+                log_event(
+                    request.user,
+                    "APPLY",
+                    "inventario.ExistenciaInsumo",
+                    existencia.id,
+                    {
+                        "source": ajuste.folio,
+                        "insumo_id": ajuste.insumo_id,
+                        "from_stock": str(prev_stock),
+                        "to_stock": str(existencia.stock_actual),
+                    },
+                )
 
-                MovimientoInventario.objects.create(
+                movimiento_ajuste = MovimientoInventario.objects.create(
                     tipo=MovimientoInventario.TIPO_AJUSTE,
                     insumo_id=ajuste.insumo_id,
                     cantidad=abs(ajuste.cantidad_fisica - ajuste.cantidad_sistema),
                     referencia=ajuste.folio,
+                )
+                log_event(
+                    request.user,
+                    "CREATE",
+                    "inventario.MovimientoInventario",
+                    movimiento_ajuste.id,
+                    {
+                        "tipo": movimiento_ajuste.tipo,
+                        "insumo_id": movimiento_ajuste.insumo_id,
+                        "cantidad": str(movimiento_ajuste.cantidad),
+                        "referencia": movimiento_ajuste.referencia,
+                    },
                 )
         return redirect("inventario:ajustes")
 
