@@ -63,6 +63,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "recetas_count": 0,
         "proveedores_count": 0,
         "alertas_count": 0,
+        "criticos_count": 0,
+        "bajo_reorden_count": 0,
     }
     try:
         ctx.update(
@@ -74,6 +76,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "recetas_count": Receta.objects.count(),
                 "proveedores_count": Proveedor.objects.count(),
                 "alertas_count": ExistenciaInsumo.objects.filter(stock_actual__lt=F("punto_reorden")).count(),
+                "criticos_count": ExistenciaInsumo.objects.filter(stock_actual__lte=0).count(),
+                "bajo_reorden_count": ExistenciaInsumo.objects.filter(stock_actual__gt=0, stock_actual__lt=F("punto_reorden")).count(),
                 "can_view_maestros": can_view_maestros(u),
                 "can_view_recetas": can_view_recetas(u),
                 "can_view_compras": can_view_compras(u),
