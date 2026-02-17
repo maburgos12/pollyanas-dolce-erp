@@ -16,17 +16,27 @@
     {% csrf_token %}
     <input class="input-field" name="area" placeholder="Área" required>
     <input class="input-field" name="solicitante" placeholder="Solicitante" required>
-    <select class="input-field" name="insumo_id" required>
+    <select class="input-field" id="insumo_id" name="insumo_id" required>
       <option value="">Insumo</option>
-      {% for i in insumos %}<option value="{{ i.id }}">{{ i.nombre }}</option>{% endfor %}
+      {% for i in insumo_options %}
+      <option
+        value="{{ i.id }}"
+        data-stock="{{ i.stock_actual }}"
+        data-reorden="{{ i.punto_reorden }}"
+        data-recomendado="{{ i.recomendado }}"
+      >
+        {{ i.nombre }}
+      </option>
+      {% endfor %}
     </select>
-    <input class="input-field" type="number" step="0.001" min="0" name="cantidad" placeholder="Cantidad" required>
+    <input class="input-field" id="cantidad" type="number" step="0.001" min="0" name="cantidad" placeholder="Cantidad" required>
     <input class="input-field" type="date" name="fecha_requerida" required>
     <select class="input-field" name="estatus">
       {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
     </select>
     <button class="btn btn-primary" type="submit">Guardar solicitud</button>
   </form>
+  <p id="stock-hint" class="muted mb-0">Selecciona un insumo para ver stock, punto de reorden y sugerencia de compra.</p>
   {% else %}
   <p class="muted">Tu perfil está en modo lectura para Compras.</p>
   {% endif %}
@@ -85,4 +95,36 @@
     </table>
   </div>
 </section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    const insumoSelect = document.getElementById("insumo_id");
+    const cantidadInput = document.getElementById("cantidad");
+    const stockHint = document.getElementById("stock-hint");
+    if (!insumoSelect || !cantidadInput || !stockHint) return;
+
+    function onInsumoChange() {
+      const selected = insumoSelect.options[insumoSelect.selectedIndex];
+      if (!selected || !selected.value) {
+        stockHint.textContent = "Selecciona un insumo para ver stock, punto de reorden y sugerencia de compra.";
+        return;
+      }
+
+      const stock = Number(selected.dataset.stock || 0);
+      const reorden = Number(selected.dataset.reorden || 0);
+      const recomendado = Number(selected.dataset.recomendado || 0);
+
+      if (!Number.isNaN(recomendado) && recomendado > 0) {
+        cantidadInput.value = recomendado.toFixed(3);
+        stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | Sugerido: " + recomendado.toFixed(3);
+      } else {
+        stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | No se requiere compra por reorden.";
+      }
+    }
+
+    insumoSelect.addEventListener("change", onInsumoChange);
+  })();
+</script>
 {% endblock %}

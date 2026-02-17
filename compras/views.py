@@ -9,6 +9,7 @@ from django.views.decorators.http import require_POST
 
 from core.access import can_manage_compras, can_view_compras
 from core.audit import log_event
+from inventario.models import ExistenciaInsumo
 from maestros.models import Insumo, Proveedor
 
 from .models import OrdenCompra, RecepcionCompra, SolicitudCompra
@@ -51,6 +52,30 @@ def _can_transition_recepcion(current: str, new: str) -> bool:
     return new in transitions.get(current, set())
 
 
+def _build_insumo_options():
+    insumos = list(Insumo.objects.filter(activo=True).order_by("nombre")[:200])
+    existencias = {
+        e.insumo_id: e
+        for e in ExistenciaInsumo.objects.filter(insumo_id__in=[i.id for i in insumos])
+    }
+    options = []
+    for insumo in insumos:
+        ex = existencias.get(insumo.id)
+        stock_actual = ex.stock_actual if ex else Decimal("0")
+        punto_reorden = ex.punto_reorden if ex else Decimal("0")
+        recomendado = max(punto_reorden - stock_actual, Decimal("0"))
+        options.append(
+            {
+                "id": insumo.id,
+                "nombre": insumo.nombre,
+                "stock_actual": stock_actual,
+                "punto_reorden": punto_reorden,
+                "recomendado": recomendado,
+            }
+        )
+    return options
+
+
 @login_required
 def solicitudes(request: HttpRequest) -> HttpResponse:
     if not can_view_compras(request.user):
@@ -80,7 +105,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
 
     context = {
         "solicitudes": SolicitudCompra.objects.select_related("insumo")[:50],
-        "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
+        "insumo_options": _build_insumo_options(),
         "status_choices": SolicitudCompra.STATUS_CHOICES,
         "can_manage_compras": can_manage_compras(request.user),
     }
