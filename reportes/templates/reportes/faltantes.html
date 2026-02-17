@@ -22,6 +22,10 @@
     <span class="badge bg-warning">Bajo mínimo: {{ bajo_count }}</span>
     <span class="badge bg-primary">Alertas: {{ alertas_count }}</span>
   </div>
+  <div class="d-flex gap-2 mb-3">
+    <a class="btn btn-secondary" href="{% url 'reportes:faltantes' %}?nivel={{ nivel }}&export=csv">Descargar CSV</a>
+    <a class="btn btn-secondary" href="{% url 'reportes:faltantes' %}?nivel={{ nivel }}&export=xlsx">Descargar Excel</a>
+  </div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
