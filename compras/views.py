@@ -124,11 +124,18 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             s.reabasto_texto = "Stock suficiente"
         s.reabasto_detalle = f"Stock {stock_actual} / Reorden {punto_reorden}"
 
+    reabasto_filter = (request.GET.get("reabasto") or "all").lower()
+    if reabasto_filter in {"critico", "bajo", "ok"}:
+        solicitudes = [s for s in solicitudes if s.reabasto_nivel == reabasto_filter]
+    else:
+        reabasto_filter = "all"
+
     context = {
         "solicitudes": solicitudes,
         "insumo_options": _build_insumo_options(),
         "status_choices": SolicitudCompra.STATUS_CHOICES,
         "can_manage_compras": can_manage_compras(request.user),
+        "reabasto_filter": reabasto_filter,
     }
     return render(request, "compras/solicitudes.html", context)
 

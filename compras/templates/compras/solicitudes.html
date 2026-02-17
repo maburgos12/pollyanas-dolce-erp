@@ -44,6 +44,12 @@
 
 <section class="card">
   <div class="card-header">Solicitudes Registradas</div>
+  <div class="d-flex gap-2 mb-3">
+    <a href="{% url 'compras:solicitudes' %}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=critico" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=bajo" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=ok" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
+  </div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
