@@ -10,8 +10,26 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Solicitudes de Compra</div>
-  <p class="muted">Captura de requerimientos por área para aprobación y generación de orden.</p>
+  <div class="card-header">Nueva Solicitud</div>
+  <form method="post" class="quick-actions" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+    {% csrf_token %}
+    <input class="input-field" name="area" placeholder="Área" required>
+    <input class="input-field" name="solicitante" placeholder="Solicitante" required>
+    <select class="input-field" name="insumo_id" required>
+      <option value="">Insumo</option>
+      {% for i in insumos %}<option value="{{ i.id }}">{{ i.nombre }}</option>{% endfor %}
+    </select>
+    <input class="input-field" type="number" step="0.001" min="0" name="cantidad" placeholder="Cantidad" required>
+    <input class="input-field" type="date" name="fecha_requerida" required>
+    <select class="input-field" name="estatus">
+      {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Guardar solicitud</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Solicitudes Registradas</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -26,9 +44,19 @@
         </tr>
       </thead>
       <tbody>
-        <tr><td>SOL-0001</td><td>Producción</td><td>Carolina C.</td><td>Harina integral</td><td class="text-end">45 kg</td><td>18-Feb-2026</td><td><span class="badge bg-warning">Pendiente</span></td></tr>
-        <tr><td>SOL-0002</td><td>Compras</td><td>Jorge P.</td><td>Mantequilla sin sal</td><td class="text-end">28 kg</td><td>17-Feb-2026</td><td><span class="badge bg-primary">En revisión</span></td></tr>
-        <tr><td>SOL-0003</td><td>Ventas</td><td>Johanna L.</td><td>Caja cupcake 6 pzas</td><td class="text-end">300 pza</td><td>19-Feb-2026</td><td><span class="badge bg-success">Aprobada</span></td></tr>
+        {% for s in solicitudes %}
+        <tr>
+          <td>{{ s.folio }}</td>
+          <td>{{ s.area }}</td>
+          <td>{{ s.solicitante }}</td>
+          <td>{{ s.insumo.nombre }}</td>
+          <td class="text-end">{{ s.cantidad }}</td>
+          <td>{{ s.fecha_requerida }}</td>
+          <td><span class="badge bg-primary">{{ s.get_estatus_display }}</span></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="text-muted">Sin solicitudes capturadas.</td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>

@@ -10,23 +10,50 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Ajustes por Conteo Físico</div>
-  <p class="muted">Registro de diferencias detectadas en conteo, con motivo y autorización.</p>
+  <div class="card-header">Nuevo Ajuste</div>
+  <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+    {% csrf_token %}
+    <select class="input-field" name="insumo_id" required>
+      <option value="">Insumo</option>
+      {% for i in insumos %}<option value="{{ i.id }}">{{ i.nombre }}</option>{% endfor %}
+    </select>
+    <input class="input-field" type="number" min="0" step="0.001" name="cantidad_sistema" placeholder="Cantidad sistema" required>
+    <input class="input-field" type="number" min="0" step="0.001" name="cantidad_fisica" placeholder="Cantidad física" required>
+    <input class="input-field" name="motivo" placeholder="Motivo" required>
+    <select class="input-field" name="estatus">
+      {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Registrar ajuste</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Ajustes Registrados</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
         <tr>
           <th>Folio</th>
           <th>Insumo</th>
-          <th class="text-end">Cantidad sistema</th>
-          <th class="text-end">Cantidad física</th>
+          <th class="text-end">Sistema</th>
+          <th class="text-end">Físico</th>
           <th>Motivo</th>
           <th>Estatus</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td>AJ-030</td><td>Chocolate semiamargo</td><td class="text-end">12.0 kg</td><td class="text-end">11.4 kg</td><td>Merma por humedad</td><td><span class="badge bg-primary">Pendiente aprobación</span></td></tr>
-        <tr><td>AJ-031</td><td>Caja cupcake 6 pzas</td><td class="text-end">410 pza</td><td class="text-end">430 pza</td><td>Captura tardía de recepción</td><td><span class="badge bg-success">Aplicado</span></td></tr>
+        {% for a in ajustes %}
+        <tr>
+          <td>{{ a.folio }}</td>
+          <td>{{ a.insumo.nombre }}</td>
+          <td class="text-end">{{ a.cantidad_sistema }}</td>
+          <td class="text-end">{{ a.cantidad_fisica }}</td>
+          <td>{{ a.motivo }}</td>
+          <td><span class="badge bg-primary">{{ a.get_estatus_display }}</span></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="text-muted">Sin ajustes registrados.</td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>

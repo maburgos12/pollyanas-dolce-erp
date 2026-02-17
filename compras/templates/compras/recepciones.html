@@ -10,23 +10,52 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Recepciones de Mercancía</div>
-  <p class="muted">Registro de recepción física para impactar inventario y cierre de OC.</p>
+  <div class="card-header">Nueva Recepción</div>
+  <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+    {% csrf_token %}
+    <select class="input-field" name="orden_id" required>
+      <option value="">Orden de compra</option>
+      {% for o in ordenes %}<option value="{{ o.id }}">{{ o.folio }} - {{ o.proveedor.nombre }}</option>{% endfor %}
+    </select>
+    <input class="input-field" type="date" name="fecha_recepcion" required>
+    <input class="input-field" type="number" min="0" max="100" step="0.01" name="conformidad_pct" placeholder="Conformidad %">
+    <select class="input-field" name="estatus">
+      {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <input class="input-field" name="observaciones" placeholder="Observaciones">
+    <button class="btn btn-primary" type="submit">Guardar recepción</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Recepciones Registradas</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
         <tr>
           <th>Recepción</th>
-          <th>OC relacionada</th>
+          <th>OC</th>
           <th>Proveedor</th>
           <th>Fecha</th>
           <th>Conformidad</th>
           <th>Estatus</th>
+          <th>Observaciones</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td>REC-1301</td><td>OC-2408</td><td>Distribuidora Norte</td><td>16-Feb-2026</td><td>93%</td><td><span class="badge bg-warning">Con diferencias</span></td></tr>
-        <tr><td>REC-1302</td><td>OC-2410</td><td>Lácteos Selectos</td><td>16-Feb-2026</td><td>100%</td><td><span class="badge bg-success">Cerrada</span></td></tr>
+        {% for r in recepciones %}
+        <tr>
+          <td>{{ r.folio }}</td>
+          <td>{{ r.orden.folio }}</td>
+          <td>{{ r.orden.proveedor.nombre }}</td>
+          <td>{{ r.fecha_recepcion }}</td>
+          <td>{{ r.conformidad_pct }}%</td>
+          <td><span class="badge bg-primary">{{ r.get_estatus_display }}</span></td>
+          <td>{{ r.observaciones|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="text-muted">Sin recepciones registradas.</td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>

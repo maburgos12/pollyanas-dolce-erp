@@ -10,7 +10,21 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Stock Actual por Insumo</div>
+  <div class="card-header">Actualizar Existencia</div>
+  <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+    {% csrf_token %}
+    <select class="input-field" name="insumo_id" required>
+      <option value="">Insumo</option>
+      {% for i in insumos %}<option value="{{ i.id }}">{{ i.nombre }}</option>{% endfor %}
+    </select>
+    <input class="input-field" type="number" step="0.001" name="stock_actual" placeholder="Stock actual" required>
+    <input class="input-field" type="number" step="0.001" name="punto_reorden" placeholder="Punto reorden" required>
+    <button class="btn btn-primary" type="submit">Guardar existencia</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Stock por Insumo</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -23,9 +37,17 @@
         </tr>
       </thead>
       <tbody>
-        <tr><td>Harina integral</td><td>kg</td><td class="text-end">78.0</td><td class="text-end">50.0</td><td><span class="badge bg-success">Sano</span></td></tr>
-        <tr><td>Mantequilla sin sal</td><td>kg</td><td class="text-end">22.5</td><td class="text-end">25.0</td><td><span class="badge bg-danger">Bajo mínimo</span></td></tr>
-        <tr><td>Caja cupcake 6 pzas</td><td>pza</td><td class="text-end">430</td><td class="text-end">300</td><td><span class="badge bg-success">Sano</span></td></tr>
+        {% for e in existencias %}
+        <tr>
+          <td>{{ e.insumo.nombre }}</td>
+          <td>{% if e.insumo.unidad_base %}{{ e.insumo.unidad_base.codigo }}{% else %}-{% endif %}</td>
+          <td class="text-end">{{ e.stock_actual }}</td>
+          <td class="text-end">{{ e.punto_reorden }}</td>
+          <td>{% if e.stock_actual < e.punto_reorden %}<span class="badge bg-danger">Bajo mínimo</span>{% else %}<span class="badge bg-success">Sano</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-muted">Sin existencias registradas.</td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>

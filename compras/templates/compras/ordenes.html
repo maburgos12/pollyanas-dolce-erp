@@ -10,24 +10,56 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Órdenes de Compra</div>
-  <p class="muted">Consolidación de solicitudes aprobadas y envío a proveedor.</p>
+  <div class="card-header">Nueva Orden de Compra</div>
+  <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+    {% csrf_token %}
+    <select class="input-field" name="solicitud_id">
+      <option value="">Solicitud (opcional)</option>
+      {% for s in solicitudes %}<option value="{{ s.id }}">{{ s.folio }} - {{ s.insumo.nombre }}</option>{% endfor %}
+    </select>
+    <select class="input-field" name="proveedor_id" required>
+      <option value="">Proveedor</option>
+      {% for p in proveedores %}<option value="{{ p.id }}">{{ p.nombre }}</option>{% endfor %}
+    </select>
+    <input class="input-field" type="date" name="fecha_emision" required>
+    <input class="input-field" type="date" name="fecha_entrega_estimada">
+    <input class="input-field" type="number" min="0" step="0.01" name="monto_estimado" placeholder="Monto estimado">
+    <select class="input-field" name="estatus">
+      {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Guardar orden</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Órdenes Registradas</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
         <tr>
           <th>OC</th>
+          <th>Solicitud</th>
           <th>Proveedor</th>
           <th>Emisión</th>
           <th>Entrega estimada</th>
-          <th class="text-end">Monto estimado</th>
+          <th class="text-end">Monto</th>
           <th>Estatus</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td>OC-2408</td><td>Distribuidora Norte</td><td>15-Feb-2026</td><td>18-Feb-2026</td><td class="text-end">$14,850.00</td><td><span class="badge bg-warning">Parcial</span></td></tr>
-        <tr><td>OC-2409</td><td>Empaques del Pacífico</td><td>16-Feb-2026</td><td>20-Feb-2026</td><td class="text-end">$8,420.00</td><td><span class="badge bg-primary">Enviada</span></td></tr>
-        <tr><td>OC-2410</td><td>Lácteos Selectos</td><td>16-Feb-2026</td><td>17-Feb-2026</td><td class="text-end">$5,980.00</td><td><span class="badge bg-success">Confirmada</span></td></tr>
+        {% for o in ordenes %}
+        <tr>
+          <td>{{ o.folio }}</td>
+          <td>{% if o.solicitud %}{{ o.solicitud.folio }}{% else %}-{% endif %}</td>
+          <td>{{ o.proveedor.nombre }}</td>
+          <td>{{ o.fecha_emision }}</td>
+          <td>{{ o.fecha_entrega_estimada|default:"-" }}</td>
+          <td class="text-end">${{ o.monto_estimado }}</td>
+          <td><span class="badge bg-primary">{{ o.get_estatus_display }}</span></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="text-muted">Sin órdenes registradas.</td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>

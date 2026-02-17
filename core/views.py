@@ -1,11 +1,13 @@
 import logging
 
+from django.db.models import F
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from maestros.models import Insumo, Proveedor
 from recetas.models import Receta
+from inventario.models import ExistenciaInsumo
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "insumos_count": Insumo.objects.filter(activo=True).count(),
                 "recetas_count": Receta.objects.count(),
                 "proveedores_count": Proveedor.objects.count(),
+                "alertas_count": ExistenciaInsumo.objects.filter(stock_actual__lt=F("punto_reorden")).count(),
             }
         )
     except Exception:

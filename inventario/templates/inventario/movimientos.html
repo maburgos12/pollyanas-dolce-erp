@@ -10,6 +10,24 @@
 </nav>
 
 <section class="card">
+  <div class="card-header">Nuevo Movimiento</div>
+  <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+    {% csrf_token %}
+    <input class="input-field" type="datetime-local" name="fecha" required>
+    <select class="input-field" name="tipo" required>
+      {% for value, label in tipo_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <select class="input-field" name="insumo_id" required>
+      <option value="">Insumo</option>
+      {% for i in insumos %}<option value="{{ i.id }}">{{ i.nombre }}</option>{% endfor %}
+    </select>
+    <input class="input-field" type="number" min="0" step="0.001" name="cantidad" placeholder="Cantidad" required>
+    <input class="input-field" name="referencia" placeholder="Referencia">
+    <button class="btn btn-primary" type="submit">Registrar movimiento</button>
+  </form>
+</section>
+
+<section class="card">
   <div class="card-header">Bitácora de Movimientos</div>
   <div class="table-responsive">
     <table class="table table-striped">
@@ -23,9 +41,17 @@
         </tr>
       </thead>
       <tbody>
-        <tr><td>16-Feb-2026 09:10</td><td><span class="badge bg-success">Entrada</span></td><td>Mantequilla sin sal</td><td class="text-end">+15 kg</td><td>REC-1302</td></tr>
-        <tr><td>16-Feb-2026 11:42</td><td><span class="badge bg-warning">Consumo</span></td><td>Harina integral</td><td class="text-end">-8 kg</td><td>OP-589</td></tr>
-        <tr><td>16-Feb-2026 12:30</td><td><span class="badge bg-danger">Salida</span></td><td>Azúcar refinada</td><td class="text-end">-6 kg</td><td>TRF-SUC2</td></tr>
+        {% for m in movimientos %}
+        <tr>
+          <td>{{ m.fecha|date:"Y-m-d H:i" }}</td>
+          <td><span class="badge bg-primary">{{ m.get_tipo_display }}</span></td>
+          <td>{{ m.insumo.nombre }}</td>
+          <td class="text-end">{{ m.cantidad }}</td>
+          <td>{{ m.referencia|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-muted">Sin movimientos registrados.</td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
