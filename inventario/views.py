@@ -127,9 +127,22 @@ def movimientos(request: HttpRequest) -> HttpResponse:
             )
         return redirect("inventario:movimientos")
 
+    existencias_by_insumo = {
+        row["insumo_id"]: row["stock_actual"]
+        for row in ExistenciaInsumo.objects.values("insumo_id", "stock_actual")
+    }
+    insumo_options = [
+        {
+            "id": i.id,
+            "nombre": i.nombre,
+            "stock": existencias_by_insumo.get(i.id, Decimal("0")),
+        }
+        for i in Insumo.objects.filter(activo=True).order_by("nombre")[:200]
+    ]
+
     context = {
         "movimientos": MovimientoInventario.objects.select_related("insumo")[:100],
-        "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
+        "insumo_options": insumo_options,
         "tipo_choices": [
             (value, label)
             for value, label in MovimientoInventario.TIPO_CHOICES

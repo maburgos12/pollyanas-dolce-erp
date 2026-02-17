@@ -15,17 +15,20 @@
   <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
     {% csrf_token %}
     <input class="input-field" type="datetime-local" name="fecha" required>
-    <select class="input-field" name="tipo" required>
+    <select class="input-field" name="tipo" id="mov-tipo" required>
       {% for value, label in tipo_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
     </select>
-    <select class="input-field" name="insumo_id" required>
+    <select class="input-field" name="insumo_id" id="mov-insumo" required>
       <option value="">Insumo</option>
-      {% for i in insumos %}<option value="{{ i.id }}">{{ i.nombre }}</option>{% endfor %}
+      {% for i in insumo_options %}
+      <option value="{{ i.id }}" data-stock="{{ i.stock }}">{{ i.nombre }} (disp: {{ i.stock }})</option>
+      {% endfor %}
     </select>
-    <input class="input-field" type="number" min="0" step="0.001" name="cantidad" placeholder="Cantidad" required>
+    <input class="input-field" type="number" min="0" step="0.001" name="cantidad" id="mov-cantidad" placeholder="Cantidad" required>
     <input class="input-field" name="referencia" placeholder="Referencia">
-    <button class="btn btn-primary" type="submit">Registrar movimiento</button>
+    <button class="btn btn-primary" id="mov-submit" type="submit">Registrar movimiento</button>
   </form>
+  <p class="muted" id="mov-stock-msg" style="margin-top:10px;">Selecciona un insumo para ver stock disponible.</p>
   {% else %}
   <p class="muted">Tu perfil está en modo lectura para Inventario.</p>
   {% endif %}
@@ -60,4 +63,53 @@
     </table>
   </div>
 </section>
+
+{% if can_manage_inventario %}
+<script>
+  (function () {
+    const tipo = document.getElementById("mov-tipo");
+    const insumo = document.getElementById("mov-insumo");
+    const cantidad = document.getElementById("mov-cantidad");
+    const submit = document.getElementById("mov-submit");
+    const msg = document.getElementById("mov-stock-msg");
+    if (!tipo || !insumo || !cantidad || !submit || !msg) return;
+
+    function toNum(v) {
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function validate() {
+      const selected = insumo.options[insumo.selectedIndex];
+      const stock = selected ? toNum(selected.dataset.stock) : 0;
+      const qty = toNum(cantidad.value);
+      const type = tipo.value;
+      const enforce = type === "SALIDA" || type === "CONSUMO";
+      const invalid = enforce && qty > 0 && qty > stock;
+
+      if (!insumo.value) {
+        msg.textContent = "Selecciona un insumo para ver stock disponible.";
+        submit.disabled = false;
+        return;
+      }
+
+      if (enforce) {
+        msg.textContent = "Stock disponible: " + stock + " | Tipo: " + type + ".";
+      } else {
+        msg.textContent = "Stock disponible: " + stock + ".";
+      }
+
+      if (invalid) {
+        msg.textContent = "Stock insuficiente: disponible " + stock + ", solicitado " + qty + ".";
+      }
+      submit.disabled = invalid;
+    }
+
+    tipo.addEventListener("change", validate);
+    insumo.addEventListener("change", validate);
+    cantidad.addEventListener("input", validate);
+    validate();
+  })();
+</script>
+{% endif %}
 {% endblock %}
