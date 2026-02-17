@@ -10,21 +10,55 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Consumo de Insumos (Últimos 30 días)</div>
+  <div class="card-header">Consumo de Insumos</div>
+  <form method="get" class="d-flex gap-2 mb-3" style="flex-wrap:wrap;">
+    <div>
+      <label for="date_from">Desde</label>
+      <input class="input-field" id="date_from" type="date" name="date_from" value="{{ filters.date_from }}">
+    </div>
+    <div>
+      <label for="date_to">Hasta</label>
+      <input class="input-field" id="date_to" type="date" name="date_to" value="{{ filters.date_to }}">
+    </div>
+    <div>
+      <label for="tipo">Tipo</label>
+      <select class="input-field" id="tipo" name="tipo">
+        <option value="ALL" {% if filters.tipo == "ALL" %}selected{% endif %}>Todos</option>
+        <option value="CONSUMO" {% if filters.tipo == "CONSUMO" %}selected{% endif %}>Consumo</option>
+        <option value="SALIDA" {% if filters.tipo == "SALIDA" %}selected{% endif %}>Salida</option>
+        <option value="ENTRADA" {% if filters.tipo == "ENTRADA" %}selected{% endif %}>Entrada</option>
+      </select>
+    </div>
+    <div class="align-items-end d-flex">
+      <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+    </div>
+  </form>
+
+  <div class="d-flex gap-2 mb-3" style="flex-wrap:wrap;">
+    <span class="badge bg-primary">Movimientos: {{ total_movimientos }}</span>
+    <span class="badge bg-success">Insumos: {{ total_insumos }}</span>
+    <span class="badge bg-warning">Cantidad total: {{ total_cantidad|floatformat:3 }}</span>
+  </div>
+
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
         <tr>
           <th>Insumo</th>
           <th class="text-end">Consumo</th>
-          <th class="text-end">Costo total</th>
-          <th>Variación vs mes anterior</th>
+          <th>Último movimiento</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td>Harina integral</td><td class="text-end">326 kg</td><td class="text-end">$11,214.00</td><td><span class="badge bg-warning">+8%</span></td></tr>
-        <tr><td>Mantequilla sin sal</td><td class="text-end">142 kg</td><td class="text-end">$15,876.00</td><td><span class="badge bg-danger">+16%</span></td></tr>
-        <tr><td>Chocolate semiamargo</td><td class="text-end">78 kg</td><td class="text-end">$12,012.00</td><td><span class="badge bg-success">-4%</span></td></tr>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.insumo__nombre }}</td>
+          <td class="text-end">{{ row.cantidad_total|floatformat:3 }}</td>
+          <td>{{ row.ultima_fecha|date:"Y-m-d H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="3" class="text-muted">Sin movimientos para el periodo seleccionado.</td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
