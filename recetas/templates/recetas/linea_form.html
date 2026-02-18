@@ -47,7 +47,13 @@
         <label for="tipo_linea">Tipo de línea</label>
         <select id="tipo_linea" class="form-select" name="tipo_linea">
           {% for value, label in linea_tipo_choices %}
-          <option value="{{ value }}" {% if linea.tipo_linea == value or (not linea and value == "NORMAL") %}selected{% endif %}>{{ label }}</option>
+          <option value="{{ value }}"
+            {% if linea %}
+              {% if linea.tipo_linea == value %}selected{% endif %}
+            {% else %}
+              {% if value == "NORMAL" %}selected{% endif %}
+            {% endif %}
+          >{{ label }}</option>
           {% endfor %}
         </select>
       </div>
