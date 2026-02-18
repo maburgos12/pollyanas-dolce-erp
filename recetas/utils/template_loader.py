@@ -14,6 +14,7 @@ from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from recetas.models import LineaReceta, Receta
 from recetas.utils.matching import clasificar_match, match_insumo
 from recetas.utils.normalizacion import normalizar_nombre
+from recetas.utils.subsection_costing import find_parent_cost_for_stage
 
 
 REQUIRED_HEADERS = {"receta", "ingrediente", "cantidad"}
@@ -154,6 +155,48 @@ def _get_or_create_component_insumo(nombre: str, unidad: UnidadMedida | None) ->
     return Insumo.objects.create(nombre=nombre[:250], unidad_base=unidad)
 
 
+def _hydrate_subsection_costs(recipe_rows: list[dict[str, Any]]) -> None:
+    main_costs: list[tuple[str, float]] = []
+    for row in recipe_rows:
+        if _resolve_line_type(row.get("tipo_linea")) != LineaReceta.TIPO_NORMAL:
+            continue
+        cost = _to_decimal(row.get("costo_linea"), "0")
+        if cost <= 0:
+            continue
+        main_costs.append((str(row.get("ingrediente") or ""), float(cost)))
+
+    if not main_costs:
+        return
+
+    stage_groups: dict[str, list[dict[str, Any]]] = {}
+    for row in recipe_rows:
+        if _resolve_line_type(row.get("tipo_linea")) != LineaReceta.TIPO_SUBSECCION:
+            continue
+        cost = _to_decimal(row.get("costo_linea"), "0")
+        if cost > 0:
+            continue
+        qty = _to_decimal(row.get("cantidad"), "0")
+        if qty <= 0:
+            continue
+        stage = str(row.get("etapa") or row.get("notas") or "").strip()
+        if not stage:
+            continue
+        stage_groups.setdefault(stage, []).append(row)
+
+    for stage, stage_rows in stage_groups.items():
+        parent_cost = find_parent_cost_for_stage(stage, main_costs)
+        if parent_cost is None or parent_cost <= 0:
+            continue
+        total_qty = sum(_to_decimal(r.get("cantidad"), "0") for r in stage_rows)
+        if total_qty <= 0:
+            continue
+        parent_cost_dec = Decimal(str(parent_cost))
+        for r in stage_rows:
+            qty = _to_decimal(r.get("cantidad"), "0")
+            allocated = parent_cost_dec * (qty / total_qty)
+            r["costo_linea"] = str(allocated)
+
+
 def _build_hash(receta_name: str, sheet_name: str, rows: list[dict[str, Any]]) -> str:
     payload = [
         (
@@ -240,6 +283,7 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
             result.recetas_omitidas += 1
             continue
 
+        _hydrate_subsection_costs(recipe_rows)
         sheet_name = str(recipe_rows[0].get("subreceta") or recipe_rows[0].get("producto_final") or "PLANTILLA").strip()[:120]
         recipe_type = _resolve_recipe_type(recipe_rows[0].get("tipo"))
         hash_contenido = _build_hash(receta_name, sheet_name, recipe_rows)

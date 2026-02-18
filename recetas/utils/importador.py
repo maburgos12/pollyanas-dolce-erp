@@ -13,6 +13,7 @@ from django.utils import timezone
 from maestros.models import Insumo, CostoInsumo, Proveedor, UnidadMedida, seed_unidades_basicas
 from .matching import match_insumo, clasificar_match
 from .normalizacion import normalizar_nombre
+from .subsection_costing import find_parent_cost_for_stage
 from recetas.models import Receta, LineaReceta
 
 log = logging.getLogger(__name__)
@@ -203,6 +204,45 @@ def _get_or_create_component_insumo(nombre: str, unidad: Optional[UnidadMedida])
             insumo.save(update_fields=["unidad_base"])
         return insumo
     return Insumo.objects.create(nombre=nombre[:250], unidad_base=unidad)
+
+
+def _hydrate_subsection_costs(lineas: List[Dict[str, Any]]) -> None:
+    main_costs: List[Tuple[str, float]] = []
+    for l in lineas:
+        if l.get("tipo_linea") != LineaReceta.TIPO_NORMAL:
+            continue
+        costo = _to_float(l.get("costo"))
+        if costo is None or costo <= 0:
+            continue
+        main_costs.append((str(l.get("ingrediente") or ""), costo))
+
+    if not main_costs:
+        return
+
+    by_stage: Dict[str, List[Dict[str, Any]]] = {}
+    for l in lineas:
+        if l.get("tipo_linea") != LineaReceta.TIPO_SUBSECCION:
+            continue
+        if _to_float(l.get("costo")) not in (None, 0):
+            continue
+        qty = _to_float(l.get("cantidad"))
+        if qty is None or qty <= 0:
+            continue
+        stage = str(l.get("etapa") or "").strip()
+        if not stage:
+            continue
+        by_stage.setdefault(stage, []).append(l)
+
+    for stage, stage_lines in by_stage.items():
+        parent_cost = find_parent_cost_for_stage(stage, main_costs)
+        if parent_cost is None or parent_cost <= 0:
+            continue
+        total_qty = sum((_to_float(l.get("cantidad")) or 0.0) for l in stage_lines)
+        if total_qty <= 0:
+            continue
+        for l in stage_lines:
+            qty = _to_float(l.get("cantidad")) or 0.0
+            l["costo"] = parent_cost * (qty / total_qty)
 
 
 class ImportadorCosteo:
@@ -572,6 +612,7 @@ class ImportadorCosteo:
         for receta_nombre, lineas in recetas_por_presentacion.items():
             if not lineas:
                 continue
+            _hydrate_subsection_costs(lineas)
             self._upsert_receta(
                 receta_nombre,
                 sheet_name,

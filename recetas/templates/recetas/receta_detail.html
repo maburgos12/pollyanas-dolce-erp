@@ -171,7 +171,7 @@
         </td>
         <td class="text-end">{{ l.cantidad }}</td>
         <td>{{ l.unidad_texto }}</td>
-        <td class="text-end">{% if l.costo_linea_excel %}${{ l.costo_linea_excel|floatformat:2 }}{% endif %}</td>
+        <td class="text-end">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% endif %}</td>
         <td>
           {% if l.match_status == "AUTO_APPROVED" %}
             <span class="badge bg-success">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span>
