@@ -1,6 +1,7 @@
 import csv
 from io import BytesIO
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 
 from openpyxl import Workbook
 from django.contrib.auth.decorators import login_required
@@ -12,6 +13,15 @@ from django.utils import timezone
 
 from core.access import can_view_reportes
 from inventario.models import ExistenciaInsumo, MovimientoInventario
+from maestros.models import CostoInsumo
+from recetas.models import Receta, LineaReceta
+
+
+def _to_decimal(value, default: str = "0") -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal(default)
 
 
 def _consumo_rows(date_from: str, date_to: str, tipo: str):
@@ -175,7 +185,76 @@ def _export_faltantes_xlsx(rows, nivel: str) -> HttpResponse:
 def costo_receta(request: HttpRequest) -> HttpResponse:
     if not can_view_reportes(request.user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")
-    return render(request, "reportes/costo_receta.html")
+
+    margen_pct = _to_decimal(request.GET.get("margen"), "35")
+    if margen_pct < 0:
+        margen_pct = Decimal("0")
+    if margen_pct > 500:
+        margen_pct = Decimal("500")
+    factor_margen = Decimal("1") + (margen_pct / Decimal("100"))
+
+    recetas = list(Receta.objects.prefetch_related("lineas", "lineas__insumo").order_by("nombre")[:500])
+    lineas_insumo_ids = []
+    for receta in recetas:
+        for linea in receta.lineas.all():
+            if linea.insumo_id:
+                lineas_insumo_ids.append(linea.insumo_id)
+
+    latest_cost_by_insumo = {}
+    for cost in CostoInsumo.objects.filter(insumo_id__in=lineas_insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+        if cost.insumo_id not in latest_cost_by_insumo:
+            latest_cost_by_insumo[cost.insumo_id] = cost
+
+    rows = []
+    total_costo = Decimal("0")
+    with_costo = 0
+    for receta in recetas:
+        costo_total = Decimal("0")
+        lineas_total = 0
+        lineas_costeadas = 0
+        for linea in receta.lineas.all():
+            if linea.match_status == LineaReceta.STATUS_REJECTED:
+                continue
+            lineas_total += 1
+
+            costo_linea = Decimal("0")
+            if linea.costo_linea_excel is not None:
+                costo_linea = _to_decimal(linea.costo_linea_excel, "0")
+            elif linea.cantidad is not None and linea.costo_unitario_snapshot is not None:
+                costo_linea = _to_decimal(linea.cantidad, "0") * _to_decimal(linea.costo_unitario_snapshot, "0")
+            elif linea.cantidad is not None and linea.insumo_id and linea.insumo_id in latest_cost_by_insumo:
+                costo_linea = _to_decimal(linea.cantidad, "0") * _to_decimal(latest_cost_by_insumo[linea.insumo_id].costo_unitario, "0")
+
+            if costo_linea > 0:
+                lineas_costeadas += 1
+                costo_total += costo_linea
+
+        cobertura_pct = (Decimal("100") * Decimal(lineas_costeadas) / Decimal(lineas_total)) if lineas_total else Decimal("0")
+        precio_sugerido = costo_total * factor_margen
+        row = {
+            "receta": receta,
+            "costo_total": costo_total,
+            "margen_pct": margen_pct,
+            "precio_sugerido": precio_sugerido,
+            "lineas_total": lineas_total,
+            "lineas_costeadas": lineas_costeadas,
+            "cobertura_pct": cobertura_pct,
+        }
+        rows.append(row)
+        total_costo += costo_total
+        if costo_total > 0:
+            with_costo += 1
+
+    rows.sort(key=lambda r: (r["costo_total"], r["receta"].nombre), reverse=True)
+
+    context = {
+        "rows": rows,
+        "margen_pct": margen_pct,
+        "total_recetas": len(rows),
+        "recetas_con_costo": with_costo,
+        "total_costo": total_costo,
+    }
+    return render(request, "reportes/costo_receta.html", context)
 
 
 @login_required
