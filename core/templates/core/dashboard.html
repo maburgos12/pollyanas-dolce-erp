@@ -4,6 +4,18 @@
 {% block page_title %}Dashboard Ejecutivo{% endblock %}
 
 {% block content %}
+<section class="card dashboard-hero">
+    <div>
+        <div class="dashboard-hero-title">Operación General</div>
+        <div class="dashboard-hero-subtitle">Vista rápida de módulos y estado del sistema para la jornada.</div>
+    </div>
+    <div class="dashboard-hero-badges">
+        <span class="badge bg-success">Inventario crítico: {{ criticos_count }}</span>
+        <span class="badge bg-warning">Bajo reorden: {{ bajo_reorden_count }}</span>
+        <span class="badge bg-primary">Alertas total: {{ alertas_count }}</span>
+    </div>
+</section>
+
 <div class="kpi-grid">
     <article class="kpi-card">
         <div class="kpi-number">{{ insumos_count }}</div>
@@ -23,70 +35,72 @@
     </article>
 </div>
 
-<section class="card">
-    <div class="card-header">Accesos Operativos</div>
-    <div class="quick-actions">
-        {% if can_view_maestros %}
-            <a href="{% url 'maestros:insumo_list' %}" class="btn btn-secondary">📦 Catálogo de insumos</a>
-            <a href="{% url 'maestros:proveedor_list' %}" class="btn btn-secondary">🏢 Catálogo de proveedores</a>
-        {% endif %}
-        {% if can_view_compras %}
-            <a href="{% url 'compras:solicitudes' %}" class="btn btn-primary">🛒 Flujo de compras</a>
-        {% endif %}
-        {% if can_view_inventario %}
-            <a href="{% url 'inventario:existencias' %}" class="btn btn-primary">📚 Control de inventario</a>
-        {% endif %}
-        {% if can_view_reportes %}
-            <a href="{% url 'reportes:costo_receta' %}" class="btn btn-secondary">📈 Reportes ejecutivos</a>
-        {% endif %}
-        {% if can_view_recetas %}
-            <a href="{% url 'recetas:recetas_list' %}" class="btn btn-secondary">🧁 Recetas y costeo</a>
-        {% endif %}
-        {% if can_review_matching %}
-            <a href="{% url 'recetas:matching_pendientes' %}" class="btn btn-secondary">🔎 Revisar matching</a>
-        {% endif %}
-    </div>
-</section>
+<div class="dashboard-grid">
+    <section class="card">
+        <div class="card-header">Accesos Operativos</div>
+        <div class="quick-actions">
+            {% if can_view_maestros %}
+                <a href="{% url 'maestros:insumo_list' %}" class="btn btn-secondary">📦 Catálogo de insumos</a>
+                <a href="{% url 'maestros:proveedor_list' %}" class="btn btn-secondary">🏢 Catálogo de proveedores</a>
+            {% endif %}
+            {% if can_view_compras %}
+                <a href="{% url 'compras:solicitudes' %}" class="btn btn-primary">🛒 Flujo de compras</a>
+            {% endif %}
+            {% if can_view_inventario %}
+                <a href="{% url 'inventario:existencias' %}" class="btn btn-primary">📚 Control de inventario</a>
+            {% endif %}
+            {% if can_view_reportes %}
+                <a href="{% url 'reportes:costo_receta' %}" class="btn btn-secondary">📈 Reportes ejecutivos</a>
+            {% endif %}
+            {% if can_view_recetas %}
+                <a href="{% url 'recetas:recetas_list' %}" class="btn btn-secondary">🧁 Recetas y costeo</a>
+            {% endif %}
+            {% if can_review_matching %}
+                <a href="{% url 'recetas:matching_pendientes' %}" class="btn btn-secondary">🔎 Revisar matching</a>
+            {% endif %}
+        </div>
+    </section>
 
-<section class="card">
-    <div class="card-header">Resumen Fase 1</div>
-    <div class="table-responsive">
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Módulo</th>
-                    <th>Estado</th>
-                    <th>Alcance sprint</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>Maestros</td>
-                    <td><span class="badge bg-success">Activo</span></td>
-                    <td>ABM básico de insumos y proveedores</td>
-                </tr>
-                <tr>
-                    <td>Recetas</td>
-                    <td><span class="badge bg-success">Activo</span></td>
-                    <td>Listado, detalle, matching y MRP inicial</td>
-                </tr>
-                <tr>
-                    <td>Compras</td>
-                    <td><span class="badge bg-warning">Diseño funcional</span></td>
-                    <td>Solicitudes, órdenes y recepciones estructuradas</td>
-                </tr>
-                <tr>
-                    <td>Inventario</td>
-                    <td><span class="badge bg-warning">Diseño funcional</span></td>
-                    <td>Existencias, movimientos y ajustes listos para integrar lógica</td>
-                </tr>
-                <tr>
-                    <td>Reportes</td>
-                    <td><span class="badge bg-warning">Diseño funcional</span></td>
-                    <td>Costo receta, consumo y faltantes para visión ejecutiva</td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-</section>
+    <section class="card">
+        <div class="card-header">Estado Fase 1</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Módulo</th>
+                        <th>Estado</th>
+                        <th>Alcance sprint</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Maestros</td>
+                        <td><span class="badge bg-success">Activo</span></td>
+                        <td>ABM básico de insumos y proveedores</td>
+                    </tr>
+                    <tr>
+                        <td>Recetas</td>
+                        <td><span class="badge bg-success">Activo</span></td>
+                        <td>Listado, detalle, matching y MRP inicial</td>
+                    </tr>
+                    <tr>
+                        <td>Compras</td>
+                        <td><span class="badge bg-success">Activo</span></td>
+                        <td>Solicitudes, órdenes y recepciones operativas</td>
+                    </tr>
+                    <tr>
+                        <td>Inventario</td>
+                        <td><span class="badge bg-success">Activo</span></td>
+                        <td>Existencias, movimientos, ajustes y alertas</td>
+                    </tr>
+                    <tr>
+                        <td>Reportes</td>
+                        <td><span class="badge bg-success">Activo</span></td>
+                        <td>Costo receta, consumo y faltantes exportables</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
 {% endblock %}

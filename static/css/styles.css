@@ -432,6 +432,39 @@ textarea:focus,
   font-size: 32px;
 }
 
+.dashboard-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(90deg, #fff 0%, #fff7fa 100%);
+}
+
+.dashboard-hero-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 30px;
+  color: var(--vino);
+  margin-bottom: 4px;
+}
+
+.dashboard-hero-subtitle {
+  color: var(--texto-light);
+  font-size: 14px;
+}
+
+.dashboard-hero-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
 .recipe-actions {
   display: flex;
   gap: 8px;
@@ -655,5 +688,14 @@ tr:hover,
 
   .form-grid-2 {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dashboard-hero-badges {
+    justify-content: flex-start;
   }
 }
