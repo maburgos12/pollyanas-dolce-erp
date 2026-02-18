@@ -121,6 +121,24 @@ def _latest_cost_unitario(insumo: Insumo) -> Optional[float]:
     ci = CostoInsumo.objects.filter(insumo=insumo).order_by("-fecha", "-id").first()
     return float(ci.costo_unitario) if ci else None
 
+
+def _is_presentation_header(text: Any) -> bool:
+    n = normalizar_nombre(text)
+    return n in {
+        "mini",
+        "chico",
+        "mediano",
+        "grande",
+        "individual",
+        "rebanada",
+        "bollos",
+        "bollito",
+        "media plancha",
+        "1/2 plancha",
+        "1 2 plancha",
+    }
+
+
 class ImportadorCosteo:
     def __init__(self, filepath: str):
         self.filepath = filepath
@@ -241,13 +259,18 @@ class ImportadorCosteo:
         self.resultado.catalogo_importado = 1
 
     def importar_recetas(self):
-        # detecta hojas con "Ingredientes"
+        # detecta hojas con recetas tradicionales y/o matrices por presentación.
         for sheet_name in self.wb.sheetnames:
             ws = self.wb[sheet_name]
-            if not self._sheet_has_ingredientes(ws):
+            has_ingredientes = self._sheet_has_ingredientes(ws)
+            has_matrix = self._sheet_has_presentacion_matrix(ws)
+            if not has_ingredientes and not has_matrix:
                 continue
             try:
-                self._importar_recetas_de_hoja(ws, sheet_name)
+                if has_ingredientes:
+                    self._importar_recetas_de_hoja(ws, sheet_name)
+                if has_matrix:
+                    self._importar_productos_finales_de_hoja(ws, sheet_name)
             except Exception as e:
                 self.resultado.errores.append({"sheet": sheet_name, "error": str(e)})
 
@@ -257,6 +280,20 @@ class ImportadorCosteo:
                 v = ws.cell(row=r, column=c).value
                 if isinstance(v, str) and "ingrediente" in v.lower():
                     return True
+        return False
+
+    def _sheet_has_presentacion_matrix(self, ws) -> bool:
+        if "pastel" not in normalizar_nombre(ws.title):
+            return False
+        max_row = min(ws.max_row, 120)
+        max_col = min(ws.max_column, 24)
+        for r in range(1, max_row + 1):
+            for c in range(1, max_col + 1):
+                if normalizar_nombre(ws.cell(row=r, column=c).value) != "elemento":
+                    continue
+                for cc in range(c + 1, min(c + 8, max_col + 1)):
+                    if _is_presentation_header(ws.cell(row=r, column=cc).value):
+                        return True
         return False
 
     def _importar_recetas_de_hoja(self, ws, sheet_name: str):
@@ -319,13 +356,92 @@ class ImportadorCosteo:
                     rr += 1
 
                 if lineas:
-                    self._upsert_receta(receta_nombre, sheet_name, lineas)
+                    self._upsert_receta(
+                        receta_nombre,
+                        sheet_name,
+                        lineas,
+                        recipe_type=Receta.TIPO_PREPARACION,
+                    )
                     r = rr + 1
                     continue
 
             r += 1
 
-    def _upsert_receta(self, nombre: str, sheet_name: str, lineas: List[Dict[str, Any]]):
+    def _importar_productos_finales_de_hoja(self, ws, sheet_name: str):
+        if "pastel" not in normalizar_nombre(sheet_name):
+            return
+        max_row = min(ws.max_row, 250)
+        max_col = min(ws.max_column, 30)
+        recetas_por_presentacion: Dict[str, List[Dict[str, Any]]] = {}
+
+        for r in range(1, max_row + 1):
+            for c in range(1, max_col + 1):
+                if normalizar_nombre(ws.cell(row=r, column=c).value) != "elemento":
+                    continue
+
+                headers: List[Tuple[int, str]] = []
+                cc = c + 1
+                while cc <= max_col:
+                    hv = ws.cell(row=r, column=cc).value
+                    if hv is None or str(hv).strip() == "":
+                        if headers:
+                            break
+                        cc += 1
+                        continue
+                    if isinstance(hv, (int, float)):
+                        break
+                    if _is_presentation_header(hv):
+                        headers.append((cc, str(hv).strip()))
+                    cc += 1
+
+                if not headers:
+                    continue
+
+                rr = r + 1
+                while rr <= max_row:
+                    elemento = ws.cell(row=rr, column=c).value
+                    if elemento is None or str(elemento).strip() == "":
+                        break
+                    elemento_txt = str(elemento).strip()
+                    elemento_norm = normalizar_nombre(elemento_txt)
+                    if elemento_norm == "elemento" or elemento_norm.startswith("total"):
+                        break
+
+                    for col, presentacion in headers:
+                        cantidad = _to_float(ws.cell(row=rr, column=col).value)
+                        if cantidad is None or cantidad <= 0:
+                            continue
+
+                        receta_nombre = f"{sheet_name} - {presentacion}"[:250]
+                        lineas = recetas_por_presentacion.setdefault(receta_nombre, [])
+                        lineas.append(
+                            {
+                                "pos": len(lineas) + 1,
+                                "ingrediente": elemento_txt[:250],
+                                "cantidad": cantidad,
+                                "unidad": "kg",
+                                "costo": None,
+                            }
+                        )
+                    rr += 1
+
+        for receta_nombre, lineas in recetas_por_presentacion.items():
+            if not lineas:
+                continue
+            self._upsert_receta(
+                receta_nombre,
+                sheet_name,
+                lineas,
+                recipe_type=Receta.TIPO_PRODUCTO_FINAL,
+            )
+
+    def _upsert_receta(
+        self,
+        nombre: str,
+        sheet_name: str,
+        lineas: List[Dict[str, Any]],
+        recipe_type: str = Receta.TIPO_PREPARACION,
+    ):
         # Hash idempotente por contenido
         nombre_norm = normalizar_nombre(nombre)
         h_payload = {
@@ -345,14 +461,25 @@ class ImportadorCosteo:
         if receta:
             self.resultado.recetas_actualizadas += 1
             # asegurar nombre/sheet/hash y recrear lineas
-            if receta.nombre != nombre or receta.sheet_name != sheet_name or receta.hash_contenido != hash_contenido:
+            if (
+                receta.nombre != nombre
+                or receta.sheet_name != sheet_name
+                or receta.hash_contenido != hash_contenido
+                or receta.tipo != recipe_type
+            ):
                 receta.nombre = nombre
                 receta.sheet_name = sheet_name
                 receta.hash_contenido = hash_contenido
+                receta.tipo = recipe_type
                 receta.save()
             receta.lineas.all().delete()
         else:
-            receta = Receta.objects.create(nombre=nombre, sheet_name=sheet_name, hash_contenido=hash_contenido)
+            receta = Receta.objects.create(
+                nombre=nombre,
+                sheet_name=sheet_name,
+                hash_contenido=hash_contenido,
+                tipo=recipe_type,
+            )
             self.resultado.recetas_creadas += 1
 
         for l in lineas:

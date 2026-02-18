@@ -58,6 +58,7 @@ def _map_header(name: str) -> str:
         "subreceta": "subreceta",
         "producto final": "producto_final",
         "producto": "producto_final",
+        "tipo": "tipo",
         "ingrediente": "ingrediente",
         "insumo": "ingrediente",
         "cantidad": "cantidad",
@@ -68,6 +69,19 @@ def _map_header(name: str) -> str:
         "notas": "notas",
     }
     return aliases.get(n, n)
+
+
+def _resolve_recipe_type(raw: Any) -> str:
+    n = normalizar_nombre(raw)
+    if n in {"producto final", "productofinal", "producto_final"}:
+        return Receta.TIPO_PRODUCTO_FINAL
+    if n in {"preparacion", "base", "subreceta"}:
+        return Receta.TIPO_PREPARACION
+    if isinstance(raw, str):
+        r = raw.strip().upper()
+        if r in {Receta.TIPO_PREPARACION, Receta.TIPO_PRODUCTO_FINAL}:
+            return r
+    return Receta.TIPO_PREPARACION
 
 
 def _unit_from_text(unit_text: str) -> UnidadMedida | None:
@@ -182,12 +196,14 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
             continue
 
         sheet_name = str(recipe_rows[0].get("subreceta") or recipe_rows[0].get("producto_final") or "PLANTILLA").strip()[:120]
+        recipe_type = _resolve_recipe_type(recipe_rows[0].get("tipo"))
         hash_contenido = _build_hash(receta_name, sheet_name, recipe_rows)
 
         if existing:
             receta = existing
             receta.nombre = receta_name[:250]
             receta.sheet_name = sheet_name
+            receta.tipo = recipe_type
             receta.hash_contenido = hash_contenido
             receta.save()
             receta.lineas.all().delete()
@@ -196,6 +212,7 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
             receta = Receta.objects.create(
                 nombre=receta_name[:250],
                 sheet_name=sheet_name,
+                tipo=recipe_type,
                 hash_contenido=hash_contenido,
             )
             result.recetas_creadas += 1
@@ -239,4 +256,3 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
             pos += 1
 
     return result
-

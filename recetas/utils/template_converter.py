@@ -14,6 +14,7 @@ TEMPLATE_HEADERS = [
     "receta",
     "subreceta",
     "producto_final",
+    "tipo",
     "ingrediente",
     "cantidad",
     "unidad",
@@ -102,6 +103,7 @@ def _find_recipe_block(ws) -> list[dict[str, Any]]:
                     "receta": receta_nombre,
                     "subreceta": subreceta,
                     "producto_final": receta_nombre,
+                    "tipo": "PREPARACION",
                     "ingrediente": ing.strip(),
                     "cantidad": _to_number(qty),
                     "unidad": (str(unit).strip() if unit is not None else ""),
@@ -117,12 +119,107 @@ def _find_recipe_block(ws) -> list[dict[str, Any]]:
     return rows
 
 
+def _is_presentation_header(text: Any) -> bool:
+    n = normalizar_nombre(text)
+    return n in {
+        "mini",
+        "chico",
+        "mediano",
+        "grande",
+        "individual",
+        "rebanada",
+        "bollos",
+        "bollito",
+        "media plancha",
+        "1/2 plancha",
+        "1 2 plancha",
+    }
+
+
+def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
+    if "pastel" not in normalizar_nombre(ws.title):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    orden_por_receta: dict[str, int] = {}
+    max_row = min(ws.max_row, 250)
+    max_col = min(ws.max_column, 30)
+
+    for r in range(1, max_row + 1):
+        for c in range(1, max_col + 1):
+            if normalizar_nombre(ws.cell(row=r, column=c).value) != "elemento":
+                continue
+
+            headers: list[tuple[int, str]] = []
+            cc = c + 1
+            while cc <= max_col:
+                hv = ws.cell(row=r, column=cc).value
+                if hv is None or str(hv).strip() == "":
+                    if headers:
+                        break
+                    cc += 1
+                    continue
+                if isinstance(hv, (int, float)):
+                    break
+                htxt = str(hv).strip()
+                if _is_presentation_header(htxt):
+                    headers.append((cc, htxt))
+                cc += 1
+
+            if not headers:
+                continue
+
+            section = ""
+            if r > 1:
+                prev = ws.cell(row=r - 1, column=c).value
+                if isinstance(prev, str) and prev.strip():
+                    section = prev.strip()[:120]
+
+            rr = r + 1
+            while rr <= max_row:
+                elemento = ws.cell(row=rr, column=c).value
+                if elemento is None or str(elemento).strip() == "":
+                    break
+
+                elemento_txt = str(elemento).strip()
+                elemento_norm = normalizar_nombre(elemento_txt)
+                if elemento_norm == "elemento" or elemento_norm.startswith("total"):
+                    break
+
+                for col, presentacion in headers:
+                    cantidad = _to_number(ws.cell(row=rr, column=col).value)
+                    if cantidad == "":
+                        continue
+
+                    receta_nombre = f"{ws.title} - {presentacion.strip()}"[:250]
+                    orden_actual = orden_por_receta.get(receta_nombre, 0) + 1
+                    orden_por_receta[receta_nombre] = orden_actual
+
+                    rows.append(
+                        {
+                            "receta": receta_nombre,
+                            "subreceta": section or ws.title[:120],
+                            "producto_final": ws.title[:250],
+                            "tipo": "PRODUCTO_FINAL",
+                            "ingrediente": elemento_txt[:250],
+                            "cantidad": cantidad,
+                            "unidad": "kg",
+                            "costo_linea": "",
+                            "orden": orden_actual,
+                            "notas": section,
+                        }
+                    )
+                rr += 1
+
+    return rows
+
+
 def convert_costeo_to_template(costeo_path: str) -> tuple[list[dict[str, Any]], ConversionResult]:
     path = Path(costeo_path)
     if not path.exists():
         raise FileNotFoundError(f"Archivo no encontrado: {costeo_path}")
 
-    wb = load_workbook(path, data_only=True, read_only=True)
+    wb = load_workbook(path, data_only=True)
     all_rows: list[dict[str, Any]] = []
     seen_recetas: set[tuple[str, str]] = set()
     result = ConversionResult(hojas_escaneadas=len(wb.sheetnames))
@@ -130,9 +227,11 @@ def convert_costeo_to_template(costeo_path: str) -> tuple[list[dict[str, Any]], 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         rows = _find_recipe_block(ws)
-        if rows:
+        product_rows = _find_product_final_matrix(ws)
+        merged_rows = rows + product_rows
+        if merged_rows:
             result.hojas_con_recetas += 1
-        for row in rows:
+        for row in merged_rows:
             all_rows.append(row)
             seen_recetas.add((row["subreceta"], row["receta"]))
 
@@ -161,4 +260,3 @@ def write_template_xlsx(rows: list[dict[str, Any]], output_path: str) -> None:
     for row in rows:
         ws.append([row.get(h, "") for h in TEMPLATE_HEADERS])
     wb.save(path)
-
