@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ receta.nombre }}{% endblock %}
 {% block content %}
+<div class="recipe-detail">
 <div class="card">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
@@ -136,7 +137,19 @@
 {% endif %}
 
 <div class="table-responsive card">
-  <table class="table align-middle">
+  <table class="table align-middle recipe-lines-table">
+    <colgroup>
+      <col class="col-pos">
+      <col class="col-type">
+      <col class="col-stage">
+      <col class="col-ingredient">
+      <col class="col-linked">
+      <col class="col-qty">
+      <col class="col-unit">
+      <col class="col-cost">
+      <col class="col-match">
+      <col class="col-actions">
+    </colgroup>
     <thead>
       <tr>
         <th>#</th>
@@ -154,7 +167,7 @@
     <tbody>
       {% for l in lineas %}
       <tr>
-        <td>{{ l.posicion }}</td>
+        <td class="text-end">{{ l.posicion }}</td>
         <td>
           {% if l.tipo_linea == "SUBSECCION" %}
             <span class="badge bg-info text-dark">Subsección</span>
@@ -162,8 +175,8 @@
             <span class="badge bg-secondary">Principal</span>
           {% endif %}
         </td>
-        <td>{{ l.etapa|default:"-" }}</td>
-        <td>{{ l.insumo_texto }}</td>
+        <td class="cell-stage">{{ l.etapa|default:"-" }}</td>
+        <td class="cell-ingredient">{{ l.insumo_texto }}</td>
         <td>
           {% if l.insumo %}
             {{ l.insumo.nombre }}
@@ -173,9 +186,9 @@
             <span class="badge bg-danger">Sin match</span>
           {% endif %}
         </td>
-        <td class="text-end">{{ l.cantidad }}</td>
-        <td>{{ l.unidad_texto }}</td>
-        <td class="text-end">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+        <td class="text-end cell-qty">{{ l.cantidad }}</td>
+        <td class="cell-unit">{{ l.unidad_texto }}</td>
+        <td class="text-end cell-cost">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
         <td>
           {% if l.match_status == "AUTO_APPROVED" %}
             <span class="badge bg-success">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span>
@@ -186,7 +199,7 @@
           {% endif %}
         </td>
         <td>
-          <div class="recipe-actions">
+          <div class="recipe-actions recipe-actions-compact">
             <a class="btn btn-secondary" href="{% url 'recetas:linea_edit' receta.id l.id %}">Editar</a>
             <form method="post" action="{% url 'recetas:linea_delete' receta.id l.id %}" onsubmit="return confirm('¿Eliminar esta línea?');">
               {% csrf_token %}
@@ -209,5 +222,6 @@
       </tr>
     </tfoot>
   </table>
+</div>
 </div>
 {% endblock %}
