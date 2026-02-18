@@ -31,7 +31,7 @@
 
 <section class="card">
   <div class="card-header">Panel de Alertas</div>
-  <div class="d-flex gap-2 mb-3">
+  <div class="toolbar">
     <a href="{% url 'inventario:alertas' %}" class="btn {% if nivel == 'alerta' %}btn-primary{% else %}btn-secondary{% endif %}">Solo alertas</a>
     <a href="{% url 'inventario:alertas' %}?nivel=critico" class="btn {% if nivel == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
     <a href="{% url 'inventario:alertas' %}?nivel=bajo" class="btn {% if nivel == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>

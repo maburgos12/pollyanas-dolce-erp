@@ -404,6 +404,34 @@ textarea:focus,
   align-items: end;
 }
 
+.form-grid-auto {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.kpi-mini {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.kpi-mini .kpi-card {
+  padding: 14px;
+}
+
+.kpi-mini .kpi-number {
+  font-size: 32px;
+}
+
 .recipe-actions {
   display: flex;
   gap: 8px;

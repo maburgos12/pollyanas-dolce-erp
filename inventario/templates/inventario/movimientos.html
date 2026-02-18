@@ -13,7 +13,7 @@
 <section class="card">
   <div class="card-header">Nuevo Movimiento</div>
   {% if can_manage_inventario %}
-  <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+  <form method="post" class="form-grid-auto">
     {% csrf_token %}
     <input class="input-field" type="datetime-local" name="fecha" required>
     <select class="input-field" name="tipo" id="mov-tipo" required>

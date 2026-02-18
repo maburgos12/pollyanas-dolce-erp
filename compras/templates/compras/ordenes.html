@@ -12,7 +12,7 @@
 <section class="card">
   <div class="card-header">Nueva Orden de Compra</div>
   {% if can_manage_compras %}
-  <form method="post" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+  <form method="post" class="form-grid-auto">
     {% csrf_token %}
     <select class="input-field" name="solicitud_id" required>
       <option value="">Solicitud aprobada</option>
@@ -71,6 +71,7 @@
           </td>
           {% if can_manage_compras %}
           <td>
+            <div class="recipe-actions">
             {% if o.estatus == 'BORRADOR' %}
               <form method="post" action="{% url 'compras:orden_estatus' o.id 'ENVIADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-secondary" type="submit">Enviar</button></form>
             {% endif %}
@@ -81,6 +82,7 @@
             {% if o.estatus == 'CONFIRMADA' or o.estatus == 'PARCIAL' %}
               <form method="post" action="{% url 'compras:orden_estatus' o.id 'CERRADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-primary" type="submit">Cerrar</button></form>
             {% endif %}
+            </div>
           </td>
           {% endif %}
         </tr>
