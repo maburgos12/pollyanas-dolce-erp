@@ -425,8 +425,8 @@ def matching_pendientes(request: HttpRequest) -> HttpResponse:
     paginator = Paginator(pendientes, 25)
     page = paginator.get_page(request.GET.get("page"))
 
-    # Insumos para dropdown (limitado). En producción: usar búsqueda/autocomplete.
-    insumos = Insumo.objects.filter(activo=True).order_by("nombre")[:500]
+    # Insumos para dropdown con búsqueda en cliente.
+    insumos = Insumo.objects.filter(activo=True).order_by("nombre")[:1200]
     return render(request, "recetas/matching_pendientes.html", {"page": page, "q": q, "insumos": insumos})
 
 @permission_required("recetas.change_lineareceta", raise_exception=True)

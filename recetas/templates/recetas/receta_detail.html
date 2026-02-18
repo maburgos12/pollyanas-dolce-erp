@@ -67,7 +67,7 @@
 
 <div class="kpi-mini">
   <div class="kpi-card">
-    <div class="kpi-number">{{ receta.rendimiento_cantidad|default:"0" }}</div>
+    <div class="kpi-number">{{ receta.rendimiento_cantidad|default:0|floatformat:2 }}</div>
     <div class="kpi-label">Rendimiento{% if receta.rendimiento_unidad %} ({{ receta.rendimiento_unidad.codigo }}){% endif %}</div>
   </div>
   <div class="kpi-card">
@@ -114,9 +114,9 @@
           <tr>
             <td>{{ p.nombre }}</td>
             <td>{{ receta.nombre }} - {{ p.nombre }}</td>
-            <td class="text-end">{{ p.peso_por_unidad_kg }}</td>
-            <td class="text-end">{% if p.unidades_por_batch %}{{ p.unidades_por_batch|floatformat:3 }}{% else %}-{% endif %}</td>
-            <td class="text-end">{% if p.unidades_por_pastel %}{{ p.unidades_por_pastel|floatformat:3 }}{% else %}-{% endif %}</td>
+            <td class="text-end">{{ p.peso_por_unidad_kg|floatformat:2 }}</td>
+            <td class="text-end">{% if p.unidades_por_batch %}{{ p.unidades_por_batch|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if p.unidades_por_pastel %}{{ p.unidades_por_pastel|floatformat:2 }}{% else %}-{% endif %}</td>
             <td class="text-end">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
             <td class="text-end">{% if p.costo_por_pastel_estimado %}${{ p.costo_por_pastel_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
             <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>
@@ -209,7 +209,7 @@
             -
           {% endif %}
         </td>
-        <td class="text-end cell-qty">{{ l.cantidad|default:"-" }}</td>
+        <td class="text-end cell-qty">{% if l.cantidad is not None %}{{ l.cantidad|floatformat:2 }}{% else %}-{% endif %}</td>
         <td class="cell-unit">{{ l.unidad_texto }}</td>
         <td class="text-end cell-cost">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
         <td>

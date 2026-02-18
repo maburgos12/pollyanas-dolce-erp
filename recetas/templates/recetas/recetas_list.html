@@ -48,7 +48,7 @@
       <tr>
         <td><a href="{% url 'recetas:receta_detail' r.id %}">{{ r.nombre }}</a></td>
         <td>{% if r.tipo == "PRODUCTO_FINAL" %}<span class="badge bg-primary">Producto final</span>{% else %}<span class="badge bg-success">Preparación</span>{% endif %}</td>
-        <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
+        <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad|floatformat:2 }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
         <td>{{ r.sheet_name }}</td>
         <td>
           {% if r.pendientes_count > 0 %}

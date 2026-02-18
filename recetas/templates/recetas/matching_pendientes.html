@@ -30,9 +30,10 @@
         <td>{{ l.insumo_texto }}</td>
         <td><span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span></td>
         <td>
-          <form method="post" action="{% url 'recetas:aprobar_matching' l.id %}" class="d-flex gap-2">
+          <form method="post" action="{% url 'recetas:aprobar_matching' l.id %}" class="d-flex gap-2 align-items-start flex-column">
             {% csrf_token %}
-            <select name="insumo_id" class="form-select form-select-sm" required>
+            <input type="text" class="form-control form-control-sm insumo-filter-input" placeholder="Buscar insumo...">
+            <select name="insumo_id" class="form-select form-select-sm insumo-filter-select" required>
               <option value="">Selecciona...</option>
               {% for i in insumos %}
                 <option value="{{ i.id }}">{{ i.nombre }}</option>
@@ -60,4 +61,28 @@
     {% endif %}
   </ul>
 </nav>
+
+<script>
+(function () {
+  function normalizeText(v) {
+    return String(v || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+  document.querySelectorAll("form").forEach((form) => {
+    const input = form.querySelector(".insumo-filter-input");
+    const select = form.querySelector(".insumo-filter-select");
+    if (!input || !select) return;
+    input.addEventListener("input", () => {
+      const query = normalizeText(input.value);
+      select.querySelectorAll("option").forEach((opt, idx) => {
+        if (idx === 0) return;
+        const match = !query || normalizeText(opt.textContent).includes(query);
+        opt.hidden = !match;
+      });
+    });
+  });
+})();
+</script>
 {% endblock %}

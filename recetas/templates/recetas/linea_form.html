@@ -61,6 +61,13 @@
 
     <div class="kpi-grid">
       <div class="form-group">
+        <label for="insumo_search">Buscar insumo</label>
+        <input id="insumo_search" class="form-control" type="text" placeholder="Escribe para filtrar insumos...">
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="form-group">
         <label for="insumo_id">Insumo ligado</label>
         <select id="insumo_id" class="form-select" name="insumo_id">
           <option value="">Sin ligar</option>
@@ -133,6 +140,7 @@
 <script>
 (function () {
   const insumoSelect = document.getElementById("insumo_id");
+  const insumoSearch = document.getElementById("insumo_search");
   const unidadSelect = document.getElementById("unidad_id");
   const unidadTexto = document.getElementById("unidad_texto");
   const cantidadInput = document.getElementById("cantidad");
@@ -147,7 +155,28 @@
   }
 
   function formatMoney(n) {
-    return "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+    return "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function normalizeText(v) {
+    return String(v || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function filterInsumos() {
+    const query = normalizeText(insumoSearch.value);
+    const groups = insumoSelect.querySelectorAll("optgroup");
+    groups.forEach((group) => {
+      let visible = 0;
+      group.querySelectorAll("option").forEach((opt) => {
+        const match = !query || normalizeText(opt.textContent).includes(query);
+        opt.hidden = !match;
+        if (match) visible += 1;
+      });
+      group.hidden = visible === 0;
+    });
   }
 
   function recalc() {
@@ -188,6 +217,8 @@
 
   insumoSelect.addEventListener("change", recalc);
   cantidadInput.addEventListener("input", recalc);
+  insumoSearch.addEventListener("input", filterInsumos);
+  filterInsumos();
   recalc();
 })();
 </script>
