@@ -72,6 +72,10 @@
     </div>
     <div class="kpi-label">Costo por Kg (estimado)</div>
   </div>
+  <div class="kpi-card">
+    <div class="kpi-number">${{ total_costo_estimado|floatformat:2 }}</div>
+    <div class="kpi-label">Costo total del producto</div>
+  </div>
 </div>
 
 {% if receta.usa_presentaciones %}
@@ -197,6 +201,13 @@
       </tr>
       {% endfor %}
     </tbody>
+    <tfoot>
+      <tr>
+        <th colspan="7" class="text-end">Total</th>
+        <th class="text-end">${{ total_costo_estimado|floatformat:2 }}</th>
+        <th colspan="2"></th>
+      </tr>
+    </tfoot>
   </table>
 </div>
 {% endblock %}

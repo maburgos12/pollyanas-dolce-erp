@@ -54,12 +54,13 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
 @login_required
 def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
-    lineas = receta.lineas.select_related("insumo").order_by("posicion")
+    lineas = list(receta.lineas.select_related("insumo").order_by("posicion"))
     presentaciones = receta.presentaciones.all().order_by("nombre")
-    total_lineas = lineas.count()
-    total_match = lineas.filter(match_status=LineaReceta.STATUS_AUTO).count()
-    total_revision = lineas.filter(match_status=LineaReceta.STATUS_NEEDS_REVIEW).count()
-    total_sin_match = lineas.filter(match_status=LineaReceta.STATUS_REJECTED).count()
+    total_lineas = len(lineas)
+    total_match = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_AUTO)
+    total_revision = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_NEEDS_REVIEW)
+    total_sin_match = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_REJECTED)
+    total_costo_estimado = sum((l.costo_total_estimado or 0.0) for l in lineas)
     return render(
         request,
         "recetas/receta_detail.html",
@@ -71,6 +72,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "total_match": total_match,
             "total_revision": total_revision,
             "total_sin_match": total_sin_match,
+            "total_costo_estimado": total_costo_estimado,
             "unidades": UnidadMedida.objects.order_by("codigo"),
             "tipo_choices": Receta.TIPO_CHOICES,
             "costo_por_kg_estimado": receta.costo_por_kg_estimado,
