@@ -297,7 +297,7 @@ class ImportadorCosteo:
         return False
 
     def _importar_recetas_de_hoja(self, ws, sheet_name: str):
-        max_row = ws.max_row
+        max_row = min(ws.max_row, 400)
         r = 1
         while r <= max_row - 2:
             a = ws.cell(row=r, column=1).value
@@ -347,6 +347,8 @@ class ImportadorCosteo:
                     if ing is not None and str(ing).strip():
                         lineas.append({
                             "pos": pos,
+                            "tipo_linea": LineaReceta.TIPO_NORMAL,
+                            "etapa": "",
                             "ingrediente": str(ing).strip(),
                             "cantidad": _to_float(qty),
                             "unidad": str(unit).strip() if unit is not None else "",
@@ -373,6 +375,49 @@ class ImportadorCosteo:
         max_row = min(ws.max_row, 250)
         max_col = min(ws.max_column, 30)
         recetas_por_presentacion: Dict[str, List[Dict[str, Any]]] = {}
+        size_cols: Dict[str, Tuple[int, str]] = {}
+
+        # Bloque principal de costos por componente (columna A + tamaños en la fila de encabezado).
+        for r in range(1, max_row + 1):
+            head = normalizar_nombre(ws.cell(row=r, column=1).value)
+            if head not in {"insumo", "ingrediente", "insumos"}:
+                continue
+            for c in range(2, max_col + 1):
+                hv = ws.cell(row=r, column=c).value
+                if _is_presentation_header(hv):
+                    size_cols[normalizar_nombre(hv)] = (c, str(hv).strip())
+
+            if size_cols:
+                rr = r + 1
+                while rr <= max_row:
+                    componente = ws.cell(row=rr, column=1).value
+                    if componente is None or str(componente).strip() == "":
+                        rr += 1
+                        continue
+                    componente_txt = str(componente).strip()
+                    componente_norm = normalizar_nombre(componente_txt)
+                    if componente_norm.startswith("subtotal") or componente_norm.startswith("costo"):
+                        break
+
+                    for _, (col, presentacion) in size_cols.items():
+                        costo = _to_float(ws.cell(row=rr, column=col).value)
+                        if costo is None:
+                            continue
+                        receta_nombre = f"{sheet_name} - {presentacion}"[:250]
+                        lineas = recetas_por_presentacion.setdefault(receta_nombre, [])
+                        lineas.append(
+                            {
+                                "pos": len(lineas) + 1,
+                                "tipo_linea": LineaReceta.TIPO_NORMAL,
+                                "etapa": "",
+                                "ingrediente": componente_txt[:250],
+                                "cantidad": None,
+                                "unidad": "",
+                                "costo": costo,
+                            }
+                        )
+                    rr += 1
+            break
 
         for r in range(1, max_row + 1):
             for c in range(1, max_col + 1):
@@ -397,6 +442,12 @@ class ImportadorCosteo:
                 if not headers:
                     continue
 
+                section = ""
+                if r > 1:
+                    prev = ws.cell(row=r - 1, column=c).value
+                    if isinstance(prev, str) and prev.strip():
+                        section = prev.strip()[:120]
+
                 rr = r + 1
                 while rr <= max_row:
                     elemento = ws.cell(row=rr, column=c).value
@@ -417,6 +468,8 @@ class ImportadorCosteo:
                         lineas.append(
                             {
                                 "pos": len(lineas) + 1,
+                                "tipo_linea": LineaReceta.TIPO_SUBSECCION,
+                                "etapa": section,
                                 "ingrediente": elemento_txt[:250],
                                 "cantidad": cantidad,
                                 "unidad": "kg",
@@ -448,7 +501,13 @@ class ImportadorCosteo:
             "nombre": nombre_norm,
             "sheet": sheet_name,
             "lineas": [
-                (normalizar_nombre(l["ingrediente"]), l.get("cantidad"), normalizar_nombre(l.get("unidad","")))
+                (
+                    normalizar_nombre(l["ingrediente"]),
+                    l.get("cantidad"),
+                    normalizar_nombre(l.get("unidad", "")),
+                    l.get("tipo_linea", LineaReceta.TIPO_NORMAL),
+                    normalizar_nombre(l.get("etapa", "")),
+                )
                 for l in lineas
             ],
         }
@@ -487,9 +546,17 @@ class ImportadorCosteo:
             status = clasificar_match(score)
             unidad = _get_unit(l.get("unidad",""))
             costo_unitario = _latest_cost_unitario(insumo) if insumo else None
+            tipo_linea = l.get("tipo_linea", LineaReceta.TIPO_NORMAL)
+            etapa = str(l.get("etapa") or "")[:120]
+            if tipo_linea == LineaReceta.TIPO_SUBSECCION and insumo is None:
+                status = LineaReceta.STATUS_AUTO
+                method = LineaReceta.MATCH_SUBSECTION
+                score = 100.0
             lr = LineaReceta.objects.create(
                 receta=receta,
                 posicion=l["pos"],
+                tipo_linea=tipo_linea,
+                etapa=etapa,
                 insumo=insumo if status != "REJECTED" else None,
                 insumo_texto=l["ingrediente"],
                 cantidad=l.get("cantidad"),

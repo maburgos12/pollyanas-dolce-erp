@@ -59,6 +59,8 @@ def _map_header(name: str) -> str:
         "producto final": "producto_final",
         "producto": "producto_final",
         "tipo": "tipo",
+        "tipo_linea": "tipo_linea",
+        "etapa": "etapa",
         "ingrediente": "ingrediente",
         "insumo": "ingrediente",
         "cantidad": "cantidad",
@@ -82,6 +84,13 @@ def _resolve_recipe_type(raw: Any) -> str:
         if r in {Receta.TIPO_PREPARACION, Receta.TIPO_PRODUCTO_FINAL}:
             return r
     return Receta.TIPO_PREPARACION
+
+
+def _resolve_line_type(raw: Any) -> str:
+    n = normalizar_nombre(raw)
+    if n in {"subseccion", "sub seccion", "sub-seccion"}:
+        return LineaReceta.TIPO_SUBSECCION
+    return LineaReceta.TIPO_NORMAL
 
 
 def _unit_from_text(unit_text: str) -> UnidadMedida | None:
@@ -235,6 +244,8 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
             unidad_texto = str(row.get("unidad") or "").strip()
             costo_linea = _to_decimal(row.get("costo_linea"), "0")
             costo_linea_value = costo_linea if costo_linea > 0 else None
+            etapa = str(row.get("etapa") or row.get("notas") or "").strip()[:120]
+            tipo_linea = _resolve_line_type(row.get("tipo_linea"))
 
             if ingrediente in match_cache:
                 insumo, score, method = match_cache[ingrediente]
@@ -256,9 +267,16 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
                     costo_snapshot = _latest_cost_by_insumo(insumo.id)
                     cost_cache[insumo.id] = costo_snapshot
 
+            if tipo_linea == LineaReceta.TIPO_SUBSECCION and insumo is None:
+                status = LineaReceta.STATUS_AUTO
+                method = LineaReceta.MATCH_SUBSECTION
+                score = 100.0
+
             LineaReceta.objects.create(
                 receta=receta,
                 posicion=pos,
+                tipo_linea=tipo_linea,
+                etapa=etapa,
                 insumo=insumo if status != LineaReceta.STATUS_REJECTED else None,
                 insumo_texto=ingrediente[:250],
                 cantidad=cantidad if cantidad > 0 else None,

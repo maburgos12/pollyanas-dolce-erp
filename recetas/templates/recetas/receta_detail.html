@@ -44,7 +44,11 @@
     </div>
     <div class="kpi-card">
       <div class="kpi-number is-success">{{ total_match }}</div>
-      <div class="kpi-label">Con Match</div>
+      <div class="kpi-label">Auto/OK</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if total_revision > 0 %}is-danger{% else %}is-success{% endif %}">{{ total_revision }}</div>
+      <div class="kpi-label">Por Revisar</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-number {% if total_sin_match > 0 %}is-danger{% else %}is-success{% endif %}">{{ total_sin_match }}</div>
@@ -132,6 +136,8 @@
     <thead>
       <tr>
         <th>#</th>
+        <th>Tipo</th>
+        <th>Etapa</th>
         <th>Ingrediente (texto)</th>
         <th>Insumo ligado</th>
         <th class="text-end">Cantidad</th>
@@ -145,8 +151,24 @@
       {% for l in lineas %}
       <tr>
         <td>{{ l.posicion }}</td>
+        <td>
+          {% if l.tipo_linea == "SUBSECCION" %}
+            <span class="badge bg-info text-dark">Subsección</span>
+          {% else %}
+            <span class="badge bg-secondary">Principal</span>
+          {% endif %}
+        </td>
+        <td>{{ l.etapa|default:"-" }}</td>
         <td>{{ l.insumo_texto }}</td>
-        <td>{% if l.insumo %}{{ l.insumo.nombre }}{% else %}<span class="badge bg-danger">Sin match</span>{% endif %}</td>
+        <td>
+          {% if l.insumo %}
+            {{ l.insumo.nombre }}
+          {% elif l.tipo_linea == "SUBSECCION" %}
+            <span class="badge bg-info text-dark">Subsección de {{ l.etapa|default:"componente" }}</span>
+          {% else %}
+            <span class="badge bg-danger">Sin match</span>
+          {% endif %}
+        </td>
         <td class="text-end">{{ l.cantidad }}</td>
         <td>{{ l.unidad_texto }}</td>
         <td class="text-end">{% if l.costo_linea_excel %}${{ l.costo_linea_excel|floatformat:2 }}{% endif %}</td>
@@ -171,7 +193,7 @@
       </tr>
       {% empty %}
       <tr>
-        <td colspan="8" class="text-muted">Esta receta no tiene líneas.</td>
+        <td colspan="10" class="text-muted">Esta receta no tiene líneas.</td>
       </tr>
       {% endfor %}
     </tbody>

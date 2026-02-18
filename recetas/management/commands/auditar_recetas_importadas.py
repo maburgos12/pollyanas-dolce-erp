@@ -13,12 +13,20 @@ class Command(BaseCommand):
         total_recetas = Receta.objects.count()
         total_lineas = LineaReceta.objects.count()
         sin_match = LineaReceta.objects.filter(
+            ~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION),
+        ).filter(
             Q(insumo__isnull=True) | Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW) | Q(match_status=LineaReceta.STATUS_REJECTED)
         ).count()
         sin_unidad = LineaReceta.objects.filter(Q(unidad__isnull=True) & Q(unidad_texto="")).count()
-        sin_cantidad = LineaReceta.objects.filter(cantidad__isnull=True).count()
+        sin_cantidad = LineaReceta.objects.filter(
+            ~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION),
+            cantidad__isnull=True,
+            costo_linea_excel__isnull=True,
+        ).count()
         sin_costo = LineaReceta.objects.filter(
-            costo_linea_excel__isnull=True, costo_unitario_snapshot__isnull=True
+            ~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION),
+            costo_linea_excel__isnull=True,
+            costo_unitario_snapshot__isnull=True,
         ).count()
 
         self.stdout.write(self.style.SUCCESS("Auditoría de recetas importadas"))
@@ -37,6 +45,7 @@ class Command(BaseCommand):
         shown = 0
         for receta in problematic:
             count_bad = receta.lineas.filter(
+                ~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION),
                 Q(insumo__isnull=True)
                 | Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW)
                 | Q(match_status=LineaReceta.STATUS_REJECTED)
@@ -48,4 +57,3 @@ class Command(BaseCommand):
                 break
         if shown == 0:
             self.stdout.write("    * Sin pendientes de match")
-

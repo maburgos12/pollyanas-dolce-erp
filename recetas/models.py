@@ -90,9 +90,19 @@ class LineaReceta(models.Model):
     MATCH_CONTAINS = "CONTAINS"
     MATCH_FUZZY = "FUZZY"
     MATCH_NONE = "NO_MATCH"
+    MATCH_SUBSECTION = "SUBSECCION"
+
+    TIPO_NORMAL = "NORMAL"
+    TIPO_SUBSECCION = "SUBSECCION"
+    TIPO_CHOICES = [
+        (TIPO_NORMAL, "Componente principal"),
+        (TIPO_SUBSECCION, "Subsección de componente"),
+    ]
 
     receta = models.ForeignKey(Receta, related_name="lineas", on_delete=models.CASCADE)
     posicion = models.PositiveIntegerField(default=0)
+    tipo_linea = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_NORMAL)
+    etapa = models.CharField(max_length=120, blank=True, default="")
 
     insumo = models.ForeignKey(Insumo, null=True, blank=True, on_delete=models.SET_NULL)
     insumo_texto = models.CharField(max_length=250)

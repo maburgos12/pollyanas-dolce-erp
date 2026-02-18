@@ -15,6 +15,8 @@ TEMPLATE_HEADERS = [
     "subreceta",
     "producto_final",
     "tipo",
+    "tipo_linea",
+    "etapa",
     "ingrediente",
     "cantidad",
     "unidad",
@@ -49,7 +51,7 @@ def _to_number(value: Any):
 def _find_recipe_block(ws) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     r = 1
-    max_row = ws.max_row
+    max_row = min(ws.max_row, 400)
     while r <= max_row - 2:
         title = ws.cell(row=r, column=1).value
         next_row_values = [ws.cell(row=r + 1, column=c).value for c in range(1, 20)]
@@ -104,6 +106,8 @@ def _find_recipe_block(ws) -> list[dict[str, Any]]:
                     "subreceta": subreceta,
                     "producto_final": receta_nombre,
                     "tipo": "PREPARACION",
+                    "tipo_linea": "NORMAL",
+                    "etapa": "",
                     "ingrediente": ing.strip(),
                     "cantidad": _to_number(qty),
                     "unidad": (str(unit).strip() if unit is not None else ""),
@@ -144,7 +148,59 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
     orden_por_receta: dict[str, int] = {}
     max_row = min(ws.max_row, 250)
     max_col = min(ws.max_column, 30)
+    size_cols: dict[str, tuple[int, str]] = {}
 
+    # Bloque principal: costos por componente (Pan, Betún, Fresa, etc.) por tamaño.
+    for r in range(1, max_row + 1):
+        head = normalizar_nombre(ws.cell(row=r, column=1).value)
+        if head not in {"insumo", "ingrediente", "insumos"}:
+            continue
+        for c in range(2, max_col + 1):
+            hv = ws.cell(row=r, column=c).value
+            if not _is_presentation_header(hv):
+                continue
+            size_cols[normalizar_nombre(hv)] = (c, str(hv).strip())
+            if size_cols:
+                rr = r + 1
+                while rr <= max_row:
+                    componente = ws.cell(row=rr, column=1).value
+                    if componente is None or str(componente).strip() == "":
+                        rr += 1
+                        continue
+                    componente_txt = str(componente).strip()
+                componente_norm = normalizar_nombre(componente_txt)
+                if componente_norm in {"subtotal 1", "costo sin m o"} or componente_norm.startswith("subtotal"):
+                    break
+                if componente_norm.startswith("costo"):
+                    break
+
+                for _, (col, presentacion) in size_cols.items():
+                    costo = _to_number(ws.cell(row=rr, column=col).value)
+                    if costo == "":
+                        continue
+                    receta_nombre = f"{ws.title} - {presentacion}"[:250]
+                    orden_actual = orden_por_receta.get(receta_nombre, 0) + 1
+                    orden_por_receta[receta_nombre] = orden_actual
+                    rows.append(
+                        {
+                            "receta": receta_nombre,
+                            "subreceta": ws.title[:120],
+                            "producto_final": ws.title[:250],
+                            "tipo": "PRODUCTO_FINAL",
+                            "tipo_linea": "NORMAL",
+                            "etapa": "",
+                            "ingrediente": componente_txt[:250],
+                            "cantidad": "",
+                            "unidad": "",
+                            "costo_linea": costo,
+                            "orden": orden_actual,
+                            "notas": "",
+                        }
+                    )
+                rr += 1
+        break
+
+    # Bloques de subsección: Elemento + tamaños (Cobertura/Relleno/etc dentro de Dream Whip, Fresa, etc.).
     for r in range(1, max_row + 1):
         for c in range(1, max_col + 1):
             if normalizar_nombre(ws.cell(row=r, column=c).value) != "elemento":
@@ -201,6 +257,8 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
                             "subreceta": section or ws.title[:120],
                             "producto_final": ws.title[:250],
                             "tipo": "PRODUCTO_FINAL",
+                            "tipo_linea": "SUBSECCION",
+                            "etapa": section,
                             "ingrediente": elemento_txt[:250],
                             "cantidad": cantidad,
                             "unidad": "kg",

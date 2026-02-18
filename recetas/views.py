@@ -57,8 +57,9 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     lineas = receta.lineas.select_related("insumo").order_by("posicion")
     presentaciones = receta.presentaciones.all().order_by("nombre")
     total_lineas = lineas.count()
-    total_match = lineas.filter(insumo__isnull=False).count()
-    total_sin_match = total_lineas - total_match
+    total_match = lineas.filter(match_status=LineaReceta.STATUS_AUTO).count()
+    total_revision = lineas.filter(match_status=LineaReceta.STATUS_NEEDS_REVIEW).count()
+    total_sin_match = lineas.filter(match_status=LineaReceta.STATUS_REJECTED).count()
     return render(
         request,
         "recetas/receta_detail.html",
@@ -68,10 +69,12 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "presentaciones": presentaciones,
             "total_lineas": total_lineas,
             "total_match": total_match,
+            "total_revision": total_revision,
             "total_sin_match": total_sin_match,
             "unidades": UnidadMedida.objects.order_by("codigo"),
             "tipo_choices": Receta.TIPO_CHOICES,
             "costo_por_kg_estimado": receta.costo_por_kg_estimado,
+            "linea_tipo_choices": LineaReceta.TIPO_CHOICES,
         },
     )
 
@@ -136,6 +139,7 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
         "linea": linea,
         "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:800],
         "unidades": UnidadMedida.objects.order_by("codigo"),
+        "linea_tipo_choices": LineaReceta.TIPO_CHOICES,
     }
 
 
@@ -147,8 +151,13 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     if request.method == "POST":
         insumo_id = request.POST.get("insumo_id")
         unidad_id = request.POST.get("unidad_id")
+        tipo_linea = (request.POST.get("tipo_linea") or LineaReceta.TIPO_NORMAL).strip()
+        if tipo_linea not in {LineaReceta.TIPO_NORMAL, LineaReceta.TIPO_SUBSECCION}:
+            tipo_linea = LineaReceta.TIPO_NORMAL
         linea.insumo_texto = (request.POST.get("insumo_texto") or "").strip()[:250]
         linea.unidad_texto = (request.POST.get("unidad_texto") or "").strip()[:40]
+        linea.etapa = (request.POST.get("etapa") or "").strip()[:120]
+        linea.tipo_linea = tipo_linea
         linea.cantidad = _to_decimal_or_none(request.POST.get("cantidad"))
         linea.costo_linea_excel = _to_decimal_or_none(request.POST.get("costo_linea_excel"))
         linea.posicion = int(request.POST.get("posicion") or linea.posicion)
@@ -158,6 +167,12 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
         if linea.insumo:
             linea.match_status = LineaReceta.STATUS_AUTO
             linea.match_method = "MANUAL"
+            linea.match_score = 100.0
+            linea.aprobado_por = request.user
+            linea.aprobado_en = timezone.now()
+        elif tipo_linea == LineaReceta.TIPO_SUBSECCION:
+            linea.match_status = LineaReceta.STATUS_AUTO
+            linea.match_method = LineaReceta.MATCH_SUBSECTION
             linea.match_score = 100.0
             linea.aprobado_por = request.user
             linea.aprobado_en = timezone.now()
@@ -179,10 +194,15 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         insumo_id = request.POST.get("insumo_id")
         unidad_id = request.POST.get("unidad_id")
+        tipo_linea = (request.POST.get("tipo_linea") or LineaReceta.TIPO_NORMAL).strip()
+        if tipo_linea not in {LineaReceta.TIPO_NORMAL, LineaReceta.TIPO_SUBSECCION}:
+            tipo_linea = LineaReceta.TIPO_NORMAL
         posicion_default = (receta.lineas.order_by("-posicion").first().posicion + 1) if receta.lineas.exists() else 1
         linea = LineaReceta(
             receta=receta,
             posicion=int(request.POST.get("posicion") or posicion_default),
+            tipo_linea=tipo_linea,
+            etapa=(request.POST.get("etapa") or "").strip()[:120],
             insumo_texto=(request.POST.get("insumo_texto") or "").strip()[:250],
             unidad_texto=(request.POST.get("unidad_texto") or "").strip()[:40],
             cantidad=_to_decimal_or_none(request.POST.get("cantidad")),
@@ -193,6 +213,12 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
         if linea.insumo:
             linea.match_status = LineaReceta.STATUS_AUTO
             linea.match_method = "MANUAL"
+            linea.match_score = 100.0
+            linea.aprobado_por = request.user
+            linea.aprobado_en = timezone.now()
+        elif tipo_linea == LineaReceta.TIPO_SUBSECCION:
+            linea.match_status = LineaReceta.STATUS_AUTO
+            linea.match_method = LineaReceta.MATCH_SUBSECTION
             linea.match_score = 100.0
             linea.aprobado_por = request.user
             linea.aprobado_en = timezone.now()

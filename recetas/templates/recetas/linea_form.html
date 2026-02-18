@@ -33,8 +33,23 @@
         <input id="insumo_texto" class="form-control" type="text" name="insumo_texto" value="{{ linea.insumo_texto|default:'' }}" required>
       </div>
       <div class="form-group">
+        <label for="etapa">Etapa / Sección</label>
+        <input id="etapa" class="form-control" type="text" name="etapa" value="{{ linea.etapa|default:'' }}" placeholder="Ej. Dream Whip, Fresa fresca">
+      </div>
+      <div class="form-group">
         <label for="unidad_texto">Unidad (texto)</label>
         <input id="unidad_texto" class="form-control" type="text" name="unidad_texto" value="{{ linea.unidad_texto|default:'' }}">
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="form-group">
+        <label for="tipo_linea">Tipo de línea</label>
+        <select id="tipo_linea" class="form-select" name="tipo_linea">
+          {% for value, label in linea_tipo_choices %}
+          <option value="{{ value }}" {% if linea.tipo_linea == value or (not linea and value == "NORMAL") %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
       </div>
     </div>
 
