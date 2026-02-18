@@ -188,6 +188,11 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
             continue
         grouped.setdefault(receta_name, []).append(row)
 
+    # Reduce roundtrips in bulk imports (especially over public DB connection).
+    unit_cache: dict[str, UnidadMedida | None] = {}
+    match_cache: dict[str, tuple[Any, float, str]] = {}
+    cost_cache: dict[int, Decimal | None] = {}
+
     for receta_name, recipe_rows in grouped.items():
         receta_norm = normalizar_nombre(receta_name)
         existing = Receta.objects.filter(nombre_normalizado=receta_norm).order_by("id").first()
@@ -231,10 +236,25 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
             costo_linea = _to_decimal(row.get("costo_linea"), "0")
             costo_linea_value = costo_linea if costo_linea > 0 else None
 
-            insumo, score, method = match_insumo(ingrediente)
+            if ingrediente in match_cache:
+                insumo, score, method = match_cache[ingrediente]
+            else:
+                insumo, score, method = match_insumo(ingrediente)
+                match_cache[ingrediente] = (insumo, score, method)
             status = clasificar_match(score)
-            unidad = _unit_from_text(unidad_texto)
-            costo_snapshot = _latest_cost_by_insumo(insumo.id) if insumo else None
+            if unidad_texto in unit_cache:
+                unidad = unit_cache[unidad_texto]
+            else:
+                unidad = _unit_from_text(unidad_texto)
+                unit_cache[unidad_texto] = unidad
+
+            costo_snapshot = None
+            if insumo:
+                if insumo.id in cost_cache:
+                    costo_snapshot = cost_cache[insumo.id]
+                else:
+                    costo_snapshot = _latest_cost_by_insumo(insumo.id)
+                    cost_cache[insumo.id] = costo_snapshot
 
             LineaReceta.objects.create(
                 receta=receta,
