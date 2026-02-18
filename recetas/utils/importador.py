@@ -374,23 +374,31 @@ class ImportadorCosteo:
             return
         max_row = min(ws.max_row, 250)
         max_col = min(ws.max_column, 30)
+        values = [
+            [ws.cell(row=r, column=c).value for c in range(1, max_col + 1)]
+            for r in range(1, max_row + 1)
+        ]
+
+        def v(r: int, c: int):
+            return values[r - 1][c - 1]
+
         recetas_por_presentacion: Dict[str, List[Dict[str, Any]]] = {}
         size_cols: Dict[str, Tuple[int, str]] = {}
 
         # Bloque principal de costos por componente (columna A + tamaños en la fila de encabezado).
         for r in range(1, max_row + 1):
-            head = normalizar_nombre(ws.cell(row=r, column=1).value)
+            head = normalizar_nombre(v(r, 1))
             if head not in {"insumo", "ingrediente", "insumos"}:
                 continue
             for c in range(2, max_col + 1):
-                hv = ws.cell(row=r, column=c).value
+                hv = v(r, c)
                 if _is_presentation_header(hv):
                     size_cols[normalizar_nombre(hv)] = (c, str(hv).strip())
 
             if size_cols:
                 rr = r + 1
                 while rr <= max_row:
-                    componente = ws.cell(row=rr, column=1).value
+                    componente = v(rr, 1)
                     if componente is None or str(componente).strip() == "":
                         rr += 1
                         continue
@@ -400,7 +408,7 @@ class ImportadorCosteo:
                         break
 
                     for _, (col, presentacion) in size_cols.items():
-                        costo = _to_float(ws.cell(row=rr, column=col).value)
+                        costo = _to_float(v(rr, col))
                         if costo is None:
                             continue
                         receta_nombre = f"{sheet_name} - {presentacion}"[:250]
@@ -421,13 +429,13 @@ class ImportadorCosteo:
 
         for r in range(1, max_row + 1):
             for c in range(1, max_col + 1):
-                if normalizar_nombre(ws.cell(row=r, column=c).value) != "elemento":
+                if normalizar_nombre(v(r, c)) != "elemento":
                     continue
 
                 headers: List[Tuple[int, str]] = []
                 cc = c + 1
                 while cc <= max_col:
-                    hv = ws.cell(row=r, column=cc).value
+                    hv = v(r, cc)
                     if hv is None or str(hv).strip() == "":
                         if headers:
                             break
@@ -444,13 +452,13 @@ class ImportadorCosteo:
 
                 section = ""
                 if r > 1:
-                    prev = ws.cell(row=r - 1, column=c).value
+                    prev = v(r - 1, c)
                     if isinstance(prev, str) and prev.strip():
                         section = prev.strip()[:120]
 
                 rr = r + 1
                 while rr <= max_row:
-                    elemento = ws.cell(row=rr, column=c).value
+                    elemento = v(rr, c)
                     if elemento is None or str(elemento).strip() == "":
                         break
                     elemento_txt = str(elemento).strip()
@@ -459,7 +467,7 @@ class ImportadorCosteo:
                         break
 
                     for col, presentacion in headers:
-                        cantidad = _to_float(ws.cell(row=rr, column=col).value)
+                        cantidad = _to_float(v(rr, col))
                         if cantidad is None or cantidad <= 0:
                             continue
 

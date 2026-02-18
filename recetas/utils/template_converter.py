@@ -148,26 +148,34 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
     orden_por_receta: dict[str, int] = {}
     max_row = min(ws.max_row, 250)
     max_col = min(ws.max_column, 30)
+    values = [
+        [ws.cell(row=r, column=c).value for c in range(1, max_col + 1)]
+        for r in range(1, max_row + 1)
+    ]
+
+    def v(r: int, c: int):
+        return values[r - 1][c - 1]
+
     size_cols: dict[str, tuple[int, str]] = {}
 
     # Bloque principal: costos por componente (Pan, Betún, Fresa, etc.) por tamaño.
     for r in range(1, max_row + 1):
-        head = normalizar_nombre(ws.cell(row=r, column=1).value)
+        head = normalizar_nombre(v(r, 1))
         if head not in {"insumo", "ingrediente", "insumos"}:
             continue
         for c in range(2, max_col + 1):
-            hv = ws.cell(row=r, column=c).value
+            hv = v(r, c)
             if not _is_presentation_header(hv):
                 continue
             size_cols[normalizar_nombre(hv)] = (c, str(hv).strip())
-            if size_cols:
-                rr = r + 1
-                while rr <= max_row:
-                    componente = ws.cell(row=rr, column=1).value
-                    if componente is None or str(componente).strip() == "":
-                        rr += 1
-                        continue
-                    componente_txt = str(componente).strip()
+        if size_cols:
+            rr = r + 1
+            while rr <= max_row:
+                componente = v(rr, 1)
+                if componente is None or str(componente).strip() == "":
+                    rr += 1
+                    continue
+                componente_txt = str(componente).strip()
                 componente_norm = normalizar_nombre(componente_txt)
                 if componente_norm in {"subtotal 1", "costo sin m o"} or componente_norm.startswith("subtotal"):
                     break
@@ -175,7 +183,7 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
                     break
 
                 for _, (col, presentacion) in size_cols.items():
-                    costo = _to_number(ws.cell(row=rr, column=col).value)
+                    costo = _to_number(v(rr, col))
                     if costo == "":
                         continue
                     receta_nombre = f"{ws.title} - {presentacion}"[:250]
@@ -203,13 +211,13 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
     # Bloques de subsección: Elemento + tamaños (Cobertura/Relleno/etc dentro de Dream Whip, Fresa, etc.).
     for r in range(1, max_row + 1):
         for c in range(1, max_col + 1):
-            if normalizar_nombre(ws.cell(row=r, column=c).value) != "elemento":
+            if normalizar_nombre(v(r, c)) != "elemento":
                 continue
 
             headers: list[tuple[int, str]] = []
             cc = c + 1
             while cc <= max_col:
-                hv = ws.cell(row=r, column=cc).value
+                hv = v(r, cc)
                 if hv is None or str(hv).strip() == "":
                     if headers:
                         break
@@ -227,13 +235,13 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
 
             section = ""
             if r > 1:
-                prev = ws.cell(row=r - 1, column=c).value
+                prev = v(r - 1, c)
                 if isinstance(prev, str) and prev.strip():
                     section = prev.strip()[:120]
 
             rr = r + 1
             while rr <= max_row:
-                elemento = ws.cell(row=rr, column=c).value
+                elemento = v(rr, c)
                 if elemento is None or str(elemento).strip() == "":
                     break
 
@@ -243,7 +251,7 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
                     break
 
                 for col, presentacion in headers:
-                    cantidad = _to_number(ws.cell(row=rr, column=col).value)
+                    cantidad = _to_number(v(rr, col))
                     if cantidad == "":
                         continue
 
