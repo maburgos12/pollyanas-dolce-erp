@@ -63,7 +63,7 @@ h4 {
 
 .sidebar-brand {
   font-family: 'Playfair Display', serif;
-  font-size: 44px;
+  font-size: 36px;
   line-height: 1;
   font-weight: 700;
   margin-top: 8px;
@@ -142,7 +142,7 @@ h4 {
 
 .header-title {
   margin: 0;
-  font-size: 52px;
+  font-size: 42px;
   color: var(--vino);
 }
 
@@ -471,6 +471,14 @@ textarea:focus,
   flex-wrap: wrap;
 }
 
+.inline-form {
+  display: inline;
+}
+
+.mt-2 {
+  margin-top: 10px;
+}
+
 table,
 .table {
   width: 100%;
@@ -500,7 +508,7 @@ td,
 
 tr:hover,
 .table tbody tr:hover {
-  background: var(--rosa);
+  background: var(--rosa-hover);
 }
 
 .badge,
@@ -675,7 +683,7 @@ tr:hover,
   }
 
   .header-title {
-    font-size: 40px;
+    font-size: 32px;
   }
 
   .container {

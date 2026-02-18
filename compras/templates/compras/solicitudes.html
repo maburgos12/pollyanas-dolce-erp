@@ -96,11 +96,11 @@
           <td>
             <div class="recipe-actions">
             {% if s.estatus == 'BORRADOR' %}
-              <form method="post" action="{% url 'compras:solicitud_estatus' s.id 'EN_REVISION' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-secondary" type="submit">Enviar revisión</button></form>
+              <form method="post" action="{% url 'compras:solicitud_estatus' s.id 'EN_REVISION' %}" class="inline-form">{% csrf_token %}<button class="btn btn-secondary" type="submit">Enviar revisión</button></form>
             {% endif %}
             {% if s.estatus == 'BORRADOR' or s.estatus == 'EN_REVISION' %}
-              <form method="post" action="{% url 'compras:solicitud_estatus' s.id 'APROBADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-success" type="submit">Aprobar</button></form>
-              <form method="post" action="{% url 'compras:solicitud_estatus' s.id 'RECHAZADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-danger" type="submit">Rechazar</button></form>
+              <form method="post" action="{% url 'compras:solicitud_estatus' s.id 'APROBADA' %}" class="inline-form">{% csrf_token %}<button class="btn btn-success" type="submit">Aprobar</button></form>
+              <form method="post" action="{% url 'compras:solicitud_estatus' s.id 'RECHAZADA' %}" class="inline-form">{% csrf_token %}<button class="btn btn-danger" type="submit">Rechazar</button></form>
             {% endif %}
             </div>
           </td>

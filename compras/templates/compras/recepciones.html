@@ -69,10 +69,10 @@
           <td>
             <div class="recipe-actions">
             {% if r.estatus == 'PENDIENTE' %}
-              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'DIFERENCIAS' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-secondary" type="submit">Con diferencias</button></form>
-              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-success" type="submit">Cerrar</button></form>
+              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'DIFERENCIAS' %}" class="inline-form">{% csrf_token %}<button class="btn btn-secondary" type="submit">Con diferencias</button></form>
+              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form">{% csrf_token %}<button class="btn btn-success" type="submit">Cerrar</button></form>
             {% elif r.estatus == 'DIFERENCIAS' %}
-              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" style="display:inline;">{% csrf_token %}<button class="btn btn-primary" type="submit">Cerrar</button></form>
+              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form">{% csrf_token %}<button class="btn btn-primary" type="submit">Cerrar</button></form>
             {% endif %}
             </div>
           </td>
