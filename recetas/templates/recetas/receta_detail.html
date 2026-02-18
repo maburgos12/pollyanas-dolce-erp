@@ -38,6 +38,13 @@
     <button class="btn btn-primary" type="submit">Guardar receta</button>
   </form>
 
+  {% if receta.tipo == "PREPARACION" and not receta.rendimiento_cantidad %}
+  <div class="alert alert-info mt-2">
+    Para costeo interno de este insumo, captura el rendimiento (ej. <strong>10.400 kg</strong>).
+    El costo unitario se calcula como <strong>costo total / rendimiento</strong>.
+  </div>
+  {% endif %}
+
   <div class="kpi-grid mb-3">
     <div class="kpi-card">
       <div class="kpi-number">{{ total_lineas }}</div>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand
+from django.db.models import Q
 
 from recetas.models import Receta
 from recetas.utils.derived_insumos import sync_receta_derivados
@@ -19,7 +20,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         receta_filter = (options.get("receta") or "").strip()
-        recetas = Receta.objects.all().order_by("nombre")
+        recetas = Receta.objects.filter(
+            Q(tipo=Receta.TIPO_PREPARACION) | Q(usa_presentaciones=True)
+        ).order_by("nombre")
         if receta_filter:
             recetas = recetas.filter(nombre__icontains=receta_filter)
 
