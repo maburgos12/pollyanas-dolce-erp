@@ -30,7 +30,9 @@
       <thead>
         <tr>
           <th>Receta</th>
+          <th>Rendimiento</th>
           <th class="text-end">Costo estimado</th>
+          <th class="text-end">Costo por Kg</th>
           <th class="text-end">Cobertura de costo</th>
           <th class="text-end">Margen objetivo</th>
           <th class="text-end">Precio sugerido</th>
@@ -40,13 +42,15 @@
         {% for row in rows %}
         <tr>
           <td>{{ row.receta.nombre }}</td>
+          <td>{% if row.rendimiento_cantidad %}{{ row.rendimiento_cantidad }} {{ row.rendimiento_unidad }}{% else %}-{% endif %}</td>
           <td class="text-end">{{ row.costo_total|floatformat:2 }}</td>
+          <td class="text-end">{% if row.costo_por_kg %}{{ row.costo_por_kg|floatformat:2 }}{% else %}-{% endif %}</td>
           <td class="text-end">{{ row.lineas_costeadas }}/{{ row.lineas_total }} ({{ row.cobertura_pct|floatformat:1 }}%)</td>
           <td class="text-end">{{ row.margen_pct|floatformat:2 }}%</td>
           <td class="text-end">{{ row.precio_sugerido|floatformat:2 }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="5" class="text-muted">Sin recetas disponibles para costeo.</td></tr>
+        <tr><td colspan="7" class="text-muted">Sin recetas disponibles para costeo.</td></tr>
         {% endfor %}
       </tbody>
     </table>

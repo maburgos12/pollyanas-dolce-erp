@@ -17,9 +17,20 @@
   <form method="post" action="{% url 'recetas:receta_update' receta.id %}" class="recipes-filters mb-3">
     {% csrf_token %}
     <input class="form-control" type="text" name="nombre" value="{{ receta.nombre }}" placeholder="Nombre de receta" required>
+    <select class="form-select" name="tipo">
+      {% for value, label in tipo_choices %}
+      <option value="{{ value }}" {% if receta.tipo == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input class="form-control" type="number" name="rendimiento_cantidad" step="0.000001" min="0" value="{{ receta.rendimiento_cantidad|default:'' }}" placeholder="Rendimiento">
+    <select class="form-select" name="rendimiento_unidad_id">
+      <option value="">Unidad rendimiento</option>
+      {% for u in unidades %}
+      <option value="{{ u.id }}" {% if receta.rendimiento_unidad_id == u.id %}selected{% endif %}>{{ u.codigo }} - {{ u.nombre }}</option>
+      {% endfor %}
+    </select>
     <input class="form-control" type="text" name="sheet_name" value="{{ receta.sheet_name }}" placeholder="Hoja / categoría">
     <button class="btn btn-primary" type="submit">Guardar receta</button>
-    <div></div>
   </form>
 
   <div class="kpi-grid mb-3">
@@ -35,6 +46,70 @@
       <div class="kpi-number {% if total_sin_match > 0 %}is-danger{% else %}is-success{% endif %}">{{ total_sin_match }}</div>
       <div class="kpi-label">Sin Match</div>
     </div>
+  </div>
+</div>
+
+<div class="kpi-mini">
+  <div class="kpi-card">
+    <div class="kpi-number">{{ receta.rendimiento_cantidad|default:"0" }}</div>
+    <div class="kpi-label">Rendimiento{% if receta.rendimiento_unidad %} ({{ receta.rendimiento_unidad.codigo }}){% endif %}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number">
+      {% if costo_por_kg_estimado %}
+        ${{ costo_por_kg_estimado|floatformat:2 }}
+      {% else %}
+        0
+      {% endif %}
+    </div>
+    <div class="kpi-label">Costo por Kg (estimado)</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">Presentaciones / Tamaños</h3>
+    <a class="btn btn-primary" href="{% url 'recetas:presentacion_create' receta.id %}">Agregar presentación</a>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Presentación</th>
+          <th class="text-end">Peso por unidad (kg)</th>
+          <th class="text-end">Unidades por batida</th>
+          <th class="text-end">Unidades por pastel</th>
+          <th class="text-end">Costo por unidad</th>
+          <th class="text-end">Costo por pastel</th>
+          <th>Estatus</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in presentaciones %}
+        <tr>
+          <td>{{ p.nombre }}</td>
+          <td class="text-end">{{ p.peso_por_unidad_kg }}</td>
+          <td class="text-end">{{ p.unidades_por_batch|default:"-" }}</td>
+          <td class="text-end">{{ p.unidades_por_pastel|default:"-" }}</td>
+          <td class="text-end">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+          <td class="text-end">{% if p.costo_por_pastel_estimado %}${{ p.costo_por_pastel_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+          <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>
+          <td>
+            <div class="recipe-actions">
+              <a class="btn btn-secondary" href="{% url 'recetas:presentacion_edit' receta.id p.id %}">Editar</a>
+              <form method="post" action="{% url 'recetas:presentacion_delete' receta.id p.id %}" class="inline-form" onsubmit="return confirm('¿Eliminar presentación?');">
+                {% csrf_token %}
+                <button class="btn btn-danger" type="submit">Eliminar</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" class="text-muted">Sin presentaciones registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 

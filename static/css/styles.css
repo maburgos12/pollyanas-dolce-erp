@@ -399,7 +399,7 @@ textarea:focus,
 
 .recipes-filters {
   display: grid;
-  grid-template-columns: 1.5fr 220px auto auto;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
   align-items: end;
 }

@@ -234,6 +234,9 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
         row = {
             "receta": receta,
             "costo_total": costo_total,
+            "costo_por_kg": receta.costo_por_kg_estimado,
+            "rendimiento_cantidad": receta.rendimiento_cantidad,
+            "rendimiento_unidad": receta.rendimiento_unidad.codigo if receta.rendimiento_unidad else "",
             "margen_pct": margen_pct,
             "precio_sugerido": precio_sugerido,
             "lineas_total": lineas_total,

@@ -35,6 +35,8 @@
     <thead>
       <tr>
         <th>Receta</th>
+        <th>Tipo</th>
+        <th>Rendimiento</th>
         <th>Hoja</th>
         <th>Pendientes</th>
         <th class="text-end">Líneas</th>
@@ -45,6 +47,8 @@
       {% for r in page.object_list %}
       <tr>
         <td><a href="{% url 'recetas:receta_detail' r.id %}">{{ r.nombre }}</a></td>
+        <td>{% if r.tipo == "PRODUCTO_FINAL" %}<span class="badge bg-primary">Producto final</span>{% else %}<span class="badge bg-success">Preparación</span>{% endif %}</td>
+        <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
         <td>{{ r.sheet_name }}</td>
         <td>
           {% if r.pendientes_count > 0 %}
@@ -57,7 +61,7 @@
         <td class="text-end">${{ r.costo_total_estimado|floatformat:2 }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="5" class="text-muted">Sin recetas</td></tr>
+      <tr><td colspan="7" class="text-muted">Sin recetas</td></tr>
       {% endfor %}
     </tbody>
   </table>

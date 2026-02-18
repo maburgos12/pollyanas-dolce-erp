@@ -11,13 +11,13 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from maestros.models import Insumo, UnidadMedida
-from .models import Receta, LineaReceta
+from .models import Receta, LineaReceta, RecetaPresentacion
 
 @login_required
 def recetas_list(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
     estado = request.GET.get("estado", "").strip().lower()
-    recetas = Receta.objects.all().annotate(
+    recetas = Receta.objects.select_related("rendimiento_unidad").all().annotate(
         pendientes_count=Count(
             "lineas",
             filter=Q(lineas__match_status=LineaReceta.STATUS_NEEDS_REVIEW),
@@ -55,6 +55,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
 def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     lineas = receta.lineas.select_related("insumo").order_by("posicion")
+    presentaciones = receta.presentaciones.all().order_by("nombre")
     total_lineas = lineas.count()
     total_match = lineas.filter(insumo__isnull=False).count()
     total_sin_match = total_lineas - total_match
@@ -64,9 +65,13 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
         {
             "receta": receta,
             "lineas": lineas,
+            "presentaciones": presentaciones,
             "total_lineas": total_lineas,
             "total_match": total_match,
             "total_sin_match": total_sin_match,
+            "unidades": UnidadMedida.objects.order_by("codigo"),
+            "tipo_choices": Receta.TIPO_CHOICES,
+            "costo_por_kg_estimado": receta.costo_por_kg_estimado,
         },
     )
 
@@ -77,11 +82,22 @@ def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     nombre = (request.POST.get("nombre") or "").strip()
     sheet_name = (request.POST.get("sheet_name") or "").strip()
+    tipo = (request.POST.get("tipo") or Receta.TIPO_PREPARACION).strip()
+    rendimiento_cantidad = _to_decimal_or_none(request.POST.get("rendimiento_cantidad"))
+    rendimiento_unidad_id = request.POST.get("rendimiento_unidad_id")
+
     if not nombre:
         messages.error(request, "El nombre de receta es obligatorio.")
         return redirect("recetas:receta_detail", pk=pk)
+
+    if tipo not in {Receta.TIPO_PREPARACION, Receta.TIPO_PRODUCTO_FINAL}:
+        tipo = Receta.TIPO_PREPARACION
+
     receta.nombre = nombre[:250]
     receta.sheet_name = sheet_name[:120]
+    receta.tipo = tipo
+    receta.rendimiento_cantidad = rendimiento_cantidad
+    receta.rendimiento_unidad = UnidadMedida.objects.filter(pk=rendimiento_unidad_id).first() if rendimiento_unidad_id else None
     receta.save()
     messages.success(request, "Receta actualizada.")
     return redirect("recetas:receta_detail", pk=pk)
@@ -95,6 +111,19 @@ def _to_decimal_or_none(value: str | None) -> Decimal | None:
         return None
     try:
         return Decimal(raw)
+    except Exception:
+        return None
+
+
+def _to_int_or_none(value: str | None) -> int | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if raw == "":
+        return None
+    try:
+        num = int(raw)
+        return num if num >= 0 else None
     except Exception:
         return None
 
@@ -182,6 +211,85 @@ def linea_delete(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     linea = get_object_or_404(LineaReceta, pk=linea_id, receta=receta)
     linea.delete()
     messages.success(request, "Línea eliminada.")
+    return redirect("recetas:receta_detail", pk=pk)
+
+
+@permission_required("recetas.change_receta", raise_exception=True)
+def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
+    receta = get_object_or_404(Receta, pk=pk)
+    if request.method == "POST":
+        nombre = (request.POST.get("nombre") or "").strip()
+        peso_por_unidad_kg = _to_decimal_or_none(request.POST.get("peso_por_unidad_kg"))
+        unidades_por_batch = request.POST.get("unidades_por_batch") or None
+        unidades_por_pastel = request.POST.get("unidades_por_pastel") or None
+        activo = request.POST.get("activo") == "on"
+        if not nombre:
+            messages.error(request, "El nombre de la presentación es obligatorio.")
+            return redirect("recetas:presentacion_create", pk=pk)
+        if not peso_por_unidad_kg or peso_por_unidad_kg <= 0:
+            messages.error(request, "Peso por unidad (kg) debe ser mayor que cero.")
+            return redirect("recetas:presentacion_create", pk=pk)
+
+        RecetaPresentacion.objects.update_or_create(
+            receta=receta,
+            nombre=nombre[:80],
+            defaults={
+                "peso_por_unidad_kg": peso_por_unidad_kg,
+                "unidades_por_batch": _to_int_or_none(unidades_por_batch),
+                "unidades_por_pastel": _to_int_or_none(unidades_por_pastel),
+                "activo": activo,
+            },
+        )
+        messages.success(request, "Presentación guardada.")
+        return redirect("recetas:receta_detail", pk=pk)
+
+    return render(
+        request,
+        "recetas/presentacion_form.html",
+        {"receta": receta, "presentacion": None},
+    )
+
+
+@permission_required("recetas.change_receta", raise_exception=True)
+def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> HttpResponse:
+    receta = get_object_or_404(Receta, pk=pk)
+    presentacion = get_object_or_404(RecetaPresentacion, pk=presentacion_id, receta=receta)
+    if request.method == "POST":
+        nombre = (request.POST.get("nombre") or "").strip()
+        peso_por_unidad_kg = _to_decimal_or_none(request.POST.get("peso_por_unidad_kg"))
+        unidades_por_batch = request.POST.get("unidades_por_batch") or None
+        unidades_por_pastel = request.POST.get("unidades_por_pastel") or None
+        activo = request.POST.get("activo") == "on"
+        if not nombre:
+            messages.error(request, "El nombre de la presentación es obligatorio.")
+            return redirect("recetas:presentacion_edit", pk=pk, presentacion_id=presentacion_id)
+        if not peso_por_unidad_kg or peso_por_unidad_kg <= 0:
+            messages.error(request, "Peso por unidad (kg) debe ser mayor que cero.")
+            return redirect("recetas:presentacion_edit", pk=pk, presentacion_id=presentacion_id)
+
+        presentacion.nombre = nombre[:80]
+        presentacion.peso_por_unidad_kg = peso_por_unidad_kg
+        presentacion.unidades_por_batch = _to_int_or_none(unidades_por_batch)
+        presentacion.unidades_por_pastel = _to_int_or_none(unidades_por_pastel)
+        presentacion.activo = activo
+        presentacion.save()
+        messages.success(request, "Presentación actualizada.")
+        return redirect("recetas:receta_detail", pk=pk)
+
+    return render(
+        request,
+        "recetas/presentacion_form.html",
+        {"receta": receta, "presentacion": presentacion},
+    )
+
+
+@permission_required("recetas.change_receta", raise_exception=True)
+@require_POST
+def presentacion_delete(request: HttpRequest, pk: int, presentacion_id: int) -> HttpResponse:
+    receta = get_object_or_404(Receta, pk=pk)
+    presentacion = get_object_or_404(RecetaPresentacion, pk=presentacion_id, receta=receta)
+    presentacion.delete()
+    messages.success(request, "Presentación eliminada.")
     return redirect("recetas:receta_detail", pk=pk)
 
 @permission_required("recetas.change_lineareceta", raise_exception=True)

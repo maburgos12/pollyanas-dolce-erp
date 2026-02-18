@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{% if presentacion %}Editar presentación{% else %}Nueva presentación{% endif %}{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h3 class="mb-0">{% if presentacion %}Editar presentación{% else %}Nueva presentación{% endif %}</h3>
+      <div class="text-muted">Receta: {{ receta.nombre }}</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Volver a receta</a>
+  </div>
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-grid-2 form-section">
+      <div class="form-group">
+        <label for="nombre">Nombre presentación</label>
+        <input id="nombre" class="form-control" type="text" name="nombre" value="{{ presentacion.nombre|default:'' }}" placeholder="Mini / Chico / Mediano / Grande" required>
+      </div>
+      <div class="form-group">
+        <label for="peso_por_unidad_kg">Peso por unidad (kg)</label>
+        <input id="peso_por_unidad_kg" class="form-control" type="number" step="0.000001" min="0.000001" name="peso_por_unidad_kg" value="{{ presentacion.peso_por_unidad_kg|default:'' }}" required>
+      </div>
+      <div class="form-group">
+        <label for="unidades_por_batch">Unidades por batida</label>
+        <input id="unidades_por_batch" class="form-control" type="number" min="0" name="unidades_por_batch" value="{{ presentacion.unidades_por_batch|default:'' }}" placeholder="Ej. 6">
+      </div>
+      <div class="form-group">
+        <label for="unidades_por_pastel">Unidades por pastel</label>
+        <input id="unidades_por_pastel" class="form-control" type="number" min="0" name="unidades_por_pastel" value="{{ presentacion.unidades_por_pastel|default:'' }}" placeholder="Ej. 2">
+      </div>
+      <div class="form-group full">
+        <label for="activo">Estatus</label>
+        <div class="field-check">
+          <input id="activo" type="checkbox" name="activo" {% if presentacion and presentacion.activo %}checked{% elif not presentacion %}checked{% endif %}>
+          <span>Presentación activa</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="recipe-actions">
+      <button type="submit" class="btn btn-primary">Guardar</button>
+      <a class="btn btn-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
