@@ -12,6 +12,7 @@ from django.views.decorators.http import require_POST
 
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from .models import Receta, LineaReceta, RecetaPresentacion
+from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_presentaciones
 
 @login_required
 def recetas_list(request: HttpRequest) -> HttpResponse:
@@ -106,6 +107,7 @@ def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
     receta.rendimiento_cantidad = rendimiento_cantidad
     receta.rendimiento_unidad = UnidadMedida.objects.filter(pk=rendimiento_unidad_id).first() if rendimiento_unidad_id else None
     receta.save()
+    _sync_derived_insumos_safe(request, receta)
     messages.success(request, "Receta actualizada.")
     return redirect("recetas:receta_detail", pk=pk)
 
@@ -179,6 +181,18 @@ def _switch_line_to_internal_cost(linea: LineaReceta) -> None:
         linea.costo_linea_excel = None
 
 
+def _sync_derived_insumos_safe(request: HttpRequest, receta: Receta) -> None:
+    if not receta.usa_presentaciones:
+        return
+    try:
+        sync_receta_presentaciones(receta)
+    except Exception:
+        messages.warning(
+            request,
+            "La receta se guardó, pero falló la sincronización automática de insumos derivados.",
+        )
+
+
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
@@ -219,6 +233,7 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
 
         _switch_line_to_internal_cost(linea)
         linea.save()
+        _sync_derived_insumos_safe(request, receta)
         messages.success(request, "Línea actualizada.")
         return redirect("recetas:receta_detail", pk=pk)
 
@@ -266,6 +281,7 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
 
         _switch_line_to_internal_cost(linea)
         linea.save()
+        _sync_derived_insumos_safe(request, receta)
         messages.success(request, "Línea agregada.")
         return redirect("recetas:receta_detail", pk=pk)
     return render(request, "recetas/linea_form.html", _linea_form_context(receta))
@@ -277,6 +293,7 @@ def linea_delete(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     linea = get_object_or_404(LineaReceta, pk=linea_id, receta=receta)
     linea.delete()
+    _sync_derived_insumos_safe(request, receta)
     messages.success(request, "Línea eliminada.")
     return redirect("recetas:receta_detail", pk=pk)
 
@@ -297,7 +314,7 @@ def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
             messages.error(request, "Peso por unidad (kg) debe ser mayor que cero.")
             return redirect("recetas:presentacion_create", pk=pk)
 
-        RecetaPresentacion.objects.update_or_create(
+        presentacion, _ = RecetaPresentacion.objects.update_or_create(
             receta=receta,
             nombre=nombre[:80],
             defaults={
@@ -310,6 +327,7 @@ def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
         if not receta.usa_presentaciones:
             receta.usa_presentaciones = True
             receta.save(update_fields=["usa_presentaciones"])
+        _sync_derived_insumos_safe(request, receta)
         messages.success(request, "Presentación guardada.")
         return redirect("recetas:receta_detail", pk=pk)
 
@@ -343,6 +361,7 @@ def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> Ht
         presentacion.unidades_por_pastel = _to_int_or_none(unidades_por_pastel)
         presentacion.activo = activo
         presentacion.save()
+        _sync_derived_insumos_safe(request, receta)
         messages.success(request, "Presentación actualizada.")
         return redirect("recetas:receta_detail", pk=pk)
 
@@ -358,6 +377,13 @@ def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> Ht
 def presentacion_delete(request: HttpRequest, pk: int, presentacion_id: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     presentacion = get_object_or_404(RecetaPresentacion, pk=presentacion_id, receta=receta)
+    try:
+        sync_presentacion_insumo(presentacion, deactivate=True)
+    except Exception:
+        messages.warning(
+            request,
+            "La presentación se eliminó, pero falló la desactivación del insumo derivado.",
+        )
     presentacion.delete()
     messages.success(request, "Presentación eliminada.")
     return redirect("recetas:receta_detail", pk=pk)
