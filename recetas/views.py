@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from maestros.models import Insumo, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from .models import Receta, LineaReceta, RecetaPresentacion
 
 @login_required
@@ -143,6 +143,40 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
     }
 
 
+def _latest_cost_for_insumo(insumo: Insumo | None) -> Decimal | None:
+    if not insumo:
+        return None
+    cost = (
+        CostoInsumo.objects.filter(insumo=insumo)
+        .order_by("-fecha", "-id")
+        .values_list("costo_unitario", flat=True)
+        .first()
+    )
+    return Decimal(str(cost)) if cost is not None else None
+
+
+def _switch_line_to_internal_cost(linea: LineaReceta) -> None:
+    # Si ya hay cantidad + insumo, dejamos de usar costo fijo de Excel y
+    # pasamos a costo dinámico interno (cantidad * costo_unitario_snapshot).
+    if not linea.insumo:
+        return
+    if linea.cantidad is None or linea.cantidad <= 0:
+        return
+
+    if linea.costo_unitario_snapshot is None or linea.costo_unitario_snapshot <= 0:
+        latest = _latest_cost_for_insumo(linea.insumo)
+        if latest is not None and latest > 0:
+            linea.costo_unitario_snapshot = latest
+        elif linea.costo_linea_excel is not None and linea.costo_linea_excel > 0:
+            try:
+                linea.costo_unitario_snapshot = linea.costo_linea_excel / linea.cantidad
+            except Exception:
+                pass
+
+    if linea.costo_unitario_snapshot is not None and linea.costo_unitario_snapshot > 0:
+        linea.costo_linea_excel = None
+
+
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
@@ -181,6 +215,7 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
             linea.match_method = LineaReceta.MATCH_NONE
             linea.match_score = 0.0
 
+        _switch_line_to_internal_cost(linea)
         linea.save()
         messages.success(request, "Línea actualizada.")
         return redirect("recetas:receta_detail", pk=pk)
@@ -226,6 +261,8 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
             linea.match_status = LineaReceta.STATUS_REJECTED
             linea.match_method = LineaReceta.MATCH_NONE
             linea.match_score = 0.0
+
+        _switch_line_to_internal_cost(linea)
         linea.save()
         messages.success(request, "Línea agregada.")
         return redirect("recetas:receta_detail", pk=pk)

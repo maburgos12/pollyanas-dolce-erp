@@ -126,11 +126,12 @@ class LineaReceta(models.Model):
 
     @property
     def costo_total_estimado(self):
-        # Preferencia: costo de Excel si existe, si no: cantidad * costo_unitario_snapshot
-        if self.costo_linea_excel is not None:
-            return float(self.costo_linea_excel)
+        # Preferencia en modo operativo: cantidad * costo_unitario_snapshot.
+        # Si no hay snapshot, usar costo fijo legado desde Excel.
         if self.cantidad is not None and self.costo_unitario_snapshot is not None:
             return float(self.cantidad) * float(self.costo_unitario_snapshot)
+        if self.costo_linea_excel is not None:
+            return float(self.costo_linea_excel)
         return 0.0
 
     def __str__(self) -> str:
