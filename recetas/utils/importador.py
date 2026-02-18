@@ -15,7 +15,6 @@ from maestros.models import Insumo, CostoInsumo, Proveedor, UnidadMedida, seed_u
 from .matching import match_insumo, clasificar_match
 from .normalizacion import normalizar_nombre
 from .subsection_costing import find_parent_cost_for_stage
-from .derived_insumos import sync_receta_derivados
 from recetas.models import Receta, LineaReceta, RecetaPresentacion
 
 log = logging.getLogger(__name__)
@@ -1024,11 +1023,6 @@ class ImportadorCosteo:
             for key, obj in existing.items():
                 if key not in incoming:
                     obj.delete()
-
-        try:
-            sync_receta_derivados(receta)
-        except Exception as e:
-            self.resultado.errores.append({"sheet": sheet_name, "error": f"sync derivados: {e}"})
 
 def json_dumps_sorted(obj: Any) -> str:
     import json

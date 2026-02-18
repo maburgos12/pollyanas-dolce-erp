@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 
 from django.core.management.base import BaseCommand
+from django.core.management import call_command
 from recetas.utils.importador import ImportadorCosteo
 from recetas.utils.reportes import generar_reportes
 from django.conf import settings
@@ -33,6 +34,9 @@ class Command(BaseCommand):
             "errores": len(resultado.errores),
             "matches_pendientes": len(resultado.matches_pendientes),
         }
+
+        self.stdout.write(self.style.SUCCESS("Sincronizando costos/insumos derivados..."))
+        call_command("sync_insumos_derivados", verbosity=0)
 
         self.stdout.write(self.style.SUCCESS("✅ Importación completada"))
         for k, v in resumen.items():
