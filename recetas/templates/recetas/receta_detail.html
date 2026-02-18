@@ -142,7 +142,7 @@
         <th>Insumo ligado</th>
         <th class="text-end">Cantidad</th>
         <th>Unidad</th>
-        <th class="text-end">Costo (excel)</th>
+        <th class="text-end">Costo estimado</th>
         <th>Match</th>
         <th>Acciones</th>
       </tr>
@@ -171,7 +171,7 @@
         </td>
         <td class="text-end">{{ l.cantidad }}</td>
         <td>{{ l.unidad_texto }}</td>
-        <td class="text-end">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% endif %}</td>
+        <td class="text-end">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
         <td>
           {% if l.match_status == "AUTO_APPROVED" %}
             <span class="badge bg-success">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span>
