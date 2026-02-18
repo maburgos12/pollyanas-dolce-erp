@@ -163,14 +163,11 @@ def _presentation_display_name(text: Any) -> str:
     return mapping.get(n, str(text).strip())
 
 
-def _to_positive_int_approx(value: Any, tolerance: float = 0.05) -> Optional[int]:
+def _to_positive_decimal(value: Any) -> Optional[Decimal]:
     f = _to_float(value)
     if f is None or f <= 0:
         return None
-    i = int(round(f))
-    if abs(f - i) <= tolerance:
-        return i
-    return None
+    return Decimal(str(f)).quantize(Decimal("0.000001"))
 
 
 _CELL_REF_RE = re.compile(
@@ -290,6 +287,10 @@ def _ensure_unique_receta_hash(desired_hash: str, receta_id: Optional[int], seed
         i += 1
         candidate = _sha256(f"{desired_hash}|{seed}|{i}")
     return candidate
+
+
+def _remove_duplicate_recetas(nombre_norm: str, keep_id: int) -> None:
+    Receta.objects.filter(nombre_normalizado=nombre_norm).exclude(pk=keep_id).delete()
 
 
 class ImportadorCosteo:
@@ -540,9 +541,9 @@ class ImportadorCosteo:
                 )
                 item["peso_por_unidad_kg"] = weight
                 if batch_row:
-                    item["unidades_por_batch"] = _to_positive_int_approx(ws.cell(row=batch_row, column=c).value)
+                    item["unidades_por_batch"] = _to_positive_decimal(ws.cell(row=batch_row, column=c).value)
                 if pastel_row:
-                    item["unidades_por_pastel"] = _to_positive_int_approx(ws.cell(row=pastel_row, column=c).value)
+                    item["unidades_por_pastel"] = _to_positive_decimal(ws.cell(row=pastel_row, column=c).value)
                 found[key] = item
 
         return list(found.values())
@@ -555,6 +556,7 @@ class ImportadorCosteo:
         lineas: List[Dict[str, Any]],
     ) -> Tuple[Optional[float], Optional[UnidadMedida], List[Dict[str, Any]]]:
         rendimiento_cantidad = None
+        costo_unitario_fg = None
         unit_hint = ""
         scan_end = min(ws.max_row, end_row)
 
@@ -562,8 +564,18 @@ class ImportadorCosteo:
             f_raw = ws.cell(row=r, column=6).value
             g_val = _to_float(ws.cell(row=r, column=7).value)
             f_norm = normalizar_nombre(f_raw)
-            if g_val is not None and f_norm in {"batida", "total batida", "total peso", "peso total", "total"}:
-                rendimiento_cantidad = g_val
+            if g_val is not None and g_val > 0:
+                is_cost_row = ("costo" in f_norm) or ("$/" in f_norm) or ("$/ " in f_norm)
+                looks_like_total = any(token in f_norm for token in {"batida", "total", "peso", "rendimiento"})
+
+                if (
+                    f_norm in {"batida", "total batida", "total peso", "peso total", "total"}
+                    or (looks_like_total and not is_cost_row)
+                ):
+                    rendimiento_cantidad = g_val
+
+                if is_cost_row:
+                    costo_unitario_fg = g_val
 
             if f_raw is not None:
                 f_txt = str(f_raw).lower()
@@ -571,6 +583,11 @@ class ImportadorCosteo:
                     unit_hint = "kg"
                 elif ("lt" in f_txt or "/l" in f_txt or "litro" in f_txt) and ("costo" in f_txt or "$/" in f_txt):
                     unit_hint = "lt"
+
+        if (rendimiento_cantidad is None or rendimiento_cantidad <= 0) and costo_unitario_fg and costo_unitario_fg > 0:
+            total_costo_lineas = sum((_to_float(l.get("costo")) or 0.0) for l in lineas)
+            if total_costo_lineas > 0:
+                rendimiento_cantidad = total_costo_lineas / costo_unitario_fg
 
         rendimiento_unidad = self._infer_rendimiento_unidad(lineas, unit_hint)
         presentaciones = self._extract_presentaciones_block(ws, start_row, end_row)
@@ -910,6 +927,7 @@ class ImportadorCosteo:
 
             if changed:
                 receta.save()
+            _remove_duplicate_recetas(nombre_norm, receta.id)
             receta.lineas.all().delete()
         else:
             receta = Receta.objects.create(
@@ -922,6 +940,7 @@ class ImportadorCosteo:
                 usa_presentaciones=bool(presentaciones) if (presentaciones is not None and recipe_type == Receta.TIPO_PREPARACION) else False,
             )
             self.resultado.recetas_creadas += 1
+            _remove_duplicate_recetas(nombre_norm, receta.id)
 
         for l in lineas:
             insumo, score, method = match_insumo(l["ingrediente"])

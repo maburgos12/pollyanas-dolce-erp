@@ -115,8 +115,8 @@
             <td>{{ p.nombre }}</td>
             <td>{{ receta.nombre }} - {{ p.nombre }}</td>
             <td class="text-end">{{ p.peso_por_unidad_kg }}</td>
-            <td class="text-end">{{ p.unidades_por_batch|default:"-" }}</td>
-            <td class="text-end">{{ p.unidades_por_pastel|default:"-" }}</td>
+            <td class="text-end">{% if p.unidades_por_batch %}{{ p.unidades_por_batch|floatformat:3 }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if p.unidades_por_pastel %}{{ p.unidades_por_pastel|floatformat:3 }}{% else %}-{% endif %}</td>
             <td class="text-end">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
             <td class="text-end">{% if p.costo_por_pastel_estimado %}${{ p.costo_por_pastel_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
             <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>

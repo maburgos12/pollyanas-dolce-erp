@@ -148,8 +148,8 @@ class RecetaPresentacion(models.Model):
     receta = models.ForeignKey(Receta, related_name="presentaciones", on_delete=models.CASCADE)
     nombre = models.CharField(max_length=80)  # Mini, Chico, Mediano, etc.
     peso_por_unidad_kg = models.DecimalField(max_digits=18, decimal_places=6)
-    unidades_por_batch = models.PositiveIntegerField(null=True, blank=True)
-    unidades_por_pastel = models.PositiveIntegerField(null=True, blank=True)
+    unidades_por_batch = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    unidades_por_pastel = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     activo = models.BooleanField(default=True)
     creado_en = models.DateTimeField(default=timezone.now)
 

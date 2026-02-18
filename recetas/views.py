@@ -124,14 +124,14 @@ def _to_decimal_or_none(value: str | None) -> Decimal | None:
         return None
 
 
-def _to_int_or_none(value: str | None) -> int | None:
+def _to_non_negative_decimal_or_none(value: str | None) -> Decimal | None:
     if value is None:
         return None
-    raw = str(value).strip()
+    raw = str(value).strip().replace(",", ".")
     if raw == "":
         return None
     try:
-        num = int(raw)
+        num = Decimal(raw)
         return num if num >= 0 else None
     except Exception:
         return None
@@ -317,8 +317,8 @@ def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
             nombre=nombre[:80],
             defaults={
                 "peso_por_unidad_kg": peso_por_unidad_kg,
-                "unidades_por_batch": _to_int_or_none(unidades_por_batch),
-                "unidades_por_pastel": _to_int_or_none(unidades_por_pastel),
+                "unidades_por_batch": _to_non_negative_decimal_or_none(unidades_por_batch),
+                "unidades_por_pastel": _to_non_negative_decimal_or_none(unidades_por_pastel),
                 "activo": activo,
             },
         )
@@ -355,8 +355,8 @@ def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> Ht
 
         presentacion.nombre = nombre[:80]
         presentacion.peso_por_unidad_kg = peso_por_unidad_kg
-        presentacion.unidades_por_batch = _to_int_or_none(unidades_por_batch)
-        presentacion.unidades_por_pastel = _to_int_or_none(unidades_por_pastel)
+        presentacion.unidades_por_batch = _to_non_negative_decimal_or_none(unidades_por_batch)
+        presentacion.unidades_por_pastel = _to_non_negative_decimal_or_none(unidades_por_pastel)
         presentacion.activo = activo
         presentacion.save()
         _sync_derived_insumos_safe(request, receta)
