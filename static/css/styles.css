@@ -357,6 +357,19 @@ textarea:focus,
   overflow-x: auto;
 }
 
+.recipes-filters {
+  display: grid;
+  grid-template-columns: 1.5fr 220px auto auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.recipe-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 table,
 .table {
   width: 100%;
@@ -566,5 +579,9 @@ tr:hover,
 
   .container {
     padding: 16px;
+  }
+
+  .recipes-filters {
+    grid-template-columns: 1fr;
   }
 }

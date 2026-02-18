@@ -327,8 +327,9 @@ class ImportadorCosteo:
 
     def _upsert_receta(self, nombre: str, sheet_name: str, lineas: List[Dict[str, Any]]):
         # Hash idempotente por contenido
+        nombre_norm = normalizar_nombre(nombre)
         h_payload = {
-            "nombre": normalizar_nombre(nombre),
+            "nombre": nombre_norm,
             "sheet": sheet_name,
             "lineas": [
                 (normalizar_nombre(l["ingrediente"]), l.get("cantidad"), normalizar_nombre(l.get("unidad","")))
@@ -337,13 +338,17 @@ class ImportadorCosteo:
         }
         hash_contenido = _sha256(json_dumps_sorted(h_payload))
 
-        receta = Receta.objects.filter(hash_contenido=hash_contenido).first()
+        # Consolidar por nombre normalizado para evitar duplicados entre corridas.
+        receta = Receta.objects.filter(nombre_normalizado=nombre_norm).order_by("-id").first()
+        if not receta:
+            receta = Receta.objects.filter(hash_contenido=hash_contenido).first()
         if receta:
             self.resultado.recetas_actualizadas += 1
-            # asegurar sheet_name y nombre, y recrear lineas si no coinciden
-            if receta.nombre != nombre or receta.sheet_name != sheet_name:
+            # asegurar nombre/sheet/hash y recrear lineas
+            if receta.nombre != nombre or receta.sheet_name != sheet_name or receta.hash_contenido != hash_contenido:
                 receta.nombre = nombre
                 receta.sheet_name = sheet_name
+                receta.hash_contenido = hash_contenido
                 receta.save()
             receta.lineas.all().delete()
         else:

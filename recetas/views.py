@@ -4,6 +4,7 @@ from typing import Dict, Any, List
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.db.models import Count, Q
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -15,19 +16,59 @@ from .models import Receta, LineaReceta
 @login_required
 def recetas_list(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
-    recetas = Receta.objects.all()
+    estado = request.GET.get("estado", "").strip().lower()
+    recetas = Receta.objects.all().annotate(
+        pendientes_count=Count(
+            "lineas",
+            filter=Q(lineas__match_status=LineaReceta.STATUS_NEEDS_REVIEW),
+        ),
+        lineas_count=Count("lineas"),
+    )
     if q:
         recetas = recetas.filter(nombre__icontains=q)
+    if estado == "pendientes":
+        recetas = recetas.filter(pendientes_count__gt=0)
+    elif estado == "ok":
+        recetas = recetas.filter(pendientes_count=0)
     recetas = recetas.order_by("nombre")
+
+    total_recetas = recetas.count()
+    total_pendientes = recetas.filter(pendientes_count__gt=0).count()
+    total_lineas = sum(r.lineas_count for r in recetas)
+
     paginator = Paginator(recetas, 20)
     page = paginator.get_page(request.GET.get("page"))
-    return render(request, "recetas/recetas_list.html", {"page": page, "q": q})
+    return render(
+        request,
+        "recetas/recetas_list.html",
+        {
+            "page": page,
+            "q": q,
+            "estado": estado,
+            "total_recetas": total_recetas,
+            "total_pendientes": total_pendientes,
+            "total_lineas": total_lineas,
+        },
+    )
 
 @login_required
 def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
-    lineas = receta.lineas.select_related("insumo").all()
-    return render(request, "recetas/receta_detail.html", {"receta": receta, "lineas": lineas})
+    lineas = receta.lineas.select_related("insumo").order_by("posicion")
+    total_lineas = lineas.count()
+    total_match = lineas.filter(insumo__isnull=False).count()
+    total_sin_match = total_lineas - total_match
+    return render(
+        request,
+        "recetas/receta_detail.html",
+        {
+            "receta": receta,
+            "lineas": lineas,
+            "total_lineas": total_lineas,
+            "total_match": total_match,
+            "total_sin_match": total_sin_match,
+        },
+    )
 
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def matching_pendientes(request: HttpRequest) -> HttpResponse:

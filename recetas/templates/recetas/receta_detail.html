@@ -1,16 +1,36 @@
 {% extends "base.html" %}
 {% block title %}{{ receta.nombre }}{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <div>
-    <h3 class="mb-0">{{ receta.nombre }}</h3>
-    <div class="text-muted">Hoja: {{ receta.sheet_name }}</div>
+<div class="card">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h3 class="mb-0">{{ receta.nombre }}</h3>
+      <div class="text-muted">Hoja: {{ receta.sheet_name }}</div>
+    </div>
+    <div class="recipe-actions">
+      <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Ver pendientes</a>
+      <a class="btn btn-outline-secondary" href="{% url 'recetas:recetas_list' %}">Volver</a>
+    </div>
   </div>
-  <a class="btn btn-outline-secondary" href="{% url 'recetas:recetas_list' %}">Volver</a>
+
+  <div class="kpi-grid mb-3">
+    <div class="kpi-card">
+      <div class="kpi-number">{{ total_lineas }}</div>
+      <div class="kpi-label">Líneas</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number is-success">{{ total_match }}</div>
+      <div class="kpi-label">Con Match</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if total_sin_match > 0 %}is-danger{% else %}is-success{% endif %}">{{ total_sin_match }}</div>
+      <div class="kpi-label">Sin Match</div>
+    </div>
+  </div>
 </div>
 
-<div class="table-responsive">
-  <table class="table table-sm table-striped align-middle">
+<div class="table-responsive card">
+  <table class="table align-middle">
     <thead>
       <tr>
         <th>#</th>
@@ -27,7 +47,7 @@
       <tr>
         <td>{{ l.posicion }}</td>
         <td>{{ l.insumo_texto }}</td>
-        <td>{% if l.insumo %}{{ l.insumo.nombre }}{% else %}<span class="text-danger">Sin match</span>{% endif %}</td>
+        <td>{% if l.insumo %}{{ l.insumo.nombre }}{% else %}<span class="badge bg-danger">Sin match</span>{% endif %}</td>
         <td class="text-end">{{ l.cantidad }}</td>
         <td>{{ l.unidad_texto }}</td>
         <td class="text-end">{% if l.costo_linea_excel %}${{ l.costo_linea_excel|floatformat:2 }}{% endif %}</td>
