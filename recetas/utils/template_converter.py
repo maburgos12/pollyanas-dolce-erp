@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -140,7 +141,45 @@ def _is_presentation_header(text: Any) -> bool:
     }
 
 
-def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
+_CELL_REF_RE = re.compile(
+    r"(?:'(?P<sheet1>[^']+)'|(?P<sheet2>[A-Za-z0-9 _\-\[\]]+))!\$?(?P<col>[A-Z]{1,3})\$?(?P<row>\d+)"
+)
+
+
+def _build_insumos2_pan_map(ws_insumos2) -> dict[int, str]:
+    row_to_pan: dict[int, str] = {}
+    current_pan = ""
+    max_row = min(ws_insumos2.max_row, 500)
+    for r in range(1, max_row + 1):
+        v9 = ws_insumos2.cell(row=r, column=9).value
+        v19 = ws_insumos2.cell(row=r, column=19).value
+        candidate = v9 if isinstance(v9, str) and v9.strip() else v19
+        if isinstance(candidate, str) and candidate.strip():
+            n = normalizar_nombre(candidate)
+            if n.startswith("pan "):
+                current_pan = candidate.strip()
+        if current_pan:
+            row_to_pan[r] = current_pan
+    return row_to_pan
+
+
+def _resolve_pan_from_formula(formula: Any, pan_map: dict[int, str]) -> str:
+    if not isinstance(formula, str):
+        return ""
+    m = _CELL_REF_RE.search(formula)
+    if not m:
+        return ""
+    sheet = (m.group("sheet1") or m.group("sheet2") or "").strip()
+    if normalizar_nombre(sheet) != "insumos 2":
+        return ""
+    try:
+        row = int(m.group("row"))
+    except Exception:
+        return ""
+    return pan_map.get(row, "")
+
+
+def _find_product_final_matrix(ws, ws_formula=None, pan_map: dict[int, str] | None = None) -> list[dict[str, Any]]:
     if "pastel" not in normalizar_nombre(ws.title):
         return []
 
@@ -152,9 +191,17 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
         [ws.cell(row=r, column=c).value for c in range(1, max_col + 1)]
         for r in range(1, max_row + 1)
     ]
+    ws_formula = ws_formula or ws
+    formula_values = [
+        [ws_formula.cell(row=r, column=c).value for c in range(1, max_col + 1)]
+        for r in range(1, max_row + 1)
+    ]
 
     def v(r: int, c: int):
         return values[r - 1][c - 1]
+
+    def vf(r: int, c: int):
+        return formula_values[r - 1][c - 1]
 
     size_cols: dict[str, tuple[int, str]] = {}
 
@@ -186,6 +233,11 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
                     costo = _to_number(v(rr, col))
                     if costo == "":
                         continue
+                    ingrediente_txt = componente_txt
+                    if componente_norm == "pan":
+                        pan_name = _resolve_pan_from_formula(vf(rr, col), pan_map or {})
+                        if pan_name:
+                            ingrediente_txt = f"{pan_name} - {presentacion}"
                     receta_nombre = f"{ws.title} - {presentacion}"[:250]
                     orden_actual = orden_por_receta.get(receta_nombre, 0) + 1
                     orden_por_receta[receta_nombre] = orden_actual
@@ -197,7 +249,7 @@ def _find_product_final_matrix(ws) -> list[dict[str, Any]]:
                             "tipo": "PRODUCTO_FINAL",
                             "tipo_linea": "NORMAL",
                             "etapa": "",
-                            "ingrediente": componente_txt[:250],
+                            "ingrediente": ingrediente_txt[:250],
                             "cantidad": "",
                             "unidad": "",
                             "costo_linea": costo,
@@ -286,14 +338,19 @@ def convert_costeo_to_template(costeo_path: str) -> tuple[list[dict[str, Any]], 
         raise FileNotFoundError(f"Archivo no encontrado: {costeo_path}")
 
     wb = load_workbook(path, data_only=True)
+    wb_formula = load_workbook(path, data_only=False)
+    pan_map: dict[int, str] = {}
+    if "Insumos 2" in wb_formula.sheetnames:
+        pan_map = _build_insumos2_pan_map(wb_formula["Insumos 2"])
     all_rows: list[dict[str, Any]] = []
     seen_recetas: set[tuple[str, str]] = set()
     result = ConversionResult(hojas_escaneadas=len(wb.sheetnames))
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
+        ws_formula = wb_formula[sheet_name] if sheet_name in wb_formula.sheetnames else ws
         rows = _find_recipe_block(ws)
-        product_rows = _find_product_final_matrix(ws)
+        product_rows = _find_product_final_matrix(ws, ws_formula=ws_formula, pan_map=pan_map)
         merged_rows = rows + product_rows
         if merged_rows:
             result.hojas_con_recetas += 1

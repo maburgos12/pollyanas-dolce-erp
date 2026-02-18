@@ -10,7 +10,7 @@ from typing import Any
 from openpyxl import load_workbook
 from django.db import transaction
 
-from maestros.models import CostoInsumo, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from recetas.models import LineaReceta, Receta
 from recetas.utils.matching import clasificar_match, match_insumo
 from recetas.utils.normalizacion import normalizar_nombre
@@ -121,6 +121,37 @@ def _latest_cost_by_insumo(insumo_id: int) -> Decimal | None:
         .first()
     )
     return Decimal(str(cost)) if cost is not None else None
+
+
+def _should_autocreate_component(
+    recipe_type: str,
+    tipo_linea: str,
+    ingrediente: str,
+    costo_linea_value: Decimal | None,
+) -> bool:
+    if recipe_type != Receta.TIPO_PRODUCTO_FINAL:
+        return False
+    if tipo_linea != LineaReceta.TIPO_NORMAL:
+        return False
+    if costo_linea_value is None or costo_linea_value <= 0:
+        return False
+    ingrediente_norm = normalizar_nombre(ingrediente)
+    if not ingrediente_norm:
+        return False
+    if ingrediente_norm in {"armado", "presentacion", "presentación"}:
+        return False
+    return ("-" in ingrediente) or (len(ingrediente_norm.split()) >= 2)
+
+
+def _get_or_create_component_insumo(nombre: str, unidad: UnidadMedida | None) -> Insumo:
+    nombre_norm = normalizar_nombre(nombre)
+    insumo = Insumo.objects.filter(nombre_normalizado=nombre_norm).order_by("id").first()
+    if insumo:
+        if insumo.unidad_base is None and unidad is not None:
+            insumo.unidad_base = unidad
+            insumo.save(update_fields=["unidad_base"])
+        return insumo
+    return Insumo.objects.create(nombre=nombre[:250], unidad_base=unidad)
 
 
 def _build_hash(receta_name: str, sheet_name: str, rows: list[dict[str, Any]]) -> str:
@@ -258,6 +289,18 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
             else:
                 unidad = _unit_from_text(unidad_texto)
                 unit_cache[unidad_texto] = unidad
+
+            if insumo is None and _should_autocreate_component(
+                recipe_type=recipe_type,
+                tipo_linea=tipo_linea,
+                ingrediente=ingrediente,
+                costo_linea_value=costo_linea_value,
+            ):
+                insumo = _get_or_create_component_insumo(ingrediente, unidad)
+                score = 100.0
+                method = "AUTO_COMPONENTE"
+                status = LineaReceta.STATUS_AUTO
+                match_cache[ingrediente] = (insumo, score, method)
 
             costo_snapshot = None
             if insumo:

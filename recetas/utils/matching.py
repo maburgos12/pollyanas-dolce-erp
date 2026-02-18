@@ -15,10 +15,14 @@ def match_insumo(nombre_origen: str, score_threshold: float = 75.0) -> Tuple[Opt
     if insumo:
         return (insumo, 100.0, "EXACT")
 
-    # 2) Contains (cuando el origen es más corto)
-    insumo = Insumo.objects.filter(nombre_normalizado__icontains=nombre_norm).first()
-    if insumo:
-        return (insumo, 95.0, "CONTAINS")
+    # 2) Contains solo para términos suficientemente específicos.
+    # Evita falsos positivos como "pan" -> "pan de muerto".
+    tokens = nombre_norm.split()
+    allow_contains = len(tokens) >= 2 and len(nombre_norm) >= 8
+    if allow_contains:
+        insumo = Insumo.objects.filter(nombre_normalizado__icontains=nombre_norm).first()
+        if insumo:
+            return (insumo, 95.0, "CONTAINS")
 
     # 3) Fuzzy
     nombres = list(Insumo.objects.values_list("nombre_normalizado", flat=True))

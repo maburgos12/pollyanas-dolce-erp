@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -139,10 +140,79 @@ def _is_presentation_header(text: Any) -> bool:
     }
 
 
+_CELL_REF_RE = re.compile(
+    r"(?:'(?P<sheet1>[^']+)'|(?P<sheet2>[A-Za-z0-9 _\-\[\]]+))!\$?(?P<col>[A-Z]{1,3})\$?(?P<row>\d+)"
+)
+
+
+def _build_insumos2_pan_map(ws_insumos2) -> Dict[int, str]:
+    row_to_pan: Dict[int, str] = {}
+    current_pan = ""
+    max_row = min(ws_insumos2.max_row, 500)
+    for r in range(1, max_row + 1):
+        v9 = ws_insumos2.cell(row=r, column=9).value
+        v19 = ws_insumos2.cell(row=r, column=19).value
+        candidate = v9 if isinstance(v9, str) and v9.strip() else v19
+        if isinstance(candidate, str) and candidate.strip():
+            n = normalizar_nombre(candidate)
+            if n.startswith("pan "):
+                current_pan = candidate.strip()
+        if current_pan:
+            row_to_pan[r] = current_pan
+    return row_to_pan
+
+
+def _resolve_pan_from_formula(formula: Any, pan_map: Dict[int, str]) -> str:
+    if not isinstance(formula, str):
+        return ""
+    m = _CELL_REF_RE.search(formula)
+    if not m:
+        return ""
+    sheet = (m.group("sheet1") or m.group("sheet2") or "").strip()
+    if normalizar_nombre(sheet) != "insumos 2":
+        return ""
+    try:
+        row = int(m.group("row"))
+    except Exception:
+        return ""
+    return pan_map.get(row, "")
+
+
+def _should_autocreate_component(recipe_type: str, tipo_linea: str, ingrediente: str, costo: Optional[float]) -> bool:
+    if recipe_type != Receta.TIPO_PRODUCTO_FINAL:
+        return False
+    if tipo_linea != LineaReceta.TIPO_NORMAL:
+        return False
+    if costo is None or costo <= 0:
+        return False
+    ingrediente_norm = normalizar_nombre(ingrediente)
+    if not ingrediente_norm:
+        return False
+    # Evitar crear conceptos operativos que no son insumo real.
+    if ingrediente_norm in {"armado", "presentacion", "presentación"}:
+        return False
+    return ("-" in ingrediente) or (len(ingrediente_norm.split()) >= 2)
+
+
+def _get_or_create_component_insumo(nombre: str, unidad: Optional[UnidadMedida]) -> Insumo:
+    nombre_norm = normalizar_nombre(nombre)
+    insumo = Insumo.objects.filter(nombre_normalizado=nombre_norm).order_by("id").first()
+    if insumo:
+        if insumo.unidad_base is None and unidad is not None:
+            insumo.unidad_base = unidad
+            insumo.save(update_fields=["unidad_base"])
+        return insumo
+    return Insumo.objects.create(nombre=nombre[:250], unidad_base=unidad)
+
+
 class ImportadorCosteo:
     def __init__(self, filepath: str):
         self.filepath = filepath
         self.wb = openpyxl.load_workbook(filepath, data_only=True)
+        self.wb_formula = openpyxl.load_workbook(filepath, data_only=False)
+        self.pan_map: Dict[int, str] = {}
+        if "Insumos 2" in self.wb_formula.sheetnames:
+            self.pan_map = _build_insumos2_pan_map(self.wb_formula["Insumos 2"])
         self.resultado = ImportResultado()
 
     @transaction.atomic
@@ -374,13 +444,21 @@ class ImportadorCosteo:
             return
         max_row = min(ws.max_row, 250)
         max_col = min(ws.max_column, 30)
+        ws_formula = self.wb_formula[sheet_name] if sheet_name in self.wb_formula.sheetnames else ws
         values = [
             [ws.cell(row=r, column=c).value for c in range(1, max_col + 1)]
+            for r in range(1, max_row + 1)
+        ]
+        formula_values = [
+            [ws_formula.cell(row=r, column=c).value for c in range(1, max_col + 1)]
             for r in range(1, max_row + 1)
         ]
 
         def v(r: int, c: int):
             return values[r - 1][c - 1]
+
+        def vf(r: int, c: int):
+            return formula_values[r - 1][c - 1]
 
         recetas_por_presentacion: Dict[str, List[Dict[str, Any]]] = {}
         size_cols: Dict[str, Tuple[int, str]] = {}
@@ -411,6 +489,11 @@ class ImportadorCosteo:
                         costo = _to_float(v(rr, col))
                         if costo is None:
                             continue
+                        ingrediente_txt = componente_txt
+                        if componente_norm == "pan":
+                            pan_name = _resolve_pan_from_formula(vf(rr, col), self.pan_map)
+                            if pan_name:
+                                ingrediente_txt = f"{pan_name} - {presentacion}"
                         receta_nombre = f"{sheet_name} - {presentacion}"[:250]
                         lineas = recetas_por_presentacion.setdefault(receta_nombre, [])
                         lineas.append(
@@ -418,7 +501,7 @@ class ImportadorCosteo:
                                 "pos": len(lineas) + 1,
                                 "tipo_linea": LineaReceta.TIPO_NORMAL,
                                 "etapa": "",
-                                "ingrediente": componente_txt[:250],
+                                "ingrediente": ingrediente_txt[:250],
                                 "cantidad": None,
                                 "unidad": "",
                                 "costo": costo,
@@ -553,9 +636,19 @@ class ImportadorCosteo:
             insumo, score, method = match_insumo(l["ingrediente"])
             status = clasificar_match(score)
             unidad = _get_unit(l.get("unidad",""))
-            costo_unitario = _latest_cost_unitario(insumo) if insumo else None
             tipo_linea = l.get("tipo_linea", LineaReceta.TIPO_NORMAL)
             etapa = str(l.get("etapa") or "")[:120]
+            if insumo is None and _should_autocreate_component(
+                recipe_type=recipe_type,
+                tipo_linea=tipo_linea,
+                ingrediente=l["ingrediente"],
+                costo=l.get("costo"),
+            ):
+                insumo = _get_or_create_component_insumo(l["ingrediente"], unidad)
+                score = 100.0
+                method = "AUTO_COMPONENTE"
+                status = LineaReceta.STATUS_AUTO
+            costo_unitario = _latest_cost_unitario(insumo) if insumo else None
             if tipo_linea == LineaReceta.TIPO_SUBSECCION and insumo is None:
                 status = LineaReceta.STATUS_AUTO
                 method = LineaReceta.MATCH_SUBSECTION
