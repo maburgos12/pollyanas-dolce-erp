@@ -234,7 +234,13 @@ def _hydrate_subsection_costs(lineas: List[Dict[str, Any]]) -> None:
         by_stage.setdefault(stage, []).append(l)
 
     for stage, stage_lines in by_stage.items():
-        parent_cost = find_parent_cost_for_stage(stage, main_costs)
+        stage_total_cost = None
+        for l in stage_lines:
+            v = _to_float(l.get("_stage_total_cost"))
+            if v is not None and v > 0:
+                stage_total_cost = v
+                break
+        parent_cost = stage_total_cost if stage_total_cost else find_parent_cost_for_stage(stage, main_costs)
         if parent_cost is None or parent_cost <= 0:
             continue
         total_qty = sum((_to_float(l.get("cantidad")) or 0.0) for l in stage_lines)
@@ -579,6 +585,7 @@ class ImportadorCosteo:
                     if isinstance(prev, str) and prev.strip():
                         section = prev.strip()[:120]
 
+                section_items: List[Tuple[str, Dict[str, float]]] = []
                 rr = r + 1
                 while rr <= max_row:
                     elemento = v(rr, c)
@@ -589,13 +596,53 @@ class ImportadorCosteo:
                     if elemento_norm == "elemento" or elemento_norm.startswith("total"):
                         break
 
+                    qty_by_presentation: Dict[str, float] = {}
                     for col, presentacion in headers:
                         cantidad = _to_float(v(rr, col))
                         if cantidad is None or cantidad <= 0:
                             continue
+                        qty_by_presentation[presentacion] = cantidad
+                    if qty_by_presentation:
+                        section_items.append((elemento_txt[:250], qty_by_presentation))
+                    rr += 1
 
+                section_total_by_presentation: Dict[str, float] = {}
+                scan = rr
+                while scan <= max_row:
+                    label = v(scan, c)
+                    if label is None or str(label).strip() == "":
+                        if scan - rr > 6:
+                            break
+                        scan += 1
+                        continue
+
+                    label_norm = normalizar_nombre(label)
+                    if label_norm == "total por decorar":
+                        for col, presentacion in headers:
+                            total_cost = _to_float(v(scan, col))
+                            if total_cost is not None and total_cost > 0:
+                                section_total_by_presentation[presentacion] = total_cost
+                        break
+                    if label_norm == "elemento":
+                        break
+                    if scan + 1 <= max_row and normalizar_nombre(v(scan + 1, c)) == "elemento":
+                        break
+                    scan += 1
+
+                totals_qty_by_presentation: Dict[str, float] = {}
+                for _, qty_map in section_items:
+                    for presentacion, qty in qty_map.items():
+                        totals_qty_by_presentation[presentacion] = totals_qty_by_presentation.get(presentacion, 0.0) + qty
+
+                for elemento_txt, qty_map in section_items:
+                    for presentacion, cantidad in qty_map.items():
                         receta_nombre = f"{sheet_name} - {presentacion}"[:250]
                         lineas = recetas_por_presentacion.setdefault(receta_nombre, [])
+                        stage_total = section_total_by_presentation.get(presentacion)
+                        total_qty = totals_qty_by_presentation.get(presentacion, 0.0)
+                        allocated = None
+                        if stage_total is not None and stage_total > 0 and total_qty > 0:
+                            allocated = stage_total * (cantidad / total_qty)
                         lineas.append(
                             {
                                 "pos": len(lineas) + 1,
@@ -604,10 +651,10 @@ class ImportadorCosteo:
                                 "ingrediente": elemento_txt[:250],
                                 "cantidad": cantidad,
                                 "unidad": "kg",
-                                "costo": None,
+                                "costo": allocated,
+                                "_stage_total_cost": stage_total,
                             }
                         )
-                    rr += 1
 
         for receta_nombre, lineas in recetas_por_presentacion.items():
             if not lineas:

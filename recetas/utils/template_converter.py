@@ -291,6 +291,7 @@ def _find_product_final_matrix(ws, ws_formula=None, pan_map: dict[int, str] | No
                 if isinstance(prev, str) and prev.strip():
                     section = prev.strip()[:120]
 
+            section_items: list[tuple[str, dict[str, float]]] = []
             rr = r + 1
             while rr <= max_row:
                 elemento = v(rr, c)
@@ -302,14 +303,53 @@ def _find_product_final_matrix(ws, ws_formula=None, pan_map: dict[int, str] | No
                 if elemento_norm == "elemento" or elemento_norm.startswith("total"):
                     break
 
+                qty_by_presentation: dict[str, float] = {}
                 for col, presentacion in headers:
                     cantidad = _to_number(v(rr, col))
                     if cantidad == "":
                         continue
+                    qty_by_presentation[presentacion.strip()] = float(cantidad)
+                if qty_by_presentation:
+                    section_items.append((elemento_txt[:250], qty_by_presentation))
+                rr += 1
 
+            section_total_by_presentation: dict[str, float] = {}
+            scan = rr
+            while scan <= max_row:
+                label = v(scan, c)
+                if label is None or str(label).strip() == "":
+                    if scan - rr > 6:
+                        break
+                    scan += 1
+                    continue
+                label_norm = normalizar_nombre(label)
+                if label_norm == "total por decorar":
+                    for col, presentacion in headers:
+                        total_cost = _to_number(v(scan, col))
+                        if total_cost != "":
+                            section_total_by_presentation[presentacion.strip()] = float(total_cost)
+                    break
+                if label_norm == "elemento":
+                    break
+                if scan + 1 <= max_row and normalizar_nombre(v(scan + 1, c)) == "elemento":
+                    break
+                scan += 1
+
+            totals_qty_by_presentation: dict[str, float] = {}
+            for _, qty_map in section_items:
+                for presentacion, qty in qty_map.items():
+                    totals_qty_by_presentation[presentacion] = totals_qty_by_presentation.get(presentacion, 0.0) + qty
+
+            for elemento_txt, qty_map in section_items:
+                for presentacion, cantidad in qty_map.items():
                     receta_nombre = f"{ws.title} - {presentacion.strip()}"[:250]
                     orden_actual = orden_por_receta.get(receta_nombre, 0) + 1
                     orden_por_receta[receta_nombre] = orden_actual
+                    total_stage_cost = section_total_by_presentation.get(presentacion)
+                    total_qty = totals_qty_by_presentation.get(presentacion, 0.0)
+                    allocated = ""
+                    if total_stage_cost is not None and total_stage_cost > 0 and total_qty > 0:
+                        allocated = total_stage_cost * (float(cantidad) / total_qty)
 
                     rows.append(
                         {
@@ -322,12 +362,11 @@ def _find_product_final_matrix(ws, ws_formula=None, pan_map: dict[int, str] | No
                             "ingrediente": elemento_txt[:250],
                             "cantidad": cantidad,
                             "unidad": "kg",
-                            "costo_linea": "",
+                            "costo_linea": allocated,
                             "orden": orden_actual,
                             "notas": section,
                         }
                     )
-                rr += 1
 
     return rows
 
