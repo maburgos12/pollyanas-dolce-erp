@@ -209,7 +209,7 @@
             -
           {% endif %}
         </td>
-        <td class="text-end cell-qty">{{ l.cantidad }}</td>
+        <td class="text-end cell-qty">{{ l.cantidad|default:"-" }}</td>
         <td class="cell-unit">{{ l.unidad_texto }}</td>
         <td class="text-end cell-cost">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
         <td>

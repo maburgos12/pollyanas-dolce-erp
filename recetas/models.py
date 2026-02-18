@@ -132,13 +132,22 @@ class LineaReceta(models.Model):
 
     @property
     def costo_total_estimado(self):
-        # Preferencia en modo operativo: cantidad * costo_unitario_snapshot.
-        # Si no hay snapshot, usar costo fijo legado desde Excel.
-        if self.cantidad is not None and self.costo_unitario_snapshot is not None:
+        # Modo operativo:
+        # - Si la linea esta ligada a un insumo, el costo SIEMPRE sale de cantidad * costo_unitario_snapshot.
+        # - Si falta cantidad o costo snapshot, no se calcula costo.
+        # - El costo fijo legado (Excel) solo aplica para lineas sin insumo ligado.
+        if self.insumo_id:
+            if (
+                self.cantidad is None
+                or self.costo_unitario_snapshot is None
+                or self.cantidad <= 0
+                or self.costo_unitario_snapshot <= 0
+            ):
+                return None
             return float(self.cantidad) * float(self.costo_unitario_snapshot)
         if self.costo_linea_excel is not None:
             return float(self.costo_linea_excel)
-        return 0.0
+        return None
 
     def __str__(self) -> str:
         return f"{self.receta.nombre}: {self.insumo_texto}"
