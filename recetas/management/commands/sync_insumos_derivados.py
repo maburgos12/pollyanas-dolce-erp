@@ -3,11 +3,11 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 
 from recetas.models import Receta
-from recetas.utils.derived_insumos import sync_receta_presentaciones
+from recetas.utils.derived_insumos import sync_receta_derivados
 
 
 class Command(BaseCommand):
-    help = "Sincroniza insumos derivados desde presentaciones de recetas (crear/actualizar costo por unidad)."
+    help = "Sincroniza insumos/costos derivados de recetas base y presentaciones."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -19,11 +19,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         receta_filter = (options.get("receta") or "").strip()
-        recetas = Receta.objects.filter(usa_presentaciones=True).order_by("nombre")
+        recetas = Receta.objects.all().order_by("nombre")
         if receta_filter:
             recetas = recetas.filter(nombre__icontains=receta_filter)
 
         recetas_procesadas = 0
+        preparaciones = 0
         presentaciones = 0
         insumos_creados = 0
         insumos_actualizados = 0
@@ -31,8 +32,9 @@ class Command(BaseCommand):
         costos_creados = 0
 
         for receta in recetas:
-            s = sync_receta_presentaciones(receta)
+            s = sync_receta_derivados(receta)
             recetas_procesadas += 1
+            preparaciones += s.preparaciones
             presentaciones += s.presentaciones
             insumos_creados += s.insumos_creados
             insumos_actualizados += s.insumos_actualizados
@@ -41,6 +43,7 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("Sincronización completada"))
         self.stdout.write(f"  - recetas procesadas: {recetas_procesadas}")
+        self.stdout.write(f"  - preparaciones procesadas: {preparaciones}")
         self.stdout.write(f"  - presentaciones procesadas: {presentaciones}")
         self.stdout.write(f"  - insumos creados: {insumos_creados}")
         self.stdout.write(f"  - insumos actualizados: {insumos_actualizados}")

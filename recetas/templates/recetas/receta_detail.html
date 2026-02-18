@@ -65,13 +65,15 @@
   </div>
   <div class="kpi-card">
     <div class="kpi-number">
-      {% if costo_por_kg_estimado %}
-        ${{ costo_por_kg_estimado|floatformat:2 }}
+      {% if receta.costo_por_unidad_rendimiento %}
+        ${{ receta.costo_por_unidad_rendimiento|floatformat:2 }}
       {% else %}
         0
       {% endif %}
     </div>
-    <div class="kpi-label">Costo por Kg (estimado)</div>
+    <div class="kpi-label">
+      Costo por unidad de rendimiento{% if receta.rendimiento_unidad %} ({{ receta.rendimiento_unidad.codigo }}){% endif %}
+    </div>
   </div>
   <div class="kpi-card">
     <div class="kpi-number">${{ total_costo_estimado|floatformat:2 }}</div>

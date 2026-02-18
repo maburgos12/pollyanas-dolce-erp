@@ -70,6 +70,12 @@ class Receta(models.Model):
         return self.costo_total_estimado_decimal / rendimiento_kg
 
     @property
+    def costo_por_unidad_rendimiento(self) -> Decimal | None:
+        if not self.rendimiento_cantidad or self.rendimiento_cantidad <= 0:
+            return None
+        return self.costo_total_estimado_decimal / Decimal(str(self.rendimiento_cantidad))
+
+    @property
     def pendientes_matching(self):
         return self.lineas.filter(match_status=LineaReceta.STATUS_NEEDS_REVIEW).count()
 

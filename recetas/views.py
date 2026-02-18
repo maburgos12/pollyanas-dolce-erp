@@ -12,7 +12,7 @@ from django.views.decorators.http import require_POST
 
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from .models import Receta, LineaReceta, RecetaPresentacion
-from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_presentaciones
+from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 
 @login_required
 def recetas_list(request: HttpRequest) -> HttpResponse:
@@ -182,14 +182,12 @@ def _switch_line_to_internal_cost(linea: LineaReceta) -> None:
 
 
 def _sync_derived_insumos_safe(request: HttpRequest, receta: Receta) -> None:
-    if not receta.usa_presentaciones:
-        return
     try:
-        sync_receta_presentaciones(receta)
+        sync_receta_derivados(receta)
     except Exception:
         messages.warning(
             request,
-            "La receta se guardó, pero falló la sincronización automática de insumos derivados.",
+            "La receta se guardó, pero falló la sincronización automática de costos/insumos derivados.",
         )
 
 
