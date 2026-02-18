@@ -3,6 +3,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -14,7 +15,8 @@ from maestros.models import Insumo, CostoInsumo, Proveedor, UnidadMedida, seed_u
 from .matching import match_insumo, clasificar_match
 from .normalizacion import normalizar_nombre
 from .subsection_costing import find_parent_cost_for_stage
-from recetas.models import Receta, LineaReceta
+from .derived_insumos import sync_receta_derivados
+from recetas.models import Receta, LineaReceta, RecetaPresentacion
 
 log = logging.getLogger(__name__)
 
@@ -133,12 +135,43 @@ def _is_presentation_header(text: Any) -> bool:
         "grande",
         "individual",
         "rebanada",
+        "bollo",
         "bollos",
         "bollito",
+        "rosca",
         "media plancha",
         "1/2 plancha",
         "1 2 plancha",
     }
+
+
+def _presentation_display_name(text: Any) -> str:
+    n = normalizar_nombre(text)
+    if n in {"1/2 plancha", "1 2 plancha", "media plancha"}:
+        return "Media Plancha"
+    mapping = {
+        "mini": "Mini",
+        "chico": "Chico",
+        "mediano": "Mediano",
+        "grande": "Grande",
+        "individual": "Individual",
+        "rebanada": "Rebanada",
+        "bollo": "Bollo",
+        "bollos": "Bollos",
+        "bollito": "Bollito",
+        "rosca": "Rosca",
+    }
+    return mapping.get(n, str(text).strip())
+
+
+def _to_positive_int_approx(value: Any, tolerance: float = 0.05) -> Optional[int]:
+    f = _to_float(value)
+    if f is None or f <= 0:
+        return None
+    i = int(round(f))
+    if abs(f - i) <= tolerance:
+        return i
+    return None
 
 
 _CELL_REF_RE = re.compile(
@@ -249,6 +282,15 @@ def _hydrate_subsection_costs(lineas: List[Dict[str, Any]]) -> None:
         for l in stage_lines:
             qty = _to_float(l.get("cantidad")) or 0.0
             l["costo"] = parent_cost * (qty / total_qty)
+
+
+def _ensure_unique_receta_hash(desired_hash: str, receta_id: Optional[int], seed: str) -> str:
+    candidate = desired_hash
+    i = 0
+    while Receta.objects.filter(hash_contenido=candidate).exclude(pk=receta_id).exists():
+        i += 1
+        candidate = _sha256(f"{desired_hash}|{seed}|{i}")
+    return candidate
 
 
 class ImportadorCosteo:
@@ -412,6 +454,129 @@ class ImportadorCosteo:
                         return True
         return False
 
+    def _infer_rendimiento_unidad(self, lineas: List[Dict[str, Any]], fg_hint: str) -> Optional[UnidadMedida]:
+        if fg_hint:
+            u = _get_unit(fg_hint)
+            if u:
+                return u
+
+        counts: Dict[str, int] = {"kg": 0, "lt": 0}
+        for l in lineas:
+            u = normalizar_nombre(l.get("unidad", ""))
+            if u in {"kg", "g", "gr"}:
+                counts["kg"] += 1
+            elif u in {"lt", "l", "litro", "ml"}:
+                counts["lt"] += 1
+        if counts["lt"] > counts["kg"] and counts["lt"] > 0:
+            return _get_unit("lt")
+        if counts["kg"] > 0:
+            return _get_unit("kg")
+        return None
+
+    def _extract_presentaciones_block(self, ws, start_row: int, end_row: int) -> List[Dict[str, Any]]:
+        scan_end = min(ws.max_row, end_row)
+        found: Dict[str, Dict[str, Any]] = {}
+
+        for r in range(start_row, scan_end + 1):
+            headers: Dict[int, str] = {}
+            for c in range(9, 18):
+                hv = ws.cell(row=r, column=c).value
+                if _is_presentation_header(hv):
+                    headers[c] = _presentation_display_name(hv)
+            if not headers:
+                continue
+
+            # Patrón simple: fila de encabezados y siguiente fila con pesos.
+            simple_weight_row = r + 1 if r + 1 <= scan_end else None
+            for c, name in headers.items():
+                weight = _to_float(ws.cell(row=simple_weight_row, column=c).value) if simple_weight_row else None
+                if weight is None or weight <= 0:
+                    continue
+                key = normalizar_nombre(name)
+                found[key] = {
+                    "nombre": name[:80],
+                    "peso_por_unidad_kg": weight,
+                    "unidades_por_batch": None,
+                    "unidades_por_pastel": None,
+                }
+
+        # Patrón con etiquetas en columna I: Elemento / Peso-Molde / Cantidades.
+        for r in range(start_row, scan_end + 1):
+            if normalizar_nombre(ws.cell(row=r, column=9).value) != "elemento":
+                continue
+
+            headers: Dict[int, str] = {}
+            for c in range(10, 18):
+                hv = ws.cell(row=r, column=c).value
+                if _is_presentation_header(hv):
+                    headers[c] = _presentation_display_name(hv)
+            if not headers:
+                continue
+
+            weight_row = None
+            batch_row = None
+            pastel_row = None
+            for rr in range(r + 1, min(scan_end, r + 8) + 1):
+                label = normalizar_nombre(ws.cell(row=rr, column=9).value)
+                if label in {"peso/molde", "peso molde", "peso por molde"}:
+                    weight_row = rr
+                elif label in {"cantidad piezas en pan", "cantidad piezas pan", "cantidad piezas"}:
+                    batch_row = rr
+                elif label in {"cantidad en pasteles", "cantidad en pastel"}:
+                    pastel_row = rr
+
+            for c, name in headers.items():
+                weight = _to_float(ws.cell(row=weight_row, column=c).value) if weight_row else None
+                if weight is None or weight <= 0:
+                    continue
+                key = normalizar_nombre(name)
+                item = found.get(
+                    key,
+                    {
+                        "nombre": name[:80],
+                        "peso_por_unidad_kg": weight,
+                        "unidades_por_batch": None,
+                        "unidades_por_pastel": None,
+                    },
+                )
+                item["peso_por_unidad_kg"] = weight
+                if batch_row:
+                    item["unidades_por_batch"] = _to_positive_int_approx(ws.cell(row=batch_row, column=c).value)
+                if pastel_row:
+                    item["unidades_por_pastel"] = _to_positive_int_approx(ws.cell(row=pastel_row, column=c).value)
+                found[key] = item
+
+        return list(found.values())
+
+    def _extract_preparacion_metadata(
+        self,
+        ws,
+        start_row: int,
+        end_row: int,
+        lineas: List[Dict[str, Any]],
+    ) -> Tuple[Optional[float], Optional[UnidadMedida], List[Dict[str, Any]]]:
+        rendimiento_cantidad = None
+        unit_hint = ""
+        scan_end = min(ws.max_row, end_row)
+
+        for r in range(start_row, scan_end + 1):
+            f_raw = ws.cell(row=r, column=6).value
+            g_val = _to_float(ws.cell(row=r, column=7).value)
+            f_norm = normalizar_nombre(f_raw)
+            if g_val is not None and f_norm in {"batida", "total batida", "total peso", "peso total", "total"}:
+                rendimiento_cantidad = g_val
+
+            if f_raw is not None:
+                f_txt = str(f_raw).lower()
+                if ("kg" in f_txt) and ("costo" in f_txt or "$/" in f_txt):
+                    unit_hint = "kg"
+                elif ("lt" in f_txt or "/l" in f_txt or "litro" in f_txt) and ("costo" in f_txt or "$/" in f_txt):
+                    unit_hint = "lt"
+
+        rendimiento_unidad = self._infer_rendimiento_unidad(lineas, unit_hint)
+        presentaciones = self._extract_presentaciones_block(ws, start_row, end_row)
+        return rendimiento_cantidad, rendimiento_unidad, presentaciones
+
     def _importar_recetas_de_hoja(self, ws, sheet_name: str):
         max_row = min(ws.max_row, 400)
         r = 1
@@ -474,11 +639,20 @@ class ImportadorCosteo:
                     rr += 1
 
                 if lineas:
+                    rendimiento_cantidad, rendimiento_unidad, presentaciones = self._extract_preparacion_metadata(
+                        ws,
+                        r,
+                        rr,
+                        lineas,
+                    )
                     self._upsert_receta(
                         receta_nombre,
                         sheet_name,
                         lineas,
                         recipe_type=Receta.TIPO_PREPARACION,
+                        rendimiento_cantidad=rendimiento_cantidad,
+                        rendimiento_unidad=rendimiento_unidad,
+                        presentaciones=presentaciones,
                     )
                     r = rr + 1
                     continue
@@ -673,6 +847,9 @@ class ImportadorCosteo:
         sheet_name: str,
         lineas: List[Dict[str, Any]],
         recipe_type: str = Receta.TIPO_PREPARACION,
+        rendimiento_cantidad: Optional[float] = None,
+        rendimiento_unidad: Optional[UnidadMedida] = None,
+        presentaciones: Optional[List[Dict[str, Any]]] = None,
     ):
         # Hash idempotente por contenido
         nombre_norm = normalizar_nombre(nombre)
@@ -690,15 +867,21 @@ class ImportadorCosteo:
                 for l in lineas
             ],
         }
-        hash_contenido = _sha256(json_dumps_sorted(h_payload))
+        desired_hash = _sha256(json_dumps_sorted(h_payload))
 
         # Consolidar por nombre normalizado para evitar duplicados entre corridas.
         receta = Receta.objects.filter(nombre_normalizado=nombre_norm).order_by("-id").first()
         if not receta:
-            receta = Receta.objects.filter(hash_contenido=hash_contenido).first()
+            receta = Receta.objects.filter(hash_contenido=desired_hash).first()
+        hash_contenido = _ensure_unique_receta_hash(
+            desired_hash,
+            receta.id if receta else None,
+            nombre_norm,
+        )
         if receta:
             self.resultado.recetas_actualizadas += 1
             # asegurar nombre/sheet/hash y recrear lineas
+            changed = False
             if (
                 receta.nombre != nombre
                 or receta.sheet_name != sheet_name
@@ -709,6 +892,24 @@ class ImportadorCosteo:
                 receta.sheet_name = sheet_name
                 receta.hash_contenido = hash_contenido
                 receta.tipo = recipe_type
+                changed = True
+
+            if rendimiento_cantidad is not None and rendimiento_cantidad > 0:
+                qty = Decimal(str(rendimiento_cantidad))
+                if receta.rendimiento_cantidad != qty:
+                    receta.rendimiento_cantidad = qty
+                    changed = True
+            if rendimiento_unidad is not None and receta.rendimiento_unidad_id != rendimiento_unidad.id:
+                receta.rendimiento_unidad = rendimiento_unidad
+                changed = True
+
+            if presentaciones is not None and recipe_type == Receta.TIPO_PREPARACION:
+                usa_presentaciones = bool(presentaciones)
+                if receta.usa_presentaciones != usa_presentaciones:
+                    receta.usa_presentaciones = usa_presentaciones
+                    changed = True
+
+            if changed:
                 receta.save()
             receta.lineas.all().delete()
         else:
@@ -717,6 +918,9 @@ class ImportadorCosteo:
                 sheet_name=sheet_name,
                 hash_contenido=hash_contenido,
                 tipo=recipe_type,
+                rendimiento_cantidad=Decimal(str(rendimiento_cantidad)) if rendimiento_cantidad else None,
+                rendimiento_unidad=rendimiento_unidad,
+                usa_presentaciones=bool(presentaciones) if (presentaciones is not None and recipe_type == Receta.TIPO_PREPARACION) else False,
             )
             self.resultado.recetas_creadas += 1
 
@@ -766,6 +970,65 @@ class ImportadorCosteo:
                     "method": method,
                     "status": status,
                 })
+
+        if presentaciones is not None and recipe_type == Receta.TIPO_PREPARACION:
+            incoming: Dict[str, Dict[str, Any]] = {}
+            for p in presentaciones:
+                nombre_p = str(p.get("nombre") or "").strip()[:80]
+                peso = _to_float(p.get("peso_por_unidad_kg"))
+                if not nombre_p or peso is None or peso <= 0:
+                    continue
+                incoming[normalizar_nombre(nombre_p)] = {
+                    "nombre": nombre_p,
+                    "peso_por_unidad_kg": Decimal(str(peso)),
+                    "unidades_por_batch": p.get("unidades_por_batch"),
+                    "unidades_por_pastel": p.get("unidades_por_pastel"),
+                }
+
+            existing = {
+                normalizar_nombre(x.nombre): x
+                for x in receta.presentaciones.all()
+            }
+
+            for key, data in incoming.items():
+                obj = existing.get(key)
+                if obj:
+                    changed_fields: List[str] = []
+                    if obj.nombre != data["nombre"]:
+                        obj.nombre = data["nombre"]
+                        changed_fields.append("nombre")
+                    if obj.peso_por_unidad_kg != data["peso_por_unidad_kg"]:
+                        obj.peso_por_unidad_kg = data["peso_por_unidad_kg"]
+                        changed_fields.append("peso_por_unidad_kg")
+                    if obj.unidades_por_batch != data["unidades_por_batch"]:
+                        obj.unidades_por_batch = data["unidades_por_batch"]
+                        changed_fields.append("unidades_por_batch")
+                    if obj.unidades_por_pastel != data["unidades_por_pastel"]:
+                        obj.unidades_por_pastel = data["unidades_por_pastel"]
+                        changed_fields.append("unidades_por_pastel")
+                    if not obj.activo:
+                        obj.activo = True
+                        changed_fields.append("activo")
+                    if changed_fields:
+                        obj.save(update_fields=changed_fields)
+                else:
+                    RecetaPresentacion.objects.create(
+                        receta=receta,
+                        nombre=data["nombre"],
+                        peso_por_unidad_kg=data["peso_por_unidad_kg"],
+                        unidades_por_batch=data["unidades_por_batch"],
+                        unidades_por_pastel=data["unidades_por_pastel"],
+                        activo=True,
+                    )
+
+            for key, obj in existing.items():
+                if key not in incoming:
+                    obj.delete()
+
+        try:
+            sync_receta_derivados(receta)
+        except Exception as e:
+            self.resultado.errores.append({"sheet": sheet_name, "error": f"sync derivados: {e}"})
 
 def json_dumps_sorted(obj: Any) -> str:
     import json
