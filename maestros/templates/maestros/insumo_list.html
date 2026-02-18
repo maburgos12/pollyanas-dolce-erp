@@ -9,14 +9,31 @@
 </nav>
 
 <section class="card">
+  <div class="kpi-grid mb-3">
+    <div class="kpi-card">
+      <div class="kpi-number">{{ total_insumos }}</div>
+      <div class="kpi-label">Insumos</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number is-success">{{ total_activos }}</div>
+      <div class="kpi-label">Activos</div>
+    </div>
+  </div>
+
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="page-section-title mb-0">Catálogo de Insumos</div>
     <a class="btn btn-primary" href="{% url 'maestros:insumo_create' %}">+ Nuevo insumo</a>
   </div>
 
-  <form method="get" class="d-flex gap-2 mb-3">
+  <form method="get" class="recipes-filters mb-3">
     <input class="form-control" name="q" value="{{ search_query }}" placeholder="Buscar por nombre o código...">
-    <button class="btn btn-outline-primary" type="submit">Buscar</button>
+    <select class="form-select" name="estado">
+      <option value="" {% if not estado %}selected{% endif %}>Todos</option>
+      <option value="activos" {% if estado == "activos" %}selected{% endif %}>Activos</option>
+      <option value="inactivos" {% if estado == "inactivos" %}selected{% endif %}>Inactivos</option>
+    </select>
+    <button class="btn btn-primary" type="submit">Filtrar</button>
+    <a class="btn btn-secondary" href="{% url 'maestros:insumo_list' %}">Limpiar</a>
   </form>
 
   <div class="table-responsive">
@@ -40,8 +57,10 @@
             <td>{% if i.proveedor_principal %}{{ i.proveedor_principal.nombre }}{% else %}-{% endif %}</td>
             <td>{% if i.activo %}<span class="badge bg-success">Activo</span>{% else %}<span class="badge bg-danger">Inactivo</span>{% endif %}</td>
             <td>
-              <a href="{% url 'maestros:insumo_update' i.id %}" class="btn btn-outline-primary">Editar</a>
-              <a href="{% url 'maestros:insumo_delete' i.id %}" class="btn btn-danger">Eliminar</a>
+              <div class="recipe-actions">
+                <a href="{% url 'maestros:insumo_update' i.id %}" class="btn btn-secondary">Editar</a>
+                <a href="{% url 'maestros:insumo_delete' i.id %}" class="btn btn-danger">Eliminar</a>
+              </div>
             </td>
           </tr>
         {% empty %}
@@ -50,5 +69,19 @@
       </tbody>
     </table>
   </div>
+
+  {% if is_paginated %}
+  <nav>
+    <ul class="pagination">
+      {% if page_obj.has_previous %}
+      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
+      {% endif %}
+      <li><span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span></li>
+      {% if page_obj.has_next %}
+      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+  {% endif %}
 </section>
 {% endblock %}

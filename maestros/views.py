@@ -16,13 +16,22 @@ class ProveedorListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         queryset = Proveedor.objects.all()
         search = self.request.GET.get('q')
+        estado = self.request.GET.get('estado')
         if search:
             queryset = queryset.filter(nombre__icontains=search)
+        if estado == "activos":
+            queryset = queryset.filter(activo=True)
+        elif estado == "inactivos":
+            queryset = queryset.filter(activo=False)
         return queryset.order_by('nombre')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        qs = self.get_queryset()
         context['search_query'] = self.request.GET.get('q', '')
+        context['estado'] = self.request.GET.get('estado', '')
+        context['total_proveedores'] = qs.count()
+        context['total_activos'] = qs.filter(activo=True).count()
         return context
 
 class ProveedorCreateView(LoginRequiredMixin, CreateView):
@@ -53,13 +62,22 @@ class InsumoListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         queryset = Insumo.objects.select_related('unidad_base', 'proveedor_principal')
         search = self.request.GET.get('q')
+        estado = self.request.GET.get('estado')
         if search:
             queryset = queryset.filter(Q(nombre__icontains=search) | Q(codigo__icontains=search))
+        if estado == "activos":
+            queryset = queryset.filter(activo=True)
+        elif estado == "inactivos":
+            queryset = queryset.filter(activo=False)
         return queryset.order_by('nombre')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        qs = self.get_queryset()
         context['search_query'] = self.request.GET.get('q', '')
+        context['estado'] = self.request.GET.get('estado', '')
+        context['total_insumos'] = qs.count()
+        context['total_activos'] = qs.filter(activo=True).count()
         return context
 
 class InsumoCreateView(LoginRequiredMixin, CreateView):
