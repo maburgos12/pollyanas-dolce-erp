@@ -1,4 +1,3 @@
-from collections import defaultdict
 from decimal import Decimal
 from typing import Dict, Any, List
 
@@ -9,8 +8,9 @@ from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
-from maestros.models import Insumo
+from maestros.models import Insumo, UnidadMedida
 from .models import Receta, LineaReceta
 
 @login_required
@@ -69,6 +69,120 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "total_sin_match": total_sin_match,
         },
     )
+
+
+@permission_required("recetas.change_receta", raise_exception=True)
+@require_POST
+def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
+    receta = get_object_or_404(Receta, pk=pk)
+    nombre = (request.POST.get("nombre") or "").strip()
+    sheet_name = (request.POST.get("sheet_name") or "").strip()
+    if not nombre:
+        messages.error(request, "El nombre de receta es obligatorio.")
+        return redirect("recetas:receta_detail", pk=pk)
+    receta.nombre = nombre[:250]
+    receta.sheet_name = sheet_name[:120]
+    receta.save()
+    messages.success(request, "Receta actualizada.")
+    return redirect("recetas:receta_detail", pk=pk)
+
+
+def _to_decimal_or_none(value: str | None) -> Decimal | None:
+    if value is None:
+        return None
+    raw = str(value).strip().replace(",", ".")
+    if raw == "":
+        return None
+    try:
+        return Decimal(raw)
+    except Exception:
+        return None
+
+
+def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dict[str, Any]:
+    return {
+        "receta": receta,
+        "linea": linea,
+        "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:800],
+        "unidades": UnidadMedida.objects.order_by("codigo"),
+    }
+
+
+@permission_required("recetas.change_lineareceta", raise_exception=True)
+def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
+    receta = get_object_or_404(Receta, pk=pk)
+    linea = get_object_or_404(LineaReceta, pk=linea_id, receta=receta)
+
+    if request.method == "POST":
+        insumo_id = request.POST.get("insumo_id")
+        unidad_id = request.POST.get("unidad_id")
+        linea.insumo_texto = (request.POST.get("insumo_texto") or "").strip()[:250]
+        linea.unidad_texto = (request.POST.get("unidad_texto") or "").strip()[:40]
+        linea.cantidad = _to_decimal_or_none(request.POST.get("cantidad"))
+        linea.costo_linea_excel = _to_decimal_or_none(request.POST.get("costo_linea_excel"))
+        linea.posicion = int(request.POST.get("posicion") or linea.posicion)
+        linea.insumo = Insumo.objects.filter(pk=insumo_id).first() if insumo_id else None
+        linea.unidad = UnidadMedida.objects.filter(pk=unidad_id).first() if unidad_id else None
+
+        if linea.insumo:
+            linea.match_status = LineaReceta.STATUS_AUTO
+            linea.match_method = "MANUAL"
+            linea.match_score = 100.0
+            linea.aprobado_por = request.user
+            linea.aprobado_en = timezone.now()
+        else:
+            linea.match_status = LineaReceta.STATUS_REJECTED
+            linea.match_method = LineaReceta.MATCH_NONE
+            linea.match_score = 0.0
+
+        linea.save()
+        messages.success(request, "Línea actualizada.")
+        return redirect("recetas:receta_detail", pk=pk)
+
+    return render(request, "recetas/linea_form.html", _linea_form_context(receta, linea))
+
+
+@permission_required("recetas.add_lineareceta", raise_exception=True)
+def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
+    receta = get_object_or_404(Receta, pk=pk)
+    if request.method == "POST":
+        insumo_id = request.POST.get("insumo_id")
+        unidad_id = request.POST.get("unidad_id")
+        posicion_default = (receta.lineas.order_by("-posicion").first().posicion + 1) if receta.lineas.exists() else 1
+        linea = LineaReceta(
+            receta=receta,
+            posicion=int(request.POST.get("posicion") or posicion_default),
+            insumo_texto=(request.POST.get("insumo_texto") or "").strip()[:250],
+            unidad_texto=(request.POST.get("unidad_texto") or "").strip()[:40],
+            cantidad=_to_decimal_or_none(request.POST.get("cantidad")),
+            costo_linea_excel=_to_decimal_or_none(request.POST.get("costo_linea_excel")),
+            insumo=Insumo.objects.filter(pk=insumo_id).first() if insumo_id else None,
+            unidad=UnidadMedida.objects.filter(pk=unidad_id).first() if unidad_id else None,
+        )
+        if linea.insumo:
+            linea.match_status = LineaReceta.STATUS_AUTO
+            linea.match_method = "MANUAL"
+            linea.match_score = 100.0
+            linea.aprobado_por = request.user
+            linea.aprobado_en = timezone.now()
+        else:
+            linea.match_status = LineaReceta.STATUS_REJECTED
+            linea.match_method = LineaReceta.MATCH_NONE
+            linea.match_score = 0.0
+        linea.save()
+        messages.success(request, "Línea agregada.")
+        return redirect("recetas:receta_detail", pk=pk)
+    return render(request, "recetas/linea_form.html", _linea_form_context(receta))
+
+
+@permission_required("recetas.delete_lineareceta", raise_exception=True)
+@require_POST
+def linea_delete(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
+    receta = get_object_or_404(Receta, pk=pk)
+    linea = get_object_or_404(LineaReceta, pk=linea_id, receta=receta)
+    linea.delete()
+    messages.success(request, "Línea eliminada.")
+    return redirect("recetas:receta_detail", pk=pk)
 
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def matching_pendientes(request: HttpRequest) -> HttpResponse:

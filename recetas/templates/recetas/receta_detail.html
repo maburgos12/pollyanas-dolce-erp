@@ -9,9 +9,18 @@
     </div>
     <div class="recipe-actions">
       <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Ver pendientes</a>
+      <a class="btn btn-primary" href="{% url 'recetas:linea_create' receta.id %}">Agregar línea</a>
       <a class="btn btn-outline-secondary" href="{% url 'recetas:recetas_list' %}">Volver</a>
     </div>
   </div>
+
+  <form method="post" action="{% url 'recetas:receta_update' receta.id %}" class="recipes-filters mb-3">
+    {% csrf_token %}
+    <input class="form-control" type="text" name="nombre" value="{{ receta.nombre }}" placeholder="Nombre de receta" required>
+    <input class="form-control" type="text" name="sheet_name" value="{{ receta.sheet_name }}" placeholder="Hoja / categoría">
+    <button class="btn btn-primary" type="submit">Guardar receta</button>
+    <div></div>
+  </form>
 
   <div class="kpi-grid mb-3">
     <div class="kpi-card">
@@ -40,6 +49,7 @@
         <th>Unidad</th>
         <th class="text-end">Costo (excel)</th>
         <th>Match</th>
+        <th>Acciones</th>
       </tr>
     </thead>
     <tbody>
@@ -60,6 +70,19 @@
             <span class="badge bg-danger">NO_MATCH</span>
           {% endif %}
         </td>
+        <td>
+          <div class="recipe-actions">
+            <a class="btn btn-secondary" href="{% url 'recetas:linea_edit' receta.id l.id %}">Editar</a>
+            <form method="post" action="{% url 'recetas:linea_delete' receta.id l.id %}" onsubmit="return confirm('¿Eliminar esta línea?');">
+              {% csrf_token %}
+              <button class="btn btn-danger" type="submit">Eliminar</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="8" class="text-muted">Esta receta no tiene líneas.</td>
       </tr>
       {% endfor %}
     </tbody>
