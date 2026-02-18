@@ -5,7 +5,9 @@
 {% block content %}
 <section class="card">
   <div class="card-header">Eliminar proveedor</div>
-  <p>¿Confirmas eliminar a <strong>{{ object.nombre }}</strong>?</p>
+  <div class="danger-box">
+    ¿Confirmas eliminar a <strong>{{ object.nombre }}</strong>? Esta acción no se puede deshacer.
+  </div>
   <form method="post">
     {% csrf_token %}
     <div class="quick-actions">

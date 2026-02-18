@@ -312,6 +312,46 @@ h4 {
   margin-bottom: 16px;
 }
 
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.form-group.full {
+  grid-column: 1 / -1;
+}
+
+.form-section {
+  margin-bottom: 14px;
+}
+
+.field-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--rosa-deep);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.field-check input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.danger-box {
+  border: 1px solid #f4c5ce;
+  background: #fff3f5;
+  color: #8f2340;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
 label,
 .form-label {
   display: block;
@@ -582,6 +622,10 @@ tr:hover,
   }
 
   .recipes-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid-2 {
     grid-template-columns: 1fr;
   }
 }
