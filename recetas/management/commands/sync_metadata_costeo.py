@@ -17,6 +17,12 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("filepath", type=str, help="Ruta al archivo COSTEO.xlsx")
+        parser.add_argument(
+            "--receta",
+            dest="receta",
+            default="",
+            help="Filtra por nombre de receta (contains, opcional).",
+        )
 
     def handle(self, *args, **options):
         filepath = str(options["filepath"])
@@ -26,6 +32,7 @@ class Command(BaseCommand):
 
         seed_unidades_basicas()
         importador = ImportadorCosteo(filepath)
+        receta_filter = (options.get("receta") or "").strip().lower()
         sheets = [
             s for s in importador.wb.sheetnames if normalizar_nombre(s) in {"insumos 1", "insumos 2"}
         ]
@@ -49,6 +56,9 @@ class Command(BaseCommand):
                     continue
 
                 receta_nombre = a.strip()
+                if receta_filter and receta_filter not in receta_nombre.lower():
+                    r += 1
+                    continue
                 header_row = r + 1
                 header_vals = [ws.cell(row=header_row, column=c).value for c in range(1, 10)]
                 col_ing = 1
