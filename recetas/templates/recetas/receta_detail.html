@@ -168,6 +168,7 @@
         <th>Etapa</th>
         <th>Ingrediente (texto)</th>
         <th>Insumo ligado</th>
+        <th>Origen</th>
         <th class="text-end">Cantidad</th>
         <th>Unidad</th>
         <th class="text-end">Costo estimado</th>
@@ -197,6 +198,17 @@
             <span class="badge bg-danger">Sin match</span>
           {% endif %}
         </td>
+        <td>
+          {% if l.insumo %}
+            {% if l.insumo.codigo|default:""|slice:":16" == "DERIVADO:RECETA:" %}
+              <span class="badge bg-success">Interno</span>
+            {% else %}
+              <span class="badge bg-secondary">Materia prima</span>
+            {% endif %}
+          {% else %}
+            -
+          {% endif %}
+        </td>
         <td class="text-end cell-qty">{{ l.cantidad }}</td>
         <td class="cell-unit">{{ l.unidad_texto }}</td>
         <td class="text-end cell-cost">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
@@ -221,13 +233,13 @@
       </tr>
       {% empty %}
       <tr>
-        <td colspan="10" class="text-muted">Esta receta no tiene líneas.</td>
+        <td colspan="11" class="text-muted">Esta receta no tiene líneas.</td>
       </tr>
       {% endfor %}
     </tbody>
     <tfoot>
       <tr>
-        <th colspan="7" class="text-end">Total</th>
+        <th colspan="8" class="text-end">Total</th>
         <th class="text-end">${{ total_costo_estimado|floatformat:2 }}</th>
         <th colspan="2"></th>
       </tr>

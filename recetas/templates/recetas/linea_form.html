@@ -64,10 +64,38 @@
         <label for="insumo_id">Insumo ligado</label>
         <select id="insumo_id" class="form-select" name="insumo_id">
           <option value="">Sin ligar</option>
-          {% for i in insumos %}
-          <option value="{{ i.id }}" {% if linea.insumo_id == i.id %}selected{% endif %}>{{ i.nombre }}</option>
-          {% endfor %}
+          <optgroup label="Insumos internos (producidos)">
+            {% for i in insumos %}
+              {% if i.codigo|default:""|slice:":16" == "DERIVADO:RECETA:" %}
+              <option
+                value="{{ i.id }}"
+                data-origin="INTERNO"
+                data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
+                data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
+                data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
+                {% if linea.insumo_id == i.id %}selected{% endif %}
+              >{{ i.nombre }} [Interno]</option>
+              {% endif %}
+            {% endfor %}
+          </optgroup>
+          <optgroup label="Materia prima">
+            {% for i in insumos %}
+              {% if i.codigo|default:""|slice:":16" != "DERIVADO:RECETA:" %}
+              <option
+                value="{{ i.id }}"
+                data-origin="MATERIA_PRIMA"
+                data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
+                data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
+                data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
+                {% if linea.insumo_id == i.id %}selected{% endif %}
+              >{{ i.nombre }} [Materia prima]</option>
+              {% endif %}
+            {% endfor %}
+          </optgroup>
         </select>
+        <div class="text-muted mt-1">
+          Al elegir insumo se autocompleta la unidad y se calcula costo estimado con el último costo registrado.
+        </div>
       </div>
       <div class="form-group">
         <label for="unidad_id">Unidad normalizada</label>
@@ -80,10 +108,87 @@
       </div>
     </div>
 
+    <div class="kpi-grid">
+      <div class="form-group">
+        <label for="insumo_origen">Origen de insumo</label>
+        <input id="insumo_origen" class="form-control" type="text" value="-" readonly>
+      </div>
+      <div class="form-group">
+        <label for="costo_unitario_preview">Costo unitario vigente</label>
+        <input id="costo_unitario_preview" class="form-control" type="text" value="-" readonly>
+      </div>
+      <div class="form-group">
+        <label for="costo_estimado_preview">Costo estimado (cantidad x costo unitario)</label>
+        <input id="costo_estimado_preview" class="form-control" type="text" value="-" readonly>
+      </div>
+    </div>
+
     <div class="recipe-actions">
       <button type="submit" class="btn btn-primary">Guardar</button>
       <a class="btn btn-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Cancelar</a>
     </div>
   </form>
 </div>
+
+<script>
+(function () {
+  const insumoSelect = document.getElementById("insumo_id");
+  const unidadSelect = document.getElementById("unidad_id");
+  const unidadTexto = document.getElementById("unidad_texto");
+  const cantidadInput = document.getElementById("cantidad");
+  const origenInput = document.getElementById("insumo_origen");
+  const costoUnitarioInput = document.getElementById("costo_unitario_preview");
+  const costoEstimadoInput = document.getElementById("costo_estimado_preview");
+
+  function toNum(v) {
+    if (v === null || v === undefined) return NaN;
+    const n = parseFloat(String(v).replace(",", "."));
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function formatMoney(n) {
+    return "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+  }
+
+  function recalc() {
+    const option = insumoSelect.options[insumoSelect.selectedIndex];
+    if (!option || !option.value) {
+      origenInput.value = "-";
+      costoUnitarioInput.value = "-";
+      costoEstimadoInput.value = "-";
+      return;
+    }
+    const origin = option.dataset.origin || "-";
+    const unitId = option.dataset.unidadId || "";
+    const unitCode = option.dataset.unidadCodigo || "";
+    const unitCost = toNum(option.dataset.costoUnitario || "");
+    const qty = toNum(cantidadInput.value);
+
+    origenInput.value = origin === "INTERNO" ? "Insumo interno (producido)" : "Materia prima";
+
+    if (unitId) {
+      unidadSelect.value = unitId;
+    }
+    if (unitCode) {
+      unidadTexto.value = unitCode;
+    }
+
+    if (Number.isFinite(unitCost) && unitCost > 0) {
+      costoUnitarioInput.value = formatMoney(unitCost);
+      if (Number.isFinite(qty) && qty > 0) {
+        costoEstimadoInput.value = formatMoney(unitCost * qty);
+      } else {
+        costoEstimadoInput.value = "-";
+      }
+    } else {
+      costoUnitarioInput.value = "-";
+      costoEstimadoInput.value = "-";
+    }
+  }
+
+  insumoSelect.addEventListener("change", recalc);
+  cantidadInput.addEventListener("input", recalc);
+  recalc();
+})();
+</script>
 {% endblock %}

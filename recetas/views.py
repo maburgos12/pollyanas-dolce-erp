@@ -3,7 +3,7 @@ from typing import Dict, Any, List
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.db.models import Count, Q
+from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -138,10 +138,29 @@ def _to_non_negative_decimal_or_none(value: str | None) -> Decimal | None:
 
 
 def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dict[str, Any]:
+    latest_cost_subquery = (
+        CostoInsumo.objects.filter(insumo=OuterRef("pk"))
+        .order_by("-fecha", "-id")
+        .values("costo_unitario")[:1]
+    )
+    insumos_qs = (
+        Insumo.objects.filter(activo=True)
+        .select_related("unidad_base")
+        .annotate(
+            latest_costo_unitario=Subquery(latest_cost_subquery),
+            origen_orden=Case(
+                When(codigo__startswith="DERIVADO:RECETA:", then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField(),
+            ),
+        )
+        .order_by("origen_orden", "nombre")
+    )
+    insumos = list(insumos_qs[:1200])
     return {
         "receta": receta,
         "linea": linea,
-        "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:800],
+        "insumos": insumos,
         "unidades": UnidadMedida.objects.order_by("codigo"),
         "linea_tipo_choices": LineaReceta.TIPO_CHOICES,
     }
@@ -179,6 +198,15 @@ def _switch_line_to_internal_cost(linea: LineaReceta) -> None:
 
     if linea.costo_unitario_snapshot is not None and linea.costo_unitario_snapshot > 0:
         linea.costo_linea_excel = None
+
+
+def _autofill_unidad_from_insumo(linea: LineaReceta) -> None:
+    if not linea.insumo:
+        return
+    if linea.unidad is None and linea.insumo.unidad_base is not None:
+        linea.unidad = linea.insumo.unidad_base
+    if linea.unidad and not (linea.unidad_texto or "").strip():
+        linea.unidad_texto = linea.unidad.codigo
 
 
 def _sync_derived_insumos_safe(request: HttpRequest, receta: Receta) -> None:
@@ -229,6 +257,7 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
             linea.match_method = LineaReceta.MATCH_NONE
             linea.match_score = 0.0
 
+        _autofill_unidad_from_insumo(linea)
         _switch_line_to_internal_cost(linea)
         linea.save()
         _sync_derived_insumos_safe(request, receta)
@@ -277,6 +306,7 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
             linea.match_method = LineaReceta.MATCH_NONE
             linea.match_score = 0.0
 
+        _autofill_unidad_from_insumo(linea)
         _switch_line_to_internal_cost(linea)
         linea.save()
         _sync_derived_insumos_safe(request, receta)
