@@ -30,6 +30,10 @@
       {% endfor %}
     </select>
     <input class="form-control" type="text" name="sheet_name" value="{{ receta.sheet_name }}" placeholder="Hoja / categoría">
+    <label class="field-check">
+      <input type="checkbox" name="usa_presentaciones" {% if receta.usa_presentaciones %}checked{% endif %}>
+      <span>Aplica presentaciones/tamaños (mini, chico, mediano, etc.)</span>
+    </label>
     <button class="btn btn-primary" type="submit">Guardar receta</button>
   </form>
 
@@ -66,52 +70,62 @@
   </div>
 </div>
 
-<div class="card">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h3 class="mb-0">Presentaciones / Tamaños</h3>
-    <a class="btn btn-primary" href="{% url 'recetas:presentacion_create' receta.id %}">Agregar presentación</a>
+{% if receta.usa_presentaciones %}
+  <div class="card">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h3 class="mb-0">Presentaciones / Tamaños</h3>
+      <a class="btn btn-primary" href="{% url 'recetas:presentacion_create' receta.id %}">Agregar presentación</a>
+    </div>
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Presentación</th>
+            <th class="text-end">Peso por unidad (kg)</th>
+            <th class="text-end">Unidades por batida</th>
+            <th class="text-end">Unidades por pastel</th>
+            <th class="text-end">Costo por unidad</th>
+            <th class="text-end">Costo por pastel</th>
+            <th>Estatus</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in presentaciones %}
+          <tr>
+            <td>{{ p.nombre }}</td>
+            <td class="text-end">{{ p.peso_por_unidad_kg }}</td>
+            <td class="text-end">{{ p.unidades_por_batch|default:"-" }}</td>
+            <td class="text-end">{{ p.unidades_por_pastel|default:"-" }}</td>
+            <td class="text-end">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td class="text-end">{% if p.costo_por_pastel_estimado %}${{ p.costo_por_pastel_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>
+            <td>
+              <div class="recipe-actions">
+                <a class="btn btn-secondary" href="{% url 'recetas:presentacion_edit' receta.id p.id %}">Editar</a>
+                <form method="post" action="{% url 'recetas:presentacion_delete' receta.id p.id %}" class="inline-form" onsubmit="return confirm('¿Eliminar presentación?');">
+                  {% csrf_token %}
+                  <button class="btn btn-danger" type="submit">Eliminar</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="8" class="text-muted">Sin presentaciones registradas.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
-  <div class="table-responsive">
-    <table class="table align-middle">
-      <thead>
-        <tr>
-          <th>Presentación</th>
-          <th class="text-end">Peso por unidad (kg)</th>
-          <th class="text-end">Unidades por batida</th>
-          <th class="text-end">Unidades por pastel</th>
-          <th class="text-end">Costo por unidad</th>
-          <th class="text-end">Costo por pastel</th>
-          <th>Estatus</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in presentaciones %}
-        <tr>
-          <td>{{ p.nombre }}</td>
-          <td class="text-end">{{ p.peso_por_unidad_kg }}</td>
-          <td class="text-end">{{ p.unidades_por_batch|default:"-" }}</td>
-          <td class="text-end">{{ p.unidades_por_pastel|default:"-" }}</td>
-          <td class="text-end">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
-          <td class="text-end">{% if p.costo_por_pastel_estimado %}${{ p.costo_por_pastel_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
-          <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>
-          <td>
-            <div class="recipe-actions">
-              <a class="btn btn-secondary" href="{% url 'recetas:presentacion_edit' receta.id p.id %}">Editar</a>
-              <form method="post" action="{% url 'recetas:presentacion_delete' receta.id p.id %}" class="inline-form" onsubmit="return confirm('¿Eliminar presentación?');">
-                {% csrf_token %}
-                <button class="btn btn-danger" type="submit">Eliminar</button>
-              </form>
-            </div>
-          </td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="8" class="text-muted">Sin presentaciones registradas.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+{% else %}
+  <div class="card">
+    <div class="card-header">Presentaciones / Tamaños (Opcional)</div>
+    <p class="text-muted mb-0">
+      Esta receta se costea por rendimiento (ejemplo: betún 10 kg). Si después necesitas moldes/tamaños, marca
+      “Aplica presentaciones” y guarda para habilitar esta sección.
+    </p>
   </div>
-</div>
+{% endif %}
 
 <div class="table-responsive card">
   <table class="table align-middle">

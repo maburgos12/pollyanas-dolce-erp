@@ -16,6 +16,7 @@ class Receta(models.Model):
     nombre = models.CharField(max_length=250)
     nombre_normalizado = models.CharField(max_length=260, db_index=True)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_PREPARACION, db_index=True)
+    usa_presentaciones = models.BooleanField(default=False)
     sheet_name = models.CharField(max_length=120, blank=True, default="")
     rendimiento_cantidad = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     rendimiento_unidad = models.ForeignKey(

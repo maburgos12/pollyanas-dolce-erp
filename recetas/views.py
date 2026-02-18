@@ -83,6 +83,7 @@ def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
     nombre = (request.POST.get("nombre") or "").strip()
     sheet_name = (request.POST.get("sheet_name") or "").strip()
     tipo = (request.POST.get("tipo") or Receta.TIPO_PREPARACION).strip()
+    usa_presentaciones = request.POST.get("usa_presentaciones") == "on"
     rendimiento_cantidad = _to_decimal_or_none(request.POST.get("rendimiento_cantidad"))
     rendimiento_unidad_id = request.POST.get("rendimiento_unidad_id")
 
@@ -96,6 +97,7 @@ def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
     receta.nombre = nombre[:250]
     receta.sheet_name = sheet_name[:120]
     receta.tipo = tipo
+    receta.usa_presentaciones = usa_presentaciones
     receta.rendimiento_cantidad = rendimiento_cantidad
     receta.rendimiento_unidad = UnidadMedida.objects.filter(pk=rendimiento_unidad_id).first() if rendimiento_unidad_id else None
     receta.save()
@@ -240,6 +242,9 @@ def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
                 "activo": activo,
             },
         )
+        if not receta.usa_presentaciones:
+            receta.usa_presentaciones = True
+            receta.save(update_fields=["usa_presentaciones"])
         messages.success(request, "Presentación guardada.")
         return redirect("recetas:receta_detail", pk=pk)
 
