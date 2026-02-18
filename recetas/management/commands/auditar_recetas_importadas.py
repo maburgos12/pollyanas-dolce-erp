@@ -14,10 +14,15 @@ class Command(BaseCommand):
         total_lineas = LineaReceta.objects.count()
         sin_match = LineaReceta.objects.filter(
             ~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION),
+            costo_linea_excel__isnull=True,
         ).filter(
             Q(insumo__isnull=True) | Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW) | Q(match_status=LineaReceta.STATUS_REJECTED)
         ).count()
-        sin_unidad = LineaReceta.objects.filter(Q(unidad__isnull=True) & Q(unidad_texto="")).count()
+        sin_unidad = LineaReceta.objects.filter(
+            Q(unidad__isnull=True),
+            Q(unidad_texto=""),
+            costo_linea_excel__isnull=True,
+        ).count()
         sin_cantidad = LineaReceta.objects.filter(
             ~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION),
             cantidad__isnull=True,
@@ -46,6 +51,8 @@ class Command(BaseCommand):
         for receta in problematic:
             count_bad = receta.lineas.filter(
                 ~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION),
+                costo_linea_excel__isnull=True,
+            ).filter(
                 Q(insumo__isnull=True)
                 | Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW)
                 | Q(match_status=LineaReceta.STATUS_REJECTED)
