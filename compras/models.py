@@ -63,6 +63,7 @@ class OrdenCompra(models.Model):
 
     folio = models.CharField(max_length=20, unique=True, blank=True)
     solicitud = models.ForeignKey(SolicitudCompra, null=True, blank=True, on_delete=models.SET_NULL)
+    referencia = models.CharField(max_length=160, blank=True, default="")
     proveedor = models.ForeignKey(Proveedor, on_delete=models.PROTECT)
     fecha_emision = models.DateField(default=timezone.localdate)
     fecha_entrega_estimada = models.DateField(null=True, blank=True)

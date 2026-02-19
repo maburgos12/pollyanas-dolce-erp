@@ -1,6 +1,6 @@
 from typing import Optional, Tuple
 from rapidfuzz import fuzz, process
-from maestros.models import Insumo
+from maestros.models import Insumo, InsumoAlias
 from .normalizacion import normalizar_nombre
 
 PRESENTATION_TOKENS = (
@@ -32,6 +32,11 @@ def match_insumo(nombre_origen: str, score_threshold: float = 75.0) -> Tuple[Opt
     if not nombre_norm:
         return (None, 0.0, "NO_MATCH")
     required_presentations = _extract_presentation_tokens(nombre_norm)
+
+    # 0) Alias exacto.
+    alias = InsumoAlias.objects.select_related("insumo").filter(nombre_normalizado=nombre_norm).first()
+    if alias and alias.insumo_id:
+        return (alias.insumo, 100.0, "ALIAS")
 
     # 1) Exact
     insumo = Insumo.objects.filter(nombre_normalizado=nombre_norm).first()

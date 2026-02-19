@@ -16,7 +16,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook
 
-from compras.models import SolicitudCompra
+from compras.models import OrdenCompra, SolicitudCompra
 from core.access import can_manage_compras
 from core.audit import log_event
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
@@ -831,6 +831,8 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
     explosion = _plan_explosion(plan)
     materias_primas = [row for row in explosion["insumos"] if row["origen"] != "Interno" and Decimal(str(row["cantidad"] or 0)) > 0]
     area_tag = f"PLAN_PRODUCCION:{plan.id}"
+    referencia_plan = f"PLAN_PRODUCCION:{plan.id}"
+    auto_create_oc = bool(request.POST.get("auto_create_oc"))
 
     # Idempotencia operativa: si vuelven a generar, reemplazamos únicamente borradores del plan.
     borradores_previos = SolicitudCompra.objects.filter(
@@ -842,15 +844,18 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
         borradores_previos.delete()
 
     creadas = 0
+    sin_proveedor = 0
+    oc_por_proveedor: dict[int, dict[str, Any]] = {}
     for row in materias_primas:
         insumo = Insumo.objects.filter(pk=row["insumo_id"]).first()
         if not insumo:
             continue
+        proveedor = insumo.proveedor_principal
         solicitud = SolicitudCompra.objects.create(
             area=area_tag,
             solicitante=request.user.username,
             insumo=insumo,
-            proveedor_sugerido=insumo.proveedor_principal,
+            proveedor_sugerido=proveedor,
             cantidad=Decimal(str(row["cantidad"])),
             fecha_requerida=plan.fecha_produccion,
             estatus=SolicitudCompra.STATUS_BORRADOR,
@@ -868,16 +873,69 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
         )
         creadas += 1
 
+        if auto_create_oc:
+            if not proveedor:
+                sin_proveedor += 1
+                continue
+            bucket = oc_por_proveedor.setdefault(
+                proveedor.id,
+                {
+                    "proveedor_id": proveedor.id,
+                    "proveedor_nombre": proveedor.nombre,
+                    "monto_estimado": Decimal("0"),
+                },
+            )
+            bucket["monto_estimado"] += Decimal(str(row.get("costo_total") or 0))
+
+    oc_prev_deleted = 0
+    oc_creadas = 0
+    if auto_create_oc:
+        ocs_previas = OrdenCompra.objects.filter(
+            referencia=referencia_plan,
+            estatus=OrdenCompra.STATUS_BORRADOR,
+            solicitud__isnull=True,
+        )
+        oc_prev_deleted = ocs_previas.count()
+        if oc_prev_deleted:
+            ocs_previas.delete()
+
+        for data in oc_por_proveedor.values():
+            orden = OrdenCompra.objects.create(
+                solicitud=None,
+                referencia=referencia_plan,
+                proveedor_id=data["proveedor_id"],
+                fecha_emision=timezone.localdate(),
+                fecha_entrega_estimada=plan.fecha_produccion,
+                monto_estimado=data["monto_estimado"],
+                estatus=OrdenCompra.STATUS_BORRADOR,
+            )
+            log_event(
+                request.user,
+                "CREATE",
+                "compras.OrdenCompra",
+                orden.id,
+                {
+                    "folio": orden.folio,
+                    "estatus": orden.estatus,
+                    "source_plan_id": plan.id,
+                    "source_plan_nombre": plan.nombre,
+                    "proveedor": data["proveedor_nombre"],
+                },
+            )
+            oc_creadas += 1
+
     if creadas == 0:
         messages.warning(
             request,
             "No se generaron solicitudes: el plan no tiene materia prima con cantidad válida.",
         )
     else:
-        messages.success(
-            request,
-            f"Solicitudes generadas: {creadas}. Borradores reemplazados del plan: {deleted_prev}.",
-        )
+        msg = f"Solicitudes generadas: {creadas}. Borradores reemplazados del plan: {deleted_prev}."
+        if auto_create_oc:
+            msg += f" OC borrador creadas (agrupadas por proveedor): {oc_creadas}. OCs borrador previas reemplazadas: {oc_prev_deleted}."
+            if sin_proveedor:
+                msg += f" Insumos sin proveedor principal: {sin_proveedor} (no entraron a OC automática)."
+        messages.success(request, msg)
     next_view = (request.POST.get("next_view") or "plan").strip().lower()
     compras_query = urlencode(
         {

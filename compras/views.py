@@ -396,6 +396,7 @@ def ordenes(request: HttpRequest) -> HttpResponse:
             orden = OrdenCompra.objects.create(
                 proveedor_id=proveedor_id,
                 solicitud=solicitud,
+                referencia=f"SOLICITUD:{solicitud.folio}",
                 fecha_emision=request.POST.get("fecha_emision") or None,
                 fecha_entrega_estimada=request.POST.get("fecha_entrega_estimada") or None,
                 monto_estimado=_to_decimal(request.POST.get("monto_estimado"), "0"),
@@ -588,6 +589,7 @@ def crear_orden_desde_solicitud(request: HttpRequest, pk: int) -> HttpResponse:
     orden = OrdenCompra.objects.create(
         solicitud=solicitud,
         proveedor=proveedor,
+        referencia=f"SOLICITUD:{solicitud.folio}",
         fecha_emision=timezone.localdate(),
         fecha_entrega_estimada=solicitud.fecha_requerida,
         monto_estimado=monto_estimado,

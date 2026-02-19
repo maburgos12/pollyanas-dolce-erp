@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
-from maestros.models import Insumo
+from maestros.models import Insumo, InsumoAlias
 from recetas.utils.normalizacion import normalizar_nombre
 from inventario.utils.almacen_import import (
     ENTRADAS_FILE,
@@ -92,7 +92,7 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
         raise PermissionDenied("No tienes permisos para ver Inventario.")
 
     summary = None
-    pendientes_preview = []
+    pendientes_preview = list(request.session.get("inventario_pending_preview", []))[:80]
     warnings: list[str] = []
     drive_info = None
 
@@ -101,6 +101,48 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
             raise PermissionDenied("No tienes permisos para importar archivos de almacén.")
 
         action = (request.POST.get("action") or "upload").strip().lower()
+        if action == "create_alias":
+            alias_name = (request.POST.get("alias_name") or "").strip()
+            insumo_id = (request.POST.get("insumo_id") or "").strip()
+            if not alias_name or not insumo_id:
+                messages.error(request, "Debes indicar nombre origen e insumo para crear el alias.")
+                return redirect("inventario:importar_archivos")
+
+            insumo = Insumo.objects.filter(pk=insumo_id).first()
+            if not insumo:
+                messages.error(request, "Insumo inválido para crear alias.")
+                return redirect("inventario:importar_archivos")
+
+            alias_norm = normalizar_nombre(alias_name)
+            if not alias_norm:
+                messages.error(request, "El nombre origen no es válido.")
+                return redirect("inventario:importar_archivos")
+
+            obj, created = InsumoAlias.objects.get_or_create(
+                nombre_normalizado=alias_norm,
+                defaults={
+                    "nombre": alias_name[:250],
+                    "insumo": insumo,
+                },
+            )
+            if not created and (obj.insumo_id != insumo.id or obj.nombre != alias_name[:250]):
+                obj.insumo = insumo
+                obj.nombre = alias_name[:250]
+                obj.save(update_fields=["insumo", "nombre"])
+
+            if pending := request.session.get("inventario_pending_preview"):
+                request.session["inventario_pending_preview"] = [
+                    row
+                    for row in pending
+                    if normalizar_nombre(str(row.get("nombre_origen") or "")) != alias_norm
+                ]
+
+            messages.success(
+                request,
+                f"Alias guardado: '{alias_name}' -> {insumo.nombre}. Ejecuta de nuevo la importación para aplicar el cambio.",
+            )
+            return redirect("inventario:importar_archivos")
+
         selected_sources = set(request.POST.getlist("sources")) or set(SOURCE_TO_FILENAME.keys())
         selected_sources = selected_sources.intersection(set(SOURCE_TO_FILENAME.keys()))
         if not selected_sources:
@@ -209,6 +251,7 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
             if summary.unmatched:
                 messages.warning(request, f"Quedaron {summary.unmatched} filas sin match.")
             pendientes_preview = summary.pendientes[:80]
+            request.session["inventario_pending_preview"] = summary.pendientes[:200]
             log_sync_run(
                 source=run_source,
                 status=AlmacenSyncRun.STATUS_OK,
@@ -246,6 +289,7 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
         "current_month": timezone.localdate().strftime("%Y-%m"),
         "drive_info": drive_info,
         "latest_runs": AlmacenSyncRun.objects.select_related("triggered_by").all()[:10],
+        "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:800],
     }
     return render(request, "inventario/importar_archivos.html", context)
 

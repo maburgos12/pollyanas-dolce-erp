@@ -82,6 +82,10 @@
     {% if ui_access.can_manage_compras %}
     <form method="post" action="{% url 'recetas:plan_produccion_generar_solicitudes' plan_actual.id %}" class="inline-form" onsubmit="return confirm('Se generarán solicitudes de compra en borrador para materia prima de este plan. ¿Continuar?');">
       {% csrf_token %}
+      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="auto_create_oc" value="1" checked>
+        <span>Crear OC borrador por proveedor</span>
+      </label>
       <button class="btn btn-success" type="submit" name="next_view" value="plan">Generar solicitudes en Compras</button>
       <button class="btn btn-secondary" type="submit" name="next_view" value="compras">Generar y abrir Compras</button>
       <button class="btn btn-primary" type="submit" name="next_view" value="compras_print">Generar e imprimir solicitud compras</button>

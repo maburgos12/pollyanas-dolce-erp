@@ -211,6 +211,7 @@
           <th>Nombre origen</th>
           <th>Sugerencia</th>
           <th class="text-end">Score</th>
+          <th>Unificar</th>
         </tr>
       </thead>
       <tbody>
@@ -221,11 +222,54 @@
           <td>{{ p.nombre_origen }}</td>
           <td>{{ p.sugerencia|default:"-" }}</td>
           <td class="text-end">{{ p.score }}</td>
+          <td>
+            <button type="button" class="btn btn-secondary use-alias-name" data-name="{{ p.nombre_origen|escape }}">Usar en alias</button>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  {% if can_manage_inventario %}
+  <hr>
+  <div class="card-header">Crear Alias Manual (Unificar Nombre)</div>
+  <p class="muted">Usa este formulario para decirle al sistema que un nombre de almacén corresponde a un insumo oficial.</p>
+  <form method="post" class="form-grid-2">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create_alias">
+    <div class="form-group">
+      <label>Nombre origen (almacén)</label>
+      <input id="alias_name_input" class="input-field" type="text" name="alias_name" placeholder="Ej. Harina pastelera 25kg" required>
+    </div>
+    <div class="form-group">
+      <label>Insumo oficial</label>
+      <select class="input-field" name="insumo_id" required>
+        <option value="">Selecciona insumo...</option>
+        {% for i in insumo_alias_targets %}
+        <option value="{{ i.id }}">{{ i.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="grid-column:1/-1; display:flex; justify-content:flex-end;">
+      <button class="btn btn-primary" type="submit">Guardar alias</button>
+    </div>
+  </form>
+  {% endif %}
 </section>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    const aliasInput = document.getElementById("alias_name_input");
+    if (!aliasInput) return;
+    document.querySelectorAll(".use-alias-name").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        aliasInput.value = btn.dataset.name || "";
+        aliasInput.focus();
+      });
+    });
+  })();
+</script>
 {% endblock %}

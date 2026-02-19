@@ -43,6 +43,7 @@
         <tr>
           <th>OC</th>
           <th>Solicitud</th>
+          <th>Referencia</th>
           <th>Proveedor</th>
           <th>Emisión</th>
           <th>Entrega estimada</th>
@@ -56,6 +57,7 @@
         <tr>
           <td>{{ o.folio }}</td>
           <td>{% if o.solicitud %}{{ o.solicitud.folio }}{% else %}-{% endif %}</td>
+          <td>{{ o.referencia|default:"-" }}</td>
           <td>{{ o.proveedor.nombre }}</td>
           <td>{{ o.fecha_emision }}</td>
           <td>{{ o.fecha_entrega_estimada|default:"-" }}</td>
@@ -87,7 +89,7 @@
           {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="8" class="text-muted">Sin órdenes registradas.</td></tr>
+        <tr><td colspan="{% if can_manage_compras %}10{% else %}9{% endif %}" class="text-muted">Sin órdenes registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
