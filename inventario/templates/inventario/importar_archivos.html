@@ -8,6 +8,7 @@
   <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
   <a class="module-tab" href="{% url 'inventario:alertas' %}">Alertas</a>
+  <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Aliases</a>
   <a class="module-tab active" href="{% url 'inventario:importar_archivos' %}">Carga Almacén</a>
 </nav>
 
@@ -112,6 +113,9 @@
 
 <section class="card">
   <div class="card-header">Nombres Esperados</div>
+  <div class="toolbar mb-2">
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Abrir catálogo de aliases</a>
+  </div>
   <ul>
     {% for n in expected_names %}
     <li><code>{{ n }}</code></li>

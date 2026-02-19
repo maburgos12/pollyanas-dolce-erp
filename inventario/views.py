@@ -4,14 +4,18 @@ import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import PermissionDenied
+from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from core.access import can_manage_inventario, can_view_inventario
@@ -86,6 +90,36 @@ def _save_uploaded_file(target_dir: str, target_name: str, uploaded: UploadedFil
             out.write(chunk)
 
 
+def _upsert_alias(alias_name: str, insumo: Insumo) -> tuple[bool, str, str]:
+    alias_norm = normalizar_nombre(alias_name)
+    if not alias_norm:
+        return False, "", "El nombre origen no es válido."
+
+    obj, created = InsumoAlias.objects.get_or_create(
+        nombre_normalizado=alias_norm,
+        defaults={
+            "nombre": alias_name[:250],
+            "insumo": insumo,
+        },
+    )
+    if not created and (obj.insumo_id != insumo.id or obj.nombre != alias_name[:250]):
+        obj.insumo = insumo
+        obj.nombre = alias_name[:250]
+        obj.save(update_fields=["insumo", "nombre"])
+    return True, alias_norm, "creado" if created else "actualizado"
+
+
+def _remove_pending_name_from_session(request: HttpRequest, alias_norm: str) -> None:
+    pending = request.session.get("inventario_pending_preview")
+    if not pending:
+        return
+    request.session["inventario_pending_preview"] = [
+        row
+        for row in pending
+        if normalizar_nombre(str(row.get("nombre_origen") or "")) != alias_norm
+    ]
+
+
 @login_required
 def importar_archivos(request: HttpRequest) -> HttpResponse:
     if not can_view_inventario(request.user):
@@ -113,34 +147,13 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "Insumo inválido para crear alias.")
                 return redirect("inventario:importar_archivos")
 
-            alias_norm = normalizar_nombre(alias_name)
-            if not alias_norm:
+            ok, alias_norm, action_label = _upsert_alias(alias_name, insumo)
+            if not ok:
                 messages.error(request, "El nombre origen no es válido.")
                 return redirect("inventario:importar_archivos")
 
-            obj, created = InsumoAlias.objects.get_or_create(
-                nombre_normalizado=alias_norm,
-                defaults={
-                    "nombre": alias_name[:250],
-                    "insumo": insumo,
-                },
-            )
-            if not created and (obj.insumo_id != insumo.id or obj.nombre != alias_name[:250]):
-                obj.insumo = insumo
-                obj.nombre = alias_name[:250]
-                obj.save(update_fields=["insumo", "nombre"])
-
-            if pending := request.session.get("inventario_pending_preview"):
-                request.session["inventario_pending_preview"] = [
-                    row
-                    for row in pending
-                    if normalizar_nombre(str(row.get("nombre_origen") or "")) != alias_norm
-                ]
-
-            messages.success(
-                request,
-                f"Alias guardado: '{alias_name}' -> {insumo.nombre}. Ejecuta de nuevo la importación para aplicar el cambio.",
-            )
+            _remove_pending_name_from_session(request, alias_norm)
+            messages.success(request, f"Alias {action_label}: '{alias_name}' -> {insumo.nombre}. Ejecuta de nuevo la importación para aplicar el cambio.")
             return redirect("inventario:importar_archivos")
 
         selected_sources = set(request.POST.getlist("sources")) or set(SOURCE_TO_FILENAME.keys())
@@ -292,6 +305,89 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
         "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:800],
     }
     return render(request, "inventario/importar_archivos.html", context)
+
+
+@login_required
+def aliases_catalog(request: HttpRequest) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+
+    if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied("No tienes permisos para administrar aliases.")
+
+        action = (request.POST.get("action") or "").strip().lower()
+        next_q = (request.POST.get("next_q") or "").strip()
+
+        if action == "create":
+            alias_name = (request.POST.get("alias_name") or "").strip()
+            insumo_id = (request.POST.get("insumo_id") or "").strip()
+            if not alias_name or not insumo_id:
+                messages.error(request, "Debes indicar nombre origen e insumo.")
+            else:
+                insumo = Insumo.objects.filter(pk=insumo_id).first()
+                if not insumo:
+                    messages.error(request, "Insumo inválido.")
+                else:
+                    ok, alias_norm, action_label = _upsert_alias(alias_name, insumo)
+                    if ok:
+                        _remove_pending_name_from_session(request, alias_norm)
+                        messages.success(request, f"Alias {action_label}: '{alias_name}' -> {insumo.nombre}.")
+                    else:
+                        messages.error(request, "El nombre origen no es válido.")
+
+        elif action == "bulk_reassign":
+            insumo_id = (request.POST.get("insumo_id") or "").strip()
+            alias_ids = [a for a in request.POST.getlist("alias_ids") if a.isdigit()]
+            if not insumo_id or not alias_ids:
+                messages.error(request, "Selecciona aliases e insumo destino para la reasignación masiva.")
+            else:
+                insumo = Insumo.objects.filter(pk=insumo_id).first()
+                if not insumo:
+                    messages.error(request, "Insumo destino inválido.")
+                else:
+                    updated = InsumoAlias.objects.filter(id__in=alias_ids).exclude(insumo=insumo).update(insumo=insumo)
+                    messages.success(request, f"Aliases reasignados a {insumo.nombre}: {updated}.")
+
+        elif action == "delete":
+            alias_id = (request.POST.get("alias_id") or "").strip()
+            alias = InsumoAlias.objects.filter(pk=alias_id).first()
+            if not alias:
+                messages.error(request, "Alias no encontrado.")
+            else:
+                alias_display = alias.nombre
+                alias.delete()
+                messages.success(request, f"Alias eliminado: {alias_display}.")
+
+        elif action == "clear_pending":
+            request.session["inventario_pending_preview"] = []
+            messages.success(request, "Pendientes en pantalla limpiados.")
+
+        base_url = reverse("inventario:aliases_catalog")
+        if next_q:
+            return redirect(f"{base_url}?{urlencode({'q': next_q})}")
+        return redirect(base_url)
+
+    q = (request.GET.get("q") or "").strip()
+    aliases_qs = InsumoAlias.objects.select_related("insumo").order_by("nombre")
+    if q:
+        q_norm = normalizar_nombre(q)
+        aliases_qs = aliases_qs.filter(
+            Q(nombre__icontains=q)
+            | Q(nombre_normalizado__icontains=q_norm)
+            | Q(insumo__nombre__icontains=q)
+        )
+    paginator = Paginator(aliases_qs, 100)
+    page = paginator.get_page(request.GET.get("page"))
+
+    context = {
+        "q": q,
+        "page": page,
+        "pending_preview": list(request.session.get("inventario_pending_preview", []))[:120],
+        "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:1200],
+        "can_manage_inventario": can_manage_inventario(request.user),
+    }
+    return render(request, "inventario/aliases_catalog.html", context)
 
 
 @login_required
