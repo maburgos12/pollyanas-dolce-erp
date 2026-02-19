@@ -185,6 +185,7 @@
         <tr>
           <th>Insumo</th>
           <th>Origen</th>
+          <th>Proveedor sugerido</th>
           <th class="text-end">Cantidad requerida</th>
           <th>Unidad</th>
           <th class="text-end">Costo unitario</th>
@@ -196,18 +197,19 @@
         <tr>
           <td>{{ row.nombre }}</td>
           <td>{% if row.origen == "Interno" %}<span class="badge badge-verde">Interno</span>{% else %}<span class="badge badge-amarillo">Materia prima</span>{% endif %}</td>
+          <td>{{ row.proveedor_sugerido|default:"-" }}</td>
           <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
           <td>{{ row.unidad }}</td>
           <td class="text-end">${{ row.costo_unitario|floatformat:2 }}</td>
           <td class="text-end">${{ row.costo_total|floatformat:2 }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="6" class="text-muted">No hay insumos calculados.</td></tr>
+        <tr><td colspan="7" class="text-muted">No hay insumos calculados.</td></tr>
         {% endfor %}
       </tbody>
       <tfoot>
         <tr>
-          <th colspan="5" class="text-end">Costo total plan</th>
+          <th colspan="6" class="text-end">Costo total plan</th>
           <th class="text-end">${{ explosion.costo_total|floatformat:2 }}</th>
         </tr>
       </tfoot>

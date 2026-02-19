@@ -176,6 +176,7 @@
         <tr>
           <th>#</th>
           <th>Insumo</th>
+          <th>Proveedor sugerido</th>
           <th class="text-end">Cantidad</th>
           <th>Unidad</th>
           <th class="text-end">Costo unitario</th>
@@ -187,6 +188,7 @@
         <tr>
           <td>{{ forloop.counter }}</td>
           <td>{{ row.nombre }}</td>
+          <td>{{ row.proveedor_sugerido|default:"-" }}</td>
           <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
           <td>{{ row.unidad }}</td>
           <td class="text-end">${{ row.costo_unitario|floatformat:2 }}</td>
@@ -194,7 +196,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="6">No hay materia prima pendiente para este plan.</td>
+          <td colspan="7">No hay materia prima pendiente para este plan.</td>
         </tr>
         {% endfor %}
       </tbody>

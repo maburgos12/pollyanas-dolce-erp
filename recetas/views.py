@@ -482,7 +482,11 @@ def _linea_unit_cost(linea: LineaReceta, unit_cost_cache: Dict[int, Decimal | No
 def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
     items = (
         plan.items.select_related("receta")
-        .prefetch_related("receta__lineas__insumo__unidad_base", "receta__lineas__unidad")
+        .prefetch_related(
+            "receta__lineas__insumo__unidad_base",
+            "receta__lineas__insumo__proveedor_principal",
+            "receta__lineas__unidad",
+        )
         .order_by("id")
     )
 
@@ -525,10 +529,14 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
             if key not in insumos_map:
                 insumo_obj = linea.insumo
                 origen = "Interno" if (insumo_obj.codigo or "").startswith("DERIVADO:RECETA:") else "Materia prima"
+                proveedor_sugerido = "-"
+                if insumo_obj.proveedor_principal_id and insumo_obj.proveedor_principal:
+                    proveedor_sugerido = insumo_obj.proveedor_principal.nombre
                 insumos_map[key] = {
                     "insumo_id": key,
                     "nombre": insumo_obj.nombre,
                     "origen": origen,
+                    "proveedor_sugerido": proveedor_sugerido,
                     "unidad": unit_code,
                     "cantidad": Decimal("0"),
                     "costo_total": Decimal("0"),
@@ -586,12 +594,13 @@ def _export_plan_csv(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpRes
 
     writer.writerow([])
     writer.writerow(["INSUMOS CONSOLIDADOS"])
-    writer.writerow(["Insumo", "Origen", "Cantidad requerida", "Unidad", "Costo unitario", "Costo total"])
+    writer.writerow(["Insumo", "Origen", "Proveedor sugerido", "Cantidad requerida", "Unidad", "Costo unitario", "Costo total"])
     for row in explosion["insumos"]:
         writer.writerow(
             [
                 row["nombre"],
                 row["origen"],
+                row.get("proveedor_sugerido") or "-",
                 f"{Decimal(str(row['cantidad'])):.3f}",
                 row["unidad"],
                 f"{Decimal(str(row['costo_unitario'])):.2f}",
@@ -626,12 +635,13 @@ def _export_plan_xlsx(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpRe
         )
 
     ws_insumos = wb.create_sheet("Insumos")
-    ws_insumos.append(["Insumo", "Origen", "Cantidad requerida", "Unidad", "Costo unitario", "Costo total"])
+    ws_insumos.append(["Insumo", "Origen", "Proveedor sugerido", "Cantidad requerida", "Unidad", "Costo unitario", "Costo total"])
     for row in explosion["insumos"]:
         ws_insumos.append(
             [
                 row["nombre"],
                 row["origen"],
+                row.get("proveedor_sugerido") or "-",
                 float(row["cantidad"] or 0),
                 row["unidad"],
                 float(row["costo_unitario"] or 0),
