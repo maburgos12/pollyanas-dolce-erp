@@ -3,6 +3,7 @@ from io import BytesIO
 from datetime import date
 from decimal import Decimal
 from typing import Dict, Any, List
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
@@ -877,6 +878,18 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
             request,
             f"Solicitudes generadas: {creadas}. Borradores reemplazados del plan: {deleted_prev}.",
         )
+    next_view = (request.POST.get("next_view") or "plan").strip().lower()
+    compras_query = urlencode(
+        {
+            "source": "plan",
+            "plan_id": str(plan.id),
+            "reabasto": "all",
+        }
+    )
+    if next_view == "compras":
+        return redirect(f"{reverse('compras:solicitudes')}?{compras_query}")
+    if next_view == "compras_print":
+        return redirect(f"{reverse('compras:solicitudes_print')}?{compras_query}")
     return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
 
 
