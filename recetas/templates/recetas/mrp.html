@@ -2,6 +2,9 @@
 {% block title %}MRP{% endblock %}
 {% block content %}
 <h3 class="mb-3">MRP - Explosión de insumos</h3>
+<div class="toolbar">
+  <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion' %}">Abrir Plan de Producción</a>
+</div>
 
 <form method="post" class="row g-2 align-items-end">
   {% csrf_token %}

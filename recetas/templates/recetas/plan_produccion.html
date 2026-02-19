@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}Plan de Producción{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">Plan de Producción</div>
+  <p class="muted mb-3">Define qué productos vas a fabricar y el sistema calcula automáticamente insumos requeridos y costo total estimado.</p>
+
+  <form class="form-grid-2" method="post" action="{% url 'recetas:plan_produccion_create' %}">
+    {% csrf_token %}
+    <div class="form-group">
+      <label class="form-label">Nombre del plan</label>
+      <input class="form-control" name="nombre" required placeholder="Ej. Producción Semana 8">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fecha producción</label>
+      <input class="form-control" type="date" name="fecha_produccion">
+    </div>
+    <div class="form-group full">
+      <label class="form-label">Notas</label>
+      <input class="form-control" name="notas" placeholder="Opcional">
+    </div>
+    <div class="form-group full">
+      <button class="btn btn-primary" type="submit">Crear plan</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header">Planes recientes</div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Plan</th>
+          <th>Fecha</th>
+          <th class="text-end">Renglones</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for plan in planes %}
+        <tr>
+          <td>
+            <a href="{% url 'recetas:plan_produccion' %}?plan_id={{ plan.id }}">{{ plan.nombre }}</a>
+            {% if plan_actual and plan_actual.id == plan.id %}
+              <span class="badge badge-verde">ACTIVO</span>
+            {% endif %}
+          </td>
+          <td>{{ plan.fecha_produccion }}</td>
+          <td class="text-end">{{ plan.items.count }}</td>
+          <td>
+            <form method="post" action="{% url 'recetas:plan_produccion_delete' plan.id %}" class="inline-form" onsubmit="return confirm('¿Eliminar este plan y todos sus renglones?');">
+              {% csrf_token %}
+              <button class="btn btn-danger" type="submit">Eliminar</button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" class="text-muted">No hay planes de producción registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if plan_actual %}
+<div class="card">
+  <div class="d-flex justify-content-between align-items-center">
+    <div>
+      <div class="card-header mb-0">{{ plan_actual.nombre }}</div>
+      <div class="muted">Fecha: {{ plan_actual.fecha_produccion }}{% if plan_actual.notas %} · {{ plan_actual.notas }}{% endif %}</div>
+    </div>
+    <div>
+      <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion' %}">Limpiar selección</a>
+    </div>
+  </div>
+
+  <hr>
+  <form class="form-grid-auto" method="post" action="{% url 'recetas:plan_produccion_item_create' plan_actual.id %}">
+    {% csrf_token %}
+    <div class="form-group">
+      <label class="form-label">Receta / Producto</label>
+      <select class="form-select" name="receta_id" required>
+        <option value="">Selecciona...</option>
+        {% for r in recetas_disponibles %}
+          <option value="{{ r.id }}">{{ r.nombre }} {% if r.tipo == "PRODUCTO_FINAL" %}(Producto final){% else %}(Preparación){% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Cantidad a producir</label>
+      <input class="form-control" type="number" step="0.001" min="0.001" name="cantidad" value="1" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notas</label>
+      <input class="form-control" name="notas" placeholder="Opcional">
+    </div>
+    <div class="form-group">
+      <button class="btn btn-primary" type="submit">Agregar al plan</button>
+    </div>
+  </form>
+</div>
+
+{% if explosion %}
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-number">{{ explosion.items_detalle|length }}</div>
+    <div class="kpi-label">Renglones del plan</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number">{{ explosion.insumos|length }}</div>
+    <div class="kpi-label">Insumos requeridos</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number is-danger">${{ explosion.costo_total|floatformat:2 }}</div>
+    <div class="kpi-label">Costo total estimado</div>
+  </div>
+</div>
+
+{% if explosion.lineas_sin_cantidad %}
+<div class="alert alert-info">
+  <strong>Líneas sin cantidad:</strong> {{ explosion.lineas_sin_cantidad|length }}.
+  Ajusta esas recetas para que entren al costeo.
+</div>
+{% endif %}
+{% if explosion.lineas_sin_costo_unitario %}
+<div class="alert alert-info">
+  <strong>Líneas sin costo unitario:</strong> {{ explosion.lineas_sin_costo_unitario|length }}.
+  Asigna costo al insumo para calcular su impacto.
+</div>
+{% endif %}
+{% if explosion.lineas_sin_match %}
+<div class="alert alert-info">
+  <strong>Líneas sin match:</strong> {{ explosion.lineas_sin_match }}.
+  Revisa matching en recetas para explosión completa.
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header">Productos en el plan</div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Receta</th>
+          <th class="text-end">Cantidad</th>
+          <th>Notas</th>
+          <th class="text-end">Costo estimado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in explosion.items_detalle %}
+        <tr>
+          <td>{{ row.receta.nombre }}</td>
+          <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
+          <td>{{ row.notas|default:"-" }}</td>
+          <td class="text-end">${{ row.costo_estimado|floatformat:2 }}</td>
+          <td>
+            <form method="post" action="{% url 'recetas:plan_produccion_item_delete' plan_actual.id row.id %}" class="inline-form">
+              {% csrf_token %}
+              <button class="btn btn-danger" type="submit">Quitar</button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-muted">Sin renglones en este plan.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Insumos requeridos (consolidado)</div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Insumo</th>
+          <th>Origen</th>
+          <th class="text-end">Cantidad requerida</th>
+          <th>Unidad</th>
+          <th class="text-end">Costo unitario</th>
+          <th class="text-end">Costo total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in explosion.insumos %}
+        <tr>
+          <td>{{ row.nombre }}</td>
+          <td>{% if row.origen == "Interno" %}<span class="badge badge-verde">Interno</span>{% else %}<span class="badge badge-amarillo">Materia prima</span>{% endif %}</td>
+          <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
+          <td>{{ row.unidad }}</td>
+          <td class="text-end">${{ row.costo_unitario|floatformat:2 }}</td>
+          <td class="text-end">${{ row.costo_total|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="text-muted">No hay insumos calculados.</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th colspan="5" class="text-end">Costo total plan</th>
+          <th class="text-end">${{ explosion.costo_total|floatformat:2 }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

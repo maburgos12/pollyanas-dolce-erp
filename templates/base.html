@@ -25,7 +25,8 @@
                     <li><a href="{% url 'maestros:proveedor_list' %}" class="{% if '/maestros/' in request.path %}active{% endif %}"><span>🗂️</span><span>Maestros</span></a></li>
                     {% endif %}
                     {% if ui_access.can_view_recetas %}
-                    <li><a href="{% url 'recetas:recetas_list' %}" class="{% if '/recetas/' in request.path %}active{% endif %}"><span>🧁</span><span>Recetas</span></a></li>
+                    <li><a href="{% url 'recetas:recetas_list' %}" class="{% if '/recetas/' in request.path and '/recetas/plan-produccion/' not in request.path %}active{% endif %}"><span>🧁</span><span>Recetas</span></a></li>
+                    <li><a href="{% url 'recetas:plan_produccion' %}" class="{% if '/recetas/plan-produccion/' in request.path %}active{% endif %}"><span>🗓️</span><span>Plan Producción</span></a></li>
                     {% endif %}
                     {% if ui_access.can_view_compras %}
                     <li><a href="{% url 'compras:solicitudes' %}" class="{% if '/compras/' in request.path %}active{% endif %}"><span>🛒</span><span>Compras</span></a></li>

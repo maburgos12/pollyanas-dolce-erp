@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Receta, LineaReceta
+from .models import Receta, LineaReceta, PlanProduccion, PlanProduccionItem
 
 class LineaRecetaInline(admin.TabularInline):
     model = LineaReceta
@@ -19,3 +19,24 @@ class LineaRecetaAdmin(admin.ModelAdmin):
     search_fields = ("receta__nombre", "insumo_texto", "insumo__nombre")
     list_filter = ("match_status", "match_method")
     autocomplete_fields = ("insumo",)
+
+
+class PlanProduccionItemInline(admin.TabularInline):
+    model = PlanProduccionItem
+    extra = 0
+    autocomplete_fields = ("receta",)
+
+
+@admin.register(PlanProduccion)
+class PlanProduccionAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "fecha_produccion", "creado_por", "creado_en")
+    search_fields = ("nombre",)
+    list_filter = ("fecha_produccion",)
+    inlines = [PlanProduccionItemInline]
+
+
+@admin.register(PlanProduccionItem)
+class PlanProduccionItemAdmin(admin.ModelAdmin):
+    list_display = ("plan", "receta", "cantidad", "creado_en")
+    search_fields = ("plan__nombre", "receta__nombre")
+    autocomplete_fields = ("plan", "receta")

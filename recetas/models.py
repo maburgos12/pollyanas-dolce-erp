@@ -188,3 +188,54 @@ class RecetaPresentacion(models.Model):
 
     def __str__(self) -> str:
         return f"{self.receta.nombre} - {self.nombre}"
+
+
+class PlanProduccion(models.Model):
+    nombre = models.CharField(max_length=140)
+    fecha_produccion = models.DateField(default=timezone.localdate)
+    notas = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="planes_produccion_creados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Plan de producción"
+        verbose_name_plural = "Planes de producción"
+        ordering = ["-fecha_produccion", "-id"]
+
+    @property
+    def costo_total_estimado(self) -> Decimal:
+        total = Decimal("0")
+        for item in self.items.select_related("receta").all():
+            total += item.costo_total_estimado
+        return total
+
+    def __str__(self) -> str:
+        return f"{self.nombre} ({self.fecha_produccion})"
+
+
+class PlanProduccionItem(models.Model):
+    plan = models.ForeignKey(PlanProduccion, related_name="items", on_delete=models.CASCADE)
+    receta = models.ForeignKey(Receta, related_name="plan_items", on_delete=models.PROTECT)
+    cantidad = models.DecimalField(max_digits=18, decimal_places=3, default=1)
+    notas = models.CharField(max_length=160, blank=True, default="")
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Renglón de plan de producción"
+        verbose_name_plural = "Renglones de plan de producción"
+        ordering = ["id"]
+
+    @property
+    def costo_total_estimado(self) -> Decimal:
+        receta_total = self.receta.costo_total_estimado_decimal
+        return receta_total * Decimal(str(self.cantidad or 0))
+
+    def __str__(self) -> str:
+        return f"{self.plan.nombre}: {self.receta.nombre} x {self.cantidad}"

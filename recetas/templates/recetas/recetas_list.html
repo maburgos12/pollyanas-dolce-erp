@@ -28,6 +28,10 @@
     <button class="btn btn-primary" type="submit">Filtrar</button>
     <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Limpiar</a>
   </form>
+  <div class="toolbar mt-2">
+    <a class="btn btn-primary" href="{% url 'recetas:plan_produccion' %}">Ir a Plan de Producción</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:mrp_form' %}">MRP rápido</a>
+  </div>
 </div>
 
 <div class="table-responsive card">

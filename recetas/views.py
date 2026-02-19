@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from typing import Dict, Any, List
 
@@ -6,12 +7,13 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse
+from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
-from .models import Receta, LineaReceta, RecetaPresentacion
+from .models import Receta, LineaReceta, RecetaPresentacion, PlanProduccion, PlanProduccionItem
 from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 
 @login_required
@@ -447,6 +449,216 @@ def aprobar_matching(request: HttpRequest, linea_id: int) -> HttpResponse:
     linea.save()
     messages.success(request, f"Matching aprobado: {linea.insumo_texto} → {insumo.nombre}")
     return redirect("recetas:matching_pendientes")
+
+
+def _linea_unit_code(linea: LineaReceta) -> str:
+    if linea.unidad_id and linea.unidad:
+        return linea.unidad.codigo
+    txt = (linea.unidad_texto or "").strip()
+    if txt:
+        return txt
+    if linea.insumo_id and linea.insumo and linea.insumo.unidad_base_id and linea.insumo.unidad_base:
+        return linea.insumo.unidad_base.codigo
+    return "-"
+
+
+def _linea_unit_cost(linea: LineaReceta, unit_cost_cache: Dict[int, Decimal | None]) -> Decimal | None:
+    if not linea.insumo_id:
+        return None
+    if linea.costo_unitario_snapshot is not None and linea.costo_unitario_snapshot > 0:
+        return Decimal(str(linea.costo_unitario_snapshot))
+
+    if linea.insumo_id in unit_cost_cache:
+        return unit_cost_cache[linea.insumo_id]
+
+    latest = _latest_cost_for_insumo(linea.insumo)
+    unit_cost_cache[linea.insumo_id] = latest
+    return latest
+
+
+def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
+    items = (
+        plan.items.select_related("receta")
+        .prefetch_related("receta__lineas__insumo__unidad_base", "receta__lineas__unidad")
+        .order_by("id")
+    )
+
+    unit_cost_cache: Dict[int, Decimal | None] = {}
+    insumos_map: Dict[int, Dict[str, Any]] = {}
+    items_detalle: List[Dict[str, Any]] = []
+    lineas_sin_cantidad: set[str] = set()
+    lineas_sin_costo_unitario: set[str] = set()
+    lineas_sin_match = 0
+
+    for item in items:
+        multiplicador = Decimal(str(item.cantidad or 0))
+        item_total = Decimal("0")
+        if multiplicador <= 0:
+            continue
+
+        for linea in item.receta.lineas.all():
+            if not linea.insumo_id:
+                lineas_sin_match += 1
+                continue
+
+            qty_base = Decimal(str(linea.cantidad or 0))
+            if qty_base <= 0:
+                lineas_sin_cantidad.add(f"{item.receta.nombre}: {linea.insumo_texto}")
+                continue
+
+            qty = qty_base * multiplicador
+            if qty <= 0:
+                continue
+
+            unit_code = _linea_unit_code(linea)
+            unit_cost = _linea_unit_cost(linea, unit_cost_cache)
+            costo_linea = Decimal("0")
+            if unit_cost is not None and unit_cost > 0:
+                costo_linea = qty * unit_cost
+            else:
+                lineas_sin_costo_unitario.add(f"{item.receta.nombre}: {linea.insumo_texto}")
+
+            key = linea.insumo_id
+            if key not in insumos_map:
+                insumo_obj = linea.insumo
+                origen = "Interno" if (insumo_obj.codigo or "").startswith("DERIVADO:RECETA:") else "Materia prima"
+                insumos_map[key] = {
+                    "insumo_id": key,
+                    "nombre": insumo_obj.nombre,
+                    "origen": origen,
+                    "unidad": unit_code,
+                    "cantidad": Decimal("0"),
+                    "costo_total": Decimal("0"),
+                    "costo_unitario": unit_cost or Decimal("0"),
+                }
+
+            insumos_map[key]["cantidad"] += qty
+            insumos_map[key]["costo_total"] += costo_linea
+            item_total += costo_linea
+
+        items_detalle.append(
+            {
+                "id": item.id,
+                "receta": item.receta,
+                "cantidad": multiplicador,
+                "notas": item.notas,
+                "costo_estimado": item_total,
+            }
+        )
+
+    insumos = sorted(insumos_map.values(), key=lambda x: x["nombre"].lower())
+    costo_total = sum((row["costo_total"] for row in insumos), Decimal("0"))
+
+    return {
+        "items_detalle": items_detalle,
+        "insumos": insumos,
+        "costo_total": costo_total,
+        "lineas_sin_cantidad": sorted(lineas_sin_cantidad),
+        "lineas_sin_costo_unitario": sorted(lineas_sin_costo_unitario),
+        "lineas_sin_match": lineas_sin_match,
+    }
+
+
+@permission_required("recetas.view_planproduccion", raise_exception=True)
+def plan_produccion(request: HttpRequest) -> HttpResponse:
+    planes = PlanProduccion.objects.select_related("creado_por").prefetch_related("items").order_by("-fecha_produccion", "-id")
+    plan_actual = None
+    plan_id = request.GET.get("plan_id")
+    if plan_id:
+        plan_actual = get_object_or_404(PlanProduccion, pk=plan_id)
+    elif planes.exists():
+        plan_actual = planes.first()
+
+    recetas_disponibles = Receta.objects.order_by("tipo", "nombre")
+    explosion = _plan_explosion(plan_actual) if plan_actual else None
+    return render(
+        request,
+        "recetas/plan_produccion.html",
+        {
+            "planes": planes[:30],
+            "plan_actual": plan_actual,
+            "recetas_disponibles": recetas_disponibles,
+            "explosion": explosion,
+        },
+    )
+
+
+@permission_required("recetas.add_planproduccion", raise_exception=True)
+@require_POST
+def plan_produccion_create(request: HttpRequest) -> HttpResponse:
+    nombre = (request.POST.get("nombre") or "").strip()
+    fecha_str = (request.POST.get("fecha_produccion") or "").strip()
+    notas = (request.POST.get("notas") or "").strip()
+    if not nombre:
+        messages.error(request, "El nombre del plan es obligatorio.")
+        return redirect("recetas:plan_produccion")
+
+    fecha = timezone.localdate()
+    if fecha_str:
+        try:
+            fecha = date.fromisoformat(fecha_str)
+        except Exception:
+            messages.warning(request, "Fecha inválida. Se usó la fecha de hoy.")
+
+    plan = PlanProduccion.objects.create(
+        nombre=nombre[:140],
+        fecha_produccion=fecha,
+        notas=notas,
+        creado_por=request.user if request.user.is_authenticated else None,
+    )
+    messages.success(request, "Plan de producción creado.")
+    return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+
+
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def plan_produccion_item_create(request: HttpRequest, plan_id: int) -> HttpResponse:
+    plan = get_object_or_404(PlanProduccion, pk=plan_id)
+    receta_id = request.POST.get("receta_id")
+    cantidad_raw = (request.POST.get("cantidad") or "1").strip()
+    notas = (request.POST.get("notas") or "").strip()[:160]
+
+    receta = Receta.objects.filter(pk=receta_id).first()
+    if not receta:
+        messages.error(request, "Selecciona una receta válida.")
+        return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+
+    try:
+        cantidad = Decimal(cantidad_raw)
+    except Exception:
+        cantidad = Decimal("0")
+    if cantidad <= 0:
+        messages.error(request, "La cantidad debe ser mayor que cero.")
+        return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+
+    PlanProduccionItem.objects.create(
+        plan=plan,
+        receta=receta,
+        cantidad=cantidad,
+        notas=notas,
+    )
+    messages.success(request, "Producto agregado al plan.")
+    return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+
+
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def plan_produccion_item_delete(request: HttpRequest, plan_id: int, item_id: int) -> HttpResponse:
+    plan = get_object_or_404(PlanProduccion, pk=plan_id)
+    item = get_object_or_404(PlanProduccionItem, pk=item_id, plan=plan)
+    item.delete()
+    messages.success(request, "Renglón eliminado del plan.")
+    return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+
+
+@permission_required("recetas.delete_planproduccion", raise_exception=True)
+@require_POST
+def plan_produccion_delete(request: HttpRequest, plan_id: int) -> HttpResponse:
+    plan = get_object_or_404(PlanProduccion, pk=plan_id)
+    plan.delete()
+    messages.success(request, "Plan eliminado.")
+    return redirect("recetas:plan_produccion")
+
 
 @login_required
 def mrp_form(request: HttpRequest) -> HttpResponse:
