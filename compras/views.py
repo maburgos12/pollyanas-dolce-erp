@@ -5,6 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from core.access import can_manage_compras, can_view_compras
@@ -78,39 +79,11 @@ def _build_insumo_options():
     return options
 
 
-@login_required
-def solicitudes(request: HttpRequest) -> HttpResponse:
-    if not can_view_compras(request.user):
-        raise PermissionDenied("No tienes permisos para ver Compras.")
-
-    if request.method == "POST":
-        if not can_manage_compras(request.user):
-            raise PermissionDenied("No tienes permisos para crear solicitudes.")
-        insumo_id = request.POST.get("insumo_id")
-        if insumo_id:
-            insumo = get_object_or_404(Insumo, pk=insumo_id)
-            solicitud = SolicitudCompra.objects.create(
-                area=request.POST.get("area", "General").strip() or "General",
-                solicitante=request.POST.get("solicitante", request.user.username).strip() or request.user.username,
-                insumo=insumo,
-                proveedor_sugerido=insumo.proveedor_principal,
-                cantidad=_to_decimal(request.POST.get("cantidad"), "1"),
-                fecha_requerida=request.POST.get("fecha_requerida") or None,
-                estatus=request.POST.get("estatus") or SolicitudCompra.STATUS_BORRADOR,
-            )
-            log_event(
-                request.user,
-                "CREATE",
-                "compras.SolicitudCompra",
-                solicitud.id,
-                {"folio": solicitud.folio, "estatus": solicitud.estatus},
-            )
-        return redirect("compras:solicitudes")
-
-    source_filter = (request.GET.get("source") or "all").lower()
+def _filtered_solicitudes(source_filter_raw: str, plan_filter_raw: str, reabasto_filter_raw: str):
+    source_filter = (source_filter_raw or "all").lower()
     if source_filter not in {"all", "manual", "plan"}:
         source_filter = "all"
-    plan_filter = (request.GET.get("plan_id") or "").strip()
+    plan_filter = (plan_filter_raw or "").strip()
 
     solicitudes_qs = SolicitudCompra.objects.select_related("insumo", "proveedor_sugerido").all()
     if source_filter == "plan":
@@ -121,7 +94,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
     if plan_filter:
         solicitudes_qs = solicitudes_qs.filter(area=f"PLAN_PRODUCCION:{plan_filter}")
 
-    solicitudes = list(solicitudes_qs[:200])
+    solicitudes = list(solicitudes_qs[:300])
     insumo_ids = [s.insumo_id for s in solicitudes]
     existencias = {
         e.insumo_id: e
@@ -164,19 +137,56 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
                 s.source_plan_id = plan_id_int
                 s.source_plan_nombre = planes_map.get(plan_id_int).nombre if plan_id_int in planes_map else f"Plan {plan_id_int}"
 
-    reabasto_filter = (request.GET.get("reabasto") or "all").lower()
+    reabasto_filter = (reabasto_filter_raw or "all").lower()
     if reabasto_filter in {"critico", "bajo", "ok"}:
         solicitudes = [s for s in solicitudes if s.reabasto_nivel == reabasto_filter]
     else:
         reabasto_filter = "all"
 
-    # Armamos opciones de planes en Python para mapear area "PLAN_PRODUCCION:{id}".
     plan_ids_all = set()
     for area_val in SolicitudCompra.objects.filter(area__startswith="PLAN_PRODUCCION:").values_list("area", flat=True).distinct():
         _, _, maybe_id = (area_val or "").partition(":")
         if maybe_id.isdigit():
             plan_ids_all.add(int(maybe_id))
     plan_options = list(PlanProduccion.objects.filter(id__in=plan_ids_all).order_by("-fecha_produccion", "-id")[:100])
+
+    return solicitudes, source_filter, plan_filter, reabasto_filter, plan_options
+
+
+@login_required
+def solicitudes(request: HttpRequest) -> HttpResponse:
+    if not can_view_compras(request.user):
+        raise PermissionDenied("No tienes permisos para ver Compras.")
+
+    if request.method == "POST":
+        if not can_manage_compras(request.user):
+            raise PermissionDenied("No tienes permisos para crear solicitudes.")
+        insumo_id = request.POST.get("insumo_id")
+        if insumo_id:
+            insumo = get_object_or_404(Insumo, pk=insumo_id)
+            solicitud = SolicitudCompra.objects.create(
+                area=request.POST.get("area", "General").strip() or "General",
+                solicitante=request.POST.get("solicitante", request.user.username).strip() or request.user.username,
+                insumo=insumo,
+                proveedor_sugerido=insumo.proveedor_principal,
+                cantidad=_to_decimal(request.POST.get("cantidad"), "1"),
+                fecha_requerida=request.POST.get("fecha_requerida") or None,
+                estatus=request.POST.get("estatus") or SolicitudCompra.STATUS_BORRADOR,
+            )
+            log_event(
+                request.user,
+                "CREATE",
+                "compras.SolicitudCompra",
+                solicitud.id,
+                {"folio": solicitud.folio, "estatus": solicitud.estatus},
+            )
+        return redirect("compras:solicitudes")
+
+    solicitudes, source_filter, plan_filter, reabasto_filter, plan_options = _filtered_solicitudes(
+        request.GET.get("source"),
+        request.GET.get("plan_id"),
+        request.GET.get("reabasto"),
+    )
 
     context = {
         "solicitudes": solicitudes,
@@ -187,8 +197,41 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "source_filter": source_filter,
         "plan_filter": plan_filter,
         "plan_options": plan_options,
+        "current_query": request.GET.urlencode(),
     }
     return render(request, "compras/solicitudes.html", context)
+
+
+@login_required
+def solicitudes_print(request: HttpRequest) -> HttpResponse:
+    if not can_view_compras(request.user):
+        raise PermissionDenied("No tienes permisos para ver Compras.")
+
+    solicitudes, source_filter, plan_filter, reabasto_filter, _ = _filtered_solicitudes(
+        request.GET.get("source"),
+        request.GET.get("plan_id"),
+        request.GET.get("reabasto"),
+    )
+
+    total_cantidad = sum((s.cantidad for s in solicitudes), Decimal("0"))
+    criticos_count = sum(1 for s in solicitudes if s.reabasto_nivel == "critico")
+    bajos_count = sum(1 for s in solicitudes if s.reabasto_nivel == "bajo")
+    ok_count = sum(1 for s in solicitudes if s.reabasto_nivel == "ok")
+
+    context = {
+        "solicitudes": solicitudes,
+        "source_filter": source_filter,
+        "plan_filter": plan_filter or "-",
+        "reabasto_filter": reabasto_filter,
+        "total_cantidad": total_cantidad,
+        "criticos_count": criticos_count,
+        "bajos_count": bajos_count,
+        "ok_count": ok_count,
+        "generated_at": timezone.localtime(),
+        "generated_by": request.user.username,
+        "return_query": request.GET.urlencode(),
+    }
+    return render(request, "compras/solicitudes_print.html", context)
 
 
 @login_required

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solicitud de Compras</title>
+  <style>
+    :root {
+      --vino: #8B2252;
+      --rosa: #F8E8EE;
+      --texto: #3D2B2B;
+      --gris: #7A6565;
+      --borde: #E8B4C8;
+      --ok-bg: #E8F5E9;
+      --ok-fg: #2E7D32;
+      --warn-bg: #FFF8E1;
+      --warn-fg: #F57F17;
+      --danger-bg: #FFEBEE;
+      --danger-fg: #C62828;
+    }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--texto);
+      background: #fff;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 14mm;
+      box-sizing: border-box;
+    }
+    .header {
+      border: 2px solid var(--vino);
+      padding: 10px 12px;
+      margin-bottom: 14px;
+    }
+    .title {
+      font-size: 24px;
+      color: var(--vino);
+      margin: 0 0 6px 0;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: var(--gris);
+      margin: 0;
+    }
+    .meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 10px 0 14px;
+    }
+    .meta-box {
+      border: 1px solid var(--borde);
+      padding: 8px;
+      font-size: 12px;
+      background: #fff;
+    }
+    .meta-box strong {
+      color: var(--vino);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    th, td {
+      border: 1px solid #d8d8d8;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--rosa);
+      color: var(--vino);
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .text-end {
+      text-align: right;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .badge-ok {
+      background: var(--ok-bg);
+      color: var(--ok-fg);
+    }
+    .badge-warn {
+      background: var(--warn-bg);
+      color: var(--warn-fg);
+    }
+    .badge-danger {
+      background: var(--danger-bg);
+      color: var(--danger-fg);
+    }
+    .totals {
+      border: 1px solid var(--borde);
+      padding: 10px;
+      background: #fff;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .totals strong {
+      color: var(--vino);
+    }
+    .signatures {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .sig-box {
+      border-top: 1px solid #777;
+      padding-top: 6px;
+      font-size: 11px;
+      color: #555;
+      text-align: center;
+      min-height: 26px;
+    }
+    .print-actions {
+      width: 210mm;
+      margin: 10px auto;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .btn {
+      border: 1px solid var(--vino);
+      background: var(--vino);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn.secondary {
+      background: #fff;
+      color: var(--vino);
+    }
+    @media print {
+      .print-actions {
+        display: none;
+      }
+      .page {
+        margin: 0;
+        width: auto;
+        min-height: auto;
+        padding: 8mm;
+      }
+      @page {
+        size: A4;
+        margin: 8mm;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-actions">
+    <a class="btn secondary" href="{% url 'compras:solicitudes' %}{% if return_query %}?{{ return_query }}{% endif %}">Volver</a>
+    <button class="btn" onclick="window.print()">Imprimir</button>
+  </div>
+
+  <section class="page">
+    <div class="header">
+      <h1 class="title">Solicitud de Compras</h1>
+      <p class="subtitle">Pollyana's Dolce · Documento interno de abastecimiento</p>
+    </div>
+
+    <div class="meta">
+      <div class="meta-box"><strong>Generado:</strong> {{ generated_at|date:"Y-m-d H:i" }}</div>
+      <div class="meta-box"><strong>Usuario:</strong> {{ generated_by }}</div>
+      <div class="meta-box"><strong>Origen:</strong> {{ source_filter|upper }}</div>
+      <div class="meta-box"><strong>Plan:</strong> {{ plan_filter }}</div>
+      <div class="meta-box"><strong>Filtro reabasto:</strong> {{ reabasto_filter|upper }}</div>
+      <div class="meta-box"><strong>Solicitudes:</strong> {{ solicitudes|length }}</div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Folio</th>
+          <th>Insumo</th>
+          <th>Proveedor sugerido</th>
+          <th class="text-end">Cantidad</th>
+          <th>Fecha requerida</th>
+          <th>Reabasto</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in solicitudes %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td>{{ s.folio }}</td>
+          <td>{{ s.insumo.nombre }}</td>
+          <td>{{ s.proveedor_sugerido.nombre|default:"-" }}</td>
+          <td class="text-end">{{ s.cantidad|floatformat:3 }}</td>
+          <td>{{ s.fecha_requerida }}</td>
+          <td>
+            {% if s.reabasto_nivel == "critico" %}
+              <span class="badge badge-danger">{{ s.reabasto_texto }}</span>
+            {% elif s.reabasto_nivel == "bajo" %}
+              <span class="badge badge-warn">{{ s.reabasto_texto }}</span>
+            {% else %}
+              <span class="badge badge-ok">{{ s.reabasto_texto }}</span>
+            {% endif %}
+          </td>
+          <td>{{ s.get_estatus_display }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="8">Sin solicitudes para los filtros seleccionados.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="totals">
+      <div><strong>Cantidad total solicitada:</strong> {{ total_cantidad|floatformat:3 }}</div>
+      <div><strong>Críticos:</strong> {{ criticos_count }} · <strong>Bajo reorden:</strong> {{ bajos_count }} · <strong>Suficiente:</strong> {{ ok_count }}</div>
+    </div>
+
+    <div class="signatures">
+      <div class="sig-box">Solicita</div>
+      <div class="sig-box">Autoriza</div>
+      <div class="sig-box">Compras / Almacén</div>
+    </div>
+  </section>
+</body>
+</html>

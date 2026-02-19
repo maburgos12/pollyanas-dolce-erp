@@ -82,6 +82,7 @@
     <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
     <a href="{% url 'compras:solicitudes' %}?reabasto=bajo&source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
     <a href="{% url 'compras:solicitudes' %}?reabasto=ok&source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
+    <a href="{% url 'compras:solicitudes_print' %}{% if current_query %}?{{ current_query }}{% endif %}" target="_blank" class="btn btn-secondary">Imprimir solicitud compras</a>
   </div>
   <div class="table-responsive">
     <table class="table table-striped">
