@@ -1,4 +1,6 @@
 import logging
+import os
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db.models import F
@@ -8,6 +10,7 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
+from django.utils import timezone
 from core.access import (
     can_view_audit,
     can_manage_compras,
@@ -67,6 +70,10 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "alertas_count": 0,
         "criticos_count": 0,
         "bajo_reorden_count": 0,
+        "latest_almacen_sync": None,
+        "auto_sync_enabled": False,
+        "auto_sync_interval_hours": 24,
+        "next_sync_eta": None,
     }
     try:
         existencias_qs = ExistenciaInsumo.objects.all()
@@ -139,6 +146,40 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             .first()
         )
         ctx["latest_almacen_sync"] = latest_sync
+
+        auto_sync_enabled = os.getenv("ENABLE_AUTO_SYNC_ALMACEN", "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        try:
+            auto_sync_interval_hours = int((os.getenv("AUTO_SYNC_INTERVAL_HOURS", "24") or "24").strip())
+        except ValueError:
+            auto_sync_interval_hours = 24
+        auto_sync_interval_hours = max(auto_sync_interval_hours, 1)
+
+        next_sync_eta = None
+        if auto_sync_enabled:
+            latest_scheduled = (
+                AlmacenSyncRun.objects.filter(source=AlmacenSyncRun.SOURCE_SCHEDULED)
+                .order_by("-started_at", "-id")
+                .first()
+            )
+            if latest_scheduled:
+                delta = timedelta(hours=auto_sync_interval_hours)
+                next_sync_eta = latest_scheduled.started_at + delta
+                now = timezone.now()
+                while next_sync_eta <= now:
+                    next_sync_eta += delta
+
+        ctx.update(
+            {
+                "auto_sync_enabled": auto_sync_enabled,
+                "auto_sync_interval_hours": auto_sync_interval_hours,
+                "next_sync_eta": next_sync_eta,
+            }
+        )
     except Exception:
         logger.exception("Dashboard failed to build full context")
 

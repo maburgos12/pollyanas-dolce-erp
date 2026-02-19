@@ -1,7 +1,11 @@
+import os
+import subprocess
+import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.files.uploadedfile import UploadedFile
@@ -244,6 +248,42 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
         "latest_runs": AlmacenSyncRun.objects.select_related("triggered_by").all()[:10],
     }
     return render(request, "inventario/importar_archivos.html", context)
+
+
+@login_required
+def sync_drive_now(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return redirect("dashboard")
+    if not can_manage_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ejecutar sincronización manual.")
+
+    next_url = (request.POST.get("next") or "").strip()
+    if not next_url.startswith("/"):
+        next_url = ""
+
+    try:
+        cmd = [
+            sys.executable,
+            "manage.py",
+            "sync_almacen_drive",
+            "--create-missing-insumos",
+        ]
+        subprocess.Popen(
+            cmd,
+            cwd=str(settings.BASE_DIR),
+            env=os.environ.copy(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        messages.success(
+            request,
+            "Sincronización manual iniciada. Refresca el dashboard en 1-2 minutos para ver el resultado.",
+        )
+    except Exception as exc:
+        messages.error(request, f"No se pudo iniciar la sincronización manual: {exc}")
+
+    return redirect(next_url or "dashboard")
 
 
 @login_required

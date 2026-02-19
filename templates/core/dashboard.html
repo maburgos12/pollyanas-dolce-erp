@@ -7,51 +7,68 @@
 <section class="card">
     <div class="card-header">Último Sync de Almacén</div>
     {% if latest_almacen_sync %}
-    <div class="table-responsive">
-        <table class="table table-striped">
-            <tbody>
-                <tr>
-                    <th>Estatus</th>
-                    <td>
-                        {% if latest_almacen_sync.status == "OK" %}
-                            <span class="badge bg-success">OK</span>
-                        {% else %}
-                            <span class="badge bg-danger">ERROR</span>
-                        {% endif %}
-                    </td>
-                </tr>
-                <tr>
-                    <th>Fecha</th>
-                    <td>{{ latest_almacen_sync.started_at|date:"Y-m-d H:i" }}</td>
-                </tr>
-                <tr>
-                    <th>Origen</th>
-                    <td>{{ latest_almacen_sync.get_source_display }}</td>
-                </tr>
-                <tr>
-                    <th>Carpeta / Mes</th>
-                    <td>
-                        {{ latest_almacen_sync.folder_name|default:"-" }}
-                        {% if latest_almacen_sync.target_month %} · {{ latest_almacen_sync.target_month }}{% endif %}
-                        {% if latest_almacen_sync.fallback_used %} (fallback){% endif %}
-                    </td>
-                </tr>
-                <tr>
-                    <th>Resultado</th>
-                    <td>
-                        Existencias {{ latest_almacen_sync.existencias_updated }} ·
-                        Movimientos {{ latest_almacen_sync.movimientos_created }} ·
-                        Sin match {{ latest_almacen_sync.unmatched }}
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+    <div class="sync-summary-grid">
+        <div class="sync-item">
+            <span class="sync-label">Estatus</span>
+            <span class="sync-value">
+                {% if latest_almacen_sync.status == "OK" %}
+                    <span class="badge bg-success">OK</span>
+                {% else %}
+                    <span class="badge bg-danger">ERROR</span>
+                {% endif %}
+            </span>
+        </div>
+        <div class="sync-item">
+            <span class="sync-label">Fecha</span>
+            <span class="sync-value">{{ latest_almacen_sync.started_at|date:"Y-m-d H:i" }}</span>
+        </div>
+        <div class="sync-item">
+            <span class="sync-label">Origen</span>
+            <span class="sync-value">{{ latest_almacen_sync.get_source_display }}</span>
+        </div>
+        <div class="sync-item">
+            <span class="sync-label">Carpeta / Mes</span>
+            <span class="sync-value">
+                {{ latest_almacen_sync.folder_name|default:"-" }}
+                {% if latest_almacen_sync.target_month %} · {{ latest_almacen_sync.target_month }}{% endif %}
+                {% if latest_almacen_sync.fallback_used %} (fallback){% endif %}
+            </span>
+        </div>
+        <div class="sync-item">
+            <span class="sync-label">Próximo sync estimado</span>
+            <span class="sync-value">
+                {% if auto_sync_enabled %}
+                    {% if next_sync_eta %}
+                        {{ next_sync_eta|date:"Y-m-d H:i" }} (cada {{ auto_sync_interval_hours }}h)
+                    {% else %}
+                        Pendiente primer ciclo automático (cada {{ auto_sync_interval_hours }}h)
+                    {% endif %}
+                {% else %}
+                    Auto-sync desactivado
+                {% endif %}
+            </span>
+        </div>
+        <div class="sync-item sync-item-full">
+            <span class="sync-label">Resultado</span>
+            <span class="sync-value">
+                Existencias {{ latest_almacen_sync.existencias_updated }} ·
+                Movimientos {{ latest_almacen_sync.movimientos_created }} ·
+                Sin match {{ latest_almacen_sync.unmatched }}
+            </span>
+        </div>
     </div>
     {% else %}
     <p style="margin: 0; color: var(--texto-light);">Aún no hay sincronizaciones registradas.</p>
     {% endif %}
     <div class="quick-actions">
         <a href="{% url 'inventario:importar_archivos' %}" class="btn btn-secondary">Ver historial de sync</a>
+        {% if can_manage_inventario %}
+        <form method="post" action="{% url 'inventario:sync_drive_now' %}" class="inline-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button type="submit" class="btn btn-primary">Sincronizar ahora</button>
+        </form>
+        {% endif %}
     </div>
 </section>
 
