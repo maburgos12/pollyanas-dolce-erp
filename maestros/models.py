@@ -58,6 +58,27 @@ class Insumo(models.Model):
     def __str__(self) -> str:
         return self.nombre
 
+
+class InsumoAlias(models.Model):
+    nombre = models.CharField(max_length=250)
+    nombre_normalizado = models.CharField(max_length=260, unique=True, db_index=True)
+    insumo = models.ForeignKey(Insumo, on_delete=models.CASCADE, related_name="aliases")
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Alias de insumo"
+        verbose_name_plural = "Aliases de insumos"
+        ordering = ["nombre"]
+        indexes = [models.Index(fields=["nombre_normalizado"])]
+
+    def save(self, *args, **kwargs):
+        self.nombre_normalizado = " ".join(unidecode((self.nombre or "")).lower().strip().split())
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.nombre} -> {self.insumo.nombre}"
+
+
 class CostoInsumo(models.Model):
     insumo = models.ForeignKey(Insumo, on_delete=models.CASCADE)
     proveedor = models.ForeignKey(Proveedor, null=True, blank=True, on_delete=models.SET_NULL)

@@ -36,6 +36,7 @@ class MovimientoInventario(models.Model):
     insumo = models.ForeignKey(Insumo, on_delete=models.PROTECT)
     cantidad = models.DecimalField(max_digits=18, decimal_places=3)
     referencia = models.CharField(max_length=120, blank=True, default="")
+    source_hash = models.CharField(max_length=64, unique=True, null=True, blank=True)
 
     class Meta:
         ordering = ["-fecha"]
