@@ -195,6 +195,10 @@
     }
     clearSuggestions();
     recalc();
+    if (cantidadInput) {
+      cantidadInput.focus();
+      cantidadInput.select();
+    }
   }
 
   function renderSuggestions() {
