@@ -16,6 +16,54 @@
     </div>
 </section>
 
+{% if latest_almacen_sync %}
+<section class="card">
+    <div class="card-header">Último Sync de Almacén</div>
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <tbody>
+                <tr>
+                    <th>Estatus</th>
+                    <td class="text-end">
+                        {% if latest_almacen_sync.status == "OK" %}
+                        <span class="badge bg-success">OK</span>
+                        {% else %}
+                        <span class="badge bg-danger">ERROR</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr>
+                    <th>Fecha</th>
+                    <td class="text-end">{{ latest_almacen_sync.started_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+                <tr>
+                    <th>Origen</th>
+                    <td class="text-end">{{ latest_almacen_sync.get_source_display }}</td>
+                </tr>
+                <tr>
+                    <th>Carpeta / Mes</th>
+                    <td class="text-end">
+                        {{ latest_almacen_sync.folder_name|default:"-" }}
+                        {% if latest_almacen_sync.target_month %} · {{ latest_almacen_sync.target_month }}{% endif %}
+                        {% if latest_almacen_sync.fallback_used %} (fallback){% endif %}
+                    </td>
+                </tr>
+                <tr>
+                    <th>Resultado</th>
+                    <td class="text-end">
+                        Existencias {{ latest_almacen_sync.existencias_updated }} · Movimientos {{ latest_almacen_sync.movimientos_created }} ·
+                        Sin match {{ latest_almacen_sync.unmatched }}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="quick-actions">
+        <a href="{% url 'inventario:importar_archivos' %}" class="btn btn-secondary">Ver historial de sync</a>
+    </div>
+</section>
+{% endif %}
+
 <div class="kpi-grid">
     <article class="kpi-card">
         <div class="kpi-number">{{ insumos_count }}</div>

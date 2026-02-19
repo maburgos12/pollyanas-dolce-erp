@@ -20,7 +20,7 @@ from core.access import (
 )
 from maestros.models import Insumo, Proveedor
 from recetas.models import Receta
-from inventario.models import ExistenciaInsumo
+from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from core.models import AuditLog
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "cobertura_promedio_dias": cobertura_promedio_dias,
             }
         )
+        latest_sync = AlmacenSyncRun.objects.select_related("triggered_by").first()
+        ctx["latest_almacen_sync"] = latest_sync
     except Exception:
         logger.exception("Dashboard failed to build full context")
 
