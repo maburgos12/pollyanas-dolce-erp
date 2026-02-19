@@ -12,6 +12,40 @@
   <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Carga Almacén</a>
 </nav>
 
+<section class="card">
+  <div class="card-header">Resumen de Matching (Almacén)</div>
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card">
+      <div class="kpi-number is-success">{{ matching_summary.total_matched }}</div>
+      <div class="kpi-label">Matches (últimos {{ matching_summary.runs_count }} syncs)</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if matching_summary.total_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ matching_summary.total_unmatched }}</div>
+      <div class="kpi-label">Sin match (últimos {{ matching_summary.runs_count }} syncs)</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if matching_summary.match_rate >= 98 %}is-success{% elif matching_summary.match_rate >= 95 %}is-warning{% else %}is-danger{% endif %}">
+        {{ matching_summary.match_rate|floatformat:2 }}%
+      </div>
+      <div class="kpi-label">Tasa de match</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ matching_summary.ok_runs }}/{{ matching_summary.runs_count }}</div>
+      <div class="kpi-label">Sync OK</div>
+    </article>
+  </div>
+  {% if latest_sync %}
+  <p class="muted" style="margin-top:10px;">
+    Último sync: {{ latest_sync.started_at|date:"Y-m-d H:i" }} ·
+    Origen {{ latest_sync.get_source_display }} ·
+    Match {{ latest_sync.matched }} ·
+    Sin match {{ latest_sync.unmatched }} ·
+    Filas inventario {{ latest_sync.rows_stock_read }} ·
+    Filas movimientos {{ latest_sync.rows_mov_read }}.
+  </p>
+  {% endif %}
+</section>
+
 {% if can_manage_inventario %}
 <section class="card">
   <div class="card-header">Crear Alias</div>
@@ -95,6 +129,45 @@
     {% endif %}
   {% endif %}
 </section>
+
+{% if pending_grouped %}
+<section class="card">
+  <div class="card-header">Pendientes Agrupados Para Corrección</div>
+  <p class="muted">Prioriza los de mayor frecuencia para corregir más rápido.</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Nombre origen</th>
+          <th>Normalizado</th>
+          <th>Fuentes</th>
+          <th class="text-end">Repeticiones</th>
+          <th>Sugerencia</th>
+          <th class="text-end">Score máx</th>
+          {% if can_manage_inventario %}<th>Acción</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in pending_grouped %}
+        <tr>
+          <td>{{ p.nombre_origen }}</td>
+          <td><code>{{ p.nombre_normalizado }}</code></td>
+          <td>{{ p.sources }}</td>
+          <td class="text-end">{{ p.count }}</td>
+          <td>{{ p.sugerencia|default:"-" }}</td>
+          <td class="text-end">{{ p.score_max|floatformat:1 }}</td>
+          {% if can_manage_inventario %}
+          <td>
+            <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ p.nombre_origen|escape }}">Usar en alta</button>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
 
 <section class="card">
   <div class="card-header">Catálogo de Aliases</div>

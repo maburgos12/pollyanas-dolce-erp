@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -404,7 +405,19 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     hidden_run_id = request.session.get("inventario_hidden_pending_run_id")
 
     latest_runs = list(
-        AlmacenSyncRun.objects.only("id", "started_at", "source", "status", "unmatched", "pending_preview").order_by("-started_at")[:20]
+        AlmacenSyncRun.objects.only(
+            "id",
+            "started_at",
+            "source",
+            "status",
+            "matched",
+            "unmatched",
+            "rows_stock_read",
+            "rows_mov_read",
+            "aliases_created",
+            "insumos_created",
+            "pending_preview",
+        ).order_by("-started_at")[:20]
     )
     latest_sync = latest_runs[0] if latest_runs else None
     latest_pending_run = None
@@ -418,13 +431,64 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     persisted_pending = list((latest_pending_run.pending_preview if latest_pending_run else [])[:120])
     pending_preview = session_pending or persisted_pending
 
+    recent_runs = latest_runs[:10]
+    total_matched = sum(int(r.matched or 0) for r in recent_runs)
+    total_unmatched = sum(int(r.unmatched or 0) for r in recent_runs)
+    total_rows = total_matched + total_unmatched
+    match_rate = round((total_matched * 100.0 / total_rows), 2) if total_rows else 100.0
+    ok_runs = sum(1 for r in recent_runs if r.status == AlmacenSyncRun.STATUS_OK)
+
+    grouped = defaultdict(lambda: {"count": 0, "sources": set(), "name": "", "suggestion": "", "score_max": 0.0})
+    for row in pending_preview:
+        name = str((row or {}).get("nombre_origen") or "").strip()
+        norm = str((row or {}).get("nombre_normalizado") or normalizar_nombre(name))
+        if not norm:
+            continue
+        item = grouped[norm]
+        item["count"] += 1
+        item["name"] = item["name"] or name
+        source = str((row or {}).get("source") or "").strip()
+        if source:
+            item["sources"].add(source)
+        suggestion = str((row or {}).get("sugerencia") or "").strip()
+        if suggestion and not item["suggestion"]:
+            item["suggestion"] = suggestion
+        try:
+            score = float((row or {}).get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        item["score_max"] = max(item["score_max"], score)
+
+    pending_grouped = sorted(
+        [
+            {
+                "nombre_origen": v["name"],
+                "nombre_normalizado": k,
+                "count": v["count"],
+                "sources": ", ".join(sorted(v["sources"])) if v["sources"] else "-",
+                "sugerencia": v["suggestion"],
+                "score_max": v["score_max"],
+            }
+            for k, v in grouped.items()
+        ],
+        key=lambda x: (-x["count"], x["nombre_origen"]),
+    )
+
     context = {
         "q": q,
         "page": page,
         "pending_preview": pending_preview,
+        "pending_grouped": pending_grouped[:80],
         "pending_source": "session" if session_pending else ("persisted" if persisted_pending else ""),
         "latest_pending_run": latest_pending_run,
         "latest_sync": latest_sync,
+        "matching_summary": {
+            "runs_count": len(recent_runs),
+            "ok_runs": ok_runs,
+            "total_matched": total_matched,
+            "total_unmatched": total_unmatched,
+            "match_rate": match_rate,
+        },
         "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:1200],
         "can_manage_inventario": can_manage_inventario(request.user),
     }
