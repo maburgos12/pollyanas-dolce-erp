@@ -216,6 +216,32 @@ def _is_ignored_name(norm: str) -> bool:
     return False
 
 
+def classify_almacen_filename(filename: str) -> tuple[str | None, str | None]:
+    if not filename:
+        return None, None
+    normalized = normalizar_nombre(Path(filename).name)
+
+    expected = {
+        INVENTARIO_FILE: "inventario",
+        ENTRADAS_FILE: "entradas",
+        SALIDAS_FILE: "salidas",
+        MERMA_FILE: "merma",
+    }
+    for expected_name, source in expected.items():
+        if normalized == normalizar_nombre(expected_name):
+            return source, expected_name
+
+    if "inventario" in normalized and "almacen" in normalized:
+        return "inventario", INVENTARIO_FILE
+    if "entradas" in normalized and "almacen" in normalized:
+        return "entradas", ENTRADAS_FILE
+    if "salidas" in normalized and "almacen" in normalized:
+        return "salidas", SALIDAS_FILE
+    if "merma" in normalized and "almacen" in normalized:
+        return "merma", MERMA_FILE
+    return None, None
+
+
 def _unit_from_text(unit_text: str) -> UnidadMedida | None:
     u = normalizar_nombre(unit_text or "")
     if not u:
@@ -530,7 +556,7 @@ def _apply_movimiento(movimiento: MovimientoInventario) -> None:
     existencia.save(update_fields=["stock_actual", "actualizado_en"])
 
 
-def _build_source_hash(
+def _build_source_hash_legacy(
     source: str,
     row_index: int,
     tipo: str,
@@ -545,6 +571,28 @@ def _build_source_hash(
             str(row_index),
             tipo,
             fecha.isoformat(),
+            nombre_norm,
+            f"{cantidad:.6f}",
+            referencia,
+        ]
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _build_source_hash_stable(
+    source: str,
+    row_index: int,
+    tipo: str,
+    nombre_norm: str,
+    cantidad: Decimal,
+    referencia: str,
+) -> str:
+    # Stable idempotency key: avoid timestamp drift when source row has missing/invalid time.
+    raw = "|".join(
+        [
+            source,
+            str(row_index),
+            tipo,
             nombre_norm,
             f"{cantidad:.6f}",
             referencia,
@@ -684,7 +732,7 @@ def import_folder(
             if _ensure_alias(row.nombre_origen, match.insumo):
                 summary.aliases_created += 1
 
-        source_hash = _build_source_hash(
+        source_hash_legacy = _build_source_hash_legacy(
             source=row.source,
             row_index=row.row_index,
             tipo=row.tipo,
@@ -693,8 +741,16 @@ def import_folder(
             cantidad=row.cantidad,
             referencia=row.referencia,
         )
+        source_hash = _build_source_hash_stable(
+            source=row.source,
+            row_index=row.row_index,
+            tipo=row.tipo,
+            nombre_norm=match.nombre_normalizado,
+            cantidad=row.cantidad,
+            referencia=row.referencia,
+        )
 
-        if MovimientoInventario.objects.filter(source_hash=source_hash).exists():
+        if MovimientoInventario.objects.filter(source_hash__in=[source_hash, source_hash_legacy]).exists():
             summary.movimientos_skipped_duplicate += 1
             continue
 
