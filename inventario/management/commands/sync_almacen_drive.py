@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
 
+from inventario.models import AlmacenSyncRun
 from inventario.utils.google_drive_sync import sync_almacen_from_drive
+from inventario.utils.sync_logging import log_sync_run
 
 
 VALID_SOURCES = {"inventario", "entradas", "salidas", "merma"}
@@ -65,6 +68,7 @@ class Command(BaseCommand):
         if not requested:
             raise CommandError("Debes indicar al menos una fuente en --sources")
 
+        run_started_at = timezone.now()
         try:
             result = sync_almacen_from_drive(
                 include_sources=requested,
@@ -77,10 +81,28 @@ class Command(BaseCommand):
                 dry_run=bool(options["dry_run"]),
             )
         except Exception as exc:
+            log_sync_run(
+                source=AlmacenSyncRun.SOURCE_SCHEDULED,
+                status=AlmacenSyncRun.STATUS_ERROR,
+                message=str(exc),
+                started_at=run_started_at,
+            )
             raise CommandError(str(exc)) from exc
 
         summary = result.summary
         mode = "DRY-RUN" if options["dry_run"] else "APLICADO"
+
+        log_sync_run(
+            source=AlmacenSyncRun.SOURCE_SCHEDULED,
+            status=AlmacenSyncRun.STATUS_OK,
+            summary=summary,
+            folder_name=result.folder_name,
+            target_month=result.target_month,
+            fallback_used=result.used_fallback_month,
+            downloaded_sources=result.downloaded_sources,
+            message=" | ".join(result.skipped_files[:12]),
+            started_at=run_started_at,
+        )
 
         self.stdout.write(self.style.SUCCESS(f"Sync de Google Drive completado ({mode})"))
         self.stdout.write(f"  - carpeta usada: {result.folder_name} ({result.folder_id})")

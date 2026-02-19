@@ -155,6 +155,50 @@
 </section>
 {% endif %}
 
+{% if latest_runs %}
+<section class="card">
+  <div class="card-header">Últimas Sincronizaciones</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Origen</th>
+          <th>Estatus</th>
+          <th>Carpeta / Mes</th>
+          <th>Resultados</th>
+          <th>Ejecutado por</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in latest_runs %}
+        <tr>
+          <td>{{ run.started_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ run.get_source_display }}</td>
+          <td>
+            {% if run.status == "OK" %}
+            <span class="badge badge-success">OK</span>
+            {% else %}
+            <span class="badge badge-danger">ERROR</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if run.folder_name %}<div><strong>{{ run.folder_name }}</strong></div>{% endif %}
+            {% if run.target_month %}<div>{{ run.target_month }}{% if run.fallback_used %} (fallback){% endif %}</div>{% endif %}
+          </td>
+          <td>
+            <div>Existencias: {{ run.existencias_updated }} · Movimientos: {{ run.movimientos_created }}</div>
+            <div>Matches: {{ run.matched }} · Sin match: {{ run.unmatched }}</div>
+          </td>
+          <td>{{ run.triggered_by.username|default:"Sistema" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
 {% if pendientes_preview %}
 <section class="card">
   <div class="card-header">Pendientes de match (muestra)</div>

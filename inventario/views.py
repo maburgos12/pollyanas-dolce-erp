@@ -22,8 +22,9 @@ from inventario.utils.almacen_import import (
     import_folder,
 )
 from inventario.utils.google_drive_sync import sync_almacen_from_drive
+from inventario.utils.sync_logging import log_sync_run
 
-from .models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
+from .models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 
 
 SOURCE_TO_FILENAME = {
@@ -105,6 +106,8 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
         fuzzy_threshold = int(_to_decimal(request.POST.get("fuzzy_threshold"), "96"))
         create_aliases = bool(request.POST.get("create_aliases"))
         create_missing_insumos = bool(request.POST.get("create_missing_insumos"))
+        run_started_at = timezone.now()
+        run_source = AlmacenSyncRun.SOURCE_DRIVE if action == "drive" else AlmacenSyncRun.SOURCE_MANUAL
 
         if action == "drive":
             month_override = (request.POST.get("month") or "").strip() or None
@@ -127,6 +130,13 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
                 }
                 warnings.extend(drive_result.skipped_files)
             except Exception as exc:
+                log_sync_run(
+                    source=run_source,
+                    status=AlmacenSyncRun.STATUS_ERROR,
+                    triggered_by=request.user,
+                    message=str(exc),
+                    started_at=run_started_at,
+                )
                 messages.error(request, f"Falló la sincronización desde Google Drive: {exc}")
                 return redirect("inventario:importar_archivos")
         else:
@@ -163,6 +173,13 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
                         dry_run=False,
                     )
                 except Exception as exc:
+                    log_sync_run(
+                        source=run_source,
+                        status=AlmacenSyncRun.STATUS_ERROR,
+                        triggered_by=request.user,
+                        message=str(exc),
+                        started_at=run_started_at,
+                    )
                     messages.error(request, f"Falló la importación de almacén: {exc}")
                     return redirect("inventario:importar_archivos")
 
@@ -188,6 +205,18 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
             if summary.unmatched:
                 messages.warning(request, f"Quedaron {summary.unmatched} filas sin match.")
             pendientes_preview = summary.pendientes[:80]
+            log_sync_run(
+                source=run_source,
+                status=AlmacenSyncRun.STATUS_OK,
+                summary=summary,
+                triggered_by=request.user,
+                folder_name=(drive_info or {}).get("folder_name", ""),
+                target_month=(drive_info or {}).get("target_month", ""),
+                fallback_used=bool((drive_info or {}).get("used_fallback_month")),
+                downloaded_sources=(drive_info or {}).get("downloaded_sources", sorted(selected_sources)),
+                message=" | ".join(warnings[:12]),
+                started_at=run_started_at,
+            )
 
     context = {
         "can_manage_inventario": can_manage_inventario(request.user),
@@ -212,6 +241,7 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
         },
         "current_month": timezone.localdate().strftime("%Y-%m"),
         "drive_info": drive_info,
+        "latest_runs": AlmacenSyncRun.objects.select_related("triggered_by").all()[:10],
     }
     return render(request, "inventario/importar_archivos.html", context)
 

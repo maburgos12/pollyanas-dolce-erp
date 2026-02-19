@@ -79,3 +79,49 @@ class AjusteInventario(models.Model):
 
     def __str__(self):
         return self.folio
+
+
+class AlmacenSyncRun(models.Model):
+    SOURCE_MANUAL = "MANUAL"
+    SOURCE_DRIVE = "DRIVE"
+    SOURCE_SCHEDULED = "SCHEDULED"
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, "Manual"),
+        (SOURCE_DRIVE, "Google Drive"),
+        (SOURCE_SCHEDULED, "Programado"),
+    ]
+
+    STATUS_OK = "OK"
+    STATUS_ERROR = "ERROR"
+    STATUS_CHOICES = [
+        (STATUS_OK, "OK"),
+        (STATUS_ERROR, "Error"),
+    ]
+
+    source = models.CharField(max_length=12, choices=SOURCE_CHOICES)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_OK)
+    triggered_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL)
+    started_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    folder_name = models.CharField(max_length=255, blank=True, default="")
+    target_month = models.CharField(max_length=7, blank=True, default="")
+    fallback_used = models.BooleanField(default=False)
+    downloaded_sources = models.CharField(max_length=255, blank=True, default="")
+
+    rows_stock_read = models.PositiveIntegerField(default=0)
+    rows_mov_read = models.PositiveIntegerField(default=0)
+    matched = models.PositiveIntegerField(default=0)
+    unmatched = models.PositiveIntegerField(default=0)
+    insumos_created = models.PositiveIntegerField(default=0)
+    existencias_updated = models.PositiveIntegerField(default=0)
+    movimientos_created = models.PositiveIntegerField(default=0)
+    movimientos_skipped_duplicate = models.PositiveIntegerField(default=0)
+    aliases_created = models.PositiveIntegerField(default=0)
+    message = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"{self.source} {self.status} {self.started_at:%Y-%m-%d %H:%M}"

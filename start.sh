@@ -12,6 +12,7 @@ python manage.py collectstatic --noinput
 
 echo "DEBUG: CREATE_SUPERUSER=${CREATE_SUPERUSER}"
 echo "DEBUG: USERNAME=${DJANGO_SUPERUSER_USERNAME:-EMPTY}"
+echo "DEBUG: ENABLE_AUTO_SYNC_ALMACEN=${ENABLE_AUTO_SYNC_ALMACEN:-0}"
 
 if [ "${CREATE_SUPERUSER:-0}" = "1" ]; then
   echo "Creating superuser..."
@@ -47,6 +48,11 @@ except Exception as e:
     raise
 PY
   fi
+fi
+
+if [ "${ENABLE_AUTO_SYNC_ALMACEN:-0}" = "1" ]; then
+  echo "Starting auto sync worker..."
+  ./scripts/auto_sync_almacen.sh &
 fi
 
 echo "Starting Gunicorn..."
