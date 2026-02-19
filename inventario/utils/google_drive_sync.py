@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import date
+from collections import deque
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -271,6 +272,71 @@ def _iter_files(service, folder_id: str):
             break
 
 
+def _list_children(service, folder_id: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    token = None
+    query = f"'{folder_id}' in parents and trashed=false"
+    while True:
+        resp = (
+            service.files()
+            .list(
+                q=query,
+                fields="nextPageToken, files(id,name,mimeType,fileExtension)",
+                pageSize=1000,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageToken=token,
+            )
+            .execute()
+        )
+        items.extend(resp.get("files", []))
+        token = resp.get("nextPageToken")
+        if not token:
+            break
+    return items
+
+
+def _find_folder_with_expected_files(
+    service,
+    start_folder_id: str,
+    include_sources: set[str],
+    max_depth: int = 4,
+    max_folders_scanned: int = 120,
+) -> tuple[str, str | None]:
+    queue: deque[tuple[str, int]] = deque([(start_folder_id, 0)])
+    visited: set[str] = set()
+    scanned = 0
+
+    while queue and scanned < max_folders_scanned:
+        folder_id, depth = queue.popleft()
+        if folder_id in visited:
+            continue
+        visited.add(folder_id)
+        scanned += 1
+
+        children = _list_children(service, folder_id)
+        matched_sources = set()
+        for item in children:
+            source, _ = _classify_filename(item.get("name", ""))
+            if source and source in include_sources:
+                matched_sources.add(source)
+
+        if matched_sources:
+            return folder_id, None
+
+        if depth >= max_depth:
+            continue
+
+        for item in children:
+            if item.get("mimeType") == FOLDER_MIME:
+                queue.append((item["id"], depth + 1))
+
+    return start_folder_id, (
+        f"No se encontró carpeta con archivos válidos tras escanear {scanned} carpeta(s). "
+        "Revisa nombres esperados y permisos del service account."
+    )
+
+
 def sync_almacen_from_drive(
     include_sources: set[str] | None = None,
     month_override: str | None = None,
@@ -305,6 +371,26 @@ def sync_almacen_from_drive(
 
     downloaded_sources: set[str] = set()
     skipped_files: list[str] = []
+
+    target_folder_id, scan_warning = _find_folder_with_expected_files(
+        service=service,
+        start_folder_id=folder.folder_id,
+        include_sources=include_sources,
+    )
+    if scan_warning:
+        skipped_files.append(scan_warning)
+    if target_folder_id != folder.folder_id:
+        meta = (
+            service.files()
+            .get(fileId=target_folder_id, fields="id,name", supportsAllDrives=True)
+            .execute()
+        )
+        folder = DriveFolderCandidate(
+            folder_id=target_folder_id,
+            name=meta.get("name", folder.name),
+            month=folder.month,
+            year=folder.year,
+        )
 
     with TemporaryDirectory(prefix="inv-drive-") as tmpdir:
         tmp = Path(tmpdir)
