@@ -8,7 +8,7 @@
     "numReplicas": 1,
     "restartPolicyType": "always",
     "healthcheckPath": "/health/",
-    "healthcheckTimeout": 10,
+    "healthcheckTimeout": 60,
     "startCommand": "./start.sh"
   }
 }
