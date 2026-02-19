@@ -74,6 +74,11 @@
       <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion' %}">Limpiar selección</a>
     </div>
   </div>
+  <div class="toolbar mt-2">
+    <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=csv">Exportar CSV</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=xlsx">Exportar XLSX</a>
+    <a class="btn btn-primary" href="{% url 'recetas:plan_produccion_solicitud_print' plan_actual.id %}" target="_blank">Imprimir solicitud formal</a>
+  </div>
 
   <hr>
   <form class="form-grid-auto" method="post" action="{% url 'recetas:plan_produccion_item_create' plan_actual.id %}">

@@ -1,3 +1,5 @@
+import csv
+from io import BytesIO
 from datetime import date
 from decimal import Decimal
 from typing import Dict, Any, List
@@ -11,6 +13,7 @@ from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from openpyxl import Workbook
 
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from .models import Receta, LineaReceta, RecetaPresentacion, PlanProduccion, PlanProduccionItem
@@ -559,6 +562,95 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
     }
 
 
+def _export_plan_csv(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    filename = f"plan_produccion_{plan.id}_{plan.fecha_produccion}.csv"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+
+    writer.writerow(["PLAN DE PRODUCCION", plan.nombre])
+    writer.writerow(["Fecha", plan.fecha_produccion.isoformat()])
+    writer.writerow(["Costo total estimado", str(explosion["costo_total"])])
+    writer.writerow([])
+    writer.writerow(["PRODUCTOS EN PLAN"])
+    writer.writerow(["Receta", "Cantidad", "Notas", "Costo estimado"])
+    for row in explosion["items_detalle"]:
+        writer.writerow(
+            [
+                row["receta"].nombre,
+                f"{Decimal(str(row['cantidad'])):.3f}",
+                row["notas"] or "",
+                f"{Decimal(str(row['costo_estimado'])):.2f}",
+            ]
+        )
+
+    writer.writerow([])
+    writer.writerow(["INSUMOS CONSOLIDADOS"])
+    writer.writerow(["Insumo", "Origen", "Cantidad requerida", "Unidad", "Costo unitario", "Costo total"])
+    for row in explosion["insumos"]:
+        writer.writerow(
+            [
+                row["nombre"],
+                row["origen"],
+                f"{Decimal(str(row['cantidad'])):.3f}",
+                row["unidad"],
+                f"{Decimal(str(row['costo_unitario'])):.2f}",
+                f"{Decimal(str(row['costo_total'])):.2f}",
+            ]
+        )
+
+    return response
+
+
+def _export_plan_xlsx(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpResponse:
+    wb = Workbook()
+    ws_resumen = wb.active
+    ws_resumen.title = "Resumen"
+    ws_resumen.append(["Plan", plan.nombre])
+    ws_resumen.append(["Fecha", plan.fecha_produccion.isoformat()])
+    ws_resumen.append(["Costo total estimado", float(explosion["costo_total"] or 0)])
+    ws_resumen.append([])
+    ws_resumen.append(["Productos", len(explosion["items_detalle"])])
+    ws_resumen.append(["Insumos", len(explosion["insumos"])])
+
+    ws_productos = wb.create_sheet("Productos")
+    ws_productos.append(["Receta", "Cantidad", "Notas", "Costo estimado"])
+    for row in explosion["items_detalle"]:
+        ws_productos.append(
+            [
+                row["receta"].nombre,
+                float(row["cantidad"] or 0),
+                row["notas"] or "",
+                float(row["costo_estimado"] or 0),
+            ]
+        )
+
+    ws_insumos = wb.create_sheet("Insumos")
+    ws_insumos.append(["Insumo", "Origen", "Cantidad requerida", "Unidad", "Costo unitario", "Costo total"])
+    for row in explosion["insumos"]:
+        ws_insumos.append(
+            [
+                row["nombre"],
+                row["origen"],
+                float(row["cantidad"] or 0),
+                row["unidad"],
+                float(row["costo_unitario"] or 0),
+                float(row["costo_total"] or 0),
+            ]
+        )
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    filename = f"plan_produccion_{plan.id}_{plan.fecha_produccion}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion(request: HttpRequest) -> HttpResponse:
     planes = PlanProduccion.objects.select_related("creado_por").prefetch_related("items").order_by("-fecha_produccion", "-id")
@@ -579,6 +671,36 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "plan_actual": plan_actual,
             "recetas_disponibles": recetas_disponibles,
             "explosion": explosion,
+        },
+    )
+
+
+@permission_required("recetas.view_planproduccion", raise_exception=True)
+def plan_produccion_export(request: HttpRequest, plan_id: int) -> HttpResponse:
+    plan = get_object_or_404(PlanProduccion, pk=plan_id)
+    explosion = _plan_explosion(plan)
+    export_format = (request.GET.get("format") or "csv").lower()
+    if export_format == "xlsx":
+        return _export_plan_xlsx(plan, explosion)
+    return _export_plan_csv(plan, explosion)
+
+
+@permission_required("recetas.view_planproduccion", raise_exception=True)
+def plan_produccion_solicitud_print(request: HttpRequest, plan_id: int) -> HttpResponse:
+    plan = get_object_or_404(PlanProduccion, pk=plan_id)
+    explosion = _plan_explosion(plan)
+    materias_primas = [row for row in explosion["insumos"] if row["origen"] != "Interno"]
+    internos = [row for row in explosion["insumos"] if row["origen"] == "Interno"]
+    folio = f"SOL-{plan.fecha_produccion.strftime('%Y%m%d')}-{plan.id:04d}"
+    return render(
+        request,
+        "recetas/solicitud_insumos_print.html",
+        {
+            "plan": plan,
+            "explosion": explosion,
+            "materias_primas": materias_primas,
+            "internos": internos,
+            "folio": folio,
         },
     )
 

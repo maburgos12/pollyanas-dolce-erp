@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solicitud de Insumos - {{ folio }}</title>
+  <style>
+    :root {
+      --vino: #8B2252;
+      --rosa: #F8E8EE;
+      --texto: #3D2B2B;
+      --gris: #7A6565;
+      --borde: #E8B4C8;
+    }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--texto);
+      background: #fff;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 14mm;
+      box-sizing: border-box;
+    }
+    .header {
+      border: 2px solid var(--vino);
+      padding: 10px 12px;
+      margin-bottom: 14px;
+    }
+    .title {
+      font-size: 24px;
+      color: var(--vino);
+      margin: 0 0 6px 0;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: var(--gris);
+      margin: 0;
+    }
+    .meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 10px 0 14px;
+    }
+    .meta-box {
+      border: 1px solid var(--borde);
+      padding: 8px;
+      font-size: 12px;
+      background: #fff;
+    }
+    .meta-box strong {
+      color: var(--vino);
+    }
+    h2 {
+      font-size: 14px;
+      margin: 14px 0 6px;
+      color: var(--vino);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    th, td {
+      border: 1px solid #d8d8d8;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--rosa);
+      color: var(--vino);
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .text-end {
+      text-align: right;
+    }
+    .totals {
+      border: 1px solid var(--borde);
+      padding: 10px;
+      background: #fff;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .totals strong {
+      color: var(--vino);
+    }
+    .signatures {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .sig-box {
+      border-top: 1px solid #777;
+      padding-top: 6px;
+      font-size: 11px;
+      color: #555;
+      text-align: center;
+      min-height: 26px;
+    }
+    .print-actions {
+      width: 210mm;
+      margin: 10px auto;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .btn {
+      border: 1px solid var(--vino);
+      background: var(--vino);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn.secondary {
+      background: #fff;
+      color: var(--vino);
+    }
+    @media print {
+      .print-actions {
+        display: none;
+      }
+      .page {
+        margin: 0;
+        width: auto;
+        min-height: auto;
+        padding: 8mm;
+      }
+      @page {
+        size: A4;
+        margin: 8mm;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-actions">
+    <a class="btn secondary" href="{% url 'recetas:plan_produccion' %}?plan_id={{ plan.id }}">Volver</a>
+    <button class="btn" onclick="window.print()">Imprimir</button>
+  </div>
+
+  <section class="page">
+    <div class="header">
+      <h1 class="title">Orden de Solicitud de Insumos</h1>
+      <p class="subtitle">Pollyana's Dolce · Documento interno de abastecimiento</p>
+    </div>
+
+    <div class="meta">
+      <div class="meta-box"><strong>Folio:</strong> {{ folio }}</div>
+      <div class="meta-box"><strong>Fecha plan:</strong> {{ plan.fecha_produccion }}</div>
+      <div class="meta-box"><strong>Plan:</strong> {{ plan.nombre }}</div>
+      <div class="meta-box"><strong>Generado:</strong> {% now "Y-m-d H:i" %}</div>
+      <div class="meta-box"><strong>Solicitado por:</strong> {{ request.user.username|default:"-" }}</div>
+      <div class="meta-box"><strong>Área:</strong> Producción</div>
+    </div>
+
+    <h2>Materia Prima a Solicitar</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Insumo</th>
+          <th class="text-end">Cantidad</th>
+          <th>Unidad</th>
+          <th class="text-end">Costo unitario</th>
+          <th class="text-end">Costo estimado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in materias_primas %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td>{{ row.nombre }}</td>
+          <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
+          <td>{{ row.unidad }}</td>
+          <td class="text-end">${{ row.costo_unitario|floatformat:2 }}</td>
+          <td class="text-end">${{ row.costo_total|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6">No hay materia prima pendiente para este plan.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if internos %}
+    <h2>Insumos Internos (Referencia Producción)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Insumo interno</th>
+          <th class="text-end">Cantidad</th>
+          <th>Unidad</th>
+          <th class="text-end">Costo estimado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in internos %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td>{{ row.nombre }}</td>
+          <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
+          <td>{{ row.unidad }}</td>
+          <td class="text-end">${{ row.costo_total|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <div class="totals">
+      <div><strong>Total productos en plan:</strong> {{ explosion.items_detalle|length }}</div>
+      <div><strong>Total insumos consolidados:</strong> {{ explosion.insumos|length }}</div>
+      <div><strong>Costo total estimado del plan:</strong> ${{ explosion.costo_total|floatformat:2 }}</div>
+    </div>
+
+    <div class="signatures">
+      <div class="sig-box">Solicita (Producción)</div>
+      <div class="sig-box">Autoriza (Administración/DG)</div>
+      <div class="sig-box">Recibe (Compras/Almacén)</div>
+    </div>
+  </section>
+</body>
+</html>
