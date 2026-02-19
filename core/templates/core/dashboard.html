@@ -35,6 +35,72 @@
     </article>
 </div>
 
+<section class="card">
+    <div class="card-header">Indicadores de Inventario (Control de Almacén)</div>
+    <div class="kpi-grid">
+        <article class="kpi-card">
+            <div class="kpi-number">{{ inventario_total_count }}</div>
+            <div class="kpi-label">Insumos con existencia</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number is-danger">{{ stock_bajo_min_count }}</div>
+            <div class="kpi-label">Abajo de stock mínimo</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number is-warning">{{ stock_sobre_max_count }}</div>
+            <div class="kpi-label">Arriba de stock máximo</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number is-danger">{{ lead_time_risk_count }}</div>
+            <div class="kpi-label">Riesgo por lead time</div>
+        </article>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Indicador</th>
+                    <th class="text-end">Valor</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Stock mínimo configurado</td>
+                    <td class="text-end">{{ stock_min_config_count }} / {{ inventario_total_count }}</td>
+                </tr>
+                <tr>
+                    <td>Stock máximo configurado</td>
+                    <td class="text-end">{{ stock_max_config_count }} / {{ inventario_total_count }}</td>
+                </tr>
+                <tr>
+                    <td>Inventario promedio configurado</td>
+                    <td class="text-end">{{ inv_prom_config_count }} / {{ inventario_total_count }}</td>
+                </tr>
+                <tr>
+                    <td>Punto de reorden configurado</td>
+                    <td class="text-end">{{ punto_reorden_config_count }} / {{ inventario_total_count }}</td>
+                </tr>
+                <tr>
+                    <td>Días promedio de llegada de pedido</td>
+                    <td class="text-end">{{ avg_dias_llegada|floatformat:1 }}</td>
+                </tr>
+                <tr>
+                    <td>Consumo diario promedio por insumo</td>
+                    <td class="text-end">{{ avg_consumo_diario|floatformat:2 }}</td>
+                </tr>
+                <tr>
+                    <td>Consumo diario total estimado</td>
+                    <td class="text-end">{{ total_consumo_diario|floatformat:2 }}</td>
+                </tr>
+                <tr>
+                    <td>Cobertura promedio (días)</td>
+                    <td class="text-end">{{ cobertura_promedio_dias|floatformat:2 }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
 <div class="dashboard-grid">
     <section class="card">
         <div class="card-header">Accesos Operativos</div>

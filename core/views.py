@@ -1,6 +1,8 @@
 import logging
+from decimal import Decimal
 
 from django.db.models import F
+from django.db.models import Avg, Sum
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -67,6 +69,38 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "bajo_reorden_count": 0,
     }
     try:
+        existencias_qs = ExistenciaInsumo.objects.all()
+        inventario_total_count = existencias_qs.count()
+        stock_min_config_count = existencias_qs.exclude(stock_minimo=0).count()
+        stock_max_config_count = existencias_qs.exclude(stock_maximo=0).count()
+        inv_prom_config_count = existencias_qs.exclude(inventario_promedio=0).count()
+        punto_reorden_config_count = existencias_qs.exclude(punto_reorden=0).count()
+
+        stock_bajo_min_count = existencias_qs.filter(stock_minimo__gt=0, stock_actual__lt=F("stock_minimo")).count()
+        stock_sobre_max_count = existencias_qs.filter(stock_maximo__gt=0, stock_actual__gt=F("stock_maximo")).count()
+
+        agg = existencias_qs.aggregate(
+            avg_dias_llegada=Avg("dias_llegada_pedido"),
+            avg_consumo_diario=Avg("consumo_diario_promedio"),
+            total_consumo_diario=Sum("consumo_diario_promedio"),
+        )
+
+        lead_time_risk_count = 0
+        cobertura_total = Decimal("0")
+        cobertura_items = 0
+        for e in existencias_qs.only("stock_actual", "consumo_diario_promedio", "dias_llegada_pedido"):
+            consumo = e.consumo_diario_promedio or Decimal("0")
+            dias_llegada = Decimal(e.dias_llegada_pedido or 0)
+            if consumo <= 0:
+                continue
+            cobertura_dias = e.stock_actual / consumo
+            cobertura_total += cobertura_dias
+            cobertura_items += 1
+            if dias_llegada > 0 and cobertura_dias < dias_llegada:
+                lead_time_risk_count += 1
+
+        cobertura_promedio_dias = (cobertura_total / cobertura_items) if cobertura_items else Decimal("0")
+
         ctx.update(
             {
                 "can_view_recetas": u.has_perm("recetas.view_receta"),
@@ -85,6 +119,18 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "can_view_inventario": can_view_inventario(u),
                 "can_manage_inventario": can_manage_inventario(u),
                 "can_view_reportes": can_view_reportes(u),
+                "inventario_total_count": inventario_total_count,
+                "stock_min_config_count": stock_min_config_count,
+                "stock_max_config_count": stock_max_config_count,
+                "inv_prom_config_count": inv_prom_config_count,
+                "punto_reorden_config_count": punto_reorden_config_count,
+                "stock_bajo_min_count": stock_bajo_min_count,
+                "stock_sobre_max_count": stock_sobre_max_count,
+                "lead_time_risk_count": lead_time_risk_count,
+                "avg_dias_llegada": agg.get("avg_dias_llegada") or Decimal("0"),
+                "avg_consumo_diario": agg.get("avg_consumo_diario") or Decimal("0"),
+                "total_consumo_diario": agg.get("total_consumo_diario") or Decimal("0"),
+                "cobertura_promedio_dias": cobertura_promedio_dias,
             }
         )
     except Exception:
