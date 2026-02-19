@@ -44,11 +44,43 @@
 
 <section class="card">
   <div class="card-header">Solicitudes Registradas</div>
+  <form method="get" class="form-grid-auto mb-3">
+    <div>
+      <label for="source">Origen</label>
+      <select id="source" name="source" class="input-field">
+        <option value="all" {% if source_filter == 'all' %}selected{% endif %}>Todos</option>
+        <option value="manual" {% if source_filter == 'manual' %}selected{% endif %}>Manual</option>
+        <option value="plan" {% if source_filter == 'plan' %}selected{% endif %}>Desde plan</option>
+      </select>
+    </div>
+    <div>
+      <label for="plan_id">Plan específico (opcional)</label>
+      <select id="plan_id" name="plan_id" class="input-field">
+        <option value="">Todos los planes</option>
+        {% for p in plan_options %}
+        <option value="{{ p.id }}" {% if plan_filter == p.id|stringformat:'s' %}selected{% endif %}>#{{ p.id }} · {{ p.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="reabasto">Reabasto</label>
+      <select id="reabasto" name="reabasto" class="input-field">
+        <option value="all" {% if reabasto_filter == 'all' %}selected{% endif %}>Todos</option>
+        <option value="critico" {% if reabasto_filter == 'critico' %}selected{% endif %}>Críticos</option>
+        <option value="bajo" {% if reabasto_filter == 'bajo' %}selected{% endif %}>Bajo reorden</option>
+        <option value="ok" {% if reabasto_filter == 'ok' %}selected{% endif %}>Suficiente</option>
+      </select>
+    </div>
+    <div class="align-items-end d-flex gap-2">
+      <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+      <a href="{% url 'compras:solicitudes' %}" class="btn btn-secondary">Limpiar</a>
+    </div>
+  </form>
   <div class="toolbar">
-    <a href="{% url 'compras:solicitudes' %}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=critico" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=bajo" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=ok" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
+    <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=bajo&source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=ok&source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
   </div>
   <div class="table-responsive">
     <table class="table table-striped">
@@ -57,6 +89,7 @@
           <th>Folio</th>
           <th>Área</th>
           <th>Solicitante</th>
+          <th>Origen</th>
           <th>Insumo</th>
           <th>Reabasto</th>
           <th class="text-end">Cantidad</th>
@@ -71,6 +104,13 @@
           <td>{{ s.folio }}</td>
           <td>{{ s.area }}</td>
           <td>{{ s.solicitante }}</td>
+          <td>
+            {% if s.source_tipo == 'plan' %}
+              <span class="badge-amarillo">Plan #{{ s.source_plan_id }}</span>
+            {% else %}
+              <span class="badge-verde">Manual</span>
+            {% endif %}
+          </td>
           <td>{{ s.insumo.nombre }}</td>
           <td>
             {% if s.reabasto_nivel == 'critico' %}
@@ -107,7 +147,7 @@
           {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="{% if can_manage_compras %}9{% else %}8{% endif %}" class="text-muted">Sin solicitudes capturadas.</td></tr>
+        <tr><td colspan="{% if can_manage_compras %}10{% else %}9{% endif %}" class="text-muted">Sin solicitudes capturadas.</td></tr>
         {% endfor %}
       </tbody>
     </table>

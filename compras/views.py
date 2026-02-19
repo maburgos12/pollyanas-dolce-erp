@@ -11,6 +11,7 @@ from core.access import can_manage_compras, can_view_compras
 from core.audit import log_event
 from inventario.models import ExistenciaInsumo
 from maestros.models import Insumo, Proveedor
+from recetas.models import PlanProduccion
 
 from .models import OrdenCompra, RecepcionCompra, SolicitudCompra
 
@@ -103,12 +104,38 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             )
         return redirect("compras:solicitudes")
 
-    solicitudes = list(SolicitudCompra.objects.select_related("insumo")[:50])
+    source_filter = (request.GET.get("source") or "all").lower()
+    if source_filter not in {"all", "manual", "plan"}:
+        source_filter = "all"
+    plan_filter = (request.GET.get("plan_id") or "").strip()
+
+    solicitudes_qs = SolicitudCompra.objects.select_related("insumo").all()
+    if source_filter == "plan":
+        solicitudes_qs = solicitudes_qs.filter(area__startswith="PLAN_PRODUCCION:")
+    elif source_filter == "manual":
+        solicitudes_qs = solicitudes_qs.exclude(area__startswith="PLAN_PRODUCCION:")
+
+    if plan_filter:
+        solicitudes_qs = solicitudes_qs.filter(area=f"PLAN_PRODUCCION:{plan_filter}")
+
+    solicitudes = list(solicitudes_qs[:200])
     insumo_ids = [s.insumo_id for s in solicitudes]
     existencias = {
         e.insumo_id: e
         for e in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)
     }
+
+    plan_ids = set()
+    for s in solicitudes:
+        if (s.area or "").startswith("PLAN_PRODUCCION:"):
+            _, _, maybe_id = s.area.partition(":")
+            if maybe_id.isdigit():
+                plan_ids.add(int(maybe_id))
+    planes_map = {
+        p.id: p
+        for p in PlanProduccion.objects.filter(id__in=plan_ids)
+    }
+
     for s in solicitudes:
         ex = existencias.get(s.insumo_id)
         stock_actual = ex.stock_actual if ex else Decimal("0")
@@ -123,6 +150,16 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             s.reabasto_nivel = "ok"
             s.reabasto_texto = "Stock suficiente"
         s.reabasto_detalle = f"Stock {stock_actual} / Reorden {punto_reorden}"
+        s.source_tipo = "manual"
+        s.source_plan_id = None
+        s.source_plan_nombre = ""
+        if (s.area or "").startswith("PLAN_PRODUCCION:"):
+            _, _, maybe_id = s.area.partition(":")
+            if maybe_id.isdigit():
+                plan_id_int = int(maybe_id)
+                s.source_tipo = "plan"
+                s.source_plan_id = plan_id_int
+                s.source_plan_nombre = planes_map.get(plan_id_int).nombre if plan_id_int in planes_map else f"Plan {plan_id_int}"
 
     reabasto_filter = (request.GET.get("reabasto") or "all").lower()
     if reabasto_filter in {"critico", "bajo", "ok"}:
@@ -130,12 +167,23 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
     else:
         reabasto_filter = "all"
 
+    # Armamos opciones de planes en Python para mapear area "PLAN_PRODUCCION:{id}".
+    plan_ids_all = set()
+    for area_val in SolicitudCompra.objects.filter(area__startswith="PLAN_PRODUCCION:").values_list("area", flat=True).distinct():
+        _, _, maybe_id = (area_val or "").partition(":")
+        if maybe_id.isdigit():
+            plan_ids_all.add(int(maybe_id))
+    plan_options = list(PlanProduccion.objects.filter(id__in=plan_ids_all).order_by("-fecha_produccion", "-id")[:100])
+
     context = {
         "solicitudes": solicitudes,
         "insumo_options": _build_insumo_options(),
         "status_choices": SolicitudCompra.STATUS_CHOICES,
         "can_manage_compras": can_manage_compras(request.user),
         "reabasto_filter": reabasto_filter,
+        "source_filter": source_filter,
+        "plan_filter": plan_filter,
+        "plan_options": plan_options,
     }
     return render(request, "compras/solicitudes.html", context)
 
