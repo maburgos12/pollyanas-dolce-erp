@@ -69,6 +69,7 @@ def _build_insumo_options():
             {
                 "id": insumo.id,
                 "nombre": insumo.nombre,
+                "proveedor_sugerido": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
                 "stock_actual": stock_actual,
                 "punto_reorden": punto_reorden,
                 "recomendado": recomendado,
@@ -87,10 +88,12 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             raise PermissionDenied("No tienes permisos para crear solicitudes.")
         insumo_id = request.POST.get("insumo_id")
         if insumo_id:
+            insumo = get_object_or_404(Insumo, pk=insumo_id)
             solicitud = SolicitudCompra.objects.create(
                 area=request.POST.get("area", "General").strip() or "General",
                 solicitante=request.POST.get("solicitante", request.user.username).strip() or request.user.username,
-                insumo_id=insumo_id,
+                insumo=insumo,
+                proveedor_sugerido=insumo.proveedor_principal,
                 cantidad=_to_decimal(request.POST.get("cantidad"), "1"),
                 fecha_requerida=request.POST.get("fecha_requerida") or None,
                 estatus=request.POST.get("estatus") or SolicitudCompra.STATUS_BORRADOR,
@@ -109,7 +112,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         source_filter = "all"
     plan_filter = (request.GET.get("plan_id") or "").strip()
 
-    solicitudes_qs = SolicitudCompra.objects.select_related("insumo").all()
+    solicitudes_qs = SolicitudCompra.objects.select_related("insumo", "proveedor_sugerido").all()
     if source_filter == "plan":
         solicitudes_qs = solicitudes_qs.filter(area__startswith="PLAN_PRODUCCION:")
     elif source_filter == "manual":

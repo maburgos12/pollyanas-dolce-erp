@@ -849,6 +849,7 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
             area=area_tag,
             solicitante=request.user.username,
             insumo=insumo,
+            proveedor_sugerido=insumo.proveedor_principal,
             cantidad=Decimal(str(row["cantidad"])),
             fecha_requerida=plan.fecha_produccion,
             estatus=SolicitudCompra.STATUS_BORRADOR,

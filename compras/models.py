@@ -20,6 +20,13 @@ class SolicitudCompra(models.Model):
     area = models.CharField(max_length=120)
     solicitante = models.CharField(max_length=120)
     insumo = models.ForeignKey(Insumo, on_delete=models.PROTECT)
+    proveedor_sugerido = models.ForeignKey(
+        Proveedor,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="solicitudes_sugeridas",
+    )
     cantidad = models.DecimalField(max_digits=18, decimal_places=3)
     fecha_requerida = models.DateField(default=timezone.localdate)
     estatus = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_BORRADOR)

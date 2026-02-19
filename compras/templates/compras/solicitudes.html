@@ -24,6 +24,7 @@
         data-stock="{{ i.stock_actual }}"
         data-reorden="{{ i.punto_reorden }}"
         data-recomendado="{{ i.recomendado }}"
+        data-proveedor="{{ i.proveedor_sugerido }}"
       >
         {{ i.nombre }}
       </option>
@@ -36,7 +37,7 @@
     </select>
     <button class="btn btn-primary" type="submit">Guardar solicitud</button>
   </form>
-  <p id="stock-hint" class="muted mb-0">Selecciona un insumo para ver stock, punto de reorden y sugerencia de compra.</p>
+  <p id="stock-hint" class="muted mb-0">Selecciona un insumo para ver stock, punto de reorden, sugerencia y proveedor principal.</p>
   {% else %}
   <p class="muted">Tu perfil está en modo lectura para Compras.</p>
   {% endif %}
@@ -91,6 +92,7 @@
           <th>Solicitante</th>
           <th>Origen</th>
           <th>Insumo</th>
+          <th>Proveedor sugerido</th>
           <th>Reabasto</th>
           <th class="text-end">Cantidad</th>
           <th>Fecha requerida</th>
@@ -106,12 +108,13 @@
           <td>{{ s.solicitante }}</td>
           <td>
             {% if s.source_tipo == 'plan' %}
-              <span class="badge-amarillo">Plan #{{ s.source_plan_id }}</span>
+              <span class="badge-amarillo"><a href="{% url 'recetas:plan_produccion' %}?plan_id={{ s.source_plan_id }}" style="color: inherit; text-decoration: none;">Plan #{{ s.source_plan_id }}</a></span>
             {% else %}
               <span class="badge-verde">Manual</span>
             {% endif %}
           </td>
           <td>{{ s.insumo.nombre }}</td>
+          <td>{{ s.proveedor_sugerido.nombre|default:"-" }}</td>
           <td>
             {% if s.reabasto_nivel == 'critico' %}
               <span class="badge-rojo" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
@@ -147,7 +150,7 @@
           {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="{% if can_manage_compras %}10{% else %}9{% endif %}" class="text-muted">Sin solicitudes capturadas.</td></tr>
+        <tr><td colspan="{% if can_manage_compras %}11{% else %}10{% endif %}" class="text-muted">Sin solicitudes capturadas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -173,12 +176,13 @@
       const stock = Number(selected.dataset.stock || 0);
       const reorden = Number(selected.dataset.reorden || 0);
       const recomendado = Number(selected.dataset.recomendado || 0);
+      const proveedor = selected.dataset.proveedor || "-";
 
       if (!Number.isNaN(recomendado) && recomendado > 0) {
         cantidadInput.value = recomendado.toFixed(3);
-        stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | Sugerido: " + recomendado.toFixed(3);
+        stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | Sugerido: " + recomendado.toFixed(3) + " | Proveedor: " + proveedor;
       } else {
-        stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | No se requiere compra por reorden.";
+        stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | No se requiere compra por reorden. | Proveedor: " + proveedor;
       }
     }
 
