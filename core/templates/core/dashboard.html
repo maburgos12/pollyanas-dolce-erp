@@ -114,6 +114,7 @@
             {% endif %}
             {% if can_view_inventario %}
                 <a href="{% url 'inventario:existencias' %}" class="btn btn-primary">📚 Control de inventario</a>
+                <a href="{% url 'inventario:importar_archivos' %}" class="btn btn-secondary">📤 Cargar archivos almacén</a>
             {% endif %}
             {% if can_view_reportes %}
                 <a href="{% url 'reportes:costo_receta' %}" class="btn btn-secondary">📈 Reportes ejecutivos</a>

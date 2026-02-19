@@ -9,4 +9,5 @@ urlpatterns = [
     path("movimientos/", views.movimientos, name="movimientos"),
     path("ajustes/", views.ajustes, name="ajustes"),
     path("alertas/", views.alertas, name="alertas"),
+    path("importar/", views.importar_archivos, name="importar_archivos"),
 ]

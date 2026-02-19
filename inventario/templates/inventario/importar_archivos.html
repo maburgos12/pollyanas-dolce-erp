@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Inventario - Carga de Almacén{% endblock %}
+{% block page_title %}Inventario · Carga de Almacén{% endblock %}
+
+{% block content %}
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
+  <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
+  <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
+  <a class="module-tab" href="{% url 'inventario:alertas' %}">Alertas</a>
+  <a class="module-tab active" href="{% url 'inventario:importar_archivos' %}">Carga Almacén</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Subir Archivos de Almacén (XLSX)</div>
+  <p class="muted">Sube uno o varios archivos. El sistema detecta automáticamente Inventario, Entradas, Salidas y Merma por nombre de archivo.</p>
+
+  {% if can_manage_inventario %}
+  <form method="post" enctype="multipart/form-data" class="form-grid-2">
+    {% csrf_token %}
+
+    <div class="form-group" style="grid-column: 1 / -1;">
+      <label>Archivos .xlsx</label>
+      <input class="input-field" type="file" name="archivos" accept=".xlsx" multiple required>
+    </div>
+
+    <div class="form-group" style="grid-column: 1 / -1;">
+      <label>Fuentes a importar</label>
+      <div class="quick-actions">
+        {% for value, label in sources %}
+          <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" name="sources" value="{{ value }}" checked>
+            <span>{{ label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Fuzzy threshold</label>
+      <input class="input-field" type="number" name="fuzzy_threshold" min="80" max="100" value="{{ defaults.fuzzy_threshold }}">
+    </div>
+
+    <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end; gap:8px;">
+      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="create_missing_insumos" {% if defaults.create_missing_insumos %}checked{% endif %}>
+        <span>Crear insumos faltantes</span>
+      </label>
+      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="create_aliases" {% if defaults.create_aliases %}checked{% endif %}>
+        <span>Crear aliases automáticos</span>
+      </label>
+    </div>
+
+    <div style="grid-column: 1 / -1; display:flex; justify-content:flex-end;">
+      <button class="btn btn-primary" type="submit">Procesar carga</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="muted">Tu perfil está en modo lectura para Inventario.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Nombres recomendados</div>
+  <ul>
+    {% for n in expected_names %}
+    <li><code>{{ n }}</code></li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% if summary %}
+<section class="card">
+  <div class="card-header">Resumen de importación</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <tbody>
+        <tr><th>Filas inventario leídas</th><td class="text-end">{{ summary.rows_stock_read }}</td></tr>
+        <tr><th>Filas movimientos leídas</th><td class="text-end">{{ summary.rows_mov_read }}</td></tr>
+        <tr><th>Matches</th><td class="text-end">{{ summary.matched }}</td></tr>
+        <tr><th>Sin match</th><td class="text-end">{{ summary.unmatched }}</td></tr>
+        <tr><th>Insumos creados</th><td class="text-end">{{ summary.insumos_created }}</td></tr>
+        <tr><th>Existencias actualizadas</th><td class="text-end">{{ summary.existencias_updated }}</td></tr>
+        <tr><th>Movimientos creados</th><td class="text-end">{{ summary.movimientos_created }}</td></tr>
+        <tr><th>Duplicados omitidos</th><td class="text-end">{{ summary.movimientos_skipped_duplicate }}</td></tr>
+        <tr><th>Aliases creados</th><td class="text-end">{{ summary.aliases_created }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if pendientes_preview %}
+<section class="card">
+  <div class="card-header">Pendientes de match (muestra)</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fuente</th>
+          <th>Fila</th>
+          <th>Nombre origen</th>
+          <th>Sugerencia</th>
+          <th class="text-end">Score</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in pendientes_preview %}
+        <tr>
+          <td>{{ p.source }}</td>
+          <td>{{ p.row }}</td>
+          <td>{{ p.nombre_origen }}</td>
+          <td>{{ p.sugerencia|default:"-" }}</td>
+          <td class="text-end">{{ p.score }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

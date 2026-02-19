@@ -1,7 +1,10 @@
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -10,8 +13,26 @@ from django.utils import timezone
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
 from maestros.models import Insumo
+from recetas.utils.normalizacion import normalizar_nombre
+from inventario.utils.almacen_import import (
+    ENTRADAS_FILE,
+    INVENTARIO_FILE,
+    MERMA_FILE,
+    SALIDAS_FILE,
+    import_folder,
+)
 
 from .models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
+
+
+SOURCE_TO_FILENAME = {
+    "inventario": INVENTARIO_FILE,
+    "entradas": ENTRADAS_FILE,
+    "salidas": SALIDAS_FILE,
+    "merma": MERMA_FILE,
+}
+
+FILENAME_TO_SOURCE = {v: k for k, v in SOURCE_TO_FILENAME.items()}
 
 
 def _to_decimal(value: str, default: str = "0") -> Decimal:
@@ -29,6 +50,134 @@ def _apply_movimiento(movimiento: MovimientoInventario) -> None:
         existencia.stock_actual -= movimiento.cantidad
     existencia.actualizado_en = timezone.now()
     existencia.save()
+
+
+def _classify_upload(filename: str) -> tuple[str | None, str | None]:
+    if not filename:
+        return None, None
+    original = filename.strip()
+    normalized = normalizar_nombre(Path(original).name)
+
+    for expected_name, source in FILENAME_TO_SOURCE.items():
+        if normalized == normalizar_nombre(expected_name):
+            return source, expected_name
+
+    if "inventario" in normalized and "almacen" in normalized:
+        return "inventario", INVENTARIO_FILE
+    if "entradas" in normalized and "almacen" in normalized:
+        return "entradas", ENTRADAS_FILE
+    if "salidas" in normalized and "almacen" in normalized:
+        return "salidas", SALIDAS_FILE
+    if "merma" in normalized and "almacen" in normalized:
+        return "merma", MERMA_FILE
+    return None, None
+
+
+def _save_uploaded_file(target_dir: str, target_name: str, uploaded: UploadedFile) -> None:
+    filepath = Path(target_dir) / target_name
+    with filepath.open("wb") as out:
+        for chunk in uploaded.chunks():
+            out.write(chunk)
+
+
+@login_required
+def importar_archivos(request: HttpRequest) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+
+    summary = None
+    pendientes_preview = []
+    warnings: list[str] = []
+
+    if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied("No tienes permisos para importar archivos de almacén.")
+
+        uploaded_files = request.FILES.getlist("archivos")
+        if not uploaded_files:
+            messages.error(request, "Selecciona al menos un archivo .xlsx para importar.")
+            return redirect("inventario:importar_archivos")
+
+        selected_sources = set(request.POST.getlist("sources")) or set(SOURCE_TO_FILENAME.keys())
+        selected_sources = selected_sources.intersection(set(SOURCE_TO_FILENAME.keys()))
+        if not selected_sources:
+            messages.error(request, "Selecciona al menos una fuente a importar.")
+            return redirect("inventario:importar_archivos")
+
+        fuzzy_threshold = int(_to_decimal(request.POST.get("fuzzy_threshold"), "96"))
+        create_aliases = bool(request.POST.get("create_aliases"))
+        create_missing_insumos = bool(request.POST.get("create_missing_insumos"))
+
+        saved_sources = set()
+        with TemporaryDirectory(prefix="inv-upload-") as tmpdir:
+            for f in uploaded_files:
+                source, target_name = _classify_upload(f.name)
+                if not source or not target_name:
+                    warnings.append(f"Archivo no reconocido y omitido: {f.name}")
+                    continue
+                if source not in selected_sources:
+                    warnings.append(f"Archivo omitido por filtro de fuente ({source}): {f.name}")
+                    continue
+                _save_uploaded_file(tmpdir, target_name, f)
+                saved_sources.add(source)
+
+            run_sources = selected_sources.intersection(saved_sources)
+            if not run_sources:
+                messages.error(request, "Ninguno de los archivos subidos coincide con las fuentes seleccionadas.")
+                return redirect("inventario:importar_archivos")
+
+            try:
+                summary = import_folder(
+                    folderpath=tmpdir,
+                    include_sources=run_sources,
+                    fuzzy_threshold=fuzzy_threshold,
+                    create_aliases=create_aliases,
+                    create_missing_insumos=create_missing_insumos,
+                    dry_run=False,
+                )
+            except Exception as exc:
+                messages.error(request, f"Falló la importación de almacén: {exc}")
+                return redirect("inventario:importar_archivos")
+
+        for w in warnings:
+            messages.warning(request, w)
+
+        if summary:
+            messages.success(
+                request,
+                (
+                    f"Importación aplicada. Existencias actualizadas: {summary.existencias_updated}, "
+                    f"Movimientos creados: {summary.movimientos_created}, "
+                    f"Duplicados omitidos: {summary.movimientos_skipped_duplicate}."
+                ),
+            )
+            if summary.unmatched:
+                messages.warning(request, f"Quedaron {summary.unmatched} filas sin match.")
+            pendientes_preview = summary.pendientes[:80]
+
+    context = {
+        "can_manage_inventario": can_manage_inventario(request.user),
+        "sources": [
+            ("inventario", "Inventario"),
+            ("entradas", "Entradas"),
+            ("salidas", "Salidas"),
+            ("merma", "Merma"),
+        ],
+        "summary": summary,
+        "pendientes_preview": pendientes_preview,
+        "expected_names": [
+            INVENTARIO_FILE,
+            ENTRADAS_FILE,
+            SALIDAS_FILE,
+            MERMA_FILE,
+        ],
+        "defaults": {
+            "fuzzy_threshold": 96,
+            "create_missing_insumos": True,
+            "create_aliases": False,
+        },
+    }
+    return render(request, "inventario/importar_archivos.html", context)
 
 
 @login_required
