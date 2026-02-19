@@ -153,6 +153,7 @@
     .filter((opt) => !!opt.value)
     .map((opt) => ({ value: opt.value, label: opt.textContent.trim() }));
   let currentSuggestions = [];
+  let highlightedSuggestionIndex = -1;
 
   function toNum(v) {
     if (v === null || v === undefined) return NaN;
@@ -192,32 +193,60 @@
     if (option && option.value) {
       insumoAutocomplete.value = option.textContent.trim();
     }
+    clearSuggestions();
     recalc();
   }
 
   function renderSuggestions() {
     suggestionsBox.innerHTML = "";
-    if (!currentSuggestions.length) return;
+    if (!currentSuggestions.length) {
+      highlightedSuggestionIndex = -1;
+      return;
+    }
     currentSuggestions.forEach((item, idx) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "autocomplete-item";
       btn.setAttribute("role", "option");
+      btn.setAttribute("aria-selected", idx === highlightedSuggestionIndex ? "true" : "false");
       btn.dataset.value = item.value;
+      btn.dataset.idx = String(idx);
       btn.textContent = item.label;
       btn.addEventListener("click", () => {
         selectInsumoByValue(item.value);
-        suggestionsBox.innerHTML = "";
       });
-      if (idx === 0) {
+      if (idx === highlightedSuggestionIndex) {
+        btn.classList.add("is-active");
+      } else if (idx === 0) {
         btn.classList.add("is-best-match");
       }
       suggestionsBox.appendChild(btn);
     });
   }
 
+  function clearSuggestions() {
+    currentSuggestions = [];
+    highlightedSuggestionIndex = -1;
+    suggestionsBox.innerHTML = "";
+  }
+
+  function setHighlightedIndex(index) {
+    if (!currentSuggestions.length) {
+      highlightedSuggestionIndex = -1;
+      return;
+    }
+    const len = currentSuggestions.length;
+    highlightedSuggestionIndex = ((index % len) + len) % len;
+    renderSuggestions();
+    const active = suggestionsBox.querySelector('.autocomplete-item.is-active');
+    if (active) {
+      active.scrollIntoView({ block: "nearest" });
+    }
+  }
+
   function updateSuggestions() {
     currentSuggestions = suggestionsFor(insumoAutocomplete.value);
+    highlightedSuggestionIndex = currentSuggestions.length ? 0 : -1;
     renderSuggestions();
   }
 
@@ -261,22 +290,47 @@
   cantidadInput.addEventListener("input", recalc);
   insumoAutocomplete.addEventListener("input", updateSuggestions);
   insumoAutocomplete.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Enter") return;
-    ev.preventDefault();
-    if (currentSuggestions.length > 0) {
-      selectInsumoByValue(currentSuggestions[0].value);
-      suggestionsBox.innerHTML = "";
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      if (!currentSuggestions.length) {
+        updateSuggestions();
+      }
+      if (currentSuggestions.length) {
+        setHighlightedIndex(highlightedSuggestionIndex + 1);
+      }
       return;
     }
-    const exact = insumoOptions.find((item) => normalizeText(item.label) === normalizeText(insumoAutocomplete.value));
-    if (exact) {
-      selectInsumoByValue(exact.value);
-      suggestionsBox.innerHTML = "";
+    if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      if (!currentSuggestions.length) {
+        updateSuggestions();
+      }
+      if (currentSuggestions.length) {
+        setHighlightedIndex(highlightedSuggestionIndex - 1);
+      }
+      return;
+    }
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      clearSuggestions();
+      return;
+    }
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      if (currentSuggestions.length > 0) {
+        const pickIndex = highlightedSuggestionIndex >= 0 ? highlightedSuggestionIndex : 0;
+        selectInsumoByValue(currentSuggestions[pickIndex].value);
+        return;
+      }
+      const exact = insumoOptions.find((item) => normalizeText(item.label) === normalizeText(insumoAutocomplete.value));
+      if (exact) {
+        selectInsumoByValue(exact.value);
+      }
     }
   });
   document.addEventListener("click", (ev) => {
     if (!suggestionsBox.contains(ev.target) && ev.target !== insumoAutocomplete) {
-      suggestionsBox.innerHTML = "";
+      clearSuggestions();
     }
   });
 
@@ -312,6 +366,10 @@
 }
 .autocomplete-item.is-best-match {
   background: #f8e8ee;
+}
+.autocomplete-item.is-active {
+  background: #f0d0dc;
+  border-color: #e8b4c8;
 }
 </style>
 {% endblock %}
