@@ -21,6 +21,7 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
+XLS_MIME = "application/vnd.ms-excel"
 
 
 MONTH_WORDS = {
@@ -424,7 +425,7 @@ def sync_almacen_from_drive(
             file_id, mime_type = _resolved_target(file_item)
             if mime_type == SHEET_MIME:
                 blob = _download_file(service, file_id, mime_type=XLSX_MIME)
-            elif name.lower().endswith((".xlsx", ".xlsm", ".xls")):
+            elif mime_type in {XLSX_MIME, XLS_MIME} or name.lower().endswith((".xlsx", ".xlsm", ".xls")):
                 blob = _download_file(service, file_id)
             else:
                 skipped_files.append(f"Formato no soportado: {name}")
