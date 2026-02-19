@@ -133,7 +133,11 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "cobertura_promedio_dias": cobertura_promedio_dias,
             }
         )
-        latest_sync = AlmacenSyncRun.objects.select_related("triggered_by").first()
+        latest_sync = (
+            AlmacenSyncRun.objects.select_related("triggered_by")
+            .order_by("-started_at", "-id")
+            .first()
+        )
         ctx["latest_almacen_sync"] = latest_sync
     except Exception:
         logger.exception("Dashboard failed to build full context")
