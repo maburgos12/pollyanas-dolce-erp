@@ -15,6 +15,9 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook
 
+from compras.models import SolicitudCompra
+from core.access import can_manage_compras
+from core.audit import log_event
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from .models import Receta, LineaReceta, RecetaPresentacion, PlanProduccion, PlanProduccionItem
 from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
@@ -815,6 +818,65 @@ def plan_produccion_delete(request: HttpRequest, plan_id: int) -> HttpResponse:
     plan.delete()
     messages.success(request, "Plan eliminado.")
     return redirect("recetas:plan_produccion")
+
+
+@login_required
+@require_POST
+def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> HttpResponse:
+    plan = get_object_or_404(PlanProduccion, pk=plan_id)
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para generar solicitudes de compra.")
+
+    explosion = _plan_explosion(plan)
+    materias_primas = [row for row in explosion["insumos"] if row["origen"] != "Interno" and Decimal(str(row["cantidad"] or 0)) > 0]
+    area_tag = f"PLAN_PRODUCCION:{plan.id}"
+
+    # Idempotencia operativa: si vuelven a generar, reemplazamos únicamente borradores del plan.
+    borradores_previos = SolicitudCompra.objects.filter(
+        area=area_tag,
+        estatus=SolicitudCompra.STATUS_BORRADOR,
+    )
+    deleted_prev = borradores_previos.count()
+    if deleted_prev:
+        borradores_previos.delete()
+
+    creadas = 0
+    for row in materias_primas:
+        insumo = Insumo.objects.filter(pk=row["insumo_id"]).first()
+        if not insumo:
+            continue
+        solicitud = SolicitudCompra.objects.create(
+            area=area_tag,
+            solicitante=request.user.username,
+            insumo=insumo,
+            cantidad=Decimal(str(row["cantidad"])),
+            fecha_requerida=plan.fecha_produccion,
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "compras.SolicitudCompra",
+            solicitud.id,
+            {
+                "folio": solicitud.folio,
+                "source_plan_id": plan.id,
+                "source_plan_nombre": plan.nombre,
+            },
+        )
+        creadas += 1
+
+    if creadas == 0:
+        messages.warning(
+            request,
+            "No se generaron solicitudes: el plan no tiene materia prima con cantidad válida.",
+        )
+    else:
+        messages.success(
+            request,
+            f"Solicitudes generadas: {creadas}. Borradores reemplazados del plan: {deleted_prev}.",
+        )
+    return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
 
 
 @login_required

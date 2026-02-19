@@ -79,6 +79,12 @@
     <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=xlsx">Exportar XLSX</a>
     <a class="btn btn-primary" href="{% url 'recetas:plan_produccion_solicitud_print' plan_actual.id %}" target="_blank">Imprimir solicitud formal</a>
     <a class="btn btn-primary" href="{% url 'recetas:plan_produccion_solicitud_compras_print' plan_actual.id %}" target="_blank">Imprimir solicitud compras (MP)</a>
+    {% if ui_access.can_manage_compras %}
+    <form method="post" action="{% url 'recetas:plan_produccion_generar_solicitudes' plan_actual.id %}" class="inline-form" onsubmit="return confirm('Se generarán solicitudes de compra en borrador para materia prima de este plan. ¿Continuar?');">
+      {% csrf_token %}
+      <button class="btn btn-success" type="submit">Generar solicitudes en Compras</button>
+    </form>
+    {% endif %}
   </div>
 
   <hr>
