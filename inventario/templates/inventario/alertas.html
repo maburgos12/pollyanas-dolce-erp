@@ -46,7 +46,12 @@
           <th>Insumo</th>
           <th>Unidad</th>
           <th class="text-end">Stock actual</th>
+          <th class="text-end">Stock min</th>
+          <th class="text-end">Stock max</th>
           <th class="text-end">Punto reorden</th>
+          <th class="text-end">Inv. promedio</th>
+          <th class="text-end">Días pedido</th>
+          <th class="text-end">Consumo diario</th>
           <th class="text-end">Diferencia</th>
           <th>Nivel</th>
         </tr>
@@ -57,7 +62,12 @@
           <td>{{ e.insumo.nombre }}</td>
           <td>{% if e.insumo.unidad_base %}{{ e.insumo.unidad_base.codigo }}{% else %}-{% endif %}</td>
           <td class="text-end">{{ e.stock_actual }}</td>
+          <td class="text-end">{{ e.stock_minimo }}</td>
+          <td class="text-end">{{ e.stock_maximo }}</td>
           <td class="text-end">{{ e.punto_reorden }}</td>
+          <td class="text-end">{{ e.inventario_promedio }}</td>
+          <td class="text-end">{{ e.dias_llegada_pedido }}</td>
+          <td class="text-end">{{ e.consumo_diario_promedio }}</td>
           <td class="text-end">{{ e.alerta_diferencia }}</td>
           <td>
             {% if e.alerta_nivel == 'critico' %}
@@ -71,7 +81,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="6" class="text-muted">No hay insumos para el filtro seleccionado.</td>
+          <td colspan="11" class="text-muted">No hay insumos para el filtro seleccionado.</td>
         </tr>
         {% endfor %}
       </tbody>

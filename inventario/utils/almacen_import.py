@@ -54,7 +54,12 @@ class StockRow:
     nombre_origen: str
     unidad_texto: str
     stock_actual: Decimal
+    stock_minimo: Decimal
+    stock_maximo: Decimal
+    inventario_promedio: Decimal
     punto_reorden: Decimal
+    dias_llegada_pedido: int
+    consumo_diario_promedio: Decimal
 
 
 @dataclass
@@ -278,7 +283,13 @@ def _read_inventory_rows(folder: Path) -> list[StockRow]:
 
         unidad = _as_text(df.iat[idx, 3] if df.shape[1] > 3 else None)
         stock = _to_decimal(df.iat[idx, 8] if df.shape[1] > 8 else None, default="0")
+        stock_minimo = _to_decimal(df.iat[idx, 12] if df.shape[1] > 12 else None, default="0")
+        stock_maximo = _to_decimal(df.iat[idx, 13] if df.shape[1] > 13 else None, default="0")
+        inventario_promedio = _to_decimal(df.iat[idx, 15] if df.shape[1] > 15 else None, default="0")
         reorden = _to_decimal(df.iat[idx, 12] if df.shape[1] > 12 else None, default="0")
+        punto_retorno = _to_decimal(df.iat[idx, 17] if df.shape[1] > 17 else None, default=str(reorden))
+        dias_llegada = int(_to_decimal(df.iat[idx, 18] if df.shape[1] > 18 else None, default="0"))
+        consumo_diario = _to_decimal(df.iat[idx, 19] if df.shape[1] > 19 else None, default="0")
 
         rows.append(
             StockRow(
@@ -287,7 +298,12 @@ def _read_inventory_rows(folder: Path) -> list[StockRow]:
                 nombre_origen=name,
                 unidad_texto=unidad,
                 stock_actual=stock,
-                punto_reorden=reorden,
+                stock_minimo=stock_minimo,
+                stock_maximo=stock_maximo,
+                inventario_promedio=inventario_promedio,
+                punto_reorden=punto_retorno,
+                dias_llegada_pedido=max(dias_llegada, 0),
+                consumo_diario_promedio=consumo_diario,
             )
         )
 
@@ -607,8 +623,28 @@ def import_folder(
             existencia.stock_actual = row.stock_actual
             if row.punto_reorden >= 0:
                 existencia.punto_reorden = row.punto_reorden
+            if row.stock_minimo >= 0:
+                existencia.stock_minimo = row.stock_minimo
+            if row.stock_maximo >= 0:
+                existencia.stock_maximo = row.stock_maximo
+            if row.inventario_promedio >= 0:
+                existencia.inventario_promedio = row.inventario_promedio
+            if row.consumo_diario_promedio >= 0:
+                existencia.consumo_diario_promedio = row.consumo_diario_promedio
+            existencia.dias_llegada_pedido = max(int(row.dias_llegada_pedido), 0)
             existencia.actualizado_en = timezone.now()
-            existencia.save(update_fields=["stock_actual", "punto_reorden", "actualizado_en"])
+            existencia.save(
+                update_fields=[
+                    "stock_actual",
+                    "stock_minimo",
+                    "stock_maximo",
+                    "inventario_promedio",
+                    "punto_reorden",
+                    "dias_llegada_pedido",
+                    "consumo_diario_promedio",
+                    "actualizado_en",
+                ]
+            )
             summary.existencias_updated += 1
 
     valid_movement_sources = include_sources.intersection({"entradas", "salidas", "merma"})

@@ -8,6 +8,11 @@ class ExistenciaInsumo(models.Model):
     insumo = models.OneToOneField(Insumo, on_delete=models.CASCADE)
     stock_actual = models.DecimalField(max_digits=18, decimal_places=3, default=0)
     punto_reorden = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    stock_minimo = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    stock_maximo = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    inventario_promedio = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    dias_llegada_pedido = models.PositiveIntegerField(default=0)
+    consumo_diario_promedio = models.DecimalField(max_digits=18, decimal_places=3, default=0)
     actualizado_en = models.DateTimeField(default=timezone.now)
 
     class Meta:

@@ -44,14 +44,37 @@ def existencias(request: HttpRequest) -> HttpResponse:
             existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo_id=insumo_id)
             prev_stock = existencia.stock_actual
             prev_reorden = existencia.punto_reorden
+            prev_minimo = existencia.stock_minimo
+            prev_maximo = existencia.stock_maximo
+            prev_inv_prom = existencia.inventario_promedio
+            prev_dias = existencia.dias_llegada_pedido
+            prev_consumo = existencia.consumo_diario_promedio
             new_stock = _to_decimal(request.POST.get("stock_actual"), "0")
             new_reorden = _to_decimal(request.POST.get("punto_reorden"), "0")
-            if new_stock < 0 or new_reorden < 0:
-                messages.error(request, "Stock actual y punto de reorden no pueden ser negativos.")
+            new_minimo = _to_decimal(request.POST.get("stock_minimo"), "0")
+            new_maximo = _to_decimal(request.POST.get("stock_maximo"), "0")
+            new_inv_prom = _to_decimal(request.POST.get("inventario_promedio"), "0")
+            new_dias = int(_to_decimal(request.POST.get("dias_llegada_pedido"), "0"))
+            new_consumo = _to_decimal(request.POST.get("consumo_diario_promedio"), "0")
+            if (
+                new_stock < 0
+                or new_reorden < 0
+                or new_minimo < 0
+                or new_maximo < 0
+                or new_inv_prom < 0
+                or new_dias < 0
+                or new_consumo < 0
+            ):
+                messages.error(request, "Los indicadores de inventario no pueden ser negativos.")
                 return redirect("inventario:existencias")
 
             existencia.stock_actual = new_stock
             existencia.punto_reorden = new_reorden
+            existencia.stock_minimo = new_minimo
+            existencia.stock_maximo = new_maximo
+            existencia.inventario_promedio = new_inv_prom
+            existencia.dias_llegada_pedido = new_dias
+            existencia.consumo_diario_promedio = new_consumo
             existencia.actualizado_en = timezone.now()
             existencia.save()
             log_event(
@@ -65,6 +88,16 @@ def existencias(request: HttpRequest) -> HttpResponse:
                     "to_stock": str(existencia.stock_actual),
                     "from_reorden": str(prev_reorden),
                     "to_reorden": str(existencia.punto_reorden),
+                    "from_stock_minimo": str(prev_minimo),
+                    "to_stock_minimo": str(existencia.stock_minimo),
+                    "from_stock_maximo": str(prev_maximo),
+                    "to_stock_maximo": str(existencia.stock_maximo),
+                    "from_inventario_promedio": str(prev_inv_prom),
+                    "to_inventario_promedio": str(existencia.inventario_promedio),
+                    "from_dias_llegada_pedido": prev_dias,
+                    "to_dias_llegada_pedido": existencia.dias_llegada_pedido,
+                    "from_consumo_diario_promedio": str(prev_consumo),
+                    "to_consumo_diario_promedio": str(existencia.consumo_diario_promedio),
                 },
             )
         return redirect("inventario:existencias")
