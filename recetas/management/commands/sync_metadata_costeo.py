@@ -23,6 +23,11 @@ class Command(BaseCommand):
             default="",
             help="Filtra por nombre de receta (contains, opcional).",
         )
+        parser.add_argument(
+            "--all-sheets",
+            action="store_true",
+            help="Procesa todas las hojas con bloques de ingredientes (no solo Insumos 1/2).",
+        )
 
     def handle(self, *args, **options):
         filepath = str(options["filepath"])
@@ -33,9 +38,12 @@ class Command(BaseCommand):
         seed_unidades_basicas()
         importador = ImportadorCosteo(filepath)
         receta_filter = (options.get("receta") or "").strip().lower()
-        sheets = [
-            s for s in importador.wb.sheetnames if normalizar_nombre(s) in {"insumos 1", "insumos 2"}
-        ]
+        if options.get("all_sheets"):
+            sheets = list(importador.wb.sheetnames)
+        else:
+            sheets = [
+                s for s in importador.wb.sheetnames if normalizar_nombre(s) in {"insumos 1", "insumos 2"}
+            ]
         if not sheets:
             self.stdout.write(self.style.ERROR("No se encontraron hojas 'Insumos 1' o 'Insumos 2'."))
             return
@@ -109,6 +117,9 @@ class Command(BaseCommand):
                 receta = Receta.objects.filter(nombre_normalizado=normalizar_nombre(receta_nombre)).order_by("-id").first()
                 if receta is None:
                     recetas_no_encontradas += 1
+                    r = rr + 1
+                    continue
+                if receta.tipo != Receta.TIPO_PREPARACION:
                     r = rr + 1
                     continue
 

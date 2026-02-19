@@ -558,12 +558,32 @@ class ImportadorCosteo:
         rendimiento_cantidad = None
         costo_unitario_fg = None
         unit_hint = ""
-        scan_end = min(ws.max_row, end_row)
+        fallback_qty = None
+        fallback_unit_hint = ""
+        scan_end = min(ws.max_row, end_row + 30)
 
         for r in range(start_row, scan_end + 1):
+            # Evitar capturar metadatos de la siguiente receta.
+            if r > end_row:
+                maybe_recipe_title = ws.cell(row=r, column=1).value
+                maybe_header = ws.cell(row=r + 1, column=1).value if (r + 1) <= ws.max_row else None
+                if (
+                    isinstance(maybe_recipe_title, str)
+                    and maybe_recipe_title.strip()
+                    and isinstance(maybe_header, str)
+                    and "ingrediente" in maybe_header.lower()
+                ):
+                    break
+
+            c1 = ws.cell(row=r, column=1).value
+            c2 = ws.cell(row=r, column=2).value
+            c3 = ws.cell(row=r, column=3).value
+            c4 = ws.cell(row=r, column=4).value
+            c5 = ws.cell(row=r, column=5).value
             f_raw = ws.cell(row=r, column=6).value
             g_val = _to_float(ws.cell(row=r, column=7).value)
             f_norm = normalizar_nombre(f_raw)
+            c1_norm = normalizar_nombre(c1)
             if g_val is not None and g_val > 0:
                 is_cost_row = ("costo" in f_norm) or ("$/" in f_norm) or ("$/ " in f_norm)
                 looks_like_total = any(token in f_norm for token in {"batida", "total", "peso", "rendimiento"})
@@ -577,6 +597,50 @@ class ImportadorCosteo:
                 if is_cost_row:
                     costo_unitario_fg = g_val
 
+            # Fallback flexible fuera de F/G:
+            # detecta filas tipo "Rendimiento", "Rendimiento Individuales", "Numero de galletas".
+            if any(t in c1_norm for t in {"rendimiento", "numero de galletas", "numero galletas"}):
+                qty_candidate = None
+                unit_candidate = ""
+
+                c2f = _to_float(c2)
+                c3f = _to_float(c3)
+                c4f = _to_float(c4)
+                c5f = _to_float(c5)
+
+                unit_from_c2 = _get_unit(str(c2)) if isinstance(c2, str) else None
+                unit_from_c3 = _get_unit(str(c3)) if isinstance(c3, str) else None
+                unit_from_c4 = _get_unit(str(c4)) if isinstance(c4, str) else None
+
+                if c2f is not None and c2f > 0 and unit_from_c3:
+                    qty_candidate = c2f
+                    unit_candidate = unit_from_c3.codigo
+                elif c3f is not None and c3f > 0:
+                    qty_candidate = c3f
+                    if unit_from_c2:
+                        unit_candidate = unit_from_c2.codigo
+                elif c4f is not None and c4f > 0:
+                    qty_candidate = c4f
+                    if unit_from_c3:
+                        unit_candidate = unit_from_c3.codigo
+                    elif unit_from_c2:
+                        unit_candidate = unit_from_c2.codigo
+                elif c5f is not None and c5f > 0:
+                    qty_candidate = c5f
+                    if unit_from_c4:
+                        unit_candidate = unit_from_c4.codigo
+
+                if qty_candidate is not None and qty_candidate > 0:
+                    fallback_qty = qty_candidate
+                    if not unit_candidate:
+                        # Si no hay unidad explícita, para rendimiento por piezas default a pza.
+                        if any(t in c1_norm for t in {"galleta", "individual", "empanada", "pieza", "pza", "numero"}):
+                            unit_candidate = "pza"
+                        elif "rendimiento" in c1_norm:
+                            unit_candidate = "pza"
+                    if unit_candidate:
+                        fallback_unit_hint = unit_candidate
+
             if f_raw is not None:
                 f_txt = str(f_raw).lower()
                 if ("kg" in f_txt) and ("costo" in f_txt or "$/" in f_txt):
@@ -588,6 +652,10 @@ class ImportadorCosteo:
             total_costo_lineas = sum((_to_float(l.get("costo")) or 0.0) for l in lineas)
             if total_costo_lineas > 0:
                 rendimiento_cantidad = total_costo_lineas / costo_unitario_fg
+        if (rendimiento_cantidad is None or rendimiento_cantidad <= 0) and fallback_qty and fallback_qty > 0:
+            rendimiento_cantidad = fallback_qty
+        if not unit_hint and fallback_unit_hint:
+            unit_hint = fallback_unit_hint
 
         rendimiento_unidad = self._infer_rendimiento_unidad(lineas, unit_hint)
         presentaciones = self._extract_presentaciones_block(ws, start_row, end_row)
