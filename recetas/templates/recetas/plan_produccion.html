@@ -78,6 +78,7 @@
     <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=csv">Exportar CSV</a>
     <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan_actual.id %}?format=xlsx">Exportar XLSX</a>
     <a class="btn btn-primary" href="{% url 'recetas:plan_produccion_solicitud_print' plan_actual.id %}" target="_blank">Imprimir solicitud formal</a>
+    <a class="btn btn-primary" href="{% url 'recetas:plan_produccion_solicitud_compras_print' plan_actual.id %}" target="_blank">Imprimir solicitud compras (MP)</a>
   </div>
 
   <hr>

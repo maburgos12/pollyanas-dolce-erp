@@ -157,8 +157,8 @@
 
   <section class="page">
     <div class="header">
-      <h1 class="title">Orden de Solicitud de Insumos</h1>
-      <p class="subtitle">Pollyana's Dolce · Documento interno de abastecimiento</p>
+      <h1 class="title">{{ titulo_documento|default:"Orden de Solicitud de Insumos" }}</h1>
+      <p class="subtitle">Pollyana's Dolce · {{ subtitulo_documento|default:"Documento interno de abastecimiento" }}</p>
     </div>
 
     <div class="meta">
@@ -200,7 +200,7 @@
       </tbody>
     </table>
 
-    {% if internos %}
+    {% if mostrar_internos and internos %}
     <h2>Insumos Internos (Referencia Producción)</h2>
     <table>
       <thead>

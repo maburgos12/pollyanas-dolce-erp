@@ -701,6 +701,31 @@ def plan_produccion_solicitud_print(request: HttpRequest, plan_id: int) -> HttpR
             "materias_primas": materias_primas,
             "internos": internos,
             "folio": folio,
+            "titulo_documento": "Orden de Solicitud de Insumos",
+            "subtitulo_documento": "Documento interno de abastecimiento",
+            "mostrar_internos": True,
+        },
+    )
+
+
+@permission_required("recetas.view_planproduccion", raise_exception=True)
+def plan_produccion_solicitud_compras_print(request: HttpRequest, plan_id: int) -> HttpResponse:
+    plan = get_object_or_404(PlanProduccion, pk=plan_id)
+    explosion = _plan_explosion(plan)
+    materias_primas = [row for row in explosion["insumos"] if row["origen"] != "Interno"]
+    folio = f"SOL-COMP-{plan.fecha_produccion.strftime('%Y%m%d')}-{plan.id:04d}"
+    return render(
+        request,
+        "recetas/solicitud_insumos_print.html",
+        {
+            "plan": plan,
+            "explosion": explosion,
+            "materias_primas": materias_primas,
+            "internos": [],
+            "folio": folio,
+            "titulo_documento": "Orden de Solicitud de Materia Prima",
+            "subtitulo_documento": "Documento para área de Compras",
+            "mostrar_internos": False,
         },
     )
 
