@@ -772,10 +772,18 @@ class ImportadorCosteo:
             head = normalizar_nombre(v(r, 1))
             if head not in {"insumo", "ingrediente", "insumos"}:
                 continue
+            headers_started = False
             for c in range(2, max_col + 1):
                 hv = v(r, c)
+                if hv is None or str(hv).strip() == "":
+                    if headers_started:
+                        break
+                    continue
                 if _is_presentation_header(hv):
                     size_cols[normalizar_nombre(hv)] = (c, str(hv).strip())
+                    headers_started = True
+                elif headers_started:
+                    break
 
             if size_cols:
                 rr = r + 1
@@ -791,7 +799,7 @@ class ImportadorCosteo:
 
                     for _, (col, presentacion) in size_cols.items():
                         costo = _to_float(v(rr, col))
-                        if costo is None:
+                        if costo is None or costo <= 0:
                             continue
                         ingrediente_txt = componente_txt
                         if componente_norm == "pan":
