@@ -15,6 +15,7 @@ def log_sync_run(
     target_month: str = "",
     fallback_used: bool = False,
     downloaded_sources: list[str] | None = None,
+    pending_preview: list[dict] | None = None,
     message: str = "",
     started_at=None,
 ):
@@ -30,6 +31,8 @@ def log_sync_run(
     movimientos_created = int(getattr(summary, "movimientos_created", 0) or 0)
     movimientos_skipped_duplicate = int(getattr(summary, "movimientos_skipped_duplicate", 0) or 0)
     aliases_created = int(getattr(summary, "aliases_created", 0) or 0)
+    if pending_preview is None:
+        pending_preview = list(getattr(summary, "pendientes", [])[:200] or [])
 
     return AlmacenSyncRun.objects.create(
         source=source,
@@ -50,5 +53,6 @@ def log_sync_run(
         movimientos_created=movimientos_created,
         movimientos_skipped_duplicate=movimientos_skipped_duplicate,
         aliases_created=aliases_created,
+        pending_preview=pending_preview,
         message=message,
     )

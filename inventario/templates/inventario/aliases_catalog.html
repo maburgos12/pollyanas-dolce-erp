@@ -40,49 +40,61 @@
 </section>
 {% endif %}
 
-{% if pending_preview %}
 <section class="card">
   <div class="card-header">Pendientes Recientes de Match (Almacén)</div>
-  <p class="muted">Da clic en "Usar en alta" para copiar el nombre origen y crear el alias rápido.</p>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Fuente</th>
-          <th>Fila</th>
-          <th>Nombre origen</th>
-          <th>Sugerencia</th>
-          <th class="text-end">Score</th>
-          {% if can_manage_inventario %}<th>Acción</th>{% endif %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in pending_preview %}
-        <tr>
-          <td>{{ p.source }}</td>
-          <td>{{ p.row }}</td>
-          <td>{{ p.nombre_origen }}</td>
-          <td>{{ p.sugerencia|default:"-" }}</td>
-          <td class="text-end">{{ p.score }}</td>
-          {% if can_manage_inventario %}
-          <td>
-            <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ p.nombre_origen|escape }}">Usar en alta</button>
-          </td>
-          {% endif %}
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% if can_manage_inventario %}
-  <form method="post" style="display:flex; justify-content:flex-end; margin-top:8px;">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="clear_pending">
-    <button class="btn btn-secondary" type="submit">Limpiar pendientes en pantalla</button>
-  </form>
+  {% if pending_source == "session" %}
+  <p class="muted">Fuente: sesión actual (última importación manual en este navegador).</p>
+  {% elif pending_source == "persisted" and latest_pending_run %}
+  <p class="muted">Fuente: último sync con pendientes ({{ latest_pending_run.started_at|date:"Y-m-d H:i" }}).</p>
+  {% else %}
+  <p class="muted">
+    No hay pendientes recientes en pantalla.
+    {% if latest_sync %}Último sync: {{ latest_sync.started_at|date:"Y-m-d H:i" }} · Sin match: {{ latest_sync.unmatched }}.{% endif %}
+  </p>
+  {% endif %}
+
+  {% if pending_preview %}
+    <p class="muted">Da clic en "Usar en alta" para copiar el nombre origen y crear el alias rápido.</p>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Fuente</th>
+            <th>Fila</th>
+            <th>Nombre origen</th>
+            <th>Sugerencia</th>
+            <th class="text-end">Score</th>
+            {% if can_manage_inventario %}<th>Acción</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in pending_preview %}
+          <tr>
+            <td>{{ p.source }}</td>
+            <td>{{ p.row }}</td>
+            <td>{{ p.nombre_origen }}</td>
+            <td>{{ p.sugerencia|default:"-" }}</td>
+            <td class="text-end">{{ p.score }}</td>
+            {% if can_manage_inventario %}
+            <td>
+              <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ p.nombre_origen|escape }}">Usar en alta</button>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if can_manage_inventario %}
+    <form method="post" style="display:flex; justify-content:flex-end; margin-top:8px;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="clear_pending">
+      {% if latest_pending_run %}<input type="hidden" name="hide_run_id" value="{{ latest_pending_run.id }}">{% endif %}
+      <button class="btn btn-secondary" type="submit">Limpiar pendientes en pantalla</button>
+    </form>
+    {% endif %}
   {% endif %}
 </section>
-{% endif %}
 
 <section class="card">
   <div class="card-header">Catálogo de Aliases</div>

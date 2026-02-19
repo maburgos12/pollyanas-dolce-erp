@@ -118,6 +118,7 @@ class AlmacenSyncRun(models.Model):
     movimientos_created = models.PositiveIntegerField(default=0)
     movimientos_skipped_duplicate = models.PositiveIntegerField(default=0)
     aliases_created = models.PositiveIntegerField(default=0)
+    pending_preview = models.JSONField(default=list, blank=True)
     message = models.TextField(blank=True, default="")
 
     class Meta:

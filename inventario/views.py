@@ -120,6 +120,21 @@ def _remove_pending_name_from_session(request: HttpRequest, alias_norm: str) -> 
     ]
 
 
+def _remove_pending_name_from_recent_runs(alias_norm: str, max_runs: int = 20) -> None:
+    runs = AlmacenSyncRun.objects.only("id", "pending_preview").order_by("-started_at")[:max_runs]
+    for run in runs:
+        pending = list(getattr(run, "pending_preview", []) or [])
+        filtered = [
+            row
+            for row in pending
+            if normalizar_nombre(str((row or {}).get("nombre_origen") or "")) != alias_norm
+        ]
+        if len(filtered) != len(pending):
+            run.pending_preview = filtered
+            run.save(update_fields=["pending_preview"])
+            return
+
+
 @login_required
 def importar_archivos(request: HttpRequest) -> HttpResponse:
     if not can_view_inventario(request.user):
@@ -153,6 +168,7 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
                 return redirect("inventario:importar_archivos")
 
             _remove_pending_name_from_session(request, alias_norm)
+            _remove_pending_name_from_recent_runs(alias_norm)
             messages.success(request, f"Alias {action_label}: '{alias_name}' -> {insumo.nombre}. Ejecuta de nuevo la importación para aplicar el cambio.")
             return redirect("inventario:importar_archivos")
 
@@ -332,6 +348,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                     ok, alias_norm, action_label = _upsert_alias(alias_name, insumo)
                     if ok:
                         _remove_pending_name_from_session(request, alias_norm)
+                        _remove_pending_name_from_recent_runs(alias_norm)
                         messages.success(request, f"Alias {action_label}: '{alias_name}' -> {insumo.nombre}.")
                     else:
                         messages.error(request, "El nombre origen no es válido.")
@@ -361,6 +378,9 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
 
         elif action == "clear_pending":
             request.session["inventario_pending_preview"] = []
+            hide_run_id = (request.POST.get("hide_run_id") or "").strip()
+            if hide_run_id.isdigit():
+                request.session["inventario_hidden_pending_run_id"] = int(hide_run_id)
             messages.success(request, "Pendientes en pantalla limpiados.")
 
         base_url = reverse("inventario:aliases_catalog")
@@ -380,10 +400,31 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     paginator = Paginator(aliases_qs, 100)
     page = paginator.get_page(request.GET.get("page"))
 
+    session_pending = list(request.session.get("inventario_pending_preview", []))[:120]
+    hidden_run_id = request.session.get("inventario_hidden_pending_run_id")
+
+    latest_runs = list(
+        AlmacenSyncRun.objects.only("id", "started_at", "source", "status", "unmatched", "pending_preview").order_by("-started_at")[:20]
+    )
+    latest_sync = latest_runs[0] if latest_runs else None
+    latest_pending_run = None
+    for run in latest_runs:
+        if hidden_run_id and run.id == hidden_run_id:
+            continue
+        if isinstance(run.pending_preview, list) and run.pending_preview:
+            latest_pending_run = run
+            break
+
+    persisted_pending = list((latest_pending_run.pending_preview if latest_pending_run else [])[:120])
+    pending_preview = session_pending or persisted_pending
+
     context = {
         "q": q,
         "page": page,
-        "pending_preview": list(request.session.get("inventario_pending_preview", []))[:120],
+        "pending_preview": pending_preview,
+        "pending_source": "session" if session_pending else ("persisted" if persisted_pending else ""),
+        "latest_pending_run": latest_pending_run,
+        "latest_sync": latest_sync,
         "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:1200],
         "can_manage_inventario": can_manage_inventario(request.user),
     }
