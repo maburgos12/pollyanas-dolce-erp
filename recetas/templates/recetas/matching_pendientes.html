@@ -74,6 +74,15 @@
     const input = form.querySelector(".insumo-filter-input");
     const select = form.querySelector(".insumo-filter-select");
     if (!input || !select) return;
+
+    function firstVisibleOption() {
+      const opts = Array.from(select.querySelectorAll("option"));
+      for (let i = 1; i < opts.length; i += 1) {
+        if (!opts[i].hidden) return opts[i];
+      }
+      return null;
+    }
+
     input.addEventListener("input", () => {
       const query = normalizeText(input.value);
       select.querySelectorAll("option").forEach((opt, idx) => {
@@ -81,6 +90,15 @@
         const match = !query || normalizeText(opt.textContent).includes(query);
         opt.hidden = !match;
       });
+    });
+
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      const first = firstVisibleOption();
+      if (!first) return;
+      select.value = first.value;
+      form.submit();
     });
   });
 })();

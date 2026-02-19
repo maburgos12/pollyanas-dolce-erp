@@ -61,15 +61,16 @@
 
     <div class="kpi-grid">
       <div class="form-group">
-        <label for="insumo_search">Buscar insumo</label>
-        <input id="insumo_search" class="form-control" type="text" placeholder="Escribe para filtrar insumos...">
+        <label for="insumo_autocomplete">Buscar insumo (autocompletar)</label>
+        <input id="insumo_autocomplete" class="form-control" type="text" placeholder="Escribe y presiona Enter..." autocomplete="off">
+        <div id="insumo_autocomplete_suggestions" class="autocomplete-suggestions" role="listbox" aria-label="Sugerencias de insumo"></div>
       </div>
     </div>
 
     <div class="kpi-grid">
       <div class="form-group">
         <label for="insumo_id">Insumo ligado</label>
-        <select id="insumo_id" class="form-select" name="insumo_id">
+        <select id="insumo_id" class="form-select" name="insumo_id" style="display:none;">
           <option value="">Sin ligar</option>
           <optgroup label="Insumos internos (producidos)">
             {% for i in insumos %}
@@ -101,7 +102,7 @@
           </optgroup>
         </select>
         <div class="text-muted mt-1">
-          Al elegir insumo se autocompleta la unidad y se calcula costo estimado con el último costo registrado.
+          Escribe para buscar, presiona Enter para tomar la mejor coincidencia.
         </div>
       </div>
       <div class="form-group">
@@ -140,13 +141,18 @@
 <script>
 (function () {
   const insumoSelect = document.getElementById("insumo_id");
-  const insumoSearch = document.getElementById("insumo_search");
+  const insumoAutocomplete = document.getElementById("insumo_autocomplete");
+  const suggestionsBox = document.getElementById("insumo_autocomplete_suggestions");
   const unidadSelect = document.getElementById("unidad_id");
   const unidadTexto = document.getElementById("unidad_texto");
   const cantidadInput = document.getElementById("cantidad");
   const origenInput = document.getElementById("insumo_origen");
   const costoUnitarioInput = document.getElementById("costo_unitario_preview");
   const costoEstimadoInput = document.getElementById("costo_estimado_preview");
+  const insumoOptions = Array.from(insumoSelect.querySelectorAll("option"))
+    .filter((opt) => !!opt.value)
+    .map((opt) => ({ value: opt.value, label: opt.textContent.trim() }));
+  let currentSuggestions = [];
 
   function toNum(v) {
     if (v === null || v === undefined) return NaN;
@@ -165,18 +171,54 @@
       .replace(/[\u0300-\u036f]/g, "");
   }
 
-  function filterInsumos() {
-    const query = normalizeText(insumoSearch.value);
-    const groups = insumoSelect.querySelectorAll("optgroup");
-    groups.forEach((group) => {
-      let visible = 0;
-      group.querySelectorAll("option").forEach((opt) => {
-        const match = !query || normalizeText(opt.textContent).includes(query);
-        opt.hidden = !match;
-        if (match) visible += 1;
+  function suggestionsFor(query) {
+    const q = normalizeText(query);
+    if (!q) return [];
+    return insumoOptions
+      .map((item) => {
+        const norm = normalizeText(item.label);
+        const idx = norm.indexOf(q);
+        return { ...item, idx };
+      })
+      .filter((item) => item.idx >= 0)
+      .sort((a, b) => (a.idx - b.idx) || (a.label.length - b.label.length))
+      .slice(0, 12);
+  }
+
+  function selectInsumoByValue(value) {
+    if (!value) return;
+    insumoSelect.value = String(value);
+    const option = insumoSelect.options[insumoSelect.selectedIndex];
+    if (option && option.value) {
+      insumoAutocomplete.value = option.textContent.trim();
+    }
+    recalc();
+  }
+
+  function renderSuggestions() {
+    suggestionsBox.innerHTML = "";
+    if (!currentSuggestions.length) return;
+    currentSuggestions.forEach((item, idx) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "autocomplete-item";
+      btn.setAttribute("role", "option");
+      btn.dataset.value = item.value;
+      btn.textContent = item.label;
+      btn.addEventListener("click", () => {
+        selectInsumoByValue(item.value);
+        suggestionsBox.innerHTML = "";
       });
-      group.hidden = visible === 0;
+      if (idx === 0) {
+        btn.classList.add("is-best-match");
+      }
+      suggestionsBox.appendChild(btn);
     });
+  }
+
+  function updateSuggestions() {
+    currentSuggestions = suggestionsFor(insumoAutocomplete.value);
+    renderSuggestions();
   }
 
   function recalc() {
@@ -217,9 +259,59 @@
 
   insumoSelect.addEventListener("change", recalc);
   cantidadInput.addEventListener("input", recalc);
-  insumoSearch.addEventListener("input", filterInsumos);
-  filterInsumos();
+  insumoAutocomplete.addEventListener("input", updateSuggestions);
+  insumoAutocomplete.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    if (currentSuggestions.length > 0) {
+      selectInsumoByValue(currentSuggestions[0].value);
+      suggestionsBox.innerHTML = "";
+      return;
+    }
+    const exact = insumoOptions.find((item) => normalizeText(item.label) === normalizeText(insumoAutocomplete.value));
+    if (exact) {
+      selectInsumoByValue(exact.value);
+      suggestionsBox.innerHTML = "";
+    }
+  });
+  document.addEventListener("click", (ev) => {
+    if (!suggestionsBox.contains(ev.target) && ev.target !== insumoAutocomplete) {
+      suggestionsBox.innerHTML = "";
+    }
+  });
+
+  // Si ya hay un insumo seleccionado (pantalla de edición), mostrarlo en el input.
+  if (insumoSelect.value) {
+    selectInsumoByValue(insumoSelect.value);
+  }
+
   recalc();
 })();
 </script>
+<style>
+.autocomplete-suggestions {
+  position: relative;
+  z-index: 5;
+  margin-top: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  border-radius: 8px;
+}
+.autocomplete-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #f0d0dc;
+  background: #fff;
+  color: #3d2b2b;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.autocomplete-item + .autocomplete-item {
+  border-top: 0;
+}
+.autocomplete-item.is-best-match {
+  background: #f8e8ee;
+}
+</style>
 {% endblock %}
