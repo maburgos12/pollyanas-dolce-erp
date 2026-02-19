@@ -20,6 +20,7 @@ DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive.readonly"]
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
 
 
 MONTH_WORDS = {
@@ -256,7 +257,7 @@ def _iter_files(service, folder_id: str):
             service.files()
             .list(
                 q=query,
-                fields="nextPageToken, files(id,name,mimeType,fileExtension)",
+                fields="nextPageToken, files(id,name,mimeType,fileExtension,shortcutDetails(targetId,targetMimeType))",
                 pageSize=1000,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
@@ -281,7 +282,7 @@ def _list_children(service, folder_id: str) -> list[dict[str, Any]]:
             service.files()
             .list(
                 q=query,
-                fields="nextPageToken, files(id,name,mimeType,fileExtension)",
+                fields="nextPageToken, files(id,name,mimeType,fileExtension,shortcutDetails(targetId,targetMimeType))",
                 pageSize=1000,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
@@ -294,6 +295,18 @@ def _list_children(service, folder_id: str) -> list[dict[str, Any]]:
         if not token:
             break
     return items
+
+
+def _resolved_target(item: dict[str, Any]) -> tuple[str, str]:
+    item_id = item.get("id", "")
+    mime_type = item.get("mimeType", "")
+    if mime_type == SHORTCUT_MIME:
+        details = item.get("shortcutDetails") or {}
+        target_id = details.get("targetId")
+        target_mime = details.get("targetMimeType")
+        if target_id and target_mime:
+            return target_id, target_mime
+    return item_id, mime_type
 
 
 def _find_folder_with_expected_files(
@@ -317,6 +330,9 @@ def _find_folder_with_expected_files(
         children = _list_children(service, folder_id)
         matched_sources = set()
         for item in children:
+            _, mime_type = _resolved_target(item)
+            if mime_type == FOLDER_MIME:
+                continue
             source, _ = _classify_filename(item.get("name", ""))
             if source and source in include_sources:
                 matched_sources.add(source)
@@ -328,8 +344,9 @@ def _find_folder_with_expected_files(
             continue
 
         for item in children:
-            if item.get("mimeType") == FOLDER_MIME:
-                queue.append((item["id"], depth + 1))
+            target_id, target_mime = _resolved_target(item)
+            if target_mime == FOLDER_MIME and target_id:
+                queue.append((target_id, depth + 1))
 
     return start_folder_id, (
         f"No se encontró carpeta con archivos válidos tras escanear {scanned} carpeta(s). "
@@ -404,8 +421,7 @@ def sync_almacen_from_drive(
                 skipped_files.append(f"Omitido por filtro ({source}): {name}")
                 continue
 
-            mime_type = file_item.get("mimeType", "")
-            file_id = file_item["id"]
+            file_id, mime_type = _resolved_target(file_item)
             if mime_type == SHEET_MIME:
                 blob = _download_file(service, file_id, mime_type=XLSX_MIME)
             elif name.lower().endswith((".xlsx", ".xlsm", ".xls")):
