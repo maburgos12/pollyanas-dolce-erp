@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Solicitud de Compras</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --vino: #8B2252;
@@ -20,7 +21,7 @@
     }
     body {
       margin: 0;
-      font-family: Arial, Helvetica, sans-serif;
+      font-family: "Nunito", Arial, Helvetica, sans-serif;
       color: var(--texto);
       background: #fff;
     }
@@ -42,6 +43,7 @@
       margin: 0 0 6px 0;
       font-weight: 700;
       letter-spacing: 0.3px;
+      font-family: "Playfair Display", Georgia, serif;
     }
     .subtitle {
       font-size: 12px;
@@ -61,6 +63,16 @@
       background: #fff;
     }
     .meta-box strong {
+      color: var(--vino);
+    }
+    .notes-box {
+      border: 1px solid var(--borde);
+      min-height: 52px;
+      padding: 8px;
+      font-size: 12px;
+      margin-top: 10px;
+    }
+    .notes-box strong {
       color: var(--vino);
     }
     table {
@@ -181,13 +193,16 @@
     </div>
 
     <div class="meta">
+      <div class="meta-box"><strong>Folio documento:</strong> {{ document_folio }}</div>
       <div class="meta-box"><strong>Generado:</strong> {{ generated_at|date:"Y-m-d H:i" }}</div>
       <div class="meta-box"><strong>Usuario:</strong> {{ generated_by }}</div>
+      <div class="meta-box"><strong>Estatus autorización:</strong> {{ status_autorizacion }}</div>
       <div class="meta-box"><strong>Origen:</strong> {{ source_filter|upper }}</div>
       <div class="meta-box"><strong>Plan:</strong> {{ plan_filter }}</div>
       <div class="meta-box"><strong>Filtro reabasto:</strong> {{ reabasto_filter|upper }}</div>
       <div class="meta-box"><strong>Solicitudes:</strong> {{ solicitudes|length }}</div>
     </div>
+    <div class="notes-box"><strong>Observaciones:</strong><br><br></div>
 
     <table>
       <thead>
@@ -236,9 +251,9 @@
     </div>
 
     <div class="signatures">
-      <div class="sig-box">Solicita</div>
-      <div class="sig-box">Autoriza</div>
-      <div class="sig-box">Compras / Almacén</div>
+      <div class="sig-box">Solicita (Área)</div>
+      <div class="sig-box">Revisa (Compras)</div>
+      <div class="sig-box">Autoriza (Gerencia)</div>
     </div>
   </section>
 </body>

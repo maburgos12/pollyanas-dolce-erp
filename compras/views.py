@@ -1,3 +1,5 @@
+import csv
+from io import BytesIO
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
@@ -7,11 +9,12 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from openpyxl import Workbook
 
 from core.access import can_manage_compras, can_view_compras
 from core.audit import log_event
 from inventario.models import ExistenciaInsumo
-from maestros.models import Insumo, Proveedor
+from maestros.models import CostoInsumo, Insumo, Proveedor
 from recetas.models import PlanProduccion
 
 from .models import OrdenCompra, RecepcionCompra, SolicitudCompra
@@ -79,6 +82,115 @@ def _build_insumo_options():
     return options
 
 
+def _solicitudes_print_folio() -> str:
+    now = timezone.localtime()
+    return f"SC-{now.strftime('%Y%m%d-%H%M%S')}"
+
+
+def _export_solicitudes_csv(solicitudes, source_filter: str, plan_filter: str, reabasto_filter: str) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="solicitudes_compras_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "Folio",
+            "Area",
+            "Solicitante",
+            "Origen",
+            "Plan",
+            "Insumo",
+            "Proveedor sugerido",
+            "Cantidad",
+            "Fecha requerida",
+            "Estatus",
+            "Reabasto",
+            "Detalle reabasto",
+            "Filtro origen",
+            "Filtro plan",
+            "Filtro reabasto",
+        ]
+    )
+    for s in solicitudes:
+        writer.writerow(
+            [
+                s.folio,
+                s.area,
+                s.solicitante,
+                "PLAN" if s.source_tipo == "plan" else "MANUAL",
+                s.source_plan_id or "",
+                s.insumo.nombre,
+                s.proveedor_sugerido.nombre if s.proveedor_sugerido_id else "",
+                s.cantidad,
+                s.fecha_requerida,
+                s.get_estatus_display(),
+                s.reabasto_texto,
+                s.reabasto_detalle,
+                source_filter,
+                plan_filter or "",
+                reabasto_filter,
+            ]
+        )
+    return response
+
+
+def _export_solicitudes_xlsx(solicitudes, source_filter: str, plan_filter: str, reabasto_filter: str) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Solicitudes"
+    ws.append(
+        [
+            "Folio",
+            "Area",
+            "Solicitante",
+            "Origen",
+            "Plan",
+            "Insumo",
+            "Proveedor sugerido",
+            "Cantidad",
+            "Fecha requerida",
+            "Estatus",
+            "Reabasto",
+            "Detalle reabasto",
+            "Filtro origen",
+            "Filtro plan",
+            "Filtro reabasto",
+        ]
+    )
+    for s in solicitudes:
+        ws.append(
+            [
+                s.folio,
+                s.area,
+                s.solicitante,
+                "PLAN" if s.source_tipo == "plan" else "MANUAL",
+                s.source_plan_id or "",
+                s.insumo.nombre,
+                s.proveedor_sugerido.nombre if s.proveedor_sugerido_id else "",
+                float(s.cantidad or 0),
+                s.fecha_requerida.isoformat() if s.fecha_requerida else "",
+                s.get_estatus_display(),
+                s.reabasto_texto,
+                s.reabasto_detalle,
+                source_filter,
+                plan_filter or "",
+                reabasto_filter,
+            ]
+        )
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="solicitudes_compras_{now_str}.xlsx"'
+    return response
+
+
 def _filtered_solicitudes(source_filter_raw: str, plan_filter_raw: str, reabasto_filter_raw: str):
     source_filter = (source_filter_raw or "all").lower()
     if source_filter not in {"all", "manual", "plan"}:
@@ -137,6 +249,22 @@ def _filtered_solicitudes(source_filter_raw: str, plan_filter_raw: str, reabasto
                 s.source_plan_id = plan_id_int
                 s.source_plan_nombre = planes_map.get(plan_id_int).nombre if plan_id_int in planes_map else f"Plan {plan_id_int}"
 
+    open_orders_by_solicitud = {}
+    solicitud_ids = [s.id for s in solicitudes]
+    if solicitud_ids:
+        for orden in (
+            OrdenCompra.objects.filter(solicitud_id__in=solicitud_ids)
+            .exclude(estatus=OrdenCompra.STATUS_CERRADA)
+            .order_by("-creado_en")
+        ):
+            open_orders_by_solicitud.setdefault(orden.solicitud_id, orden)
+
+    for s in solicitudes:
+        open_order = open_orders_by_solicitud.get(s.id)
+        s.has_open_order = bool(open_order)
+        s.open_order_id = open_order.id if open_order else None
+        s.open_order_folio = open_order.folio if open_order else ""
+
     reabasto_filter = (reabasto_filter_raw or "all").lower()
     if reabasto_filter in {"critico", "bajo", "ok"}:
         solicitudes = [s for s in solicitudes if s.reabasto_nivel == reabasto_filter]
@@ -188,6 +316,15 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         request.GET.get("reabasto"),
     )
 
+    export_format = (request.GET.get("export") or "").lower()
+    if export_format == "csv":
+        return _export_solicitudes_csv(solicitudes, source_filter, plan_filter, reabasto_filter)
+    if export_format == "xlsx":
+        return _export_solicitudes_xlsx(solicitudes, source_filter, plan_filter, reabasto_filter)
+
+    query_without_export = request.GET.copy()
+    query_without_export.pop("export", None)
+
     context = {
         "solicitudes": solicitudes,
         "insumo_options": _build_insumo_options(),
@@ -197,7 +334,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "source_filter": source_filter,
         "plan_filter": plan_filter,
         "plan_options": plan_options,
-        "current_query": request.GET.urlencode(),
+        "current_query": query_without_export.urlencode(),
     }
     return render(request, "compras/solicitudes.html", context)
 
@@ -229,6 +366,8 @@ def solicitudes_print(request: HttpRequest) -> HttpResponse:
         "ok_count": ok_count,
         "generated_at": timezone.localtime(),
         "generated_by": request.user.username,
+        "document_folio": _solicitudes_print_folio(),
+        "status_autorizacion": "Pendiente de firmas",
         "return_query": request.GET.urlencode(),
     }
     return render(request, "compras/solicitudes_print.html", context)
@@ -416,3 +555,50 @@ def actualizar_recepcion_estatus(request: HttpRequest, pk: int, estatus: str) ->
                 {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": recepcion.orden.folio, "source": recepcion.folio},
             )
     return redirect("compras:recepciones")
+
+
+@login_required
+@require_POST
+def crear_orden_desde_solicitud(request: HttpRequest, pk: int) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para crear órdenes.")
+
+    solicitud = get_object_or_404(SolicitudCompra.objects.select_related("insumo", "proveedor_sugerido"), pk=pk)
+    if solicitud.estatus != SolicitudCompra.STATUS_APROBADA:
+        messages.error(request, f"La solicitud {solicitud.folio} no está aprobada.")
+        return redirect("compras:solicitudes")
+
+    has_open_order = OrdenCompra.objects.filter(solicitud=solicitud).exclude(estatus=OrdenCompra.STATUS_CERRADA).exists()
+    if has_open_order:
+        messages.info(request, f"La solicitud {solicitud.folio} ya tiene una orden activa.")
+        return redirect("compras:ordenes")
+
+    proveedor = solicitud.proveedor_sugerido or solicitud.insumo.proveedor_principal
+    if not proveedor:
+        messages.error(request, f"La solicitud {solicitud.folio} no tiene proveedor sugerido. Asigna uno y reintenta.")
+        return redirect("compras:solicitudes")
+
+    latest_cost = (
+        CostoInsumo.objects.filter(insumo=solicitud.insumo)
+        .order_by("-fecha", "-id")
+        .first()
+    )
+    monto_estimado = (solicitud.cantidad or Decimal("0")) * (latest_cost.costo_unitario if latest_cost else Decimal("0"))
+
+    orden = OrdenCompra.objects.create(
+        solicitud=solicitud,
+        proveedor=proveedor,
+        fecha_emision=timezone.localdate(),
+        fecha_entrega_estimada=solicitud.fecha_requerida,
+        monto_estimado=monto_estimado,
+        estatus=OrdenCompra.STATUS_BORRADOR,
+    )
+    log_event(
+        request.user,
+        "CREATE",
+        "compras.OrdenCompra",
+        orden.id,
+        {"folio": orden.folio, "estatus": orden.estatus, "source": f"solicitud:{solicitud.folio}"},
+    )
+    messages.success(request, f"Orden {orden.folio} creada desde solicitud {solicitud.folio}.")
+    return redirect("compras:ordenes")
