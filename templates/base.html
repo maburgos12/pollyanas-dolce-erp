@@ -32,7 +32,8 @@
                     <li><a href="{% url 'compras:solicitudes' %}" class="{% if '/compras/' in request.path %}active{% endif %}"><span>🛒</span><span>Compras</span></a></li>
                     {% endif %}
                     {% if ui_access.can_view_inventario %}
-                    <li><a href="{% url 'inventario:existencias' %}" class="{% if '/inventario/' in request.path %}active{% endif %}"><span>📦</span><span>Inventario</span></a></li>
+                    <li><a href="{% url 'inventario:existencias' %}" class="{% if '/inventario/' in request.path and '/inventario/importar/' not in request.path %}active{% endif %}"><span>📦</span><span>Inventario</span></a></li>
+                    <li><a href="{% url 'inventario:importar_archivos' %}" class="{% if '/inventario/importar/' in request.path %}active{% endif %}"><span>📤</span><span>Carga Almacén</span></a></li>
                     {% endif %}
                     {% if ui_access.can_view_reportes %}
                     <li><a href="{% url 'reportes:costo_receta' %}" class="{% if '/reportes/' in request.path %}active{% endif %}"><span>📈</span><span>Reportes</span></a></li>
