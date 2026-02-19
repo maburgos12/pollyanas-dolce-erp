@@ -11,13 +11,65 @@
   <a class="module-tab active" href="{% url 'inventario:importar_archivos' %}">Carga Almacén</a>
 </nav>
 
+{% if can_manage_inventario %}
 <section class="card">
-  <div class="card-header">Subir Archivos de Almacén (XLSX)</div>
-  <p class="muted">Sube uno o varios archivos. El sistema detecta automáticamente Inventario, Entradas, Salidas y Merma por nombre de archivo.</p>
+  <div class="card-header">Sincronizar Desde Google Drive</div>
+  <p class="muted">Conecta con la carpeta mensual de almacén (por ejemplo: <code>ALMACEN ENERO 2026</code>) y procesa archivos automáticamente.</p>
 
-  {% if can_manage_inventario %}
+  <form method="post" class="form-grid-2">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="drive">
+
+    <div class="form-group">
+      <label>Mes objetivo</label>
+      <input class="input-field" type="month" name="month" value="{{ current_month }}">
+    </div>
+
+    <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end;">
+      <small class="muted">Si no existe ese mes, se usa fallback al mes anterior.</small>
+    </div>
+
+    <div class="form-group" style="grid-column: 1 / -1;">
+      <label>Fuentes a importar</label>
+      <div class="quick-actions">
+        {% for value, label in sources %}
+          <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" name="sources" value="{{ value }}" checked>
+            <span>{{ label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Fuzzy threshold</label>
+      <input class="input-field" type="number" name="fuzzy_threshold" min="80" max="100" value="{{ defaults.fuzzy_threshold }}">
+    </div>
+
+    <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end; gap:8px;">
+      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="create_missing_insumos" {% if defaults.create_missing_insumos %}checked{% endif %}>
+        <span>Crear insumos faltantes</span>
+      </label>
+      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="create_aliases" {% if defaults.create_aliases %}checked{% endif %}>
+        <span>Crear aliases automáticos</span>
+      </label>
+    </div>
+
+    <div style="grid-column: 1 / -1; display:flex; justify-content:flex-end;">
+      <button class="btn btn-primary" type="submit">Sincronizar ahora</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Subir Archivos Manualmente (XLSX)</div>
+  <p class="muted">Sube uno o varios archivos desde tu computadora. El sistema detecta Inventario, Entradas, Salidas y Merma por nombre.</p>
+
   <form method="post" enctype="multipart/form-data" class="form-grid-2">
     {% csrf_token %}
+    <input type="hidden" name="action" value="upload">
 
     <div class="form-group" style="grid-column: 1 / -1;">
       <label>Archivos .xlsx</label>
@@ -53,22 +105,34 @@
     </div>
 
     <div style="grid-column: 1 / -1; display:flex; justify-content:flex-end;">
-      <button class="btn btn-primary" type="submit">Procesar carga</button>
+      <button class="btn btn-secondary" type="submit">Procesar carga manual</button>
     </div>
   </form>
-  {% else %}
-  <p class="muted">Tu perfil está en modo lectura para Inventario.</p>
-  {% endif %}
 </section>
 
 <section class="card">
-  <div class="card-header">Nombres recomendados</div>
+  <div class="card-header">Nombres Esperados</div>
   <ul>
     {% for n in expected_names %}
     <li><code>{{ n }}</code></li>
     {% endfor %}
   </ul>
+  {% if drive_info %}
+  <hr>
+  <p class="muted">
+    Último sync Drive:
+    carpeta <strong>{{ drive_info.folder_name }}</strong>,
+    mes objetivo {{ drive_info.target_month }},
+    fuentes descargadas: {{ drive_info.downloaded_sources|join:", " }}.
+    {% if drive_info.used_fallback_month %}(fallback aplicado){% endif %}
+  </p>
+  {% endif %}
 </section>
+{% else %}
+<section class="card">
+  <p class="muted">Tu perfil está en modo lectura para Inventario.</p>
+</section>
+{% endif %}
 
 {% if summary %}
 <section class="card">

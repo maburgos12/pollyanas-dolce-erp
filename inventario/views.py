@@ -21,6 +21,7 @@ from inventario.utils.almacen_import import (
     SALIDAS_FILE,
     import_folder,
 )
+from inventario.utils.google_drive_sync import sync_almacen_from_drive
 
 from .models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
 
@@ -88,16 +89,13 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
     summary = None
     pendientes_preview = []
     warnings: list[str] = []
+    drive_info = None
 
     if request.method == "POST":
         if not can_manage_inventario(request.user):
             raise PermissionDenied("No tienes permisos para importar archivos de almacén.")
 
-        uploaded_files = request.FILES.getlist("archivos")
-        if not uploaded_files:
-            messages.error(request, "Selecciona al menos un archivo .xlsx para importar.")
-            return redirect("inventario:importar_archivos")
-
+        action = (request.POST.get("action") or "upload").strip().lower()
         selected_sources = set(request.POST.getlist("sources")) or set(SOURCE_TO_FILENAME.keys())
         selected_sources = selected_sources.intersection(set(SOURCE_TO_FILENAME.keys()))
         if not selected_sources:
@@ -108,47 +106,83 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
         create_aliases = bool(request.POST.get("create_aliases"))
         create_missing_insumos = bool(request.POST.get("create_missing_insumos"))
 
-        saved_sources = set()
-        with TemporaryDirectory(prefix="inv-upload-") as tmpdir:
-            for f in uploaded_files:
-                source, target_name = _classify_upload(f.name)
-                if not source or not target_name:
-                    warnings.append(f"Archivo no reconocido y omitido: {f.name}")
-                    continue
-                if source not in selected_sources:
-                    warnings.append(f"Archivo omitido por filtro de fuente ({source}): {f.name}")
-                    continue
-                _save_uploaded_file(tmpdir, target_name, f)
-                saved_sources.add(source)
-
-            run_sources = selected_sources.intersection(saved_sources)
-            if not run_sources:
-                messages.error(request, "Ninguno de los archivos subidos coincide con las fuentes seleccionadas.")
-                return redirect("inventario:importar_archivos")
-
+        if action == "drive":
+            month_override = (request.POST.get("month") or "").strip() or None
             try:
-                summary = import_folder(
-                    folderpath=tmpdir,
-                    include_sources=run_sources,
+                drive_result = sync_almacen_from_drive(
+                    include_sources=selected_sources,
+                    month_override=month_override,
+                    fallback_previous=True,
                     fuzzy_threshold=fuzzy_threshold,
                     create_aliases=create_aliases,
                     create_missing_insumos=create_missing_insumos,
                     dry_run=False,
                 )
+                summary = drive_result.summary
+                drive_info = {
+                    "folder_name": drive_result.folder_name,
+                    "target_month": drive_result.target_month,
+                    "used_fallback_month": drive_result.used_fallback_month,
+                    "downloaded_sources": drive_result.downloaded_sources,
+                }
+                warnings.extend(drive_result.skipped_files)
             except Exception as exc:
-                messages.error(request, f"Falló la importación de almacén: {exc}")
+                messages.error(request, f"Falló la sincronización desde Google Drive: {exc}")
                 return redirect("inventario:importar_archivos")
+        else:
+            uploaded_files = request.FILES.getlist("archivos")
+            if not uploaded_files:
+                messages.error(request, "Selecciona al menos un archivo .xlsx para importar.")
+                return redirect("inventario:importar_archivos")
+
+            saved_sources = set()
+            with TemporaryDirectory(prefix="inv-upload-") as tmpdir:
+                for f in uploaded_files:
+                    source, target_name = _classify_upload(f.name)
+                    if not source or not target_name:
+                        warnings.append(f"Archivo no reconocido y omitido: {f.name}")
+                        continue
+                    if source not in selected_sources:
+                        warnings.append(f"Archivo omitido por filtro de fuente ({source}): {f.name}")
+                        continue
+                    _save_uploaded_file(tmpdir, target_name, f)
+                    saved_sources.add(source)
+
+                run_sources = selected_sources.intersection(saved_sources)
+                if not run_sources:
+                    messages.error(request, "Ninguno de los archivos subidos coincide con las fuentes seleccionadas.")
+                    return redirect("inventario:importar_archivos")
+
+                try:
+                    summary = import_folder(
+                        folderpath=tmpdir,
+                        include_sources=run_sources,
+                        fuzzy_threshold=fuzzy_threshold,
+                        create_aliases=create_aliases,
+                        create_missing_insumos=create_missing_insumos,
+                        dry_run=False,
+                    )
+                except Exception as exc:
+                    messages.error(request, f"Falló la importación de almacén: {exc}")
+                    return redirect("inventario:importar_archivos")
 
         for w in warnings:
             messages.warning(request, w)
 
         if summary:
+            if drive_info:
+                suffix = (
+                    f" (Drive: {drive_info['folder_name']} · objetivo {drive_info['target_month']}"
+                    f"{' · fallback aplicado' if drive_info['used_fallback_month'] else ''})"
+                )
+            else:
+                suffix = ""
             messages.success(
                 request,
                 (
                     f"Importación aplicada. Existencias actualizadas: {summary.existencias_updated}, "
                     f"Movimientos creados: {summary.movimientos_created}, "
-                    f"Duplicados omitidos: {summary.movimientos_skipped_duplicate}."
+                    f"Duplicados omitidos: {summary.movimientos_skipped_duplicate}.{suffix}"
                 ),
             )
             if summary.unmatched:
@@ -176,6 +210,8 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
             "create_missing_insumos": True,
             "create_aliases": False,
         },
+        "current_month": timezone.localdate().strftime("%Y-%m"),
+        "drive_info": drive_info,
     }
     return render(request, "inventario/importar_archivos.html", context)
 

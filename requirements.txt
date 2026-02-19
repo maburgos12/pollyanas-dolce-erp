@@ -11,3 +11,6 @@ django-filter==23.5
 gunicorn==23.0.0
 dj-database-url==3.1.0
 whitenoise==6.6.0
+google-api-python-client==2.170.0
+google-auth==2.40.3
+google-auth-httplib2==0.2.0
