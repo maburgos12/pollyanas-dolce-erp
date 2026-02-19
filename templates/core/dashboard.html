@@ -37,6 +37,8 @@
         <div class="sync-item">
             <span class="sync-label">Próximo sync estimado</span>
             <span class="sync-value">
+                <span class="badge {{ next_sync_state_class }}">{{ next_sync_state_label }}</span>
+                &nbsp;
                 {% if auto_sync_enabled %}
                     {% if next_sync_eta %}
                         {{ next_sync_eta|date:"Y-m-d H:i" }} (cada {{ auto_sync_interval_hours }}h)

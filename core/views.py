@@ -74,6 +74,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "auto_sync_enabled": False,
         "auto_sync_interval_hours": 24,
         "next_sync_eta": None,
+        "next_sync_state_label": "",
+        "next_sync_state_class": "bg-warning",
     }
     try:
         existencias_qs = ExistenciaInsumo.objects.all()
@@ -160,6 +162,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         auto_sync_interval_hours = max(auto_sync_interval_hours, 1)
 
         next_sync_eta = None
+        next_sync_state_label = "Pendiente"
+        next_sync_state_class = "bg-warning"
         if auto_sync_enabled:
             latest_scheduled = (
                 AlmacenSyncRun.objects.filter(source=AlmacenSyncRun.SOURCE_SCHEDULED)
@@ -172,12 +176,30 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 now = timezone.now()
                 while next_sync_eta <= now:
                     next_sync_eta += delta
+                hours_to_next = (next_sync_eta - now).total_seconds() / 3600
+                if hours_to_next <= 2:
+                    next_sync_state_label = "Próximo"
+                    next_sync_state_class = "bg-danger"
+                elif hours_to_next <= 8:
+                    next_sync_state_label = "Hoy"
+                    next_sync_state_class = "bg-warning"
+                else:
+                    next_sync_state_label = "Programado"
+                    next_sync_state_class = "bg-success"
+            else:
+                next_sync_state_label = "Pendiente"
+                next_sync_state_class = "bg-warning"
+        else:
+            next_sync_state_label = "Desactivado"
+            next_sync_state_class = "bg-danger"
 
         ctx.update(
             {
                 "auto_sync_enabled": auto_sync_enabled,
                 "auto_sync_interval_hours": auto_sync_interval_hours,
                 "next_sync_eta": next_sync_eta,
+                "next_sync_state_label": next_sync_state_label,
+                "next_sync_state_class": next_sync_state_class,
             }
         )
     except Exception:
