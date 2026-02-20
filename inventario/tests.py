@@ -4,7 +4,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from inventario.models import AlmacenSyncRun
-from maestros.models import PointPendingMatch
+from maestros.models import Insumo, InsumoAlias, PointPendingMatch, UnidadMedida
 from recetas.models import LineaReceta, Receta
 
 
@@ -124,3 +124,40 @@ class InventarioAliasesPendingTests(TestCase):
         body = response.content.decode("utf-8")
         self.assertIn("nombre_muestra", body)
         self.assertIn("Mantequilla Barra", body)
+
+    def test_auto_apply_suggestions_creates_alias_and_cleans_pending(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo = Insumo.objects.create(nombre="Harina Pastelera", unidad_base=unidad)
+        run = AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=timezone.now(),
+            matched=11,
+            unmatched=1,
+            pending_preview=[
+                {
+                    "source": "inventario",
+                    "row": 9,
+                    "nombre_origen": "Harina pastelera 25kg",
+                    "nombre_normalizado": "harina pastelera 25kg",
+                    "sugerencia": "Harina Pastelera",
+                    "score": 95.0,
+                }
+            ],
+        )
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "auto_apply_suggestions",
+                "auto_min_score": "90",
+                "auto_max_rows": "50",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            InsumoAlias.objects.filter(nombre_normalizado="harina pastelera 25kg", insumo=insumo).exists()
+        )
+
+        run.refresh_from_db()
+        self.assertEqual(run.pending_preview, [])

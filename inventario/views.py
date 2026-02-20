@@ -120,28 +120,78 @@ def _upsert_alias(alias_name: str, insumo: Insumo) -> tuple[bool, str, str]:
 
 
 def _remove_pending_name_from_session(request: HttpRequest, alias_norm: str) -> None:
+    _remove_pending_names_from_session(request, {alias_norm})
+
+
+def _remove_pending_name_from_recent_runs(alias_norm: str, max_runs: int = 20) -> None:
+    _remove_pending_names_from_recent_runs({alias_norm}, max_runs=max_runs)
+
+
+def _remove_pending_names_from_session(request: HttpRequest, alias_norms: set[str]) -> None:
+    if not alias_norms:
+        return
     pending = request.session.get("inventario_pending_preview")
     if not pending:
         return
     request.session["inventario_pending_preview"] = [
         row
         for row in pending
-        if normalizar_nombre(str(row.get("nombre_origen") or "")) != alias_norm
+        if normalizar_nombre(str((row or {}).get("nombre_origen") or "")) not in alias_norms
     ]
 
 
-def _remove_pending_name_from_recent_runs(alias_norm: str, max_runs: int = 20) -> None:
+def _remove_pending_names_from_recent_runs(alias_norms: set[str], max_runs: int = 20) -> None:
+    if not alias_norms:
+        return
     runs = AlmacenSyncRun.objects.only("id", "pending_preview").order_by("-started_at")[:max_runs]
     for run in runs:
         pending = list(getattr(run, "pending_preview", []) or [])
         filtered = [
             row
             for row in pending
-            if normalizar_nombre(str((row or {}).get("nombre_origen") or "")) != alias_norm
+            if normalizar_nombre(str((row or {}).get("nombre_origen") or "")) not in alias_norms
         ]
         if len(filtered) != len(pending):
             run.pending_preview = filtered
-        run.save(update_fields=["pending_preview"])
+            run.save(update_fields=["pending_preview"])
+
+
+def _build_pending_grouped(pending_preview: list[dict]) -> list[dict]:
+    grouped = defaultdict(lambda: {"count": 0, "sources": set(), "name": "", "suggestion": "", "score_max": 0.0})
+    for row in pending_preview:
+        name = str((row or {}).get("nombre_origen") or "").strip()
+        norm = str((row or {}).get("nombre_normalizado") or normalizar_nombre(name))
+        if not norm:
+            continue
+        item = grouped[norm]
+        item["count"] += 1
+        item["name"] = item["name"] or name
+        source = str((row or {}).get("source") or "").strip()
+        if source:
+            item["sources"].add(source)
+        suggestion = str((row or {}).get("sugerencia") or "").strip()
+        if suggestion and not item["suggestion"]:
+            item["suggestion"] = suggestion
+        try:
+            score = float((row or {}).get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        item["score_max"] = max(item["score_max"], score)
+
+    return sorted(
+        [
+            {
+                "nombre_origen": v["name"],
+                "nombre_normalizado": k,
+                "count": v["count"],
+                "sources": ", ".join(sorted(v["sources"])) if v["sources"] else "-",
+                "sugerencia": v["suggestion"],
+                "score_max": v["score_max"],
+            }
+            for k, v in grouped.items()
+        ],
+        key=lambda x: (-x["count"], x["nombre_origen"]),
+    )
 
 
 def _export_cross_pending_csv(cross_unified_rows: list[dict]) -> HttpResponse:
@@ -582,6 +632,104 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                     request,
                     f"Pendientes cargados desde run {run.id} ({run.started_at:%Y-%m-%d %H:%M}).",
                 )
+        elif action == "auto_apply_suggestions":
+            min_score = float(_to_decimal(request.POST.get("auto_min_score"), "90"))
+            min_score = max(0.0, min(100.0, min_score))
+            max_rows = int(_to_decimal(request.POST.get("auto_max_rows"), "80"))
+            max_rows = max(1, min(500, max_rows))
+
+            session_pending = list(request.session.get("inventario_pending_preview", []))[:500]
+            hidden_run_id = request.session.get("inventario_hidden_pending_run_id")
+            latest_runs = list(
+                AlmacenSyncRun.objects.only("id", "pending_preview").order_by("-started_at")[:20]
+            )
+            latest_pending_run = None
+            for run in latest_runs:
+                if hidden_run_id and run.id == hidden_run_id:
+                    continue
+                if isinstance(run.pending_preview, list) and run.pending_preview:
+                    latest_pending_run = run
+                    break
+            persisted_pending = list((latest_pending_run.pending_preview if latest_pending_run else [])[:500])
+            pending_preview = session_pending or persisted_pending
+            pending_grouped = _build_pending_grouped(pending_preview)
+
+            if not pending_grouped:
+                messages.info(request, "No hay pendientes visibles para auto-aplicar sugerencias.")
+            else:
+                insumo_map = {
+                    i.nombre_normalizado: i
+                    for i in Insumo.objects.filter(activo=True).only("id", "nombre", "nombre_normalizado")
+                }
+                created = 0
+                updated = 0
+                skipped_no_suggestion = 0
+                skipped_low_score = 0
+                skipped_unresolved = 0
+                skipped_invalid = 0
+                point_resolved_total = 0
+                recetas_resolved_total = 0
+                processed = 0
+                cleaned_norms: set[str] = set()
+
+                for row in pending_grouped:
+                    if processed >= max_rows:
+                        break
+
+                    suggestion = str(row.get("sugerencia") or "").strip()
+                    if not suggestion:
+                        skipped_no_suggestion += 1
+                        continue
+
+                    score_max = float(row.get("score_max") or 0.0)
+                    if score_max < min_score:
+                        skipped_low_score += 1
+                        continue
+
+                    insumo = insumo_map.get(normalizar_nombre(suggestion))
+                    if not insumo:
+                        skipped_unresolved += 1
+                        continue
+
+                    ok, alias_norm, action_label = _upsert_alias(row["nombre_origen"], insumo)
+                    if not ok:
+                        skipped_invalid += 1
+                        continue
+
+                    processed += 1
+                    if action_label == "creado":
+                        created += 1
+                    else:
+                        updated += 1
+                    cleaned_norms.add(alias_norm)
+
+                    point_resolved, recetas_resolved = _resolve_cross_source_with_alias(row["nombre_origen"], insumo)
+                    point_resolved_total += point_resolved
+                    recetas_resolved_total += recetas_resolved
+
+                if cleaned_norms:
+                    _remove_pending_names_from_session(request, cleaned_norms)
+                    _remove_pending_names_from_recent_runs(cleaned_norms)
+
+                messages.success(
+                    request,
+                    (
+                        "Auto-aplicación completada. "
+                        f"Creados: {created}, actualizados: {updated}, "
+                        f"Point resueltos: {point_resolved_total}, "
+                        f"Recetas resueltas: {recetas_resolved_total}."
+                    ),
+                )
+                messages.info(
+                    request,
+                    (
+                        "Omitidos → "
+                        f"sin sugerencia: {skipped_no_suggestion}, "
+                        f"score<{min_score:.1f}: {skipped_low_score}, "
+                        f"sugerencia sin insumo exacto: {skipped_unresolved}, "
+                        f"nombre inválido: {skipped_invalid}."
+                    ),
+                )
         elif action == "reprocess_recetas_pending":
             result = _reprocess_recetas_pending_matching()
             messages.success(
@@ -665,40 +813,17 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         for r in recent_runs
     ]
 
-    grouped = defaultdict(lambda: {"count": 0, "sources": set(), "name": "", "suggestion": "", "score_max": 0.0})
-    for row in pending_preview:
-        name = str((row or {}).get("nombre_origen") or "").strip()
-        norm = str((row or {}).get("nombre_normalizado") or normalizar_nombre(name))
-        if not norm:
-            continue
-        item = grouped[norm]
-        item["count"] += 1
-        item["name"] = item["name"] or name
-        source = str((row or {}).get("source") or "").strip()
-        if source:
-            item["sources"].add(source)
-        suggestion = str((row or {}).get("sugerencia") or "").strip()
-        if suggestion and not item["suggestion"]:
-            item["suggestion"] = suggestion
-        try:
-            score = float((row or {}).get("score") or 0.0)
-        except (TypeError, ValueError):
-            score = 0.0
-        item["score_max"] = max(item["score_max"], score)
-
-    pending_grouped = sorted(
-        [
-            {
-                "nombre_origen": v["name"],
-                "nombre_normalizado": k,
-                "count": v["count"],
-                "sources": ", ".join(sorted(v["sources"])) if v["sources"] else "-",
-                "sugerencia": v["suggestion"],
-                "score_max": v["score_max"],
-            }
-            for k, v in grouped.items()
-        ],
-        key=lambda x: (-x["count"], x["nombre_origen"]),
+    pending_grouped = _build_pending_grouped(pending_preview)
+    auto_default_score = 90.0
+    insumo_norm_set = set(
+        Insumo.objects.filter(activo=True).values_list("nombre_normalizado", flat=True)
+    )
+    auto_apply_candidates = sum(
+        1
+        for row in pending_grouped
+        if row.get("sugerencia")
+        and float(row.get("score_max") or 0.0) >= auto_default_score
+        and normalizar_nombre(str(row.get("sugerencia") or "")) in insumo_norm_set
     )
 
     unified = defaultdict(
@@ -799,6 +924,9 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "pending_recent_runs": pending_recent_runs,
         "pending_visible_count": len(pending_preview),
         "pending_unique_count": len(pending_grouped),
+        "auto_default_score": auto_default_score,
+        "auto_default_limit": 80,
+        "auto_apply_candidates": auto_apply_candidates,
         "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:1200],
         "can_manage_inventario": can_manage_inventario(request.user),
         "cross_summary": {
