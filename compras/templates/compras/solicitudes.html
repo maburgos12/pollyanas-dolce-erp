@@ -567,6 +567,7 @@
           </table>
         </div>
       </div>
+    {% endif %}
       <div class="card" style="margin-top: 12px;">
         <div class="card-header">Consumo Real vs Plan de Producción</div>
         <p class="muted">
@@ -661,7 +662,6 @@
           </table>
         </div>
       </div>
-    {% endif %}
   </section>
   <div class="toolbar">
     <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
