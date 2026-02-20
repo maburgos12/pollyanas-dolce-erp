@@ -5,10 +5,12 @@ from decimal import Decimal, InvalidOperation
 from io import StringIO
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db.models import Sum
 from django.urls import reverse
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -24,7 +26,7 @@ from recetas.models import PlanProduccion
 from recetas.utils.matching import match_insumo
 from recetas.utils.normalizacion import normalizar_nombre
 
-from .models import OrdenCompra, RecepcionCompra, SolicitudCompra
+from .models import OrdenCompra, PresupuestoCompraPeriodo, RecepcionCompra, SolicitudCompra
 
 
 def _to_decimal(value: str, default: str = "0") -> Decimal:
@@ -236,6 +238,120 @@ def _parse_period_filters(periodo_tipo_raw: str, periodo_mes_raw: str) -> tuple[
     return tipo, periodo_mes, label
 
 
+def _periodo_bounds(periodo_tipo: str, periodo_mes: str) -> tuple[date | None, date | None]:
+    if periodo_tipo == "all":
+        return None, None
+
+    year, month = periodo_mes.split("-")
+    y = int(year)
+    m = int(month)
+    last_day = calendar.monthrange(y, m)[1]
+    start = date(y, m, 1)
+    end = date(y, m, last_day)
+
+    if periodo_tipo == "q1":
+        end = date(y, m, 15)
+    elif periodo_tipo == "q2":
+        start = date(y, m, 16)
+    return start, end
+
+
+def _filter_ordenes_by_scope(ordenes_qs, source_filter: str, plan_filter: str):
+    if source_filter == "plan":
+        ordenes_qs = ordenes_qs.filter(solicitud__area__startswith="PLAN_PRODUCCION:")
+    elif source_filter == "manual":
+        ordenes_qs = ordenes_qs.exclude(solicitud__area__startswith="PLAN_PRODUCCION:")
+
+    if plan_filter:
+        ordenes_qs = ordenes_qs.filter(solicitud__area=f"PLAN_PRODUCCION:{plan_filter}")
+    return ordenes_qs
+
+
+def _build_budget_context(
+    solicitudes,
+    source_filter: str,
+    plan_filter: str,
+    periodo_tipo: str,
+    periodo_mes: str,
+) -> dict:
+    total_estimado = sum((s.presupuesto_estimado for s in solicitudes), Decimal("0"))
+
+    start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
+    ordenes_qs = OrdenCompra.objects.select_related("proveedor", "solicitud").exclude(estatus=OrdenCompra.STATUS_BORRADOR)
+    if start_date and end_date:
+        ordenes_qs = ordenes_qs.filter(fecha_emision__range=(start_date, end_date))
+    ordenes_qs = _filter_ordenes_by_scope(ordenes_qs, source_filter, plan_filter)
+
+    total_ejecutado = ordenes_qs.aggregate(total=Sum("monto_estimado"))["total"] or Decimal("0")
+    variacion_ejecutado_vs_estimado = total_ejecutado - total_estimado
+
+    presupuesto_periodo = None
+    objetivo = None
+    variacion_objetivo = None
+    variacion_objetivo_pct = None
+    avance_objetivo_pct = None
+    if periodo_tipo != "all":
+        presupuesto_periodo = PresupuestoCompraPeriodo.objects.filter(
+            periodo_tipo=periodo_tipo,
+            periodo_mes=periodo_mes,
+        ).first()
+        objetivo = presupuesto_periodo.monto_objetivo if presupuesto_periodo else Decimal("0")
+        variacion_objetivo = total_estimado - objetivo
+        if objetivo > 0:
+            variacion_objetivo_pct = (variacion_objetivo * Decimal("100")) / objetivo
+            avance_objetivo_pct = (total_ejecutado * Decimal("100")) / objetivo
+
+    estimado_by_proveedor: dict[str, Decimal] = {}
+    for s in solicitudes:
+        proveedor_nombre = (
+            s.proveedor_sugerido.nombre
+            if s.proveedor_sugerido_id
+            else (
+                s.insumo.proveedor_principal.nombre
+                if getattr(s.insumo, "proveedor_principal_id", None)
+                else "Sin proveedor"
+            )
+        )
+        estimado_by_proveedor[proveedor_nombre] = estimado_by_proveedor.get(proveedor_nombre, Decimal("0")) + (
+            s.presupuesto_estimado or Decimal("0")
+        )
+
+    ejecutado_by_proveedor: dict[str, Decimal] = {}
+    for row in ordenes_qs.values("proveedor__nombre").annotate(total=Sum("monto_estimado")):
+        proveedor_nombre = row["proveedor__nombre"] or "Sin proveedor"
+        ejecutado_by_proveedor[proveedor_nombre] = row["total"] or Decimal("0")
+
+    proveedores = set(estimado_by_proveedor.keys()) | set(ejecutado_by_proveedor.keys())
+    rows = []
+    for proveedor_nombre in proveedores:
+        estimado = estimado_by_proveedor.get(proveedor_nombre, Decimal("0"))
+        ejecutado = ejecutado_by_proveedor.get(proveedor_nombre, Decimal("0"))
+        variacion = ejecutado - estimado
+        share = (estimado * Decimal("100") / total_estimado) if total_estimado > 0 else Decimal("0")
+        rows.append(
+            {
+                "proveedor": proveedor_nombre,
+                "estimado": estimado,
+                "ejecutado": ejecutado,
+                "variacion": variacion,
+                "participacion_pct": share,
+            }
+        )
+    rows.sort(key=lambda r: r["estimado"], reverse=True)
+
+    return {
+        "presupuesto_periodo": presupuesto_periodo,
+        "presupuesto_objetivo": objetivo,
+        "presupuesto_estimado_total": total_estimado,
+        "presupuesto_ejecutado_total": total_ejecutado,
+        "presupuesto_variacion_objetivo": variacion_objetivo,
+        "presupuesto_variacion_objetivo_pct": variacion_objetivo_pct,
+        "presupuesto_avance_objetivo_pct": avance_objetivo_pct,
+        "presupuesto_variacion_ejecutado_estimado": variacion_ejecutado_vs_estimado,
+        "presupuesto_rows_proveedor": rows,
+    }
+
+
 def _export_solicitudes_csv(
     solicitudes,
     source_filter: str,
@@ -369,6 +485,158 @@ def _export_solicitudes_xlsx(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     response["Content-Disposition"] = f'attachment; filename="solicitudes_compras_{now_str}.xlsx"'
+    return response
+
+
+def _export_consolidado_csv(
+    solicitudes,
+    source_filter: str,
+    plan_filter: str,
+    reabasto_filter: str,
+    periodo_label: str,
+    budget_ctx: dict,
+) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="compras_consolidado_{now_str}.csv"'
+    writer = csv.writer(response)
+
+    writer.writerow(["RESUMEN EJECUTIVO COMPRAS"])
+    writer.writerow(["Filtro periodo", periodo_label])
+    writer.writerow(["Filtro origen", source_filter])
+    writer.writerow(["Filtro plan", plan_filter or "-"])
+    writer.writerow(["Filtro reabasto", reabasto_filter])
+    writer.writerow(["Objetivo presupuesto", budget_ctx.get("presupuesto_objetivo") or ""])
+    writer.writerow(["Estimado solicitudes", budget_ctx["presupuesto_estimado_total"]])
+    writer.writerow(["Ejecutado ordenes", budget_ctx["presupuesto_ejecutado_total"]])
+    writer.writerow(["Variacion vs objetivo", budget_ctx.get("presupuesto_variacion_objetivo") or ""])
+    writer.writerow(["Variacion ejecutado vs estimado", budget_ctx["presupuesto_variacion_ejecutado_estimado"]])
+    writer.writerow([])
+
+    writer.writerow(["DESVIACION POR PROVEEDOR"])
+    writer.writerow(["Proveedor", "Estimado", "Ejecutado", "Variacion", "Participacion estimado %"])
+    for row in budget_ctx["presupuesto_rows_proveedor"]:
+        writer.writerow(
+            [
+                row["proveedor"],
+                row["estimado"],
+                row["ejecutado"],
+                row["variacion"],
+                round(float(row["participacion_pct"]), 2),
+            ]
+        )
+    writer.writerow([])
+
+    writer.writerow(["DETALLE SOLICITUDES"])
+    writer.writerow(
+        [
+            "Folio",
+            "Area",
+            "Solicitante",
+            "Insumo",
+            "Proveedor sugerido",
+            "Cantidad",
+            "Costo unitario",
+            "Presupuesto",
+            "Fecha requerida",
+            "Estatus",
+        ]
+    )
+    for s in solicitudes:
+        writer.writerow(
+            [
+                s.folio,
+                s.area,
+                s.solicitante,
+                s.insumo.nombre,
+                s.proveedor_sugerido.nombre if s.proveedor_sugerido_id else "",
+                s.cantidad,
+                s.costo_unitario,
+                s.presupuesto_estimado,
+                s.fecha_requerida,
+                s.get_estatus_display(),
+            ]
+        )
+    return response
+
+
+def _export_consolidado_xlsx(
+    solicitudes,
+    source_filter: str,
+    plan_filter: str,
+    reabasto_filter: str,
+    periodo_label: str,
+    budget_ctx: dict,
+) -> HttpResponse:
+    wb = Workbook()
+
+    ws_resumen = wb.active
+    ws_resumen.title = "Resumen"
+    ws_resumen.append(["RESUMEN EJECUTIVO COMPRAS"])
+    ws_resumen.append(["Filtro periodo", periodo_label])
+    ws_resumen.append(["Filtro origen", source_filter])
+    ws_resumen.append(["Filtro plan", plan_filter or "-"])
+    ws_resumen.append(["Filtro reabasto", reabasto_filter])
+    ws_resumen.append(["Objetivo presupuesto", float(budget_ctx["presupuesto_objetivo"] or 0)])
+    ws_resumen.append(["Estimado solicitudes", float(budget_ctx["presupuesto_estimado_total"] or 0)])
+    ws_resumen.append(["Ejecutado ordenes", float(budget_ctx["presupuesto_ejecutado_total"] or 0)])
+    ws_resumen.append(["Variacion vs objetivo", float((budget_ctx.get("presupuesto_variacion_objetivo") or 0))])
+    ws_resumen.append(["Variacion ejecutado vs estimado", float(budget_ctx["presupuesto_variacion_ejecutado_estimado"] or 0)])
+    ws_resumen.append([])
+    ws_resumen.append(["DESVIACION POR PROVEEDOR"])
+    ws_resumen.append(["Proveedor", "Estimado", "Ejecutado", "Variacion", "Participacion estimado %"])
+    for row in budget_ctx["presupuesto_rows_proveedor"]:
+        ws_resumen.append(
+            [
+                row["proveedor"],
+                float(row["estimado"] or 0),
+                float(row["ejecutado"] or 0),
+                float(row["variacion"] or 0),
+                float(row["participacion_pct"] or 0),
+            ]
+        )
+
+    ws_solicitudes = wb.create_sheet(title="Solicitudes")
+    ws_solicitudes.append(
+        [
+            "Folio",
+            "Area",
+            "Solicitante",
+            "Insumo",
+            "Proveedor sugerido",
+            "Cantidad",
+            "Costo unitario",
+            "Presupuesto",
+            "Fecha requerida",
+            "Estatus",
+        ]
+    )
+    for s in solicitudes:
+        ws_solicitudes.append(
+            [
+                s.folio,
+                s.area,
+                s.solicitante,
+                s.insumo.nombre,
+                s.proveedor_sugerido.nombre if s.proveedor_sugerido_id else "",
+                float(s.cantidad or 0),
+                float(s.costo_unitario or 0),
+                float(s.presupuesto_estimado or 0),
+                s.fecha_requerida.isoformat() if s.fecha_requerida else "",
+                s.get_estatus_display(),
+            ]
+        )
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="compras_consolidado_{now_str}.xlsx"'
     return response
 
 
@@ -521,7 +789,14 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         request.GET.get("periodo_tipo"),
         request.GET.get("periodo_mes"),
     )
-    total_presupuesto = sum((s.presupuesto_estimado for s in solicitudes), Decimal("0"))
+    budget_ctx = _build_budget_context(
+        solicitudes,
+        source_filter,
+        plan_filter,
+        periodo_tipo,
+        periodo_mes,
+    )
+    total_presupuesto = budget_ctx["presupuesto_estimado_total"]
 
     export_format = (request.GET.get("export") or "").lower()
     if export_format == "csv":
@@ -533,6 +808,24 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_tipo,
             periodo_mes,
             periodo_label,
+        )
+    if export_format == "consolidado_csv":
+        return _export_consolidado_csv(
+            solicitudes,
+            source_filter,
+            plan_filter,
+            reabasto_filter,
+            periodo_label,
+            budget_ctx,
+        )
+    if export_format == "consolidado_xlsx":
+        return _export_consolidado_xlsx(
+            solicitudes,
+            source_filter,
+            plan_filter,
+            reabasto_filter,
+            periodo_label,
+            budget_ctx,
         )
     if export_format == "xlsx":
         return _export_solicitudes_xlsx(
@@ -562,8 +855,62 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "periodo_label": periodo_label,
         "total_presupuesto": total_presupuesto,
         "current_query": query_without_export.urlencode(),
+        **budget_ctx,
     }
     return render(request, "compras/solicitudes.html", context)
+
+
+@login_required
+@require_POST
+def guardar_presupuesto_periodo(request: HttpRequest) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para gestionar presupuesto.")
+
+    periodo_tipo, periodo_mes, _ = _parse_period_filters(
+        request.POST.get("periodo_tipo"),
+        request.POST.get("periodo_mes"),
+    )
+    if periodo_tipo == "all":
+        messages.error(request, "Selecciona periodo mensual o quincenal para guardar presupuesto.")
+        return redirect("compras:solicitudes")
+
+    monto_objetivo = _to_decimal(request.POST.get("monto_objetivo"), "0")
+    if monto_objetivo < 0:
+        monto_objetivo = Decimal("0")
+    notas = (request.POST.get("notas") or "").strip()
+
+    presupuesto, created = PresupuestoCompraPeriodo.objects.update_or_create(
+        periodo_tipo=periodo_tipo,
+        periodo_mes=periodo_mes,
+        defaults={
+            "monto_objetivo": monto_objetivo,
+            "notas": notas,
+            "actualizado_por": request.user,
+        },
+    )
+    log_event(
+        request.user,
+        "CREATE" if created else "UPDATE",
+        "compras.PresupuestoCompraPeriodo",
+        presupuesto.id,
+        {
+            "periodo_tipo": periodo_tipo,
+            "periodo_mes": periodo_mes,
+            "monto_objetivo": str(monto_objetivo),
+        },
+    )
+    messages.success(request, "Presupuesto del período actualizado.")
+
+    params = {
+        "source": (request.POST.get("source") or "all").strip() or "all",
+        "plan_id": (request.POST.get("plan_id") or "").strip(),
+        "reabasto": (request.POST.get("reabasto") or "all").strip() or "all",
+        "periodo_tipo": periodo_tipo,
+        "periodo_mes": periodo_mes,
+    }
+    if not params["plan_id"]:
+        params.pop("plan_id")
+    return redirect(f"{reverse('compras:solicitudes')}?{urlencode(params)}")
 
 
 @login_required

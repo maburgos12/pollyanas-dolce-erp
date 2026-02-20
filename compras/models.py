@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+from django.conf import settings
 
 from maestros.models import Insumo, Proveedor
 
@@ -117,3 +118,34 @@ class RecepcionCompra(models.Model):
 
     def __str__(self):
         return self.folio
+
+
+class PresupuestoCompraPeriodo(models.Model):
+    TIPO_MES = "mes"
+    TIPO_Q1 = "q1"
+    TIPO_Q2 = "q2"
+    TIPO_CHOICES = [
+        (TIPO_MES, "Mensual"),
+        (TIPO_Q1, "1ra quincena"),
+        (TIPO_Q2, "2da quincena"),
+    ]
+
+    periodo_tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
+    periodo_mes = models.CharField(max_length=7)  # YYYY-MM
+    monto_objetivo = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    notas = models.CharField(max_length=255, blank=True, default="")
+    actualizado_en = models.DateTimeField(auto_now=True)
+    actualizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="presupuestos_compras_actualizados",
+    )
+
+    class Meta:
+        ordering = ["-periodo_mes", "periodo_tipo"]
+        unique_together = [("periodo_tipo", "periodo_mes")]
+
+    def __str__(self):
+        return f"{self.get_periodo_tipo_display()} {self.periodo_mes}"

@@ -117,6 +117,88 @@
     </div>
   </form>
   <p class="muted">Periodo activo: <strong>{{ periodo_label }}</strong></p>
+  <section class="card" style="margin: 12px 0;">
+    <div class="card-header">Presupuesto y Desviación (Periodo)</div>
+    {% if periodo_tipo == 'all' %}
+      <p class="muted mb-0">Selecciona un periodo mensual o quincenal para habilitar objetivo de presupuesto y variación.</p>
+    {% else %}
+      {% if can_manage_compras %}
+      <form method="post" action="{% url 'compras:solicitudes_presupuesto' %}" class="form-grid-auto mb-3">
+        {% csrf_token %}
+        <input type="hidden" name="source" value="{{ source_filter }}">
+        <input type="hidden" name="plan_id" value="{{ plan_filter }}">
+        <input type="hidden" name="reabasto" value="{{ reabasto_filter }}">
+        <input type="hidden" name="periodo_tipo" value="{{ periodo_tipo }}">
+        <input type="hidden" name="periodo_mes" value="{{ periodo_mes }}">
+        <div>
+          <label>Monto objetivo</label>
+          <input class="input-field" type="number" name="monto_objetivo" min="0" step="0.01" value="{{ presupuesto_objetivo|default_if_none:0|floatformat:2 }}">
+        </div>
+        <div>
+          <label>Notas</label>
+          <input class="input-field" type="text" name="notas" maxlength="255" value="{{ presupuesto_periodo.notas|default:'' }}" placeholder="Opcional">
+        </div>
+        <div class="align-items-end d-flex">
+          <button class="btn btn-primary" type="submit">Guardar presupuesto</button>
+        </div>
+      </form>
+      {% endif %}
+      <div class="kpi-mini">
+        <article class="kpi-card">
+          <div class="kpi-number">{{ presupuesto_objetivo|default_if_none:0|floatformat:2 }}</div>
+          <div class="kpi-label">Objetivo presupuesto</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number is-warning">{{ presupuesto_estimado_total|floatformat:2 }}</div>
+          <div class="kpi-label">Estimado solicitudes</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number {% if presupuesto_variacion_objetivo and presupuesto_variacion_objetivo > 0 %}is-danger{% else %}is-success{% endif %}">{{ presupuesto_variacion_objetivo|default_if_none:0|floatformat:2 }}</div>
+          <div class="kpi-label">
+            Variación vs objetivo
+            {% if presupuesto_variacion_objetivo_pct is not None %}
+              ({{ presupuesto_variacion_objetivo_pct|floatformat:2 }}%)
+            {% endif %}
+          </div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number is-success">{{ presupuesto_ejecutado_total|floatformat:2 }}</div>
+          <div class="kpi-label">
+            Ejecutado OC
+            {% if presupuesto_avance_objetivo_pct is not None %}
+              ({{ presupuesto_avance_objetivo_pct|floatformat:2 }}% objetivo)
+            {% endif %}
+          </div>
+        </article>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Proveedor</th>
+              <th class="text-end">Estimado</th>
+              <th class="text-end">Ejecutado</th>
+              <th class="text-end">Variación</th>
+              <th class="text-end">% participación estimado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in presupuesto_rows_proveedor %}
+              <tr>
+                <td>{{ r.proveedor }}</td>
+                <td class="text-end">${{ r.estimado|floatformat:2 }}</td>
+                <td class="text-end">${{ r.ejecutado|floatformat:2 }}</td>
+                <td class="text-end {% if r.variacion > 0 %}text-danger{% elif r.variacion < 0 %}text-success{% endif %}">${{ r.variacion|floatformat:2 }}</td>
+                <td class="text-end">{{ r.participacion_pct|floatformat:2 }}%</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="5" class="text-muted">Sin datos por proveedor para este filtro.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
   <div class="toolbar">
     <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
     <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
@@ -125,6 +207,8 @@
     <a href="{% url 'compras:solicitudes_print' %}{% if current_query %}?{{ current_query }}{% endif %}" target="_blank" class="btn btn-secondary">Imprimir solicitud compras</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=csv{% else %}?export=csv{% endif %}" class="btn btn-secondary">Exportar CSV</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=xlsx{% else %}?export=xlsx{% endif %}" class="btn btn-secondary">Exportar XLSX</a>
+    <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=consolidado_csv{% else %}?export=consolidado_csv{% endif %}" class="btn btn-secondary">Export consolidado CSV</a>
+    <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=consolidado_xlsx{% else %}?export=consolidado_xlsx{% endif %}" class="btn btn-secondary">Export consolidado XLSX</a>
   </div>
   <div class="table-responsive">
     <table class="table table-striped">
