@@ -415,6 +415,97 @@ def _build_budget_history(periodo_mes: str, source_filter: str, plan_filter: str
     return rows
 
 
+def _build_provider_dashboard(periodo_mes: str, source_filter: str, plan_filter: str, current_rows: list[dict]) -> dict:
+    months_desc = [_shift_month(periodo_mes, d) for d in range(0, 6)]
+    months_asc = list(reversed(months_desc))
+
+    monthly_provider_data: dict[str, dict[str, dict[str, Decimal]]] = {}
+    provider_score: dict[str, Decimal] = {}
+
+    for month_value in months_desc:
+        start_date, end_date = _periodo_bounds("mes", month_value)
+        solicitudes_qs = SolicitudCompra.objects.select_related("insumo", "proveedor_sugerido").filter(
+            fecha_requerida__range=(start_date, end_date)
+        )
+        solicitudes_qs = _filter_solicitudes_by_scope(solicitudes_qs, source_filter, plan_filter)
+        solicitudes = list(solicitudes_qs)
+
+        insumo_ids = [s.insumo_id for s in solicitudes]
+        latest_cost_by_insumo: dict[int, Decimal] = {}
+        if insumo_ids:
+            for c in CostoInsumo.objects.filter(insumo_id__in=insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+                if c.insumo_id not in latest_cost_by_insumo:
+                    latest_cost_by_insumo[c.insumo_id] = c.costo_unitario
+
+        estimado_by_provider: dict[str, Decimal] = {}
+        for s in solicitudes:
+            proveedor_nombre = (
+                s.proveedor_sugerido.nombre
+                if s.proveedor_sugerido_id
+                else (
+                    s.insumo.proveedor_principal.nombre
+                    if getattr(s.insumo, "proveedor_principal_id", None)
+                    else "Sin proveedor"
+                )
+            )
+            estimado_by_provider[proveedor_nombre] = estimado_by_provider.get(proveedor_nombre, Decimal("0")) + (
+                (s.cantidad or Decimal("0")) * latest_cost_by_insumo.get(s.insumo_id, Decimal("0"))
+            )
+
+        ordenes_qs = OrdenCompra.objects.exclude(estatus=OrdenCompra.STATUS_BORRADOR).filter(
+            fecha_emision__range=(start_date, end_date)
+        )
+        ordenes_qs = _filter_ordenes_by_scope(ordenes_qs, source_filter, plan_filter)
+        ejecutado_by_provider: dict[str, Decimal] = {}
+        for row in ordenes_qs.values("proveedor__nombre").annotate(total=Sum("monto_estimado")):
+            provider_name = row["proveedor__nombre"] or "Sin proveedor"
+            ejecutado_by_provider[provider_name] = row["total"] or Decimal("0")
+
+        providers = set(estimado_by_provider.keys()) | set(ejecutado_by_provider.keys())
+        for provider_name in providers:
+            estimado = estimado_by_provider.get(provider_name, Decimal("0"))
+            ejecutado = ejecutado_by_provider.get(provider_name, Decimal("0"))
+            variacion = ejecutado - estimado
+            monthly_provider_data.setdefault(provider_name, {})[month_value] = {
+                "estimado": estimado,
+                "ejecutado": ejecutado,
+                "variacion": variacion,
+            }
+            provider_score[provider_name] = provider_score.get(provider_name, Decimal("0")) + abs(variacion)
+
+    top_providers = [p for p, _ in sorted(provider_score.items(), key=lambda x: x[1], reverse=True)[:6]]
+
+    trend_rows: list[dict] = []
+    for provider_name in top_providers:
+        for month_value in months_asc:
+            data = monthly_provider_data.get(provider_name, {}).get(
+                month_value,
+                {"estimado": Decimal("0"), "ejecutado": Decimal("0"), "variacion": Decimal("0")},
+            )
+            trend_rows.append(
+                {
+                    "proveedor": provider_name,
+                    "mes": month_value,
+                    "estimado": data["estimado"],
+                    "ejecutado": data["ejecutado"],
+                    "variacion": data["variacion"],
+                }
+            )
+
+    top_desviaciones = sorted(
+        [r for r in current_rows if (r["variacion"] or Decimal("0")) != Decimal("0")],
+        key=lambda x: abs(x["variacion"]),
+        reverse=True,
+    )[:12]
+
+    return {
+        "top_desviaciones": top_desviaciones,
+        "trend_rows": trend_rows,
+        "trend_months": months_asc,
+        "trend_providers": top_providers,
+    }
+
+
 def _build_budget_context(
     solicitudes,
     source_filter: str,
@@ -859,6 +950,103 @@ def _export_consolidado_xlsx(
     return response
 
 
+def _export_tablero_proveedor_csv(
+    provider_dashboard: dict,
+    periodo_label: str,
+    source_filter: str,
+    plan_filter: str,
+) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="compras_tablero_proveedor_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["TABLERO PROVEEDOR - COMPRAS"])
+    writer.writerow(["Periodo activo", periodo_label])
+    writer.writerow(["Filtro origen", source_filter])
+    writer.writerow(["Filtro plan", plan_filter or "-"])
+    writer.writerow([])
+
+    writer.writerow(["TOP DESVIACIONES (PERIODO ACTIVO)"])
+    writer.writerow(["Proveedor", "Estimado", "Ejecutado", "Variacion", "Participacion %"])
+    for row in provider_dashboard["top_desviaciones"]:
+        writer.writerow(
+            [
+                row["proveedor"],
+                row["estimado"],
+                row["ejecutado"],
+                row["variacion"],
+                round(float(row["participacion_pct"] or 0), 2),
+            ]
+        )
+    writer.writerow([])
+
+    writer.writerow(["TENDENCIA 6 MESES (TOP PROVEEDORES)"])
+    writer.writerow(["Proveedor", "Mes", "Estimado", "Ejecutado", "Variacion"])
+    for row in provider_dashboard["trend_rows"]:
+        writer.writerow(
+            [
+                row["proveedor"],
+                row["mes"],
+                row["estimado"],
+                row["ejecutado"],
+                row["variacion"],
+            ]
+        )
+
+    return response
+
+
+def _export_tablero_proveedor_xlsx(
+    provider_dashboard: dict,
+    periodo_label: str,
+    source_filter: str,
+    plan_filter: str,
+) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Top desviaciones"
+    ws.append(["TABLERO PROVEEDOR - COMPRAS"])
+    ws.append(["Periodo activo", periodo_label])
+    ws.append(["Filtro origen", source_filter])
+    ws.append(["Filtro plan", plan_filter or "-"])
+    ws.append([])
+    ws.append(["Proveedor", "Estimado", "Ejecutado", "Variacion", "Participacion %"])
+    for row in provider_dashboard["top_desviaciones"]:
+        ws.append(
+            [
+                row["proveedor"],
+                float(row["estimado"] or 0),
+                float(row["ejecutado"] or 0),
+                float(row["variacion"] or 0),
+                float(row["participacion_pct"] or 0),
+            ]
+        )
+
+    ws2 = wb.create_sheet(title="Tendencia 6m")
+    ws2.append(["Proveedor", "Mes", "Estimado", "Ejecutado", "Variacion"])
+    for row in provider_dashboard["trend_rows"]:
+        ws2.append(
+            [
+                row["proveedor"],
+                row["mes"],
+                float(row["estimado"] or 0),
+                float(row["ejecutado"] or 0),
+                float(row["variacion"] or 0),
+            ]
+        )
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="compras_tablero_proveedor_{now_str}.xlsx"'
+    return response
+
+
 def _filtered_solicitudes(
     source_filter_raw: str,
     plan_filter_raw: str,
@@ -1015,6 +1203,12 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         periodo_tipo,
         periodo_mes,
     )
+    provider_dashboard = _build_provider_dashboard(
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        budget_ctx["presupuesto_rows_proveedor"],
+    )
     total_presupuesto = budget_ctx["presupuesto_estimado_total"]
 
     export_format = (request.GET.get("export") or "").lower()
@@ -1046,6 +1240,20 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_label,
             budget_ctx,
         )
+    if export_format == "proveedor_csv":
+        return _export_tablero_proveedor_csv(
+            provider_dashboard,
+            periodo_label,
+            source_filter,
+            plan_filter,
+        )
+    if export_format == "proveedor_xlsx":
+        return _export_tablero_proveedor_xlsx(
+            provider_dashboard,
+            periodo_label,
+            source_filter,
+            plan_filter,
+        )
     if export_format == "xlsx":
         return _export_solicitudes_xlsx(
             solicitudes,
@@ -1075,6 +1283,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "total_presupuesto": total_presupuesto,
         "current_query": query_without_export.urlencode(),
         "presupuesto_historial": _build_budget_history(periodo_mes, source_filter, plan_filter),
+        "provider_dashboard": provider_dashboard,
         **budget_ctx,
     }
     return render(request, "compras/solicitudes.html", context)

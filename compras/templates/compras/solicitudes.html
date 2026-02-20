@@ -292,6 +292,61 @@
           </table>
         </div>
       </div>
+      <div class="card" style="margin-top: 12px;">
+        <div class="card-header">Tablero Proveedor (Top desviaciones + Tendencia)</div>
+        <div class="table-responsive">
+          <table class="table table-striped">
+            <thead>
+              <tr>
+                <th>Proveedor</th>
+                <th class="text-end">Estimado</th>
+                <th class="text-end">Ejecutado</th>
+                <th class="text-end">Variación</th>
+                <th class="text-end">Participación %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in provider_dashboard.top_desviaciones %}
+              <tr>
+                <td>{{ r.proveedor }}</td>
+                <td class="text-end">${{ r.estimado|floatformat:2 }}</td>
+                <td class="text-end">${{ r.ejecutado|floatformat:2 }}</td>
+                <td class="text-end {% if r.variacion > 0 %}text-danger{% elif r.variacion < 0 %}text-success{% endif %}">${{ r.variacion|floatformat:2 }}</td>
+                <td class="text-end">{{ r.participacion_pct|floatformat:2 }}%</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="text-muted">Sin desviaciones para el periodo/filtro actual.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="table-responsive" style="margin-top: 10px;">
+          <table class="table table-striped">
+            <thead>
+              <tr>
+                <th>Proveedor</th>
+                <th>Mes</th>
+                <th class="text-end">Estimado</th>
+                <th class="text-end">Ejecutado</th>
+                <th class="text-end">Variación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for t in provider_dashboard.trend_rows %}
+              <tr>
+                <td>{{ t.proveedor }}</td>
+                <td>{{ t.mes }}</td>
+                <td class="text-end">${{ t.estimado|floatformat:2 }}</td>
+                <td class="text-end">${{ t.ejecutado|floatformat:2 }}</td>
+                <td class="text-end {% if t.variacion > 0 %}text-danger{% elif t.variacion < 0 %}text-success{% endif %}">${{ t.variacion|floatformat:2 }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="text-muted">Sin datos de tendencia para proveedores.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
     {% endif %}
   </section>
   <div class="toolbar">
@@ -304,6 +359,8 @@
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=xlsx{% else %}?export=xlsx{% endif %}" class="btn btn-secondary">Exportar XLSX</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=consolidado_csv{% else %}?export=consolidado_csv{% endif %}" class="btn btn-secondary">Export consolidado CSV</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=consolidado_xlsx{% else %}?export=consolidado_xlsx{% endif %}" class="btn btn-secondary">Export consolidado XLSX</a>
+    <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=proveedor_csv{% else %}?export=proveedor_csv{% endif %}" class="btn btn-secondary">Export tablero proveedor CSV</a>
+    <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=proveedor_xlsx{% else %}?export=proveedor_xlsx{% endif %}" class="btn btn-secondary">Export tablero proveedor XLSX</a>
   </div>
   <div class="table-responsive">
     <table class="table table-striped">
