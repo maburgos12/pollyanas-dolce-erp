@@ -181,6 +181,18 @@
     {% if latest_sync %}Último sync: {{ latest_sync.started_at|date:"Y-m-d H:i" }} · Sin match: {{ latest_sync.unmatched }}.{% endif %}
   </p>
   {% endif %}
+  {% if hidden_pending_run and can_manage_inventario %}
+  <div class="toolbar" style="margin-top:10px;">
+    <span class="muted">
+      Hay un run oculto: #{{ hidden_pending_run.id }} ({{ hidden_pending_run.started_at|date:"Y-m-d H:i" }}).
+    </span>
+    <form method="post" class="inline-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="reset_hidden_pending">
+      <button class="btn btn-secondary" type="submit">Restaurar visibilidad</button>
+    </form>
+  </div>
+  {% endif %}
 
   {% if pending_recent_runs %}
   <div class="table-responsive" style="margin-top:12px;">
@@ -193,6 +205,7 @@
           <th class="text-end">Match</th>
           <th class="text-end">Sin match</th>
           <th>Detalle</th>
+          {% if can_manage_inventario %}<th>Acción</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -203,7 +216,27 @@
           <td>{{ run.status }}</td>
           <td class="text-end">{{ run.matched }}</td>
           <td class="text-end">{{ run.unmatched }}</td>
-          <td>{% if run.has_preview %}Con preview{% else %}Sin preview{% endif %}</td>
+          <td>
+            {% if run.has_preview %}
+              {% if run.is_hidden %}<span class="badge-amarillo">Oculto</span>{% else %}<span class="badge-verde">Con preview</span>{% endif %}
+            {% else %}
+              <span class="text-muted">Sin preview</span>
+            {% endif %}
+          </td>
+          {% if can_manage_inventario %}
+          <td>
+            {% if run.has_preview %}
+            <form method="post" class="inline-form">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="load_pending_run">
+              <input type="hidden" name="run_id" value="{{ run.id }}">
+              <button class="btn btn-secondary" type="submit">Cargar pendientes</button>
+            </form>
+            {% else %}
+              <span class="text-muted">-</span>
+            {% endif %}
+          </td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>

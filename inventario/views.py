@@ -529,6 +529,23 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             if hide_run_id.isdigit():
                 request.session["inventario_hidden_pending_run_id"] = int(hide_run_id)
             messages.success(request, "Pendientes en pantalla limpiados.")
+        elif action == "reset_hidden_pending":
+            request.session.pop("inventario_hidden_pending_run_id", None)
+            messages.success(request, "Se restauró la visibilidad de pendientes recientes.")
+        elif action == "load_pending_run":
+            run_id_raw = (request.POST.get("run_id") or "").strip()
+            run = AlmacenSyncRun.objects.filter(pk=run_id_raw).first() if run_id_raw.isdigit() else None
+            if not run:
+                messages.error(request, "Run de sincronización no encontrado.")
+            elif not isinstance(run.pending_preview, list) or not run.pending_preview:
+                messages.error(request, "Ese run no tiene pendientes guardados para mostrar.")
+            else:
+                request.session["inventario_pending_preview"] = list(run.pending_preview)[:200]
+                request.session.pop("inventario_hidden_pending_run_id", None)
+                messages.success(
+                    request,
+                    f"Pendientes cargados desde run {run.id} ({run.started_at:%Y-%m-%d %H:%M}).",
+                )
         elif action == "reprocess_recetas_pending":
             result = _reprocess_recetas_pending_matching()
             messages.success(
@@ -580,8 +597,10 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     )
     latest_sync = latest_runs[0] if latest_runs else None
     latest_pending_run = None
+    hidden_pending_run = None
     for run in latest_runs:
         if hidden_run_id and run.id == hidden_run_id:
+            hidden_pending_run = run
             continue
         if isinstance(run.pending_preview, list) and run.pending_preview:
             latest_pending_run = run
@@ -598,12 +617,14 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     ok_runs = sum(1 for r in recent_runs if r.status == AlmacenSyncRun.STATUS_OK)
     pending_recent_runs = [
         {
+            "id": r.id,
             "started_at": r.started_at,
             "source_label": r.get_source_display(),
             "status": r.status,
             "matched": int(r.matched or 0),
             "unmatched": int(r.unmatched or 0),
             "has_preview": bool(isinstance(r.pending_preview, list) and r.pending_preview),
+            "is_hidden": bool(hidden_run_id and r.id == hidden_run_id),
         }
         for r in recent_runs
     ]
@@ -725,6 +746,8 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "pending_grouped": pending_grouped[:80],
         "pending_source": "session" if session_pending else ("persisted" if persisted_pending else ""),
         "latest_pending_run": latest_pending_run,
+        "hidden_pending_run": hidden_pending_run,
+        "hidden_run_id": hidden_run_id,
         "latest_sync": latest_sync,
         "matching_summary": {
             "runs_count": len(recent_runs),
