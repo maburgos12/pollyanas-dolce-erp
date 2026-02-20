@@ -312,6 +312,109 @@ def _filter_ordenes_by_scope(ordenes_qs, source_filter: str, plan_filter: str):
     return ordenes_qs
 
 
+def _filter_solicitudes_by_scope(solicitudes_qs, source_filter: str, plan_filter: str):
+    if source_filter == "plan":
+        solicitudes_qs = solicitudes_qs.filter(area__startswith="PLAN_PRODUCCION:")
+    elif source_filter == "manual":
+        solicitudes_qs = solicitudes_qs.exclude(area__startswith="PLAN_PRODUCCION:")
+    if plan_filter:
+        solicitudes_qs = solicitudes_qs.filter(area=f"PLAN_PRODUCCION:{plan_filter}")
+    return solicitudes_qs
+
+
+def _shift_month(periodo_mes: str, delta_months: int) -> str:
+    year, month = periodo_mes.split("-")
+    y = int(year)
+    m = int(month)
+    total = y * 12 + (m - 1) - delta_months
+    shifted_y = total // 12
+    shifted_m = (total % 12) + 1
+    return f"{shifted_y:04d}-{shifted_m:02d}"
+
+
+def _compute_budget_period_summary(
+    periodo_tipo: str,
+    periodo_mes: str,
+    source_filter: str,
+    plan_filter: str,
+) -> dict:
+    start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
+    if not start_date or not end_date:
+        return {
+            "periodo_tipo": periodo_tipo,
+            "periodo_mes": periodo_mes,
+            "objetivo": Decimal("0"),
+            "estimado": Decimal("0"),
+            "ejecutado": Decimal("0"),
+            "ratio_pct": None,
+            "estado_label": "Sin periodo",
+            "estado_badge": "bg-warning",
+        }
+
+    presupuesto = PresupuestoCompraPeriodo.objects.filter(
+        periodo_tipo=periodo_tipo,
+        periodo_mes=periodo_mes,
+    ).first()
+    objetivo = presupuesto.monto_objetivo if presupuesto else Decimal("0")
+
+    solicitudes_qs = SolicitudCompra.objects.filter(fecha_requerida__range=(start_date, end_date))
+    solicitudes_qs = _filter_solicitudes_by_scope(solicitudes_qs, source_filter, plan_filter)
+    solicitudes_vals = list(solicitudes_qs.values("insumo_id", "cantidad"))
+    insumo_ids = [x["insumo_id"] for x in solicitudes_vals]
+
+    latest_cost_by_insumo: dict[int, Decimal] = {}
+    if insumo_ids:
+        for c in CostoInsumo.objects.filter(insumo_id__in=insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+            if c.insumo_id not in latest_cost_by_insumo:
+                latest_cost_by_insumo[c.insumo_id] = c.costo_unitario
+
+    estimado = sum(
+        ((row.get("cantidad") or Decimal("0")) * latest_cost_by_insumo.get(row["insumo_id"], Decimal("0")))
+        for row in solicitudes_vals
+    )
+
+    ordenes_qs = OrdenCompra.objects.exclude(estatus=OrdenCompra.STATUS_BORRADOR).filter(
+        fecha_emision__range=(start_date, end_date)
+    )
+    ordenes_qs = _filter_ordenes_by_scope(ordenes_qs, source_filter, plan_filter)
+    ejecutado = ordenes_qs.aggregate(total=Sum("monto_estimado"))["total"] or Decimal("0")
+
+    base = max(estimado, ejecutado)
+    ratio_pct = ((base * Decimal("100")) / objetivo) if objetivo > 0 else None
+    if objetivo <= 0:
+        estado_label = "Sin objetivo"
+        estado_badge = "bg-warning"
+    elif ratio_pct <= Decimal("90"):
+        estado_label = "Verde"
+        estado_badge = "bg-success"
+    elif ratio_pct <= Decimal("100"):
+        estado_label = "Amarillo"
+        estado_badge = "bg-warning"
+    else:
+        estado_label = "Rojo"
+        estado_badge = "bg-danger"
+
+    return {
+        "periodo_tipo": periodo_tipo,
+        "periodo_mes": periodo_mes,
+        "objetivo": objetivo,
+        "estimado": estimado,
+        "ejecutado": ejecutado,
+        "ratio_pct": ratio_pct,
+        "estado_label": estado_label,
+        "estado_badge": estado_badge,
+    }
+
+
+def _build_budget_history(periodo_mes: str, source_filter: str, plan_filter: str) -> list[dict]:
+    rows: list[dict] = []
+    for delta in range(0, 6):
+        month_value = _shift_month(periodo_mes, delta)
+        summary = _compute_budget_period_summary("mes", month_value, source_filter, plan_filter)
+        rows.append(summary)
+    return rows
+
+
 def _build_budget_context(
     solicitudes,
     source_filter: str,
@@ -971,6 +1074,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "periodo_label": periodo_label,
         "total_presupuesto": total_presupuesto,
         "current_query": query_without_export.urlencode(),
+        "presupuesto_historial": _build_budget_history(periodo_mes, source_filter, plan_filter),
         **budget_ctx,
     }
     return render(request, "compras/solicitudes.html", context)

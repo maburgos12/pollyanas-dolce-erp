@@ -255,6 +255,43 @@
           </tbody>
         </table>
       </div>
+      <div class="card" style="margin-top: 12px;">
+        <div class="card-header">Histórico Mensual (Últimos 6 meses)</div>
+        <div class="table-responsive">
+          <table class="table table-striped">
+            <thead>
+              <tr>
+                <th>Mes</th>
+                <th>Semáforo</th>
+                <th class="text-end">Objetivo</th>
+                <th class="text-end">Estimado</th>
+                <th class="text-end">Ejecutado</th>
+                <th class="text-end">% Uso presupuesto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for h in presupuesto_historial %}
+                <tr>
+                  <td>{{ h.periodo_mes }}</td>
+                  <td><span class="badge {{ h.estado_badge }}">{{ h.estado_label }}</span></td>
+                  <td class="text-end">${{ h.objetivo|floatformat:2 }}</td>
+                  <td class="text-end">${{ h.estimado|floatformat:2 }}</td>
+                  <td class="text-end">${{ h.ejecutado|floatformat:2 }}</td>
+                  <td class="text-end">
+                    {% if h.ratio_pct is not None %}
+                      {{ h.ratio_pct|floatformat:2 }}%
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="6" class="text-muted">Sin histórico disponible.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
     {% endif %}
   </section>
   <div class="toolbar">
