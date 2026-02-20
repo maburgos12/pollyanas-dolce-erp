@@ -12,7 +12,7 @@ from rapidfuzz import fuzz, process
 from unidecode import unidecode
 
 from maestros.models import Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
-from recetas.models import Receta
+from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
 
 
@@ -29,6 +29,10 @@ def _safe(value: object) -> str:
         return ""
     text = str(value).strip()
     return "" if text.lower() == "nan" else text
+
+
+def _norm_code(value: str | None) -> str:
+    return normalizar_codigo_point(value or "")
 
 
 def _pick_col(columns: Iterable[str], *candidates: str) -> str | None:
@@ -278,7 +282,7 @@ class Command(BaseCommand):
         self.stdout.write(
             f"  - productos/recetas: point={productos_stats['point_total']} "
             f"match={productos_stats['matched']} no_match={productos_stats['unmatched']} "
-            f"recetas_actualizadas={productos_stats['updated_codes']}"
+            f"recetas_actualizadas={productos_stats['updated_codes']} aliases={productos_stats.get('aliases_created', 0)}"
         )
         self.stdout.write(f"  - reportes: {p_prov}, {p_ins}, {p_prod}")
         self.stdout.write(f"  - modo: {'DRY-RUN (rollback)' if options['dry_run'] else 'APLICADO'}")
@@ -606,20 +610,31 @@ class Command(BaseCommand):
 
     def _sync_productos(self, rows: list[dict], threshold: int, apply: bool) -> tuple[list[dict], dict]:
         recetas = list(Receta.objects.all())
+        aliases = list(RecetaCodigoPointAlias.objects.select_related("receta").filter(activo=True))
         by_norm: dict[str, Receta] = {}
         by_code: dict[str, Receta] = {}
+        by_alias_norm: dict[str, Receta] = {}
+        by_alias_code: dict[str, Receta] = {}
         for r in recetas:
             norm = _norm_text(r.nombre)
             if norm and norm not in by_norm:
                 by_norm[norm] = r
             if r.codigo_point:
-                code_key = _norm_text(r.codigo_point)
+                code_key = _norm_code(r.codigo_point)
                 if code_key and code_key not in by_code:
                     by_code[code_key] = r
+        for a in aliases:
+            code_key = _norm_code(a.codigo_point_normalizado or a.codigo_point)
+            if code_key and code_key not in by_alias_code:
+                by_alias_code[code_key] = a.receta
+            name_key = _norm_text(a.nombre_point)
+            if name_key and name_key not in by_alias_norm:
+                by_alias_norm[name_key] = a.receta
         choices = list(by_norm.keys())
 
         report: list[dict] = []
         updated_codes = 0
+        aliases_created = 0
         matched = 0
         unmatched = 0
 
@@ -627,7 +642,7 @@ class Command(BaseCommand):
             point_code = _safe(row["codigo"])
             point_name = row["nombre"]
             point_norm = _norm_text(point_name)
-            point_code_key = _norm_text(point_code)
+            point_code_key = _norm_code(point_code)
 
             target: Receta | None = None
             method = "NO_MATCH"
@@ -638,9 +653,17 @@ class Command(BaseCommand):
                 target = by_code[point_code_key]
                 method = "EXACT_CODE"
                 score = 100.0
+            elif point_code_key and point_code_key in by_alias_code:
+                target = by_alias_code[point_code_key]
+                method = "EXACT_CODE_ALIAS"
+                score = 100.0
             elif point_norm in by_norm:
                 target = by_norm[point_norm]
                 method = "EXACT_NAME"
+                score = 100.0
+            elif point_norm in by_alias_norm:
+                target = by_alias_norm[point_norm]
+                method = "EXACT_NAME_ALIAS"
                 score = 100.0
             elif choices:
                 best = process.extractOne(point_norm, choices, scorer=fuzz.WRatio)
@@ -654,10 +677,53 @@ class Command(BaseCommand):
 
             if target:
                 matched += 1
-                if apply and point_code and target.codigo_point != point_code[:80]:
-                    target.codigo_point = point_code[:80]
-                    target.save(update_fields=["codigo_point"])
-                    updated_codes += 1
+                if apply and point_code:
+                    primary_norm = _norm_code(target.codigo_point)
+                    incoming_norm = _norm_code(point_code)
+                    if not target.codigo_point:
+                        target.codigo_point = point_code[:80]
+                        target.save(update_fields=["codigo_point"])
+                        updated_codes += 1
+                        if incoming_norm:
+                            by_code[incoming_norm] = target
+                    elif primary_norm != incoming_norm:
+                        if not incoming_norm:
+                            unmatched += 1
+                            matched -= 1
+                            target = None
+                            method = "ALIAS_CODE_INVALID"
+                        else:
+                            alias, was_created = RecetaCodigoPointAlias.objects.get_or_create(
+                                codigo_point_normalizado=incoming_norm,
+                                defaults={
+                                    "receta": target,
+                                    "codigo_point": point_code[:80],
+                                    "nombre_point": point_name[:250],
+                                    "activo": True,
+                                },
+                            )
+                            if not was_created and alias.receta_id != target.id:
+                                unmatched += 1
+                                matched -= 1
+                                target = None
+                                method = "ALIAS_CODE_CONFLICT"
+                            else:
+                                changed = []
+                                if alias.codigo_point != point_code[:80]:
+                                    alias.codigo_point = point_code[:80]
+                                    changed.append("codigo_point")
+                                if point_name and alias.nombre_point != point_name[:250]:
+                                    alias.nombre_point = point_name[:250]
+                                    changed.append("nombre_point")
+                                if not alias.activo:
+                                    alias.activo = True
+                                    changed.append("activo")
+                                if changed:
+                                    alias.save(update_fields=changed)
+                                if was_created:
+                                    aliases_created += 1
+                                if incoming_norm:
+                                    by_alias_code[incoming_norm] = target
             else:
                 unmatched += 1
 
@@ -679,6 +745,7 @@ class Command(BaseCommand):
             "matched": matched,
             "unmatched": unmatched,
             "updated_codes": updated_codes,
+            "aliases_created": aliases_created,
         }
 
     def _write_csv(self, filepath: Path, rows: list[dict], headers: list[str]) -> None:

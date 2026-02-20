@@ -83,6 +83,10 @@
         <option value="{{ r.id }}">{{ r.nombre }}</option>
         {% endfor %}
       </select>
+      <label class="field-check">
+        <input type="checkbox" name="create_aliases" checked>
+        <span>Crear alias de código Point si la receta ya tiene otro código</span>
+      </label>
       <button class="btn btn-primary" type="submit" name="action" value="resolve_productos">Resolver productos</button>
       <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar pendientes seleccionados?');">Descartar seleccionados</button>
     </div>

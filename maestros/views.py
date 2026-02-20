@@ -11,7 +11,7 @@ from django.urls import reverse_lazy
 from django.db.models import Count, Q
 from django.contrib.auth.decorators import login_required
 from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_maestros, has_any_role
-from recetas.models import Receta
+from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import PointPendingMatch, Proveedor, Insumo, InsumoAlias, UnidadMedida
@@ -278,6 +278,7 @@ def point_pending_review(request):
 
         elif action == "resolve_productos":
             receta_id = (request.POST.get("receta_id") or "").strip()
+            create_aliases = request.POST.get("create_aliases") == "on"
             target = Receta.objects.filter(pk=receta_id).first() if receta_id else None
             if not target:
                 messages.error(request, "Selecciona una receta destino.")
@@ -285,18 +286,56 @@ def point_pending_review(request):
 
             resolved = 0
             conflicts = 0
+            aliases_created = 0
             for p in selected:
                 point_code = (p.point_codigo or "").strip()
-                if point_code and target.codigo_point and target.codigo_point != point_code:
-                    conflicts += 1
-                    continue
-                if point_code and target.codigo_point != point_code:
-                    target.codigo_point = point_code
-                    target.save(update_fields=["codigo_point"])
+                if point_code:
+                    point_norm = normalizar_codigo_point(point_code)
+                    primary_norm = normalizar_codigo_point(target.codigo_point)
+                    if not target.codigo_point:
+                        target.codigo_point = point_code[:80]
+                        target.save(update_fields=["codigo_point"])
+                    elif primary_norm != point_norm:
+                        if not point_norm:
+                            conflicts += 1
+                            continue
+                        if not create_aliases:
+                            conflicts += 1
+                            continue
+                        alias, was_created = RecetaCodigoPointAlias.objects.get_or_create(
+                            codigo_point_normalizado=point_norm,
+                            defaults={
+                                "receta": target,
+                                "codigo_point": point_code[:80],
+                                "nombre_point": (p.point_nombre or "")[:250],
+                                "activo": True,
+                            },
+                        )
+                        if not was_created and alias.receta_id != target.id:
+                            conflicts += 1
+                            continue
+                        changed = []
+                        if alias.codigo_point != point_code[:80]:
+                            alias.codigo_point = point_code[:80]
+                            changed.append("codigo_point")
+                        if (p.point_nombre or "").strip() and alias.nombre_point != (p.point_nombre or "")[:250]:
+                            alias.nombre_point = (p.point_nombre or "")[:250]
+                            changed.append("nombre_point")
+                        if not alias.activo:
+                            alias.activo = True
+                            changed.append("activo")
+                        if changed:
+                            alias.save(update_fields=changed)
+                        if was_created:
+                            aliases_created += 1
+
                 p.delete()
                 resolved += 1
 
-            messages.success(request, f"Pendientes resueltos (productos): {resolved}.")
+            messages.success(
+                request,
+                f"Pendientes resueltos (productos): {resolved}. Aliases creados: {aliases_created}.",
+            )
             if conflicts:
                 messages.warning(request, f"Conflictos de código Point en productos: {conflicts}.")
 

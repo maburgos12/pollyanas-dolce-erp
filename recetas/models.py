@@ -5,6 +5,13 @@ from django.conf import settings
 from unidecode import unidecode
 from decimal import Decimal
 
+
+def normalizar_codigo_point(texto: str) -> str:
+    if not texto:
+        return ""
+    raw = unidecode(str(texto)).lower().strip()
+    return "".join(ch for ch in raw if ch.isalnum())
+
 class Receta(models.Model):
     TIPO_PREPARACION = "PREPARACION"
     TIPO_PRODUCTO_FINAL = "PRODUCTO_FINAL"
@@ -82,6 +89,28 @@ class Receta(models.Model):
 
     def __str__(self) -> str:
         return self.nombre
+
+
+class RecetaCodigoPointAlias(models.Model):
+    receta = models.ForeignKey(Receta, related_name="codigos_point_aliases", on_delete=models.CASCADE)
+    codigo_point = models.CharField(max_length=80)
+    codigo_point_normalizado = models.CharField(max_length=90, unique=True, db_index=True)
+    nombre_point = models.CharField(max_length=250, blank=True, default="")
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Alias código Point de receta"
+        verbose_name_plural = "Aliases código Point de recetas"
+        ordering = ["codigo_point"]
+
+    def save(self, *args, **kwargs):
+        self.codigo_point_normalizado = normalizar_codigo_point(self.codigo_point)
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.codigo_point} -> {self.receta.nombre}"
 
 class LineaReceta(models.Model):
     STATUS_AUTO = "AUTO_APPROVED"
