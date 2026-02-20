@@ -594,6 +594,14 @@ tr:hover,
   background: var(--rosa-hover);
 }
 
+.row-needs-point td {
+  background: #fff4f6;
+}
+
+.row-needs-point:hover td {
+  background: #ffe9ef !important;
+}
+
 .recipe-lines-table {
   table-layout: fixed;
   min-width: 1120px;

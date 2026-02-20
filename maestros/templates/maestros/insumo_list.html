@@ -18,6 +18,14 @@
       <div class="kpi-number is-success">{{ total_activos }}</div>
       <div class="kpi-label">Activos</div>
     </div>
+    <div class="kpi-card">
+      <div class="kpi-number is-danger">{{ total_point_pendientes }}</div>
+      <div class="kpi-label">Pendientes Código Point</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number is-warning">{{ point_ratio|floatformat:2 }}%</div>
+      <div class="kpi-label">Cobertura homologación Point</div>
+    </div>
   </div>
 
   <div class="d-flex justify-content-between align-items-center mb-3">
@@ -34,6 +42,11 @@
       <option value="" {% if not estado %}selected{% endif %}>Todos</option>
       <option value="activos" {% if estado == "activos" %}selected{% endif %}>Activos</option>
       <option value="inactivos" {% if estado == "inactivos" %}selected{% endif %}>Inactivos</option>
+    </select>
+    <select class="form-select" name="point_status">
+      <option value="" {% if not point_status %}selected{% endif %}>Point: Todos</option>
+      <option value="pendientes" {% if point_status == "pendientes" %}selected{% endif %}>Point: Pendientes</option>
+      <option value="completos" {% if point_status == "completos" %}selected{% endif %}>Point: Completos</option>
     </select>
     <button class="btn btn-primary" type="submit">Filtrar</button>
     <a class="btn btn-secondary" href="{% url 'maestros:insumo_list' %}">Limpiar</a>
@@ -55,14 +68,19 @@
       </thead>
       <tbody>
         {% for i in insumos %}
-          <tr>
+          <tr class="{% if i.activo and not i.codigo_point %}row-needs-point{% endif %}">
             <td>{{ i.codigo|default:"-" }}</td>
             <td>{{ i.codigo_point|default:"-" }}</td>
             <td>{{ i.nombre }}</td>
             <td>{{ i.nombre_point|default:"-" }}</td>
             <td>{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% else %}-{% endif %}</td>
             <td>{% if i.proveedor_principal %}{{ i.proveedor_principal.nombre }}{% else %}-{% endif %}</td>
-            <td>{% if i.activo %}<span class="badge bg-success">Activo</span>{% else %}<span class="badge bg-danger">Inactivo</span>{% endif %}</td>
+            <td>
+              {% if i.activo %}<span class="badge bg-success">Activo</span>{% else %}<span class="badge bg-danger">Inactivo</span>{% endif %}
+              {% if i.activo and not i.codigo_point %}
+                <span class="badge bg-danger">Sin Código Point</span>
+              {% endif %}
+            </td>
             <td>
               <div class="recipe-actions">
                 <a href="{% url 'maestros:insumo_update' i.id %}" class="btn btn-secondary">Editar</a>
@@ -81,11 +99,11 @@
   <nav>
     <ul class="pagination">
       {% if page_obj.has_previous %}
-      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
+      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
       {% endif %}
       <li><span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span></li>
       {% if page_obj.has_next %}
-      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
+      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
       {% endif %}
     </ul>
   </nav>

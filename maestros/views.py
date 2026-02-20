@@ -1,5 +1,6 @@
 import csv
 
+from django.contrib import messages
 from django.http import HttpResponse
 from django.shortcuts import render, redirect
 from django.views.generic import ListView, CreateView, UpdateView, DeleteView
@@ -67,6 +68,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
         queryset = Insumo.objects.select_related('unidad_base', 'proveedor_principal')
         search = self.request.GET.get('q')
         estado = self.request.GET.get('estado')
+        point_status = self.request.GET.get('point_status')
         if search:
             queryset = queryset.filter(
                 Q(nombre__icontains=search)
@@ -78,15 +80,30 @@ class InsumoListView(LoginRequiredMixin, ListView):
             queryset = queryset.filter(activo=True)
         elif estado == "inactivos":
             queryset = queryset.filter(activo=False)
+        if point_status == "pendientes":
+            queryset = queryset.filter(activo=True).filter(Q(codigo_point="") | Q(codigo_point__isnull=True))
+        elif point_status == "completos":
+            queryset = queryset.filter(activo=True).exclude(Q(codigo_point="") | Q(codigo_point__isnull=True))
         return queryset.order_by('nombre')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         qs = self.get_queryset()
+        active_qs = Insumo.objects.filter(activo=True)
+        pending_point_qs = active_qs.filter(Q(codigo_point="") | Q(codigo_point__isnull=True))
+        total_active = active_qs.count()
+        total_pending_point = pending_point_qs.count()
+        total_complete_point = max(total_active - total_pending_point, 0)
+        point_ratio = round((total_complete_point * 100.0 / total_active), 2) if total_active else 100.0
+
         context['search_query'] = self.request.GET.get('q', '')
         context['estado'] = self.request.GET.get('estado', '')
+        context['point_status'] = self.request.GET.get('point_status', '')
         context['total_insumos'] = qs.count()
         context['total_activos'] = qs.filter(activo=True).count()
+        context['total_point_pendientes'] = total_pending_point
+        context['total_point_completos'] = total_complete_point
+        context['point_ratio'] = point_ratio
         return context
 
 class InsumoCreateView(LoginRequiredMixin, CreateView):
@@ -101,6 +118,15 @@ class InsumoCreateView(LoginRequiredMixin, CreateView):
         context['proveedores'] = Proveedor.objects.filter(activo=True)
         return context
 
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        if self.object.activo and not (self.object.codigo_point or "").strip():
+            messages.warning(
+                self.request,
+                "Insumo activo sin Código Point: queda pendiente de homologación para integración.",
+            )
+        return response
+
 class InsumoUpdateView(LoginRequiredMixin, UpdateView):
     model = Insumo
     template_name = 'maestros/insumo_form.html'
@@ -112,6 +138,15 @@ class InsumoUpdateView(LoginRequiredMixin, UpdateView):
         context['unidades'] = UnidadMedida.objects.all()
         context['proveedores'] = Proveedor.objects.filter(activo=True)
         return context
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        if self.object.activo and not (self.object.codigo_point or "").strip():
+            messages.warning(
+                self.request,
+                "Insumo activo sin Código Point: queda pendiente de homologación para integración.",
+            )
+        return response
 
 class InsumoDeleteView(LoginRequiredMixin, DeleteView):
     model = Insumo
