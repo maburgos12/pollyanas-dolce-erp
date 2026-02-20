@@ -194,6 +194,13 @@ def _sanitize_categoria_filter(raw: str) -> str:
     return " ".join((raw or "").strip().split())
 
 
+def _sanitize_consumo_ref_filter(raw: str) -> str:
+    value = (raw or "all").strip().lower()
+    if value not in {"all", "plan_ref"}:
+        return "all"
+    return value
+
+
 def _resolve_insumo_categoria(insumo: Insumo) -> str:
     categoria = " ".join((getattr(insumo, "categoria", "") or "").strip().split())
     if categoria:
@@ -406,13 +413,20 @@ def _filter_ordenes_by_categoria(ordenes_qs, categoria_filter: str):
     return ordenes_qs.filter(solicitud__insumo__categoria__iexact=categoria)
 
 
-def _filter_movimientos_by_scope(movimientos_qs, source_filter: str, plan_filter: str):
+def _filter_movimientos_by_scope(
+    movimientos_qs,
+    source_filter: str,
+    plan_filter: str,
+    consumo_ref_filter: str = "all",
+):
     if source_filter == "plan":
         movimientos_qs = movimientos_qs.filter(referencia__icontains="PLAN_PRODUCCION:")
     elif source_filter == "manual":
         movimientos_qs = movimientos_qs.exclude(referencia__icontains="PLAN_PRODUCCION:")
     if plan_filter:
         movimientos_qs = movimientos_qs.filter(referencia__icontains=f"PLAN_PRODUCCION:{plan_filter}")
+    if _sanitize_consumo_ref_filter(consumo_ref_filter) == "plan_ref":
+        movimientos_qs = movimientos_qs.filter(referencia__icontains="PLAN_PRODUCCION:")
     return movimientos_qs
 
 
@@ -741,8 +755,10 @@ def _build_consumo_vs_plan_dashboard(
     source_filter: str,
     plan_filter: str,
     categoria_filter: str,
+    consumo_ref_filter: str = "all",
 ) -> dict:
     start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
+    consumo_ref_filter = _sanitize_consumo_ref_filter(consumo_ref_filter)
     if not start_date or not end_date:
         # Evita consultas históricas abiertas cuando el filtro está en "Todos".
         end_date = timezone.localdate()
@@ -790,7 +806,12 @@ def _build_consumo_vs_plan_dashboard(
         .filter(tipo__in=[MovimientoInventario.TIPO_SALIDA, MovimientoInventario.TIPO_CONSUMO])
         .filter(fecha__date__range=(start_date, end_date))
     )
-    movimientos_qs = _filter_movimientos_by_scope(movimientos_qs, source_filter, plan_filter)
+    movimientos_qs = _filter_movimientos_by_scope(
+        movimientos_qs,
+        source_filter,
+        plan_filter,
+        consumo_ref_filter,
+    )
     movimientos_qs = _filter_movimientos_by_categoria(movimientos_qs, categoria_filter)
 
     actual_qty_by_insumo: dict[int, Decimal] = {}
@@ -822,6 +843,10 @@ def _build_consumo_vs_plan_dashboard(
         "plan_cost_total": Decimal("0"),
         "consumo_real_cost_total": Decimal("0"),
         "variacion_cost_total": Decimal("0"),
+        "sin_costo_count": 0,
+        "semaforo_verde_count": 0,
+        "semaforo_amarillo_count": 0,
+        "semaforo_rojo_count": 0,
     }
     for insumo_id in insumo_ids:
         plan_qty = plan_qty_by_insumo.get(insumo_id, Decimal("0"))
@@ -835,16 +860,35 @@ def _build_consumo_vs_plan_dashboard(
         consumo_pct = None
         if plan_qty > 0:
             consumo_pct = (real_qty * Decimal("100")) / plan_qty
+        sin_costo = costo_unitario <= 0 and (plan_qty > 0 or real_qty > 0)
 
         estado = "OK"
+        semaforo = "VERDE"
         if plan_qty <= 0 and real_qty > 0:
             estado = "SIN_PLAN"
+            semaforo = "ROJO"
         elif plan_qty > 0 and real_qty <= 0:
             estado = "SIN_CONSUMO"
+            semaforo = "AMARILLO"
         elif consumo_pct is not None and consumo_pct > Decimal("110"):
             estado = "SOBRECONSUMO"
+            semaforo = "ROJO"
         elif consumo_pct is not None and consumo_pct < Decimal("90"):
             estado = "BAJO_CONSUMO"
+            semaforo = "AMARILLO"
+
+        if sin_costo and semaforo == "VERDE":
+            semaforo = "AMARILLO"
+
+        if semaforo == "ROJO":
+            totals["semaforo_rojo_count"] += 1
+        elif semaforo == "AMARILLO":
+            totals["semaforo_amarillo_count"] += 1
+        else:
+            totals["semaforo_verde_count"] += 1
+
+        if sin_costo:
+            totals["sin_costo_count"] += 1
 
         meta = insumo_meta.get(insumo_id, {"insumo": f"Insumo {insumo_id}", "unidad": "-", "categoria": "Sin categoría"})
         rows.append(
@@ -862,6 +906,9 @@ def _build_consumo_vs_plan_dashboard(
                 "variacion_cost": variacion_cost,
                 "consumo_pct": consumo_pct,
                 "estado": estado,
+                "semaforo": semaforo,
+                "sin_costo": sin_costo,
+                "alerta": "Sin costo unitario" if sin_costo else "",
             }
         )
         totals["plan_qty_total"] += plan_qty
@@ -1877,6 +1924,7 @@ def _export_consumo_plan_csv(
     source_filter: str,
     plan_filter: str,
     categoria_filter: str,
+    consumo_ref_filter: str,
 ) -> HttpResponse:
     now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
     response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -1888,6 +1936,12 @@ def _export_consumo_plan_csv(
     writer.writerow(["Filtro origen", source_filter])
     writer.writerow(["Filtro plan", plan_filter or "-"])
     writer.writerow(["Filtro categoria", categoria_filter or "-"])
+    writer.writerow(
+        [
+            "Filtro consumo ref",
+            "Solo referencia plan" if consumo_ref_filter == "plan_ref" else "Todos",
+        ]
+    )
     writer.writerow([])
     writer.writerow(["Totales"])
     writer.writerow(["Plan qty", consumo_dashboard["totals"]["plan_qty_total"]])
@@ -1911,6 +1965,8 @@ def _export_consumo_plan_csv(
             "Variacion costo",
             "Consumo %",
             "Estado",
+            "Semaforo",
+            "Alerta costo",
         ]
     )
     for row in consumo_dashboard["rows"]:
@@ -1928,6 +1984,8 @@ def _export_consumo_plan_csv(
                 row["variacion_cost"],
                 row["consumo_pct"] if row["consumo_pct"] is not None else "",
                 row["estado"],
+                row["semaforo"],
+                "SI" if row["sin_costo"] else "",
             ]
         )
     return response
@@ -1939,6 +1997,7 @@ def _export_consumo_plan_xlsx(
     source_filter: str,
     plan_filter: str,
     categoria_filter: str,
+    consumo_ref_filter: str,
 ) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
@@ -1949,6 +2008,7 @@ def _export_consumo_plan_xlsx(
     ws.append(["Filtro origen", source_filter])
     ws.append(["Filtro plan", plan_filter or "-"])
     ws.append(["Filtro categoria", categoria_filter or "-"])
+    ws.append(["Filtro consumo ref", "Solo referencia plan" if consumo_ref_filter == "plan_ref" else "Todos"])
     ws.append([])
     ws.append(["Plan qty", float(consumo_dashboard["totals"]["plan_qty_total"] or 0)])
     ws.append(["Real qty", float(consumo_dashboard["totals"]["consumo_real_qty_total"] or 0)])
@@ -1971,6 +2031,8 @@ def _export_consumo_plan_xlsx(
             "Variacion costo",
             "Consumo %",
             "Estado",
+            "Semaforo",
+            "Alerta costo",
         ]
     )
     for row in consumo_dashboard["rows"]:
@@ -1988,6 +2050,8 @@ def _export_consumo_plan_xlsx(
                 float(row["variacion_cost"] or 0),
                 float(row["consumo_pct"] or 0) if row["consumo_pct"] is not None else None,
                 row["estado"],
+                row["semaforo"],
+                "SI" if row["sin_costo"] else "",
             ]
         )
 
@@ -2176,6 +2240,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         request.GET.get("periodo_tipo"),
         request.GET.get("periodo_mes"),
     )
+    consumo_ref_filter = _sanitize_consumo_ref_filter(request.GET.get("consumo_ref"))
     budget_ctx = _build_budget_context(
         solicitudes,
         source_filter,
@@ -2204,6 +2269,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         source_filter,
         plan_filter,
         categoria_filter,
+        consumo_ref_filter,
     )
     total_presupuesto = budget_ctx["presupuesto_estimado_total"]
 
@@ -2278,6 +2344,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             source_filter,
             plan_filter,
             categoria_filter,
+            consumo_ref_filter,
         )
     if export_format == "consumo_plan_xlsx":
         return _export_consumo_plan_xlsx(
@@ -2286,6 +2353,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             source_filter,
             plan_filter,
             categoria_filter,
+            consumo_ref_filter,
         )
     if export_format == "xlsx":
         return _export_solicitudes_xlsx(
@@ -2333,6 +2401,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "periodo_tipo": periodo_tipo,
         "periodo_mes": periodo_mes,
         "periodo_label": periodo_label,
+        "consumo_ref_filter": consumo_ref_filter,
         "total_presupuesto": total_presupuesto,
         "current_query": query_without_export.urlencode(),
         "presupuesto_historial": _build_budget_history(periodo_mes, source_filter, plan_filter, categoria_filter),
@@ -2390,6 +2459,7 @@ def guardar_presupuesto_periodo(request: HttpRequest) -> HttpResponse:
         "plan_id": (request.POST.get("plan_id") or "").strip(),
         "categoria": _sanitize_categoria_filter(request.POST.get("categoria")),
         "reabasto": (request.POST.get("reabasto") or "all").strip() or "all",
+        "consumo_ref": _sanitize_consumo_ref_filter(request.POST.get("consumo_ref")),
         "periodo_tipo": periodo_tipo,
         "periodo_mes": periodo_mes,
     }
@@ -2459,6 +2529,7 @@ def guardar_presupuesto_proveedor(request: HttpRequest) -> HttpResponse:
         "plan_id": (request.POST.get("plan_id") or "").strip(),
         "categoria": _sanitize_categoria_filter(request.POST.get("categoria")),
         "reabasto": (request.POST.get("reabasto") or "all").strip() or "all",
+        "consumo_ref": _sanitize_consumo_ref_filter(request.POST.get("consumo_ref")),
         "periodo_tipo": periodo_tipo,
         "periodo_mes": periodo_mes,
     }
@@ -2527,6 +2598,7 @@ def guardar_presupuesto_categoria(request: HttpRequest) -> HttpResponse:
         "plan_id": (request.POST.get("plan_id") or "").strip(),
         "categoria": _sanitize_categoria_filter(request.POST.get("categoria")),
         "reabasto": (request.POST.get("reabasto") or "all").strip() or "all",
+        "consumo_ref": _sanitize_consumo_ref_filter(request.POST.get("consumo_ref")),
         "periodo_tipo": periodo_tipo,
         "periodo_mes": periodo_mes,
     }
@@ -2965,6 +3037,7 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
         request.GET.get("periodo_tipo"),
         request.GET.get("periodo_mes"),
     )
+    consumo_ref_filter = _sanitize_consumo_ref_filter(request.GET.get("consumo_ref"))
 
     budget_ctx = _build_budget_context(
         solicitudes,
@@ -2994,6 +3067,7 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
         source_filter,
         plan_filter,
         categoria_filter,
+        consumo_ref_filter,
     )
     historial = _build_budget_history(periodo_mes, source_filter, plan_filter, categoria_filter)
 
@@ -3003,6 +3077,7 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
             "plan_id": plan_filter or "",
             "categoria": categoria_filter or "",
             "reabasto": reabasto_filter,
+            "consumo_ref": consumo_ref_filter,
             "periodo_tipo": periodo_tipo,
             "periodo_mes": periodo_mes,
             "periodo_label": periodo_label,
@@ -3089,6 +3164,10 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
                 "plan_cost_total": float(consumo_dashboard["totals"]["plan_cost_total"] or 0),
                 "consumo_real_cost_total": float(consumo_dashboard["totals"]["consumo_real_cost_total"] or 0),
                 "variacion_cost_total": float(consumo_dashboard["totals"]["variacion_cost_total"] or 0),
+                "sin_costo_count": int(consumo_dashboard["totals"]["sin_costo_count"] or 0),
+                "semaforo_verde_count": int(consumo_dashboard["totals"]["semaforo_verde_count"] or 0),
+                "semaforo_amarillo_count": int(consumo_dashboard["totals"]["semaforo_amarillo_count"] or 0),
+                "semaforo_rojo_count": int(consumo_dashboard["totals"]["semaforo_rojo_count"] or 0),
                 "cobertura_pct": (
                     float(consumo_dashboard["totals"]["cobertura_pct"])
                     if consumo_dashboard["totals"]["cobertura_pct"] is not None
@@ -3112,6 +3191,9 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
                     "variacion_cost": float(row["variacion_cost"] or 0),
                     "consumo_pct": float(row["consumo_pct"]) if row["consumo_pct"] is not None else None,
                     "estado": row["estado"],
+                    "semaforo": row["semaforo"],
+                    "sin_costo": bool(row["sin_costo"]),
+                    "alerta": row["alerta"],
                 }
                 for row in consumo_dashboard["rows"][:20]
             ],
@@ -3134,6 +3216,7 @@ def solicitudes_consumo_vs_plan_api(request: HttpRequest) -> JsonResponse:
         source_filter = "all"
     plan_filter = (request.GET.get("plan_id") or "").strip()
     categoria_filter = _sanitize_categoria_filter(request.GET.get("categoria"))
+    consumo_ref_filter = _sanitize_consumo_ref_filter(request.GET.get("consumo_ref"))
 
     dashboard = _build_consumo_vs_plan_dashboard(
         periodo_tipo=periodo_tipo,
@@ -3141,12 +3224,14 @@ def solicitudes_consumo_vs_plan_api(request: HttpRequest) -> JsonResponse:
         source_filter=source_filter,
         plan_filter=plan_filter,
         categoria_filter=categoria_filter,
+        consumo_ref_filter=consumo_ref_filter,
     )
     data = {
         "filters": {
             "source": source_filter,
             "plan_id": plan_filter,
             "categoria": categoria_filter or "",
+            "consumo_ref": consumo_ref_filter,
             "periodo_tipo": periodo_tipo,
             "periodo_mes": periodo_mes,
             "periodo_label": periodo_label,
@@ -3159,6 +3244,10 @@ def solicitudes_consumo_vs_plan_api(request: HttpRequest) -> JsonResponse:
             "plan_cost_total": float(dashboard["totals"]["plan_cost_total"] or 0),
             "consumo_real_cost_total": float(dashboard["totals"]["consumo_real_cost_total"] or 0),
             "variacion_cost_total": float(dashboard["totals"]["variacion_cost_total"] or 0),
+            "sin_costo_count": int(dashboard["totals"]["sin_costo_count"] or 0),
+            "semaforo_verde_count": int(dashboard["totals"]["semaforo_verde_count"] or 0),
+            "semaforo_amarillo_count": int(dashboard["totals"]["semaforo_amarillo_count"] or 0),
+            "semaforo_rojo_count": int(dashboard["totals"]["semaforo_rojo_count"] or 0),
             "cobertura_pct": (
                 float(dashboard["totals"]["cobertura_pct"])
                 if dashboard["totals"]["cobertura_pct"] is not None
@@ -3180,6 +3269,9 @@ def solicitudes_consumo_vs_plan_api(request: HttpRequest) -> JsonResponse:
                 "variacion_cost": float(row["variacion_cost"] or 0),
                 "consumo_pct": float(row["consumo_pct"]) if row["consumo_pct"] is not None else None,
                 "estado": row["estado"],
+                "semaforo": row["semaforo"],
+                "sin_costo": bool(row["sin_costo"]),
+                "alerta": row["alerta"],
             }
             for row in dashboard["rows"]
         ],

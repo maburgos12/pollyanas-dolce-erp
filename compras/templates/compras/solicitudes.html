@@ -120,12 +120,23 @@
       <label for="periodo_mes">Mes</label>
       <input id="periodo_mes" class="input-field" type="month" name="periodo_mes" value="{{ periodo_mes }}">
     </div>
+    <div>
+      <label for="consumo_ref">Consumo real</label>
+      <select id="consumo_ref" name="consumo_ref" class="input-field">
+        <option value="all" {% if consumo_ref_filter == 'all' %}selected{% endif %}>Todos los movimientos</option>
+        <option value="plan_ref" {% if consumo_ref_filter == 'plan_ref' %}selected{% endif %}>Solo con referencia de plan</option>
+      </select>
+    </div>
     <div class="align-items-end d-flex gap-2">
       <button class="btn btn-primary" type="submit">Aplicar filtros</button>
       <a href="{% url 'compras:solicitudes' %}" class="btn btn-secondary">Limpiar</a>
     </div>
   </form>
-  <p class="muted">Periodo activo: <strong>{{ periodo_label }}</strong>{% if categoria_filter %} · Categoría: <strong>{{ categoria_filter }}</strong>{% endif %}</p>
+  <p class="muted">
+    Periodo activo: <strong>{{ periodo_label }}</strong>
+    {% if categoria_filter %} · Categoría: <strong>{{ categoria_filter }}</strong>{% endif %}
+    · Consumo: <strong>{% if consumo_ref_filter == 'plan_ref' %}Solo referencia plan{% else %}Todos{% endif %}</strong>
+  </p>
   <section class="card" style="margin: 12px 0;">
     <div class="card-header">Presupuesto y Desviación (Periodo)</div>
     {% if periodo_tipo == 'all' %}
@@ -140,6 +151,7 @@
         <input type="hidden" name="reabasto" value="{{ reabasto_filter }}">
         <input type="hidden" name="periodo_tipo" value="{{ periodo_tipo }}">
         <input type="hidden" name="periodo_mes" value="{{ periodo_mes }}">
+        <input type="hidden" name="consumo_ref" value="{{ consumo_ref_filter }}">
         <div>
           <label>Monto objetivo</label>
           <input class="input-field" type="number" name="monto_objetivo" min="0" step="0.01" value="{{ presupuesto_objetivo|default_if_none:0|floatformat:2 }}">
@@ -160,6 +172,7 @@
         <input type="hidden" name="reabasto" value="{{ reabasto_filter }}">
         <input type="hidden" name="periodo_tipo" value="{{ periodo_tipo }}">
         <input type="hidden" name="periodo_mes" value="{{ periodo_mes }}">
+        <input type="hidden" name="consumo_ref" value="{{ consumo_ref_filter }}">
         <div>
           <label>Proveedor</label>
           <select class="input-field" name="proveedor_id" required>
@@ -189,6 +202,7 @@
         <input type="hidden" name="reabasto" value="{{ reabasto_filter }}">
         <input type="hidden" name="periodo_tipo" value="{{ periodo_tipo }}">
         <input type="hidden" name="periodo_mes" value="{{ periodo_mes }}">
+        <input type="hidden" name="consumo_ref" value="{{ consumo_ref_filter }}">
         <div>
           <label>Categoría</label>
           <input class="input-field" type="text" name="categoria" list="categoria_options" placeholder="Ej. Lácteos, Harinas, Empaque..." required>
@@ -602,6 +616,12 @@
               {% endif %}
             </div>
           </article>
+          <article class="kpi-card">
+            <div class="kpi-number {% if consumo_dashboard.totals.sin_costo_count > 0 %}is-danger{% else %}is-success{% endif %}">
+              {{ consumo_dashboard.totals.sin_costo_count|default:0 }}
+            </div>
+            <div class="kpi-label">Insumos sin costo</div>
+          </article>
         </div>
         <div class="table-responsive" style="margin-top:10px;">
           <table class="table table-striped">
@@ -618,6 +638,8 @@
                 <th class="text-end">Costo real</th>
                 <th class="text-end">Variación costo</th>
                 <th class="text-end">% Consumo</th>
+                <th>Semáforo</th>
+                <th>Alerta costo</th>
                 <th>Estatus</th>
               </tr>
             </thead>
@@ -642,6 +664,22 @@
                   {% endif %}
                 </td>
                 <td>
+                  {% if r.semaforo == 'ROJO' %}
+                    <span class="badge-rojo">Rojo</span>
+                  {% elif r.semaforo == 'AMARILLO' %}
+                    <span class="badge-amarillo">Amarillo</span>
+                  {% else %}
+                    <span class="badge-verde">Verde</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if r.sin_costo %}
+                    <span class="badge-rojo">Sin costo</span>
+                  {% else %}
+                    <span class="text-muted">-</span>
+                  {% endif %}
+                </td>
+                <td>
                   {% if r.estado == 'OK' %}
                     <span class="badge-verde">OK</span>
                   {% elif r.estado == 'SOBRECONSUMO' %}
@@ -656,7 +694,7 @@
                 </td>
               </tr>
               {% empty %}
-              <tr><td colspan="12" class="text-muted">Sin datos de consumo/plan para este rango.</td></tr>
+              <tr><td colspan="14" class="text-muted">Sin datos de consumo/plan para este rango.</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -664,10 +702,10 @@
       </div>
   </section>
   <div class="toolbar">
-    <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=bajo&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=ok&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
+    <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=bajo&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=ok&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
     <a href="{% url 'compras:solicitudes_print' %}{% if current_query %}?{{ current_query }}{% endif %}" target="_blank" class="btn btn-secondary">Imprimir solicitud compras</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=csv{% else %}?export=csv{% endif %}" class="btn btn-secondary">Exportar CSV</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=xlsx{% else %}?export=xlsx{% endif %}" class="btn btn-secondary">Exportar XLSX</a>

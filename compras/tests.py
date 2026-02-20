@@ -203,15 +203,107 @@ class ComprasFase2FiltersTests(TestCase):
                 "periodo_mes": self.periodo_mes,
                 "categoria": "Masa",
                 "source": "all",
+                "consumo_ref": "all",
             },
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
 
         self.assertEqual(payload["filters"]["categoria"], "Masa")
+        self.assertEqual(payload["filters"]["consumo_ref"], "all")
         self.assertAlmostEqual(payload["totals"]["plan_qty_total"], 2.0, places=2)
         self.assertAlmostEqual(payload["totals"]["consumo_real_qty_total"], 3.0, places=2)
         self.assertAlmostEqual(payload["totals"]["plan_cost_total"], 20.0, places=2)
         self.assertAlmostEqual(payload["totals"]["consumo_real_cost_total"], 30.0, places=2)
         self.assertAlmostEqual(payload["totals"]["variacion_cost_total"], 10.0, places=2)
         self.assertIsNotNone(payload["totals"]["cobertura_pct"])
+        self.assertEqual(payload["totals"]["sin_costo_count"], 0)
+        self.assertEqual(payload["totals"]["semaforo_rojo_count"], 1)
+        self.assertEqual(payload["rows"][0]["semaforo"], "ROJO")
+        self.assertFalse(payload["rows"][0]["sin_costo"])
+
+    def test_consumo_vs_plan_api_filtra_movimientos_solo_con_referencia_plan(self):
+        MovimientoInventario.objects.create(
+            fecha=timezone.make_aware(datetime(2026, 2, 10, 12, 0, 0)),
+            tipo=MovimientoInventario.TIPO_CONSUMO,
+            insumo=self.insumo_masa_blank,
+            cantidad=Decimal("2"),
+            referencia="SALIDA_MANUAL",
+        )
+        url = reverse("compras:solicitudes_consumo_vs_plan_api")
+        payload_all = self.client.get(
+            url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": self.periodo_mes,
+                "categoria": "Masa",
+                "source": "all",
+                "consumo_ref": "all",
+            },
+        ).json()
+        payload_plan_ref = self.client.get(
+            url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": self.periodo_mes,
+                "categoria": "Masa",
+                "source": "all",
+                "consumo_ref": "plan_ref",
+            },
+        ).json()
+
+        self.assertAlmostEqual(payload_all["totals"]["consumo_real_qty_total"], 5.0, places=2)
+        self.assertAlmostEqual(payload_plan_ref["totals"]["consumo_real_qty_total"], 3.0, places=2)
+        self.assertEqual(payload_plan_ref["filters"]["consumo_ref"], "plan_ref")
+
+    def test_consumo_vs_plan_marca_alerta_sin_costo_unitario(self):
+        insumo_sin_costo = Insumo.objects.create(
+            nombre="Insumo interno sin costo",
+            categoria="Masa",
+            unidad_base=self.unidad_kg,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+        receta_sin_costo = Receta.objects.create(
+            nombre="Receta sin costo",
+            hash_contenido="test-hash-plan-002",
+        )
+        LineaReceta.objects.create(
+            receta=receta_sin_costo,
+            posicion=1,
+            insumo=insumo_sin_costo,
+            insumo_texto="Insumo interno sin costo",
+            cantidad=Decimal("1"),
+            unidad=self.unidad_kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("0"),
+            match_method=LineaReceta.MATCH_EXACT,
+            match_score=100,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        plan_sin_costo = PlanProduccion.objects.create(
+            nombre="Plan Sin Costo",
+            fecha_produccion=self.fecha_base,
+        )
+        PlanProduccionItem.objects.create(
+            plan=plan_sin_costo,
+            receta=receta_sin_costo,
+            cantidad=Decimal("1"),
+        )
+
+        url = reverse("compras:solicitudes_consumo_vs_plan_api")
+        payload = self.client.get(
+            url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": self.periodo_mes,
+                "categoria": "Masa",
+                "source": "all",
+                "consumo_ref": "all",
+            },
+        ).json()
+
+        self.assertGreaterEqual(payload["totals"]["sin_costo_count"], 1)
+        row = next(r for r in payload["rows"] if r["insumo"] == "Insumo interno sin costo")
+        self.assertTrue(row["sin_costo"])
+        self.assertEqual(row["alerta"], "Sin costo unitario")
