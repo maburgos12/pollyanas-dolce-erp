@@ -1,8 +1,12 @@
+import csv
+
+from django.http import HttpResponse
 from django.shortcuts import render, redirect
 from django.views.generic import ListView, CreateView, UpdateView, DeleteView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.urls import reverse_lazy
-from django.db.models import Q
+from django.db.models import Count, Q
+from django.contrib.auth.decorators import login_required
 from .models import Proveedor, Insumo, UnidadMedida
 
 # ============ PROVEEDORES ============
@@ -64,7 +68,12 @@ class InsumoListView(LoginRequiredMixin, ListView):
         search = self.request.GET.get('q')
         estado = self.request.GET.get('estado')
         if search:
-            queryset = queryset.filter(Q(nombre__icontains=search) | Q(codigo__icontains=search))
+            queryset = queryset.filter(
+                Q(nombre__icontains=search)
+                | Q(codigo__icontains=search)
+                | Q(codigo_point__icontains=search)
+                | Q(nombre_point__icontains=search)
+            )
         if estado == "activos":
             queryset = queryset.filter(activo=True)
         elif estado == "inactivos":
@@ -83,7 +92,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
 class InsumoCreateView(LoginRequiredMixin, CreateView):
     model = Insumo
     template_name = 'maestros/insumo_form.html'
-    fields = ['codigo', 'nombre', 'unidad_base', 'proveedor_principal', 'activo']
+    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'unidad_base', 'proveedor_principal', 'activo']
     success_url = reverse_lazy('maestros:insumo_list')
     
     def get_context_data(self, **kwargs):
@@ -95,7 +104,7 @@ class InsumoCreateView(LoginRequiredMixin, CreateView):
 class InsumoUpdateView(LoginRequiredMixin, UpdateView):
     model = Insumo
     template_name = 'maestros/insumo_form.html'
-    fields = ['codigo', 'nombre', 'unidad_base', 'proveedor_principal', 'activo']
+    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'unidad_base', 'proveedor_principal', 'activo']
     success_url = reverse_lazy('maestros:insumo_list')
     
     def get_context_data(self, **kwargs):
@@ -108,3 +117,39 @@ class InsumoDeleteView(LoginRequiredMixin, DeleteView):
     model = Insumo
     template_name = 'maestros/insumo_confirm_delete.html'
     success_url = reverse_lazy('maestros:insumo_list')
+
+
+@login_required
+def insumo_point_mapping_csv(request):
+    qs = (
+        Insumo.objects.select_related('unidad_base')
+        .annotate(alias_count=Count("aliases"))
+        .order_by("nombre")
+    )
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="insumos_point_mapping.csv"'
+    writer = csv.writer(response)
+    writer.writerow([
+        "insumo_id",
+        "codigo_interno",
+        "codigo_point",
+        "nombre_interno",
+        "nombre_point",
+        "nombre_normalizado",
+        "unidad_base",
+        "alias_count",
+        "activo",
+    ])
+    for i in qs:
+        writer.writerow([
+            i.id,
+            i.codigo or "",
+            i.codigo_point or "",
+            i.nombre or "",
+            i.nombre_point or "",
+            i.nombre_normalizado or "",
+            i.unidad_base.codigo if i.unidad_base else "",
+            i.alias_count,
+            "1" if i.activo else "0",
+        ])
+    return response

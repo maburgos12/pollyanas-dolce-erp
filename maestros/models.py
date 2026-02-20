@@ -39,6 +39,8 @@ class Proveedor(models.Model):
 
 class Insumo(models.Model):
     codigo = models.CharField(max_length=60, blank=True, default="")
+    codigo_point = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    nombre_point = models.CharField(max_length=250, blank=True, default="")
     nombre = models.CharField(max_length=250)
     nombre_normalizado = models.CharField(max_length=260, db_index=True)
     unidad_base = models.ForeignKey(UnidadMedida, null=True, blank=True, on_delete=models.SET_NULL)

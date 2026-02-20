@@ -15,8 +15,8 @@ class ProveedorAdmin(admin.ModelAdmin):
 
 @admin.register(Insumo)
 class InsumoAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "codigo", "unidad_base", "proveedor_principal", "activo")
-    search_fields = ("nombre", "codigo", "nombre_normalizado")
+    list_display = ("nombre", "codigo", "codigo_point", "unidad_base", "proveedor_principal", "activo")
+    search_fields = ("nombre", "codigo", "codigo_point", "nombre_point", "nombre_normalizado")
     list_filter = ("activo", "unidad_base")
 
 @admin.register(CostoInsumo)
