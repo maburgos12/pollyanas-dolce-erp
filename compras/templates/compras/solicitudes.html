@@ -61,9 +61,100 @@
       <input type="checkbox" name="evitar_duplicados" checked>
       Evitar duplicados (área + insumo + fecha)
     </label>
-    <button class="btn btn-secondary" type="submit">Importar solicitudes</button>
+    <button class="btn btn-secondary" type="submit">Previsualizar solicitudes</button>
   </form>
   <p class="muted mb-0">Columnas sugeridas del archivo: <code>insumo</code>, <code>cantidad</code>, <code>proveedor</code>, <code>fecha_requerida</code>, <code>area</code>, <code>solicitante</code>.</p>
+  {% if import_preview %}
+  <section class="card" style="margin-top: 14px;">
+    <div class="card-header" style="padding:0 0 10px 0;border:0;">Vista previa de importación</div>
+    <p class="muted">Filas: <strong>{{ import_preview.count }}</strong>. Puedes editar celdas, desmarcar filas para eliminarlas de la carga y luego confirmar.</p>
+    <form method="post" action="{% url 'compras:solicitudes_importar_confirmar' %}">
+      {% csrf_token %}
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Importar</th>
+              <th>Fila</th>
+              <th>Insumo (archivo)</th>
+              <th>Insumo final</th>
+              <th class="text-end">Cantidad</th>
+              <th>Fecha</th>
+              <th>Área</th>
+              <th>Solicitante</th>
+              <th>Proveedor</th>
+              <th>Estatus</th>
+              <th>Validación</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in import_preview.rows %}
+            <tr>
+              <td><input type="checkbox" name="row_{{ row.row_id }}_include" {% if row.include %}checked{% endif %}></td>
+              <td>{{ row.source_row }}</td>
+              <td>
+                {{ row.insumo_origen|default:"-" }}
+                {% if row.insumo_sugerencia %}
+                <div class="muted">Sugerencia: {{ row.insumo_sugerencia }} (score {{ row.score }} · {{ row.metodo }})</div>
+                {% endif %}
+              </td>
+              <td>
+                <select class="input-field" name="row_{{ row.row_id }}_insumo_id">
+                  <option value="">Selecciona insumo...</option>
+                  {% for i in insumo_options %}
+                  <option value="{{ i.id }}" {% if row.insumo_id == i.id|stringformat:'s' %}selected{% endif %}>{{ i.nombre }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                <input class="input-field text-end" type="number" step="0.001" min="0" name="row_{{ row.row_id }}_cantidad" value="{{ row.cantidad }}">
+              </td>
+              <td>
+                <input class="input-field" type="date" name="row_{{ row.row_id }}_fecha_requerida" value="{{ row.fecha_requerida }}">
+              </td>
+              <td>
+                <input class="input-field" type="text" name="row_{{ row.row_id }}_area" value="{{ row.area }}">
+              </td>
+              <td>
+                <input class="input-field" type="text" name="row_{{ row.row_id }}_solicitante" value="{{ row.solicitante }}">
+              </td>
+              <td>
+                <select class="input-field" name="row_{{ row.row_id }}_proveedor_id">
+                  <option value="">Proveedor principal del insumo</option>
+                  {% for p in proveedor_options %}
+                  <option value="{{ p.id }}" {% if row.proveedor_id == p.id|stringformat:'s' %}selected{% endif %}>{{ p.nombre }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                <select class="input-field" name="row_{{ row.row_id }}_estatus">
+                  {% for value, label in status_choices %}
+                  <option value="{{ value }}" {% if row.estatus == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                {% if row.notes %}
+                <span class="badge-amarillo">{{ row.notes }}</span>
+                {% else %}
+                <span class="badge-verde">Lista</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="toolbar" style="margin-top: 10px;">
+        <button class="btn btn-primary" type="submit">Confirmar importación</button>
+      </div>
+    </form>
+    <form method="post" action="{% url 'compras:solicitudes_importar_cancelar' %}" style="margin-top: 10px;">
+      {% csrf_token %}
+      <button class="btn btn-secondary" type="submit">Cancelar vista previa</button>
+    </form>
+  </section>
+  {% endif %}
   {% else %}
   <p class="muted">Tu perfil está en modo lectura para Compras.</p>
   {% endif %}
@@ -794,6 +885,11 @@
                 </form>
               {% endif %}
             {% endif %}
+            <form method="post" action="{% url 'compras:solicitud_eliminar' s.id %}" class="inline-form" onsubmit="return confirm('¿Eliminar la solicitud {{ s.folio }}? Esta acción no se puede deshacer.');">
+              {% csrf_token %}
+              <input type="hidden" name="return_query" value="{{ current_query }}">
+              <button class="btn btn-danger" type="submit" {% if s.has_open_order %}disabled title="Tiene OC activa"{% endif %}>Eliminar</button>
+            </form>
             </div>
           </td>
           {% endif %}

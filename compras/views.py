@@ -35,6 +35,8 @@ from .models import (
     SolicitudCompra,
 )
 
+IMPORT_PREVIEW_SESSION_KEY = "compras_solicitudes_import_preview"
+
 
 def _to_decimal(value: str, default: str = "0") -> Decimal:
     try:
@@ -237,6 +239,14 @@ def _write_import_pending_csv(rows: list[dict]) -> str:
         for row in rows:
             writer.writerow({h: row.get(h, "") for h in headers})
     return str(filepath)
+
+
+def _active_solicitud_statuses() -> set[str]:
+    return {
+        SolicitudCompra.STATUS_BORRADOR,
+        SolicitudCompra.STATUS_EN_REVISION,
+        SolicitudCompra.STATUS_APROBADA,
+    }
 
 
 def _can_transition_solicitud(current: str, new: str) -> bool:
@@ -2369,6 +2379,21 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
 
     query_without_export = request.GET.copy()
     query_without_export.pop("export", None)
+    import_preview = request.session.get(IMPORT_PREVIEW_SESSION_KEY)
+    if isinstance(import_preview, dict):
+        preview_rows = [x for x in (import_preview.get("rows") or []) if isinstance(x, dict)]
+        try:
+            preview_score_min = int(import_preview.get("score_min") or 90)
+        except (TypeError, ValueError):
+            preview_score_min = 90
+        import_preview = {
+            "rows": preview_rows,
+            "count": len(preview_rows),
+            "evitar_duplicados": bool(import_preview.get("evitar_duplicados")),
+            "score_min": preview_score_min,
+        }
+    else:
+        import_preview = None
 
     context = {
         "solicitudes": solicitudes,
@@ -2404,6 +2429,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "consumo_ref_filter": consumo_ref_filter,
         "total_presupuesto": total_presupuesto,
         "current_query": query_without_export.urlencode(),
+        "import_preview": import_preview,
         "presupuesto_historial": _build_budget_history(periodo_mes, source_filter, plan_filter, categoria_filter),
         "provider_dashboard": provider_dashboard,
         "category_dashboard": category_dashboard,
@@ -2870,55 +2896,176 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
         normalizar_nombre(p.nombre): p
         for p in Proveedor.objects.filter(activo=True).only("id", "nombre")
     }
-
-    created = 0
-    skipped_invalid = 0
-    skipped_duplicate = 0
-    skipped_match = 0
-    pending_rows: list[dict] = []
+    preview_rows: list[dict] = []
 
     for idx, row in enumerate(rows, start=2):
         insumo_raw = str(row.get("insumo") or "").strip()
-        cantidad = _to_decimal(str(row.get("cantidad") or ""), "0")
-        if not insumo_raw or cantidad <= 0:
-            skipped_invalid += 1
-            continue
-
-        insumo, score, method = match_insumo(insumo_raw)
-        if not insumo or score < min_score:
-            skipped_match += 1
-            pending_rows.append(
-                {
-                    "row": idx,
-                    "insumo_origen": insumo_raw,
-                    "cantidad_origen": str(row.get("cantidad") or ""),
-                    "score": f"{score:.1f}",
-                    "metodo": method,
-                    "sugerencia": insumo.nombre if insumo else "",
-                    "motivo": f"score<{min_score}" if insumo else "sin_match",
-                }
-            )
-            continue
-
+        cantidad_raw = str(row.get("cantidad") or "").strip()
+        cantidad = _to_decimal(cantidad_raw, "0")
+        insumo_match, score, method = (None, 0.0, "sin_match")
+        if insumo_raw:
+            insumo_match, score, method = match_insumo(insumo_raw)
+        insumo_id = insumo_match.id if (insumo_match and score >= min_score) else ""
         area = str(row.get("area") or area_default).strip() or area_default
         solicitante = str(row.get("solicitante") or solicitante_default).strip() or solicitante_default
         fecha_requerida = _parse_date_value(row.get("fecha_requerida"), fecha_default)
         estatus = str(row.get("estatus") or estatus_default).strip().upper()
         if estatus not in valid_status:
             estatus = estatus_default
+        proveedor = _resolve_proveedor_name(str(row.get("proveedor") or ""), provider_map)
+        if not proveedor and insumo_match:
+            proveedor = insumo_match.proveedor_principal
 
-        proveedor = _resolve_proveedor_name(str(row.get("proveedor") or ""), provider_map) or insumo.proveedor_principal
+        duplicate = False
+        if evitar_duplicados and insumo_id:
+            duplicate = SolicitudCompra.objects.filter(
+                area=area,
+                insumo_id=insumo_id,
+                fecha_requerida=fecha_requerida,
+                estatus__in=_active_solicitud_statuses(),
+            ).exists()
+
+        notes: list[str] = []
+        hard_error = False
+        if not insumo_raw:
+            notes.append("Insumo vacío en archivo.")
+            hard_error = True
+        if not insumo_id:
+            if insumo_match:
+                notes.append(f"Score de match insuficiente (<{min_score}).")
+            else:
+                notes.append("Sin match de insumo.")
+            hard_error = True
+        if cantidad <= 0:
+            notes.append("Cantidad inválida (debe ser > 0).")
+            hard_error = True
+        if duplicate:
+            notes.append("Posible duplicado con solicitud activa.")
+
+        preview_rows.append(
+            {
+                "row_id": str(idx),
+                "source_row": idx,
+                "insumo_origen": insumo_raw,
+                "insumo_sugerencia": insumo_match.nombre if insumo_match else "",
+                "insumo_id": str(insumo_id) if insumo_id else "",
+                "cantidad": str(cantidad),
+                "cantidad_origen": cantidad_raw,
+                "area": area,
+                "solicitante": solicitante,
+                "fecha_requerida": fecha_requerida.isoformat(),
+                "estatus": estatus,
+                "proveedor_id": str(proveedor.id) if proveedor else "",
+                "score": f"{score:.1f}",
+                "metodo": method,
+                "duplicate": duplicate,
+                "notes": " | ".join(notes),
+                "include": not hard_error,
+            }
+        )
+
+    request.session[IMPORT_PREVIEW_SESSION_KEY] = {
+        "periodo_tipo": periodo_tipo,
+        "periodo_mes": periodo_mes,
+        "evitar_duplicados": evitar_duplicados,
+        "score_min": min_score,
+        "rows": preview_rows,
+    }
+    request.session.modified = True
+    messages.info(
+        request,
+        f"Vista previa generada con {len(preview_rows)} filas. Edita, elimina filas y confirma la importación.",
+    )
+
+    return redirect(
+        f"{reverse('compras:solicitudes')}?source=manual&periodo_tipo={periodo_tipo}&periodo_mes={periodo_mes}"
+    )
+
+
+@login_required
+@require_POST
+def confirmar_importacion_solicitudes(request: HttpRequest) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para importar solicitudes.")
+
+    preview_payload = request.session.get(IMPORT_PREVIEW_SESSION_KEY)
+    if not preview_payload:
+        messages.error(request, "No hay una vista previa activa para confirmar.")
+        return redirect("compras:solicitudes")
+
+    rows = preview_payload.get("rows") or []
+    periodo_tipo = (preview_payload.get("periodo_tipo") or "mes").strip() or "mes"
+    periodo_mes = (preview_payload.get("periodo_mes") or "").strip()
+    evitar_duplicados = bool(preview_payload.get("evitar_duplicados"))
+    default_fecha = _default_fecha_requerida(periodo_tipo, periodo_mes)
+    valid_status = {x[0] for x in SolicitudCompra.STATUS_CHOICES}
+
+    insumo_ids: set[int] = set()
+    proveedor_ids: set[int] = set()
+    for row in rows:
+        row_id = str(row.get("row_id") or "")
+        if request.POST.get(f"row_{row_id}_include") != "on":
+            continue
+        try:
+            insumo_ids.add(int(request.POST.get(f"row_{row_id}_insumo_id") or "0"))
+        except ValueError:
+            pass
+        try:
+            proveedor_ids.add(int(request.POST.get(f"row_{row_id}_proveedor_id") or "0"))
+        except ValueError:
+            pass
+
+    insumos_map = Insumo.objects.select_related("proveedor_principal").in_bulk(insumo_ids)
+    proveedores_map = Proveedor.objects.filter(activo=True, id__in=proveedor_ids).in_bulk()
+
+    created = 0
+    skipped_invalid = 0
+    skipped_duplicate = 0
+    skipped_removed = 0
+
+    for row in rows:
+        row_id = str(row.get("row_id") or "")
+        if request.POST.get(f"row_{row_id}_include") != "on":
+            skipped_removed += 1
+            continue
+
+        area = (request.POST.get(f"row_{row_id}_area") or "").strip() or "General"
+        solicitante = (request.POST.get(f"row_{row_id}_solicitante") or "").strip() or request.user.username
+        estatus = (request.POST.get(f"row_{row_id}_estatus") or SolicitudCompra.STATUS_BORRADOR).strip().upper()
+        if estatus not in valid_status:
+            estatus = SolicitudCompra.STATUS_BORRADOR
+
+        try:
+            insumo_id = int(request.POST.get(f"row_{row_id}_insumo_id") or "0")
+        except ValueError:
+            insumo_id = 0
+        insumo = insumos_map.get(insumo_id)
+        if not insumo:
+            skipped_invalid += 1
+            continue
+
+        cantidad = _to_decimal(request.POST.get(f"row_{row_id}_cantidad"), "0")
+        if cantidad <= 0:
+            skipped_invalid += 1
+            continue
+
+        fecha_requerida = _parse_date_value(request.POST.get(f"row_{row_id}_fecha_requerida"), default_fecha)
+
+        proveedor = None
+        try:
+            proveedor_id = int(request.POST.get(f"row_{row_id}_proveedor_id") or "0")
+            proveedor = proveedores_map.get(proveedor_id)
+        except ValueError:
+            proveedor = None
+        if not proveedor:
+            proveedor = insumo.proveedor_principal
 
         if evitar_duplicados:
             exists = SolicitudCompra.objects.filter(
                 area=area,
                 insumo=insumo,
                 fecha_requerida=fecha_requerida,
-                estatus__in={
-                    SolicitudCompra.STATUS_BORRADOR,
-                    SolicitudCompra.STATUS_EN_REVISION,
-                    SolicitudCompra.STATUS_APROBADA,
-                },
+                estatus__in=_active_solicitud_statuses(),
             ).exists()
             if exists:
                 skipped_duplicate += 1
@@ -2938,28 +3085,37 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
             "CREATE",
             "compras.SolicitudCompra",
             solicitud.id,
-            {"folio": solicitud.folio, "source": "import", "score": round(score, 1), "method": method},
+            {
+                "folio": solicitud.folio,
+                "source": "import_preview_confirm",
+            },
         )
         created += 1
 
-    pending_path = ""
-    if pending_rows:
-        pending_path = _write_import_pending_csv(pending_rows)
-
+    request.session.pop(IMPORT_PREVIEW_SESSION_KEY, None)
+    request.session.modified = True
     messages.success(
         request,
         (
-            f"Importación completada. Creadas: {created}. "
-            f"Sin match/score: {skipped_match}. Duplicadas: {skipped_duplicate}. "
-            f"Inválidas: {skipped_invalid}."
+            f"Importación confirmada. Creadas: {created}. "
+            f"Eliminadas en vista previa: {skipped_removed}. "
+            f"Duplicadas: {skipped_duplicate}. Inválidas: {skipped_invalid}."
         ),
     )
-    if pending_path:
-        messages.warning(request, f"Pendientes de homologación guardados en: {pending_path}")
-
     return redirect(
         f"{reverse('compras:solicitudes')}?source=manual&periodo_tipo={periodo_tipo}&periodo_mes={periodo_mes}"
     )
+
+
+@login_required
+@require_POST
+def cancelar_importacion_solicitudes(request: HttpRequest) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para importar solicitudes.")
+    request.session.pop(IMPORT_PREVIEW_SESSION_KEY, None)
+    request.session.modified = True
+    messages.info(request, "Vista previa de importación eliminada.")
+    return redirect("compras:solicitudes")
 
 
 @login_required
@@ -3396,6 +3552,35 @@ def actualizar_solicitud_estatus(request: HttpRequest, pk: int, estatus: str) ->
             solicitud.id,
             {"from": prev, "to": estatus, "folio": solicitud.folio},
         )
+    return redirect("compras:solicitudes")
+
+
+@login_required
+@require_POST
+def eliminar_solicitud(request: HttpRequest, pk: int) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para eliminar solicitudes.")
+
+    solicitud = get_object_or_404(SolicitudCompra, pk=pk)
+    has_open_order = OrdenCompra.objects.filter(solicitud=solicitud).exclude(estatus=OrdenCompra.STATUS_CERRADA).exists()
+    return_query = (request.POST.get("return_query") or "").strip()
+    if has_open_order:
+        messages.error(request, f"No puedes eliminar {solicitud.folio}: tiene una orden de compra activa.")
+    else:
+        solicitud_id = solicitud.id
+        folio = solicitud.folio
+        solicitud.delete()
+        log_event(
+            request.user,
+            "DELETE",
+            "compras.SolicitudCompra",
+            solicitud_id,
+            {"folio": folio},
+        )
+        messages.success(request, f"Solicitud {folio} eliminada.")
+
+    if return_query:
+        return redirect(f"{reverse('compras:solicitudes')}?{return_query}")
     return redirect("compras:solicitudes")
 
 

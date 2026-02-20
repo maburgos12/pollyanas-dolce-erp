@@ -1,7 +1,9 @@
 from datetime import date, datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -307,3 +309,143 @@ class ComprasFase2FiltersTests(TestCase):
         row = next(r for r in payload["rows"] if r["insumo"] == "Insumo interno sin costo")
         self.assertTrue(row["sin_costo"])
         self.assertEqual(row["alerta"], "Sin costo unitario")
+
+
+class ComprasSolicitudesImportPreviewTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_import",
+            email="admin_import@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
+        self.proveedor = Proveedor.objects.create(nombre="Proveedor Import", activo=True)
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo_harina = Insumo.objects.create(
+            nombre="Harina Import",
+            categoria="Masa",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+        self.insumo_azucar = Insumo.objects.create(
+            nombre="Azucar Import",
+            categoria="Masa",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+
+    def test_import_preview_confirma_edicion_y_descarte(self):
+        csv_content = (
+            "insumo,cantidad,area,solicitante,fecha_requerida,estatus\n"
+            "Harina Import,2,Compras,ana,2026-02-20,BORRADOR\n"
+            "Azucar con typo,3,Compras,luis,2026-02-21,BORRADOR\n"
+            "Harina Import,1,Compras,maria,2026-02-22,BORRADOR\n"
+        )
+        archivo = SimpleUploadedFile("solicitudes.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        with patch(
+            "compras.views.match_insumo",
+            side_effect=[
+                (self.insumo_harina, 100.0, "exact"),
+                (self.insumo_azucar, 60.0, "fuzzy"),
+                (self.insumo_harina, 100.0, "exact"),
+            ],
+        ):
+            response = self.client.post(
+                reverse("compras:solicitudes_importar"),
+                {
+                    "archivo": archivo,
+                    "periodo_tipo": "mes",
+                    "periodo_mes": "2026-02",
+                    "area": "Compras",
+                    "solicitante": "admin_import",
+                    "estatus": SolicitudCompra.STATUS_BORRADOR,
+                    "score_min": "90",
+                    "evitar_duplicados": "on",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        preview_payload = self.client.session.get("compras_solicitudes_import_preview")
+        self.assertIsNotNone(preview_payload)
+        rows = preview_payload["rows"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[1]["insumo_id"], "")
+
+        confirmar_data = {}
+        for row in rows:
+            row_id = row["row_id"]
+            confirmar_data[f"row_{row_id}_insumo_id"] = row["insumo_id"]
+            confirmar_data[f"row_{row_id}_cantidad"] = row["cantidad"]
+            confirmar_data[f"row_{row_id}_fecha_requerida"] = row["fecha_requerida"]
+            confirmar_data[f"row_{row_id}_area"] = row["area"]
+            confirmar_data[f"row_{row_id}_solicitante"] = row["solicitante"]
+            confirmar_data[f"row_{row_id}_proveedor_id"] = row["proveedor_id"]
+            confirmar_data[f"row_{row_id}_estatus"] = row["estatus"]
+
+        confirmar_data[f"row_{rows[0]['row_id']}_include"] = "on"
+        confirmar_data[f"row_{rows[1]['row_id']}_include"] = "on"
+        confirmar_data[f"row_{rows[1]['row_id']}_insumo_id"] = str(self.insumo_azucar.id)
+
+        response_confirm = self.client.post(
+            reverse("compras:solicitudes_importar_confirmar"),
+            confirmar_data,
+        )
+        self.assertEqual(response_confirm.status_code, 302)
+
+        solicitudes = list(SolicitudCompra.objects.order_by("id"))
+        self.assertEqual(len(solicitudes), 2)
+        self.assertEqual({s.insumo_id for s in solicitudes}, {self.insumo_harina.id, self.insumo_azucar.id})
+        self.assertIsNone(self.client.session.get("compras_solicitudes_import_preview"))
+
+    def test_eliminar_solicitud_permitida_si_no_tiene_oc_activa(self):
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="admin_import",
+            insumo=self.insumo_harina,
+            proveedor_sugerido=self.proveedor,
+            cantidad=Decimal("1"),
+            fecha_requerida=date(2026, 2, 20),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+
+        response = self.client.post(
+            reverse("compras:solicitud_eliminar", args=[solicitud.id]),
+            {"return_query": "source=manual"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SolicitudCompra.objects.filter(id=solicitud.id).exists())
+
+    def test_eliminar_solicitud_bloqueada_si_tiene_oc_activa(self):
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="admin_import",
+            insumo=self.insumo_harina,
+            proveedor_sugerido=self.proveedor,
+            cantidad=Decimal("1"),
+            fecha_requerida=date(2026, 2, 20),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=self.proveedor,
+            fecha_emision=date(2026, 2, 20),
+            monto_estimado=Decimal("10"),
+            estatus=OrdenCompra.STATUS_ENVIADA,
+        )
+
+        response = self.client.post(
+            reverse("compras:solicitud_eliminar", args=[solicitud.id]),
+            {"return_query": "source=manual"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(SolicitudCompra.objects.filter(id=solicitud.id).exists())
