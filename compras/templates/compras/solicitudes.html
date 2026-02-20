@@ -142,6 +142,34 @@
           <button class="btn btn-primary" type="submit">Guardar presupuesto</button>
         </div>
       </form>
+      <form method="post" action="{% url 'compras:solicitudes_presupuesto_proveedor' %}" class="form-grid-auto mb-3">
+        {% csrf_token %}
+        <input type="hidden" name="source" value="{{ source_filter }}">
+        <input type="hidden" name="plan_id" value="{{ plan_filter }}">
+        <input type="hidden" name="reabasto" value="{{ reabasto_filter }}">
+        <input type="hidden" name="periodo_tipo" value="{{ periodo_tipo }}">
+        <input type="hidden" name="periodo_mes" value="{{ periodo_mes }}">
+        <div>
+          <label>Proveedor</label>
+          <select class="input-field" name="proveedor_id" required>
+            <option value="">Selecciona proveedor...</option>
+            {% for p in proveedor_options %}
+              <option value="{{ p.id }}">{{ p.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Objetivo proveedor</label>
+          <input class="input-field" type="number" name="monto_objetivo_proveedor" min="0" step="0.01" required>
+        </div>
+        <div>
+          <label>Notas proveedor</label>
+          <input class="input-field" type="text" name="notas_proveedor" maxlength="255" placeholder="Opcional">
+        </div>
+        <div class="align-items-end d-flex">
+          <button class="btn btn-secondary" type="submit">Guardar objetivo proveedor</button>
+        </div>
+      </form>
       <form method="post" action="{% url 'compras:solicitudes_presupuesto_importar' %}" enctype="multipart/form-data" class="form-grid-auto mb-3">
         {% csrf_token %}
         <input type="hidden" name="source" value="{{ source_filter }}">
@@ -157,7 +185,15 @@
           <button class="btn btn-secondary" type="submit">Importar presupuesto</button>
         </div>
       </form>
-      <p class="muted mb-3">Archivo esperado: <code>periodo_tipo</code> (mes/q1/q2), <code>periodo_mes</code> (YYYY-MM), <code>monto_objetivo</code>, <code>notas</code> (opcional).</p>
+      <p class="muted mb-3">
+        Archivo esperado:
+        <code>periodo_tipo</code> (mes/q1/q2),
+        <code>periodo_mes</code> (YYYY-MM),
+        <code>monto_objetivo</code> (objetivo periodo),
+        <code>proveedor</code> (opcional),
+        <code>monto_objetivo_proveedor</code> (opcional),
+        <code>notas</code> (opcional).
+      </p>
       {% endif %}
       <div class="kpi-mini">
         <article class="kpi-card">
@@ -193,12 +229,16 @@
           <div class="kpi-label">Alertas presupuesto</div>
         </article>
         <article class="kpi-card">
-          <div class="kpi-number is-danger">{{ presupuesto_alertas_altas }}</div>
-          <div class="kpi-label">Alertas altas</div>
+          <div class="kpi-number is-danger">{{ presupuesto_alertas_excedidas|default:0 }}</div>
+          <div class="kpi-label">Excedidas</div>
         </article>
         <article class="kpi-card">
-          <div class="kpi-number is-warning">{{ presupuesto_alertas_medias }}</div>
-          <div class="kpi-label">Alertas medias</div>
+          <div class="kpi-number is-warning">{{ presupuesto_alertas_preventivas|default:0 }}</div>
+          <div class="kpi-label">Preventivas (>=90%)</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number">{{ presupuesto_objetivos_proveedor_total|default:0 }}</div>
+          <div class="kpi-label">Objetivos por proveedor</div>
         </article>
       </div>
       <div class="table-responsive">
@@ -238,6 +278,8 @@
               <th class="text-end">Ejecutado</th>
               <th class="text-end">Variación</th>
               <th class="text-end">% participación estimado</th>
+              <th class="text-end">Objetivo proveedor</th>
+              <th class="text-end">% uso objetivo</th>
             </tr>
           </thead>
           <tbody>
@@ -248,9 +290,23 @@
                 <td class="text-end">${{ r.ejecutado|floatformat:2 }}</td>
                 <td class="text-end {% if r.variacion > 0 %}text-danger{% elif r.variacion < 0 %}text-success{% endif %}">${{ r.variacion|floatformat:2 }}</td>
                 <td class="text-end">{{ r.participacion_pct|floatformat:2 }}%</td>
+                <td class="text-end">${{ r.objetivo_proveedor|floatformat:2 }}</td>
+                <td class="text-end">
+                  {% if r.uso_objetivo_pct is not None %}
+                    {% if r.objetivo_estado == 'excedido' %}
+                      <span class="badge-rojo">{{ r.uso_objetivo_pct|floatformat:2 }}%</span>
+                    {% elif r.objetivo_estado == 'preventivo' %}
+                      <span class="badge-amarillo">{{ r.uso_objetivo_pct|floatformat:2 }}%</span>
+                    {% else %}
+                      <span class="badge-verde">{{ r.uso_objetivo_pct|floatformat:2 }}%</span>
+                    {% endif %}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
               </tr>
             {% empty %}
-              <tr><td colspan="5" class="text-muted">Sin datos por proveedor para este filtro.</td></tr>
+              <tr><td colspan="7" class="text-muted">Sin datos por proveedor para este filtro.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -303,6 +359,8 @@
                 <th class="text-end">Ejecutado</th>
                 <th class="text-end">Variación</th>
                 <th class="text-end">Participación %</th>
+                <th class="text-end">Objetivo</th>
+                <th class="text-end">% Uso</th>
               </tr>
             </thead>
             <tbody>
@@ -313,9 +371,17 @@
                 <td class="text-end">${{ r.ejecutado|floatformat:2 }}</td>
                 <td class="text-end {% if r.variacion > 0 %}text-danger{% elif r.variacion < 0 %}text-success{% endif %}">${{ r.variacion|floatformat:2 }}</td>
                 <td class="text-end">{{ r.participacion_pct|floatformat:2 }}%</td>
+                <td class="text-end">${{ r.objetivo_proveedor|floatformat:2 }}</td>
+                <td class="text-end">
+                  {% if r.uso_objetivo_pct is not None %}
+                    {{ r.uso_objetivo_pct|floatformat:2 }}%
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
               </tr>
               {% empty %}
-              <tr><td colspan="5" class="text-muted">Sin desviaciones para el periodo/filtro actual.</td></tr>
+              <tr><td colspan="7" class="text-muted">Sin desviaciones para el periodo/filtro actual.</td></tr>
               {% endfor %}
             </tbody>
           </table>

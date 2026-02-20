@@ -149,3 +149,33 @@ class PresupuestoCompraPeriodo(models.Model):
 
     def __str__(self):
         return f"{self.get_periodo_tipo_display()} {self.periodo_mes}"
+
+
+class PresupuestoCompraProveedor(models.Model):
+    presupuesto_periodo = models.ForeignKey(
+        PresupuestoCompraPeriodo,
+        on_delete=models.CASCADE,
+        related_name="objetivos_proveedor",
+    )
+    proveedor = models.ForeignKey(
+        Proveedor,
+        on_delete=models.PROTECT,
+        related_name="presupuestos_compra",
+    )
+    monto_objetivo = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    notas = models.CharField(max_length=255, blank=True, default="")
+    actualizado_en = models.DateTimeField(auto_now=True)
+    actualizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="presupuestos_compras_proveedor_actualizados",
+    )
+
+    class Meta:
+        ordering = ["-presupuesto_periodo_id", "proveedor_id"]
+        unique_together = [("presupuesto_periodo", "proveedor")]
+
+    def __str__(self):
+        return f"{self.presupuesto_periodo} · {self.proveedor.nombre}"
