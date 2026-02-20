@@ -558,6 +558,15 @@ textarea:focus,
   display: inline;
 }
 
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--texto);
+  font-weight: 600;
+}
+
 .mt-2 {
   margin-top: 10px;
 }

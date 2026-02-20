@@ -1,22 +1,28 @@
 import csv
+import calendar
 from io import BytesIO
 from decimal import Decimal, InvalidOperation
-from datetime import date
+from io import StringIO
+from datetime import date, datetime
+from pathlib import Path
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.urls import reverse
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from core.access import can_manage_compras, can_view_compras
 from core.audit import log_event
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, Proveedor
 from recetas.models import PlanProduccion
+from recetas.utils.matching import match_insumo
+from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import OrdenCompra, RecepcionCompra, SolicitudCompra
 
@@ -26,6 +32,119 @@ def _to_decimal(value: str, default: str = "0") -> Decimal:
         return Decimal(value or default)
     except (InvalidOperation, TypeError):
         return Decimal(default)
+
+
+def _map_import_header(name: str) -> str:
+    n = normalizar_nombre(name or "").replace("_", " ")
+    if n in {"insumo", "nombre insumo", "insumo nombre", "materia prima", "articulo", "item", "producto", "descripcion"}:
+        return "insumo"
+    if n in {"cantidad", "cant", "qty", "cantidad requerida", "requerido"}:
+        return "cantidad"
+    if n in {"proveedor", "proveedor sugerido"}:
+        return "proveedor"
+    if n in {"fecha", "fecha requerida", "fecha requerida compra", "fecha requerida compras"}:
+        return "fecha_requerida"
+    if n in {"area", "area solicitante", "departamento"}:
+        return "area"
+    if n in {"solicitante", "responsable", "usuario"}:
+        return "solicitante"
+    if n in {"estatus", "estado"}:
+        return "estatus"
+    return n
+
+
+def _read_import_rows(uploaded) -> list[dict]:
+    ext = Path(uploaded.name or "").suffix.lower()
+    rows: list[dict] = []
+
+    if ext in {".xlsx", ".xlsm"}:
+        uploaded.seek(0)
+        wb = load_workbook(uploaded, read_only=True, data_only=True)
+        ws = wb.active
+        values = list(ws.values)
+        if not values:
+            return []
+        headers = [_map_import_header(str(h or "")) for h in values[0]]
+        for raw in values[1:]:
+            row = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                row[header] = raw[idx] if idx < len(raw) else None
+            rows.append(row)
+        return rows
+
+    if ext == ".csv":
+        uploaded.seek(0)
+        content = uploaded.read().decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(StringIO(content))
+        for raw in reader:
+            row = {}
+            for k, v in raw.items():
+                if not k:
+                    continue
+                row[_map_import_header(k)] = v
+            rows.append(row)
+        return rows
+
+    raise ValueError("Formato no soportado. Usa .xlsx, .xlsm o .csv.")
+
+
+def _default_fecha_requerida(periodo_tipo: str, periodo_mes: str) -> date:
+    if periodo_tipo == "all":
+        return timezone.localdate()
+    year, month = periodo_mes.split("-")
+    y = int(year)
+    m = int(month)
+    if periodo_tipo == "q1":
+        return date(y, m, 15)
+    if periodo_tipo == "q2":
+        return date(y, m, calendar.monthrange(y, m)[1])
+    return date(y, m, 1)
+
+
+def _parse_date_value(raw_value, fallback: date) -> date:
+    if not raw_value:
+        return fallback
+    if isinstance(raw_value, date):
+        return raw_value
+    text = str(raw_value).strip()
+    if not text:
+        return fallback
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return fallback
+
+
+def _resolve_proveedor_name(raw: str, providers_by_norm: dict[str, Proveedor]) -> Proveedor | None:
+    name = (raw or "").strip()
+    if not name:
+        return None
+    return providers_by_norm.get(normalizar_nombre(name))
+
+
+def _write_import_pending_csv(rows: list[dict]) -> str:
+    ts = timezone.localtime().strftime("%Y%m%d_%H%M%S")
+    filepath = Path("logs") / f"compras_import_pendientes_{ts}.csv"
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    headers = [
+        "row",
+        "insumo_origen",
+        "cantidad_origen",
+        "score",
+        "metodo",
+        "sugerencia",
+        "motivo",
+    ]
+    with filepath.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({h: row.get(h, "") for h in headers})
+    return str(filepath)
 
 
 def _can_transition_solicitud(current: str, new: str) -> bool:
@@ -445,6 +564,144 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "current_query": query_without_export.urlencode(),
     }
     return render(request, "compras/solicitudes.html", context)
+
+
+@login_required
+@require_POST
+def importar_solicitudes(request: HttpRequest) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para importar solicitudes.")
+
+    archivo = request.FILES.get("archivo")
+    if not archivo:
+        messages.error(request, "Debes seleccionar un archivo de importación (.xlsx o .csv).")
+        return redirect("compras:solicitudes")
+
+    periodo_tipo, periodo_mes, _ = _parse_period_filters(
+        request.POST.get("periodo_tipo"),
+        request.POST.get("periodo_mes"),
+    )
+    fecha_default = _default_fecha_requerida(periodo_tipo, periodo_mes)
+    area_default = (request.POST.get("area") or "General").strip() or "General"
+    solicitante_default = (request.POST.get("solicitante") or request.user.username).strip() or request.user.username
+    estatus_default = (request.POST.get("estatus") or SolicitudCompra.STATUS_BORRADOR).strip().upper()
+    valid_status = {x[0] for x in SolicitudCompra.STATUS_CHOICES}
+    if estatus_default not in valid_status:
+        estatus_default = SolicitudCompra.STATUS_BORRADOR
+    evitar_duplicados = request.POST.get("evitar_duplicados") == "on"
+    min_score_raw = request.POST.get("score_min") or "90"
+    try:
+        min_score = max(0, min(100, int(min_score_raw)))
+    except ValueError:
+        min_score = 90
+
+    try:
+        rows = _read_import_rows(archivo)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("compras:solicitudes")
+    except Exception:
+        messages.error(request, "No se pudo leer el archivo. Verifica formato y columnas.")
+        return redirect("compras:solicitudes")
+
+    if not rows:
+        messages.warning(request, "El archivo no contiene filas de datos.")
+        return redirect("compras:solicitudes")
+
+    provider_map = {
+        normalizar_nombre(p.nombre): p
+        for p in Proveedor.objects.filter(activo=True).only("id", "nombre")
+    }
+
+    created = 0
+    skipped_invalid = 0
+    skipped_duplicate = 0
+    skipped_match = 0
+    pending_rows: list[dict] = []
+
+    for idx, row in enumerate(rows, start=2):
+        insumo_raw = str(row.get("insumo") or "").strip()
+        cantidad = _to_decimal(str(row.get("cantidad") or ""), "0")
+        if not insumo_raw or cantidad <= 0:
+            skipped_invalid += 1
+            continue
+
+        insumo, score, method = match_insumo(insumo_raw)
+        if not insumo or score < min_score:
+            skipped_match += 1
+            pending_rows.append(
+                {
+                    "row": idx,
+                    "insumo_origen": insumo_raw,
+                    "cantidad_origen": str(row.get("cantidad") or ""),
+                    "score": f"{score:.1f}",
+                    "metodo": method,
+                    "sugerencia": insumo.nombre if insumo else "",
+                    "motivo": f"score<{min_score}" if insumo else "sin_match",
+                }
+            )
+            continue
+
+        area = str(row.get("area") or area_default).strip() or area_default
+        solicitante = str(row.get("solicitante") or solicitante_default).strip() or solicitante_default
+        fecha_requerida = _parse_date_value(row.get("fecha_requerida"), fecha_default)
+        estatus = str(row.get("estatus") or estatus_default).strip().upper()
+        if estatus not in valid_status:
+            estatus = estatus_default
+
+        proveedor = _resolve_proveedor_name(str(row.get("proveedor") or ""), provider_map) or insumo.proveedor_principal
+
+        if evitar_duplicados:
+            exists = SolicitudCompra.objects.filter(
+                area=area,
+                insumo=insumo,
+                fecha_requerida=fecha_requerida,
+                estatus__in={
+                    SolicitudCompra.STATUS_BORRADOR,
+                    SolicitudCompra.STATUS_EN_REVISION,
+                    SolicitudCompra.STATUS_APROBADA,
+                },
+            ).exists()
+            if exists:
+                skipped_duplicate += 1
+                continue
+
+        solicitud = SolicitudCompra.objects.create(
+            area=area,
+            solicitante=solicitante,
+            insumo=insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=cantidad,
+            fecha_requerida=fecha_requerida,
+            estatus=estatus,
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "compras.SolicitudCompra",
+            solicitud.id,
+            {"folio": solicitud.folio, "source": "import", "score": round(score, 1), "method": method},
+        )
+        created += 1
+
+    pending_path = ""
+    if pending_rows:
+        pending_path = _write_import_pending_csv(pending_rows)
+
+    messages.success(
+        request,
+        (
+            f"Importación completada. Creadas: {created}. "
+            f"Sin match/score: {skipped_match}. Duplicadas: {skipped_duplicate}. "
+            f"Inválidas: {skipped_invalid}."
+        ),
+    )
+    if pending_path:
+        messages.warning(request, f"Pendientes de homologación guardados en: {pending_path}")
+
+    return redirect(
+        f"{reverse('compras:solicitudes')}?source=manual&periodo_tipo={periodo_tipo}&periodo_mes={periodo_mes}"
+    )
 
 
 @login_required

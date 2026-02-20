@@ -38,6 +38,32 @@
     <button class="btn btn-primary" type="submit">Guardar solicitud</button>
   </form>
   <p id="stock-hint" class="muted mb-0">Selecciona un insumo para ver stock, punto de reorden, sugerencia y proveedor principal.</p>
+
+  <hr style="margin: 18px 0;">
+  <div class="card-header" style="padding:0 0 12px 0;border:0;">Carga Masiva de Solicitudes (XLSX/CSV)</div>
+  <form method="post" action="{% url 'compras:solicitudes_importar' %}" enctype="multipart/form-data" class="form-grid-auto">
+    {% csrf_token %}
+    <input class="input-field" type="file" name="archivo" accept=".xlsx,.xlsm,.csv" required>
+    <select class="input-field" name="periodo_tipo">
+      <option value="mes">Mensual</option>
+      <option value="q1">1ra quincena</option>
+      <option value="q2">2da quincena</option>
+      <option value="all">Sin periodo (hoy)</option>
+    </select>
+    <input class="input-field" type="month" name="periodo_mes" value="{{ periodo_mes }}">
+    <input class="input-field" name="area" placeholder="Área por default (ej. Compras)" value="Compras">
+    <input class="input-field" name="solicitante" placeholder="Solicitante por default" value="{{ request.user.username }}">
+    <select class="input-field" name="estatus">
+      {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <input class="input-field" type="number" name="score_min" min="0" max="100" step="1" value="90" placeholder="Score mínimo match">
+    <label class="inline-check">
+      <input type="checkbox" name="evitar_duplicados" checked>
+      Evitar duplicados (área + insumo + fecha)
+    </label>
+    <button class="btn btn-secondary" type="submit">Importar solicitudes</button>
+  </form>
+  <p class="muted mb-0">Columnas sugeridas del archivo: <code>insumo</code>, <code>cantidad</code>, <code>proveedor</code>, <code>fecha_requerida</code>, <code>area</code>, <code>solicitante</code>.</p>
   {% else %}
   <p class="muted">Tu perfil está en modo lectura para Compras.</p>
   {% endif %}
