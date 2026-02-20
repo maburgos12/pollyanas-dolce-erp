@@ -21,6 +21,7 @@
     {% else %}
       <code>(dias_llegada * consumo_diario_promedio) + stock_minimo</code>.
     {% endif %}
+    Captura manual permitida con desviación máxima de <strong>{{ reorder_max_diff_pct|floatformat:2 }}%</strong> vs recomendado.
   </p>
   {% if can_manage_inventario %}
   <form method="post" class="form-grid-auto">

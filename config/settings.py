@@ -157,3 +157,5 @@ CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=not DEBUG)
 # - excel_legacy: (dias_llegada + consumo_diario_promedio) * stock_minimo
 # - leadtime_plus_safety: (dias_llegada * consumo_diario_promedio) + stock_minimo
 INVENTARIO_REORDER_FORMULA = os.getenv("INVENTARIO_REORDER_FORMULA", "excel_legacy").strip().lower()
+# Inventario: diferencia máxima permitida (%) para capturar manualmente el punto de reorden.
+INVENTARIO_REORDER_MAX_DIFF_PCT = float(os.getenv("INVENTARIO_REORDER_MAX_DIFF_PCT", "10"))

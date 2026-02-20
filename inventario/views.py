@@ -556,17 +556,31 @@ def existencias(request: HttpRequest) -> HttpResponse:
             new_inv_prom = _to_decimal(request.POST.get("inventario_promedio"), "0")
             new_dias = int(_to_decimal(request.POST.get("dias_llegada_pedido"), "0"))
             new_consumo = _to_decimal(request.POST.get("consumo_diario_promedio"), "0")
+            reorden_recomendado = calcular_punto_reorden(
+                stock_minimo=new_minimo,
+                dias_llegada_pedido=new_dias,
+                consumo_diario_promedio=new_consumo,
+                formula=getattr(settings, "INVENTARIO_REORDER_FORMULA", FORMULA_EXCEL_LEGACY),
+            )
             reorden_raw = (request.POST.get("punto_reorden") or "").strip()
             if reorden_raw:
                 new_reorden = _to_decimal(reorden_raw, "0")
                 reorden_auto = False
+                max_diff_pct = _to_decimal(str(getattr(settings, "INVENTARIO_REORDER_MAX_DIFF_PCT", 10)), "10")
+                if reorden_recomendado > 0 and max_diff_pct >= 0:
+                    diff_pct = (abs(new_reorden - reorden_recomendado) / reorden_recomendado) * Decimal("100")
+                    if diff_pct > max_diff_pct:
+                        messages.error(
+                            request,
+                            (
+                                "El punto de reorden manual difiere demasiado del recomendado "
+                                f"({diff_pct:.2f}% > {max_diff_pct:.2f}%). "
+                                f"Recomendado: {reorden_recomendado}."
+                            ),
+                        )
+                        return redirect("inventario:existencias")
             else:
-                new_reorden = calcular_punto_reorden(
-                    stock_minimo=new_minimo,
-                    dias_llegada_pedido=new_dias,
-                    consumo_diario_promedio=new_consumo,
-                    formula=getattr(settings, "INVENTARIO_REORDER_FORMULA", FORMULA_EXCEL_LEGACY),
-                )
+                new_reorden = reorden_recomendado
                 reorden_auto = True
             if (
                 new_stock < 0
@@ -636,6 +650,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
         "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
         "can_manage_inventario": can_manage_inventario(request.user),
         "reorder_formula_mode": formula_mode,
+        "reorder_max_diff_pct": getattr(settings, "INVENTARIO_REORDER_MAX_DIFF_PCT", 10),
         "formula_excel_legacy": FORMULA_EXCEL_LEGACY,
         "formula_leadtime_plus_safety": FORMULA_LEADTIME_PLUS_SAFETY,
     }
