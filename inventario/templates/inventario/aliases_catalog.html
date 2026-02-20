@@ -46,6 +46,76 @@
   {% endif %}
 </section>
 
+<section class="card">
+  <div class="card-header">Homologación Cruzada (Point + Almacén + Recetas)</div>
+  <p class="muted">Prioriza nombres que aparezcan en 2 o 3 fuentes para normalizar todo el ecosistema con un solo alias.</p>
+
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card">
+      <div class="kpi-number {% if cross_summary.point_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ cross_summary.point_unmatched }}</div>
+      <div class="kpi-label">Pendientes Point (insumos)</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if cross_summary.almacen_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ cross_summary.almacen_unmatched }}</div>
+      <div class="kpi-label">Pendientes Almacén</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if cross_summary.recetas_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ cross_summary.recetas_unmatched }}</div>
+      <div class="kpi-label">Líneas recetas sin match</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if cross_summary.overlaps > 0 %}is-warning{% else %}is-success{% endif %}">{{ cross_summary.overlaps }}</div>
+      <div class="kpi-label">Nombres en 2+ fuentes</div>
+    </article>
+  </div>
+
+  <div class="toolbar" style="margin-top:10px;">
+    <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}?tipo=INSUMO">Revisar pendientes Point</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Revisar pendientes Recetas</a>
+  </div>
+
+  {% if cross_unified_rows %}
+  <div class="table-responsive" style="margin-top:10px;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Normalizado</th>
+          <th class="text-end">Point</th>
+          <th class="text-end">Almacén</th>
+          <th class="text-end">Recetas</th>
+          <th class="text-end">Fuentes</th>
+          <th>Sugerencia</th>
+          <th class="text-end">Score máx</th>
+          {% if can_manage_inventario %}<th>Acción</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cross_unified_rows %}
+        <tr>
+          <td>{{ row.nombre_muestra }}</td>
+          <td><code>{{ row.nombre_normalizado }}</code></td>
+          <td class="text-end">{{ row.point_count }}</td>
+          <td class="text-end">{{ row.almacen_count }}</td>
+          <td class="text-end">{{ row.receta_count }}</td>
+          <td class="text-end">{{ row.sources_active }}</td>
+          <td>{{ row.suggestion|default:"-" }}</td>
+          <td class="text-end">{{ row.score_max|floatformat:1 }}</td>
+          {% if can_manage_inventario %}
+          <td>
+            <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ row.nombre_muestra|escape }}">Usar en alta</button>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin-top:10px;">Sin pendientes cruzados para homologar.</p>
+  {% endif %}
+</section>
+
 {% if can_manage_inventario %}
 <section class="card">
   <div class="card-header">Crear Alias</div>

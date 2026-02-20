@@ -21,7 +21,8 @@ from django.utils import timezone
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
-from maestros.models import Insumo, InsumoAlias
+from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch
+from recetas.models import LineaReceta
 from recetas.utils.normalizacion import normalizar_nombre
 from inventario.utils.almacen_import import (
     ENTRADAS_FILE,
@@ -139,7 +140,64 @@ def _remove_pending_name_from_recent_runs(alias_norm: str, max_runs: int = 20) -
         if len(filtered) != len(pending):
             run.pending_preview = filtered
             run.save(update_fields=["pending_preview"])
-            return
+
+
+def _resolve_cross_source_with_alias(alias_name: str, insumo: Insumo) -> tuple[int, int]:
+    alias_norm = normalizar_nombre(alias_name)
+    if not alias_norm:
+        return 0, 0
+
+    point_resolved = 0
+    for pending in PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).only("id", "point_nombre", "point_codigo"):
+        if normalizar_nombre(pending.point_nombre or "") != alias_norm:
+            continue
+        point_code = (pending.point_codigo or "").strip()
+        changed = []
+        if point_code and (insumo.codigo_point or "").strip() != point_code:
+            insumo.codigo_point = point_code[:80]
+            changed.append("codigo_point")
+        if (pending.point_nombre or "").strip() and insumo.nombre_point != pending.point_nombre:
+            insumo.nombre_point = pending.point_nombre[:250]
+            changed.append("nombre_point")
+        if changed:
+            insumo.save(update_fields=changed)
+        pending.delete()
+        point_resolved += 1
+
+    latest_cost = (
+        CostoInsumo.objects.filter(insumo=insumo).order_by("-fecha", "-id").values_list("costo_unitario", flat=True).first()
+    )
+    recetas_resolved = 0
+    lineas_qs = LineaReceta.objects.filter(~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION)).filter(
+        Q(insumo__isnull=True) | Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW) | Q(match_status=LineaReceta.STATUS_REJECTED)
+    )
+    for linea in lineas_qs.only("id", "insumo_texto", "unidad_texto", "unidad_id", "cantidad"):
+        if normalizar_nombre(linea.insumo_texto or "") != alias_norm:
+            continue
+        linea.insumo = insumo
+        if not linea.unidad_id and insumo.unidad_base_id:
+            linea.unidad = insumo.unidad_base
+        if (not linea.unidad_texto) and insumo.unidad_base_id and insumo.unidad_base:
+            linea.unidad_texto = insumo.unidad_base.codigo
+        if latest_cost is not None:
+            linea.costo_unitario_snapshot = latest_cost
+        linea.match_status = LineaReceta.STATUS_AUTO
+        linea.match_method = "ALIAS"
+        linea.match_score = 100.0
+        linea.save(
+            update_fields=[
+                "insumo",
+                "unidad",
+                "unidad_texto",
+                "costo_unitario_snapshot",
+                "match_status",
+                "match_method",
+                "match_score",
+            ]
+        )
+        recetas_resolved += 1
+
+    return point_resolved, recetas_resolved
 
 
 @login_required
@@ -357,6 +415,16 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                         _remove_pending_name_from_session(request, alias_norm)
                         _remove_pending_name_from_recent_runs(alias_norm)
                         messages.success(request, f"Alias {action_label}: '{alias_name}' -> {insumo.nombre}.")
+                        point_resolved, recetas_resolved = _resolve_cross_source_with_alias(alias_name, insumo)
+                        if point_resolved or recetas_resolved:
+                            messages.info(
+                                request,
+                                (
+                                    "Homologación cruzada aplicada: "
+                                    f"Point resueltos {point_resolved}, "
+                                    f"líneas recetas resueltas {recetas_resolved}."
+                                ),
+                            )
                     else:
                         messages.error(request, "El nombre origen no es válido.")
 
@@ -480,6 +548,80 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         key=lambda x: (-x["count"], x["nombre_origen"]),
     )
 
+    unified = defaultdict(
+        lambda: {
+            "nombre_muestra": "",
+            "point_count": 0,
+            "almacen_count": 0,
+            "receta_count": 0,
+            "suggestion": "",
+            "score_max": 0.0,
+        }
+    )
+
+    for row in pending_grouped:
+        norm = row["nombre_normalizado"]
+        if not norm:
+            continue
+        item = unified[norm]
+        item["nombre_muestra"] = item["nombre_muestra"] or row["nombre_origen"]
+        item["almacen_count"] += int(row["count"] or 0)
+        if row.get("sugerencia") and not item["suggestion"]:
+            item["suggestion"] = row["sugerencia"]
+        item["score_max"] = max(item["score_max"], float(row.get("score_max") or 0.0))
+
+    point_pending_insumos = list(
+        PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).only("point_nombre", "fuzzy_sugerencia", "fuzzy_score")
+    )
+    for p in point_pending_insumos:
+        norm = normalizar_nombre(p.point_nombre or "")
+        if not norm:
+            continue
+        item = unified[norm]
+        item["nombre_muestra"] = item["nombre_muestra"] or (p.point_nombre or "")
+        item["point_count"] += 1
+        if (p.fuzzy_sugerencia or "").strip() and not item["suggestion"]:
+            item["suggestion"] = p.fuzzy_sugerencia.strip()
+        item["score_max"] = max(item["score_max"], float(p.fuzzy_score or 0.0))
+
+    receta_pending_lines_qs = LineaReceta.objects.filter(~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION)).filter(
+        Q(insumo__isnull=True) | Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW) | Q(match_status=LineaReceta.STATUS_REJECTED)
+    )
+    receta_pending_lines = 0
+    for linea in receta_pending_lines_qs.only("insumo_texto"):
+        norm = normalizar_nombre(linea.insumo_texto or "")
+        if not norm:
+            continue
+        item = unified[norm]
+        item["nombre_muestra"] = item["nombre_muestra"] or (linea.insumo_texto or "")
+        item["receta_count"] += 1
+        receta_pending_lines += 1
+
+    unified_rows = []
+    overlaps = 0
+    for norm, item in unified.items():
+        sources_active = sum(
+            1
+            for v in (item["point_count"], item["almacen_count"], item["receta_count"])
+            if v > 0
+        )
+        if sources_active >= 2:
+            overlaps += 1
+        unified_rows.append(
+            {
+                "nombre_normalizado": norm,
+                "nombre_muestra": item["nombre_muestra"] or norm,
+                "point_count": item["point_count"],
+                "almacen_count": item["almacen_count"],
+                "receta_count": item["receta_count"],
+                "sources_active": sources_active,
+                "total_count": item["point_count"] + item["almacen_count"] + item["receta_count"],
+                "suggestion": item["suggestion"],
+                "score_max": item["score_max"],
+            }
+        )
+    unified_rows.sort(key=lambda x: (-x["sources_active"], -x["total_count"], x["nombre_muestra"]))
+
     context = {
         "q": q,
         "page": page,
@@ -497,6 +639,13 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         },
         "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:1200],
         "can_manage_inventario": can_manage_inventario(request.user),
+        "cross_summary": {
+            "point_unmatched": len(point_pending_insumos),
+            "almacen_unmatched": len(pending_preview),
+            "recetas_unmatched": receta_pending_lines,
+            "overlaps": overlaps,
+        },
+        "cross_unified_rows": unified_rows[:120],
     }
     return render(request, "inventario/aliases_catalog.html", context)
 
