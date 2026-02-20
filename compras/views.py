@@ -12,7 +12,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q, Sum
 from django.urls import reverse
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -624,11 +624,21 @@ def _build_category_dashboard(
         solicitudes_qs = _filter_solicitudes_by_categoria(solicitudes_qs, categoria_filter)
         solicitudes = list(solicitudes_qs)
 
+        insumo_ids = [s.insumo_id for s in solicitudes]
+        latest_cost_by_insumo: dict[int, Decimal] = {}
+        if insumo_ids:
+            for c in CostoInsumo.objects.filter(insumo_id__in=insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+                if c.insumo_id not in latest_cost_by_insumo:
+                    latest_cost_by_insumo[c.insumo_id] = c.costo_unitario
+
         estimado_by_categoria: dict[str, Decimal] = {}
         for s in solicitudes:
             categoria_nombre = _resolve_insumo_categoria(s.insumo)
+            estimado = getattr(s, "presupuesto_estimado", None)
+            if estimado is None:
+                estimado = (s.cantidad or Decimal("0")) * latest_cost_by_insumo.get(s.insumo_id, Decimal("0"))
             estimado_by_categoria[categoria_nombre] = estimado_by_categoria.get(categoria_nombre, Decimal("0")) + (
-                s.presupuesto_estimado or Decimal("0")
+                estimado or Decimal("0")
             )
 
         ordenes_qs = (
@@ -2592,6 +2602,143 @@ def solicitudes_print(request: HttpRequest) -> HttpResponse:
         "return_query": request.GET.urlencode(),
     }
     return render(request, "compras/solicitudes_print.html", context)
+
+
+@login_required
+def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
+    if not can_view_compras(request.user):
+        raise PermissionDenied("No tienes permisos para ver Compras.")
+
+    (
+        solicitudes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        reabasto_filter,
+        _,
+        periodo_tipo,
+        periodo_mes,
+        periodo_label,
+    ) = _filtered_solicitudes(
+        request.GET.get("source"),
+        request.GET.get("plan_id"),
+        request.GET.get("categoria"),
+        request.GET.get("reabasto"),
+        request.GET.get("periodo_tipo"),
+        request.GET.get("periodo_mes"),
+    )
+
+    budget_ctx = _build_budget_context(
+        solicitudes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        periodo_tipo,
+        periodo_mes,
+    )
+    provider_dashboard = _build_provider_dashboard(
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        budget_ctx["presupuesto_rows_proveedor"],
+    )
+    category_dashboard = _build_category_dashboard(
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        budget_ctx.get("presupuesto_rows_categoria", []),
+    )
+    historial = _build_budget_history(periodo_mes, source_filter, plan_filter, categoria_filter)
+
+    data = {
+        "filters": {
+            "source": source_filter,
+            "plan_id": plan_filter or "",
+            "categoria": categoria_filter or "",
+            "reabasto": reabasto_filter,
+            "periodo_tipo": periodo_tipo,
+            "periodo_mes": periodo_mes,
+            "periodo_label": periodo_label,
+        },
+        "totals": {
+            "solicitudes_count": len(solicitudes),
+            "presupuesto_estimado_total": float(budget_ctx["presupuesto_estimado_total"] or 0),
+            "presupuesto_ejecutado_total": float(budget_ctx["presupuesto_ejecutado_total"] or 0),
+            "presupuesto_objetivo": float((budget_ctx.get("presupuesto_objetivo") or 0)),
+            "presupuesto_variacion_objetivo": float((budget_ctx.get("presupuesto_variacion_objetivo") or 0)),
+            "alertas_total": int(budget_ctx.get("presupuesto_alertas_total") or 0),
+            "alertas_excedidas": int(budget_ctx.get("presupuesto_alertas_excedidas") or 0),
+            "alertas_preventivas": int(budget_ctx.get("presupuesto_alertas_preventivas") or 0),
+        },
+        "top_proveedores": [
+            {
+                "proveedor": row["proveedor"],
+                "estimado": float(row["estimado"] or 0),
+                "ejecutado": float(row["ejecutado"] or 0),
+                "variacion": float(row["variacion"] or 0),
+                "participacion_pct": float(row["participacion_pct"] or 0),
+                "objetivo_proveedor": float((row.get("objetivo_proveedor") or 0)),
+                "uso_objetivo_pct": (
+                    float(row["uso_objetivo_pct"])
+                    if row.get("uso_objetivo_pct") is not None
+                    else None
+                ),
+            }
+            for row in budget_ctx["presupuesto_rows_proveedor"][:10]
+        ],
+        "top_categorias": [
+            {
+                "categoria": row["categoria"],
+                "estimado": float(row["estimado"] or 0),
+                "ejecutado": float(row["ejecutado"] or 0),
+                "variacion": float(row["variacion"] or 0),
+                "participacion_pct": float(row["participacion_pct"] or 0),
+                "objetivo_categoria": float((row.get("objetivo_categoria") or 0)),
+                "uso_objetivo_pct": (
+                    float(row["uso_objetivo_pct"])
+                    if row.get("uso_objetivo_pct") is not None
+                    else None
+                ),
+            }
+            for row in budget_ctx.get("presupuesto_rows_categoria", [])[:10]
+        ],
+        "historial_6m": [
+            {
+                "periodo_mes": row["periodo_mes"],
+                "objetivo": float(row["objetivo"] or 0),
+                "estimado": float(row["estimado"] or 0),
+                "ejecutado": float(row["ejecutado"] or 0),
+                "ratio_pct": float(row["ratio_pct"]) if row.get("ratio_pct") is not None else None,
+                "estado_label": row["estado_label"],
+            }
+            for row in historial
+        ],
+        "trend": {
+            "proveedor_rows": [
+                {
+                    "proveedor": row["proveedor"],
+                    "mes": row["mes"],
+                    "estimado": float(row["estimado"] or 0),
+                    "ejecutado": float(row["ejecutado"] or 0),
+                    "variacion": float(row["variacion"] or 0),
+                }
+                for row in provider_dashboard["trend_rows"]
+            ],
+            "categoria_rows": [
+                {
+                    "categoria": row["categoria"],
+                    "mes": row["mes"],
+                    "estimado": float(row["estimado"] or 0),
+                    "ejecutado": float(row["ejecutado"] or 0),
+                    "variacion": float(row["variacion"] or 0),
+                }
+                for row in category_dashboard["trend_rows"]
+            ],
+        },
+    }
+    return JsonResponse(data)
 
 
 @login_required

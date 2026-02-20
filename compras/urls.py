@@ -6,6 +6,7 @@ app_name = "compras"
 
 urlpatterns = [
     path("solicitudes/", views.solicitudes, name="solicitudes"),
+    path("solicitudes/resumen.json", views.solicitudes_resumen_api, name="solicitudes_resumen_api"),
     path("solicitudes/presupuesto/", views.guardar_presupuesto_periodo, name="solicitudes_presupuesto"),
     path(
         "solicitudes/presupuesto/proveedor/",
