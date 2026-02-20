@@ -540,6 +540,89 @@ def _build_provider_dashboard(periodo_mes: str, source_filter: str, plan_filter:
     }
 
 
+def _build_category_dashboard(periodo_mes: str, source_filter: str, plan_filter: str, current_rows: list[dict]) -> dict:
+    months_desc = [_shift_month(periodo_mes, d) for d in range(0, 6)]
+    months_asc = list(reversed(months_desc))
+
+    monthly_category_data: dict[str, dict[str, dict[str, Decimal]]] = {}
+    category_score: dict[str, Decimal] = {}
+
+    for month_value in months_desc:
+        start_date, end_date = _periodo_bounds("mes", month_value)
+        solicitudes_qs = (
+            SolicitudCompra.objects.select_related("insumo", "insumo__unidad_base", "proveedor_sugerido")
+            .filter(fecha_requerida__range=(start_date, end_date))
+        )
+        solicitudes_qs = _filter_solicitudes_by_scope(solicitudes_qs, source_filter, plan_filter)
+        solicitudes = list(solicitudes_qs)
+
+        estimado_by_categoria: dict[str, Decimal] = {}
+        for s in solicitudes:
+            categoria_nombre = _resolve_insumo_categoria(s.insumo)
+            estimado_by_categoria[categoria_nombre] = estimado_by_categoria.get(categoria_nombre, Decimal("0")) + (
+                s.presupuesto_estimado or Decimal("0")
+            )
+
+        ordenes_qs = (
+            OrdenCompra.objects.select_related("solicitud", "solicitud__insumo", "solicitud__insumo__unidad_base")
+            .exclude(estatus=OrdenCompra.STATUS_BORRADOR)
+            .filter(fecha_emision__range=(start_date, end_date))
+        )
+        ordenes_qs = _filter_ordenes_by_scope(ordenes_qs, source_filter, plan_filter)
+        ejecutado_by_categoria: dict[str, Decimal] = {}
+        for orden in ordenes_qs:
+            categoria_nombre = "Sin categoría"
+            if orden.solicitud_id and getattr(orden.solicitud, "insumo_id", None):
+                categoria_nombre = _resolve_insumo_categoria(orden.solicitud.insumo)
+            ejecutado_by_categoria[categoria_nombre] = ejecutado_by_categoria.get(categoria_nombre, Decimal("0")) + (
+                orden.monto_estimado or Decimal("0")
+            )
+
+        categorias = set(estimado_by_categoria.keys()) | set(ejecutado_by_categoria.keys())
+        for categoria_nombre in categorias:
+            estimado = estimado_by_categoria.get(categoria_nombre, Decimal("0"))
+            ejecutado = ejecutado_by_categoria.get(categoria_nombre, Decimal("0"))
+            variacion = ejecutado - estimado
+            monthly_category_data.setdefault(categoria_nombre, {})[month_value] = {
+                "estimado": estimado,
+                "ejecutado": ejecutado,
+                "variacion": variacion,
+            }
+            category_score[categoria_nombre] = category_score.get(categoria_nombre, Decimal("0")) + abs(variacion)
+
+    top_categorias = [c for c, _ in sorted(category_score.items(), key=lambda x: x[1], reverse=True)[:6]]
+
+    trend_rows: list[dict] = []
+    for categoria_nombre in top_categorias:
+        for month_value in months_asc:
+            data = monthly_category_data.get(categoria_nombre, {}).get(
+                month_value,
+                {"estimado": Decimal("0"), "ejecutado": Decimal("0"), "variacion": Decimal("0")},
+            )
+            trend_rows.append(
+                {
+                    "categoria": categoria_nombre,
+                    "mes": month_value,
+                    "estimado": data["estimado"],
+                    "ejecutado": data["ejecutado"],
+                    "variacion": data["variacion"],
+                }
+            )
+
+    top_desviaciones = sorted(
+        [r for r in current_rows if (r["variacion"] or Decimal("0")) != Decimal("0")],
+        key=lambda x: abs(x["variacion"]),
+        reverse=True,
+    )[:12]
+
+    return {
+        "top_desviaciones": top_desviaciones,
+        "trend_rows": trend_rows,
+        "trend_months": months_asc,
+        "trend_categories": top_categorias,
+    }
+
+
 def _build_budget_context(
     solicitudes,
     source_filter: str,
@@ -1387,6 +1470,126 @@ def _export_tablero_proveedor_xlsx(
     return response
 
 
+def _export_tablero_categoria_csv(
+    category_dashboard: dict,
+    periodo_label: str,
+    source_filter: str,
+    plan_filter: str,
+) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="compras_tablero_categoria_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["TABLERO CATEGORIA - COMPRAS"])
+    writer.writerow(["Periodo activo", periodo_label])
+    writer.writerow(["Filtro origen", source_filter])
+    writer.writerow(["Filtro plan", plan_filter or "-"])
+    writer.writerow([])
+
+    writer.writerow(["TOP DESVIACIONES (PERIODO ACTIVO)"])
+    writer.writerow(
+        [
+            "Categoria",
+            "Estimado",
+            "Ejecutado",
+            "Variacion",
+            "Participacion %",
+            "Objetivo categoria",
+            "% Uso objetivo categoria",
+        ]
+    )
+    for row in category_dashboard["top_desviaciones"]:
+        writer.writerow(
+            [
+                row["categoria"],
+                row["estimado"],
+                row["ejecutado"],
+                row["variacion"],
+                round(float(row["participacion_pct"] or 0), 2),
+                row.get("objetivo_categoria", Decimal("0")),
+                round(float(row["uso_objetivo_pct"] or 0), 2) if row.get("uso_objetivo_pct") is not None else "",
+            ]
+        )
+    writer.writerow([])
+
+    writer.writerow(["TENDENCIA 6 MESES (TOP CATEGORIAS)"])
+    writer.writerow(["Categoria", "Mes", "Estimado", "Ejecutado", "Variacion"])
+    for row in category_dashboard["trend_rows"]:
+        writer.writerow(
+            [
+                row["categoria"],
+                row["mes"],
+                row["estimado"],
+                row["ejecutado"],
+                row["variacion"],
+            ]
+        )
+    return response
+
+
+def _export_tablero_categoria_xlsx(
+    category_dashboard: dict,
+    periodo_label: str,
+    source_filter: str,
+    plan_filter: str,
+) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Top desviaciones cat"
+    ws.append(["TABLERO CATEGORIA - COMPRAS"])
+    ws.append(["Periodo activo", periodo_label])
+    ws.append(["Filtro origen", source_filter])
+    ws.append(["Filtro plan", plan_filter or "-"])
+    ws.append([])
+    ws.append(
+        [
+            "Categoria",
+            "Estimado",
+            "Ejecutado",
+            "Variacion",
+            "Participacion %",
+            "Objetivo categoria",
+            "% Uso objetivo categoria",
+        ]
+    )
+    for row in category_dashboard["top_desviaciones"]:
+        ws.append(
+            [
+                row["categoria"],
+                float(row["estimado"] or 0),
+                float(row["ejecutado"] or 0),
+                float(row["variacion"] or 0),
+                float(row["participacion_pct"] or 0),
+                float(row.get("objetivo_categoria") or 0),
+                float(row["uso_objetivo_pct"] or 0) if row.get("uso_objetivo_pct") is not None else None,
+            ]
+        )
+
+    ws2 = wb.create_sheet(title="Tendencia 6m cat")
+    ws2.append(["Categoria", "Mes", "Estimado", "Ejecutado", "Variacion"])
+    for row in category_dashboard["trend_rows"]:
+        ws2.append(
+            [
+                row["categoria"],
+                row["mes"],
+                float(row["estimado"] or 0),
+                float(row["ejecutado"] or 0),
+                float(row["variacion"] or 0),
+            ]
+        )
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="compras_tablero_categoria_{now_str}.xlsx"'
+    return response
+
+
 def _filtered_solicitudes(
     source_filter_raw: str,
     plan_filter_raw: str,
@@ -1549,6 +1752,12 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         plan_filter,
         budget_ctx["presupuesto_rows_proveedor"],
     )
+    category_dashboard = _build_category_dashboard(
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        budget_ctx.get("presupuesto_rows_categoria", []),
+    )
     total_presupuesto = budget_ctx["presupuesto_estimado_total"]
 
     export_format = (request.GET.get("export") or "").lower()
@@ -1590,6 +1799,20 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
     if export_format == "proveedor_xlsx":
         return _export_tablero_proveedor_xlsx(
             provider_dashboard,
+            periodo_label,
+            source_filter,
+            plan_filter,
+        )
+    if export_format == "categoria_csv":
+        return _export_tablero_categoria_csv(
+            category_dashboard,
+            periodo_label,
+            source_filter,
+            plan_filter,
+        )
+    if export_format == "categoria_xlsx":
+        return _export_tablero_categoria_xlsx(
+            category_dashboard,
             periodo_label,
             source_filter,
             plan_filter,
@@ -1642,6 +1865,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "current_query": query_without_export.urlencode(),
         "presupuesto_historial": _build_budget_history(periodo_mes, source_filter, plan_filter),
         "provider_dashboard": provider_dashboard,
+        "category_dashboard": category_dashboard,
         **budget_ctx,
     }
     return render(request, "compras/solicitudes.html", context)
