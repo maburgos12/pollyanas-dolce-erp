@@ -68,13 +68,36 @@
   <section class="card" style="margin-top: 14px;">
     <div class="card-header" style="padding:0 0 10px 0;border:0;">Vista previa de importación</div>
     <p class="muted">Filas: <strong>{{ import_preview.count }}</strong>. Puedes editar celdas, desmarcar filas para eliminarlas de la carga y luego confirmar.</p>
+    <div class="kpi-grid kpi-mini" style="margin-bottom: 8px;">
+      <article class="kpi-card">
+        <div class="kpi-number is-success" id="preview-ready-count">{{ import_preview.ready_count }}</div>
+        <div class="kpi-label">Marcadas para importar</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number is-warning">{{ import_preview.excluded_count }}</div>
+        <div class="kpi-label">Desmarcadas</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number {% if import_preview.issues_count > 0 %}is-danger{% else %}is-success{% endif %}">{{ import_preview.issues_count }}</div>
+        <div class="kpi-label">Filas con observaciones</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number {% if import_preview.without_match_count > 0 %}is-danger{% else %}is-success{% endif %}">{{ import_preview.without_match_count }}</div>
+        <div class="kpi-label">Sin insumo asignado</div>
+      </article>
+    </div>
     <form method="post" action="{% url 'compras:solicitudes_importar_confirmar' %}">
       {% csrf_token %}
       <div class="table-responsive">
         <table class="table table-striped">
           <thead>
             <tr>
-              <th>Importar</th>
+              <th>
+                <label class="inline-check">
+                  <input id="import-preview-check-all" type="checkbox" checked>
+                  Importar
+                </label>
+              </th>
               <th>Fila</th>
               <th>Insumo (archivo)</th>
               <th>Insumo final</th>
@@ -90,7 +113,7 @@
           <tbody>
             {% for row in import_preview.rows %}
             <tr>
-              <td><input type="checkbox" name="row_{{ row.row_id }}_include" {% if row.include %}checked{% endif %}></td>
+              <td><input class="import-preview-row-check" type="checkbox" name="row_{{ row.row_id }}_include" {% if row.include %}checked{% endif %}></td>
               <td>{{ row.source_row }}</td>
               <td>
                 {{ row.insumo_origen|default:"-" }}
@@ -912,29 +935,53 @@
     const insumoSelect = document.getElementById("insumo_id");
     const cantidadInput = document.getElementById("cantidad");
     const stockHint = document.getElementById("stock-hint");
-    if (!insumoSelect || !cantidadInput || !stockHint) return;
+    if (insumoSelect && cantidadInput && stockHint) {
+      function onInsumoChange() {
+        const selected = insumoSelect.options[insumoSelect.selectedIndex];
+        if (!selected || !selected.value) {
+          stockHint.textContent = "Selecciona un insumo para ver stock, punto de reorden y sugerencia de compra.";
+          return;
+        }
 
-    function onInsumoChange() {
-      const selected = insumoSelect.options[insumoSelect.selectedIndex];
-      if (!selected || !selected.value) {
-        stockHint.textContent = "Selecciona un insumo para ver stock, punto de reorden y sugerencia de compra.";
-        return;
+        const stock = Number(selected.dataset.stock || 0);
+        const reorden = Number(selected.dataset.reorden || 0);
+        const recomendado = Number(selected.dataset.recomendado || 0);
+        const proveedor = selected.dataset.proveedor || "-";
+
+        if (!Number.isNaN(recomendado) && recomendado > 0) {
+          cantidadInput.value = recomendado.toFixed(3);
+          stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | Sugerido: " + recomendado.toFixed(3) + " | Proveedor: " + proveedor;
+        } else {
+          stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | No se requiere compra por reorden. | Proveedor: " + proveedor;
+        }
       }
 
-      const stock = Number(selected.dataset.stock || 0);
-      const reorden = Number(selected.dataset.reorden || 0);
-      const recomendado = Number(selected.dataset.recomendado || 0);
-      const proveedor = selected.dataset.proveedor || "-";
+      insumoSelect.addEventListener("change", onInsumoChange);
+    }
 
-      if (!Number.isNaN(recomendado) && recomendado > 0) {
-        cantidadInput.value = recomendado.toFixed(3);
-        stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | Sugerido: " + recomendado.toFixed(3) + " | Proveedor: " + proveedor;
-      } else {
-        stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | No se requiere compra por reorden. | Proveedor: " + proveedor;
+    const checkAll = document.getElementById("import-preview-check-all");
+    const rowChecks = Array.from(document.querySelectorAll(".import-preview-row-check"));
+    const readyCount = document.getElementById("preview-ready-count");
+    if (!checkAll || rowChecks.length === 0) return;
+
+    function syncCheckAllState() {
+      const checkedCount = rowChecks.filter((x) => x.checked).length;
+      checkAll.checked = checkedCount === rowChecks.length;
+      checkAll.indeterminate = checkedCount > 0 && checkedCount < rowChecks.length;
+      if (readyCount) {
+        readyCount.textContent = String(checkedCount);
       }
     }
 
-    insumoSelect.addEventListener("change", onInsumoChange);
+    checkAll.addEventListener("change", () => {
+      rowChecks.forEach((x) => {
+        x.checked = checkAll.checked;
+      });
+      syncCheckAllState();
+    });
+
+    rowChecks.forEach((x) => x.addEventListener("change", syncCheckAllState));
+    syncCheckAllState();
   })();
 </script>
 {% endblock %}

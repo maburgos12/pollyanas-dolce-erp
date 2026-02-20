@@ -2386,11 +2386,37 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             preview_score_min = int(import_preview.get("score_min") or 90)
         except (TypeError, ValueError):
             preview_score_min = 90
+        preview_ready = 0
+        preview_with_issues = 0
+        preview_duplicates = 0
+        preview_without_match = 0
+        preview_invalid_qty = 0
+        for row in preview_rows:
+            if bool(row.get("include")):
+                preview_ready += 1
+            if row.get("notes"):
+                preview_with_issues += 1
+            if bool(row.get("duplicate")):
+                preview_duplicates += 1
+            if not str(row.get("insumo_id") or "").strip():
+                preview_without_match += 1
+            try:
+                cantidad_preview = _to_decimal(str(row.get("cantidad") or "0"), "0")
+            except Exception:
+                cantidad_preview = Decimal("0")
+            if cantidad_preview <= 0:
+                preview_invalid_qty += 1
         import_preview = {
             "rows": preview_rows,
             "count": len(preview_rows),
             "evitar_duplicados": bool(import_preview.get("evitar_duplicados")),
             "score_min": preview_score_min,
+            "ready_count": preview_ready,
+            "excluded_count": max(0, len(preview_rows) - preview_ready),
+            "issues_count": preview_with_issues,
+            "duplicates_count": preview_duplicates,
+            "without_match_count": preview_without_match,
+            "invalid_qty_count": preview_invalid_qty,
         }
     else:
         import_preview = None

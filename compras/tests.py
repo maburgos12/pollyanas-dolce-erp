@@ -449,3 +449,40 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(SolicitudCompra.objects.filter(id=solicitud.id).exists())
+
+    def test_import_preview_summary_counts_in_context(self):
+        session = self.client.session
+        session["compras_solicitudes_import_preview"] = {
+            "score_min": 90,
+            "evitar_duplicados": True,
+            "rows": [
+                {
+                    "row_id": "2",
+                    "include": True,
+                    "duplicate": False,
+                    "insumo_id": str(self.insumo_harina.id),
+                    "cantidad": "2.000",
+                    "notes": "",
+                },
+                {
+                    "row_id": "3",
+                    "include": False,
+                    "duplicate": True,
+                    "insumo_id": "",
+                    "cantidad": "0",
+                    "notes": "Sin match de insumo.",
+                },
+            ],
+        }
+        session.save()
+
+        response = self.client.get(reverse("compras:solicitudes"))
+        self.assertEqual(response.status_code, 200)
+        preview = response.context["import_preview"]
+        self.assertEqual(preview["count"], 2)
+        self.assertEqual(preview["ready_count"], 1)
+        self.assertEqual(preview["excluded_count"], 1)
+        self.assertEqual(preview["issues_count"], 1)
+        self.assertEqual(preview["duplicates_count"], 1)
+        self.assertEqual(preview["without_match_count"], 1)
+        self.assertEqual(preview["invalid_qty_count"], 1)
