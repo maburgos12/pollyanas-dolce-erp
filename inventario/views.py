@@ -596,8 +596,35 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                 if not insumo:
                     messages.error(request, "Insumo destino inválido.")
                 else:
-                    updated = InsumoAlias.objects.filter(id__in=alias_ids).exclude(insumo=insumo).update(insumo=insumo)
-                    messages.success(request, f"Aliases reasignados a {insumo.nombre}: {updated}.")
+                    aliases_to_update = list(
+                        InsumoAlias.objects.filter(id__in=alias_ids).exclude(insumo=insumo).only("id", "nombre")
+                    )
+                    updated = 0
+                    point_resolved_total = 0
+                    recetas_resolved_total = 0
+                    cleaned_norms: set[str] = set()
+
+                    for alias in aliases_to_update:
+                        alias.insumo = insumo
+                        alias.save(update_fields=["insumo"])
+                        updated += 1
+                        cleaned_norms.add(normalizar_nombre(alias.nombre))
+                        point_resolved, recetas_resolved = _resolve_cross_source_with_alias(alias.nombre, insumo)
+                        point_resolved_total += point_resolved
+                        recetas_resolved_total += recetas_resolved
+
+                    if cleaned_norms:
+                        _remove_pending_names_from_session(request, cleaned_norms)
+                        _remove_pending_names_from_recent_runs(cleaned_norms)
+
+                    messages.success(
+                        request,
+                        (
+                            f"Aliases reasignados a {insumo.nombre}: {updated}. "
+                            f"Point resueltos: {point_resolved_total}. "
+                            f"Recetas resueltas: {recetas_resolved_total}."
+                        ),
+                    )
 
         elif action == "delete":
             alias_id = (request.POST.get("alias_id") or "").strip()

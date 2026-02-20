@@ -161,3 +161,41 @@ class InventarioAliasesPendingTests(TestCase):
 
         run.refresh_from_db()
         self.assertEqual(run.pending_preview, [])
+
+    def test_bulk_reassign_resolves_and_cleans_pending(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo_a = Insumo.objects.create(nombre="Harina A", unidad_base=unidad)
+        insumo_b = Insumo.objects.create(nombre="Harina B", unidad_base=unidad)
+        alias = InsumoAlias.objects.create(nombre="Harina pastelera 25kg", insumo=insumo_a)
+        run = AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=timezone.now(),
+            matched=7,
+            unmatched=1,
+            pending_preview=[
+                {
+                    "source": "inventario",
+                    "row": 14,
+                    "nombre_origen": "Harina pastelera 25kg",
+                    "nombre_normalizado": "harina pastelera 25kg",
+                    "sugerencia": "Harina B",
+                    "score": 92.0,
+                }
+            ],
+        )
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "bulk_reassign",
+                "insumo_id": str(insumo_b.id),
+                "alias_ids": [str(alias.id)],
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        alias.refresh_from_db()
+        self.assertEqual(alias.insumo_id, insumo_b.id)
+        run.refresh_from_db()
+        self.assertEqual(run.pending_preview, [])
