@@ -13,8 +13,53 @@
         <span class="badge bg-success">Inventario crítico: {{ criticos_count }}</span>
         <span class="badge bg-warning">Bajo reorden: {{ bajo_reorden_count }}</span>
         <span class="badge bg-primary">Alertas total: {{ alertas_count }}</span>
+        <span class="badge {% if budget_alerts_active > 0 %}bg-danger{% else %}bg-success{% endif %}">
+            Alertas presupuesto: {{ budget_alerts_active }}
+        </span>
     </div>
 </section>
+
+{% if budget_semaforo_mes and budget_semaforo_quincena %}
+<section class="card">
+    <div class="card-header">Semáforo Presupuesto Compras (Periodo Actual)</div>
+    <div class="kpi-mini">
+        <article class="kpi-card">
+            <div class="kpi-label">{{ budget_semaforo_mes.periodo_label }}</div>
+            <div style="margin-top:8px;">
+                <span class="badge {{ budget_semaforo_mes.estado_badge }}">{{ budget_semaforo_mes.estado_label }}</span>
+            </div>
+            <div class="muted" style="margin-top:10px;">
+                Objetivo: ${{ budget_semaforo_mes.objetivo|floatformat:2 }}<br>
+                Estimado: ${{ budget_semaforo_mes.estimado|floatformat:2 }}<br>
+                Ejecutado: ${{ budget_semaforo_mes.ejecutado|floatformat:2 }}
+            </div>
+            <div style="margin-top:10px;">
+                <a class="btn btn-secondary" href="{% url 'compras:solicitudes' %}?periodo_tipo=mes&periodo_mes={{ budget_semaforo_mes.periodo_mes }}">Ver detalle</a>
+            </div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-label">{{ budget_semaforo_quincena.periodo_label }}</div>
+            <div style="margin-top:8px;">
+                <span class="badge {{ budget_semaforo_quincena.estado_badge }}">{{ budget_semaforo_quincena.estado_label }}</span>
+            </div>
+            <div class="muted" style="margin-top:10px;">
+                Objetivo: ${{ budget_semaforo_quincena.objetivo|floatformat:2 }}<br>
+                Estimado: ${{ budget_semaforo_quincena.estimado|floatformat:2 }}<br>
+                Ejecutado: ${{ budget_semaforo_quincena.ejecutado|floatformat:2 }}
+            </div>
+            <div style="margin-top:10px;">
+                <a class="btn btn-secondary" href="{% url 'compras:solicitudes' %}?periodo_tipo={{ budget_semaforo_quincena.periodo_tipo }}&periodo_mes={{ budget_semaforo_quincena.periodo_mes }}">Ver detalle</a>
+            </div>
+        </article>
+    </div>
+    {% if latest_budget_alert %}
+    <div class="alert {% if budget_alerts_active > 0 %}alert-danger{% else %}alert-success{% endif %}" style="margin-top:10px;">
+        Última alerta bitácora: {{ latest_budget_alert.timestamp|date:"Y-m-d H:i" }} · {{ latest_budget_alert.object_id }}
+        <a href="{% url 'audit_log' %}?model=compras.PresupuestoCompraPeriodo&action=ALERT" class="btn btn-secondary" style="margin-left: 10px;">Ver bitácora</a>
+    </div>
+    {% endif %}
+</section>
+{% endif %}
 
 {% if latest_almacen_sync %}
 <section class="card">

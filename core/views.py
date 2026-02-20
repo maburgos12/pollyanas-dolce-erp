@@ -1,5 +1,7 @@
 import logging
 import os
+import calendar
+from datetime import date
 from datetime import timedelta
 from decimal import Decimal
 
@@ -22,11 +24,132 @@ from core.access import (
     can_view_reportes,
 )
 from maestros.models import Insumo, Proveedor
+from maestros.models import CostoInsumo
+from compras.models import PresupuestoCompraPeriodo, SolicitudCompra, OrdenCompra
 from recetas.models import Receta
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from core.models import AuditLog
+from core.audit import log_event
 
 logger = logging.getLogger(__name__)
+
+
+def _budget_period_bounds(periodo_tipo: str, periodo_mes: str) -> tuple[date, date]:
+    year, month = periodo_mes.split("-")
+    y = int(year)
+    m = int(month)
+    start = date(y, m, 1)
+    end = date(y, m, calendar.monthrange(y, m)[1])
+    if periodo_tipo == "q1":
+        end = date(y, m, 15)
+    elif periodo_tipo == "q2":
+        start = date(y, m, 16)
+    return start, end
+
+
+def _compute_budget_semaforo(periodo_tipo: str, periodo_mes: str) -> dict:
+    start, end = _budget_period_bounds(periodo_tipo, periodo_mes)
+    objetivo_obj = PresupuestoCompraPeriodo.objects.filter(
+        periodo_tipo=periodo_tipo,
+        periodo_mes=periodo_mes,
+    ).first()
+    objetivo = objetivo_obj.monto_objetivo if objetivo_obj else Decimal("0")
+
+    solicitudes = list(
+        SolicitudCompra.objects.filter(fecha_requerida__range=(start, end)).only("insumo_id", "cantidad")
+    )
+    insumo_ids = [s.insumo_id for s in solicitudes]
+    latest_cost_by_insumo: dict[int, Decimal] = {}
+    if insumo_ids:
+        for c in CostoInsumo.objects.filter(insumo_id__in=insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+            if c.insumo_id not in latest_cost_by_insumo:
+                latest_cost_by_insumo[c.insumo_id] = c.costo_unitario
+
+    estimado = sum(
+        ((s.cantidad or Decimal("0")) * (latest_cost_by_insumo.get(s.insumo_id, Decimal("0"))))
+        for s in solicitudes
+    )
+    ejecutado = (
+        OrdenCompra.objects.exclude(estatus=OrdenCompra.STATUS_BORRADOR)
+        .filter(fecha_emision__range=(start, end))
+        .aggregate(total=Sum("monto_estimado"))
+        .get("total")
+        or Decimal("0")
+    )
+
+    base = max(estimado, ejecutado)
+    ratio_pct = ((base * Decimal("100")) / objetivo) if objetivo > 0 else None
+    if objetivo <= 0:
+        estado = "SIN_OBJETIVO"
+        badge = "bg-warning"
+        estado_label = "Sin objetivo"
+    elif ratio_pct <= Decimal("90"):
+        estado = "VERDE"
+        badge = "bg-success"
+        estado_label = "Verde"
+    elif ratio_pct <= Decimal("100"):
+        estado = "AMARILLO"
+        badge = "bg-warning"
+        estado_label = "Amarillo"
+    else:
+        estado = "ROJO"
+        badge = "bg-danger"
+        estado_label = "Rojo"
+
+    if periodo_tipo == "mes":
+        periodo_label = f"Mensual {periodo_mes}"
+    elif periodo_tipo == "q1":
+        periodo_label = f"1ra quincena {periodo_mes}"
+    else:
+        periodo_label = f"2da quincena {periodo_mes}"
+
+    return {
+        "periodo_tipo": periodo_tipo,
+        "periodo_mes": periodo_mes,
+        "periodo_label": periodo_label,
+        "objetivo": objetivo,
+        "estimado": estimado,
+        "ejecutado": ejecutado,
+        "ratio_pct": ratio_pct,
+        "estado": estado,
+        "estado_label": estado_label,
+        "estado_badge": badge,
+        "sobre_objetivo_estimado": bool(objetivo > 0 and estimado > objetivo),
+        "sobre_objetivo_ejecutado": bool(objetivo > 0 and ejecutado > objetivo),
+    }
+
+
+def _log_budget_alert_once(alert_data: dict, kind: str) -> None:
+    if kind not in {"ESTIMADO", "EJECUTADO"}:
+        return
+    object_id = f"{alert_data['periodo_tipo']}:{alert_data['periodo_mes']}:{kind}"
+    today = timezone.localdate()
+    exists = AuditLog.objects.filter(
+        action="ALERT",
+        model="compras.PresupuestoCompraPeriodo",
+        object_id=object_id,
+        timestamp__date=today,
+    ).exists()
+    if exists:
+        return
+
+    valor = alert_data["estimado"] if kind == "ESTIMADO" else alert_data["ejecutado"]
+    log_event(
+        None,
+        "ALERT",
+        "compras.PresupuestoCompraPeriodo",
+        object_id,
+        {
+            "periodo_tipo": alert_data["periodo_tipo"],
+            "periodo_mes": alert_data["periodo_mes"],
+            "periodo_label": alert_data["periodo_label"],
+            "kind": kind,
+            "objetivo": str(alert_data["objetivo"]),
+            "valor": str(valor),
+            "ratio_pct": str(alert_data["ratio_pct"] or Decimal("0")),
+            "mensaje": f"{kind} supera objetivo del periodo",
+        },
+    )
 
 def login_view(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
@@ -76,6 +199,10 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "next_sync_eta": None,
         "next_sync_state_label": "",
         "next_sync_state_class": "bg-warning",
+        "budget_semaforo_mes": None,
+        "budget_semaforo_quincena": None,
+        "budget_alerts_active": 0,
+        "latest_budget_alert": None,
     }
     try:
         existencias_qs = ExistenciaInsumo.objects.all()
@@ -200,6 +327,34 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "next_sync_eta": next_sync_eta,
                 "next_sync_state_label": next_sync_state_label,
                 "next_sync_state_class": next_sync_state_class,
+            }
+        )
+
+        today = timezone.localdate()
+        periodo_mes = f"{today.year:04d}-{today.month:02d}"
+        periodo_quincena = "q1" if today.day <= 15 else "q2"
+        semaforo_mes = _compute_budget_semaforo("mes", periodo_mes)
+        semaforo_quincena = _compute_budget_semaforo(periodo_quincena, periodo_mes)
+
+        for semaforo in (semaforo_mes, semaforo_quincena):
+            if semaforo["sobre_objetivo_estimado"]:
+                _log_budget_alert_once(semaforo, "ESTIMADO")
+            if semaforo["sobre_objetivo_ejecutado"]:
+                _log_budget_alert_once(semaforo, "EJECUTADO")
+
+        ctx.update(
+            {
+                "budget_semaforo_mes": semaforo_mes,
+                "budget_semaforo_quincena": semaforo_quincena,
+                "budget_alerts_active": sum(
+                    1
+                    for s in (semaforo_mes, semaforo_quincena)
+                    if s["sobre_objetivo_estimado"] or s["sobre_objetivo_ejecutado"]
+                ),
+                "latest_budget_alert": AuditLog.objects.filter(
+                    action="ALERT",
+                    model="compras.PresupuestoCompraPeriodo",
+                ).first(),
             }
         )
     except Exception:
