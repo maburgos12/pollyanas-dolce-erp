@@ -3,7 +3,7 @@ import calendar
 from io import BytesIO
 from decimal import Decimal, InvalidOperation
 from io import StringIO
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -20,7 +20,7 @@ from openpyxl import Workbook, load_workbook
 
 from core.access import can_manage_compras, can_view_compras
 from core.audit import log_event
-from inventario.models import ExistenciaInsumo
+from inventario.models import ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor
 from recetas.models import PlanProduccion
 from recetas.utils.matching import match_insumo
@@ -406,6 +406,39 @@ def _filter_ordenes_by_categoria(ordenes_qs, categoria_filter: str):
     return ordenes_qs.filter(solicitud__insumo__categoria__iexact=categoria)
 
 
+def _filter_movimientos_by_scope(movimientos_qs, source_filter: str, plan_filter: str):
+    if source_filter == "plan":
+        movimientos_qs = movimientos_qs.filter(referencia__icontains="PLAN_PRODUCCION:")
+    elif source_filter == "manual":
+        movimientos_qs = movimientos_qs.exclude(referencia__icontains="PLAN_PRODUCCION:")
+    if plan_filter:
+        movimientos_qs = movimientos_qs.filter(referencia__icontains=f"PLAN_PRODUCCION:{plan_filter}")
+    return movimientos_qs
+
+
+def _filter_movimientos_by_categoria(movimientos_qs, categoria_filter: str):
+    categoria = _sanitize_categoria_filter(categoria_filter)
+    if not categoria:
+        return movimientos_qs
+
+    categoria_norm = _normalize_categoria_text(categoria)
+    categoria_unit_map = {
+        "masa": "MASS",
+        "volumen": "VOLUME",
+        "pieza": "UNIT",
+    }
+    unidad_tipo = categoria_unit_map.get(categoria_norm)
+    if unidad_tipo:
+        return movimientos_qs.filter(
+            Q(insumo__categoria__iexact=categoria)
+            | (
+                (Q(insumo__categoria="") | Q(insumo__categoria__isnull=True))
+                & Q(insumo__unidad_base__tipo=unidad_tipo)
+            )
+        )
+    return movimientos_qs.filter(insumo__categoria__iexact=categoria)
+
+
 def _shift_month(periodo_mes: str, delta_months: int) -> str:
     year, month = periodo_mes.split("-")
     y = int(year)
@@ -699,6 +732,155 @@ def _build_category_dashboard(
         "trend_rows": trend_rows,
         "trend_months": months_asc,
         "trend_categories": top_categorias,
+    }
+
+
+def _build_consumo_vs_plan_dashboard(
+    periodo_tipo: str,
+    periodo_mes: str,
+    source_filter: str,
+    plan_filter: str,
+    categoria_filter: str,
+) -> dict:
+    start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
+    if not start_date or not end_date:
+        # Evita consultas históricas abiertas cuando el filtro está en "Todos".
+        end_date = timezone.localdate()
+        start_date = end_date - timedelta(days=90)
+
+    plan_qs = PlanProduccion.objects.prefetch_related(
+        "items__receta__lineas__insumo__unidad_base"
+    ).filter(fecha_produccion__range=(start_date, end_date))
+    if plan_filter and plan_filter.isdigit():
+        plan_qs = plan_qs.filter(id=int(plan_filter))
+    if source_filter == "manual":
+        plan_qs = plan_qs.none()
+
+    plan_qty_by_insumo: dict[int, Decimal] = {}
+    insumo_meta: dict[int, dict] = {}
+    for plan in plan_qs:
+        for item in plan.items.all():
+            multiplicador = Decimal(str(item.cantidad or 0))
+            if multiplicador <= 0:
+                continue
+            for linea in item.receta.lineas.all():
+                if not linea.insumo_id:
+                    continue
+                qty_base = Decimal(str(linea.cantidad or 0))
+                if qty_base <= 0:
+                    continue
+                qty_requerida = qty_base * multiplicador
+                if qty_requerida <= 0:
+                    continue
+                if categoria_filter and _sanitize_categoria_filter(categoria_filter):
+                    if _normalize_categoria_text(_resolve_insumo_categoria(linea.insumo)) != _normalize_categoria_text(
+                        _sanitize_categoria_filter(categoria_filter)
+                    ):
+                        continue
+                plan_qty_by_insumo[linea.insumo_id] = plan_qty_by_insumo.get(linea.insumo_id, Decimal("0")) + qty_requerida
+                if linea.insumo_id not in insumo_meta:
+                    insumo_meta[linea.insumo_id] = {
+                        "insumo": linea.insumo.nombre,
+                        "unidad": linea.insumo.unidad_base.codigo if linea.insumo.unidad_base_id else "-",
+                        "categoria": _resolve_insumo_categoria(linea.insumo),
+                    }
+
+    movimientos_qs = (
+        MovimientoInventario.objects.select_related("insumo", "insumo__unidad_base")
+        .filter(tipo__in=[MovimientoInventario.TIPO_SALIDA, MovimientoInventario.TIPO_CONSUMO])
+        .filter(fecha__date__range=(start_date, end_date))
+    )
+    movimientos_qs = _filter_movimientos_by_scope(movimientos_qs, source_filter, plan_filter)
+    movimientos_qs = _filter_movimientos_by_categoria(movimientos_qs, categoria_filter)
+
+    actual_qty_by_insumo: dict[int, Decimal] = {}
+    for mov in movimientos_qs:
+        if not mov.insumo_id:
+            continue
+        qty = abs(Decimal(str(mov.cantidad or 0)))
+        if qty <= 0:
+            continue
+        actual_qty_by_insumo[mov.insumo_id] = actual_qty_by_insumo.get(mov.insumo_id, Decimal("0")) + qty
+        if mov.insumo_id not in insumo_meta:
+            insumo_meta[mov.insumo_id] = {
+                "insumo": mov.insumo.nombre,
+                "unidad": mov.insumo.unidad_base.codigo if mov.insumo.unidad_base_id else "-",
+                "categoria": _resolve_insumo_categoria(mov.insumo),
+            }
+
+    insumo_ids = list(set(plan_qty_by_insumo.keys()) | set(actual_qty_by_insumo.keys()))
+    latest_cost_by_insumo: dict[int, Decimal] = {}
+    if insumo_ids:
+        for c in CostoInsumo.objects.filter(insumo_id__in=insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+            if c.insumo_id not in latest_cost_by_insumo:
+                latest_cost_by_insumo[c.insumo_id] = c.costo_unitario
+
+    rows: list[dict] = []
+    totals = {
+        "plan_qty_total": Decimal("0"),
+        "consumo_real_qty_total": Decimal("0"),
+        "plan_cost_total": Decimal("0"),
+        "consumo_real_cost_total": Decimal("0"),
+        "variacion_cost_total": Decimal("0"),
+    }
+    for insumo_id in insumo_ids:
+        plan_qty = plan_qty_by_insumo.get(insumo_id, Decimal("0"))
+        real_qty = actual_qty_by_insumo.get(insumo_id, Decimal("0"))
+        costo_unitario = latest_cost_by_insumo.get(insumo_id, Decimal("0"))
+
+        plan_cost = plan_qty * costo_unitario
+        real_cost = real_qty * costo_unitario
+        variacion_qty = real_qty - plan_qty
+        variacion_cost = real_cost - plan_cost
+        consumo_pct = None
+        if plan_qty > 0:
+            consumo_pct = (real_qty * Decimal("100")) / plan_qty
+
+        estado = "OK"
+        if plan_qty <= 0 and real_qty > 0:
+            estado = "SIN_PLAN"
+        elif plan_qty > 0 and real_qty <= 0:
+            estado = "SIN_CONSUMO"
+        elif consumo_pct is not None and consumo_pct > Decimal("110"):
+            estado = "SOBRECONSUMO"
+        elif consumo_pct is not None and consumo_pct < Decimal("90"):
+            estado = "BAJO_CONSUMO"
+
+        meta = insumo_meta.get(insumo_id, {"insumo": f"Insumo {insumo_id}", "unidad": "-", "categoria": "Sin categoría"})
+        rows.append(
+            {
+                "insumo_id": insumo_id,
+                "insumo": meta["insumo"],
+                "categoria": meta["categoria"],
+                "unidad": meta["unidad"],
+                "cantidad_plan": plan_qty,
+                "cantidad_real": real_qty,
+                "variacion_qty": variacion_qty,
+                "costo_unitario": costo_unitario,
+                "costo_plan": plan_cost,
+                "costo_real": real_cost,
+                "variacion_cost": variacion_cost,
+                "consumo_pct": consumo_pct,
+                "estado": estado,
+            }
+        )
+        totals["plan_qty_total"] += plan_qty
+        totals["consumo_real_qty_total"] += real_qty
+        totals["plan_cost_total"] += plan_cost
+        totals["consumo_real_cost_total"] += real_cost
+        totals["variacion_cost_total"] += variacion_cost
+
+    rows = sorted(rows, key=lambda x: abs(x["variacion_cost"]), reverse=True)
+    totals["cobertura_pct"] = (
+        (totals["consumo_real_qty_total"] * Decimal("100")) / totals["plan_qty_total"]
+        if totals["plan_qty_total"] > 0
+        else None
+    )
+    return {
+        "rows": rows[:30],
+        "totals": totals,
+        "period_start": start_date,
+        "period_end": end_date,
     }
 
 
@@ -1689,6 +1871,138 @@ def _export_tablero_categoria_xlsx(
     return response
 
 
+def _export_consumo_plan_csv(
+    consumo_dashboard: dict,
+    periodo_label: str,
+    source_filter: str,
+    plan_filter: str,
+    categoria_filter: str,
+) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="compras_consumo_vs_plan_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["CONSUMO REAL VS PLAN DE PRODUCCION"])
+    writer.writerow(["Periodo activo", periodo_label])
+    writer.writerow(["Rango considerado", f"{consumo_dashboard['period_start']} a {consumo_dashboard['period_end']}"])
+    writer.writerow(["Filtro origen", source_filter])
+    writer.writerow(["Filtro plan", plan_filter or "-"])
+    writer.writerow(["Filtro categoria", categoria_filter or "-"])
+    writer.writerow([])
+    writer.writerow(["Totales"])
+    writer.writerow(["Plan qty", consumo_dashboard["totals"]["plan_qty_total"]])
+    writer.writerow(["Real qty", consumo_dashboard["totals"]["consumo_real_qty_total"]])
+    writer.writerow(["Plan costo", consumo_dashboard["totals"]["plan_cost_total"]])
+    writer.writerow(["Real costo", consumo_dashboard["totals"]["consumo_real_cost_total"]])
+    writer.writerow(["Variacion costo", consumo_dashboard["totals"]["variacion_cost_total"]])
+    writer.writerow(["Cobertura %", consumo_dashboard["totals"]["cobertura_pct"] or ""])
+    writer.writerow([])
+    writer.writerow(
+        [
+            "Insumo",
+            "Categoria",
+            "Unidad",
+            "Cantidad plan",
+            "Cantidad real",
+            "Variacion qty",
+            "Costo unitario",
+            "Costo plan",
+            "Costo real",
+            "Variacion costo",
+            "Consumo %",
+            "Estado",
+        ]
+    )
+    for row in consumo_dashboard["rows"]:
+        writer.writerow(
+            [
+                row["insumo"],
+                row["categoria"],
+                row["unidad"],
+                row["cantidad_plan"],
+                row["cantidad_real"],
+                row["variacion_qty"],
+                row["costo_unitario"],
+                row["costo_plan"],
+                row["costo_real"],
+                row["variacion_cost"],
+                row["consumo_pct"] if row["consumo_pct"] is not None else "",
+                row["estado"],
+            ]
+        )
+    return response
+
+
+def _export_consumo_plan_xlsx(
+    consumo_dashboard: dict,
+    periodo_label: str,
+    source_filter: str,
+    plan_filter: str,
+    categoria_filter: str,
+) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Consumo vs plan"
+    ws.append(["CONSUMO REAL VS PLAN DE PRODUCCION"])
+    ws.append(["Periodo activo", periodo_label])
+    ws.append(["Rango considerado", f"{consumo_dashboard['period_start']} a {consumo_dashboard['period_end']}"])
+    ws.append(["Filtro origen", source_filter])
+    ws.append(["Filtro plan", plan_filter or "-"])
+    ws.append(["Filtro categoria", categoria_filter or "-"])
+    ws.append([])
+    ws.append(["Plan qty", float(consumo_dashboard["totals"]["plan_qty_total"] or 0)])
+    ws.append(["Real qty", float(consumo_dashboard["totals"]["consumo_real_qty_total"] or 0)])
+    ws.append(["Plan costo", float(consumo_dashboard["totals"]["plan_cost_total"] or 0)])
+    ws.append(["Real costo", float(consumo_dashboard["totals"]["consumo_real_cost_total"] or 0)])
+    ws.append(["Variacion costo", float(consumo_dashboard["totals"]["variacion_cost_total"] or 0)])
+    ws.append(["Cobertura %", float(consumo_dashboard["totals"]["cobertura_pct"] or 0)])
+    ws.append([])
+    ws.append(
+        [
+            "Insumo",
+            "Categoria",
+            "Unidad",
+            "Cantidad plan",
+            "Cantidad real",
+            "Variacion qty",
+            "Costo unitario",
+            "Costo plan",
+            "Costo real",
+            "Variacion costo",
+            "Consumo %",
+            "Estado",
+        ]
+    )
+    for row in consumo_dashboard["rows"]:
+        ws.append(
+            [
+                row["insumo"],
+                row["categoria"],
+                row["unidad"],
+                float(row["cantidad_plan"] or 0),
+                float(row["cantidad_real"] or 0),
+                float(row["variacion_qty"] or 0),
+                float(row["costo_unitario"] or 0),
+                float(row["costo_plan"] or 0),
+                float(row["costo_real"] or 0),
+                float(row["variacion_cost"] or 0),
+                float(row["consumo_pct"] or 0) if row["consumo_pct"] is not None else None,
+                row["estado"],
+            ]
+        )
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="compras_consumo_vs_plan_{now_str}.xlsx"'
+    return response
+
+
 def _filtered_solicitudes(
     source_filter_raw: str,
     plan_filter_raw: str,
@@ -1884,6 +2198,13 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         categoria_filter,
         budget_ctx.get("presupuesto_rows_categoria", []),
     )
+    consumo_dashboard = _build_consumo_vs_plan_dashboard(
+        periodo_tipo,
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+    )
     total_presupuesto = budget_ctx["presupuesto_estimado_total"]
 
     export_format = (request.GET.get("export") or "").lower()
@@ -1950,6 +2271,22 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             plan_filter,
             categoria_filter,
         )
+    if export_format == "consumo_plan_csv":
+        return _export_consumo_plan_csv(
+            consumo_dashboard,
+            periodo_label,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+        )
+    if export_format == "consumo_plan_xlsx":
+        return _export_consumo_plan_xlsx(
+            consumo_dashboard,
+            periodo_label,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+        )
     if export_format == "xlsx":
         return _export_solicitudes_xlsx(
             solicitudes,
@@ -2001,6 +2338,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "presupuesto_historial": _build_budget_history(periodo_mes, source_filter, plan_filter, categoria_filter),
         "provider_dashboard": provider_dashboard,
         "category_dashboard": category_dashboard,
+        "consumo_dashboard": consumo_dashboard,
         **budget_ctx,
     }
     return render(request, "compras/solicitudes.html", context)
@@ -2650,6 +2988,13 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
         categoria_filter,
         budget_ctx.get("presupuesto_rows_categoria", []),
     )
+    consumo_dashboard = _build_consumo_vs_plan_dashboard(
+        periodo_tipo,
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+    )
     historial = _build_budget_history(periodo_mes, source_filter, plan_filter, categoria_filter)
 
     data = {
@@ -2737,6 +3082,107 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
                 for row in category_dashboard["trend_rows"]
             ],
         },
+        "consumo_vs_plan": {
+            "totals": {
+                "plan_qty_total": float(consumo_dashboard["totals"]["plan_qty_total"] or 0),
+                "consumo_real_qty_total": float(consumo_dashboard["totals"]["consumo_real_qty_total"] or 0),
+                "plan_cost_total": float(consumo_dashboard["totals"]["plan_cost_total"] or 0),
+                "consumo_real_cost_total": float(consumo_dashboard["totals"]["consumo_real_cost_total"] or 0),
+                "variacion_cost_total": float(consumo_dashboard["totals"]["variacion_cost_total"] or 0),
+                "cobertura_pct": (
+                    float(consumo_dashboard["totals"]["cobertura_pct"])
+                    if consumo_dashboard["totals"]["cobertura_pct"] is not None
+                    else None
+                ),
+            },
+            "period_start": str(consumo_dashboard["period_start"]),
+            "period_end": str(consumo_dashboard["period_end"]),
+            "rows": [
+                {
+                    "insumo_id": row["insumo_id"],
+                    "insumo": row["insumo"],
+                    "categoria": row["categoria"],
+                    "unidad": row["unidad"],
+                    "cantidad_plan": float(row["cantidad_plan"] or 0),
+                    "cantidad_real": float(row["cantidad_real"] or 0),
+                    "variacion_qty": float(row["variacion_qty"] or 0),
+                    "costo_unitario": float(row["costo_unitario"] or 0),
+                    "costo_plan": float(row["costo_plan"] or 0),
+                    "costo_real": float(row["costo_real"] or 0),
+                    "variacion_cost": float(row["variacion_cost"] or 0),
+                    "consumo_pct": float(row["consumo_pct"]) if row["consumo_pct"] is not None else None,
+                    "estado": row["estado"],
+                }
+                for row in consumo_dashboard["rows"][:20]
+            ],
+        },
+    }
+    return JsonResponse(data)
+
+
+@login_required
+def solicitudes_consumo_vs_plan_api(request: HttpRequest) -> JsonResponse:
+    if not can_view_compras(request.user):
+        raise PermissionDenied("No tienes permisos para ver Compras.")
+
+    periodo_tipo, periodo_mes, periodo_label = _parse_period_filters(
+        request.GET.get("periodo_tipo"),
+        request.GET.get("periodo_mes"),
+    )
+    source_filter = (request.GET.get("source") or "all").lower()
+    if source_filter not in {"all", "manual", "plan"}:
+        source_filter = "all"
+    plan_filter = (request.GET.get("plan_id") or "").strip()
+    categoria_filter = _sanitize_categoria_filter(request.GET.get("categoria"))
+
+    dashboard = _build_consumo_vs_plan_dashboard(
+        periodo_tipo=periodo_tipo,
+        periodo_mes=periodo_mes,
+        source_filter=source_filter,
+        plan_filter=plan_filter,
+        categoria_filter=categoria_filter,
+    )
+    data = {
+        "filters": {
+            "source": source_filter,
+            "plan_id": plan_filter,
+            "categoria": categoria_filter or "",
+            "periodo_tipo": periodo_tipo,
+            "periodo_mes": periodo_mes,
+            "periodo_label": periodo_label,
+        },
+        "period_start": str(dashboard["period_start"]),
+        "period_end": str(dashboard["period_end"]),
+        "totals": {
+            "plan_qty_total": float(dashboard["totals"]["plan_qty_total"] or 0),
+            "consumo_real_qty_total": float(dashboard["totals"]["consumo_real_qty_total"] or 0),
+            "plan_cost_total": float(dashboard["totals"]["plan_cost_total"] or 0),
+            "consumo_real_cost_total": float(dashboard["totals"]["consumo_real_cost_total"] or 0),
+            "variacion_cost_total": float(dashboard["totals"]["variacion_cost_total"] or 0),
+            "cobertura_pct": (
+                float(dashboard["totals"]["cobertura_pct"])
+                if dashboard["totals"]["cobertura_pct"] is not None
+                else None
+            ),
+        },
+        "rows": [
+            {
+                "insumo_id": row["insumo_id"],
+                "insumo": row["insumo"],
+                "categoria": row["categoria"],
+                "unidad": row["unidad"],
+                "cantidad_plan": float(row["cantidad_plan"] or 0),
+                "cantidad_real": float(row["cantidad_real"] or 0),
+                "variacion_qty": float(row["variacion_qty"] or 0),
+                "costo_unitario": float(row["costo_unitario"] or 0),
+                "costo_plan": float(row["costo_plan"] or 0),
+                "costo_real": float(row["costo_real"] or 0),
+                "variacion_cost": float(row["variacion_cost"] or 0),
+                "consumo_pct": float(row["consumo_pct"]) if row["consumo_pct"] is not None else None,
+                "estado": row["estado"],
+            }
+            for row in dashboard["rows"]
+        ],
     }
     return JsonResponse(data)
 

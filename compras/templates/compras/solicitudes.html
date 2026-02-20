@@ -567,6 +567,100 @@
           </table>
         </div>
       </div>
+      <div class="card" style="margin-top: 12px;">
+        <div class="card-header">Consumo Real vs Plan de Producción</div>
+        <p class="muted">
+          Rango evaluado: {{ consumo_dashboard.period_start }} a {{ consumo_dashboard.period_end }}.
+          El costo se estima con el último costo unitario disponible por insumo.
+        </p>
+        <div class="kpi-mini">
+          <article class="kpi-card">
+            <div class="kpi-number">{{ consumo_dashboard.totals.plan_qty_total|floatformat:2 }}</div>
+            <div class="kpi-label">Cantidad plan</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-number is-warning">{{ consumo_dashboard.totals.consumo_real_qty_total|floatformat:2 }}</div>
+            <div class="kpi-label">Cantidad real consumida</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-number">{{ consumo_dashboard.totals.plan_cost_total|floatformat:2 }}</div>
+            <div class="kpi-label">Costo plan</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-number is-success">{{ consumo_dashboard.totals.consumo_real_cost_total|floatformat:2 }}</div>
+            <div class="kpi-label">Costo real</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-number {% if consumo_dashboard.totals.variacion_cost_total > 0 %}is-danger{% elif consumo_dashboard.totals.variacion_cost_total < 0 %}is-success{% endif %}">
+              {{ consumo_dashboard.totals.variacion_cost_total|floatformat:2 }}
+            </div>
+            <div class="kpi-label">
+              Variación costo
+              {% if consumo_dashboard.totals.cobertura_pct is not None %}
+                ({{ consumo_dashboard.totals.cobertura_pct|floatformat:2 }}%)
+              {% endif %}
+            </div>
+          </article>
+        </div>
+        <div class="table-responsive" style="margin-top:10px;">
+          <table class="table table-striped">
+            <thead>
+              <tr>
+                <th>Insumo</th>
+                <th>Categoría</th>
+                <th>Unidad</th>
+                <th class="text-end">Plan</th>
+                <th class="text-end">Real</th>
+                <th class="text-end">Variación qty</th>
+                <th class="text-end">Costo unitario</th>
+                <th class="text-end">Costo plan</th>
+                <th class="text-end">Costo real</th>
+                <th class="text-end">Variación costo</th>
+                <th class="text-end">% Consumo</th>
+                <th>Estatus</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in consumo_dashboard.rows %}
+              <tr>
+                <td>{{ r.insumo }}</td>
+                <td>{{ r.categoria }}</td>
+                <td>{{ r.unidad }}</td>
+                <td class="text-end">{{ r.cantidad_plan|floatformat:2 }}</td>
+                <td class="text-end">{{ r.cantidad_real|floatformat:2 }}</td>
+                <td class="text-end {% if r.variacion_qty > 0 %}text-danger{% elif r.variacion_qty < 0 %}text-success{% endif %}">{{ r.variacion_qty|floatformat:2 }}</td>
+                <td class="text-end">${{ r.costo_unitario|floatformat:2 }}</td>
+                <td class="text-end">${{ r.costo_plan|floatformat:2 }}</td>
+                <td class="text-end">${{ r.costo_real|floatformat:2 }}</td>
+                <td class="text-end {% if r.variacion_cost > 0 %}text-danger{% elif r.variacion_cost < 0 %}text-success{% endif %}">${{ r.variacion_cost|floatformat:2 }}</td>
+                <td class="text-end">
+                  {% if r.consumo_pct is not None %}
+                    {{ r.consumo_pct|floatformat:2 }}%
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if r.estado == 'OK' %}
+                    <span class="badge-verde">OK</span>
+                  {% elif r.estado == 'SOBRECONSUMO' %}
+                    <span class="badge-rojo">Sobreconsumo</span>
+                  {% elif r.estado == 'BAJO_CONSUMO' %}
+                    <span class="badge-amarillo">Bajo consumo</span>
+                  {% elif r.estado == 'SIN_PLAN' %}
+                    <span class="badge-amarillo">Sin plan</span>
+                  {% else %}
+                    <span class="badge-amarillo">Sin consumo</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="12" class="text-muted">Sin datos de consumo/plan para este rango.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
     {% endif %}
   </section>
   <div class="toolbar">
@@ -583,6 +677,8 @@
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=proveedor_xlsx{% else %}?export=proveedor_xlsx{% endif %}" class="btn btn-secondary">Export tablero proveedor XLSX</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=categoria_csv{% else %}?export=categoria_csv{% endif %}" class="btn btn-secondary">Export tablero categoría CSV</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=categoria_xlsx{% else %}?export=categoria_xlsx{% endif %}" class="btn btn-secondary">Export tablero categoría XLSX</a>
+    <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=consumo_plan_csv{% else %}?export=consumo_plan_csv{% endif %}" class="btn btn-secondary">Export consumo vs plan CSV</a>
+    <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=consumo_plan_xlsx{% else %}?export=consumo_plan_xlsx{% endif %}" class="btn btn-secondary">Export consumo vs plan XLSX</a>
   </div>
   <div class="table-responsive">
     <table class="table table-striped">

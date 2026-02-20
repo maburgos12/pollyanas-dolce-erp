@@ -1,12 +1,15 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from compras.models import OrdenCompra, SolicitudCompra
+from inventario.models import MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
+from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
 
 
 class ComprasFase2FiltersTests(TestCase):
@@ -119,6 +122,40 @@ class ComprasFase2FiltersTests(TestCase):
             estatus=OrdenCompra.STATUS_ENVIADA,
         )
 
+        self.receta_plan = Receta.objects.create(
+            nombre="Base prueba plan",
+            hash_contenido="test-hash-plan-001",
+        )
+        LineaReceta.objects.create(
+            receta=self.receta_plan,
+            posicion=1,
+            insumo=self.insumo_masa_blank,
+            insumo_texto="Harina",
+            cantidad=Decimal("2"),
+            unidad=self.unidad_kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("10"),
+            match_method=LineaReceta.MATCH_EXACT,
+            match_score=100,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        self.plan = PlanProduccion.objects.create(
+            nombre="Plan Febrero Test",
+            fecha_produccion=self.fecha_base,
+        )
+        PlanProduccionItem.objects.create(
+            plan=self.plan,
+            receta=self.receta_plan,
+            cantidad=Decimal("1"),
+        )
+        MovimientoInventario.objects.create(
+            fecha=timezone.make_aware(datetime(2026, 2, 10, 11, 0, 0)),
+            tipo=MovimientoInventario.TIPO_CONSUMO,
+            insumo=self.insumo_masa_blank,
+            cantidad=Decimal("3"),
+            referencia=f"PLAN_PRODUCCION:{self.plan.id}",
+        )
+
     def test_resumen_api_aplica_filtro_categoria(self):
         url = reverse("compras:solicitudes_resumen_api")
         response = self.client.get(
@@ -156,3 +193,25 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertEqual(response.context["categoria_filter"], "Masa")
         self.assertEqual(len(response.context["solicitudes"]), 2)
         self.assertIn("categoria=Masa", response.context["current_query"])
+
+    def test_consumo_vs_plan_api_retorna_totales(self):
+        url = reverse("compras:solicitudes_consumo_vs_plan_api")
+        response = self.client.get(
+            url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": self.periodo_mes,
+                "categoria": "Masa",
+                "source": "all",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload["filters"]["categoria"], "Masa")
+        self.assertAlmostEqual(payload["totals"]["plan_qty_total"], 2.0, places=2)
+        self.assertAlmostEqual(payload["totals"]["consumo_real_qty_total"], 3.0, places=2)
+        self.assertAlmostEqual(payload["totals"]["plan_cost_total"], 20.0, places=2)
+        self.assertAlmostEqual(payload["totals"]["consumo_real_cost_total"], 30.0, places=2)
+        self.assertAlmostEqual(payload["totals"]["variacion_cost_total"], 10.0, places=2)
+        self.assertIsNotNone(payload["totals"]["cobertura_pct"])
