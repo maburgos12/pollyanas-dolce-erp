@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from django.utils import timezone
 
@@ -126,3 +128,28 @@ class AlmacenSyncRun(models.Model):
 
     def __str__(self):
         return f"{self.source} {self.status} {self.started_at:%Y-%m-%d %H:%M}"
+
+
+class InventarioConfig(models.Model):
+    reorder_max_diff_pct = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("10.00"))
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuración de inventario"
+        verbose_name_plural = "Configuración de inventario"
+
+    def save(self, *args, **kwargs):
+        # Singleton: solo se usa una fila global para el módulo.
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls, default_pct: Decimal | None = None) -> "InventarioConfig":
+        defaults = {}
+        if default_pct is not None:
+            defaults["reorder_max_diff_pct"] = default_pct
+        obj, _ = cls.objects.get_or_create(pk=1, defaults=defaults)
+        return obj
+
+    def __str__(self):
+        return f"Umbral manual PR: {self.reorder_max_diff_pct}%"

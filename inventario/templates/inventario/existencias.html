@@ -24,6 +24,19 @@
     Captura manual permitida con desviación máxima de <strong>{{ reorder_max_diff_pct|floatformat:2 }}%</strong> vs recomendado.
   </p>
   {% if can_manage_inventario %}
+  <form method="post" class="form-grid-auto" style="margin-bottom: 14px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="update_reorder_config">
+    <input
+      class="input-field"
+      type="number"
+      step="0.01"
+      min="0"
+      name="reorder_max_diff_pct"
+      value="{{ reorder_max_diff_pct }}"
+      placeholder="Umbral máximo manual (%)">
+    <button class="btn btn-secondary" type="submit">Guardar umbral de validación</button>
+  </form>
   <form method="post" class="form-grid-auto">
     {% csrf_token %}
     <select class="input-field" name="insumo_id" required>

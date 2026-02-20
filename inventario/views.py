@@ -34,7 +34,7 @@ from inventario.utils.google_drive_sync import sync_almacen_from_drive
 from inventario.utils.sync_logging import log_sync_run
 from inventario.utils.reorder import FORMULA_EXCEL_LEGACY, FORMULA_LEADTIME_PLUS_SAFETY, calcular_punto_reorden
 
-from .models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
+from .models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, InventarioConfig, MovimientoInventario
 
 
 SOURCE_TO_FILENAME = {
@@ -52,6 +52,11 @@ def _to_decimal(value: str, default: str = "0") -> Decimal:
         return Decimal(value or default)
     except (InvalidOperation, TypeError):
         return Decimal(default)
+
+
+def _inventario_reorder_max_diff_pct() -> Decimal:
+    default_pct = _to_decimal(str(getattr(settings, "INVENTARIO_REORDER_MAX_DIFF_PCT", 10)), "10")
+    return InventarioConfig.get_solo(default_pct=default_pct).reorder_max_diff_pct
 
 
 def _apply_movimiento(movimiento: MovimientoInventario) -> None:
@@ -540,6 +545,21 @@ def existencias(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         if not can_manage_inventario(request.user):
             raise PermissionDenied("No tienes permisos para editar existencias.")
+        action = (request.POST.get("action") or "").strip()
+        if action == "update_reorder_config":
+            max_diff_pct = _to_decimal(request.POST.get("reorder_max_diff_pct"), "10")
+            if max_diff_pct < 0:
+                messages.error(request, "El umbral máximo de desviación no puede ser negativo.")
+                return redirect("inventario:existencias")
+            config = InventarioConfig.get_solo()
+            config.reorder_max_diff_pct = max_diff_pct
+            config.save(update_fields=["reorder_max_diff_pct", "updated_at"])
+            messages.success(
+                request,
+                f"Configuración guardada: umbral máximo manual en punto de reorden = {max_diff_pct}%.",
+            )
+            return redirect("inventario:existencias")
+
         insumo_id = request.POST.get("insumo_id")
         if insumo_id:
             existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo_id=insumo_id)
@@ -566,7 +586,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
             if reorden_raw:
                 new_reorden = _to_decimal(reorden_raw, "0")
                 reorden_auto = False
-                max_diff_pct = _to_decimal(str(getattr(settings, "INVENTARIO_REORDER_MAX_DIFF_PCT", 10)), "10")
+                max_diff_pct = _inventario_reorder_max_diff_pct()
                 if reorden_recomendado > 0 and max_diff_pct >= 0:
                     diff_pct = (abs(new_reorden - reorden_recomendado) / reorden_recomendado) * Decimal("100")
                     if diff_pct > max_diff_pct:
@@ -650,7 +670,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
         "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
         "can_manage_inventario": can_manage_inventario(request.user),
         "reorder_formula_mode": formula_mode,
-        "reorder_max_diff_pct": getattr(settings, "INVENTARIO_REORDER_MAX_DIFF_PCT", 10),
+        "reorder_max_diff_pct": _inventario_reorder_max_diff_pct(),
         "formula_excel_legacy": FORMULA_EXCEL_LEGACY,
         "formula_leadtime_plus_safety": FORMULA_LEADTIME_PLUS_SAFETY,
     }
