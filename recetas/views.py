@@ -96,6 +96,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
 def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     nombre = (request.POST.get("nombre") or "").strip()
+    codigo_point = (request.POST.get("codigo_point") or "").strip()
     sheet_name = (request.POST.get("sheet_name") or "").strip()
     tipo = (request.POST.get("tipo") or Receta.TIPO_PREPARACION).strip()
     usa_presentaciones = request.POST.get("usa_presentaciones") == "on"
@@ -110,6 +111,7 @@ def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
         tipo = Receta.TIPO_PREPARACION
 
     receta.nombre = nombre[:250]
+    receta.codigo_point = codigo_point[:80]
     receta.sheet_name = sheet_name[:120]
     receta.tipo = tipo
     receta.usa_presentaciones = usa_presentaciones
@@ -665,6 +667,36 @@ def _export_plan_xlsx(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpRe
     return response
 
 
+def _export_plan_point_xlsx(plan: PlanProduccion) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Importacion Produccion"
+    ws.append(["Código", "Nombre", "Cantidad Solicitada", "Is Insumo"])
+
+    items = plan.items.select_related("receta").order_by("id")
+    for item in items:
+        receta = item.receta
+        ws.append(
+            [
+                receta.codigo_point or "",
+                receta.nombre,
+                float(item.cantidad or 0),
+                1 if receta.tipo == Receta.TIPO_PREPARACION else 0,
+            ]
+        )
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    filename = f"point_plan_produccion_{plan.id}_{plan.fecha_produccion}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion(request: HttpRequest) -> HttpResponse:
     planes = PlanProduccion.objects.select_related("creado_por").prefetch_related("items").order_by("-fecha_produccion", "-id")
@@ -692,8 +724,10 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion_export(request: HttpRequest, plan_id: int) -> HttpResponse:
     plan = get_object_or_404(PlanProduccion, pk=plan_id)
-    explosion = _plan_explosion(plan)
     export_format = (request.GET.get("format") or "csv").lower()
+    if export_format in {"point", "point-xlsx", "point_xlsx"}:
+        return _export_plan_point_xlsx(plan)
+    explosion = _plan_explosion(plan)
     if export_format == "xlsx":
         return _export_plan_xlsx(plan, explosion)
     return _export_plan_csv(plan, explosion)

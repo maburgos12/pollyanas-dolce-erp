@@ -14,6 +14,7 @@ class Receta(models.Model):
     ]
 
     nombre = models.CharField(max_length=250)
+    codigo_point = models.CharField(max_length=80, blank=True, default="", db_index=True)
     nombre_normalizado = models.CharField(max_length=260, db_index=True)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_PREPARACION, db_index=True)
     usa_presentaciones = models.BooleanField(default=False)

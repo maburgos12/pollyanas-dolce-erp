@@ -18,6 +18,7 @@
   <form method="post" action="{% url 'recetas:receta_update' receta.id %}" class="recipes-filters mb-3">
     {% csrf_token %}
     <input class="form-control" type="text" name="nombre" value="{{ receta.nombre }}" placeholder="Nombre de receta" required>
+    <input class="form-control" type="text" name="codigo_point" value="{{ receta.codigo_point }}" placeholder="Código Point (opcional)">
     <select class="form-select" name="tipo">
       {% for value, label in tipo_choices %}
       <option value="{{ value }}" {% if receta.tipo == value %}selected{% endif %}>{{ label }}</option>

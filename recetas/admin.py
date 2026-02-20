@@ -9,8 +9,8 @@ class LineaRecetaInline(admin.TabularInline):
 
 @admin.register(Receta)
 class RecetaAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "sheet_name", "pendientes_matching")
-    search_fields = ("nombre", "sheet_name")
+    list_display = ("nombre", "codigo_point", "sheet_name", "pendientes_matching")
+    search_fields = ("nombre", "codigo_point", "sheet_name")
     inlines = [LineaRecetaInline]
 
 @admin.register(LineaReceta)
