@@ -72,6 +72,13 @@
   <div class="toolbar" style="margin-top:10px;">
     <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}?tipo=INSUMO">Revisar pendientes Point</a>
     <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Revisar pendientes Recetas</a>
+    {% if can_manage_inventario %}
+    <form method="post" class="inline-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="reprocess_recetas_pending">
+      <button class="btn btn-primary" type="submit">Reprocesar pendientes recetas</button>
+    </form>
+    {% endif %}
   </div>
 
   {% if cross_unified_rows %}

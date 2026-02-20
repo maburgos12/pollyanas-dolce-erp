@@ -23,6 +23,7 @@ from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch
 from recetas.models import LineaReceta
+from recetas.utils.matching import clasificar_match, match_insumo
 from recetas.utils.normalizacion import normalizar_nombre
 from inventario.utils.almacen_import import (
     ENTRADAS_FILE,
@@ -198,6 +199,77 @@ def _resolve_cross_source_with_alias(alias_name: str, insumo: Insumo) -> tuple[i
         recetas_resolved += 1
 
     return point_resolved, recetas_resolved
+
+
+def _latest_cost_by_insumo_cached(insumo_id: int, cache: dict[int, Decimal | None]) -> Decimal | None:
+    if insumo_id in cache:
+        return cache[insumo_id]
+    latest = (
+        CostoInsumo.objects.filter(insumo_id=insumo_id).order_by("-fecha", "-id").values_list("costo_unitario", flat=True).first()
+    )
+    cache[insumo_id] = latest
+    return latest
+
+
+def _reprocess_recetas_pending_matching() -> dict[str, int]:
+    qs = LineaReceta.objects.filter(~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION)).filter(
+        Q(insumo__isnull=True) | Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW) | Q(match_status=LineaReceta.STATUS_REJECTED)
+    )
+    total = 0
+    auto_ok = 0
+    review = 0
+    rejected = 0
+    linked = 0
+    cost_cache: dict[int, Decimal | None] = {}
+
+    for linea in qs:
+        total += 1
+        insumo, score, method = match_insumo(linea.insumo_texto or "")
+        status = clasificar_match(score)
+
+        linea.match_score = score
+        linea.match_method = method
+        linea.match_status = status
+
+        if status == LineaReceta.STATUS_REJECTED or not insumo:
+            linea.insumo = None
+        else:
+            linea.insumo = insumo
+            linked += 1
+            if not linea.unidad_id and insumo.unidad_base_id:
+                linea.unidad = insumo.unidad_base
+            if (not linea.unidad_texto) and insumo.unidad_base_id and insumo.unidad_base:
+                linea.unidad_texto = insumo.unidad_base.codigo
+            latest_cost = _latest_cost_by_insumo_cached(insumo.id, cost_cache)
+            if latest_cost is not None:
+                linea.costo_unitario_snapshot = latest_cost
+
+        linea.save(
+            update_fields=[
+                "insumo",
+                "unidad",
+                "unidad_texto",
+                "costo_unitario_snapshot",
+                "match_status",
+                "match_method",
+                "match_score",
+            ]
+        )
+
+        if status == LineaReceta.STATUS_AUTO:
+            auto_ok += 1
+        elif status == LineaReceta.STATUS_NEEDS_REVIEW:
+            review += 1
+        else:
+            rejected += 1
+
+    return {
+        "total": total,
+        "auto_ok": auto_ok,
+        "review": review,
+        "rejected": rejected,
+        "linked": linked,
+    }
 
 
 @login_required
@@ -457,6 +529,19 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             if hide_run_id.isdigit():
                 request.session["inventario_hidden_pending_run_id"] = int(hide_run_id)
             messages.success(request, "Pendientes en pantalla limpiados.")
+        elif action == "reprocess_recetas_pending":
+            result = _reprocess_recetas_pending_matching()
+            messages.success(
+                request,
+                (
+                    "Reproceso recetas completado. "
+                    f"Procesadas: {result['total']}, "
+                    f"Auto/OK: {result['auto_ok']}, "
+                    f"Por revisar: {result['review']}, "
+                    f"Sin match: {result['rejected']}, "
+                    f"Ligadas a insumo: {result['linked']}."
+                ),
+            )
 
         base_url = reverse("inventario:aliases_catalog")
         if next_q:
