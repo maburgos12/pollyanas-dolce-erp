@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import CostoInsumo, Insumo, InsumoAlias, Proveedor, UnidadMedida
+from .models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 
 @admin.register(UnidadMedida)
 class UnidadMedidaAdmin(admin.ModelAdmin):
@@ -31,3 +31,10 @@ class InsumoAliasAdmin(admin.ModelAdmin):
     list_display = ("nombre", "insumo", "nombre_normalizado", "creado_en")
     search_fields = ("nombre", "nombre_normalizado", "insumo__nombre")
     list_filter = ("creado_en",)
+
+
+@admin.register(PointPendingMatch)
+class PointPendingMatchAdmin(admin.ModelAdmin):
+    list_display = ("tipo", "point_codigo", "point_nombre", "method", "fuzzy_score", "actualizado_en")
+    search_fields = ("point_codigo", "point_nombre", "fuzzy_sugerencia")
+    list_filter = ("tipo", "method")

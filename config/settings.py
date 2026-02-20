@@ -152,3 +152,8 @@ SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=not DEBUG)
 SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", default=not DEBUG)
 CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=not DEBUG)
+
+# Inventario: fórmula de punto de reorden.
+# - excel_legacy: (dias_llegada + consumo_diario_promedio) * stock_minimo
+# - leadtime_plus_safety: (dias_llegada * consumo_diario_promedio) + stock_minimo
+INVENTARIO_REORDER_FORMULA = os.getenv("INVENTARIO_REORDER_FORMULA", "excel_legacy").strip().lower()

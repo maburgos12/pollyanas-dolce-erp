@@ -14,6 +14,14 @@
 
 <section class="card">
   <div class="card-header">Actualizar Existencia</div>
+  <p class="muted">
+    Fórmula activa de punto de reorden:
+    {% if reorder_formula_mode == formula_excel_legacy %}
+      <code>(dias_llegada + consumo_diario_promedio) * stock_minimo</code> (alineada al Excel actual).
+    {% else %}
+      <code>(dias_llegada * consumo_diario_promedio) + stock_minimo</code>.
+    {% endif %}
+  </p>
   {% if can_manage_inventario %}
   <form method="post" class="form-grid-auto">
     {% csrf_token %}
@@ -24,7 +32,7 @@
     <input class="input-field" type="number" step="0.001" name="stock_actual" placeholder="Stock actual" required>
     <input class="input-field" type="number" step="0.001" name="stock_minimo" placeholder="Stock mínimo" value="0">
     <input class="input-field" type="number" step="0.001" name="stock_maximo" placeholder="Stock máximo" value="0">
-    <input class="input-field" type="number" step="0.001" name="punto_reorden" placeholder="Punto reorden" required>
+    <input class="input-field" type="number" step="0.001" name="punto_reorden" placeholder="Punto reorden (opcional, vacío = auto)">
     <input class="input-field" type="number" step="0.001" name="inventario_promedio" placeholder="Inventario promedio" value="0">
     <input class="input-field" type="number" step="1" min="0" name="dias_llegada_pedido" placeholder="Días llegada pedido" value="0">
     <input class="input-field" type="number" step="0.001" name="consumo_diario_promedio" placeholder="Consumo diario promedio" value="0">
@@ -50,6 +58,8 @@
           <th class="text-end">Inv. promedio</th>
           <th class="text-end">Días pedido</th>
           <th class="text-end">Consumo diario</th>
+          <th class="text-end">Reorden recomendado</th>
+          <th class="text-end">Diferencia</th>
           <th>Estatus</th>
         </tr>
       </thead>
@@ -65,10 +75,12 @@
           <td class="text-end">{{ e.inventario_promedio }}</td>
           <td class="text-end">{{ e.dias_llegada_pedido }}</td>
           <td class="text-end">{{ e.consumo_diario_promedio }}</td>
+          <td class="text-end">{{ e.punto_reorden_recomendado|floatformat:3 }}</td>
+          <td class="text-end">{{ e.punto_reorden_diferencia|floatformat:3 }}</td>
           <td>{% if e.stock_actual < e.punto_reorden %}<span class="badge bg-danger">Bajo mínimo</span>{% else %}<span class="badge bg-success">Sano</span>{% endif %}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="10" class="text-muted">Sin existencias registradas.</td></tr>
+        <tr><td colspan="12" class="text-muted">Sin existencias registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>

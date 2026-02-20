@@ -9,10 +9,12 @@ from typing import Any
 
 import pandas as pd
 from rapidfuzz import fuzz, process
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
 from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.utils.reorder import calcular_punto_reorden
 from maestros.models import Insumo, InsumoAlias, UnidadMedida
 from recetas.utils.normalizacion import normalizar_nombre
 
@@ -312,10 +314,18 @@ def _read_inventory_rows(folder: Path) -> list[StockRow]:
         stock_minimo = _to_decimal(df.iat[idx, 12] if df.shape[1] > 12 else None, default="0")
         stock_maximo = _to_decimal(df.iat[idx, 13] if df.shape[1] > 13 else None, default="0")
         inventario_promedio = _to_decimal(df.iat[idx, 15] if df.shape[1] > 15 else None, default="0")
-        reorden = _to_decimal(df.iat[idx, 12] if df.shape[1] > 12 else None, default="0")
-        punto_retorno = _to_decimal(df.iat[idx, 17] if df.shape[1] > 17 else None, default=str(reorden))
         dias_llegada = int(_to_decimal(df.iat[idx, 18] if df.shape[1] > 18 else None, default="0"))
         consumo_diario = _to_decimal(df.iat[idx, 19] if df.shape[1] > 19 else None, default="0")
+        punto_retorno = _to_decimal(df.iat[idx, 17] if df.shape[1] > 17 else None, default="0")
+
+        # Si el valor no viene calculado en el archivo, se reconstruye con la fórmula operativa.
+        if punto_retorno <= 0 and (stock_minimo > 0 or dias_llegada > 0 or consumo_diario > 0):
+            punto_retorno = calcular_punto_reorden(
+                stock_minimo=stock_minimo,
+                dias_llegada_pedido=dias_llegada,
+                consumo_diario_promedio=consumo_diario,
+                formula=getattr(settings, "INVENTARIO_REORDER_FORMULA", "excel_legacy"),
+            )
 
         rows.append(
             StockRow(

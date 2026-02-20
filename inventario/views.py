@@ -32,6 +32,7 @@ from inventario.utils.almacen_import import (
 )
 from inventario.utils.google_drive_sync import sync_almacen_from_drive
 from inventario.utils.sync_logging import log_sync_run
+from inventario.utils.reorder import FORMULA_EXCEL_LEGACY, FORMULA_LEADTIME_PLUS_SAFETY, calcular_punto_reorden
 
 from .models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 
@@ -550,12 +551,23 @@ def existencias(request: HttpRequest) -> HttpResponse:
             prev_dias = existencia.dias_llegada_pedido
             prev_consumo = existencia.consumo_diario_promedio
             new_stock = _to_decimal(request.POST.get("stock_actual"), "0")
-            new_reorden = _to_decimal(request.POST.get("punto_reorden"), "0")
             new_minimo = _to_decimal(request.POST.get("stock_minimo"), "0")
             new_maximo = _to_decimal(request.POST.get("stock_maximo"), "0")
             new_inv_prom = _to_decimal(request.POST.get("inventario_promedio"), "0")
             new_dias = int(_to_decimal(request.POST.get("dias_llegada_pedido"), "0"))
             new_consumo = _to_decimal(request.POST.get("consumo_diario_promedio"), "0")
+            reorden_raw = (request.POST.get("punto_reorden") or "").strip()
+            if reorden_raw:
+                new_reorden = _to_decimal(reorden_raw, "0")
+                reorden_auto = False
+            else:
+                new_reorden = calcular_punto_reorden(
+                    stock_minimo=new_minimo,
+                    dias_llegada_pedido=new_dias,
+                    consumo_diario_promedio=new_consumo,
+                    formula=getattr(settings, "INVENTARIO_REORDER_FORMULA", FORMULA_EXCEL_LEGACY),
+                )
+                reorden_auto = True
             if (
                 new_stock < 0
                 or new_reorden < 0
@@ -577,6 +589,11 @@ def existencias(request: HttpRequest) -> HttpResponse:
             existencia.consumo_diario_promedio = new_consumo
             existencia.actualizado_en = timezone.now()
             existencia.save()
+            if reorden_auto:
+                messages.info(
+                    request,
+                    f"Punto de reorden calculado automáticamente: {new_reorden} (según fórmula activa).",
+                )
             log_event(
                 request.user,
                 "UPDATE",
@@ -602,10 +619,25 @@ def existencias(request: HttpRequest) -> HttpResponse:
             )
         return redirect("inventario:existencias")
 
+    existencias_rows = list(ExistenciaInsumo.objects.select_related("insumo", "insumo__unidad_base")[:200])
+    formula_mode = getattr(settings, "INVENTARIO_REORDER_FORMULA", FORMULA_EXCEL_LEGACY)
+    for e in existencias_rows:
+        recomendado = calcular_punto_reorden(
+            stock_minimo=e.stock_minimo,
+            dias_llegada_pedido=e.dias_llegada_pedido,
+            consumo_diario_promedio=e.consumo_diario_promedio,
+            formula=formula_mode,
+        )
+        e.punto_reorden_recomendado = recomendado
+        e.punto_reorden_diferencia = e.punto_reorden - recomendado
+
     context = {
-        "existencias": ExistenciaInsumo.objects.select_related("insumo", "insumo__unidad_base")[:200],
+        "existencias": existencias_rows,
         "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
         "can_manage_inventario": can_manage_inventario(request.user),
+        "reorder_formula_mode": formula_mode,
+        "formula_excel_legacy": FORMULA_EXCEL_LEGACY,
+        "formula_leadtime_plus_safety": FORMULA_LEADTIME_PLUS_SAFETY,
     }
     return render(request, "inventario/existencias.html", context)
 

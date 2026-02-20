@@ -98,6 +98,41 @@ class CostoInsumo(models.Model):
     def __str__(self) -> str:
         return f"{self.insumo.nombre} - {self.costo_unitario} {self.moneda}"
 
+
+class PointPendingMatch(models.Model):
+    TIPO_PROVEEDOR = "PROVEEDOR"
+    TIPO_INSUMO = "INSUMO"
+    TIPO_PRODUCTO = "PRODUCTO"
+    TIPO_CHOICES = [
+        (TIPO_PROVEEDOR, "Proveedor"),
+        (TIPO_INSUMO, "Insumo"),
+        (TIPO_PRODUCTO, "Producto"),
+    ]
+
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, db_index=True)
+    point_codigo = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    point_nombre = models.CharField(max_length=250, db_index=True)
+    payload = models.JSONField(default=dict, blank=True)
+    method = models.CharField(max_length=32, blank=True, default="")
+    fuzzy_score = models.FloatField(default=0.0)
+    fuzzy_sugerencia = models.CharField(max_length=250, blank=True, default="")
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Pendiente de homologación Point"
+        verbose_name_plural = "Pendientes de homologación Point"
+        ordering = ["tipo", "-fuzzy_score", "point_nombre"]
+        unique_together = [("tipo", "point_codigo", "point_nombre")]
+        indexes = [
+            models.Index(fields=["tipo", "point_nombre"]),
+            models.Index(fields=["tipo", "point_codigo"]),
+        ]
+
+    def __str__(self) -> str:
+        code = f"[{self.point_codigo}] " if self.point_codigo else ""
+        return f"{self.tipo}: {code}{self.point_nombre}"
+
 def seed_unidades_basicas():
     # Crea unidades base típicas (safe to call multiple times)
     units = [

@@ -11,7 +11,7 @@ from django.db import transaction
 from rapidfuzz import fuzz, process
 from unidecode import unidecode
 
-from maestros.models import Insumo, InsumoAlias, Proveedor, UnidadMedida
+from maestros.models import Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 from recetas.models import Receta
 from recetas.utils.normalizacion import normalizar_nombre
 
@@ -210,6 +210,56 @@ class Command(BaseCommand):
             ],
         )
 
+        if not options["dry_run"]:
+            self._replace_point_pending(
+                PointPendingMatch.TIPO_PROVEEDOR,
+                [
+                    {
+                        "point_codigo": "",
+                        "point_nombre": row["point_proveedor"],
+                        "payload": {"rfc": row.get("rfc", ""), "correo": row.get("correo", "")},
+                        "method": row.get("method", ""),
+                        "fuzzy_score": row.get("fuzzy_score", 0),
+                        "fuzzy_sugerencia": row.get("fuzzy_sugerencia", ""),
+                    }
+                    for row in providers_report
+                    if int(row.get("matched") or 0) == 0
+                ],
+            )
+            self._replace_point_pending(
+                PointPendingMatch.TIPO_INSUMO,
+                [
+                    {
+                        "point_codigo": row.get("point_codigo", ""),
+                        "point_nombre": row.get("point_nombre", ""),
+                        "payload": {
+                            "unidad": row.get("unidad", ""),
+                            "categoria": row.get("point_categoria", ""),
+                        },
+                        "method": row.get("method", ""),
+                        "fuzzy_score": row.get("fuzzy_score", 0),
+                        "fuzzy_sugerencia": row.get("fuzzy_sugerencia", ""),
+                    }
+                    for row in insumos_report
+                    if int(row.get("matched") or 0) == 0
+                ],
+            )
+            self._replace_point_pending(
+                PointPendingMatch.TIPO_PRODUCTO,
+                [
+                    {
+                        "point_codigo": row.get("point_codigo_producto", ""),
+                        "point_nombre": row.get("point_nombre_producto", ""),
+                        "payload": {"precio_default": row.get("precio_default", "")},
+                        "method": row.get("method", ""),
+                        "fuzzy_score": row.get("fuzzy_score", 0),
+                        "fuzzy_sugerencia": row.get("fuzzy_sugerencia", ""),
+                    }
+                    for row in productos_report
+                    if int(row.get("matched_receta") or 0) == 0
+                ],
+            )
+
         if options["dry_run"]:
             transaction.set_rollback(True)
 
@@ -232,6 +282,31 @@ class Command(BaseCommand):
         )
         self.stdout.write(f"  - reportes: {p_prov}, {p_ins}, {p_prod}")
         self.stdout.write(f"  - modo: {'DRY-RUN (rollback)' if options['dry_run'] else 'APLICADO'}")
+
+    def _replace_point_pending(self, tipo: str, entries: list[dict]) -> None:
+        PointPendingMatch.objects.filter(tipo=tipo).delete()
+        if not entries:
+            return
+
+        objs = []
+        for entry in entries:
+            score_raw = entry.get("fuzzy_score", 0)
+            try:
+                score = float(score_raw)
+            except (TypeError, ValueError):
+                score = 0.0
+            objs.append(
+                PointPendingMatch(
+                    tipo=tipo,
+                    point_codigo=(entry.get("point_codigo") or "")[:80],
+                    point_nombre=(entry.get("point_nombre") or "")[:250],
+                    payload=entry.get("payload") or {},
+                    method=(entry.get("method") or "")[:32],
+                    fuzzy_score=score,
+                    fuzzy_sugerencia=(entry.get("fuzzy_sugerencia") or "")[:250],
+                )
+            )
+        PointPendingMatch.objects.bulk_create(objs, batch_size=500)
 
     def _load_point_insumos(self, filepath: Path) -> list[dict]:
         df = _read_with_header(filepath, required=["CÓDIGO", "NOMBRE"])

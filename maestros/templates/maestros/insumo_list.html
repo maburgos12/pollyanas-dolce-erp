@@ -31,6 +31,7 @@
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="page-section-title mb-0">Catálogo de Insumos</div>
     <div class="quick-actions">
+      <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}">Pendientes Point (no-match)</a>
       <a class="btn btn-secondary" href="{% url 'maestros:insumo_point_mapping_csv' %}">Exportar mapping Point (CSV)</a>
       <a class="btn btn-primary" href="{% url 'maestros:insumo_create' %}">+ Nuevo insumo</a>
     </div>

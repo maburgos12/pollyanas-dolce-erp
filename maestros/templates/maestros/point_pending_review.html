@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Maestros - Pendientes Point{% endblock %}
+{% block page_title %}Maestros · Pendientes Point{% endblock %}
+
+{% block content %}
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'maestros:proveedor_list' %}">Proveedores</a>
+  <a class="module-tab" href="{% url 'maestros:insumo_list' %}">Insumos</a>
+  <a class="module-tab active" href="{% url 'maestros:point_pending_review' %}">Pendientes Point</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Bandeja de No-Match Point</div>
+  <p class="muted">Revisa y corrige pendientes no homologados. Puedes resolver en lote por tipo.</p>
+
+  <div class="toolbar mb-2">
+    <a class="btn {% if tipo == 'INSUMO' %}btn-primary{% else %}btn-secondary{% endif %}" href="?tipo=INSUMO">Insumos ({{ counts.INSUMO }})</a>
+    <a class="btn {% if tipo == 'PRODUCTO' %}btn-primary{% else %}btn-secondary{% endif %}" href="?tipo=PRODUCTO">Productos ({{ counts.PRODUCTO }})</a>
+    <a class="btn {% if tipo == 'PROVEEDOR' %}btn-primary{% else %}btn-secondary{% endif %}" href="?tipo=PROVEEDOR">Proveedores ({{ counts.PROVEEDOR }})</a>
+  </div>
+
+  <form method="get" class="form-grid-auto mb-3">
+    <input type="hidden" name="tipo" value="{{ tipo }}">
+    <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por nombre, código o sugerencia...">
+    <button class="btn btn-primary" type="submit">Buscar</button>
+    <a class="btn btn-secondary" href="?tipo={{ tipo }}">Limpiar</a>
+  </form>
+
+  {% if can_manage and page.object_list %}
+  <form method="post" id="bulk-form">
+    {% csrf_token %}
+    <input type="hidden" name="tipo" value="{{ tipo }}">
+
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th><input id="check-all" type="checkbox"></th>
+            <th>Tipo</th>
+            <th>Código Point</th>
+            <th>Nombre Point</th>
+            <th>Sugerencia</th>
+            <th class="text-end">Score</th>
+            <th>Método</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in page.object_list %}
+          <tr>
+            <td><input type="checkbox" name="pending_ids" value="{{ p.id }}"></td>
+            <td>{{ p.get_tipo_display }}</td>
+            <td>{{ p.point_codigo|default:"-" }}</td>
+            <td>{{ p.point_nombre }}</td>
+            <td>{{ p.fuzzy_sugerencia|default:"-" }}</td>
+            <td class="text-end">{{ p.fuzzy_score|floatformat:1 }}</td>
+            <td>{{ p.method|default:"-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if tipo == "INSUMO" %}
+    <div class="form-grid-auto" style="margin-top:12px;">
+      <select class="input-field" name="insumo_id">
+        <option value="">Resolver seleccionados contra insumo...</option>
+        {% for i in insumos %}
+        <option value="{{ i.id }}">{{ i.nombre }}</option>
+        {% endfor %}
+      </select>
+      <label class="field-check">
+        <input type="checkbox" name="create_aliases" checked>
+        <span>Crear alias automáticamente</span>
+      </label>
+      <button class="btn btn-primary" type="submit" name="action" value="resolve_insumos">Resolver insumos</button>
+      <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar pendientes seleccionados?');">Descartar seleccionados</button>
+    </div>
+    {% elif tipo == "PRODUCTO" %}
+    <div class="form-grid-auto" style="margin-top:12px;">
+      <select class="input-field" name="receta_id">
+        <option value="">Resolver seleccionados contra receta...</option>
+        {% for r in recetas %}
+        <option value="{{ r.id }}">{{ r.nombre }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-primary" type="submit" name="action" value="resolve_productos">Resolver productos</button>
+      <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar pendientes seleccionados?');">Descartar seleccionados</button>
+    </div>
+    {% else %}
+    <div class="form-grid-auto" style="margin-top:12px;">
+      <select class="input-field" name="proveedor_id">
+        <option value="">(Opcional) Asignar a proveedor existente...</option>
+        {% for pr in proveedores %}
+        <option value="{{ pr.id }}">{{ pr.nombre }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-primary" type="submit" name="action" value="resolve_proveedores">Resolver proveedores</button>
+      <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar pendientes seleccionados?');">Descartar seleccionados</button>
+    </div>
+    {% endif %}
+  </form>
+  {% else %}
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tipo</th>
+          <th>Código Point</th>
+          <th>Nombre Point</th>
+          <th>Sugerencia</th>
+          <th class="text-end">Score</th>
+          <th>Método</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in page.object_list %}
+        <tr>
+          <td>{{ p.get_tipo_display }}</td>
+          <td>{{ p.point_codigo|default:"-" }}</td>
+          <td>{{ p.point_nombre }}</td>
+          <td>{{ p.fuzzy_sugerencia|default:"-" }}</td>
+          <td class="text-end">{{ p.fuzzy_score|floatformat:1 }}</td>
+          <td>{{ p.method|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="text-muted">No hay pendientes para este tipo.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if page.paginator.num_pages > 1 %}
+  <div class="toolbar mt-2">
+    {% if page.has_previous %}
+    <a class="btn btn-secondary" href="?tipo={{ tipo }}&q={{ q|urlencode }}&page={{ page.previous_page_number }}">Anterior</a>
+    {% endif %}
+    <span class="muted">Página {{ page.number }} de {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}
+    <a class="btn btn-secondary" href="?tipo={{ tipo }}&q={{ q|urlencode }}&page={{ page.next_page_number }}">Siguiente</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function() {
+    const all = document.getElementById("check-all");
+    if (!all) return;
+    all.addEventListener("change", () => {
+      document.querySelectorAll('input[name="pending_ids"]').forEach((el) => {
+        el.checked = all.checked;
+      });
+    });
+  })();
+</script>
+{% endblock %}
