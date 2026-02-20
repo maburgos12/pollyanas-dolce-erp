@@ -4,6 +4,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from inventario.models import AlmacenSyncRun
+from maestros.models import PointPendingMatch
+from recetas.models import LineaReceta, Receta
 
 
 class InventarioAliasesPendingTests(TestCase):
@@ -91,3 +93,34 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(response_after.status_code, 200)
         self.assertEqual(response_after.context["pending_source"], "session")
         self.assertEqual(response_after.context["pending_visible_count"], 1)
+
+    def test_export_cross_pending_csv(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="P-100",
+            point_nombre="Mantequilla Barra",
+            fuzzy_score=88.5,
+            fuzzy_sugerencia="Mantequilla",
+        )
+        receta = Receta.objects.create(nombre="Receta Test Export", hash_contenido="hash-export-001")
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Mantequilla Barra",
+            cantidad=1,
+            unidad=None,
+            unidad_texto="kg",
+            costo_unitario_snapshot=0,
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+
+        response = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {"export": "cross_pending_csv"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        body = response.content.decode("utf-8")
+        self.assertIn("nombre_muestra", body)
+        self.assertIn("Mantequilla Barra", body)

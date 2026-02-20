@@ -72,6 +72,7 @@
   <div class="toolbar" style="margin-top:10px;">
     <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}?tipo=INSUMO">Revisar pendientes Point</a>
     <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Revisar pendientes Recetas</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_csv">Exportar pendientes CSV</a>
     {% if can_manage_inventario %}
     <form method="post" class="inline-form">
       {% csrf_token %}

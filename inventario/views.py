@@ -1,3 +1,4 @@
+import csv
 import os
 import subprocess
 import sys
@@ -140,7 +141,42 @@ def _remove_pending_name_from_recent_runs(alias_norm: str, max_runs: int = 20) -
         ]
         if len(filtered) != len(pending):
             run.pending_preview = filtered
-            run.save(update_fields=["pending_preview"])
+        run.save(update_fields=["pending_preview"])
+
+
+def _export_cross_pending_csv(cross_unified_rows: list[dict]) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="inventario_homologacion_pendientes_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "nombre_muestra",
+            "nombre_normalizado",
+            "point_count",
+            "almacen_count",
+            "receta_count",
+            "fuentes_activas",
+            "total_count",
+            "sugerencia",
+            "score_max",
+        ]
+    )
+    for row in cross_unified_rows:
+        writer.writerow(
+            [
+                row.get("nombre_muestra", ""),
+                row.get("nombre_normalizado", ""),
+                row.get("point_count", 0),
+                row.get("almacen_count", 0),
+                row.get("receta_count", 0),
+                row.get("sources_active", 0),
+                row.get("total_count", 0),
+                row.get("suggestion", ""),
+                row.get("score_max", 0.0),
+            ]
+        )
+    return response
 
 
 def _resolve_cross_source_with_alias(alias_name: str, insumo: Insumo) -> tuple[int, int]:
@@ -738,6 +774,10 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             }
         )
     unified_rows.sort(key=lambda x: (-x["sources_active"], -x["total_count"], x["nombre_muestra"]))
+
+    export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format == "cross_pending_csv":
+        return _export_cross_pending_csv(unified_rows)
 
     context = {
         "q": q,
