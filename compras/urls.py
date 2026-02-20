@@ -12,6 +12,11 @@ urlpatterns = [
         views.guardar_presupuesto_proveedor,
         name="solicitudes_presupuesto_proveedor",
     ),
+    path(
+        "solicitudes/presupuesto/categoria/",
+        views.guardar_presupuesto_categoria,
+        name="solicitudes_presupuesto_categoria",
+    ),
     path("solicitudes/presupuesto/importar/", views.importar_presupuestos_periodo, name="solicitudes_presupuesto_importar"),
     path("solicitudes/importar/", views.importar_solicitudes, name="solicitudes_importar"),
     path("solicitudes/imprimir/", views.solicitudes_print, name="solicitudes_print"),

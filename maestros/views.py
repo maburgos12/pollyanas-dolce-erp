@@ -115,7 +115,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
 class InsumoCreateView(LoginRequiredMixin, CreateView):
     model = Insumo
     template_name = 'maestros/insumo_form.html'
-    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'unidad_base', 'proveedor_principal', 'activo']
+    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'categoria', 'unidad_base', 'proveedor_principal', 'activo']
     success_url = reverse_lazy('maestros:insumo_list')
     
     def get_context_data(self, **kwargs):
@@ -136,7 +136,7 @@ class InsumoCreateView(LoginRequiredMixin, CreateView):
 class InsumoUpdateView(LoginRequiredMixin, UpdateView):
     model = Insumo
     template_name = 'maestros/insumo_form.html'
-    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'unidad_base', 'proveedor_principal', 'activo']
+    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'categoria', 'unidad_base', 'proveedor_principal', 'activo']
     success_url = reverse_lazy('maestros:insumo_list')
     
     def get_context_data(self, **kwargs):

@@ -1,8 +1,13 @@
 from django.db import models
 from django.utils import timezone
 from django.conf import settings
+from unidecode import unidecode
 
 from maestros.models import Insumo, Proveedor
+
+
+def _norm_text(value: str) -> str:
+    return " ".join(unidecode((value or "")).lower().strip().split())
 
 
 class SolicitudCompra(models.Model):
@@ -179,3 +184,35 @@ class PresupuestoCompraProveedor(models.Model):
 
     def __str__(self):
         return f"{self.presupuesto_periodo} · {self.proveedor.nombre}"
+
+
+class PresupuestoCompraCategoria(models.Model):
+    presupuesto_periodo = models.ForeignKey(
+        PresupuestoCompraPeriodo,
+        on_delete=models.CASCADE,
+        related_name="objetivos_categoria",
+    )
+    categoria = models.CharField(max_length=120)
+    categoria_normalizada = models.CharField(max_length=140, db_index=True)
+    monto_objetivo = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    notas = models.CharField(max_length=255, blank=True, default="")
+    actualizado_en = models.DateTimeField(auto_now=True)
+    actualizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="presupuestos_compras_categoria_actualizados",
+    )
+
+    class Meta:
+        ordering = ["-presupuesto_periodo_id", "categoria"]
+        unique_together = [("presupuesto_periodo", "categoria_normalizada")]
+
+    def save(self, *args, **kwargs):
+        self.categoria = " ".join((self.categoria or "").strip().split())
+        self.categoria_normalizada = _norm_text(self.categoria)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.presupuesto_periodo} · {self.categoria}"

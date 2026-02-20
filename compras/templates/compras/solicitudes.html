@@ -170,6 +170,34 @@
           <button class="btn btn-secondary" type="submit">Guardar objetivo proveedor</button>
         </div>
       </form>
+      <form method="post" action="{% url 'compras:solicitudes_presupuesto_categoria' %}" class="form-grid-auto mb-3">
+        {% csrf_token %}
+        <input type="hidden" name="source" value="{{ source_filter }}">
+        <input type="hidden" name="plan_id" value="{{ plan_filter }}">
+        <input type="hidden" name="reabasto" value="{{ reabasto_filter }}">
+        <input type="hidden" name="periodo_tipo" value="{{ periodo_tipo }}">
+        <input type="hidden" name="periodo_mes" value="{{ periodo_mes }}">
+        <div>
+          <label>Categoría</label>
+          <input class="input-field" type="text" name="categoria" list="categoria_options" placeholder="Ej. Lácteos, Harinas, Empaque..." required>
+          <datalist id="categoria_options">
+            {% for c in categoria_options %}
+              <option value="{{ c }}"></option>
+            {% endfor %}
+          </datalist>
+        </div>
+        <div>
+          <label>Objetivo categoría</label>
+          <input class="input-field" type="number" name="monto_objetivo_categoria" min="0" step="0.01" required>
+        </div>
+        <div>
+          <label>Notas categoría</label>
+          <input class="input-field" type="text" name="notas_categoria" maxlength="255" placeholder="Opcional">
+        </div>
+        <div class="align-items-end d-flex">
+          <button class="btn btn-secondary" type="submit">Guardar objetivo categoría</button>
+        </div>
+      </form>
       <form method="post" action="{% url 'compras:solicitudes_presupuesto_importar' %}" enctype="multipart/form-data" class="form-grid-auto mb-3">
         {% csrf_token %}
         <input type="hidden" name="source" value="{{ source_filter }}">
@@ -192,6 +220,8 @@
         <code>monto_objetivo</code> (objetivo periodo),
         <code>proveedor</code> (opcional),
         <code>monto_objetivo_proveedor</code> (opcional),
+        <code>categoria</code> (opcional),
+        <code>monto_objetivo_categoria</code> (opcional),
         <code>notas</code> (opcional).
       </p>
       {% endif %}
@@ -240,6 +270,10 @@
           <div class="kpi-number">{{ presupuesto_objetivos_proveedor_total|default:0 }}</div>
           <div class="kpi-label">Objetivos por proveedor</div>
         </article>
+        <article class="kpi-card">
+          <div class="kpi-number">{{ presupuesto_objetivos_categoria_total|default:0 }}</div>
+          <div class="kpi-label">Objetivos por categoría</div>
+        </article>
       </div>
       <div class="table-responsive">
         <table class="table table-striped">
@@ -265,6 +299,48 @@
               </tr>
             {% empty %}
               <tr><td colspan="3" class="text-muted">Sin alertas de presupuesto para este periodo/filtro.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th class="text-end">Estimado</th>
+              <th class="text-end">Ejecutado</th>
+              <th class="text-end">Variación</th>
+              <th class="text-end">% participación estimado</th>
+              <th class="text-end">Objetivo categoría</th>
+              <th class="text-end">% uso objetivo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in presupuesto_rows_categoria %}
+              <tr>
+                <td>{{ r.categoria }}</td>
+                <td class="text-end">${{ r.estimado|floatformat:2 }}</td>
+                <td class="text-end">${{ r.ejecutado|floatformat:2 }}</td>
+                <td class="text-end {% if r.variacion > 0 %}text-danger{% elif r.variacion < 0 %}text-success{% endif %}">${{ r.variacion|floatformat:2 }}</td>
+                <td class="text-end">{{ r.participacion_pct|floatformat:2 }}%</td>
+                <td class="text-end">${{ r.objetivo_categoria|floatformat:2 }}</td>
+                <td class="text-end">
+                  {% if r.uso_objetivo_pct is not None %}
+                    {% if r.objetivo_estado == 'excedido' %}
+                      <span class="badge-rojo">{{ r.uso_objetivo_pct|floatformat:2 }}%</span>
+                    {% elif r.objetivo_estado == 'preventivo' %}
+                      <span class="badge-amarillo">{{ r.uso_objetivo_pct|floatformat:2 }}%</span>
+                    {% else %}
+                      <span class="badge-verde">{{ r.uso_objetivo_pct|floatformat:2 }}%</span>
+                    {% endif %}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="7" class="text-muted">Sin datos por categoría para este filtro.</td></tr>
             {% endfor %}
           </tbody>
         </table>
