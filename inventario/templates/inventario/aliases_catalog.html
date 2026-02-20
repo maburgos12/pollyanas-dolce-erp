@@ -153,6 +153,24 @@
 
 <section class="card">
   <div class="card-header">Pendientes Recientes de Match (Almacén)</div>
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card">
+      <div class="kpi-number {% if pending_visible_count > 0 %}is-danger{% else %}is-success{% endif %}">{{ pending_visible_count }}</div>
+      <div class="kpi-label">Pendientes en pantalla</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if pending_unique_count > 0 %}is-warning{% else %}is-success{% endif %}">{{ pending_unique_count }}</div>
+      <div class="kpi-label">Pendientes únicos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ matching_summary.runs_count }}</div>
+      <div class="kpi-label">Syncs auditados</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if matching_summary.total_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ matching_summary.total_unmatched }}</div>
+      <div class="kpi-label">Sin match acumulado</div>
+    </article>
+  </div>
   {% if pending_source == "session" %}
   <p class="muted">Fuente: sesión actual (última importación manual en este navegador).</p>
   {% elif pending_source == "persisted" and latest_pending_run %}
@@ -162,6 +180,35 @@
     No hay pendientes recientes en pantalla.
     {% if latest_sync %}Último sync: {{ latest_sync.started_at|date:"Y-m-d H:i" }} · Sin match: {{ latest_sync.unmatched }}.{% endif %}
   </p>
+  {% endif %}
+
+  {% if pending_recent_runs %}
+  <div class="table-responsive" style="margin-top:12px;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Origen</th>
+          <th>Estatus</th>
+          <th class="text-end">Match</th>
+          <th class="text-end">Sin match</th>
+          <th>Detalle</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in pending_recent_runs %}
+        <tr>
+          <td>{{ run.started_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ run.source_label }}</td>
+          <td>{{ run.status }}</td>
+          <td class="text-end">{{ run.matched }}</td>
+          <td class="text-end">{{ run.unmatched }}</td>
+          <td>{% if run.has_preview %}Con preview{% else %}Sin preview{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% endif %}
 
   {% if pending_preview %}

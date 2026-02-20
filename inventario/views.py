@@ -596,6 +596,17 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     total_rows = total_matched + total_unmatched
     match_rate = round((total_matched * 100.0 / total_rows), 2) if total_rows else 100.0
     ok_runs = sum(1 for r in recent_runs if r.status == AlmacenSyncRun.STATUS_OK)
+    pending_recent_runs = [
+        {
+            "started_at": r.started_at,
+            "source_label": r.get_source_display(),
+            "status": r.status,
+            "matched": int(r.matched or 0),
+            "unmatched": int(r.unmatched or 0),
+            "has_preview": bool(isinstance(r.pending_preview, list) and r.pending_preview),
+        }
+        for r in recent_runs
+    ]
 
     grouped = defaultdict(lambda: {"count": 0, "sources": set(), "name": "", "suggestion": "", "score_max": 0.0})
     for row in pending_preview:
@@ -722,6 +733,9 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             "total_unmatched": total_unmatched,
             "match_rate": match_rate,
         },
+        "pending_recent_runs": pending_recent_runs,
+        "pending_visible_count": len(pending_preview),
+        "pending_unique_count": len(pending_grouped),
         "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:1200],
         "can_manage_inventario": can_manage_inventario(request.user),
         "cross_summary": {
