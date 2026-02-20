@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.urls import reverse
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -190,6 +190,10 @@ def _normalize_categoria_text(raw: str) -> str:
     return normalizar_nombre((raw or "").strip())
 
 
+def _sanitize_categoria_filter(raw: str) -> str:
+    return " ".join((raw or "").strip().split())
+
+
 def _resolve_insumo_categoria(insumo: Insumo) -> str:
     categoria = " ".join((getattr(insumo, "categoria", "") or "").strip().split())
     if categoria:
@@ -356,6 +360,52 @@ def _filter_solicitudes_by_scope(solicitudes_qs, source_filter: str, plan_filter
     return solicitudes_qs
 
 
+def _filter_solicitudes_by_categoria(solicitudes_qs, categoria_filter: str):
+    categoria = _sanitize_categoria_filter(categoria_filter)
+    if not categoria:
+        return solicitudes_qs
+
+    categoria_norm = _normalize_categoria_text(categoria)
+    categoria_unit_map = {
+        "masa": "MASS",
+        "volumen": "VOLUME",
+        "pieza": "UNIT",
+    }
+    unidad_tipo = categoria_unit_map.get(categoria_norm)
+    if unidad_tipo:
+        return solicitudes_qs.filter(
+            Q(insumo__categoria__iexact=categoria)
+            | (
+                (Q(insumo__categoria="") | Q(insumo__categoria__isnull=True))
+                & Q(insumo__unidad_base__tipo=unidad_tipo)
+            )
+        )
+    return solicitudes_qs.filter(insumo__categoria__iexact=categoria)
+
+
+def _filter_ordenes_by_categoria(ordenes_qs, categoria_filter: str):
+    categoria = _sanitize_categoria_filter(categoria_filter)
+    if not categoria:
+        return ordenes_qs
+
+    categoria_norm = _normalize_categoria_text(categoria)
+    categoria_unit_map = {
+        "masa": "MASS",
+        "volumen": "VOLUME",
+        "pieza": "UNIT",
+    }
+    unidad_tipo = categoria_unit_map.get(categoria_norm)
+    if unidad_tipo:
+        return ordenes_qs.filter(
+            Q(solicitud__insumo__categoria__iexact=categoria)
+            | (
+                (Q(solicitud__insumo__categoria="") | Q(solicitud__insumo__categoria__isnull=True))
+                & Q(solicitud__insumo__unidad_base__tipo=unidad_tipo)
+            )
+        )
+    return ordenes_qs.filter(solicitud__insumo__categoria__iexact=categoria)
+
+
 def _shift_month(periodo_mes: str, delta_months: int) -> str:
     year, month = periodo_mes.split("-")
     y = int(year)
@@ -371,6 +421,7 @@ def _compute_budget_period_summary(
     periodo_mes: str,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
 ) -> dict:
     start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
     if not start_date or not end_date:
@@ -393,6 +444,7 @@ def _compute_budget_period_summary(
 
     solicitudes_qs = SolicitudCompra.objects.filter(fecha_requerida__range=(start_date, end_date))
     solicitudes_qs = _filter_solicitudes_by_scope(solicitudes_qs, source_filter, plan_filter)
+    solicitudes_qs = _filter_solicitudes_by_categoria(solicitudes_qs, categoria_filter)
     solicitudes_vals = list(solicitudes_qs.values("insumo_id", "cantidad"))
     insumo_ids = [x["insumo_id"] for x in solicitudes_vals]
 
@@ -411,6 +463,7 @@ def _compute_budget_period_summary(
         fecha_emision__range=(start_date, end_date)
     )
     ordenes_qs = _filter_ordenes_by_scope(ordenes_qs, source_filter, plan_filter)
+    ordenes_qs = _filter_ordenes_by_categoria(ordenes_qs, categoria_filter)
     ejecutado = ordenes_qs.aggregate(total=Sum("monto_estimado"))["total"] or Decimal("0")
 
     base = max(estimado, ejecutado)
@@ -440,16 +493,22 @@ def _compute_budget_period_summary(
     }
 
 
-def _build_budget_history(periodo_mes: str, source_filter: str, plan_filter: str) -> list[dict]:
+def _build_budget_history(periodo_mes: str, source_filter: str, plan_filter: str, categoria_filter: str) -> list[dict]:
     rows: list[dict] = []
     for delta in range(0, 6):
         month_value = _shift_month(periodo_mes, delta)
-        summary = _compute_budget_period_summary("mes", month_value, source_filter, plan_filter)
+        summary = _compute_budget_period_summary("mes", month_value, source_filter, plan_filter, categoria_filter)
         rows.append(summary)
     return rows
 
 
-def _build_provider_dashboard(periodo_mes: str, source_filter: str, plan_filter: str, current_rows: list[dict]) -> dict:
+def _build_provider_dashboard(
+    periodo_mes: str,
+    source_filter: str,
+    plan_filter: str,
+    categoria_filter: str,
+    current_rows: list[dict],
+) -> dict:
     months_desc = [_shift_month(periodo_mes, d) for d in range(0, 6)]
     months_asc = list(reversed(months_desc))
 
@@ -462,6 +521,7 @@ def _build_provider_dashboard(periodo_mes: str, source_filter: str, plan_filter:
             fecha_requerida__range=(start_date, end_date)
         )
         solicitudes_qs = _filter_solicitudes_by_scope(solicitudes_qs, source_filter, plan_filter)
+        solicitudes_qs = _filter_solicitudes_by_categoria(solicitudes_qs, categoria_filter)
         solicitudes = list(solicitudes_qs)
 
         insumo_ids = [s.insumo_id for s in solicitudes]
@@ -490,6 +550,7 @@ def _build_provider_dashboard(periodo_mes: str, source_filter: str, plan_filter:
             fecha_emision__range=(start_date, end_date)
         )
         ordenes_qs = _filter_ordenes_by_scope(ordenes_qs, source_filter, plan_filter)
+        ordenes_qs = _filter_ordenes_by_categoria(ordenes_qs, categoria_filter)
         ejecutado_by_provider: dict[str, Decimal] = {}
         for row in ordenes_qs.values("proveedor__nombre").annotate(total=Sum("monto_estimado")):
             provider_name = row["proveedor__nombre"] or "Sin proveedor"
@@ -540,7 +601,13 @@ def _build_provider_dashboard(periodo_mes: str, source_filter: str, plan_filter:
     }
 
 
-def _build_category_dashboard(periodo_mes: str, source_filter: str, plan_filter: str, current_rows: list[dict]) -> dict:
+def _build_category_dashboard(
+    periodo_mes: str,
+    source_filter: str,
+    plan_filter: str,
+    categoria_filter: str,
+    current_rows: list[dict],
+) -> dict:
     months_desc = [_shift_month(periodo_mes, d) for d in range(0, 6)]
     months_asc = list(reversed(months_desc))
 
@@ -554,6 +621,7 @@ def _build_category_dashboard(periodo_mes: str, source_filter: str, plan_filter:
             .filter(fecha_requerida__range=(start_date, end_date))
         )
         solicitudes_qs = _filter_solicitudes_by_scope(solicitudes_qs, source_filter, plan_filter)
+        solicitudes_qs = _filter_solicitudes_by_categoria(solicitudes_qs, categoria_filter)
         solicitudes = list(solicitudes_qs)
 
         estimado_by_categoria: dict[str, Decimal] = {}
@@ -569,6 +637,7 @@ def _build_category_dashboard(periodo_mes: str, source_filter: str, plan_filter:
             .filter(fecha_emision__range=(start_date, end_date))
         )
         ordenes_qs = _filter_ordenes_by_scope(ordenes_qs, source_filter, plan_filter)
+        ordenes_qs = _filter_ordenes_by_categoria(ordenes_qs, categoria_filter)
         ejecutado_by_categoria: dict[str, Decimal] = {}
         for orden in ordenes_qs:
             categoria_nombre = "Sin categoría"
@@ -627,6 +696,7 @@ def _build_budget_context(
     solicitudes,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
     periodo_tipo: str,
     periodo_mes: str,
 ) -> dict:
@@ -640,6 +710,7 @@ def _build_budget_context(
     if start_date and end_date:
         ordenes_qs = ordenes_qs.filter(fecha_emision__range=(start_date, end_date))
     ordenes_qs = _filter_ordenes_by_scope(ordenes_qs, source_filter, plan_filter)
+    ordenes_qs = _filter_ordenes_by_categoria(ordenes_qs, categoria_filter)
 
     total_ejecutado = ordenes_qs.aggregate(total=Sum("monto_estimado"))["total"] or Decimal("0")
     variacion_ejecutado_vs_estimado = total_ejecutado - total_estimado
@@ -973,6 +1044,7 @@ def _export_solicitudes_csv(
     solicitudes,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
     reabasto_filter: str,
     periodo_tipo: str,
     periodo_mes: str,
@@ -1000,6 +1072,7 @@ def _export_solicitudes_csv(
             "Detalle reabasto",
             "Filtro origen",
             "Filtro plan",
+            "Filtro categoria",
             "Filtro reabasto",
             "Filtro periodo",
             "Filtro mes",
@@ -1024,6 +1097,7 @@ def _export_solicitudes_csv(
                 s.reabasto_detalle,
                 source_filter,
                 plan_filter or "",
+                categoria_filter or "",
                 reabasto_filter,
                 periodo_label,
                 periodo_mes if periodo_tipo != "all" else "",
@@ -1036,6 +1110,7 @@ def _export_solicitudes_xlsx(
     solicitudes,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
     reabasto_filter: str,
     periodo_tipo: str,
     periodo_mes: str,
@@ -1062,6 +1137,7 @@ def _export_solicitudes_xlsx(
             "Detalle reabasto",
             "Filtro origen",
             "Filtro plan",
+            "Filtro categoria",
             "Filtro reabasto",
             "Filtro periodo",
             "Filtro mes",
@@ -1086,6 +1162,7 @@ def _export_solicitudes_xlsx(
                 s.reabasto_detalle,
                 source_filter,
                 plan_filter or "",
+                categoria_filter or "",
                 reabasto_filter,
                 periodo_label,
                 periodo_mes if periodo_tipo != "all" else "",
@@ -1109,6 +1186,7 @@ def _export_consolidado_csv(
     solicitudes,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
     reabasto_filter: str,
     periodo_label: str,
     budget_ctx: dict,
@@ -1122,6 +1200,7 @@ def _export_consolidado_csv(
     writer.writerow(["Filtro periodo", periodo_label])
     writer.writerow(["Filtro origen", source_filter])
     writer.writerow(["Filtro plan", plan_filter or "-"])
+    writer.writerow(["Filtro categoria", categoria_filter or "-"])
     writer.writerow(["Filtro reabasto", reabasto_filter])
     writer.writerow(["Objetivo presupuesto", budget_ctx.get("presupuesto_objetivo") or ""])
     writer.writerow(["Estimado solicitudes", budget_ctx["presupuesto_estimado_total"]])
@@ -1224,6 +1303,7 @@ def _export_consolidado_xlsx(
     solicitudes,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
     reabasto_filter: str,
     periodo_label: str,
     budget_ctx: dict,
@@ -1236,6 +1316,7 @@ def _export_consolidado_xlsx(
     ws_resumen.append(["Filtro periodo", periodo_label])
     ws_resumen.append(["Filtro origen", source_filter])
     ws_resumen.append(["Filtro plan", plan_filter or "-"])
+    ws_resumen.append(["Filtro categoria", categoria_filter or "-"])
     ws_resumen.append(["Filtro reabasto", reabasto_filter])
     ws_resumen.append(["Objetivo presupuesto", float(budget_ctx["presupuesto_objetivo"] or 0)])
     ws_resumen.append(["Estimado solicitudes", float(budget_ctx["presupuesto_estimado_total"] or 0)])
@@ -1354,6 +1435,7 @@ def _export_tablero_proveedor_csv(
     periodo_label: str,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
 ) -> HttpResponse:
     now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
     response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -1363,6 +1445,7 @@ def _export_tablero_proveedor_csv(
     writer.writerow(["Periodo activo", periodo_label])
     writer.writerow(["Filtro origen", source_filter])
     writer.writerow(["Filtro plan", plan_filter or "-"])
+    writer.writerow(["Filtro categoria", categoria_filter or "-"])
     writer.writerow([])
 
     writer.writerow(["TOP DESVIACIONES (PERIODO ACTIVO)"])
@@ -1412,6 +1495,7 @@ def _export_tablero_proveedor_xlsx(
     periodo_label: str,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
 ) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
@@ -1420,6 +1504,7 @@ def _export_tablero_proveedor_xlsx(
     ws.append(["Periodo activo", periodo_label])
     ws.append(["Filtro origen", source_filter])
     ws.append(["Filtro plan", plan_filter or "-"])
+    ws.append(["Filtro categoria", categoria_filter or "-"])
     ws.append([])
     ws.append(
         [
@@ -1475,6 +1560,7 @@ def _export_tablero_categoria_csv(
     periodo_label: str,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
 ) -> HttpResponse:
     now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
     response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -1484,6 +1570,7 @@ def _export_tablero_categoria_csv(
     writer.writerow(["Periodo activo", periodo_label])
     writer.writerow(["Filtro origen", source_filter])
     writer.writerow(["Filtro plan", plan_filter or "-"])
+    writer.writerow(["Filtro categoria", categoria_filter or "-"])
     writer.writerow([])
 
     writer.writerow(["TOP DESVIACIONES (PERIODO ACTIVO)"])
@@ -1532,6 +1619,7 @@ def _export_tablero_categoria_xlsx(
     periodo_label: str,
     source_filter: str,
     plan_filter: str,
+    categoria_filter: str,
 ) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
@@ -1540,6 +1628,7 @@ def _export_tablero_categoria_xlsx(
     ws.append(["Periodo activo", periodo_label])
     ws.append(["Filtro origen", source_filter])
     ws.append(["Filtro plan", plan_filter or "-"])
+    ws.append(["Filtro categoria", categoria_filter or "-"])
     ws.append([])
     ws.append(
         [
@@ -1593,6 +1682,7 @@ def _export_tablero_categoria_xlsx(
 def _filtered_solicitudes(
     source_filter_raw: str,
     plan_filter_raw: str,
+    categoria_filter_raw: str,
     reabasto_filter_raw: str,
     periodo_tipo_raw: str,
     periodo_mes_raw: str,
@@ -1601,6 +1691,7 @@ def _filtered_solicitudes(
     if source_filter not in {"all", "manual", "plan"}:
         source_filter = "all"
     plan_filter = (plan_filter_raw or "").strip()
+    categoria_filter = _sanitize_categoria_filter(categoria_filter_raw)
     periodo_tipo, periodo_mes, periodo_label = _parse_period_filters(periodo_tipo_raw, periodo_mes_raw)
 
     solicitudes_qs = SolicitudCompra.objects.select_related("insumo", "insumo__unidad_base", "proveedor_sugerido").all()
@@ -1611,6 +1702,7 @@ def _filtered_solicitudes(
 
     if plan_filter:
         solicitudes_qs = solicitudes_qs.filter(area=f"PLAN_PRODUCCION:{plan_filter}")
+    solicitudes_qs = _filter_solicitudes_by_categoria(solicitudes_qs, categoria_filter)
 
     if periodo_tipo != "all":
         year, month = periodo_mes.split("-")
@@ -1700,7 +1792,17 @@ def _filtered_solicitudes(
             plan_ids_all.add(int(maybe_id))
     plan_options = list(PlanProduccion.objects.filter(id__in=plan_ids_all).order_by("-fecha_produccion", "-id")[:100])
 
-    return solicitudes, source_filter, plan_filter, reabasto_filter, plan_options, periodo_tipo, periodo_mes, periodo_label
+    return (
+        solicitudes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        reabasto_filter,
+        plan_options,
+        periodo_tipo,
+        periodo_mes,
+        periodo_label,
+    )
 
 
 @login_required
@@ -1732,9 +1834,20 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             )
         return redirect("compras:solicitudes")
 
-    solicitudes, source_filter, plan_filter, reabasto_filter, plan_options, periodo_tipo, periodo_mes, periodo_label = _filtered_solicitudes(
+    (
+        solicitudes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        reabasto_filter,
+        plan_options,
+        periodo_tipo,
+        periodo_mes,
+        periodo_label,
+    ) = _filtered_solicitudes(
         request.GET.get("source"),
         request.GET.get("plan_id"),
+        request.GET.get("categoria"),
         request.GET.get("reabasto"),
         request.GET.get("periodo_tipo"),
         request.GET.get("periodo_mes"),
@@ -1743,6 +1856,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         solicitudes,
         source_filter,
         plan_filter,
+        categoria_filter,
         periodo_tipo,
         periodo_mes,
     )
@@ -1750,12 +1864,14 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         periodo_mes,
         source_filter,
         plan_filter,
+        categoria_filter,
         budget_ctx["presupuesto_rows_proveedor"],
     )
     category_dashboard = _build_category_dashboard(
         periodo_mes,
         source_filter,
         plan_filter,
+        categoria_filter,
         budget_ctx.get("presupuesto_rows_categoria", []),
     )
     total_presupuesto = budget_ctx["presupuesto_estimado_total"]
@@ -1766,6 +1882,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             solicitudes,
             source_filter,
             plan_filter,
+            categoria_filter,
             reabasto_filter,
             periodo_tipo,
             periodo_mes,
@@ -1776,6 +1893,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             solicitudes,
             source_filter,
             plan_filter,
+            categoria_filter,
             reabasto_filter,
             periodo_label,
             budget_ctx,
@@ -1785,6 +1903,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             solicitudes,
             source_filter,
             plan_filter,
+            categoria_filter,
             reabasto_filter,
             periodo_label,
             budget_ctx,
@@ -1795,6 +1914,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_label,
             source_filter,
             plan_filter,
+            categoria_filter,
         )
     if export_format == "proveedor_xlsx":
         return _export_tablero_proveedor_xlsx(
@@ -1802,6 +1922,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_label,
             source_filter,
             plan_filter,
+            categoria_filter,
         )
     if export_format == "categoria_csv":
         return _export_tablero_categoria_csv(
@@ -1809,6 +1930,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_label,
             source_filter,
             plan_filter,
+            categoria_filter,
         )
     if export_format == "categoria_xlsx":
         return _export_tablero_categoria_xlsx(
@@ -1816,12 +1938,14 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_label,
             source_filter,
             plan_filter,
+            categoria_filter,
         )
     if export_format == "xlsx":
         return _export_solicitudes_xlsx(
             solicitudes,
             source_filter,
             plan_filter,
+            categoria_filter,
             reabasto_filter,
             periodo_tipo,
             periodo_mes,
@@ -1857,13 +1981,14 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "reabasto_filter": reabasto_filter,
         "source_filter": source_filter,
         "plan_filter": plan_filter,
+        "categoria_filter": categoria_filter,
         "plan_options": plan_options,
         "periodo_tipo": periodo_tipo,
         "periodo_mes": periodo_mes,
         "periodo_label": periodo_label,
         "total_presupuesto": total_presupuesto,
         "current_query": query_without_export.urlencode(),
-        "presupuesto_historial": _build_budget_history(periodo_mes, source_filter, plan_filter),
+        "presupuesto_historial": _build_budget_history(periodo_mes, source_filter, plan_filter, categoria_filter),
         "provider_dashboard": provider_dashboard,
         "category_dashboard": category_dashboard,
         **budget_ctx,
@@ -1915,12 +2040,15 @@ def guardar_presupuesto_periodo(request: HttpRequest) -> HttpResponse:
     params = {
         "source": (request.POST.get("source") or "all").strip() or "all",
         "plan_id": (request.POST.get("plan_id") or "").strip(),
+        "categoria": _sanitize_categoria_filter(request.POST.get("categoria")),
         "reabasto": (request.POST.get("reabasto") or "all").strip() or "all",
         "periodo_tipo": periodo_tipo,
         "periodo_mes": periodo_mes,
     }
     if not params["plan_id"]:
         params.pop("plan_id")
+    if not params["categoria"]:
+        params.pop("categoria")
     return redirect(f"{reverse('compras:solicitudes')}?{urlencode(params)}")
 
 
@@ -1981,12 +2109,15 @@ def guardar_presupuesto_proveedor(request: HttpRequest) -> HttpResponse:
     params = {
         "source": (request.POST.get("source") or "all").strip() or "all",
         "plan_id": (request.POST.get("plan_id") or "").strip(),
+        "categoria": _sanitize_categoria_filter(request.POST.get("categoria")),
         "reabasto": (request.POST.get("reabasto") or "all").strip() or "all",
         "periodo_tipo": periodo_tipo,
         "periodo_mes": periodo_mes,
     }
     if not params["plan_id"]:
         params.pop("plan_id")
+    if not params["categoria"]:
+        params.pop("categoria")
     return redirect(f"{reverse('compras:solicitudes')}?{urlencode(params)}")
 
 
@@ -2046,12 +2177,15 @@ def guardar_presupuesto_categoria(request: HttpRequest) -> HttpResponse:
     params = {
         "source": (request.POST.get("source") or "all").strip() or "all",
         "plan_id": (request.POST.get("plan_id") or "").strip(),
+        "categoria": _sanitize_categoria_filter(request.POST.get("categoria")),
         "reabasto": (request.POST.get("reabasto") or "all").strip() or "all",
         "periodo_tipo": periodo_tipo,
         "periodo_mes": periodo_mes,
     }
     if not params["plan_id"]:
         params.pop("plan_id")
+    if not params["categoria"]:
+        params.pop("categoria")
     return redirect(f"{reverse('compras:solicitudes')}?{urlencode(params)}")
 
 
@@ -2256,12 +2390,15 @@ def importar_presupuestos_periodo(request: HttpRequest) -> HttpResponse:
     params = {
         "source": (request.POST.get("source") or "all").strip() or "all",
         "plan_id": (request.POST.get("plan_id") or "").strip(),
+        "categoria": _sanitize_categoria_filter(request.POST.get("categoria")),
         "reabasto": (request.POST.get("reabasto") or "all").strip() or "all",
         "periodo_tipo": (request.POST.get("periodo_tipo") or "mes").strip() or "mes",
         "periodo_mes": (request.POST.get("periodo_mes") or "").strip(),
     }
     if not params["plan_id"]:
         params.pop("plan_id")
+    if not params["categoria"]:
+        params.pop("categoria")
     if not params["periodo_mes"]:
         params.pop("periodo_mes")
     return redirect(f"{reverse('compras:solicitudes')}?{urlencode(params)}")
@@ -2410,9 +2547,20 @@ def solicitudes_print(request: HttpRequest) -> HttpResponse:
     if not can_view_compras(request.user):
         raise PermissionDenied("No tienes permisos para ver Compras.")
 
-    solicitudes, source_filter, plan_filter, reabasto_filter, _, periodo_tipo, periodo_mes, periodo_label = _filtered_solicitudes(
+    (
+        solicitudes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        reabasto_filter,
+        _,
+        periodo_tipo,
+        periodo_mes,
+        periodo_label,
+    ) = _filtered_solicitudes(
         request.GET.get("source"),
         request.GET.get("plan_id"),
+        request.GET.get("categoria"),
         request.GET.get("reabasto"),
         request.GET.get("periodo_tipo"),
         request.GET.get("periodo_mes"),
@@ -2428,6 +2576,7 @@ def solicitudes_print(request: HttpRequest) -> HttpResponse:
         "solicitudes": solicitudes,
         "source_filter": source_filter,
         "plan_filter": plan_filter or "-",
+        "categoria_filter": categoria_filter or "-",
         "reabasto_filter": reabasto_filter,
         "periodo_label": periodo_label,
         "periodo_mes": periodo_mes if periodo_tipo != "all" else "-",
