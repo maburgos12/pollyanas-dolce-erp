@@ -142,6 +142,22 @@
           <button class="btn btn-primary" type="submit">Guardar presupuesto</button>
         </div>
       </form>
+      <form method="post" action="{% url 'compras:solicitudes_presupuesto_importar' %}" enctype="multipart/form-data" class="form-grid-auto mb-3">
+        {% csrf_token %}
+        <input type="hidden" name="source" value="{{ source_filter }}">
+        <input type="hidden" name="plan_id" value="{{ plan_filter }}">
+        <input type="hidden" name="reabasto" value="{{ reabasto_filter }}">
+        <input type="hidden" name="periodo_tipo" value="{{ periodo_tipo }}">
+        <input type="hidden" name="periodo_mes" value="{{ periodo_mes }}">
+        <div>
+          <label>Importar presupuesto (archivo)</label>
+          <input class="input-field" type="file" name="archivo_presupuesto" accept=".xlsx,.xlsm,.csv" required>
+        </div>
+        <div class="align-items-end d-flex">
+          <button class="btn btn-secondary" type="submit">Importar presupuesto</button>
+        </div>
+      </form>
+      <p class="muted mb-3">Archivo esperado: <code>periodo_tipo</code> (mes/q1/q2), <code>periodo_mes</code> (YYYY-MM), <code>monto_objetivo</code>, <code>notas</code> (opcional).</p>
       {% endif %}
       <div class="kpi-mini">
         <article class="kpi-card">
@@ -170,6 +186,48 @@
             {% endif %}
           </div>
         </article>
+      </div>
+      <div class="kpi-mini">
+        <article class="kpi-card">
+          <div class="kpi-number {% if presupuesto_alertas_total > 0 %}is-danger{% else %}is-success{% endif %}">{{ presupuesto_alertas_total }}</div>
+          <div class="kpi-label">Alertas presupuesto</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number is-danger">{{ presupuesto_alertas_altas }}</div>
+          <div class="kpi-label">Alertas altas</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number is-warning">{{ presupuesto_alertas_medias }}</div>
+          <div class="kpi-label">Alertas medias</div>
+        </article>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Nivel</th>
+              <th>Alerta</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in presupuesto_alertas %}
+              <tr>
+                <td>
+                  {% if a.nivel == 'alto' %}
+                    <span class="badge-rojo">ALTA</span>
+                  {% else %}
+                    <span class="badge-amarillo">MEDIA</span>
+                  {% endif %}
+                </td>
+                <td>{{ a.titulo }}</td>
+                <td>{{ a.detalle }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="3" class="text-muted">Sin alertas de presupuesto para este periodo/filtro.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
       <div class="table-responsive">
         <table class="table table-striped">
