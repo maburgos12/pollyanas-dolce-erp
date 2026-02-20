@@ -72,16 +72,30 @@
         <option value="ok" {% if reabasto_filter == 'ok' %}selected{% endif %}>Suficiente</option>
       </select>
     </div>
+    <div>
+      <label for="periodo_tipo">Periodo</label>
+      <select id="periodo_tipo" name="periodo_tipo" class="input-field">
+        <option value="all" {% if periodo_tipo == 'all' %}selected{% endif %}>Todos</option>
+        <option value="mes" {% if periodo_tipo == 'mes' %}selected{% endif %}>Mensual</option>
+        <option value="q1" {% if periodo_tipo == 'q1' %}selected{% endif %}>1ra quincena</option>
+        <option value="q2" {% if periodo_tipo == 'q2' %}selected{% endif %}>2da quincena</option>
+      </select>
+    </div>
+    <div>
+      <label for="periodo_mes">Mes</label>
+      <input id="periodo_mes" class="input-field" type="month" name="periodo_mes" value="{{ periodo_mes }}">
+    </div>
     <div class="align-items-end d-flex gap-2">
       <button class="btn btn-primary" type="submit">Aplicar filtros</button>
       <a href="{% url 'compras:solicitudes' %}" class="btn btn-secondary">Limpiar</a>
     </div>
   </form>
+  <p class="muted">Periodo activo: <strong>{{ periodo_label }}</strong></p>
   <div class="toolbar">
-    <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=bajo&source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=ok&source={{ source_filter }}&plan_id={{ plan_filter }}" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
+    <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=bajo&source={{ source_filter }}&plan_id={{ plan_filter }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=ok&source={{ source_filter }}&plan_id={{ plan_filter }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
     <a href="{% url 'compras:solicitudes_print' %}{% if current_query %}?{{ current_query }}{% endif %}" target="_blank" class="btn btn-secondary">Imprimir solicitud compras</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=csv{% else %}?export=csv{% endif %}" class="btn btn-secondary">Exportar CSV</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=xlsx{% else %}?export=xlsx{% endif %}" class="btn btn-secondary">Exportar XLSX</a>
@@ -98,6 +112,8 @@
           <th>Proveedor sugerido</th>
           <th>Reabasto</th>
           <th class="text-end">Cantidad</th>
+          <th class="text-end">Costo unitario</th>
+          <th class="text-end">Presupuesto</th>
           <th>Fecha requerida</th>
           <th>Estatus</th>
           {% if can_manage_compras %}<th>Flujo</th>{% endif %}
@@ -128,6 +144,8 @@
             {% endif %}
           </td>
           <td class="text-end">{{ s.cantidad }}</td>
+          <td class="text-end">${{ s.costo_unitario|floatformat:2 }}</td>
+          <td class="text-end">${{ s.presupuesto_estimado|floatformat:2 }}</td>
           <td>{{ s.fecha_requerida }}</td>
           <td>
             {% if s.estatus == 'APROBADA' %}
@@ -163,10 +181,13 @@
           {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="{% if can_manage_compras %}11{% else %}10{% endif %}" class="text-muted">Sin solicitudes capturadas.</td></tr>
+        <tr><td colspan="{% if can_manage_compras %}13{% else %}12{% endif %}" class="text-muted">Sin solicitudes capturadas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="totals" style="margin-top: 10px;">
+    <strong>Presupuesto estimado del filtro:</strong> ${{ total_presupuesto|floatformat:2 }}
   </div>
 </section>
 {% endblock %}

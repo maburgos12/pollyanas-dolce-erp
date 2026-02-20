@@ -1,6 +1,7 @@
 import csv
 from io import BytesIO
 from decimal import Decimal, InvalidOperation
+from datetime import date
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -87,7 +88,44 @@ def _solicitudes_print_folio() -> str:
     return f"SC-{now.strftime('%Y%m%d-%H%M%S')}"
 
 
-def _export_solicitudes_csv(solicitudes, source_filter: str, plan_filter: str, reabasto_filter: str) -> HttpResponse:
+def _parse_period_filters(periodo_tipo_raw: str, periodo_mes_raw: str) -> tuple[str, str, str]:
+    tipo = (periodo_tipo_raw or "all").strip().lower()
+    if tipo not in {"all", "mes", "q1", "q2"}:
+        tipo = "all"
+
+    now = timezone.localdate()
+    default_mes = f"{now.year:04d}-{now.month:02d}"
+    periodo_mes = (periodo_mes_raw or default_mes).strip()
+    try:
+        y, m = periodo_mes.split("-")
+        y_int = int(y)
+        m_int = int(m)
+        if not (1 <= m_int <= 12):
+            raise ValueError
+        periodo_mes = f"{y_int:04d}-{m_int:02d}"
+    except Exception:
+        periodo_mes = default_mes
+
+    if tipo == "mes":
+        label = f"Mensual ({periodo_mes})"
+    elif tipo == "q1":
+        label = f"1ra Quincena ({periodo_mes})"
+    elif tipo == "q2":
+        label = f"2da Quincena ({periodo_mes})"
+    else:
+        label = "Todos"
+    return tipo, periodo_mes, label
+
+
+def _export_solicitudes_csv(
+    solicitudes,
+    source_filter: str,
+    plan_filter: str,
+    reabasto_filter: str,
+    periodo_tipo: str,
+    periodo_mes: str,
+    periodo_label: str,
+) -> HttpResponse:
     now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="solicitudes_compras_{now_str}.csv"'
@@ -102,6 +140,8 @@ def _export_solicitudes_csv(solicitudes, source_filter: str, plan_filter: str, r
             "Insumo",
             "Proveedor sugerido",
             "Cantidad",
+            "Costo unitario",
+            "Presupuesto estimado",
             "Fecha requerida",
             "Estatus",
             "Reabasto",
@@ -109,6 +149,8 @@ def _export_solicitudes_csv(solicitudes, source_filter: str, plan_filter: str, r
             "Filtro origen",
             "Filtro plan",
             "Filtro reabasto",
+            "Filtro periodo",
+            "Filtro mes",
         ]
     )
     for s in solicitudes:
@@ -122,6 +164,8 @@ def _export_solicitudes_csv(solicitudes, source_filter: str, plan_filter: str, r
                 s.insumo.nombre,
                 s.proveedor_sugerido.nombre if s.proveedor_sugerido_id else "",
                 s.cantidad,
+                s.costo_unitario,
+                s.presupuesto_estimado,
                 s.fecha_requerida,
                 s.get_estatus_display(),
                 s.reabasto_texto,
@@ -129,12 +173,22 @@ def _export_solicitudes_csv(solicitudes, source_filter: str, plan_filter: str, r
                 source_filter,
                 plan_filter or "",
                 reabasto_filter,
+                periodo_label,
+                periodo_mes if periodo_tipo != "all" else "",
             ]
         )
     return response
 
 
-def _export_solicitudes_xlsx(solicitudes, source_filter: str, plan_filter: str, reabasto_filter: str) -> HttpResponse:
+def _export_solicitudes_xlsx(
+    solicitudes,
+    source_filter: str,
+    plan_filter: str,
+    reabasto_filter: str,
+    periodo_tipo: str,
+    periodo_mes: str,
+    periodo_label: str,
+) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
     ws.title = "Solicitudes"
@@ -148,6 +202,8 @@ def _export_solicitudes_xlsx(solicitudes, source_filter: str, plan_filter: str, 
             "Insumo",
             "Proveedor sugerido",
             "Cantidad",
+            "Costo unitario",
+            "Presupuesto estimado",
             "Fecha requerida",
             "Estatus",
             "Reabasto",
@@ -155,6 +211,8 @@ def _export_solicitudes_xlsx(solicitudes, source_filter: str, plan_filter: str, 
             "Filtro origen",
             "Filtro plan",
             "Filtro reabasto",
+            "Filtro periodo",
+            "Filtro mes",
         ]
     )
     for s in solicitudes:
@@ -168,6 +226,8 @@ def _export_solicitudes_xlsx(solicitudes, source_filter: str, plan_filter: str, 
                 s.insumo.nombre,
                 s.proveedor_sugerido.nombre if s.proveedor_sugerido_id else "",
                 float(s.cantidad or 0),
+                float(s.costo_unitario or 0),
+                float(s.presupuesto_estimado or 0),
                 s.fecha_requerida.isoformat() if s.fecha_requerida else "",
                 s.get_estatus_display(),
                 s.reabasto_texto,
@@ -175,6 +235,8 @@ def _export_solicitudes_xlsx(solicitudes, source_filter: str, plan_filter: str, 
                 source_filter,
                 plan_filter or "",
                 reabasto_filter,
+                periodo_label,
+                periodo_mes if periodo_tipo != "all" else "",
             ]
         )
 
@@ -191,11 +253,18 @@ def _export_solicitudes_xlsx(solicitudes, source_filter: str, plan_filter: str, 
     return response
 
 
-def _filtered_solicitudes(source_filter_raw: str, plan_filter_raw: str, reabasto_filter_raw: str):
+def _filtered_solicitudes(
+    source_filter_raw: str,
+    plan_filter_raw: str,
+    reabasto_filter_raw: str,
+    periodo_tipo_raw: str,
+    periodo_mes_raw: str,
+):
     source_filter = (source_filter_raw or "all").lower()
     if source_filter not in {"all", "manual", "plan"}:
         source_filter = "all"
     plan_filter = (plan_filter_raw or "").strip()
+    periodo_tipo, periodo_mes, periodo_label = _parse_period_filters(periodo_tipo_raw, periodo_mes_raw)
 
     solicitudes_qs = SolicitudCompra.objects.select_related("insumo", "proveedor_sugerido").all()
     if source_filter == "plan":
@@ -205,6 +274,16 @@ def _filtered_solicitudes(source_filter_raw: str, plan_filter_raw: str, reabasto
 
     if plan_filter:
         solicitudes_qs = solicitudes_qs.filter(area=f"PLAN_PRODUCCION:{plan_filter}")
+
+    if periodo_tipo != "all":
+        year, month = periodo_mes.split("-")
+        y = int(year)
+        m = int(month)
+        solicitudes_qs = solicitudes_qs.filter(fecha_requerida__year=y, fecha_requerida__month=m)
+        if periodo_tipo == "q1":
+            solicitudes_qs = solicitudes_qs.filter(fecha_requerida__day__lte=15)
+        elif periodo_tipo == "q2":
+            solicitudes_qs = solicitudes_qs.filter(fecha_requerida__day__gte=16)
 
     solicitudes = list(solicitudes_qs[:300])
     insumo_ids = [s.insumo_id for s in solicitudes]
@@ -223,6 +302,10 @@ def _filtered_solicitudes(source_filter_raw: str, plan_filter_raw: str, reabasto
         p.id: p
         for p in PlanProduccion.objects.filter(id__in=plan_ids)
     }
+    latest_cost_by_insumo: dict[int, Decimal] = {}
+    for c in CostoInsumo.objects.filter(insumo_id__in=insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+        if c.insumo_id not in latest_cost_by_insumo:
+            latest_cost_by_insumo[c.insumo_id] = c.costo_unitario
 
     for s in solicitudes:
         ex = existencias.get(s.insumo_id)
@@ -248,6 +331,8 @@ def _filtered_solicitudes(source_filter_raw: str, plan_filter_raw: str, reabasto
                 s.source_tipo = "plan"
                 s.source_plan_id = plan_id_int
                 s.source_plan_nombre = planes_map.get(plan_id_int).nombre if plan_id_int in planes_map else f"Plan {plan_id_int}"
+        s.costo_unitario = latest_cost_by_insumo.get(s.insumo_id, Decimal("0"))
+        s.presupuesto_estimado = (s.cantidad or Decimal("0")) * (s.costo_unitario or Decimal("0"))
 
     open_orders_by_solicitud = {}
     solicitud_ids = [s.id for s in solicitudes]
@@ -278,7 +363,7 @@ def _filtered_solicitudes(source_filter_raw: str, plan_filter_raw: str, reabasto
             plan_ids_all.add(int(maybe_id))
     plan_options = list(PlanProduccion.objects.filter(id__in=plan_ids_all).order_by("-fecha_produccion", "-id")[:100])
 
-    return solicitudes, source_filter, plan_filter, reabasto_filter, plan_options
+    return solicitudes, source_filter, plan_filter, reabasto_filter, plan_options, periodo_tipo, periodo_mes, periodo_label
 
 
 @login_required
@@ -298,7 +383,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
                 insumo=insumo,
                 proveedor_sugerido=insumo.proveedor_principal,
                 cantidad=_to_decimal(request.POST.get("cantidad"), "1"),
-                fecha_requerida=request.POST.get("fecha_requerida") or None,
+                fecha_requerida=request.POST.get("fecha_requerida") or date.today(),
                 estatus=request.POST.get("estatus") or SolicitudCompra.STATUS_BORRADOR,
             )
             log_event(
@@ -310,17 +395,36 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             )
         return redirect("compras:solicitudes")
 
-    solicitudes, source_filter, plan_filter, reabasto_filter, plan_options = _filtered_solicitudes(
+    solicitudes, source_filter, plan_filter, reabasto_filter, plan_options, periodo_tipo, periodo_mes, periodo_label = _filtered_solicitudes(
         request.GET.get("source"),
         request.GET.get("plan_id"),
         request.GET.get("reabasto"),
+        request.GET.get("periodo_tipo"),
+        request.GET.get("periodo_mes"),
     )
+    total_presupuesto = sum((s.presupuesto_estimado for s in solicitudes), Decimal("0"))
 
     export_format = (request.GET.get("export") or "").lower()
     if export_format == "csv":
-        return _export_solicitudes_csv(solicitudes, source_filter, plan_filter, reabasto_filter)
+        return _export_solicitudes_csv(
+            solicitudes,
+            source_filter,
+            plan_filter,
+            reabasto_filter,
+            periodo_tipo,
+            periodo_mes,
+            periodo_label,
+        )
     if export_format == "xlsx":
-        return _export_solicitudes_xlsx(solicitudes, source_filter, plan_filter, reabasto_filter)
+        return _export_solicitudes_xlsx(
+            solicitudes,
+            source_filter,
+            plan_filter,
+            reabasto_filter,
+            periodo_tipo,
+            periodo_mes,
+            periodo_label,
+        )
 
     query_without_export = request.GET.copy()
     query_without_export.pop("export", None)
@@ -334,6 +438,10 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "source_filter": source_filter,
         "plan_filter": plan_filter,
         "plan_options": plan_options,
+        "periodo_tipo": periodo_tipo,
+        "periodo_mes": periodo_mes,
+        "periodo_label": periodo_label,
+        "total_presupuesto": total_presupuesto,
         "current_query": query_without_export.urlencode(),
     }
     return render(request, "compras/solicitudes.html", context)
@@ -344,13 +452,16 @@ def solicitudes_print(request: HttpRequest) -> HttpResponse:
     if not can_view_compras(request.user):
         raise PermissionDenied("No tienes permisos para ver Compras.")
 
-    solicitudes, source_filter, plan_filter, reabasto_filter, _ = _filtered_solicitudes(
+    solicitudes, source_filter, plan_filter, reabasto_filter, _, periodo_tipo, periodo_mes, periodo_label = _filtered_solicitudes(
         request.GET.get("source"),
         request.GET.get("plan_id"),
         request.GET.get("reabasto"),
+        request.GET.get("periodo_tipo"),
+        request.GET.get("periodo_mes"),
     )
 
     total_cantidad = sum((s.cantidad for s in solicitudes), Decimal("0"))
+    total_presupuesto = sum((s.presupuesto_estimado for s in solicitudes), Decimal("0"))
     criticos_count = sum(1 for s in solicitudes if s.reabasto_nivel == "critico")
     bajos_count = sum(1 for s in solicitudes if s.reabasto_nivel == "bajo")
     ok_count = sum(1 for s in solicitudes if s.reabasto_nivel == "ok")
@@ -360,7 +471,10 @@ def solicitudes_print(request: HttpRequest) -> HttpResponse:
         "source_filter": source_filter,
         "plan_filter": plan_filter or "-",
         "reabasto_filter": reabasto_filter,
+        "periodo_label": periodo_label,
+        "periodo_mes": periodo_mes if periodo_tipo != "all" else "-",
         "total_cantidad": total_cantidad,
+        "total_presupuesto": total_presupuesto,
         "criticos_count": criticos_count,
         "bajos_count": bajos_count,
         "ok_count": ok_count,

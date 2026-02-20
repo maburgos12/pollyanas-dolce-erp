@@ -200,6 +200,8 @@
       <div class="meta-box"><strong>Origen:</strong> {{ source_filter|upper }}</div>
       <div class="meta-box"><strong>Plan:</strong> {{ plan_filter }}</div>
       <div class="meta-box"><strong>Filtro reabasto:</strong> {{ reabasto_filter|upper }}</div>
+      <div class="meta-box"><strong>Periodo:</strong> {{ periodo_label }}</div>
+      <div class="meta-box"><strong>Mes base:</strong> {{ periodo_mes }}</div>
       <div class="meta-box"><strong>Solicitudes:</strong> {{ solicitudes|length }}</div>
     </div>
     <div class="notes-box"><strong>Observaciones:</strong><br><br></div>
@@ -212,6 +214,8 @@
           <th>Insumo</th>
           <th>Proveedor sugerido</th>
           <th class="text-end">Cantidad</th>
+          <th class="text-end">Costo unitario</th>
+          <th class="text-end">Presupuesto</th>
           <th>Fecha requerida</th>
           <th>Reabasto</th>
           <th>Estatus</th>
@@ -225,6 +229,8 @@
           <td>{{ s.insumo.nombre }}</td>
           <td>{{ s.proveedor_sugerido.nombre|default:"-" }}</td>
           <td class="text-end">{{ s.cantidad|floatformat:3 }}</td>
+          <td class="text-end">${{ s.costo_unitario|floatformat:2 }}</td>
+          <td class="text-end">${{ s.presupuesto_estimado|floatformat:2 }}</td>
           <td>{{ s.fecha_requerida }}</td>
           <td>
             {% if s.reabasto_nivel == "critico" %}
@@ -239,7 +245,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="8">Sin solicitudes para los filtros seleccionados.</td>
+          <td colspan="10">Sin solicitudes para los filtros seleccionados.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -247,6 +253,7 @@
 
     <div class="totals">
       <div><strong>Cantidad total solicitada:</strong> {{ total_cantidad|floatformat:3 }}</div>
+      <div><strong>Presupuesto estimado total:</strong> ${{ total_presupuesto|floatformat:2 }}</div>
       <div><strong>Críticos:</strong> {{ criticos_count }} · <strong>Bajo reorden:</strong> {{ bajos_count }} · <strong>Suficiente:</strong> {{ ok_count }}</div>
     </div>
 
