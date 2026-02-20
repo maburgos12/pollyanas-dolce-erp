@@ -35,6 +35,16 @@ def _norm_code(value: str | None) -> str:
     return normalizar_codigo_point(value or "")
 
 
+def _to_float(value: object) -> float:
+    txt = _safe(value).replace(",", "")
+    if not txt:
+        return 0.0
+    try:
+        return float(txt)
+    except ValueError:
+        return 0.0
+
+
 NON_RECIPE_FAMILIES = {
     "wilton",
     "accesorios",
@@ -405,8 +415,13 @@ class Command(BaseCommand):
         cat = _norm_text(row.get("categoria"))
         name = _norm_text(row.get("nombre"))
         alias = _norm_text(row.get("alias"))
+        price = _to_float(row.get("precio_default"))
 
         if fam in NON_RECIPE_FAMILIES or cat in NON_RECIPE_CATEGORIES:
+            return True
+
+        # Point products with zero price are usually internal placeholders or non-costed extras.
+        if price <= 0:
             return True
 
         accessory_tokens = (
@@ -429,6 +444,10 @@ class Command(BaseCommand):
             "deco ",
             "topping",
             "sabor ",
+            "extra ",
+            "contenedor",
+            "aderezo",
+            "gragea",
         )
         joined = f"{name} {alias}".strip()
         if any(tok in joined for tok in accessory_tokens):
