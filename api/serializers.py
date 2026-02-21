@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from compras.models import SolicitudCompra
+from compras.models import OrdenCompra, SolicitudCompra
 
 
 class MRPRequestSerializer(serializers.Serializer):
@@ -76,8 +76,22 @@ class ComprasSolicitudCreateSerializer(serializers.Serializer):
         required=False,
         default=SolicitudCompra.STATUS_BORRADOR,
     )
+    auto_crear_orden = serializers.BooleanField(required=False, default=False)
+    orden_estatus = serializers.ChoiceField(
+        choices=[choice[0] for choice in OrdenCompra.STATUS_CHOICES],
+        required=False,
+        default=OrdenCompra.STATUS_BORRADOR,
+    )
 
     def validate_cantidad(self, value):
         if value <= 0:
             raise serializers.ValidationError("La cantidad debe ser mayor a 0.")
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs.get("auto_crear_orden") and attrs.get("estatus") != SolicitudCompra.STATUS_APROBADA:
+            raise serializers.ValidationError(
+                {"auto_crear_orden": "Para crear OC automática, la solicitud debe ir en estatus APROBADA."}
+            )
+        return attrs

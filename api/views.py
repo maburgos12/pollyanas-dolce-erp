@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -684,33 +685,62 @@ class ComprasSolicitudCreateView(APIView):
         insumo = get_object_or_404(Insumo, pk=data["insumo_id"])
         solicitante = (data.get("solicitante") or request.user.username or "").strip() or request.user.username
         area = (data["area"] or "").strip() or "General"
+        auto_crear_orden = bool(data.get("auto_crear_orden"))
+        orden_estatus = data.get("orden_estatus") or OrdenCompra.STATUS_BORRADOR
+        if auto_crear_orden and not insumo.proveedor_principal_id:
+            return Response(
+                {
+                    "detail": (
+                        "No se pudo crear OC automática: el insumo no tiene proveedor "
+                        "principal configurado."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        solicitud = SolicitudCompra.objects.create(
-            area=area,
-            solicitante=solicitante[:120],
-            insumo=insumo,
-            proveedor_sugerido=insumo.proveedor_principal,
-            cantidad=data["cantidad"],
-            fecha_requerida=data.get("fecha_requerida") or timezone.localdate(),
-            estatus=data.get("estatus") or SolicitudCompra.STATUS_BORRADOR,
-        )
+        with transaction.atomic():
+            solicitud = SolicitudCompra.objects.create(
+                area=area,
+                solicitante=solicitante[:120],
+                insumo=insumo,
+                proveedor_sugerido=insumo.proveedor_principal,
+                cantidad=data["cantidad"],
+                fecha_requerida=data.get("fecha_requerida") or timezone.localdate(),
+                estatus=data.get("estatus") or SolicitudCompra.STATUS_BORRADOR,
+            )
 
-        return Response(
-            {
-                "id": solicitud.id,
-                "folio": solicitud.folio,
-                "area": solicitud.area,
-                "solicitante": solicitud.solicitante,
-                "insumo_id": solicitud.insumo_id,
-                "insumo": solicitud.insumo.nombre,
-                "cantidad": str(solicitud.cantidad),
-                "fecha_requerida": str(solicitud.fecha_requerida),
-                "estatus": solicitud.estatus,
-                "proveedor_sugerido_id": solicitud.proveedor_sugerido_id,
-                "proveedor_sugerido": solicitud.proveedor_sugerido.nombre if solicitud.proveedor_sugerido_id else "",
-            },
-            status=status.HTTP_201_CREATED,
-        )
+            orden = None
+            if auto_crear_orden:
+                proveedor = solicitud.proveedor_sugerido or insumo.proveedor_principal
+                costo_qs = CostoInsumo.objects.filter(insumo=insumo).order_by("-fecha", "-id")
+                costo = costo_qs.filter(proveedor=proveedor).first() or costo_qs.first()
+                costo_unitario = _to_decimal(costo.costo_unitario if costo else 0)
+                monto_estimado = (data["cantidad"] * costo_unitario).quantize(Decimal("0.01"))
+                orden = OrdenCompra.objects.create(
+                    solicitud=solicitud,
+                    proveedor=proveedor,
+                    estatus=orden_estatus,
+                    monto_estimado=monto_estimado,
+                )
+
+        payload = {
+            "id": solicitud.id,
+            "folio": solicitud.folio,
+            "area": solicitud.area,
+            "solicitante": solicitud.solicitante,
+            "insumo_id": solicitud.insumo_id,
+            "insumo": solicitud.insumo.nombre,
+            "cantidad": str(solicitud.cantidad),
+            "fecha_requerida": str(solicitud.fecha_requerida),
+            "estatus": solicitud.estatus,
+            "proveedor_sugerido_id": solicitud.proveedor_sugerido_id,
+            "proveedor_sugerido": solicitud.proveedor_sugerido.nombre if solicitud.proveedor_sugerido_id else "",
+            "auto_crear_orden": auto_crear_orden,
+            "orden_id": orden.id if orden else None,
+            "orden_folio": orden.folio if orden else "",
+            "orden_estatus": orden.estatus if orden else "",
+        }
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 class MRPRequerimientosView(APIView):

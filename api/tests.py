@@ -195,6 +195,55 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["cantidad"], "3.500")
         self.assertTrue(payload["folio"].startswith("SOL-"))
 
+    def test_endpoint_compras_solicitud_auto_crea_orden(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor auto OC", activo=True)
+        self.insumo.proveedor_principal = proveedor
+        self.insumo.save(update_fields=["proveedor_principal"])
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("12.5"),
+            source_hash="api-oc-auto-1",
+        )
+        url = reverse("api_compras_solicitud")
+        resp = self.client.post(
+            url,
+            {
+                "area": "Compras",
+                "solicitante": "api-auto",
+                "insumo_id": self.insumo.id,
+                "cantidad": "4",
+                "estatus": SolicitudCompra.STATUS_APROBADA,
+                "auto_crear_orden": True,
+                "orden_estatus": OrdenCompra.STATUS_ENVIADA,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertTrue(payload["auto_crear_orden"])
+        self.assertIsNotNone(payload["orden_id"])
+        orden = OrdenCompra.objects.get(pk=payload["orden_id"])
+        self.assertEqual(orden.solicitud_id, payload["id"])
+        self.assertEqual(orden.estatus, OrdenCompra.STATUS_ENVIADA)
+        self.assertEqual(orden.monto_estimado, Decimal("50.00"))
+
+    def test_endpoint_compras_solicitud_auto_crear_orden_requiere_aprobada(self):
+        url = reverse("api_compras_solicitud")
+        resp = self.client.post(
+            url,
+            {
+                "area": "Compras",
+                "insumo_id": self.insumo.id,
+                "cantidad": "1",
+                "estatus": SolicitudCompra.STATUS_BORRADOR,
+                "auto_crear_orden": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("auto_crear_orden", resp.json())
+
     def test_endpoint_compras_solicitud_requiere_rol(self):
         user_model = get_user_model()
         user = user_model.objects.create_user(
