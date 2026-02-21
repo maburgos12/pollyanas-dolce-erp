@@ -4,7 +4,8 @@ from . import views
 app_name = "recetas"
 
 urlpatterns = [
-    path("recetas/", views.recetas_list, name="recetas_list"),
+    path("", views.recetas_list, name="recetas_list"),
+    path("recetas/", views.recetas_list, name="recetas_list_legacy"),
     path("recetas/<int:pk>/", views.receta_detail, name="receta_detail"),
     path("recetas/<int:pk>/versiones/export/", views.receta_versiones_export, name="receta_versiones_export"),
     path("recetas/<int:pk>/actualizar/", views.receta_update, name="receta_update"),

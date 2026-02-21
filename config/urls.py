@@ -12,6 +12,7 @@ urlpatterns = [
 
     path("", RedirectView.as_view(url="/login/", permanent=False)),
     path("dashboard/", core_views.dashboard, name="dashboard"),
+    path("plan-produccion/", RedirectView.as_view(url="/recetas/plan-produccion/", permanent=False)),
     path("maestros/", include(("maestros.urls", "maestros"), namespace="maestros")),
     path("recetas/", include(("recetas.urls", "recetas"), namespace="recetas")),
     path("compras/", include(("compras.urls", "compras"), namespace="compras")),
