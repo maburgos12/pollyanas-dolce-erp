@@ -312,6 +312,29 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertTrue(row["sin_costo"])
         self.assertEqual(row["alerta"], "Sin costo unitario")
 
+    def test_nueva_solicitud_usa_sugerencia_con_seguridad_leadtime_y_transito(self):
+        from inventario.models import ExistenciaInsumo
+
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo_masa_blank,
+            stock_actual=Decimal("2"),
+            punto_reorden=Decimal("5"),
+            stock_minimo=Decimal("2"),
+            dias_llegada_pedido=2,
+            consumo_diario_promedio=Decimal("1.5"),
+        )
+
+        response = self.client.get(reverse("compras:solicitudes"))
+        self.assertEqual(response.status_code, 200)
+        options = response.context["insumo_options"]
+        row = next(o for o in options if o["id"] == self.insumo_masa_blank.id)
+
+        self.assertEqual(row["stock_actual"], Decimal("2"))
+        self.assertEqual(row["stock_seguridad"], Decimal("2"))
+        self.assertEqual(row["demanda_lead_time"], Decimal("3.0"))
+        self.assertEqual(row["en_transito"], Decimal("2"))
+        self.assertEqual(row["recomendado"], Decimal("1.0"))
+
 
 class ComprasSolicitudesImportPreviewTests(TestCase):
     def setUp(self):

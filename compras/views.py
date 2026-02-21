@@ -422,16 +422,49 @@ def _can_transition_recepcion(current: str, new: str) -> bool:
 
 def _build_insumo_options():
     insumos = list(Insumo.objects.filter(activo=True).order_by("nombre")[:200])
-    existencias = {
-        e.insumo_id: e
-        for e in ExistenciaInsumo.objects.filter(insumo_id__in=[i.id for i in insumos])
-    }
+    insumo_ids = [i.id for i in insumos]
+    existencias = {e.insumo_id: e for e in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)}
+
+    en_transito_by_insumo: dict[int, Decimal] = {}
+    for orden in (
+        OrdenCompra.objects.filter(
+            estatus__in=[
+                OrdenCompra.STATUS_ENVIADA,
+                OrdenCompra.STATUS_CONFIRMADA,
+                OrdenCompra.STATUS_PARCIAL,
+            ],
+            solicitud__isnull=False,
+            solicitud__insumo_id__in=insumo_ids,
+        )
+        .select_related("solicitud")
+        .only("solicitud__insumo_id", "solicitud__cantidad")
+    ):
+        solicitud = orden.solicitud
+        if not solicitud or not solicitud.insumo_id:
+            continue
+        qty = _to_decimal(str(solicitud.cantidad or 0), "0")
+        if qty <= 0:
+            continue
+        en_transito_by_insumo[solicitud.insumo_id] = en_transito_by_insumo.get(solicitud.insumo_id, Decimal("0")) + qty
+
     options = []
     for insumo in insumos:
         ex = existencias.get(insumo.id)
         stock_actual = ex.stock_actual if ex else Decimal("0")
         punto_reorden = ex.punto_reorden if ex else Decimal("0")
-        recomendado = max(punto_reorden - stock_actual, Decimal("0"))
+        stock_seguridad = ex.stock_minimo if ex else Decimal("0")
+        consumo_diario = ex.consumo_diario_promedio if ex else Decimal("0")
+        lead_time_dias = int(ex.dias_llegada_pedido or 0) if ex else 0
+        if lead_time_dias <= 0 and insumo.proveedor_principal_id:
+            lead_time_dias = int(insumo.proveedor_principal.lead_time_dias or 0)
+        lead_time_dias = max(lead_time_dias, 0)
+
+        demanda_lead_time = consumo_diario * Decimal(str(lead_time_dias))
+        en_transito = en_transito_by_insumo.get(insumo.id, Decimal("0"))
+        recomendado = (demanda_lead_time + stock_seguridad) - (stock_actual + en_transito)
+        if recomendado < 0:
+            recomendado = Decimal("0")
+
         options.append(
             {
                 "id": insumo.id,
@@ -439,6 +472,10 @@ def _build_insumo_options():
                 "proveedor_sugerido": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
                 "stock_actual": stock_actual,
                 "punto_reorden": punto_reorden,
+                "stock_seguridad": stock_seguridad,
+                "demanda_lead_time": demanda_lead_time,
+                "en_transito": en_transito,
+                "lead_time_dias": lead_time_dias,
                 "recomendado": recomendado,
             }
         )

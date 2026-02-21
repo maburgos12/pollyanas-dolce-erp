@@ -23,6 +23,10 @@
         value="{{ i.id }}"
         data-stock="{{ i.stock_actual }}"
         data-reorden="{{ i.punto_reorden }}"
+        data-seguridad="{{ i.stock_seguridad }}"
+        data-transito="{{ i.en_transito }}"
+        data-demanda-lead="{{ i.demanda_lead_time }}"
+        data-lead-time="{{ i.lead_time_dias }}"
         data-recomendado="{{ i.recomendado }}"
         data-proveedor="{{ i.proveedor_sugerido }}"
       >
@@ -37,7 +41,7 @@
     </select>
     <button class="btn btn-primary" type="submit">Guardar solicitud</button>
   </form>
-  <p id="stock-hint" class="muted mb-0">Selecciona un insumo para ver stock, punto de reorden, sugerencia y proveedor principal.</p>
+  <p id="stock-hint" class="muted mb-0">Selecciona un insumo para ver stock, seguridad, tránsito, lead time, sugerencia y proveedor principal.</p>
 
   <hr style="margin: 18px 0;">
   <div class="card-header" style="padding:0 0 12px 0;border:0;">Carga Masiva de Solicitudes (XLSX/CSV)</div>
@@ -953,20 +957,39 @@
       function onInsumoChange() {
         const selected = insumoSelect.options[insumoSelect.selectedIndex];
         if (!selected || !selected.value) {
-          stockHint.textContent = "Selecciona un insumo para ver stock, punto de reorden y sugerencia de compra.";
+          stockHint.textContent = "Selecciona un insumo para ver stock, seguridad, tránsito, lead time y sugerencia de compra.";
           return;
         }
 
         const stock = Number(selected.dataset.stock || 0);
         const reorden = Number(selected.dataset.reorden || 0);
+        const seguridad = Number(selected.dataset.seguridad || 0);
+        const transito = Number(selected.dataset.transito || 0);
+        const demandaLead = Number(selected.dataset.demandaLead || 0);
+        const leadTime = Number(selected.dataset.leadTime || 0);
         const recomendado = Number(selected.dataset.recomendado || 0);
         const proveedor = selected.dataset.proveedor || "-";
 
         if (!Number.isNaN(recomendado) && recomendado > 0) {
           cantidadInput.value = recomendado.toFixed(3);
-          stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | Sugerido: " + recomendado.toFixed(3) + " | Proveedor: " + proveedor;
+          stockHint.textContent =
+            "Stock: " + stock.toFixed(3) +
+            " | Reorden: " + reorden.toFixed(3) +
+            " | Seguridad: " + seguridad.toFixed(3) +
+            " | Tránsito: " + transito.toFixed(3) +
+            " | Demanda lead: " + demandaLead.toFixed(3) +
+            " | Lead time: " + leadTime.toFixed(0) + "d" +
+            " | Sugerido: " + recomendado.toFixed(3) +
+            " | Proveedor: " + proveedor;
         } else {
-          stockHint.textContent = "Stock: " + stock.toFixed(3) + " | Punto de reorden: " + reorden.toFixed(3) + " | No se requiere compra por reorden. | Proveedor: " + proveedor;
+          stockHint.textContent =
+            "Stock: " + stock.toFixed(3) +
+            " | Reorden: " + reorden.toFixed(3) +
+            " | Seguridad: " + seguridad.toFixed(3) +
+            " | Tránsito: " + transito.toFixed(3) +
+            " | Demanda lead: " + demandaLead.toFixed(3) +
+            " | Lead time: " + leadTime.toFixed(0) + "d" +
+            " | No se requiere compra sugerida. | Proveedor: " + proveedor;
         }
       }
 
