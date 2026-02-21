@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -199,3 +200,62 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(alias.insumo_id, insumo_b.id)
         run.refresh_from_db()
         self.assertEqual(run.pending_preview, [])
+
+    def test_bulk_import_aliases_creates_and_cleans_pending(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo = Insumo.objects.create(nombre="Harina Pastelera", unidad_base=unidad)
+        run = AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=timezone.now(),
+            matched=5,
+            unmatched=1,
+            pending_preview=[
+                {
+                    "source": "inventario",
+                    "row": 6,
+                    "nombre_origen": "Harina pastelera 25kg",
+                    "nombre_normalizado": "harina pastelera 25kg",
+                    "sugerencia": "Harina Pastelera",
+                    "score": 95.0,
+                }
+            ],
+        )
+        payload = "alias,insumo\nHarina pastelera 25kg,Harina Pastelera\n"
+        archivo = SimpleUploadedFile("aliases.csv", payload.encode("utf-8"), content_type="text/csv")
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "import_bulk",
+                "score_min": "90",
+                "archivo_aliases": archivo,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            InsumoAlias.objects.filter(nombre_normalizado="harina pastelera 25kg", insumo=insumo).exists()
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.pending_preview, [])
+
+    def test_bulk_import_aliases_stores_unresolved_preview(self):
+        payload = "alias,insumo\nFresa natural premium,No Existe En Catalogo\n"
+        archivo = SimpleUploadedFile("aliases.csv", payload.encode("utf-8"), content_type="text/csv")
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "import_bulk",
+                "score_min": "95",
+                "archivo_aliases": archivo,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        preview = self.client.session.get("inventario_alias_import_preview")
+        stats = self.client.session.get("inventario_alias_import_stats")
+        self.assertIsInstance(preview, list)
+        self.assertEqual(len(preview), 1)
+        self.assertEqual(preview[0]["alias"], "Fresa natural premium")
+        self.assertEqual(stats["unresolved"], 1)

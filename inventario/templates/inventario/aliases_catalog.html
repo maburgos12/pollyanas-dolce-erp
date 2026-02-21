@@ -152,6 +152,90 @@
 </section>
 {% endif %}
 
+{% if can_manage_inventario %}
+<section class="card">
+  <div class="card-header">Carga Masiva de Aliases (CSV/XLSX)</div>
+  <p class="muted">Columnas sugeridas: <code>alias</code>, <code>insumo</code>. Si no mandas <code>insumo</code>, se intentará resolver por el alias con score mínimo.</p>
+  <form method="post" enctype="multipart/form-data" class="form-grid-auto">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="import_bulk">
+    <input type="hidden" name="next_q" value="{{ q }}">
+    <input class="input-field" type="file" name="archivo_aliases" accept=".csv,.xlsx,.xlsm" required>
+    <input class="input-field" type="number" name="score_min" min="0" max="100" step="0.1" value="{% if alias_import_stats.score_min %}{{ alias_import_stats.score_min }}{% else %}90{% endif %}">
+    <button class="btn btn-primary" type="submit">Importar aliases</button>
+  </form>
+
+  {% if alias_import_stats.rows_total %}
+  <div class="kpi-grid kpi-mini" style="margin-top:12px;">
+    <article class="kpi-card">
+      <div class="kpi-number">{{ alias_import_stats.rows_total }}</div>
+      <div class="kpi-label">Filas archivo</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number is-success">{{ alias_import_stats.created }}</div>
+      <div class="kpi-label">Aliases creados</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number is-warning">{{ alias_import_stats.updated }}</div>
+      <div class="kpi-label">Aliases actualizados</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if alias_import_stats.unresolved %}is-danger{% else %}is-success{% endif %}">{{ alias_import_stats.unresolved }}</div>
+      <div class="kpi-label">Sin resolver</div>
+    </article>
+  </div>
+  <p class="muted" style="margin-top:8px;">
+    Archivo: {{ alias_import_stats.file_name }} ·
+    Score mínimo: {{ alias_import_stats.score_min|floatformat:1 }} ·
+    Point resueltos: {{ alias_import_stats.point_resolved }} ·
+    Recetas resueltas: {{ alias_import_stats.recetas_resolved }}.
+  </p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if can_manage_inventario and alias_import_preview %}
+<section class="card">
+  <div class="card-header">Pendientes de Importación (Alias)</div>
+  <p class="muted">Filas que no se pudieron aplicar automáticamente. Corrige el nombre de insumo o usa "Usar en alta".</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fila</th>
+          <th>Alias archivo</th>
+          <th>Insumo archivo</th>
+          <th>Sugerencia</th>
+          <th class="text-end">Score</th>
+          <th>Método</th>
+          <th>Motivo</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in alias_import_preview %}
+        <tr>
+          <td>{{ r.row }}</td>
+          <td>{{ r.alias|default:"-" }}</td>
+          <td>{{ r.insumo_archivo|default:"-" }}</td>
+          <td>{{ r.sugerencia|default:"-" }}</td>
+          <td class="text-end">{{ r.score|floatformat:1 }}</td>
+          <td>{{ r.method }}</td>
+          <td>{{ r.motivo }}</td>
+          <td><button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ r.alias|escape }}">Usar en alta</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form method="post" style="display:flex; justify-content:flex-end; margin-top:8px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="clear_import_preview">
+    <button class="btn btn-secondary" type="submit">Limpiar pendientes de importación</button>
+  </form>
+</section>
+{% endif %}
+
 <section class="card">
   <div class="card-header">Pendientes Recientes de Match (Almacén)</div>
   <div class="kpi-grid kpi-mini">

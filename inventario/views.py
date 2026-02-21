@@ -4,6 +4,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlencode
@@ -19,6 +20,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
@@ -48,6 +50,74 @@ SOURCE_TO_FILENAME = {
 }
 
 FILENAME_TO_SOURCE = {v: k for k, v in SOURCE_TO_FILENAME.items()}
+
+
+def _map_alias_import_header(raw: str) -> str:
+    h = normalizar_nombre(raw)
+    if h in {
+        "alias",
+        "nombre",
+        "nombre origen",
+        "nombre_origen",
+        "origen",
+        "insumo origen",
+        "insumo_origen",
+        "nombre almacen",
+        "nombre_almacen",
+        "point nombre",
+        "point_nombre",
+    }:
+        return "alias"
+    if h in {
+        "insumo",
+        "insumo oficial",
+        "insumo_oficial",
+        "insumo destino",
+        "insumo_destino",
+        "canonico",
+        "oficial",
+        "insumo erp",
+        "insumo_erp",
+    }:
+        return "insumo"
+    return h
+
+
+def _read_alias_import_rows(uploaded: UploadedFile) -> list[dict]:
+    ext = Path(uploaded.name or "").suffix.lower()
+    rows: list[dict] = []
+
+    if ext in {".xlsx", ".xlsm"}:
+        uploaded.seek(0)
+        wb = load_workbook(uploaded, read_only=True, data_only=True)
+        ws = wb.active
+        values = list(ws.values)
+        if not values:
+            return []
+        headers = [_map_alias_import_header(str(h or "")) for h in values[0]]
+        for raw in values[1:]:
+            row = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                row[header] = raw[idx] if idx < len(raw) else None
+            rows.append(row)
+        return rows
+
+    if ext == ".csv":
+        uploaded.seek(0)
+        content = uploaded.read().decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(StringIO(content))
+        for raw in reader:
+            row = {}
+            for k, v in raw.items():
+                if not k:
+                    continue
+                row[_map_alias_import_header(k)] = v
+            rows.append(row)
+        return rows
+
+    raise ValueError("Formato no soportado. Usa .xlsx, .xlsm o .csv.")
 
 
 def _to_decimal(value: str, default: str = "0") -> Decimal:
@@ -586,6 +656,147 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                     else:
                         messages.error(request, "El nombre origen no es válido.")
 
+        elif action == "import_bulk":
+            archivo = request.FILES.get("archivo_aliases")
+            min_score = float(_to_decimal(request.POST.get("score_min"), "90"))
+            min_score = max(0.0, min(100.0, min_score))
+
+            if not archivo:
+                messages.error(request, "Debes seleccionar un archivo .csv o .xlsx para importar aliases.")
+            else:
+                try:
+                    rows = _read_alias_import_rows(archivo)
+                except ValueError as exc:
+                    messages.error(request, str(exc))
+                    rows = []
+                except Exception:
+                    messages.error(request, "No se pudo leer el archivo de aliases. Verifica formato y columnas.")
+                    rows = []
+
+                if rows:
+                    insumo_exact_map = {
+                        i.nombre_normalizado: i
+                        for i in Insumo.objects.filter(activo=True).only("id", "nombre", "nombre_normalizado")
+                    }
+                    created = 0
+                    updated = 0
+                    invalid = 0
+                    unresolved = 0
+                    point_resolved_total = 0
+                    recetas_resolved_total = 0
+                    cleaned_norms: set[str] = set()
+                    unresolved_preview: list[dict] = []
+
+                    for idx, row in enumerate(rows, start=2):
+                        alias_name = str(row.get("alias") or "").strip()
+                        insumo_raw = str(row.get("insumo") or "").strip()
+                        reason = ""
+                        resolved_insumo = None
+                        score = 0.0
+                        method = "-"
+                        suggested_name = ""
+
+                        if not alias_name:
+                            reason = "Alias vacío."
+                            invalid += 1
+                        else:
+                            if insumo_raw:
+                                resolved_insumo = insumo_exact_map.get(normalizar_nombre(insumo_raw))
+                                if resolved_insumo:
+                                    score = 100.0
+                                    method = "EXACT_NAME"
+                                    suggested_name = resolved_insumo.nombre
+                                else:
+                                    candidate, candidate_score, candidate_method = match_insumo(insumo_raw)
+                                    if candidate and candidate_score >= min_score:
+                                        resolved_insumo = candidate
+                                        score = float(candidate_score or 0.0)
+                                        method = candidate_method or "FUZZY"
+                                        suggested_name = candidate.nombre
+                                    else:
+                                        suggested_name = candidate.nombre if candidate else ""
+                                        score = float(candidate_score or 0.0) if candidate else 0.0
+                                        method = candidate_method or "NO_MATCH"
+                                        reason = f"Insumo no resuelto (score<{min_score:.1f})."
+                            else:
+                                candidate, candidate_score, candidate_method = match_insumo(alias_name)
+                                if candidate and candidate_score >= min_score:
+                                    resolved_insumo = candidate
+                                    score = float(candidate_score or 0.0)
+                                    method = candidate_method or "FUZZY"
+                                    suggested_name = candidate.nombre
+                                else:
+                                    suggested_name = candidate.nombre if candidate else ""
+                                    score = float(candidate_score or 0.0) if candidate else 0.0
+                                    method = candidate_method or "NO_MATCH"
+                                    reason = "Sin columna 'insumo' resoluble para esta fila."
+
+                        if not reason and resolved_insumo:
+                            ok, alias_norm, action_label = _upsert_alias(alias_name, resolved_insumo)
+                            if ok:
+                                if action_label == "creado":
+                                    created += 1
+                                else:
+                                    updated += 1
+                                cleaned_norms.add(alias_norm)
+                                point_resolved, recetas_resolved = _resolve_cross_source_with_alias(alias_name, resolved_insumo)
+                                point_resolved_total += point_resolved
+                                recetas_resolved_total += recetas_resolved
+                            else:
+                                reason = "Alias inválido tras normalización."
+                                invalid += 1
+
+                        if reason:
+                            unresolved += 1
+                            if len(unresolved_preview) < 200:
+                                unresolved_preview.append(
+                                    {
+                                        "row": idx,
+                                        "alias": alias_name,
+                                        "insumo_archivo": insumo_raw,
+                                        "sugerencia": suggested_name,
+                                        "score": score,
+                                        "method": method,
+                                        "motivo": reason,
+                                    }
+                                )
+
+                    if cleaned_norms:
+                        _remove_pending_names_from_session(request, cleaned_norms)
+                        _remove_pending_names_from_recent_runs(cleaned_norms)
+
+                    request.session["inventario_alias_import_preview"] = unresolved_preview
+                    request.session["inventario_alias_import_stats"] = {
+                        "file_name": archivo.name,
+                        "rows_total": len(rows),
+                        "created": created,
+                        "updated": updated,
+                        "invalid": invalid,
+                        "unresolved": unresolved,
+                        "point_resolved": point_resolved_total,
+                        "recetas_resolved": recetas_resolved_total,
+                        "score_min": min_score,
+                    }
+
+                    messages.success(
+                        request,
+                        (
+                            "Importación masiva de aliases completada. "
+                            f"Filas: {len(rows)}. Creados: {created}. Actualizados: {updated}. "
+                            f"Point resueltos: {point_resolved_total}. Recetas resueltas: {recetas_resolved_total}."
+                        ),
+                    )
+                    if unresolved:
+                        messages.warning(
+                            request,
+                            (
+                                f"Quedaron {unresolved} filas sin resolver o inválidas. "
+                                "Revísalas en el bloque 'Pendientes de importación'."
+                            ),
+                        )
+                else:
+                    messages.warning(request, "El archivo no contiene filas para importar.")
+
         elif action == "bulk_reassign":
             insumo_id = (request.POST.get("insumo_id") or "").strip()
             alias_ids = [a for a in request.POST.getlist("alias_ids") if a.isdigit()]
@@ -770,6 +981,10 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                     f"Ligadas a insumo: {result['linked']}."
                 ),
             )
+        elif action == "clear_import_preview":
+            request.session.pop("inventario_alias_import_preview", None)
+            request.session.pop("inventario_alias_import_stats", None)
+            messages.success(request, "Pendientes de importación limpiados.")
 
         base_url = reverse("inventario:aliases_catalog")
         if next_q:
@@ -931,6 +1146,9 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     if export_format == "cross_pending_csv":
         return _export_cross_pending_csv(unified_rows)
 
+    import_preview = list(request.session.get("inventario_alias_import_preview", []))[:200]
+    import_stats = request.session.get("inventario_alias_import_stats", {})
+
     context = {
         "q": q,
         "page": page,
@@ -963,6 +1181,8 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             "overlaps": overlaps,
         },
         "cross_unified_rows": unified_rows[:120],
+        "alias_import_preview": import_preview,
+        "alias_import_stats": import_stats,
     }
     return render(request, "inventario/aliases_catalog.html", context)
 
