@@ -302,6 +302,24 @@ class RecetaPresentacion(models.Model):
         return f"{self.receta.nombre} - {self.nombre}"
 
 
+class PronosticoVenta(models.Model):
+    receta = models.ForeignKey(Receta, related_name="pronosticos", on_delete=models.CASCADE)
+    periodo = models.CharField(max_length=7, db_index=True)  # YYYY-MM
+    cantidad = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    fuente = models.CharField(max_length=40, blank=True, default="MANUAL")
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Pronóstico de venta"
+        verbose_name_plural = "Pronósticos de venta"
+        ordering = ["-periodo", "receta__nombre"]
+        unique_together = [("receta", "periodo")]
+
+    def __str__(self) -> str:
+        return f"{self.periodo} · {self.receta.nombre} · {self.cantidad}"
+
+
 class PlanProduccion(models.Model):
     nombre = models.CharField(max_length=140)
     fecha_produccion = models.DateField(default=timezone.localdate)

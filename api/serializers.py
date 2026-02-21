@@ -44,3 +44,19 @@ class RecetaCostoHistoricoResponseSerializer(serializers.Serializer):
     receta_nombre = serializers.CharField()
     puntos = RecetaCostoVersionSerializer(many=True)
     comparativo = serializers.DictField(required=False)
+
+
+class MRPRequerimientoItemInputSerializer(serializers.Serializer):
+    receta_id = serializers.IntegerField()
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=6)
+
+
+class MRPRequerimientosRequestSerializer(serializers.Serializer):
+    plan_id = serializers.IntegerField(required=False)
+    fecha_referencia = serializers.DateField(required=False)
+    items = MRPRequerimientoItemInputSerializer(many=True, required=False)
+
+    def validate(self, attrs):
+        if not attrs.get("plan_id") and not attrs.get("items"):
+            raise serializers.ValidationError("Debes enviar plan_id o items.")
+        return attrs

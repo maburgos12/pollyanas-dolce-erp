@@ -4,6 +4,7 @@ from .models import (
     LineaReceta,
     PlanProduccion,
     PlanProduccionItem,
+    PronosticoVenta,
     Receta,
     RecetaCodigoPointAlias,
     RecetaCostoVersion,
@@ -95,4 +96,12 @@ class RecetaCostoVersionAdmin(admin.ModelAdmin):
     )
     list_filter = ("fuente", "driver_scope", "creado_en")
     search_fields = ("receta__nombre", "hash_snapshot", "driver_nombre")
+    autocomplete_fields = ("receta",)
+
+
+@admin.register(PronosticoVenta)
+class PronosticoVentaAdmin(admin.ModelAdmin):
+    list_display = ("periodo", "receta", "cantidad", "fuente", "actualizado_en")
+    list_filter = ("periodo", "fuente")
+    search_fields = ("receta__nombre", "receta__codigo_point", "periodo")
     autocomplete_fields = ("receta",)

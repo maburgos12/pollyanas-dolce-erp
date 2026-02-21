@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField
+from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
@@ -19,8 +19,16 @@ from openpyxl import Workbook
 from compras.models import OrdenCompra, SolicitudCompra
 from core.access import can_manage_compras
 from core.audit import log_event
+from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
-from .models import Receta, LineaReceta, RecetaPresentacion, PlanProduccion, PlanProduccionItem
+from .models import (
+    Receta,
+    LineaReceta,
+    RecetaPresentacion,
+    PlanProduccion,
+    PlanProduccionItem,
+    PronosticoVenta,
+)
 from .utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
 from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 
@@ -610,6 +618,7 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
                     "cantidad": Decimal("0"),
                     "costo_total": Decimal("0"),
                     "costo_unitario": unit_cost or Decimal("0"),
+                    "stock_actual": Decimal("0"),
                 }
 
             insumos_map[key]["cantidad"] += qty
@@ -627,6 +636,18 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
         )
 
     insumos = sorted(insumos_map.values(), key=lambda x: x["nombre"].lower())
+    existencias_map = {
+        e.insumo_id: Decimal(str(e.stock_actual or 0))
+        for e in ExistenciaInsumo.objects.filter(insumo_id__in=list(insumos_map.keys()))
+    }
+    alertas_capacidad = 0
+    for row in insumos:
+        row["stock_actual"] = existencias_map.get(row["insumo_id"], Decimal("0"))
+        faltante = Decimal(str(row["cantidad"] or 0)) - Decimal(str(row["stock_actual"] or 0))
+        row["faltante"] = faltante if faltante > 0 else Decimal("0")
+        row["alerta_capacidad"] = row["faltante"] > 0
+        if row["alerta_capacidad"]:
+            alertas_capacidad += 1
     costo_total = sum((row["costo_total"] for row in insumos), Decimal("0"))
 
     return {
@@ -636,6 +657,54 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
         "lineas_sin_cantidad": sorted(lineas_sin_cantidad),
         "lineas_sin_costo_unitario": sorted(lineas_sin_costo_unitario),
         "lineas_sin_match": lineas_sin_match,
+        "alertas_capacidad": alertas_capacidad,
+    }
+
+
+def _plan_vs_pronostico(plan: PlanProduccion) -> Dict[str, Any]:
+    periodo = plan.fecha_produccion.strftime("%Y-%m")
+    plan_rows = (
+        plan.items.values("receta_id", "receta__nombre")
+        .annotate(cantidad_plan=Sum("cantidad"))
+        .order_by("receta__nombre")
+    )
+    plan_map = {
+        int(r["receta_id"]): {
+            "receta_id": int(r["receta_id"]),
+            "receta": r["receta__nombre"],
+            "cantidad_plan": Decimal(str(r["cantidad_plan"] or 0)),
+            "cantidad_pronostico": Decimal("0"),
+        }
+        for r in plan_rows
+    }
+
+    pronosticos = PronosticoVenta.objects.filter(periodo=periodo)
+    for p in pronosticos:
+        row = plan_map.get(p.receta_id)
+        if row:
+            row["cantidad_pronostico"] = Decimal(str(p.cantidad or 0))
+        else:
+            plan_map[p.receta_id] = {
+                "receta_id": p.receta_id,
+                "receta": p.receta.nombre,
+                "cantidad_plan": Decimal("0"),
+                "cantidad_pronostico": Decimal(str(p.cantidad or 0)),
+            }
+
+    rows = sorted(plan_map.values(), key=lambda x: x["receta"].lower())
+    con_desviacion = 0
+    for row in rows:
+        row["delta"] = row["cantidad_plan"] - row["cantidad_pronostico"]
+        row["sin_pronostico"] = row["cantidad_plan"] > 0 and row["cantidad_pronostico"] <= 0
+        if row["delta"] != 0:
+            con_desviacion += 1
+
+    return {
+        "periodo": periodo,
+        "rows": rows,
+        "total_plan": sum((r["cantidad_plan"] for r in rows), Decimal("0")),
+        "total_pronostico": sum((r["cantidad_pronostico"] for r in rows), Decimal("0")),
+        "desviaciones": con_desviacion,
     }
 
 
@@ -772,6 +841,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
 
     recetas_disponibles = Receta.objects.order_by("tipo", "nombre")
     explosion = _plan_explosion(plan_actual) if plan_actual else None
+    plan_vs_pronostico = _plan_vs_pronostico(plan_actual) if plan_actual else None
     return render(
         request,
         "recetas/plan_produccion.html",
@@ -780,6 +850,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "plan_actual": plan_actual,
             "recetas_disponibles": recetas_disponibles,
             "explosion": explosion,
+            "plan_vs_pronostico": plan_vs_pronostico,
         },
     )
 

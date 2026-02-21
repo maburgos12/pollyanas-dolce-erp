@@ -1,11 +1,13 @@
+from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from inventario.models import ExistenciaInsumo
 from maestros.models import Insumo, UnidadMedida
-from recetas.models import LineaReceta, Receta
+from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
 from recetas.utils.costeo_versionado import asegurar_version_costeo
 
 
@@ -71,3 +73,18 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(len(payload["puntos"]), 2)
         self.assertIn("comparativo", payload)
         self.assertIn("delta_total", payload["comparativo"])
+
+    def test_endpoint_mrp_calcular_requerimientos_por_plan(self):
+        plan = PlanProduccion.objects.create(nombre="Plan API", fecha_produccion=date(2026, 2, 21))
+        PlanProduccionItem.objects.create(plan=plan, receta=self.receta, cantidad=Decimal("3"))
+        ExistenciaInsumo.objects.create(insumo=self.insumo, stock_actual=Decimal("2"))
+
+        url = reverse("api_mrp_calcular_requerimientos")
+        resp = self.client.post(url, {"plan_id": plan.id})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["source"], "plan")
+        self.assertEqual(payload["plan_id"], plan.id)
+        self.assertGreaterEqual(payload["totales"]["insumos"], 1)
+        self.assertGreaterEqual(payload["totales"]["alertas_capacidad"], 1)
+        self.assertEqual(payload["items"][0]["insumo"], self.insumo.nombre)

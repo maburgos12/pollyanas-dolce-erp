@@ -138,6 +138,10 @@
     <div class="kpi-number is-danger">${{ explosion.costo_total|floatformat:2 }}</div>
     <div class="kpi-label">Costo total estimado</div>
   </div>
+  <div class="kpi-card">
+    <div class="kpi-number {% if explosion.alertas_capacidad > 0 %}is-danger{% else %}is-success{% endif %}">{{ explosion.alertas_capacidad }}</div>
+    <div class="kpi-label">Alertas de capacidad (stock)</div>
+  </div>
 </div>
 
 {% if explosion.lineas_sin_cantidad %}
@@ -156,6 +160,60 @@
 <div class="alert alert-info">
   <strong>Líneas sin match:</strong> {{ explosion.lineas_sin_match }}.
   Revisa matching en recetas para explosión completa.
+</div>
+{% endif %}
+
+{% if plan_vs_pronostico %}
+<div class="card">
+  <div class="card-header">Plan vs Pronóstico ({{ plan_vs_pronostico.periodo }})</div>
+  <div class="kpi-mini">
+    <div class="kpi-card">
+      <div class="kpi-number">{{ plan_vs_pronostico.total_plan|floatformat:2 }}</div>
+      <div class="kpi-label">Cantidad plan</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">{{ plan_vs_pronostico.total_pronostico|floatformat:2 }}</div>
+      <div class="kpi-label">Cantidad pronóstico</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if plan_vs_pronostico.desviaciones > 0 %}is-danger{% else %}is-success{% endif %}">{{ plan_vs_pronostico.desviaciones }}</div>
+      <div class="kpi-label">Recetas con desviación</div>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Receta</th>
+          <th class="text-end">Plan</th>
+          <th class="text-end">Pronóstico</th>
+          <th class="text-end">Delta</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in plan_vs_pronostico.rows %}
+        <tr>
+          <td>{{ row.receta }}</td>
+          <td class="text-end">{{ row.cantidad_plan|floatformat:2 }}</td>
+          <td class="text-end">{{ row.cantidad_pronostico|floatformat:2 }}</td>
+          <td class="text-end">{{ row.delta|floatformat:2 }}</td>
+          <td>
+            {% if row.sin_pronostico %}
+              <span class="badge badge-rojo">Sin pronóstico</span>
+            {% elif row.delta == 0 %}
+              <span class="badge badge-verde">Alineado</span>
+            {% else %}
+              <span class="badge badge-amarillo">Desviación</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-muted">Sin datos de plan/pronóstico.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endif %}
 
@@ -204,9 +262,12 @@
           <th>Origen</th>
           <th>Proveedor sugerido</th>
           <th class="text-end">Cantidad requerida</th>
+          <th class="text-end">Stock actual</th>
+          <th class="text-end">Faltante</th>
           <th>Unidad</th>
           <th class="text-end">Costo unitario</th>
           <th class="text-end">Costo total</th>
+          <th>Estatus capacidad</th>
         </tr>
       </thead>
       <tbody>
@@ -216,18 +277,28 @@
           <td>{% if row.origen == "Interno" %}<span class="badge badge-verde">Interno</span>{% else %}<span class="badge badge-amarillo">Materia prima</span>{% endif %}</td>
           <td>{{ row.proveedor_sugerido|default:"-" }}</td>
           <td class="text-end">{{ row.cantidad|floatformat:3 }}</td>
+          <td class="text-end">{{ row.stock_actual|floatformat:3 }}</td>
+          <td class="text-end">{{ row.faltante|floatformat:3 }}</td>
           <td>{{ row.unidad }}</td>
           <td class="text-end">${{ row.costo_unitario|floatformat:2 }}</td>
           <td class="text-end">${{ row.costo_total|floatformat:2 }}</td>
+          <td>
+            {% if row.alerta_capacidad %}
+              <span class="badge badge-rojo">Stock insuficiente</span>
+            {% else %}
+              <span class="badge badge-verde">Capacidad OK</span>
+            {% endif %}
+          </td>
         </tr>
         {% empty %}
-        <tr><td colspan="7" class="text-muted">No hay insumos calculados.</td></tr>
+        <tr><td colspan="10" class="text-muted">No hay insumos calculados.</td></tr>
         {% endfor %}
       </tbody>
       <tfoot>
         <tr>
-          <th colspan="6" class="text-end">Costo total plan</th>
+          <th colspan="8" class="text-end">Costo total plan</th>
           <th class="text-end">${{ explosion.costo_total|floatformat:2 }}</th>
+          <th></th>
         </tr>
       </tfoot>
     </table>
