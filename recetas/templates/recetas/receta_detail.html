@@ -89,6 +89,81 @@
   </div>
 </div>
 
+<div class="card">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">Costeo Completo (Fase 2)</h3>
+    <span class="badge bg-primary">Driver: {{ costeo_actual.driver.scope|default:"GLOBAL" }}{% if costeo_actual.driver %} · {{ costeo_actual.driver.nombre }}{% endif %}</span>
+  </div>
+  <div class="kpi-mini">
+    <div class="kpi-card">
+      <div class="kpi-number">${{ costeo_actual.costo_mp|floatformat:2 }}</div>
+      <div class="kpi-label">MP</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">${{ costeo_actual.costo_mo|floatformat:2 }}</div>
+      <div class="kpi-label">MO</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">${{ costeo_actual.costo_indirecto|floatformat:2 }}</div>
+      <div class="kpi-label">Indirectos</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">${{ costeo_actual.costo_total|floatformat:2 }}</div>
+      <div class="kpi-label">Total MP+MO+IND</div>
+    </div>
+  </div>
+  {% if versiones_comparativo %}
+  <div class="alert {% if versiones_comparativo.delta_total >= 0 %}alert-danger{% else %}alert-success{% endif %} mt-2">
+    Comparativo v{{ versiones_comparativo.version_actual }} vs v{{ versiones_comparativo.version_previa }}:
+    <strong>${{ versiones_comparativo.delta_total|floatformat:2 }}</strong>
+    ({{ versiones_comparativo.delta_pct|floatformat:2 }}%).
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">Histórico de Versiones de Costo</h3>
+    <span class="text-muted">Últimas {{ versiones_recientes|length }} versiones</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Versión</th>
+          <th>Fecha</th>
+          <th>Fuente</th>
+          <th>Driver</th>
+          <th class="text-end">MP</th>
+          <th class="text-end">MO</th>
+          <th class="text-end">Indirectos</th>
+          <th class="text-end">Total</th>
+          <th class="text-end">Costo / Rend.</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in versiones_recientes %}
+        <tr>
+          <td><strong>v{{ v.version_num }}</strong></td>
+          <td>{{ v.creado_en|date:"Y-m-d H:i" }}</td>
+          <td>{{ v.fuente }}</td>
+          <td>{% if v.driver_scope %}{{ v.driver_scope }} · {{ v.driver_nombre|default:"-" }}{% else %}-{% endif %}</td>
+          <td class="text-end">${{ v.costo_mp|floatformat:2 }}</td>
+          <td class="text-end">${{ v.costo_mo|floatformat:2 }}</td>
+          <td class="text-end">${{ v.costo_indirecto|floatformat:2 }}</td>
+          <td class="text-end"><strong>${{ v.costo_total|floatformat:2 }}</strong></td>
+          <td class="text-end">{% if v.costo_por_unidad_rendimiento %}${{ v.costo_por_unidad_rendimiento|floatformat:2 }}{% else %}-{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="9" class="text-muted">Aún no hay versiones registradas.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {% if receta.usa_presentaciones %}
   <div class="card">
     <div class="d-flex justify-content-between align-items-center mb-3">

@@ -91,6 +91,88 @@ class Receta(models.Model):
         return self.nombre
 
 
+class CostoDriver(models.Model):
+    SCOPE_PRODUCTO = "PRODUCTO"
+    SCOPE_FAMILIA = "FAMILIA"
+    SCOPE_LOTE = "LOTE"
+    SCOPE_GLOBAL = "GLOBAL"
+    SCOPE_CHOICES = [
+        (SCOPE_PRODUCTO, "Producto"),
+        (SCOPE_FAMILIA, "Familia"),
+        (SCOPE_LOTE, "Lote"),
+        (SCOPE_GLOBAL, "Global"),
+    ]
+
+    nombre = models.CharField(max_length=120)
+    scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default=SCOPE_PRODUCTO, db_index=True)
+    receta = models.ForeignKey(
+        Receta,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="drivers_costeo",
+    )
+    familia = models.CharField(max_length=120, blank=True, default="")
+    familia_normalizada = models.CharField(max_length=140, blank=True, default="", db_index=True)
+    lote_desde = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    lote_hasta = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    mo_pct = models.DecimalField(max_digits=8, decimal_places=4, default=0)
+    indirecto_pct = models.DecimalField(max_digits=8, decimal_places=4, default=0)
+    mo_fijo = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    indirecto_fijo = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    prioridad = models.PositiveIntegerField(default=100)
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Driver de costeo"
+        verbose_name_plural = "Drivers de costeo"
+        ordering = ["scope", "prioridad", "id"]
+
+    def save(self, *args, **kwargs):
+        self.familia_normalizada = " ".join(unidecode((self.familia or "")).lower().strip().split())
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        target = self.receta.nombre if self.receta_id else (self.familia or "Global")
+        return f"{self.scope} · {target} ({self.mo_pct}%/{self.indirecto_pct}%)"
+
+
+class RecetaCostoVersion(models.Model):
+    receta = models.ForeignKey(Receta, related_name="versiones_costo", on_delete=models.CASCADE)
+    version_num = models.PositiveIntegerField()
+    hash_snapshot = models.CharField(max_length=64, db_index=True)
+    lote_referencia = models.DecimalField(max_digits=18, decimal_places=6, default=1)
+
+    driver_scope = models.CharField(max_length=20, blank=True, default="")
+    driver_nombre = models.CharField(max_length=120, blank=True, default="")
+    mo_pct = models.DecimalField(max_digits=8, decimal_places=4, default=0)
+    indirecto_pct = models.DecimalField(max_digits=8, decimal_places=4, default=0)
+    mo_fijo = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    indirecto_fijo = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+
+    costo_mp = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    costo_mo = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    costo_indirecto = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    costo_total = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    rendimiento_cantidad = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    rendimiento_unidad = models.CharField(max_length=20, blank=True, default="")
+    costo_por_unidad_rendimiento = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+
+    fuente = models.CharField(max_length=40, blank=True, default="AUTO")
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Versión de costo de receta"
+        verbose_name_plural = "Versiones de costo de recetas"
+        ordering = ["receta", "-version_num"]
+        unique_together = [("receta", "version_num"), ("receta", "hash_snapshot")]
+
+    def __str__(self) -> str:
+        return f"{self.receta.nombre} v{self.version_num} · ${self.costo_total}"
+
+
 class RecetaCodigoPointAlias(models.Model):
     receta = models.ForeignKey(Receta, related_name="codigos_point_aliases", on_delete=models.CASCADE)
     codigo_point = models.CharField(max_length=80)

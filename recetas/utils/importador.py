@@ -15,6 +15,7 @@ from maestros.models import Insumo, CostoInsumo, Proveedor, UnidadMedida, seed_u
 from .matching import match_insumo, clasificar_match
 from .normalizacion import normalizar_nombre
 from .subsection_costing import find_parent_cost_for_stage
+from .costeo_versionado import asegurar_version_costeo
 from recetas.models import Receta, LineaReceta, RecetaPresentacion
 
 log = logging.getLogger(__name__)
@@ -1118,6 +1119,11 @@ class ImportadorCosteo:
             for key, obj in existing.items():
                 if key not in incoming:
                     obj.delete()
+
+        try:
+            asegurar_version_costeo(receta, fuente="IMPORT_COSTEO")
+        except Exception as exc:
+            log.warning("No se pudo versionar receta %s (%s)", receta.id, exc)
 
 def json_dumps_sorted(obj: Any) -> str:
     import json

@@ -21,6 +21,7 @@ from core.access import can_manage_compras
 from core.audit import log_event
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from .models import Receta, LineaReceta, RecetaPresentacion, PlanProduccion, PlanProduccionItem
+from .utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
 from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 
 @login_required
@@ -64,8 +65,14 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
 @login_required
 def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
+    if not receta.versiones_costo.exists():
+        _sync_cost_version_safe(request, receta, "AUTO_BOOTSTRAP")
+
     lineas = list(receta.lineas.select_related("insumo").order_by("posicion"))
     presentaciones = receta.presentaciones.all().order_by("nombre")
+    costeo_actual = calcular_costeo_receta(receta)
+    versiones_recientes = list(receta.versiones_costo.order_by("-version_num")[:8])
+    comparativo = comparativo_versiones(versiones_recientes)
     total_lineas = len(lineas)
     total_match = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_AUTO)
     total_revision = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_NEEDS_REVIEW)
@@ -87,6 +94,9 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "tipo_choices": Receta.TIPO_CHOICES,
             "costo_por_kg_estimado": receta.costo_por_kg_estimado,
             "linea_tipo_choices": LineaReceta.TIPO_CHOICES,
+            "costeo_actual": costeo_actual,
+            "versiones_recientes": versiones_recientes,
+            "versiones_comparativo": comparativo,
         },
     )
 
@@ -119,6 +129,7 @@ def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
     receta.rendimiento_unidad = UnidadMedida.objects.filter(pk=rendimiento_unidad_id).first() if rendimiento_unidad_id else None
     receta.save()
     _sync_derived_insumos_safe(request, receta)
+    _sync_cost_version_safe(request, receta, "RECETA_UPDATE")
     messages.success(request, "Receta actualizada.")
     return redirect("recetas:receta_detail", pk=pk)
 
@@ -230,6 +241,16 @@ def _sync_derived_insumos_safe(request: HttpRequest, receta: Receta) -> None:
         )
 
 
+def _sync_cost_version_safe(request: HttpRequest, receta: Receta, fuente: str) -> None:
+    try:
+        asegurar_version_costeo(receta, fuente=fuente)
+    except Exception:
+        messages.warning(
+            request,
+            "Se guardaron cambios, pero falló el versionado automático de costos.",
+        )
+
+
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
@@ -272,6 +293,7 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
         _switch_line_to_internal_cost(linea)
         linea.save()
         _sync_derived_insumos_safe(request, receta)
+        _sync_cost_version_safe(request, receta, "LINEA_EDIT")
         messages.success(request, "Línea actualizada.")
         return redirect("recetas:receta_detail", pk=pk)
 
@@ -321,6 +343,7 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
         _switch_line_to_internal_cost(linea)
         linea.save()
         _sync_derived_insumos_safe(request, receta)
+        _sync_cost_version_safe(request, receta, "LINEA_CREATE")
         messages.success(request, "Línea agregada.")
         return redirect("recetas:receta_detail", pk=pk)
     return render(request, "recetas/linea_form.html", _linea_form_context(receta))
@@ -333,6 +356,7 @@ def linea_delete(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     linea = get_object_or_404(LineaReceta, pk=linea_id, receta=receta)
     linea.delete()
     _sync_derived_insumos_safe(request, receta)
+    _sync_cost_version_safe(request, receta, "LINEA_DELETE")
     messages.success(request, "Línea eliminada.")
     return redirect("recetas:receta_detail", pk=pk)
 
@@ -367,6 +391,7 @@ def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
             receta.usa_presentaciones = True
             receta.save(update_fields=["usa_presentaciones"])
         _sync_derived_insumos_safe(request, receta)
+        _sync_cost_version_safe(request, receta, "PRESENTACION_CREATE")
         messages.success(request, "Presentación guardada.")
         return redirect("recetas:receta_detail", pk=pk)
 
@@ -401,6 +426,7 @@ def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> Ht
         presentacion.activo = activo
         presentacion.save()
         _sync_derived_insumos_safe(request, receta)
+        _sync_cost_version_safe(request, receta, "PRESENTACION_EDIT")
         messages.success(request, "Presentación actualizada.")
         return redirect("recetas:receta_detail", pk=pk)
 
@@ -424,6 +450,7 @@ def presentacion_delete(request: HttpRequest, pk: int, presentacion_id: int) -> 
             "La presentación se eliminó, pero falló la desactivación del insumo derivado.",
         )
     presentacion.delete()
+    _sync_cost_version_safe(request, receta, "PRESENTACION_DELETE")
     messages.success(request, "Presentación eliminada.")
     return redirect("recetas:receta_detail", pk=pk)
 
@@ -491,6 +518,7 @@ def aprobar_matching(request: HttpRequest, linea_id: int) -> HttpResponse:
     linea.aprobado_por = request.user
     linea.aprobado_en = timezone.now()
     linea.save()
+    _sync_cost_version_safe(request, linea.receta, "MATCHING_APPROVE")
     messages.success(request, f"Matching aprobado: {linea.insumo_texto} → {insumo.nombre}")
     return redirect("recetas:matching_pendientes")
 

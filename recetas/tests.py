@@ -7,7 +7,8 @@ from django.urls import reverse
 
 from compras.models import OrdenCompra, SolicitudCompra
 from maestros.models import Insumo, Proveedor, UnidadMedida
-from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
+from recetas.models import CostoDriver, LineaReceta, PlanProduccion, PlanProduccionItem, Receta, RecetaCostoVersion
+from recetas.utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta
 
 
 class MatchingPendientesAutocompleteTests(TestCase):
@@ -152,3 +153,73 @@ class PlanProduccionSolicitudesModeTests(TestCase):
         )
         self.assertEqual(ocs.count(), 1)
         self.assertEqual(ocs.first().monto_estimado, Decimal("20"))
+
+
+class RecetaCosteoVersionadoTests(TestCase):
+    def setUp(self):
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(nombre="Harina Base", unidad_base=self.unidad, activo=True)
+        self.receta = Receta.objects.create(
+            nombre="Batida Vainilla",
+            sheet_name="Insumos 1",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("10"),
+            rendimiento_unidad=self.unidad,
+            hash_contenido="hash-versionado-001",
+        )
+        self.linea = LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=self.insumo,
+            insumo_texto="Harina Base",
+            cantidad=Decimal("2"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("4"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+    def test_aplica_driver_producto_y_versiona_por_cambio(self):
+        CostoDriver.objects.create(
+            nombre="Driver Producto Batida",
+            scope=CostoDriver.SCOPE_PRODUCTO,
+            receta=self.receta,
+            mo_pct=Decimal("10"),
+            indirecto_pct=Decimal("5"),
+            mo_fijo=Decimal("1"),
+            indirecto_fijo=Decimal("2"),
+            prioridad=10,
+        )
+
+        v1, created_1 = asegurar_version_costeo(self.receta, fuente="TEST")
+        self.assertTrue(created_1)
+        self.assertEqual(v1.version_num, 1)
+        self.assertEqual(v1.costo_mp, Decimal("8.000000"))
+        self.assertEqual(v1.costo_mo, Decimal("1.800000"))
+        self.assertEqual(v1.costo_indirecto, Decimal("2.400000"))
+        self.assertEqual(v1.costo_total, Decimal("12.200000"))
+        self.assertEqual(v1.costo_por_unidad_rendimiento, Decimal("1.220000"))
+
+        self.linea.costo_unitario_snapshot = Decimal("5")
+        self.linea.save(update_fields=["costo_unitario_snapshot"])
+        v2, created_2 = asegurar_version_costeo(self.receta, fuente="TEST")
+        self.assertTrue(created_2)
+        self.assertEqual(v2.version_num, 2)
+        self.assertEqual(v2.costo_mp, Decimal("10.000000"))
+        self.assertEqual(v2.costo_total, Decimal("14.500000"))
+
+        self.assertEqual(RecetaCostoVersion.objects.filter(receta=self.receta).count(), 2)
+
+    def test_calculo_no_driver_solo_mp(self):
+        breakdown = calcular_costeo_receta(self.receta)
+        self.assertEqual(breakdown.costo_mp, Decimal("8.000000"))
+        self.assertEqual(breakdown.costo_mo, Decimal("0.000000"))
+        self.assertEqual(breakdown.costo_indirecto, Decimal("0.000000"))
+        self.assertEqual(breakdown.costo_total, Decimal("8.000000"))

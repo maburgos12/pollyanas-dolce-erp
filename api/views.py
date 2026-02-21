@@ -1,12 +1,13 @@
-from collections import defaultdict
 from decimal import Decimal
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
 from recetas.models import Receta
-from .serializers import MRPRequestSerializer
+from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
+from .serializers import MRPRequestSerializer, RecetaCostoVersionSerializer
 
 class MRPExplodeView(APIView):
     permission_classes = [IsAuthenticated]
@@ -46,3 +47,50 @@ class MRPExplodeView(APIView):
                 } for i in items
             ],
         }, status=status.HTTP_200_OK)
+
+
+class RecetaVersionesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, receta_id: int):
+        receta = get_object_or_404(Receta, pk=receta_id)
+        asegurar_version_costeo(receta, fuente="API_VERSIONES")
+        limit = int(request.GET.get("limit", 25))
+        limit = max(1, min(limit, 200))
+        versiones = list(receta.versiones_costo.order_by("-version_num")[:limit])
+        payload = RecetaCostoVersionSerializer(versiones, many=True).data
+        return Response(
+            {
+                "receta_id": receta.id,
+                "receta_nombre": receta.nombre,
+                "total": len(payload),
+                "items": payload,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class RecetaCostoHistoricoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, receta_id: int):
+        receta = get_object_or_404(Receta, pk=receta_id)
+        asegurar_version_costeo(receta, fuente="API_HISTORICO")
+        limit = int(request.GET.get("limit", 60))
+        limit = max(1, min(limit, 300))
+        versiones = list(receta.versiones_costo.order_by("-version_num")[:limit])
+        payload = RecetaCostoVersionSerializer(versiones, many=True).data
+        comparativo = comparativo_versiones(versiones)
+        data = {
+            "receta_id": receta.id,
+            "receta_nombre": receta.nombre,
+            "puntos": payload,
+        }
+        if comparativo:
+            data["comparativo"] = {
+                "version_actual": comparativo["version_actual"],
+                "version_previa": comparativo["version_previa"],
+                "delta_total": str(comparativo["delta_total"]),
+                "delta_pct": str(comparativo["delta_pct"]),
+            }
+        return Response(data, status=status.HTTP_200_OK)

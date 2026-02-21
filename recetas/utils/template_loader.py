@@ -12,6 +12,7 @@ from django.db import transaction
 
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from recetas.models import LineaReceta, Receta
+from recetas.utils.costeo_versionado import asegurar_version_costeo
 from recetas.utils.matching import clasificar_match, match_insumo
 from recetas.utils.normalizacion import normalizar_nombre
 from recetas.utils.subsection_costing import find_parent_cost_for_stage
@@ -379,5 +380,7 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
             if status == LineaReceta.STATUS_NEEDS_REVIEW:
                 result.matches_pendientes += 1
             pos += 1
+
+        asegurar_version_costeo(receta, fuente="IMPORT_TEMPLATE")
 
     return result

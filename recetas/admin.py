@@ -1,5 +1,13 @@
 from django.contrib import admin
-from .models import Receta, RecetaCodigoPointAlias, LineaReceta, PlanProduccion, PlanProduccionItem
+from .models import (
+    CostoDriver,
+    LineaReceta,
+    PlanProduccion,
+    PlanProduccionItem,
+    Receta,
+    RecetaCodigoPointAlias,
+    RecetaCostoVersion,
+)
 
 class LineaRecetaInline(admin.TabularInline):
     model = LineaReceta
@@ -54,3 +62,37 @@ class RecetaCodigoPointAliasAdmin(admin.ModelAdmin):
     list_display = ("codigo_point", "codigo_point_normalizado", "receta", "activo", "actualizado_en")
     search_fields = ("codigo_point", "codigo_point_normalizado", "nombre_point", "receta__nombre")
     list_filter = ("activo",)
+
+
+@admin.register(CostoDriver)
+class CostoDriverAdmin(admin.ModelAdmin):
+    list_display = (
+        "nombre",
+        "scope",
+        "receta",
+        "familia",
+        "mo_pct",
+        "indirecto_pct",
+        "prioridad",
+        "activo",
+    )
+    list_filter = ("scope", "activo")
+    search_fields = ("nombre", "receta__nombre", "familia")
+    autocomplete_fields = ("receta",)
+
+
+@admin.register(RecetaCostoVersion)
+class RecetaCostoVersionAdmin(admin.ModelAdmin):
+    list_display = (
+        "receta",
+        "version_num",
+        "costo_mp",
+        "costo_mo",
+        "costo_indirecto",
+        "costo_total",
+        "fuente",
+        "creado_en",
+    )
+    list_filter = ("fuente", "driver_scope", "creado_en")
+    search_fields = ("receta__nombre", "hash_snapshot", "driver_nombre")
+    autocomplete_fields = ("receta",)
