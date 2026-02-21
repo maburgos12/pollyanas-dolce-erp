@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 
-from compras.models import OrdenCompra, SolicitudCompra
+from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from inventario.models import MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
@@ -513,3 +513,116 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         self.assertEqual(preview["duplicates_count"], 1)
         self.assertEqual(preview["without_match_count"], 1)
         self.assertEqual(preview["invalid_qty_count"], 1)
+
+
+class ComprasOrdenesRecepcionesFiltersTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_filtros_oc",
+            email="admin_filtros_oc@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.proveedor_a = Proveedor.objects.create(nombre="Proveedor A", activo=True)
+        self.proveedor_b = Proveedor.objects.create(nombre="Proveedor B", activo=True)
+        self.insumo = Insumo.objects.create(
+            nombre="Harina OC",
+            categoria="Masa",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor_a,
+            activo=True,
+        )
+        self.solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="admin",
+            insumo=self.insumo,
+            proveedor_sugerido=self.proveedor_a,
+            cantidad=Decimal("2"),
+            fecha_requerida=date(2026, 2, 20),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        self.orden_enviada = OrdenCompra.objects.create(
+            solicitud=self.solicitud,
+            referencia="OC ENVIADA TEST",
+            proveedor=self.proveedor_a,
+            fecha_emision=date(2026, 2, 20),
+            monto_estimado=Decimal("100"),
+            estatus=OrdenCompra.STATUS_ENVIADA,
+        )
+        self.orden_cerrada = OrdenCompra.objects.create(
+            solicitud=self.solicitud,
+            referencia="OC CERRADA TEST",
+            proveedor=self.proveedor_b,
+            fecha_emision=date(2026, 1, 15),
+            monto_estimado=Decimal("50"),
+            estatus=OrdenCompra.STATUS_CERRADA,
+        )
+        self.recepcion_pendiente = RecepcionCompra.objects.create(
+            orden=self.orden_enviada,
+            fecha_recepcion=date(2026, 2, 21),
+            conformidad_pct=Decimal("95"),
+            estatus=RecepcionCompra.STATUS_PENDIENTE,
+            observaciones="Recepcion parcial",
+        )
+        self.recepcion_cerrada = RecepcionCompra.objects.create(
+            orden=self.orden_cerrada,
+            fecha_recepcion=date(2026, 1, 18),
+            conformidad_pct=Decimal("100"),
+            estatus=RecepcionCompra.STATUS_CERRADA,
+            observaciones="Recepcion ok",
+        )
+
+    def test_ordenes_filter_by_status_and_month(self):
+        response = self.client.get(
+            reverse("compras:ordenes"),
+            {"estatus": OrdenCompra.STATUS_ENVIADA, "mes": "2026-02"},
+        )
+        self.assertEqual(response.status_code, 200)
+        ordenes = list(response.context["ordenes"])
+        self.assertEqual(len(ordenes), 1)
+        self.assertEqual(ordenes[0].id, self.orden_enviada.id)
+
+    def test_ordenes_export_csv_respects_filters(self):
+        response = self.client.get(
+            reverse("compras:ordenes"),
+            {"estatus": OrdenCompra.STATUS_ENVIADA, "export": "csv"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        body = response.content.decode("utf-8")
+        self.assertIn(self.orden_enviada.folio, body)
+        self.assertNotIn(self.orden_cerrada.folio, body)
+
+    def test_recepciones_filter_by_status_and_month(self):
+        response = self.client.get(
+            reverse("compras:recepciones"),
+            {"estatus": RecepcionCompra.STATUS_PENDIENTE, "mes": "2026-02"},
+        )
+        self.assertEqual(response.status_code, 200)
+        recepciones = list(response.context["recepciones"])
+        self.assertEqual(len(recepciones), 1)
+        self.assertEqual(recepciones[0].id, self.recepcion_pendiente.id)
+
+    def test_recepciones_export_xlsx_respects_filters(self):
+        response = self.client.get(
+            reverse("compras:recepciones"),
+            {"estatus": RecepcionCompra.STATUS_PENDIENTE, "export": "xlsx"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(response.content), data_only=True)
+        ws = wb.active
+        values = [row[0] for row in ws.iter_rows(min_row=2, max_col=1, values_only=True) if row and row[0]]
+        self.assertIn(self.recepcion_pendiente.folio, values)
+        self.assertNotIn(self.recepcion_cerrada.folio, values)

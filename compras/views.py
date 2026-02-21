@@ -3506,6 +3506,165 @@ def solicitudes_consumo_vs_plan_api(request: HttpRequest) -> JsonResponse:
     return JsonResponse(data)
 
 
+def _parse_month_filter(raw: str) -> tuple[int, int] | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    try:
+        year_str, month_str = value.split("-")
+        year = int(year_str)
+        month = int(month_str)
+        if 1 <= month <= 12:
+            return year, month
+    except Exception:
+        return None
+    return None
+
+
+def _export_ordenes_csv(ordenes_qs) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="ordenes_compra_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "folio",
+            "solicitud_folio",
+            "referencia",
+            "proveedor",
+            "fecha_emision",
+            "fecha_entrega_estimada",
+            "monto_estimado",
+            "estatus",
+        ]
+    )
+    for orden in ordenes_qs:
+        writer.writerow(
+            [
+                orden.folio,
+                orden.solicitud.folio if orden.solicitud else "",
+                orden.referencia or "",
+                orden.proveedor.nombre,
+                orden.fecha_emision.isoformat() if orden.fecha_emision else "",
+                orden.fecha_entrega_estimada.isoformat() if orden.fecha_entrega_estimada else "",
+                f"{Decimal(orden.monto_estimado or 0):.2f}",
+                orden.get_estatus_display(),
+            ]
+        )
+    return response
+
+
+def _export_ordenes_xlsx(ordenes_qs) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ordenes_compra"
+    ws.append(
+        [
+            "folio",
+            "solicitud_folio",
+            "referencia",
+            "proveedor",
+            "fecha_emision",
+            "fecha_entrega_estimada",
+            "monto_estimado",
+            "estatus",
+        ]
+    )
+    for orden in ordenes_qs:
+        ws.append(
+            [
+                orden.folio,
+                orden.solicitud.folio if orden.solicitud else "",
+                orden.referencia or "",
+                orden.proveedor.nombre,
+                orden.fecha_emision.isoformat() if orden.fecha_emision else "",
+                orden.fecha_entrega_estimada.isoformat() if orden.fecha_entrega_estimada else "",
+                float(Decimal(orden.monto_estimado or 0)),
+                orden.get_estatus_display(),
+            ]
+        )
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response["Content-Disposition"] = f'attachment; filename="ordenes_compra_{now_str}.xlsx"'
+    return response
+
+
+def _export_recepciones_csv(recepciones_qs) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="recepciones_compra_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "folio",
+            "orden_folio",
+            "proveedor",
+            "fecha_recepcion",
+            "conformidad_pct",
+            "estatus",
+            "observaciones",
+        ]
+    )
+    for rec in recepciones_qs:
+        writer.writerow(
+            [
+                rec.folio,
+                rec.orden.folio,
+                rec.orden.proveedor.nombre,
+                rec.fecha_recepcion.isoformat() if rec.fecha_recepcion else "",
+                f"{Decimal(rec.conformidad_pct or 0):.2f}",
+                rec.get_estatus_display(),
+                rec.observaciones or "",
+            ]
+        )
+    return response
+
+
+def _export_recepciones_xlsx(recepciones_qs) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "recepciones_compra"
+    ws.append(
+        [
+            "folio",
+            "orden_folio",
+            "proveedor",
+            "fecha_recepcion",
+            "conformidad_pct",
+            "estatus",
+            "observaciones",
+        ]
+    )
+    for rec in recepciones_qs:
+        ws.append(
+            [
+                rec.folio,
+                rec.orden.folio,
+                rec.orden.proveedor.nombre,
+                rec.fecha_recepcion.isoformat() if rec.fecha_recepcion else "",
+                float(Decimal(rec.conformidad_pct or 0)),
+                rec.get_estatus_display(),
+                rec.observaciones or "",
+            ]
+        )
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response["Content-Disposition"] = f'attachment; filename="recepciones_compra_{now_str}.xlsx"'
+    return response
+
+
 @login_required
 def ordenes(request: HttpRequest) -> HttpResponse:
     if not can_view_compras(request.user):
@@ -3544,11 +3703,47 @@ def ordenes(request: HttpRequest) -> HttpResponse:
             )
         return redirect("compras:ordenes")
 
+    ordenes_qs = OrdenCompra.objects.select_related("proveedor", "solicitud").order_by("-creado_en")
+    proveedor_filter = (request.GET.get("proveedor_id") or "").strip()
+    estatus_filter = (request.GET.get("estatus") or "all").strip().upper() or "all"
+    mes_filter = (request.GET.get("mes") or "").strip()
+    q_filter = (request.GET.get("q") or "").strip()
+
+    if proveedor_filter.isdigit():
+        ordenes_qs = ordenes_qs.filter(proveedor_id=int(proveedor_filter))
+    if estatus_filter and estatus_filter != "ALL":
+        ordenes_qs = ordenes_qs.filter(estatus=estatus_filter)
+    parsed_month = _parse_month_filter(mes_filter)
+    if parsed_month:
+        y, m = parsed_month
+        ordenes_qs = ordenes_qs.filter(fecha_emision__year=y, fecha_emision__month=m)
+    if q_filter:
+        ordenes_qs = ordenes_qs.filter(
+            Q(folio__icontains=q_filter)
+            | Q(referencia__icontains=q_filter)
+            | Q(proveedor__nombre__icontains=q_filter)
+            | Q(solicitud__folio__icontains=q_filter)
+        )
+
+    export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format == "csv":
+        return _export_ordenes_csv(ordenes_qs)
+    if export_format == "xlsx":
+        return _export_ordenes_xlsx(ordenes_qs)
+
+    query_without_export = request.GET.copy()
+    query_without_export.pop("export", None)
+
     context = {
-        "ordenes": OrdenCompra.objects.select_related("proveedor", "solicitud")[:50],
+        "ordenes": ordenes_qs[:200],
         "proveedores": Proveedor.objects.filter(activo=True).order_by("nombre")[:200],
         "solicitudes": SolicitudCompra.objects.filter(estatus=SolicitudCompra.STATUS_APROBADA).order_by("-creado_en")[:200],
         "status_choices": OrdenCompra.STATUS_CHOICES,
+        "proveedor_filter": proveedor_filter,
+        "estatus_filter": estatus_filter,
+        "mes_filter": mes_filter,
+        "q_filter": q_filter,
+        "current_query": query_without_export.urlencode(),
         "can_manage_compras": can_manage_compras(request.user),
     }
     return render(request, "compras/ordenes.html", context)
@@ -3596,10 +3791,47 @@ def recepciones(request: HttpRequest) -> HttpResponse:
                 )
         return redirect("compras:recepciones")
 
+    recepciones_qs = RecepcionCompra.objects.select_related("orden", "orden__proveedor").order_by("-creado_en")
+    proveedor_filter = (request.GET.get("proveedor_id") or "").strip()
+    estatus_filter = (request.GET.get("estatus") or "all").strip().upper() or "all"
+    mes_filter = (request.GET.get("mes") or "").strip()
+    q_filter = (request.GET.get("q") or "").strip()
+
+    if proveedor_filter.isdigit():
+        recepciones_qs = recepciones_qs.filter(orden__proveedor_id=int(proveedor_filter))
+    if estatus_filter and estatus_filter != "ALL":
+        recepciones_qs = recepciones_qs.filter(estatus=estatus_filter)
+    parsed_month = _parse_month_filter(mes_filter)
+    if parsed_month:
+        y, m = parsed_month
+        recepciones_qs = recepciones_qs.filter(fecha_recepcion__year=y, fecha_recepcion__month=m)
+    if q_filter:
+        recepciones_qs = recepciones_qs.filter(
+            Q(folio__icontains=q_filter)
+            | Q(orden__folio__icontains=q_filter)
+            | Q(orden__proveedor__nombre__icontains=q_filter)
+            | Q(observaciones__icontains=q_filter)
+        )
+
+    export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format == "csv":
+        return _export_recepciones_csv(recepciones_qs)
+    if export_format == "xlsx":
+        return _export_recepciones_xlsx(recepciones_qs)
+
+    query_without_export = request.GET.copy()
+    query_without_export.pop("export", None)
+
     context = {
-        "recepciones": RecepcionCompra.objects.select_related("orden", "orden__proveedor")[:50],
+        "recepciones": recepciones_qs[:200],
         "ordenes": OrdenCompra.objects.select_related("proveedor").exclude(estatus=OrdenCompra.STATUS_BORRADOR).exclude(estatus=OrdenCompra.STATUS_CERRADA).order_by("-creado_en")[:200],
         "status_choices": RecepcionCompra.STATUS_CHOICES,
+        "proveedores": Proveedor.objects.filter(activo=True).order_by("nombre")[:200],
+        "proveedor_filter": proveedor_filter,
+        "estatus_filter": estatus_filter,
+        "mes_filter": mes_filter,
+        "q_filter": q_filter,
+        "current_query": query_without_export.urlencode(),
         "can_manage_compras": can_manage_compras(request.user),
     }
     return render(request, "compras/recepciones.html", context)

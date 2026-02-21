@@ -33,6 +33,28 @@
 
 <section class="card">
   <div class="card-header">Recepciones Registradas</div>
+  <form method="get" class="form-grid-auto mb-3">
+    <select class="input-field" name="proveedor_id">
+      <option value="">Todos los proveedores</option>
+      {% for p in proveedores %}
+      <option value="{{ p.id }}" {% if proveedor_filter == p.id|stringformat:"s" %}selected{% endif %}>{{ p.nombre }}</option>
+      {% endfor %}
+    </select>
+    <select class="input-field" name="estatus">
+      <option value="all" {% if estatus_filter == "ALL" %}selected{% endif %}>Todos los estatus</option>
+      {% for value, label in status_choices %}
+      <option value="{{ value }}" {% if estatus_filter == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="month" name="mes" value="{{ mes_filter }}">
+    <input class="input-field" type="text" name="q" value="{{ q_filter }}" placeholder="Buscar recepción/OC/proveedor...">
+    <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+    <a class="btn btn-secondary" href="{% url 'compras:recepciones' %}">Limpiar</a>
+  </form>
+  <div class="toolbar mb-3">
+    <a class="btn btn-secondary" href="?{% if current_query %}{{ current_query }}&{% endif %}export=csv">Exportar CSV</a>
+    <a class="btn btn-secondary" href="?{% if current_query %}{{ current_query }}&{% endif %}export=xlsx">Exportar XLSX</a>
+  </div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
