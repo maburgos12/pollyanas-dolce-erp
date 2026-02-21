@@ -1,18 +1,60 @@
-from decimal import Decimal
+from collections import defaultdict
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
+from compras.models import OrdenCompra
 from inventario.models import ExistenciaInsumo
-from recetas.models import PlanProduccion, Receta
+from maestros.models import CostoInsumo, Insumo
+from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from .serializers import (
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
     RecetaCostoVersionSerializer,
 )
+
+
+def _to_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
+    if value is None:
+        return default
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return default
+
+
+def _parse_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in {"1", "true", "yes", "si", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _parse_period(period_raw: str | None) -> tuple[int, int] | None:
+    if not period_raw:
+        return None
+    raw = str(period_raw).strip()
+    parts = raw.split("-")
+    if len(parts) != 2:
+        return None
+    try:
+        year = int(parts[0])
+        month = int(parts[1])
+    except ValueError:
+        return None
+    if year < 2000 or year > 2200 or month < 1 or month > 12:
+        return None
+    return year, month
 
 class MRPExplodeView(APIView):
     permission_classes = [IsAuthenticated]
@@ -131,6 +173,256 @@ class RecetaCostoHistoricoView(APIView):
                         "delta_pct_total": str(delta_pct) if delta_pct is not None else None,
                     }
         return Response(data, status=status.HTTP_200_OK)
+
+
+class InventarioSugerenciasCompraView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _resolve_scope(self, request):
+        plan_id_raw = (request.GET.get("plan_id") or "").strip()
+        periodo_raw = (request.GET.get("periodo") or "").strip()
+        plan = None
+        year = None
+        month = None
+
+        if plan_id_raw:
+            try:
+                plan_id = int(plan_id_raw)
+            except ValueError:
+                plan_id = None
+            if plan_id:
+                plan = get_object_or_404(PlanProduccion, pk=plan_id)
+                year = plan.fecha_produccion.year
+                month = plan.fecha_produccion.month
+
+        if not plan:
+            parsed = _parse_period(periodo_raw)
+            if parsed:
+                year, month = parsed
+            else:
+                today = timezone.localdate()
+                year, month = today.year, today.month
+
+        if plan:
+            items_qs = PlanProduccionItem.objects.filter(plan_id=plan.id).select_related("receta", "plan")
+        else:
+            items_qs = PlanProduccionItem.objects.filter(
+                plan__fecha_produccion__year=year,
+                plan__fecha_produccion__month=month,
+            ).select_related("receta", "plan")
+
+        return items_qs, {
+            "plan_id": plan.id if plan else None,
+            "plan_nombre": plan.nombre if plan else "",
+            "periodo": f"{year:04d}-{month:02d}",
+        }
+
+    def _requerimientos_plan(self, plan_items_qs) -> dict[int, Decimal]:
+        requerimientos: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+        receta_ids = set(plan_items_qs.values_list("receta_id", flat=True))
+        if not receta_ids:
+            return requerimientos
+
+        lineas_by_receta: dict[int, list[LineaReceta]] = defaultdict(list)
+        lineas_qs = (
+            LineaReceta.objects.filter(receta_id__in=receta_ids)
+            .exclude(tipo_linea=LineaReceta.TIPO_SUBSECCION)
+            .only("receta_id", "insumo_id", "cantidad")
+        )
+        for linea in lineas_qs:
+            if not linea.insumo_id:
+                continue
+            qty = _to_decimal(linea.cantidad)
+            if qty <= 0:
+                continue
+            lineas_by_receta[linea.receta_id].append(linea)
+
+        for item in plan_items_qs:
+            factor = _to_decimal(item.cantidad)
+            if factor <= 0:
+                continue
+            for linea in lineas_by_receta.get(item.receta_id, []):
+                requerimientos[linea.insumo_id] += _to_decimal(linea.cantidad) * factor
+        return requerimientos
+
+    def _en_transito_por_insumo(self) -> dict[int, Decimal]:
+        totals: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+        transit_status = [
+            OrdenCompra.STATUS_ENVIADA,
+            OrdenCompra.STATUS_CONFIRMADA,
+            OrdenCompra.STATUS_PARCIAL,
+        ]
+        ordenes = (
+            OrdenCompra.objects.filter(estatus__in=transit_status, solicitud__isnull=False)
+            .select_related("solicitud__insumo")
+            .only("solicitud__insumo_id", "solicitud__cantidad")
+        )
+        for orden in ordenes:
+            solicitud = orden.solicitud
+            if not solicitud or not solicitud.insumo_id:
+                continue
+            qty = _to_decimal(solicitud.cantidad)
+            if qty > 0:
+                totals[solicitud.insumo_id] += qty
+        return totals
+
+    def get(self, request):
+        include_all = _parse_bool(request.GET.get("include_all"), default=False)
+        try:
+            limit = int(request.GET.get("limit", 300))
+        except ValueError:
+            limit = 300
+        limit = max(1, min(limit, 2000))
+
+        plan_items_qs, scope = self._resolve_scope(request)
+        requerimientos = self._requerimientos_plan(plan_items_qs)
+        en_transito = self._en_transito_por_insumo()
+
+        existencias_qs = ExistenciaInsumo.objects.select_related("insumo__unidad_base", "insumo__proveedor_principal").filter(
+            insumo__activo=True
+        )
+        existencias_map = {e.insumo_id: e for e in existencias_qs}
+
+        insumo_ids = set(existencias_map.keys()) | set(requerimientos.keys()) | set(en_transito.keys())
+        if not insumo_ids:
+            return Response(
+                {
+                    "scope": scope,
+                    "formula": "compra_sugerida = (requerido + stock_seguridad) - (disponible + en_transito)",
+                    "totales": {
+                        "insumos": 0,
+                        "criticos": 0,
+                        "bajo_reorden": 0,
+                        "compra_sugerida_total": "0",
+                        "costo_estimado_total": "0",
+                    },
+                    "items": [],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        insumos = {
+            i.id: i
+            for i in Insumo.objects.filter(id__in=insumo_ids, activo=True).select_related("unidad_base", "proveedor_principal")
+        }
+        if not insumos:
+            return Response(
+                {
+                    "scope": scope,
+                    "formula": "compra_sugerida = (requerido + stock_seguridad) - (disponible + en_transito)",
+                    "totales": {
+                        "insumos": 0,
+                        "criticos": 0,
+                        "bajo_reorden": 0,
+                        "compra_sugerida_total": "0",
+                        "costo_estimado_total": "0",
+                    },
+                    "items": [],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        latest_cost: dict[int, Decimal] = {}
+        for costo in (
+            CostoInsumo.objects.filter(insumo_id__in=list(insumos.keys()))
+            .only("insumo_id", "costo_unitario", "fecha", "id")
+            .order_by("insumo_id", "-fecha", "-id")
+        ):
+            if costo.insumo_id not in latest_cost:
+                latest_cost[costo.insumo_id] = _to_decimal(costo.costo_unitario)
+
+        rows = []
+        total_sugerido = Decimal("0")
+        total_costo = Decimal("0")
+        criticos = 0
+        bajo_reorden = 0
+
+        for insumo_id in sorted(insumos.keys(), key=lambda pk: insumos[pk].nombre.lower()):
+            insumo = insumos[insumo_id]
+            ex = existencias_map.get(insumo_id)
+
+            stock_actual = _to_decimal(ex.stock_actual if ex else 0)
+            stock_seguridad = _to_decimal(ex.stock_minimo if ex else 0)
+            punto_reorden = _to_decimal(ex.punto_reorden if ex else 0)
+            consumo_diario = _to_decimal(ex.consumo_diario_promedio if ex else 0)
+            lead_time = int(ex.dias_llegada_pedido or 0) if ex else 0
+            if lead_time <= 0 and insumo.proveedor_principal_id:
+                lead_time = int(insumo.proveedor_principal.lead_time_dias or 0)
+            lead_time = max(lead_time, 0)
+
+            demanda_lead_time = consumo_diario * Decimal(str(lead_time))
+            requerido_plan = _to_decimal(requerimientos.get(insumo_id, 0))
+            requerido = requerido_plan if requerido_plan > demanda_lead_time else demanda_lead_time
+            en_transito_qty = _to_decimal(en_transito.get(insumo_id, 0))
+
+            sugerida = requerido + stock_seguridad - (stock_actual + en_transito_qty)
+            if sugerida < 0:
+                sugerida = Decimal("0")
+
+            costo_unitario = _to_decimal(latest_cost.get(insumo_id, 0))
+            costo_sugerido = sugerida * costo_unitario if sugerida > 0 and costo_unitario > 0 else Decimal("0")
+
+            if stock_actual <= 0 and (requerido > 0 or punto_reorden > 0):
+                estado = "CRITICO"
+                criticos += 1
+            elif punto_reorden > 0 and stock_actual < punto_reorden:
+                estado = "BAJO_REORDEN"
+                bajo_reorden += 1
+            else:
+                estado = "SUFICIENTE"
+
+            if not include_all and sugerida <= 0:
+                continue
+
+            total_sugerido += sugerida
+            total_costo += costo_sugerido
+
+            rows.append(
+                {
+                    "insumo_id": insumo_id,
+                    "insumo": insumo.nombre,
+                    "unidad": insumo.unidad_base.codigo if insumo.unidad_base_id and insumo.unidad_base else "",
+                    "proveedor_principal": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
+                    "stock_actual": str(stock_actual),
+                    "stock_seguridad": str(stock_seguridad),
+                    "punto_reorden": str(punto_reorden),
+                    "en_transito": str(en_transito_qty),
+                    "requerido_plan": str(requerido_plan),
+                    "demanda_lead_time": str(demanda_lead_time),
+                    "requerido_total": str(requerido),
+                    "compra_sugerida": str(sugerida),
+                    "lead_time_dias": lead_time,
+                    "consumo_diario_promedio": str(consumo_diario),
+                    "costo_unitario": str(costo_unitario),
+                    "costo_compra_sugerida": str(costo_sugerido),
+                    "estatus": estado,
+                }
+            )
+
+        rows.sort(
+            key=lambda x: (
+                Decimal(x["compra_sugerida"]),
+                Decimal(x["requerido_total"]),
+                x["insumo"].lower(),
+            ),
+            reverse=True,
+        )
+
+        return Response(
+            {
+                "scope": {**scope, "include_all": include_all, "limit": limit},
+                "formula": "compra_sugerida = (requerido + stock_seguridad) - (disponible + en_transito)",
+                "totales": {
+                    "insumos": len(rows[:limit]),
+                    "criticos": criticos,
+                    "bajo_reorden": bajo_reorden,
+                    "compra_sugerida_total": str(total_sugerido),
+                    "costo_estimado_total": str(total_costo),
+                },
+                "items": rows[:limit],
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class MRPRequerimientosView(APIView):

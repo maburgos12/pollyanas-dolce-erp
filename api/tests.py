@@ -5,8 +5,9 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from compras.models import OrdenCompra, SolicitudCompra
 from inventario.models import ExistenciaInsumo
-from maestros.models import Insumo, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
 from recetas.utils.costeo_versionado import asegurar_version_costeo
 
@@ -103,3 +104,73 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(payload["totales"]["insumos"], 1)
         self.assertGreaterEqual(payload["totales"]["alertas_capacidad"], 1)
         self.assertEqual(payload["items"][0]["insumo"], self.insumo.nombre)
+
+    def test_endpoint_inventario_sugerencias_compra_por_plan(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor API", lead_time_dias=3, activo=True)
+        self.insumo.proveedor_principal = proveedor
+        self.insumo.save(update_fields=["proveedor_principal"])
+        self.linea.cantidad = Decimal("6")
+        self.linea.save(update_fields=["cantidad"])
+
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            stock_actual=Decimal("4"),
+            punto_reorden=Decimal("5"),
+            stock_minimo=Decimal("2"),
+            dias_llegada_pedido=2,
+            consumo_diario_promedio=Decimal("1.5"),
+        )
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("10"),
+            source_hash="api-sug-1",
+        )
+        plan = PlanProduccion.objects.create(nombre="Plan sugerencias", fecha_produccion=date(2026, 2, 20))
+        PlanProduccionItem.objects.create(plan=plan, receta=self.receta, cantidad=Decimal("1"))
+
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="API",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("1"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            estatus=OrdenCompra.STATUS_ENVIADA,
+        )
+
+        url = reverse("api_inventario_sugerencias_compra")
+        resp = self.client.get(url, {"plan_id": plan.id})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["plan_id"], plan.id)
+        self.assertGreaterEqual(payload["totales"]["insumos"], 1)
+        self.assertEqual(len(payload["items"]), 1)
+
+        row = payload["items"][0]
+        self.assertEqual(row["insumo_id"], self.insumo.id)
+        self.assertEqual(Decimal(row["compra_sugerida"]), Decimal("3"))
+        self.assertEqual(Decimal(row["costo_compra_sugerida"]), Decimal("30"))
+        self.assertEqual(row["estatus"], "BAJO_REORDEN")
+
+    def test_endpoint_inventario_sugerencias_compra_include_all(self):
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            stock_actual=Decimal("20"),
+            punto_reorden=Decimal("5"),
+            stock_minimo=Decimal("1"),
+            dias_llegada_pedido=1,
+            consumo_diario_promedio=Decimal("1"),
+        )
+        url = reverse("api_inventario_sugerencias_compra")
+        resp_default = self.client.get(url)
+        self.assertEqual(resp_default.status_code, 200)
+        self.assertEqual(resp_default.json()["totales"]["insumos"], 0)
+
+        resp_all = self.client.get(url, {"include_all": 1})
+        self.assertEqual(resp_all.status_code, 200)
+        self.assertEqual(resp_all.json()["totales"]["insumos"], 1)
