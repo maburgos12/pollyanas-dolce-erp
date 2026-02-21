@@ -96,6 +96,12 @@ class MatchingPendientesAutocompleteTests(TestCase):
 
 
 class RecetasAuthRedirectTests(TestCase):
+    def test_drivers_legacy_redirects_to_login_when_anonymous(self):
+        response = self.client.get(reverse("recetas:drivers_costeo_legacy"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response["Location"])
+        self.assertIn("next=", response["Location"])
+
     def test_matching_pendientes_redirects_to_login_when_anonymous(self):
         response = self.client.get(reverse("recetas:matching_pendientes"))
         self.assertEqual(response.status_code, 302)
