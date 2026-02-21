@@ -41,6 +41,10 @@
 
   <hr style="margin: 18px 0;">
   <div class="card-header" style="padding:0 0 12px 0;border:0;">Carga Masiva de Solicitudes (XLSX/CSV)</div>
+  <div class="toolbar" style="margin-bottom: 8px;">
+    <a class="btn btn-secondary" href="{% url 'compras:solicitudes_importar_plantilla' %}?format=xlsx">Descargar plantilla XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'compras:solicitudes_importar_plantilla' %}?format=csv">Descargar plantilla CSV</a>
+  </div>
   <form method="post" action="{% url 'compras:solicitudes_importar' %}" enctype="multipart/form-data" class="form-grid-auto">
     {% csrf_token %}
     <input class="input-field" type="file" name="archivo" accept=".xlsx,.xlsm,.csv" required>

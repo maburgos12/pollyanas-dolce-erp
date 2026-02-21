@@ -1,3 +1,4 @@
+from io import BytesIO
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import patch
@@ -7,6 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from compras.models import OrdenCompra, SolicitudCompra
 from inventario.models import MovimientoInventario
@@ -406,6 +408,31 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         self.assertEqual(len(solicitudes), 2)
         self.assertEqual({s.insumo_id for s in solicitudes}, {self.insumo_harina.id, self.insumo_azucar.id})
         self.assertIsNone(self.client.session.get("compras_solicitudes_import_preview"))
+
+    def test_descargar_plantilla_solicitudes_csv(self):
+        response = self.client.get(
+            reverse("compras:solicitudes_importar_plantilla"),
+            {"format": "csv"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        body = response.content.decode("utf-8")
+        self.assertIn("insumo,cantidad,proveedor,fecha_requerida,area,solicitante,estatus", body)
+
+    def test_descargar_plantilla_solicitudes_xlsx(self):
+        response = self.client.get(
+            reverse("compras:solicitudes_importar_plantilla"),
+            {"format": "xlsx"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response["Content-Type"])
+        wb = load_workbook(BytesIO(response.content), data_only=True)
+        ws = wb.active
+        headers = [ws.cell(row=1, column=i).value for i in range(1, 8)]
+        self.assertEqual(
+            headers,
+            ["insumo", "cantidad", "proveedor", "fecha_requerida", "area", "solicitante", "estatus"],
+        )
 
     def test_eliminar_solicitud_permitida_si_no_tiene_oc_activa(self):
         solicitud = SolicitudCompra.objects.create(

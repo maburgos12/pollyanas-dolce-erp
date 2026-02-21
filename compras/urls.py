@@ -20,6 +20,7 @@ urlpatterns = [
         name="solicitudes_presupuesto_categoria",
     ),
     path("solicitudes/presupuesto/importar/", views.importar_presupuestos_periodo, name="solicitudes_presupuesto_importar"),
+    path("solicitudes/importar/plantilla/", views.descargar_plantilla_solicitudes, name="solicitudes_importar_plantilla"),
     path("solicitudes/importar/", views.importar_solicitudes, name="solicitudes_importar"),
     path("solicitudes/importar/confirmar/", views.confirmar_importacion_solicitudes, name="solicitudes_importar_confirmar"),
     path("solicitudes/importar/cancelar/", views.cancelar_importacion_solicitudes, name="solicitudes_importar_cancelar"),

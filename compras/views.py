@@ -115,6 +115,51 @@ def _read_import_rows(uploaded) -> list[dict]:
     raise ValueError("Formato no soportado. Usa .xlsx, .xlsm o .csv.")
 
 
+@login_required
+def descargar_plantilla_solicitudes(request: HttpRequest) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para descargar plantilla de importación.")
+
+    export_format = (request.GET.get("format") or "xlsx").strip().lower()
+    headers = ["insumo", "cantidad", "proveedor", "fecha_requerida", "area", "solicitante", "estatus"]
+    sample_rows = [
+        ["Harina Pastelera", "12.500", "Proveedor A", date.today().isoformat(), "Compras", request.user.username, SolicitudCompra.STATUS_BORRADOR],
+        ["Mantequilla", "8.000", "Proveedor B", (date.today() + timedelta(days=2)).isoformat(), "Produccion", request.user.username, SolicitudCompra.STATUS_BORRADOR],
+    ]
+
+    if export_format == "csv":
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="plantilla_solicitudes_compras.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(sample_rows)
+        return response
+
+    if export_format not in {"xlsx", "xlsm"}:
+        messages.error(request, "Formato de plantilla no soportado. Usa csv o xlsx.")
+        return redirect("compras:solicitudes")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "solicitudes_import"
+    ws.append(headers)
+    for row in sample_rows:
+        ws.append(row)
+    for col in ("A", "B", "C", "D", "E", "F", "G"):
+        ws.column_dimensions[col].width = 24
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="plantilla_solicitudes_compras.xlsx"'
+    return response
+
+
 def _parse_periodo_tipo_value(raw) -> str | None:
     value = normalizar_nombre(str(raw or ""))
     if value in {"mes", "mensual"}:
