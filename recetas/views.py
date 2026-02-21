@@ -1069,7 +1069,7 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
                 )
                 oc_creadas += 1
 
-    if creadas == 0:
+    if creadas == 0 and actualizadas == 0:
         messages.warning(
             request,
             "No se generaron solicitudes: el plan no tiene materia prima con cantidad válida.",
