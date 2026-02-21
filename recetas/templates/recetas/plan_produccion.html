@@ -26,6 +26,47 @@
 </div>
 
 <div class="card">
+  <div class="card-header">Pronósticos de Venta (CSV/XLSX)</div>
+  <p class="muted mb-3">
+    Carga pronósticos por receta para alimentar la comparación Plan vs Pronóstico.
+    Periodo actual: <strong>{{ periodo_pronostico_default }}</strong> ·
+    Registros: <strong>{{ pronosticos_periodo_count }}</strong> ·
+    Total: <strong>{{ pronosticos_periodo_total|floatformat:2 }}</strong>
+  </p>
+  <div class="toolbar mb-2">
+    <a class="btn btn-secondary" href="{% url 'recetas:pronosticos_plantilla' %}?format=xlsx">Descargar plantilla XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:pronosticos_plantilla' %}?format=csv">Descargar plantilla CSV</a>
+  </div>
+  <form class="form-grid-auto" method="post" action="{% url 'recetas:pronosticos_importar' %}" enctype="multipart/form-data">
+    {% csrf_token %}
+    {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+    <div class="form-group">
+      <label class="form-label">Archivo pronóstico</label>
+      <input class="form-control" type="file" name="archivo" accept=".xlsx,.xlsm,.csv" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Periodo default</label>
+      <input class="form-control" type="month" name="periodo_default" value="{{ periodo_pronostico_default }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Modo</label>
+      <select class="form-select" name="modo">
+        <option value="replace" selected>Reemplazar receta+periodo</option>
+        <option value="accumulate">Acumular cantidad</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fuente</label>
+      <input class="form-control" name="fuente" value="UI_PRONOSTICO" maxlength="40">
+    </div>
+    <div class="form-group" style="align-self:end;">
+      <button class="btn btn-primary" type="submit">Importar pronósticos</button>
+    </div>
+  </form>
+  <p class="muted mb-0">Columnas sugeridas: <code>receta</code>, <code>codigo_point</code>, <code>periodo</code> (YYYY-MM), <code>cantidad</code>.</p>
+</div>
+
+<div class="card">
   <div class="card-header">Planes recientes</div>
   <div class="table-responsive">
     <table class="table align-middle">

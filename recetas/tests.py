@@ -2,12 +2,21 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 
 from compras.models import OrdenCompra, SolicitudCompra
 from maestros.models import Insumo, Proveedor, UnidadMedida
-from recetas.models import CostoDriver, LineaReceta, PlanProduccion, PlanProduccionItem, Receta, RecetaCostoVersion
+from recetas.models import (
+    CostoDriver,
+    LineaReceta,
+    PlanProduccion,
+    PlanProduccionItem,
+    PronosticoVenta,
+    Receta,
+    RecetaCostoVersion,
+)
 from recetas.utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta
 
 
@@ -223,3 +232,64 @@ class RecetaCosteoVersionadoTests(TestCase):
         self.assertEqual(breakdown.costo_mo, Decimal("0.000000"))
         self.assertEqual(breakdown.costo_indirecto, Decimal("0.000000"))
         self.assertEqual(breakdown.costo_total, Decimal("8.000000"))
+
+
+class PronosticoImportViewTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_pronostico",
+            email="admin_pronostico@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+        self.receta = Receta.objects.create(
+            nombre="Pastel Fresas Con Crema - Chico",
+            codigo_point="PFC-CHICO",
+            hash_contenido="hash-pronostico-001",
+        )
+
+    def test_import_replace_crea_pronosticos(self):
+        csv_data = (
+            "receta,codigo_point,periodo,cantidad\n"
+            "Pastel Fresas Con Crema - Chico,PFC-CHICO,2026-02,120\n"
+        ).encode("utf-8")
+        upload = SimpleUploadedFile("pronostico.csv", csv_data, content_type="text/csv")
+        response = self.client.post(
+            reverse("recetas:pronosticos_importar"),
+            {
+                "modo": "replace",
+                "periodo_default": "2026-02",
+                "fuente": "TEST_UI",
+                "archivo": upload,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        record = PronosticoVenta.objects.get(receta=self.receta, periodo="2026-02")
+        self.assertEqual(record.cantidad, Decimal("120"))
+        self.assertEqual(record.fuente, "TEST_UI")
+
+    def test_import_accumulate_acumula_cantidad(self):
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-02",
+            cantidad=Decimal("100"),
+            fuente="MANUAL",
+        )
+        csv_data = (
+            "codigo_point,periodo,cantidad\n"
+            "PFC-CHICO,2026-02,20\n"
+        ).encode("utf-8")
+        upload = SimpleUploadedFile("pronostico.csv", csv_data, content_type="text/csv")
+        response = self.client.post(
+            reverse("recetas:pronosticos_importar"),
+            {
+                "modo": "accumulate",
+                "periodo_default": "2026-02",
+                "fuente": "TEST_UI",
+                "archivo": upload,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        record = PronosticoVenta.objects.get(receta=self.receta, periodo="2026-02")
+        self.assertEqual(record.cantidad, Decimal("120"))

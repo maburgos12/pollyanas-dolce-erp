@@ -101,6 +101,76 @@
     </article>
 </div>
 
+{% if plan_forecast_semaforo %}
+<section class="card">
+    <div class="card-header">Desviación Mensual Plan vs Pronóstico ({{ plan_forecast_semaforo.periodo_mes }})</div>
+    <div class="kpi-mini">
+        <article class="kpi-card">
+            <div class="kpi-label">Semáforo</div>
+            <div style="margin-top:8px;"><span class="badge {{ plan_forecast_semaforo.semaforo_badge }}">{{ plan_forecast_semaforo.semaforo_label }}</span></div>
+            <div class="muted" style="margin-top:10px;">
+                Recetas: {{ plan_forecast_semaforo.recetas_total }} ·
+                Con desviación: {{ plan_forecast_semaforo.recetas_con_desviacion }}
+            </div>
+            <div style="margin-top:10px;">
+                <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion' %}?periodo={{ plan_forecast_semaforo.periodo_mes }}">Abrir plan producción</a>
+            </div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number">{{ plan_forecast_semaforo.total_plan|floatformat:2 }}</div>
+            <div class="kpi-label">Total plan</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number">{{ plan_forecast_semaforo.total_pronostico|floatformat:2 }}</div>
+            <div class="kpi-label">Total pronóstico</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number {% if plan_forecast_semaforo.delta_total > 0 %}is-danger{% elif plan_forecast_semaforo.delta_total < 0 %}is-warning{% else %}is-success{% endif %}">
+                {{ plan_forecast_semaforo.delta_total|floatformat:2 }}
+            </div>
+            <div class="kpi-label">
+                Delta total
+                {% if plan_forecast_semaforo.desviacion_abs_pct is not None %}
+                    ({{ plan_forecast_semaforo.desviacion_abs_pct|floatformat:2 }}%)
+                {% endif %}
+            </div>
+        </article>
+    </div>
+    <div class="table-responsive" style="margin-top:12px;">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Receta</th>
+                    <th class="text-end">Plan</th>
+                    <th class="text-end">Pronóstico</th>
+                    <th class="text-end">Delta</th>
+                    <th class="text-end">% Delta</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in plan_forecast_semaforo.rows_top %}
+                <tr>
+                    <td>{{ row.receta }}</td>
+                    <td class="text-end">{{ row.plan|floatformat:2 }}</td>
+                    <td class="text-end">{{ row.pronostico|floatformat:2 }}</td>
+                    <td class="text-end {% if row.delta > 0 %}text-danger{% elif row.delta < 0 %}text-success{% endif %}">{{ row.delta|floatformat:2 }}</td>
+                    <td class="text-end">
+                        {% if row.delta_pct is not None %}
+                            {{ row.delta_pct|floatformat:2 }}%
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="text-muted">Sin datos de plan/pronóstico para este mes.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+
 <section class="card">
     <div class="card-header">Accesos Operativos</div>
     <div class="quick-actions">

@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from compras.models import OrdenCompra, SolicitudCompra
 from core.access import can_manage_compras
@@ -31,6 +31,7 @@ from .models import (
 )
 from .utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
 from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
+from .utils.normalizacion import normalizar_nombre
 
 @login_required
 def recetas_list(request: HttpRequest) -> HttpResponse:
@@ -829,6 +830,215 @@ def _export_plan_point_xlsx(plan: PlanProduccion) -> HttpResponse:
     return response
 
 
+def _normalize_periodo_mes(raw: str | None) -> str:
+    txt = (raw or "").strip()
+    if not txt:
+        today = timezone.localdate()
+        return f"{today.year:04d}-{today.month:02d}"
+
+    txt = txt.replace("/", "-")
+    if len(txt) >= 7:
+        txt = txt[:7]
+    try:
+        y, m = txt.split("-")
+        yi = int(y)
+        mi = int(m)
+        if 1 <= mi <= 12:
+            return f"{yi:04d}-{mi:02d}"
+    except Exception:
+        pass
+
+    today = timezone.localdate()
+    return f"{today.year:04d}-{today.month:02d}"
+
+
+def _to_decimal_safe(value: object) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    try:
+        txt = str(value).strip().replace(",", ".")
+        if txt == "":
+            return Decimal("0")
+        return Decimal(txt)
+    except Exception:
+        return Decimal("0")
+
+
+def _map_pronostico_header(header: str) -> str:
+    key = normalizar_nombre(header).replace("_", " ")
+    if key in {"receta", "producto", "nombre", "nombre receta"}:
+        return "receta"
+    if key in {"codigo point", "codigo", "sku"}:
+        return "codigo_point"
+    if key in {"periodo", "mes"}:
+        return "periodo"
+    if key in {"cantidad", "pronostico", "forecast"}:
+        return "cantidad"
+    return key
+
+
+def _load_pronostico_rows(uploaded) -> list[dict]:
+    filename = (uploaded.name or "").lower()
+    rows: list[dict] = []
+    if filename.endswith(".csv"):
+        uploaded.seek(0)
+        content = uploaded.read().decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            parsed = {}
+            for key, value in (row or {}).items():
+                if not key:
+                    continue
+                parsed[_map_pronostico_header(str(key))] = value
+            rows.append(parsed)
+        return rows
+
+    if filename.endswith(".xlsx") or filename.endswith(".xlsm"):
+        uploaded.seek(0)
+        wb = load_workbook(uploaded, read_only=True, data_only=True)
+        ws = wb.active
+        values = list(ws.values)
+        if not values:
+            return []
+        headers = [_map_pronostico_header(str(h or "")) for h in values[0]]
+        for raw in values[1:]:
+            parsed = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                parsed[header] = raw[idx] if idx < len(raw) else None
+            rows.append(parsed)
+        return rows
+
+    raise ValueError("Formato no soportado. Usa CSV o XLSX.")
+
+
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+def pronosticos_descargar_plantilla(request: HttpRequest) -> HttpResponse:
+    export_format = (request.GET.get("format") or "xlsx").strip().lower()
+    headers = ["receta", "codigo_point", "periodo", "cantidad"]
+    sample_rows = [
+        ["Pastel Fresas Con Crema - Chico", "PFC-CHICO", timezone.localdate().strftime("%Y-%m"), "120"],
+        ["Pan Vainilla Dawn - Chico", "PVD-CHICO", timezone.localdate().strftime("%Y-%m"), "220"],
+    ]
+
+    if export_format == "csv":
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="plantilla_pronosticos.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(sample_rows)
+        return response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "pronosticos"
+    ws.append(headers)
+    for row in sample_rows:
+        ws.append(row)
+    for col in ("A", "B", "C", "D"):
+        ws.column_dimensions[col].width = 28
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="plantilla_pronosticos.xlsx"'
+    return response
+
+
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def pronosticos_importar(request: HttpRequest) -> HttpResponse:
+    uploaded = request.FILES.get("archivo")
+    plan_id = (request.POST.get("plan_id") or "").strip()
+    modo = (request.POST.get("modo") or "replace").strip().lower()
+    if modo not in {"replace", "accumulate"}:
+        modo = "replace"
+    fuente = (request.POST.get("fuente") or "UI_PRONOSTICO").strip()[:40] or "UI_PRONOSTICO"
+    periodo_default = _normalize_periodo_mes(request.POST.get("periodo_default"))
+
+    next_url = reverse("recetas:plan_produccion")
+    if plan_id:
+        next_url = f"{next_url}?{urlencode({'plan_id': plan_id})}"
+
+    if not uploaded:
+        messages.error(request, "Selecciona un archivo para importar pronósticos.")
+        return redirect(next_url)
+
+    try:
+        rows = _load_pronostico_rows(uploaded)
+    except Exception as exc:
+        messages.error(request, f"No se pudo leer el archivo: {exc}")
+        return redirect(next_url)
+
+    if not rows:
+        messages.warning(request, "Archivo sin filas válidas para pronósticos.")
+        return redirect(next_url)
+
+    created = 0
+    updated = 0
+    skipped = 0
+    unresolved: list[str] = []
+
+    for row in rows:
+        receta_name = (row.get("receta") or "").strip()
+        codigo_point = (row.get("codigo_point") or "").strip()
+        cantidad = _to_decimal_safe(row.get("cantidad"))
+        periodo = _normalize_periodo_mes(str(row.get("periodo") or row.get("mes") or periodo_default))
+
+        if cantidad < 0:
+            skipped += 1
+            continue
+        if not receta_name and not codigo_point:
+            skipped += 1
+            continue
+
+        receta = None
+        if codigo_point:
+            receta = Receta.objects.filter(codigo_point__iexact=codigo_point).order_by("id").first()
+        if receta is None and receta_name:
+            receta = Receta.objects.filter(nombre_normalizado=normalizar_nombre(receta_name)).order_by("id").first()
+
+        if receta is None:
+            unresolved.append(receta_name or codigo_point)
+            skipped += 1
+            continue
+
+        pronostico = PronosticoVenta.objects.filter(receta=receta, periodo=periodo).first()
+        if pronostico:
+            if modo == "accumulate":
+                pronostico.cantidad = Decimal(str(pronostico.cantidad or 0)) + cantidad
+            else:
+                pronostico.cantidad = cantidad
+            pronostico.fuente = fuente
+            pronostico.save(update_fields=["cantidad", "fuente", "actualizado_en"])
+            updated += 1
+        else:
+            PronosticoVenta.objects.create(
+                receta=receta,
+                periodo=periodo,
+                cantidad=cantidad,
+                fuente=fuente,
+            )
+            created += 1
+
+    messages.success(
+        request,
+        f"Pronósticos importados. Creados: {created}. Actualizados: {updated}. Omitidos: {skipped}. Modo: {'acumular' if modo == 'accumulate' else 'reemplazar'}.",
+    )
+    if unresolved:
+        sample = ", ".join(unresolved[:5])
+        extra = "" if len(unresolved) <= 5 else f" (+{len(unresolved) - 5} más)"
+        messages.warning(
+            request,
+            f"Sin receta equivalente para: {sample}{extra}. Homologa nombre/código point y vuelve a importar.",
+        )
+    return redirect(next_url)
+
+
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion(request: HttpRequest) -> HttpResponse:
     planes = PlanProduccion.objects.select_related("creado_por").prefetch_related("items").order_by("-fecha_produccion", "-id")
@@ -842,6 +1052,10 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     recetas_disponibles = Receta.objects.order_by("tipo", "nombre")
     explosion = _plan_explosion(plan_actual) if plan_actual else None
     plan_vs_pronostico = _plan_vs_pronostico(plan_actual) if plan_actual else None
+    periodo_pronostico_default = _normalize_periodo_mes(request.GET.get("periodo"))
+    pronosticos_periodo = PronosticoVenta.objects.filter(periodo=periodo_pronostico_default)
+    pronosticos_periodo_count = pronosticos_periodo.count()
+    pronosticos_periodo_total = pronosticos_periodo.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
     return render(
         request,
         "recetas/plan_produccion.html",
@@ -851,6 +1065,9 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "recetas_disponibles": recetas_disponibles,
             "explosion": explosion,
             "plan_vs_pronostico": plan_vs_pronostico,
+            "periodo_pronostico_default": periodo_pronostico_default,
+            "pronosticos_periodo_count": pronosticos_periodo_count,
+            "pronosticos_periodo_total": pronosticos_periodo_total,
         },
     )
 

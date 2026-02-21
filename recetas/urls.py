@@ -25,5 +25,7 @@ urlpatterns = [
     path("plan-produccion/<int:plan_id>/generar-solicitudes/", views.plan_produccion_generar_solicitudes, name="plan_produccion_generar_solicitudes"),
     path("plan-produccion/<int:plan_id>/items/nuevo/", views.plan_produccion_item_create, name="plan_produccion_item_create"),
     path("plan-produccion/<int:plan_id>/items/<int:item_id>/eliminar/", views.plan_produccion_item_delete, name="plan_produccion_item_delete"),
+    path("plan-produccion/pronosticos/plantilla/", views.pronosticos_descargar_plantilla, name="pronosticos_plantilla"),
+    path("plan-produccion/pronosticos/importar/", views.pronosticos_importar, name="pronosticos_importar"),
     path("mrp/", views.mrp_form, name="mrp_form"),
 ]

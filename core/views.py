@@ -26,7 +26,7 @@ from core.access import (
 from maestros.models import Insumo, Proveedor
 from maestros.models import CostoInsumo
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra, OrdenCompra
-from recetas.models import Receta
+from recetas.models import PlanProduccionItem, PronosticoVenta, Receta
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from core.models import AuditLog
 from core.audit import log_event
@@ -151,6 +151,103 @@ def _log_budget_alert_once(alert_data: dict, kind: str) -> None:
         },
     )
 
+
+def _compute_plan_forecast_semaforo(periodo_mes: str) -> dict:
+    try:
+        year, month = periodo_mes.split("-")
+        y = int(year)
+        m = int(month)
+    except Exception:
+        today = timezone.localdate()
+        y = today.year
+        m = today.month
+        periodo_mes = f"{y:04d}-{m:02d}"
+
+    pron_rows = (
+        PronosticoVenta.objects.filter(periodo=periodo_mes)
+        .values("receta_id", "receta__nombre")
+        .annotate(total=Sum("cantidad"))
+    )
+    plan_rows = (
+        PlanProduccionItem.objects.filter(plan__fecha_produccion__year=y, plan__fecha_produccion__month=m)
+        .values("receta_id", "receta__nombre")
+        .annotate(total=Sum("cantidad"))
+    )
+
+    merged: dict[int, dict] = {}
+    for row in pron_rows:
+        receta_id = int(row["receta_id"])
+        merged[receta_id] = {
+            "receta_id": receta_id,
+            "receta": row["receta__nombre"],
+            "pronostico": Decimal(str(row["total"] or 0)),
+            "plan": Decimal("0"),
+        }
+    for row in plan_rows:
+        receta_id = int(row["receta_id"])
+        current = merged.setdefault(
+            receta_id,
+            {
+                "receta_id": receta_id,
+                "receta": row["receta__nombre"],
+                "pronostico": Decimal("0"),
+                "plan": Decimal("0"),
+            },
+        )
+        current["plan"] = Decimal(str(row["total"] or 0))
+
+    rows = []
+    con_desviacion = 0
+    for row in merged.values():
+        delta = row["plan"] - row["pronostico"]
+        if delta != 0:
+            con_desviacion += 1
+        row["delta"] = delta
+        if row["pronostico"] > 0:
+            row["delta_pct"] = (delta * Decimal("100")) / row["pronostico"]
+        else:
+            row["delta_pct"] = None
+        rows.append(row)
+
+    rows = sorted(rows, key=lambda x: (abs(x["delta"]), x["receta"]), reverse=True)
+    total_plan = sum((r["plan"] for r in rows), Decimal("0"))
+    total_pronostico = sum((r["pronostico"] for r in rows), Decimal("0"))
+    delta_total = total_plan - total_pronostico
+    if total_pronostico > 0:
+        desviacion_abs_pct = (abs(delta_total) * Decimal("100")) / total_pronostico
+    else:
+        desviacion_abs_pct = None
+
+    if total_pronostico <= 0 and total_plan <= 0:
+        semaforo = "Sin datos"
+        semaforo_badge = "bg-warning"
+    elif total_pronostico <= 0 and total_plan > 0:
+        semaforo = "Rojo"
+        semaforo_badge = "bg-danger"
+    elif desviacion_abs_pct is not None and desviacion_abs_pct <= Decimal("10"):
+        semaforo = "Verde"
+        semaforo_badge = "bg-success"
+    elif desviacion_abs_pct is not None and desviacion_abs_pct <= Decimal("25"):
+        semaforo = "Amarillo"
+        semaforo_badge = "bg-warning"
+    else:
+        semaforo = "Rojo"
+        semaforo_badge = "bg-danger"
+
+    return {
+        "periodo_mes": periodo_mes,
+        "total_plan": total_plan,
+        "total_pronostico": total_pronostico,
+        "delta_total": delta_total,
+        "desviacion_abs_pct": desviacion_abs_pct,
+        "recetas_total": len(rows),
+        "recetas_con_desviacion": con_desviacion,
+        "semaforo_label": semaforo,
+        "semaforo_badge": semaforo_badge,
+        "rows_top": rows[:8],
+    }
+
+
 def login_view(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         username = request.POST.get("username", "")
@@ -203,6 +300,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "budget_semaforo_quincena": None,
         "budget_alerts_active": 0,
         "latest_budget_alert": None,
+        "plan_forecast_semaforo": None,
     }
     try:
         existencias_qs = ExistenciaInsumo.objects.all()
@@ -357,6 +455,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 ).first(),
             }
         )
+        ctx["plan_forecast_semaforo"] = _compute_plan_forecast_semaforo(periodo_mes)
     except Exception:
         logger.exception("Dashboard failed to build full context")
 
