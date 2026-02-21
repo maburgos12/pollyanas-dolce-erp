@@ -3,6 +3,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
+from io import BytesIO
 
 from inventario.models import AlmacenSyncRun
 from maestros.models import Insumo, InsumoAlias, PointPendingMatch, UnidadMedida
@@ -309,3 +311,26 @@ class InventarioAliasesPendingTests(TestCase):
         )
         run.refresh_from_db()
         self.assertEqual(run.pending_preview, [])
+
+    def test_aliases_catalog_export_csv_and_xlsx(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo = Insumo.objects.create(nombre="Harina", unidad_base=unidad)
+        InsumoAlias.objects.create(nombre="Harina pastelera 25kg", insumo=insumo)
+
+        response_csv = self.client.get(reverse("inventario:aliases_catalog"), {"export": "aliases_csv"})
+        self.assertEqual(response_csv.status_code, 200)
+        self.assertIn("text/csv", response_csv["Content-Type"])
+        body = response_csv.content.decode("utf-8")
+        self.assertIn("alias,normalizado,insumo_oficial", body)
+        self.assertIn("Harina pastelera 25kg", body)
+
+        response_xlsx = self.client.get(reverse("inventario:aliases_catalog"), {"export": "aliases_xlsx"})
+        self.assertEqual(response_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response_xlsx["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(response_xlsx.content), data_only=True)
+        ws = wb.active
+        headers = [ws.cell(row=1, column=1).value, ws.cell(row=1, column=2).value, ws.cell(row=1, column=3).value]
+        self.assertEqual(headers, ["alias", "normalizado", "insumo_oficial"])

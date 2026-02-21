@@ -335,6 +335,39 @@ def _export_alias_template(export_format: str) -> HttpResponse:
     return response
 
 
+def _export_aliases_catalog_csv(aliases_qs) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="inventario_aliases_catalogo_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["alias", "normalizado", "insumo_oficial"])
+    for alias in aliases_qs:
+        writer.writerow([alias.nombre, alias.nombre_normalizado, alias.insumo.nombre if alias.insumo_id else ""])
+    return response
+
+
+def _export_aliases_catalog_xlsx(aliases_qs) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "aliases_catalogo"
+    ws.append(["alias", "normalizado", "insumo_oficial"])
+    for alias in aliases_qs:
+        ws.append([alias.nombre, alias.nombre_normalizado, alias.insumo.nombre if alias.insumo_id else ""])
+    ws.column_dimensions["A"].width = 36
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["C"].width = 36
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="inventario_aliases_catalogo_{now_str}.xlsx"'
+    return response
+
+
 def _resolve_cross_source_with_alias(alias_name: str, insumo: Insumo) -> tuple[int, int]:
     alias_norm = normalizar_nombre(alias_name)
     if not alias_norm:
@@ -1218,6 +1251,10 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         return _export_cross_pending_csv(unified_rows)
     if export_format in {"alias_template_csv", "alias_template_xlsx"}:
         return _export_alias_template(export_format)
+    if export_format == "aliases_csv":
+        return _export_aliases_catalog_csv(aliases_qs)
+    if export_format == "aliases_xlsx":
+        return _export_aliases_catalog_xlsx(aliases_qs)
 
     import_preview = list(request.session.get("inventario_alias_import_preview", []))[:200]
     import_stats = request.session.get("inventario_alias_import_stats", {})

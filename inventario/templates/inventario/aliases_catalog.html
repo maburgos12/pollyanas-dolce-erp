@@ -460,6 +460,8 @@
     <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por alias o insumo...">
     <button class="btn btn-primary" type="submit">Buscar</button>
     <a href="{% url 'inventario:aliases_catalog' %}" class="btn btn-secondary">Limpiar</a>
+    <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=aliases_csv" class="btn btn-secondary">Exportar aliases CSV</a>
+    <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=aliases_xlsx" class="btn btn-secondary">Exportar aliases XLSX</a>
   </form>
 
   <div class="table-responsive">
