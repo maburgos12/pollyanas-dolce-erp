@@ -50,6 +50,14 @@ class MatchingPendientesAutocompleteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Matching pendientes")
 
+    def test_matching_pendientes_export_csv(self):
+        response = self.client.get(reverse("recetas:matching_pendientes"), {"export": "csv", "q": "Harina"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        body = response.content.decode("utf-8")
+        self.assertIn("receta,posicion,ingrediente,metodo,score,insumo_ligado", body)
+        self.assertIn("Receta Test Match", body)
+
     def test_matching_insumos_search_filters_by_query(self):
         response = self.client.get(
             reverse("recetas:matching_insumos_search"),

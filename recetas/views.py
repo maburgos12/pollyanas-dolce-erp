@@ -433,6 +433,27 @@ def matching_pendientes(request: HttpRequest) -> HttpResponse:
     pendientes = LineaReceta.objects.filter(match_status=LineaReceta.STATUS_NEEDS_REVIEW).select_related("receta", "insumo").order_by("receta__nombre", "posicion")
     if q:
         pendientes = pendientes.filter(insumo_texto__icontains=q)
+
+    export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format == "csv":
+        now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="matching_pendientes_{now_str}.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["receta", "posicion", "ingrediente", "metodo", "score", "insumo_ligado"])
+        for linea in pendientes:
+            writer.writerow(
+                [
+                    linea.receta.nombre,
+                    linea.posicion,
+                    linea.insumo_texto or "",
+                    linea.match_method or "",
+                    float(linea.match_score or 0),
+                    linea.insumo.nombre if linea.insumo_id and linea.insumo else "",
+                ]
+            )
+        return response
+
     paginator = Paginator(pendientes, 25)
     page = paginator.get_page(request.GET.get("page"))
     return render(request, "recetas/matching_pendientes.html", {"page": page, "q": q})
