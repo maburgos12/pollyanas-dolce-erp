@@ -1,5 +1,8 @@
 from rest_framework import serializers
 
+from compras.models import SolicitudCompra
+
+
 class MRPRequestSerializer(serializers.Serializer):
     receta_id = serializers.IntegerField()
     multiplicador = serializers.DecimalField(max_digits=18, decimal_places=6, required=False, default=1)
@@ -60,3 +63,21 @@ class MRPRequerimientosRequestSerializer(serializers.Serializer):
         if not attrs.get("plan_id") and not attrs.get("items"):
             raise serializers.ValidationError("Debes enviar plan_id o items.")
         return attrs
+
+
+class ComprasSolicitudCreateSerializer(serializers.Serializer):
+    area = serializers.CharField(max_length=120)
+    solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    insumo_id = serializers.IntegerField()
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=3)
+    fecha_requerida = serializers.DateField(required=False)
+    estatus = serializers.ChoiceField(
+        choices=[choice[0] for choice in SolicitudCompra.STATUS_CHOICES],
+        required=False,
+        default=SolicitudCompra.STATUS_BORRADOR,
+    )
+
+    def validate_cantidad(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("La cantidad debe ser mayor a 0.")
+        return value

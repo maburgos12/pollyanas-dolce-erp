@@ -8,12 +8,15 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
+from compras.models import SolicitudCompra
 from compras.models import OrdenCompra
+from core.access import can_manage_compras
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from .serializers import (
+    ComprasSolicitudCreateSerializer,
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
     RecetaCostoVersionSerializer,
@@ -422,6 +425,52 @@ class InventarioSugerenciasCompraView(APIView):
                 "items": rows[:limit],
             },
             status=status.HTTP_200_OK,
+        )
+
+
+class ComprasSolicitudCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not can_manage_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para crear solicitudes de compra."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ComprasSolicitudCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        insumo = get_object_or_404(Insumo, pk=data["insumo_id"])
+        solicitante = (data.get("solicitante") or request.user.username or "").strip() or request.user.username
+        area = (data["area"] or "").strip() or "General"
+
+        solicitud = SolicitudCompra.objects.create(
+            area=area,
+            solicitante=solicitante[:120],
+            insumo=insumo,
+            proveedor_sugerido=insumo.proveedor_principal,
+            cantidad=data["cantidad"],
+            fecha_requerida=data.get("fecha_requerida") or timezone.localdate(),
+            estatus=data.get("estatus") or SolicitudCompra.STATUS_BORRADOR,
+        )
+
+        return Response(
+            {
+                "id": solicitud.id,
+                "folio": solicitud.folio,
+                "area": solicitud.area,
+                "solicitante": solicitud.solicitante,
+                "insumo_id": solicitud.insumo_id,
+                "insumo": solicitud.insumo.nombre,
+                "cantidad": str(solicitud.cantidad),
+                "fecha_requerida": str(solicitud.fecha_requerida),
+                "estatus": solicitud.estatus,
+                "proveedor_sugerido_id": solicitud.proveedor_sugerido_id,
+                "proveedor_sugerido": solicitud.proveedor_sugerido.nombre if solicitud.proveedor_sugerido_id else "",
+            },
+            status=status.HTTP_201_CREATED,
         )
 
 

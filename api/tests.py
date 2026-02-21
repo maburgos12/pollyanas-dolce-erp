@@ -174,3 +174,43 @@ class RecetasCosteoApiTests(TestCase):
         resp_all = self.client.get(url, {"include_all": 1})
         self.assertEqual(resp_all.status_code, 200)
         self.assertEqual(resp_all.json()["totales"]["insumos"], 1)
+
+    def test_endpoint_compras_solicitud_crea(self):
+        url = reverse("api_compras_solicitud")
+        resp = self.client.post(
+            url,
+            {
+                "area": "Produccion",
+                "solicitante": "coordinador",
+                "insumo_id": self.insumo.id,
+                "cantidad": "3.500",
+                "fecha_requerida": "2026-02-25",
+            },
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertEqual(payload["area"], "Produccion")
+        self.assertEqual(payload["solicitante"], "coordinador")
+        self.assertEqual(payload["insumo_id"], self.insumo.id)
+        self.assertEqual(payload["cantidad"], "3.500")
+        self.assertTrue(payload["folio"].startswith("SOL-"))
+
+    def test_endpoint_compras_solicitud_requiere_rol(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="lector_api",
+            email="lector_api@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+
+        url = reverse("api_compras_solicitud")
+        resp = self.client.post(
+            url,
+            {
+                "area": "Compras",
+                "insumo_id": self.insumo.id,
+                "cantidad": "1.000",
+            },
+        )
+        self.assertEqual(resp.status_code, 403)
