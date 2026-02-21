@@ -293,3 +293,100 @@ class PronosticoImportViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         record = PronosticoVenta.objects.get(receta=self.receta, periodo="2026-02")
         self.assertEqual(record.cantidad, Decimal("120"))
+
+
+class RecetaPhase2ViewsTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_phase2",
+            email="admin_phase2@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(nombre="Insumo Driver", unidad_base=self.unidad, activo=True)
+        self.receta = Receta.objects.create(
+            nombre="Receta Driver",
+            sheet_name="Insumos 1",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("8"),
+            rendimiento_unidad=self.unidad,
+            hash_contenido="hash-phase2-views-001",
+        )
+        self.linea = LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=self.insumo,
+            insumo_texto="Insumo Driver",
+            cantidad=Decimal("2"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("4"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        asegurar_version_costeo(self.receta, fuente="TEST_PHASE2")
+        self.linea.costo_unitario_snapshot = Decimal("5")
+        self.linea.save(update_fields=["costo_unitario_snapshot"])
+        asegurar_version_costeo(self.receta, fuente="TEST_PHASE2")
+
+    def test_receta_detail_renderiza_comparador_y_export(self):
+        resp = self.client.get(reverse("recetas:receta_detail", args=[self.receta.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Comparar versiones")
+        self.assertContains(resp, "Exportar versiones CSV")
+        self.assertContains(resp, "Drivers costeo")
+
+    def test_receta_versiones_export_csv(self):
+        resp = self.client.get(
+            reverse("recetas:receta_versiones_export", args=[self.receta.id]),
+            {"format": "csv"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/csv", resp["Content-Type"])
+        self.assertIn("version,fecha,fuente", resp.content.decode("utf-8"))
+
+    def test_receta_versiones_export_xlsx(self):
+        resp = self.client.get(
+            reverse("recetas:receta_versiones_export", args=[self.receta.id]),
+            {"format": "xlsx"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("spreadsheetml", resp["Content-Type"])
+
+    def test_drivers_costeo_create_and_list(self):
+        payload = {
+            "scope": CostoDriver.SCOPE_PRODUCTO,
+            "nombre": "Driver test producto",
+            "receta_id": str(self.receta.id),
+            "familia": "",
+            "lote_desde": "",
+            "lote_hasta": "",
+            "mo_pct": "7",
+            "indirecto_pct": "3",
+            "mo_fijo": "0",
+            "indirecto_fijo": "0",
+            "prioridad": "15",
+            "activo": "1",
+        }
+        post_resp = self.client.post(reverse("recetas:drivers_costeo"), payload)
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertEqual(CostoDriver.objects.count(), 1)
+        get_resp = self.client.get(reverse("recetas:drivers_costeo"))
+        self.assertEqual(get_resp.status_code, 200)
+        self.assertContains(get_resp, "Driver test producto")
+
+    def test_drivers_costeo_plantilla_csv(self):
+        resp = self.client.get(reverse("recetas:drivers_costeo_plantilla"), {"format": "csv"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/csv", resp["Content-Type"])
+        body = resp.content.decode("utf-8")
+        self.assertIn("scope,nombre,receta", body)

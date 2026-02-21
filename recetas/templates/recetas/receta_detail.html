@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ receta.nombre }}{% endblock %}
+{% block page_title %}Recetas · {{ receta.nombre }}{% endblock %}
 {% block content %}
 <div class="recipe-detail">
 <div class="card">
@@ -10,6 +11,7 @@
     </div>
     <div class="recipe-actions">
       <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Ver pendientes</a>
+      <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Drivers costeo</a>
       <a class="btn btn-primary" href="{% url 'recetas:linea_create' receta.id %}">Agregar línea</a>
       <a class="btn btn-outline-secondary" href="{% url 'recetas:recetas_list' %}">Volver</a>
     </div>
@@ -94,6 +96,11 @@
     <h3 class="mb-0">Costeo Completo (Fase 2)</h3>
     <span class="badge bg-primary">Driver: {{ costeo_actual.driver.scope|default:"GLOBAL" }}{% if costeo_actual.driver %} · {{ costeo_actual.driver.nombre }}{% endif %}</span>
   </div>
+  <div class="toolbar">
+    <a class="btn btn-secondary" href="{% url 'recetas:receta_versiones_export' receta.id %}?format=csv">Exportar versiones CSV</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:receta_versiones_export' receta.id %}?format=xlsx">Exportar versiones XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Administrar drivers</a>
+  </div>
   <div class="kpi-mini">
     <div class="kpi-card">
       <div class="kpi-number">${{ costeo_actual.costo_mp|floatformat:2 }}</div>
@@ -124,8 +131,53 @@
 <div class="card">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h3 class="mb-0">Histórico de Versiones de Costo</h3>
-    <span class="text-muted">Últimas {{ versiones_recientes|length }} versiones</span>
+    <span class="text-muted">Total {{ versiones_all|length }} versiones</span>
   </div>
+  <form class="recipes-filters mb-3" method="get">
+    <div>
+      <label class="form-label">Base</label>
+      <select class="form-select" name="base">
+        {% for v in versiones_all %}
+        <option value="{{ v.version_num }}" {% if selected_base and selected_base.version_num == v.version_num %}selected{% endif %}>v{{ v.version_num }} · {{ v.creado_en|date:"Y-m-d H:i" }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">Objetivo</label>
+      <select class="form-select" name="target">
+        {% for v in versiones_all %}
+        <option value="{{ v.version_num }}" {% if selected_target and selected_target.version_num == v.version_num %}selected{% endif %}>v{{ v.version_num }} · {{ v.creado_en|date:"Y-m-d H:i" }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn btn-primary" type="submit">Comparar versiones</button>
+    <a class="btn btn-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Limpiar</a>
+  </form>
+  {% if version_compare and selected_base and selected_target %}
+  <div class="kpi-mini mb-3">
+    <div class="kpi-card">
+      <div class="kpi-number {% if version_compare.delta_mp >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_mp|floatformat:2 }}</div>
+      <div class="kpi-label">Delta MP (v{{ selected_target.version_num }} - v{{ selected_base.version_num }})</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if version_compare.delta_mo >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_mo|floatformat:2 }}</div>
+      <div class="kpi-label">Delta MO</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if version_compare.delta_indirecto >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_indirecto|floatformat:2 }}</div>
+      <div class="kpi-label">Delta Indirectos</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if version_compare.delta_total >= 0 %}is-danger{% else %}is-success{% endif %}">${{ version_compare.delta_total|floatformat:2 }}</div>
+      <div class="kpi-label">
+        Delta Total
+        {% if version_compare.delta_pct_total != None %}
+          ({{ version_compare.delta_pct_total|floatformat:2 }}%)
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
   <div class="table-responsive">
     <table class="table align-middle">
       <thead>
@@ -142,7 +194,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for v in versiones_recientes %}
+        {% for v in versiones_all %}
         <tr>
           <td><strong>v{{ v.version_num }}</strong></td>
           <td>{{ v.creado_en|date:"Y-m-d H:i" }}</td>

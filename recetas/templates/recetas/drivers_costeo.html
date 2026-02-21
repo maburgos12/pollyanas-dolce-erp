@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Drivers de Costeo{% endblock %}
+{% block page_title %}Recetas · Drivers de Costeo{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">Drivers de Costeo (Fase 2)</div>
+  <p class="muted mb-3">
+    Configura mano de obra e indirectos por alcance (producto, familia, lote o global).
+  </p>
+  <div class="toolbar">
+    <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo_plantilla' %}?format=xlsx">Descargar plantilla XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo_plantilla' %}?format=csv">Descargar plantilla CSV</a>
+  </div>
+</div>
+
+<div class="card">
+  <form class="recipes-filters" method="get">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Buscar por nombre, familia o receta...">
+    <select class="form-select" name="scope">
+      <option value="" {% if not scope %}selected{% endif %}>Todos los scopes</option>
+      {% for s in scope_choices %}
+      <option value="{{ s }}" {% if scope == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Filtrar</button>
+    <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Limpiar</a>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header">Carga Masiva Drivers (CSV/XLSX)</div>
+  <form class="form-grid-auto" method="post" action="{% url 'recetas:drivers_costeo_importar' %}" enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="form-group">
+      <label class="form-label">Archivo</label>
+      <input class="form-control" type="file" name="archivo" accept=".csv,.xlsx,.xlsm" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Modo</label>
+      <select class="form-select" name="modo">
+        <option value="upsert" selected>Upsert (crear/actualizar)</option>
+        <option value="replace">Reemplazar todos</option>
+      </select>
+    </div>
+    <div class="form-group" style="align-self:end;">
+      <button class="btn btn-primary" type="submit">Importar drivers</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header">{% if edit_driver %}Editar Driver{% else %}Nuevo Driver{% endif %}</div>
+  <form class="form-grid-auto" method="post">
+    {% csrf_token %}
+    {% if edit_driver %}
+    <input type="hidden" name="driver_id" value="{{ edit_driver.id }}">
+    {% endif %}
+
+    <div class="form-group">
+      <label class="form-label">Scope</label>
+      <select class="form-select" name="scope">
+        {% for s in scope_choices %}
+        <option value="{{ s }}" {% if edit_driver and edit_driver.scope == s %}selected{% elif not edit_driver and s == "GLOBAL" %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nombre</label>
+      <input class="form-control" name="nombre" value="{{ edit_driver.nombre|default:'' }}" required maxlength="120">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Receta (solo scope PRODUCTO)</label>
+      <select class="form-select" name="receta_id">
+        <option value="">Sin receta</option>
+        {% for r in recetas %}
+        <option value="{{ r.id }}" {% if edit_driver and edit_driver.receta_id == r.id %}selected{% endif %}>{{ r.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Familia</label>
+      <input class="form-control" name="familia" value="{{ edit_driver.familia|default:'' }}" maxlength="120">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Lote desde</label>
+      <input class="form-control" type="number" step="0.001" min="0" name="lote_desde" value="{{ edit_driver.lote_desde|default:'' }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Lote hasta</label>
+      <input class="form-control" type="number" step="0.001" min="0" name="lote_hasta" value="{{ edit_driver.lote_hasta|default:'' }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">MO %</label>
+      <input class="form-control" type="number" step="0.000001" min="0" name="mo_pct" value="{{ edit_driver.mo_pct|default:'0' }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Indirecto %</label>
+      <input class="form-control" type="number" step="0.000001" min="0" name="indirecto_pct" value="{{ edit_driver.indirecto_pct|default:'0' }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">MO fijo</label>
+      <input class="form-control" type="number" step="0.000001" name="mo_fijo" value="{{ edit_driver.mo_fijo|default:'0' }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Indirecto fijo</label>
+      <input class="form-control" type="number" step="0.000001" name="indirecto_fijo" value="{{ edit_driver.indirecto_fijo|default:'0' }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Prioridad</label>
+      <input class="form-control" type="number" min="0" name="prioridad" value="{{ edit_driver.prioridad|default:'100' }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Activo</label>
+      <select class="form-select" name="activo">
+        <option value="1" {% if not edit_driver or edit_driver.activo %}selected{% endif %}>Sí</option>
+        <option value="0" {% if edit_driver and not edit_driver.activo %}selected{% endif %}>No</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <button class="btn btn-primary" type="submit">{% if edit_driver %}Actualizar driver{% else %}Guardar driver{% endif %}</button>
+      {% if edit_driver %}
+      <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Cancelar edición</a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+<div class="table-responsive card">
+  <table class="table align-middle">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Scope</th>
+        <th>Nombre</th>
+        <th>Objetivo</th>
+        <th class="text-end">MO %</th>
+        <th class="text-end">IND %</th>
+        <th class="text-end">MO fijo</th>
+        <th class="text-end">IND fijo</th>
+        <th class="text-end">Prioridad</th>
+        <th>Estatus</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in drivers %}
+      <tr>
+        <td>{{ d.id }}</td>
+        <td>{{ d.scope }}</td>
+        <td><strong>{{ d.nombre }}</strong></td>
+        <td>
+          {% if d.scope == "PRODUCTO" %}
+            {{ d.receta.nombre|default:"-" }}
+          {% elif d.scope == "FAMILIA" %}
+            {{ d.familia|default:"-" }}
+          {% elif d.scope == "LOTE" %}
+            {{ d.lote_desde|default:"0" }} - {{ d.lote_hasta|default:"*" }}
+          {% else %}
+            Global
+          {% endif %}
+        </td>
+        <td class="text-end">{{ d.mo_pct|floatformat:2 }}</td>
+        <td class="text-end">{{ d.indirecto_pct|floatformat:2 }}</td>
+        <td class="text-end">{{ d.mo_fijo|floatformat:2 }}</td>
+        <td class="text-end">{{ d.indirecto_fijo|floatformat:2 }}</td>
+        <td class="text-end">{{ d.prioridad }}</td>
+        <td>{% if d.activo %}<span class="badge badge-verde">Activo</span>{% else %}<span class="badge badge-rojo">Inactivo</span>{% endif %}</td>
+        <td>
+          <div class="recipe-actions recipe-actions-compact">
+            <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}?edit={{ d.id }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if scope %}&scope={{ scope|urlencode }}{% endif %}">Editar</a>
+            <form method="post" action="{% url 'recetas:drivers_costeo_delete' d.id %}" onsubmit="return confirm('¿Eliminar driver?');">
+              {% csrf_token %}
+              <button class="btn btn-danger" type="submit">Eliminar</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="11" class="text-muted">Sin drivers configurados.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

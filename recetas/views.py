@@ -25,6 +25,8 @@ from .models import (
     Receta,
     LineaReceta,
     RecetaPresentacion,
+    RecetaCostoVersion,
+    CostoDriver,
     PlanProduccion,
     PlanProduccionItem,
     PronosticoVenta,
@@ -80,8 +82,34 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     lineas = list(receta.lineas.select_related("insumo").order_by("posicion"))
     presentaciones = receta.presentaciones.all().order_by("nombre")
     costeo_actual = calcular_costeo_receta(receta)
-    versiones_recientes = list(receta.versiones_costo.order_by("-version_num")[:8])
+    versiones_all = list(receta.versiones_costo.order_by("-version_num")[:80])
+    versiones_recientes = versiones_all[:8]
     comparativo = comparativo_versiones(versiones_recientes)
+
+    selected_base = None
+    selected_target = None
+    compare_data = None
+    base_raw = (request.GET.get("base") or "").strip()
+    target_raw = (request.GET.get("target") or "").strip()
+    try:
+        if base_raw and target_raw:
+            base_num = int(base_raw)
+            target_num = int(target_raw)
+            by_num = {v.version_num: v for v in versiones_all}
+            if base_num in by_num and target_num in by_num and base_num != target_num:
+                selected_base = by_num[base_num]
+                selected_target = by_num[target_num]
+    except Exception:
+        selected_base = None
+        selected_target = None
+
+    if not selected_base and not selected_target and len(versiones_all) >= 2:
+        selected_target = versiones_all[0]
+        selected_base = versiones_all[1]
+
+    if selected_base and selected_target:
+        compare_data = _compare_versions(selected_base, selected_target)
+
     total_lineas = len(lineas)
     total_match = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_AUTO)
     total_revision = sum(1 for l in lineas if l.match_status == LineaReceta.STATUS_NEEDS_REVIEW)
@@ -105,7 +133,11 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "linea_tipo_choices": LineaReceta.TIPO_CHOICES,
             "costeo_actual": costeo_actual,
             "versiones_recientes": versiones_recientes,
+            "versiones_all": versiones_all,
             "versiones_comparativo": comparativo,
+            "selected_base": selected_base,
+            "selected_target": selected_target,
+            "version_compare": compare_data,
         },
     )
 
@@ -258,6 +290,129 @@ def _sync_cost_version_safe(request: HttpRequest, receta: Receta, fuente: str) -
             request,
             "Se guardaron cambios, pero falló el versionado automático de costos.",
         )
+
+
+def _compare_versions(base: RecetaCostoVersion, target: RecetaCostoVersion) -> dict[str, Decimal]:
+    delta_mp = Decimal(str(target.costo_mp or 0)) - Decimal(str(base.costo_mp or 0))
+    delta_mo = Decimal(str(target.costo_mo or 0)) - Decimal(str(base.costo_mo or 0))
+    delta_ind = Decimal(str(target.costo_indirecto or 0)) - Decimal(str(base.costo_indirecto or 0))
+    delta_total = Decimal(str(target.costo_total or 0)) - Decimal(str(base.costo_total or 0))
+
+    base_total = Decimal(str(base.costo_total or 0))
+    delta_pct_total = None
+    if base_total > 0:
+        delta_pct_total = (delta_total * Decimal("100")) / base_total
+
+    base_unidad = Decimal(str(base.costo_por_unidad_rendimiento or 0))
+    target_unidad = Decimal(str(target.costo_por_unidad_rendimiento or 0))
+    delta_unidad = target_unidad - base_unidad
+    delta_pct_unidad = None
+    if base_unidad > 0:
+        delta_pct_unidad = (delta_unidad * Decimal("100")) / base_unidad
+
+    return {
+        "delta_mp": delta_mp,
+        "delta_mo": delta_mo,
+        "delta_indirecto": delta_ind,
+        "delta_total": delta_total,
+        "delta_pct_total": delta_pct_total,
+        "delta_unidad": delta_unidad,
+        "delta_pct_unidad": delta_pct_unidad,
+    }
+
+
+def _map_driver_header(header: str) -> str:
+    key = normalizar_nombre(header).replace("_", " ")
+    if key in {"scope", "alcance", "tipo"}:
+        return "scope"
+    if key in {"nombre", "driver", "driver nombre"}:
+        return "nombre"
+    if key in {"receta", "producto", "nombre receta"}:
+        return "receta"
+    if key in {"codigo point", "codigo", "sku"}:
+        return "codigo_point"
+    if key in {"familia", "sheet", "categoria"}:
+        return "familia"
+    if key in {"lote desde", "lote min", "desde"}:
+        return "lote_desde"
+    if key in {"lote hasta", "lote max", "hasta"}:
+        return "lote_hasta"
+    if key in {"mo pct", "mo%", "mano obra pct", "mano de obra pct"}:
+        return "mo_pct"
+    if key in {"ind pct", "indirecto pct", "indirectos pct", "indirecto%"}:
+        return "indirecto_pct"
+    if key in {"mo fijo", "mano obra fijo", "mano de obra fijo"}:
+        return "mo_fijo"
+    if key in {"ind fijo", "indirecto fijo", "indirectos fijo"}:
+        return "indirecto_fijo"
+    if key in {"prioridad", "priority"}:
+        return "prioridad"
+    if key in {"activo", "enabled"}:
+        return "activo"
+    return key
+
+
+def _normalize_driver_scope(raw: str | None) -> str:
+    key = normalizar_nombre(raw or "")
+    if key in {"producto", "product"}:
+        return CostoDriver.SCOPE_PRODUCTO
+    if key in {"familia", "family"}:
+        return CostoDriver.SCOPE_FAMILIA
+    if key in {"lote", "batch"}:
+        return CostoDriver.SCOPE_LOTE
+    return CostoDriver.SCOPE_GLOBAL
+
+
+def _to_int_safe(value: object, default: int = 0) -> int:
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return default
+
+
+def _to_bool_safe(value: object, default: bool = True) -> bool:
+    if value is None:
+        return default
+    key = normalizar_nombre(str(value))
+    if key in {"1", "true", "si", "yes", "on", "activo"}:
+        return True
+    if key in {"0", "false", "no", "off", "inactivo"}:
+        return False
+    return default
+
+
+def _load_driver_rows(uploaded) -> list[dict]:
+    filename = (uploaded.name or "").lower()
+    rows: list[dict] = []
+    if filename.endswith(".csv"):
+        uploaded.seek(0)
+        content = uploaded.read().decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            parsed = {}
+            for key, value in (row or {}).items():
+                if not key:
+                    continue
+                parsed[_map_driver_header(str(key))] = value
+            rows.append(parsed)
+        return rows
+    if filename.endswith(".xlsx") or filename.endswith(".xlsm"):
+        uploaded.seek(0)
+        wb = load_workbook(uploaded, read_only=True, data_only=True)
+        ws = wb.active
+        values = list(ws.values)
+        if not values:
+            return []
+        headers = [_map_driver_header(str(h or "")) for h in values[0]]
+        for raw in values[1:]:
+            parsed = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                parsed[header] = raw[idx] if idx < len(raw) else None
+            rows.append(parsed)
+        return rows
+    raise ValueError("Formato no soportado. Usa CSV o XLSX.")
 
 
 @permission_required("recetas.change_lineareceta", raise_exception=True)
@@ -462,6 +617,331 @@ def presentacion_delete(request: HttpRequest, pk: int, presentacion_id: int) -> 
     _sync_cost_version_safe(request, receta, "PRESENTACION_DELETE")
     messages.success(request, "Presentación eliminada.")
     return redirect("recetas:receta_detail", pk=pk)
+
+
+@permission_required("recetas.view_receta", raise_exception=True)
+def receta_versiones_export(request: HttpRequest, pk: int) -> HttpResponse:
+    receta = get_object_or_404(Receta, pk=pk)
+    export_format = (request.GET.get("format") or "csv").strip().lower()
+    versiones = list(receta.versiones_costo.order_by("-version_num")[:300])
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "versiones_costeo"
+        ws.append(
+            [
+                "version",
+                "fecha",
+                "fuente",
+                "driver_scope",
+                "driver_nombre",
+                "costo_mp",
+                "costo_mo",
+                "costo_indirecto",
+                "costo_total",
+                "rendimiento",
+                "unidad_rendimiento",
+                "costo_por_unidad_rendimiento",
+            ]
+        )
+        for v in versiones:
+            ws.append(
+                [
+                    v.version_num,
+                    timezone.localtime(v.creado_en).strftime("%Y-%m-%d %H:%M"),
+                    v.fuente,
+                    v.driver_scope,
+                    v.driver_nombre,
+                    float(v.costo_mp or 0),
+                    float(v.costo_mo or 0),
+                    float(v.costo_indirecto or 0),
+                    float(v.costo_total or 0),
+                    float(v.rendimiento_cantidad or 0),
+                    v.rendimiento_unidad,
+                    float(v.costo_por_unidad_rendimiento or 0),
+                ]
+            )
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        resp = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        resp["Content-Disposition"] = f'attachment; filename="receta_{receta.id}_versiones_costeo.xlsx"'
+        return resp
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="receta_{receta.id}_versiones_costeo.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "version",
+            "fecha",
+            "fuente",
+            "driver_scope",
+            "driver_nombre",
+            "costo_mp",
+            "costo_mo",
+            "costo_indirecto",
+            "costo_total",
+            "rendimiento",
+            "unidad_rendimiento",
+            "costo_por_unidad_rendimiento",
+        ]
+    )
+    for v in versiones:
+        writer.writerow(
+            [
+                v.version_num,
+                timezone.localtime(v.creado_en).strftime("%Y-%m-%d %H:%M"),
+                v.fuente,
+                v.driver_scope,
+                v.driver_nombre,
+                v.costo_mp,
+                v.costo_mo,
+                v.costo_indirecto,
+                v.costo_total,
+                v.rendimiento_cantidad,
+                v.rendimiento_unidad,
+                v.costo_por_unidad_rendimiento,
+            ]
+        )
+    return response
+
+
+@permission_required("recetas.change_receta", raise_exception=True)
+def drivers_costeo(request: HttpRequest) -> HttpResponse:
+    q = (request.GET.get("q") or "").strip()
+    scope = (request.GET.get("scope") or "").strip().upper()
+    edit_raw = (request.GET.get("edit") or "").strip()
+    edit_driver = None
+
+    qs = CostoDriver.objects.select_related("receta").order_by("scope", "prioridad", "id")
+    if q:
+        qs = qs.filter(
+            Q(nombre__icontains=q)
+            | Q(familia__icontains=q)
+            | Q(receta__nombre__icontains=q)
+        )
+    if scope in {CostoDriver.SCOPE_PRODUCTO, CostoDriver.SCOPE_FAMILIA, CostoDriver.SCOPE_LOTE, CostoDriver.SCOPE_GLOBAL}:
+        qs = qs.filter(scope=scope)
+    if edit_raw:
+        try:
+            edit_driver = CostoDriver.objects.select_related("receta").filter(pk=int(edit_raw)).first()
+        except Exception:
+            edit_driver = None
+
+    if request.method == "POST":
+        driver_id = (request.POST.get("driver_id") or "").strip()
+        nombre = (request.POST.get("nombre") or "").strip()
+        driver_scope = _normalize_driver_scope(request.POST.get("scope"))
+        receta_id = (request.POST.get("receta_id") or "").strip()
+        familia = (request.POST.get("familia") or "").strip()
+        lote_desde = _to_decimal_or_none(request.POST.get("lote_desde"))
+        lote_hasta = _to_decimal_or_none(request.POST.get("lote_hasta"))
+        mo_pct = _to_decimal_safe(request.POST.get("mo_pct"))
+        indirecto_pct = _to_decimal_safe(request.POST.get("indirecto_pct"))
+        mo_fijo = _to_decimal_safe(request.POST.get("mo_fijo"))
+        indirecto_fijo = _to_decimal_safe(request.POST.get("indirecto_fijo"))
+        prioridad = _to_int_safe(request.POST.get("prioridad"), 100)
+        activo = _to_bool_safe(request.POST.get("activo"), True)
+
+        if not nombre:
+            messages.error(request, "Nombre del driver es obligatorio.")
+            return redirect("recetas:drivers_costeo")
+
+        receta = Receta.objects.filter(pk=receta_id).first() if receta_id else None
+        if driver_scope == CostoDriver.SCOPE_PRODUCTO and not receta:
+            messages.error(request, "Para scope PRODUCTO debes seleccionar una receta.")
+            return redirect("recetas:drivers_costeo")
+
+        if driver_id:
+            driver = CostoDriver.objects.filter(pk=driver_id).first()
+            if not driver:
+                messages.error(request, "Driver no encontrado para editar.")
+                return redirect("recetas:drivers_costeo")
+        else:
+            driver = CostoDriver()
+
+        driver.nombre = nombre[:120]
+        driver.scope = driver_scope
+        driver.receta = receta
+        driver.familia = familia[:120]
+        driver.lote_desde = lote_desde
+        driver.lote_hasta = lote_hasta
+        driver.mo_pct = mo_pct
+        driver.indirecto_pct = indirecto_pct
+        driver.mo_fijo = mo_fijo
+        driver.indirecto_fijo = indirecto_fijo
+        driver.prioridad = max(prioridad, 0)
+        driver.activo = activo
+        driver.save()
+        messages.success(request, "Driver guardado.")
+        return redirect("recetas:drivers_costeo")
+
+    return render(
+        request,
+        "recetas/drivers_costeo.html",
+        {
+            "drivers": qs[:400],
+            "recetas": Receta.objects.order_by("nombre"),
+            "q": q,
+            "scope": scope,
+            "edit_driver": edit_driver,
+            "scope_choices": [
+                CostoDriver.SCOPE_PRODUCTO,
+                CostoDriver.SCOPE_FAMILIA,
+                CostoDriver.SCOPE_LOTE,
+                CostoDriver.SCOPE_GLOBAL,
+            ],
+        },
+    )
+
+
+@permission_required("recetas.change_receta", raise_exception=True)
+@require_POST
+def drivers_costeo_delete(request: HttpRequest, driver_id: int) -> HttpResponse:
+    driver = get_object_or_404(CostoDriver, pk=driver_id)
+    driver.delete()
+    messages.success(request, "Driver eliminado.")
+    return redirect("recetas:drivers_costeo")
+
+
+@permission_required("recetas.change_receta", raise_exception=True)
+def drivers_costeo_plantilla(request: HttpRequest) -> HttpResponse:
+    export_format = (request.GET.get("format") or "xlsx").strip().lower()
+    headers = [
+        "scope",
+        "nombre",
+        "receta",
+        "codigo_point",
+        "familia",
+        "lote_desde",
+        "lote_hasta",
+        "mo_pct",
+        "indirecto_pct",
+        "mo_fijo",
+        "indirecto_fijo",
+        "prioridad",
+        "activo",
+    ]
+    rows = [
+        ["PRODUCTO", "Driver Pastel Fresas", "Pastel Fresas Con Crema - Chico", "PFC-CHICO", "", "", "", "8", "4", "0", "0", "10", "1"],
+        ["FAMILIA", "Driver Insumos 1", "", "", "Insumos 1", "", "", "6", "3", "0", "0", "30", "1"],
+        ["GLOBAL", "Driver Global Base", "", "", "", "", "", "5", "2", "0", "0", "100", "1"],
+    ]
+
+    if export_format == "csv":
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="plantilla_drivers_costeo.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(rows)
+        return response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "drivers_costeo"
+    ws.append(headers)
+    for row in rows:
+        ws.append(row)
+    for col in ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"):
+        ws.column_dimensions[col].width = 24
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="plantilla_drivers_costeo.xlsx"'
+    return response
+
+
+@permission_required("recetas.change_receta", raise_exception=True)
+@require_POST
+def drivers_costeo_importar(request: HttpRequest) -> HttpResponse:
+    uploaded = request.FILES.get("archivo")
+    modo = (request.POST.get("modo") or "upsert").strip().lower()
+    if modo not in {"upsert", "replace"}:
+        modo = "upsert"
+
+    if not uploaded:
+        messages.error(request, "Selecciona un archivo para importar drivers.")
+        return redirect("recetas:drivers_costeo")
+
+    try:
+        rows = _load_driver_rows(uploaded)
+    except Exception as exc:
+        messages.error(request, f"No se pudo leer archivo de drivers: {exc}")
+        return redirect("recetas:drivers_costeo")
+
+    if not rows:
+        messages.warning(request, "Archivo de drivers sin filas.")
+        return redirect("recetas:drivers_costeo")
+
+    created = 0
+    updated = 0
+    skipped = 0
+
+    if modo == "replace":
+        CostoDriver.objects.all().delete()
+
+    for row in rows:
+        scope = _normalize_driver_scope(row.get("scope"))
+        nombre = str(row.get("nombre") or "").strip()
+        if not nombre:
+            skipped += 1
+            continue
+
+        receta = None
+        receta_name = str(row.get("receta") or "").strip()
+        codigo_point = str(row.get("codigo_point") or "").strip()
+        if codigo_point:
+            receta = Receta.objects.filter(codigo_point__iexact=codigo_point).order_by("id").first()
+        if receta is None and receta_name:
+            receta = Receta.objects.filter(nombre_normalizado=normalizar_nombre(receta_name)).order_by("id").first()
+
+        if scope == CostoDriver.SCOPE_PRODUCTO and not receta:
+            skipped += 1
+            continue
+
+        familia = str(row.get("familia") or "").strip()
+        lote_desde = _to_decimal_or_none(str(row.get("lote_desde") or "").strip())
+        lote_hasta = _to_decimal_or_none(str(row.get("lote_hasta") or "").strip())
+
+        filter_kwargs = {
+            "scope": scope,
+            "nombre": nombre[:120],
+            "receta": receta,
+            "familia_normalizada": normalizar_nombre(familia),
+            "lote_desde": lote_desde,
+            "lote_hasta": lote_hasta,
+        }
+        driver = CostoDriver.objects.filter(**filter_kwargs).first()
+        if not driver:
+            driver = CostoDriver(**filter_kwargs)
+            created += 1
+        else:
+            updated += 1
+
+        driver.familia = familia[:120]
+        driver.mo_pct = _to_decimal_safe(row.get("mo_pct"))
+        driver.indirecto_pct = _to_decimal_safe(row.get("indirecto_pct"))
+        driver.mo_fijo = _to_decimal_safe(row.get("mo_fijo"))
+        driver.indirecto_fijo = _to_decimal_safe(row.get("indirecto_fijo"))
+        driver.prioridad = max(_to_int_safe(row.get("prioridad"), 100), 0)
+        driver.activo = _to_bool_safe(row.get("activo"), True)
+        driver.save()
+
+    messages.success(
+        request,
+        f"Importación drivers completada. Creados: {created}. Actualizados: {updated}. Omitidos: {skipped}.",
+    )
+    return redirect("recetas:drivers_costeo")
+
 
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def matching_pendientes(request: HttpRequest) -> HttpResponse:

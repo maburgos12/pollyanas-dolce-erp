@@ -98,6 +98,38 @@ class RecetaCostoHistoricoView(APIView):
                 "delta_total": str(comparativo["delta_total"]),
                 "delta_pct": str(comparativo["delta_pct"]),
             }
+
+        base_raw = (request.GET.get("base") or "").strip()
+        target_raw = (request.GET.get("target") or "").strip()
+        if base_raw and target_raw:
+            try:
+                base_num = int(base_raw)
+                target_num = int(target_raw)
+            except ValueError:
+                base_num = None
+                target_num = None
+
+            if base_num is not None and target_num is not None and base_num != target_num:
+                by_version = {v.version_num: v for v in versiones}
+                base_v = by_version.get(base_num)
+                target_v = by_version.get(target_num)
+                if base_v and target_v:
+                    base_total = Decimal(str(base_v.costo_total or 0))
+                    target_total = Decimal(str(target_v.costo_total or 0))
+                    delta_total = target_total - base_total
+                    delta_pct = None
+                    if base_total > 0:
+                        delta_pct = (delta_total * Decimal("100")) / base_total
+
+                    data["comparativo_seleccionado"] = {
+                        "base": base_v.version_num,
+                        "target": target_v.version_num,
+                        "delta_mp": str(Decimal(str(target_v.costo_mp or 0)) - Decimal(str(base_v.costo_mp or 0))),
+                        "delta_mo": str(Decimal(str(target_v.costo_mo or 0)) - Decimal(str(base_v.costo_mo or 0))),
+                        "delta_indirecto": str(Decimal(str(target_v.costo_indirecto or 0)) - Decimal(str(base_v.costo_indirecto or 0))),
+                        "delta_total": str(delta_total),
+                        "delta_pct_total": str(delta_pct) if delta_pct is not None else None,
+                    }
         return Response(data, status=status.HTTP_200_OK)
 
 

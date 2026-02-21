@@ -74,6 +74,21 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("comparativo", payload)
         self.assertIn("delta_total", payload["comparativo"])
 
+    def test_endpoint_costo_historico_comparativo_seleccionado(self):
+        self.linea.costo_unitario_snapshot = Decimal("4")
+        self.linea.save(update_fields=["costo_unitario_snapshot"])
+        asegurar_version_costeo(self.receta, fuente="TEST_API")
+
+        url = reverse("api_receta_costo_historico", args=[self.receta.id])
+        resp = self.client.get(url, {"base": 1, "target": 2})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("comparativo_seleccionado", payload)
+        selected = payload["comparativo_seleccionado"]
+        self.assertEqual(selected["base"], 1)
+        self.assertEqual(selected["target"], 2)
+        self.assertIn("delta_total", selected)
+
     def test_endpoint_mrp_calcular_requerimientos_por_plan(self):
         plan = PlanProduccion.objects.create(nombre="Plan API", fecha_produccion=date(2026, 2, 21))
         PlanProduccionItem.objects.create(plan=plan, receta=self.receta, cantidad=Decimal("3"))
