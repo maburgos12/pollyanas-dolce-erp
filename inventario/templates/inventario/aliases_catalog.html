@@ -111,7 +111,20 @@
           <td class="text-end">{{ row.score_max|floatformat:1 }}</td>
           {% if can_manage_inventario %}
           <td>
-            <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ row.nombre_muestra|escape }}">Usar en alta</button>
+            <div class="recipe-actions">
+              <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ row.nombre_muestra|escape }}">Usar en alta</button>
+              {% if row.suggestion %}
+              <form method="post" class="inline-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="apply_suggestion">
+                <input type="hidden" name="next_q" value="{{ q }}">
+                <input type="hidden" name="alias_name" value="{{ row.nombre_muestra }}">
+                <input type="hidden" name="suggestion" value="{{ row.suggestion }}">
+                <input type="hidden" name="score_min" value="90">
+                <button class="btn btn-primary" type="submit">Aplicar sugerencia</button>
+              </form>
+              {% endif %}
+            </div>
           </td>
           {% endif %}
         </tr>
@@ -417,7 +430,20 @@
           <td class="text-end">{{ p.score_max|floatformat:1 }}</td>
           {% if can_manage_inventario %}
           <td>
-            <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ p.nombre_origen|escape }}">Usar en alta</button>
+            <div class="recipe-actions">
+              <button type="button" class="btn btn-secondary copy-pending-name" data-name="{{ p.nombre_origen|escape }}">Usar en alta</button>
+              {% if p.sugerencia %}
+              <form method="post" class="inline-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="apply_suggestion">
+                <input type="hidden" name="next_q" value="{{ q }}">
+                <input type="hidden" name="alias_name" value="{{ p.nombre_origen }}">
+                <input type="hidden" name="suggestion" value="{{ p.sugerencia }}">
+                <input type="hidden" name="score_min" value="90">
+                <button class="btn btn-primary" type="submit">Aplicar sugerencia</button>
+              </form>
+              {% endif %}
+            </div>
           </td>
           {% endif %}
         </tr>

@@ -272,3 +272,40 @@ class InventarioAliasesPendingTests(TestCase):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             response_xlsx["Content-Type"],
         )
+
+    def test_apply_suggestion_creates_alias_and_cleans_pending(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo = Insumo.objects.create(nombre="Mantequilla", unidad_base=unidad)
+        run = AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=timezone.now(),
+            matched=12,
+            unmatched=1,
+            pending_preview=[
+                {
+                    "source": "inventario",
+                    "row": 3,
+                    "nombre_origen": "Mantequilla barra",
+                    "nombre_normalizado": "mantequilla barra",
+                    "sugerencia": "Mantequilla",
+                    "score": 95.0,
+                }
+            ],
+        )
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "apply_suggestion",
+                "alias_name": "Mantequilla barra",
+                "suggestion": "Mantequilla",
+                "score_min": "90",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            InsumoAlias.objects.filter(nombre_normalizado="mantequilla barra", insumo=insumo).exists()
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.pending_preview, [])

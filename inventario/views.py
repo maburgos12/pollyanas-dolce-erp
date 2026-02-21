@@ -692,6 +692,41 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                     else:
                         messages.error(request, "El nombre origen no es válido.")
 
+        elif action == "apply_suggestion":
+            alias_name = (request.POST.get("alias_name") or "").strip()
+            suggestion = (request.POST.get("suggestion") or "").strip()
+            min_score = float(_to_decimal(request.POST.get("score_min"), "90"))
+            min_score = max(0.0, min(100.0, min_score))
+            if not alias_name or not suggestion:
+                messages.error(request, "Faltan datos para aplicar sugerencia.")
+            else:
+                insumo = (
+                    Insumo.objects.filter(activo=True, nombre_normalizado=normalizar_nombre(suggestion))
+                    .only("id", "nombre")
+                    .first()
+                )
+                if not insumo:
+                    candidate, candidate_score, _ = match_insumo(suggestion)
+                    if candidate and float(candidate_score or 0.0) >= min_score:
+                        insumo = candidate
+                if not insumo:
+                    messages.error(request, f"No se pudo resolver '{suggestion}' como insumo activo.")
+                else:
+                    ok, alias_norm, action_label = _upsert_alias(alias_name, insumo)
+                    if ok:
+                        _remove_pending_name_from_session(request, alias_norm)
+                        _remove_pending_name_from_recent_runs(alias_norm)
+                        point_resolved, recetas_resolved = _resolve_cross_source_with_alias(alias_name, insumo)
+                        messages.success(
+                            request,
+                            (
+                                f"Sugerencia aplicada ({action_label}): '{alias_name}' -> {insumo.nombre}. "
+                                f"Point resueltos: {point_resolved}. Recetas resueltas: {recetas_resolved}."
+                            ),
+                        )
+                    else:
+                        messages.error(request, "No se pudo aplicar la sugerencia por normalización inválida.")
+
         elif action == "import_bulk":
             archivo = request.FILES.get("archivo_aliases")
             min_score = float(_to_decimal(request.POST.get("score_min"), "90"))
