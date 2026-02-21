@@ -259,3 +259,16 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(len(preview), 1)
         self.assertEqual(preview[0]["alias"], "Fresa natural premium")
         self.assertEqual(stats["unresolved"], 1)
+
+    def test_alias_template_export_csv_and_xlsx(self):
+        response_csv = self.client.get(reverse("inventario:aliases_catalog"), {"export": "alias_template_csv"})
+        self.assertEqual(response_csv.status_code, 200)
+        self.assertIn("text/csv", response_csv["Content-Type"])
+        self.assertIn("alias,insumo", response_csv.content.decode("utf-8"))
+
+        response_xlsx = self.client.get(reverse("inventario:aliases_catalog"), {"export": "alias_template_xlsx"})
+        self.assertEqual(response_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response_xlsx["Content-Type"],
+        )

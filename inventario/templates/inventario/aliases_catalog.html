@@ -156,6 +156,10 @@
 <section class="card">
   <div class="card-header">Carga Masiva de Aliases (CSV/XLSX)</div>
   <p class="muted">Columnas sugeridas: <code>alias</code>, <code>insumo</code>. Si no mandas <code>insumo</code>, se intentará resolver por el alias con score mínimo.</p>
+  <div class="toolbar" style="margin-top:8px; margin-bottom:8px;">
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_template_csv">Descargar plantilla CSV</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_template_xlsx">Descargar plantilla XLSX</a>
+  </div>
   <form method="post" enctype="multipart/form-data" class="form-grid-auto">
     {% csrf_token %}
     <input type="hidden" name="action" value="import_bulk">

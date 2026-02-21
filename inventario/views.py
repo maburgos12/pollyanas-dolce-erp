@@ -4,7 +4,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlencode
@@ -20,7 +20,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
@@ -296,6 +296,42 @@ def _export_cross_pending_csv(cross_unified_rows: list[dict]) -> HttpResponse:
                 row.get("score_max", 0.0),
             ]
         )
+    return response
+
+
+def _export_alias_template(export_format: str) -> HttpResponse:
+    headers = ["alias", "insumo"]
+    sample_rows = [
+        ["Harina pastelera 25kg", "Harina Pastelera"],
+        ["Mantequilla barra", "Mantequilla"],
+        ["Fresa fresca premium", "Fresa Fresca"],
+    ]
+
+    if export_format == "alias_template_csv":
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="plantilla_aliases_inventario.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(sample_rows)
+        return response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "aliases_import"
+    ws.append(headers)
+    for row in sample_rows:
+        ws.append(row)
+    ws.column_dimensions["A"].width = 36
+    ws.column_dimensions["B"].width = 36
+
+    bytes_buffer = BytesIO()
+    wb.save(bytes_buffer)
+    bytes_buffer.seek(0)
+    response = HttpResponse(
+        bytes_buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="plantilla_aliases_inventario.xlsx"'
     return response
 
 
@@ -1145,6 +1181,8 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     export_format = (request.GET.get("export") or "").strip().lower()
     if export_format == "cross_pending_csv":
         return _export_cross_pending_csv(unified_rows)
+    if export_format in {"alias_template_csv", "alias_template_xlsx"}:
+        return _export_alias_template(export_format)
 
     import_preview = list(request.session.get("inventario_alias_import_preview", []))[:200]
     import_stats = request.session.get("inventario_alias_import_stats", {})
