@@ -4,6 +4,7 @@ from . import views
 app_name = "maestros"
 
 urlpatterns = [
+    path('', views.InsumoListView.as_view(), name='home'),
     # Proveedores
     path('proveedores/', views.ProveedorListView.as_view(), name='proveedor_list'),
     path('proveedores/crear/', views.ProveedorCreateView.as_view(), name='proveedor_create'),
