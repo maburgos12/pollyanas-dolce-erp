@@ -16,7 +16,7 @@ from .matching import match_insumo, clasificar_match
 from .normalizacion import normalizar_nombre
 from .subsection_costing import find_parent_cost_for_stage
 from .costeo_versionado import asegurar_version_costeo
-from recetas.models import Receta, LineaReceta, RecetaPresentacion
+from recetas.models import Receta, LineaReceta, RecetaPresentacion, CostoDriver
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +28,11 @@ class ImportResultado:
     recetas_creadas: int = 0
     recetas_actualizadas: int = 0
     lineas_creadas: int = 0
+    drivers_hojas_detectadas: int = 0
+    drivers_creados: int = 0
+    drivers_actualizados: int = 0
+    drivers_omitidos: int = 0
+    versiones_costeo_creadas: int = 0
     errores: List[Dict[str, Any]] = field(default_factory=list)
     matches_pendientes: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -56,6 +61,22 @@ def _to_date(x) -> Optional[date]:
         return x.date()
     try:
         return datetime.fromisoformat(str(x)).date()
+    except Exception:
+        return None
+
+
+def _to_decimal_or_none(x) -> Optional[Decimal]:
+    if x is None:
+        return None
+    try:
+        if isinstance(x, Decimal):
+            return x
+        if isinstance(x, (int, float)):
+            return Decimal(str(x))
+        s = str(x).strip().replace(",", ".")
+        if s == "":
+            return None
+        return Decimal(s)
     except Exception:
         return None
 
@@ -99,6 +120,59 @@ def _map_columns(header_row: List[Any]) -> Dict[str, int]:
         elif "precio" in h:
             mapping["precio"] = idx
     return mapping
+
+
+def _map_driver_header(val: Any) -> str:
+    key = normalizar_nombre(val)
+    if key in {"scope", "alcance", "tipo"}:
+        return "scope"
+    if key in {"nombre", "driver", "drivernombre", "driver nombre"}:
+        return "nombre"
+    if key in {"receta", "producto", "nombrereceta", "nombre receta"}:
+        return "receta"
+    if key in {"codigopoint", "codigo", "sku"}:
+        return "codigo_point"
+    if key in {"familia", "sheet", "categoria"}:
+        return "familia"
+    if key in {"lotedesde", "lotemin", "desde"}:
+        return "lote_desde"
+    if key in {"lotehasta", "lotemax", "hasta"}:
+        return "lote_hasta"
+    if key in {"mopct", "mo%", "manodeobrapct", "mano de obra pct"}:
+        return "mo_pct"
+    if key in {"indpct", "indirectopct", "indirectospct", "indirecto%"}:
+        return "indirecto_pct"
+    if key in {"mofijo", "manodeobrafijo", "mano de obra fijo"}:
+        return "mo_fijo"
+    if key in {"indfijo", "indirectofijo", "indirectosfijo"}:
+        return "indirecto_fijo"
+    if key in {"prioridad", "priority"}:
+        return "prioridad"
+    if key in {"activo", "enabled"}:
+        return "activo"
+    return key
+
+
+def _normalize_driver_scope(raw: Any) -> str:
+    key = normalizar_nombre(raw)
+    if key in {"producto", "product"}:
+        return CostoDriver.SCOPE_PRODUCTO
+    if key in {"familia", "family"}:
+        return CostoDriver.SCOPE_FAMILIA
+    if key in {"lote", "batch"}:
+        return CostoDriver.SCOPE_LOTE
+    return CostoDriver.SCOPE_GLOBAL
+
+
+def _to_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    key = normalizar_nombre(value)
+    if key in {"1", "true", "si", "yes", "on", "activo"}:
+        return True
+    if key in {"0", "false", "no", "off", "inactivo"}:
+        return False
+    return default
 
 def _get_unit(code: str) -> Optional[UnidadMedida]:
     if not code:
@@ -309,7 +383,118 @@ class ImportadorCosteo:
         seed_unidades_basicas()
         self.importar_catalogo_costos()
         self.importar_recetas()
+        self.importar_drivers_costeo()
+        self.recalcular_versiones_costeo()
         return self.resultado
+
+    def importar_drivers_costeo(self):
+        sheets_detected = 0
+        for sheet_name in self.wb.sheetnames:
+            ws = self.wb[sheet_name]
+            imported = self._importar_drivers_de_hoja(ws)
+            if imported:
+                sheets_detected += 1
+        self.resultado.drivers_hojas_detectadas = sheets_detected
+
+    def _importar_drivers_de_hoja(self, ws) -> bool:
+        values = list(ws.values)
+        if not values:
+            return False
+
+        recognized_keys = {
+            "scope",
+            "nombre",
+            "receta",
+            "codigo_point",
+            "familia",
+            "lote_desde",
+            "lote_hasta",
+            "mo_pct",
+            "indirecto_pct",
+            "mo_fijo",
+            "indirecto_fijo",
+            "prioridad",
+            "activo",
+        }
+        header_idx = None
+        headers: List[str] = []
+        for idx, row in enumerate(values[:40]):
+            mapped = [_map_driver_header(c) for c in row]
+            present = {x for x in mapped if x in recognized_keys}
+            has_required = {"scope", "nombre"}.issubset(present)
+            has_cost_part = bool({"mo_pct", "indirecto_pct", "mo_fijo", "indirecto_fijo"} & present)
+            if has_required and has_cost_part:
+                header_idx = idx
+                headers = mapped
+                break
+
+        if header_idx is None:
+            return False
+
+        for row in values[header_idx + 1 :]:
+            row_data: Dict[str, Any] = {}
+            for i, header in enumerate(headers):
+                if not header:
+                    continue
+                if i < len(row):
+                    row_data[header] = row[i]
+
+            nombre = str(row_data.get("nombre") or "").strip()
+            if not nombre:
+                continue
+
+            scope = _normalize_driver_scope(row_data.get("scope"))
+            receta = None
+            codigo_point = str(row_data.get("codigo_point") or "").strip()
+            receta_name = str(row_data.get("receta") or "").strip()
+            if codigo_point:
+                receta = Receta.objects.filter(codigo_point__iexact=codigo_point).order_by("id").first()
+            if receta is None and receta_name:
+                receta = Receta.objects.filter(nombre_normalizado=normalizar_nombre(receta_name)).order_by("id").first()
+
+            if scope == CostoDriver.SCOPE_PRODUCTO and receta is None:
+                self.resultado.drivers_omitidos += 1
+                continue
+
+            familia = str(row_data.get("familia") or "").strip()
+            lote_desde = _to_decimal_or_none(row_data.get("lote_desde"))
+            lote_hasta = _to_decimal_or_none(row_data.get("lote_hasta"))
+            filter_kwargs = {
+                "scope": scope,
+                "nombre": nombre[:120],
+                "receta": receta,
+                "familia_normalizada": normalizar_nombre(familia),
+                "lote_desde": lote_desde,
+                "lote_hasta": lote_hasta,
+            }
+            driver = CostoDriver.objects.filter(**filter_kwargs).first()
+            if not driver:
+                driver = CostoDriver(**filter_kwargs)
+                self.resultado.drivers_creados += 1
+            else:
+                self.resultado.drivers_actualizados += 1
+
+            driver.familia = familia[:120]
+            driver.mo_pct = _to_decimal_or_none(row_data.get("mo_pct")) or Decimal("0")
+            driver.indirecto_pct = _to_decimal_or_none(row_data.get("indirecto_pct")) or Decimal("0")
+            driver.mo_fijo = _to_decimal_or_none(row_data.get("mo_fijo")) or Decimal("0")
+            driver.indirecto_fijo = _to_decimal_or_none(row_data.get("indirecto_fijo")) or Decimal("0")
+            prioridad = _to_float(row_data.get("prioridad"))
+            driver.prioridad = max(int(prioridad if prioridad is not None else 100), 0)
+            driver.activo = _to_bool(row_data.get("activo"), True)
+            driver.save()
+        return True
+
+    def recalcular_versiones_costeo(self):
+        for receta in Receta.objects.all().order_by("id"):
+            try:
+                _, created = asegurar_version_costeo(receta, fuente="IMPORT_COSTEO_FINAL")
+                if created:
+                    self.resultado.versiones_costeo_creadas += 1
+            except Exception as exc:
+                self.resultado.errores.append(
+                    {"sheet": "VERSIONADO_COSTEO", "receta": receta.nombre, "error": str(exc)}
+                )
 
     def importar_catalogo_costos(self):
         if "Costo Materia Prima" not in self.wb.sheetnames:

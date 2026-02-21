@@ -1,10 +1,13 @@
 from datetime import date
 from decimal import Decimal
+import os
+import tempfile
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
+from openpyxl import Workbook
 
 from compras.models import OrdenCompra, SolicitudCompra
 from maestros.models import Insumo, Proveedor, UnidadMedida
@@ -18,6 +21,7 @@ from recetas.models import (
     RecetaCostoVersion,
 )
 from recetas.utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta
+from recetas.utils.importador import ImportadorCosteo
 
 
 class MatchingPendientesAutocompleteTests(TestCase):
@@ -390,3 +394,71 @@ class RecetaPhase2ViewsTests(TestCase):
         self.assertIn("text/csv", resp["Content-Type"])
         body = resp.content.decode("utf-8")
         self.assertIn("scope,nombre,receta", body)
+
+
+class ImportCosteoDriverExcelTests(TestCase):
+    def setUp(self):
+        self.tempfile = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        wb = Workbook()
+
+        ws_cost = wb.active
+        ws_cost.title = "Costo Materia Prima"
+        ws_cost.append(["Proveedor", "Producto", "Descripcion", "Cantidad", "Unidad", "Costo", "Fecha"])
+        ws_cost.append(["Proveedor Test", "Harina Driver", "", 1, "kg", 10, "2026-02-20"])
+
+        ws_receta = wb.create_sheet("Insumos 1")
+        ws_receta.append(["Batida Driver"])
+        ws_receta.append(["Ingrediente", "Cantidad", "Unidad", "Costo"])
+        ws_receta.append(["Harina Driver", 1, "kg", 10])
+
+        ws_drivers = wb.create_sheet("Drivers Costeo")
+        ws_drivers.append(
+            [
+                "scope",
+                "nombre",
+                "receta",
+                "mo_pct",
+                "indirecto_pct",
+                "mo_fijo",
+                "indirecto_fijo",
+                "prioridad",
+                "activo",
+            ]
+        )
+        ws_drivers.append(
+            [
+                "PRODUCTO",
+                "Driver Batida Import",
+                "Batida Driver",
+                10,
+                5,
+                0,
+                0,
+                10,
+                1,
+            ]
+        )
+
+        wb.save(self.tempfile.name)
+        wb.close()
+
+    def tearDown(self):
+        try:
+            os.unlink(self.tempfile.name)
+        except OSError:
+            pass
+
+    def test_import_costeo_detecta_drivers_y_versiona_costeo(self):
+        resultado = ImportadorCosteo(self.tempfile.name).procesar_completo()
+        self.assertEqual(resultado.drivers_hojas_detectadas, 1)
+        self.assertEqual(resultado.drivers_creados, 1)
+
+        receta = Receta.objects.get(nombre_normalizado="batida driver")
+        driver = CostoDriver.objects.get(nombre="Driver Batida Import")
+        self.assertEqual(driver.scope, CostoDriver.SCOPE_PRODUCTO)
+        self.assertEqual(driver.receta_id, receta.id)
+
+        latest = receta.versiones_costo.order_by("-version_num").first()
+        self.assertIsNotNone(latest)
+        self.assertGreater(latest.costo_mo, Decimal("0"))
+        self.assertGreater(latest.costo_indirecto, Decimal("0"))

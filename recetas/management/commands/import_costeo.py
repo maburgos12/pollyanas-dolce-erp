@@ -31,6 +31,11 @@ class Command(BaseCommand):
             "recetas_creadas": resultado.recetas_creadas,
             "recetas_actualizadas": resultado.recetas_actualizadas,
             "lineas_creadas": resultado.lineas_creadas,
+            "drivers_hojas_detectadas": resultado.drivers_hojas_detectadas,
+            "drivers_creados": resultado.drivers_creados,
+            "drivers_actualizados": resultado.drivers_actualizados,
+            "drivers_omitidos": resultado.drivers_omitidos,
+            "versiones_costeo_creadas": resultado.versiones_costeo_creadas,
             "errores": len(resultado.errores),
             "matches_pendientes": len(resultado.matches_pendientes),
         }
