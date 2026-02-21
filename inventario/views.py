@@ -1270,9 +1270,38 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         and normalizar_nombre(str(row.get("suggestion") or "")) in insumo_norm_set
     )
 
+    cross_q = (request.GET.get("cross_q") or "").strip()
+    cross_q_norm = normalizar_nombre(cross_q)
+    cross_only_suggested = (request.GET.get("cross_only_suggested") or "").strip().lower() in {"1", "true", "on", "yes"}
+    cross_min_sources = int(_to_decimal(request.GET.get("cross_min_sources"), "1"))
+    cross_min_sources = max(1, min(3, cross_min_sources))
+    cross_score_min = float(_to_decimal(request.GET.get("cross_score_min"), "0"))
+    cross_score_min = max(0.0, min(100.0, cross_score_min))
+
+    cross_filtered_rows = []
+    for row in unified_rows:
+        sources_active = int(row.get("sources_active") or 0)
+        score_max = float(row.get("score_max") or 0.0)
+        suggestion = str(row.get("suggestion") or "").strip()
+        nombre_muestra_norm = normalizar_nombre(str(row.get("nombre_muestra") or ""))
+        nombre_norm = str(row.get("nombre_normalizado") or "")
+        suggestion_norm = normalizar_nombre(suggestion)
+
+        if sources_active < cross_min_sources:
+            continue
+        if score_max < cross_score_min:
+            continue
+        if cross_only_suggested and not suggestion:
+            continue
+        if cross_q_norm and (cross_q_norm not in nombre_muestra_norm) and (cross_q_norm not in nombre_norm) and (
+            cross_q_norm not in suggestion_norm
+        ):
+            continue
+        cross_filtered_rows.append(row)
+
     export_format = (request.GET.get("export") or "").strip().lower()
     if export_format == "cross_pending_csv":
-        return _export_cross_pending_csv(unified_rows)
+        return _export_cross_pending_csv(cross_filtered_rows)
     if export_format in {"alias_template_csv", "alias_template_xlsx"}:
         return _export_alias_template(export_format)
     if export_format == "aliases_csv":
@@ -1309,13 +1338,19 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "auto_apply_candidates": auto_apply_candidates,
         "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:1200],
         "can_manage_inventario": can_manage_inventario(request.user),
+        "cross_q": cross_q,
+        "cross_min_sources": cross_min_sources,
+        "cross_score_min": cross_score_min,
+        "cross_only_suggested": cross_only_suggested,
+        "cross_filtered_count": len(cross_filtered_rows),
+        "cross_total_count": len(unified_rows),
         "cross_summary": {
             "point_unmatched": point_unmatched_count,
             "almacen_unmatched": len(pending_preview),
             "recetas_unmatched": receta_pending_lines,
             "overlaps": overlaps,
         },
-        "cross_unified_rows": unified_rows[:120],
+        "cross_unified_rows": cross_filtered_rows[:120],
         "alias_import_preview": import_preview,
         "alias_import_stats": import_stats,
     }

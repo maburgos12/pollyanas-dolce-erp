@@ -128,6 +128,60 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn("nombre_muestra", body)
         self.assertIn("Mantequilla Barra", body)
 
+    def test_export_cross_pending_csv_with_filters(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="P-200",
+            point_nombre="Mantequilla Barra",
+            fuzzy_score=95.0,
+            fuzzy_sugerencia="Mantequilla",
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="P-201",
+            point_nombre="Azucar Morena",
+            fuzzy_score=72.0,
+            fuzzy_sugerencia="Azucar",
+        )
+        receta = Receta.objects.create(nombre="Receta Test Filtros", hash_contenido="hash-export-002")
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Mantequilla Barra",
+            cantidad=1,
+            unidad=None,
+            unidad_texto="kg",
+            costo_unitario_snapshot=0,
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=2,
+            insumo=None,
+            insumo_texto="Azucar Morena",
+            cantidad=1,
+            unidad=None,
+            unidad_texto="kg",
+            costo_unitario_snapshot=0,
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+
+        response = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {
+                "export": "cross_pending_csv",
+                "cross_q": "mantequilla",
+                "cross_min_sources": "2",
+                "cross_score_min": "90",
+                "cross_only_suggested": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("Mantequilla Barra", body)
+        self.assertNotIn("Azucar Morena", body)
+
     def test_auto_apply_suggestions_creates_alias_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
         insumo = Insumo.objects.create(nombre="Harina Pastelera", unidad_base=unidad)
