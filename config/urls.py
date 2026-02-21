@@ -6,6 +6,12 @@ from core import views as core_views
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", core_views.health_check, name="health"),
+    path("favicon.ico", RedirectView.as_view(url="/static/favicon.ico", permanent=False)),
+    path("apple-touch-icon.png", RedirectView.as_view(url="/static/apple-touch-icon.png", permanent=False)),
+    path(
+        "apple-touch-icon-precomposed.png",
+        RedirectView.as_view(url="/static/apple-touch-icon-precomposed.png", permanent=False),
+    ),
     path("login/", core_views.login_view, name="login"),
     path("logout/", core_views.logout_view, name="logout"),
     path("auditoria/", core_views.audit_log_view, name="audit_log"),
