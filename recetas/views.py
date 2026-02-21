@@ -9,7 +9,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField
 from django.core.paginator import Paginator
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -435,10 +435,24 @@ def matching_pendientes(request: HttpRequest) -> HttpResponse:
         pendientes = pendientes.filter(insumo_texto__icontains=q)
     paginator = Paginator(pendientes, 25)
     page = paginator.get_page(request.GET.get("page"))
+    return render(request, "recetas/matching_pendientes.html", {"page": page, "q": q})
 
-    # Insumos para dropdown con búsqueda en cliente.
-    insumos = Insumo.objects.filter(activo=True).order_by("nombre")[:1200]
-    return render(request, "recetas/matching_pendientes.html", {"page": page, "q": q, "insumos": insumos})
+
+@permission_required("recetas.change_lineareceta", raise_exception=True)
+def matching_insumos_search(request: HttpRequest) -> JsonResponse:
+    q = (request.GET.get("q") or "").strip()
+    limit_raw = (request.GET.get("limit") or "20").strip()
+    try:
+        limit = int(limit_raw)
+    except ValueError:
+        limit = 20
+    limit = max(1, min(limit, 100))
+
+    queryset = Insumo.objects.filter(activo=True)
+    if q:
+        queryset = queryset.filter(nombre__icontains=q)
+    items = list(queryset.order_by("nombre").values("id", "nombre")[:limit])
+    return JsonResponse({"results": items, "count": len(items)})
 
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def aprobar_matching(request: HttpRequest, linea_id: int) -> HttpResponse:

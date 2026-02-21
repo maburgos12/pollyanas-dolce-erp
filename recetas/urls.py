@@ -14,6 +14,7 @@ urlpatterns = [
     path("recetas/<int:pk>/lineas/<int:linea_id>/editar/", views.linea_edit, name="linea_edit"),
     path("recetas/<int:pk>/lineas/<int:linea_id>/eliminar/", views.linea_delete, name="linea_delete"),
     path("matching/pendientes/", views.matching_pendientes, name="matching_pendientes"),
+    path("matching/insumos/search.json", views.matching_insumos_search, name="matching_insumos_search"),
     path("matching/aprobar/<int:linea_id>/", views.aprobar_matching, name="aprobar_matching"),
     path("plan-produccion/", views.plan_produccion, name="plan_produccion"),
     path("plan-produccion/nuevo/", views.plan_produccion_create, name="plan_produccion_create"),

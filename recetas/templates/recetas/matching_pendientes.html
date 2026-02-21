@@ -10,7 +10,7 @@
 </div>
 
 <div class="alert alert-info">
-  En Sprint 1 el selector de insumos está limitado a 500 (para que cargue rápido). En Sprint 2 se agrega autocomplete/búsqueda.
+  Selecciona el insumo oficial usando búsqueda en vivo (autocomplete servidor).
 </div>
 
 <div class="table-responsive">
@@ -30,14 +30,11 @@
         <td>{{ l.insumo_texto }}</td>
         <td><span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span></td>
         <td>
-          <form method="post" action="{% url 'recetas:aprobar_matching' l.id %}" class="d-flex gap-2 align-items-start flex-column">
+          <form method="post" action="{% url 'recetas:aprobar_matching' l.id %}" class="d-flex gap-2 align-items-start flex-column matching-form" data-search-url="{% url 'recetas:matching_insumos_search' %}">
             {% csrf_token %}
             <input type="text" class="form-control form-control-sm insumo-filter-input" placeholder="Buscar insumo...">
             <select name="insumo_id" class="form-select form-select-sm insumo-filter-select" required>
               <option value="">Selecciona...</option>
-              {% for i in insumos %}
-                <option value="{{ i.id }}">{{ i.nombre }}</option>
-              {% endfor %}
             </select>
             <button class="btn btn-sm btn-success" type="submit">Aprobar</button>
           </form>
@@ -64,42 +61,90 @@
 
 <script>
 (function () {
-  function normalizeText(v) {
-    return String(v || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
+  function debounce(fn, wait) {
+    let timer = null;
+    return function (...args) {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn.apply(this, args), wait);
+    };
   }
-  document.querySelectorAll("form").forEach((form) => {
+
+  async function fetchOptions(searchUrl, query) {
+    const url = new URL(searchUrl, window.location.origin);
+    url.searchParams.set("q", query || "");
+    url.searchParams.set("limit", "20");
+    const resp = await fetch(url.toString(), { headers: { "X-Requested-With": "XMLHttpRequest" } });
+    if (!resp.ok) {
+      return [];
+    }
+    const data = await resp.json();
+    return Array.isArray(data.results) ? data.results : [];
+  }
+
+  function renderOptions(select, results) {
+    const previous = select.value || "";
+    select.innerHTML = '<option value="">Selecciona...</option>';
+    results.forEach((item) => {
+      const opt = document.createElement("option");
+      opt.value = item.id;
+      opt.textContent = item.nombre;
+      select.appendChild(opt);
+    });
+    if (previous && results.some((r) => String(r.id) === String(previous))) {
+      select.value = previous;
+    }
+  }
+
+  document.querySelectorAll(".matching-form").forEach((form) => {
     const input = form.querySelector(".insumo-filter-input");
     const select = form.querySelector(".insumo-filter-select");
+    const searchUrl = form.dataset.searchUrl;
     if (!input || !select) return;
 
-    function firstVisibleOption() {
-      const opts = Array.from(select.querySelectorAll("option"));
-      for (let i = 1; i < opts.length; i += 1) {
-        if (!opts[i].hidden) return opts[i];
+    const runSearch = debounce(async () => {
+      const query = (input.value || "").trim();
+      if (query.length < 2) {
+        renderOptions(select, []);
+        return;
       }
-      return null;
-    }
+      const results = await fetchOptions(searchUrl, query);
+      renderOptions(select, results);
+    }, 250);
 
-    input.addEventListener("input", () => {
-      const query = normalizeText(input.value);
-      select.querySelectorAll("option").forEach((opt, idx) => {
-        if (idx === 0) return;
-        const match = !query || normalizeText(opt.textContent).includes(query);
-        opt.hidden = !match;
-      });
+    input.addEventListener("input", runSearch);
+    input.addEventListener("focus", () => {
+      if ((input.value || "").trim().length >= 2) {
+        runSearch();
+      }
     });
 
-    input.addEventListener("keydown", (ev) => {
+    input.addEventListener("keydown", async (ev) => {
       if (ev.key !== "Enter") return;
       ev.preventDefault();
-      const first = firstVisibleOption();
-      if (!first) return;
-      select.value = first.value;
-      form.submit();
+      const query = (input.value || "").trim();
+      if (query.length >= 2 && !select.value) {
+        const results = await fetchOptions(searchUrl, query);
+        renderOptions(select, results);
+      }
+      if (!select.value && select.options.length > 1) {
+        select.selectedIndex = 1;
+      }
+      if (select.value) {
+        form.submit();
+      }
     });
+
+    form.addEventListener("submit", (ev) => {
+      if (!select.value) {
+        ev.preventDefault();
+        input.focus();
+      }
+    });
+
+    const initialQuery = (input.value || "").trim();
+    if (initialQuery.length >= 2) {
+      runSearch();
+    }
   });
 })();
 </script>
