@@ -95,6 +95,20 @@ class MatchingPendientesAutocompleteTests(TestCase):
         self.assertEqual(len(payload["results"]), 1)
 
 
+class RecetasAuthRedirectTests(TestCase):
+    def test_matching_pendientes_redirects_to_login_when_anonymous(self):
+        response = self.client.get(reverse("recetas:matching_pendientes"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response["Location"])
+        self.assertIn("next=", response["Location"])
+
+    def test_plan_produccion_redirects_to_login_when_anonymous(self):
+        response = self.client.get(reverse("recetas:plan_produccion"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response["Location"])
+        self.assertIn("next=", response["Location"])
+
+
 class PlanProduccionSolicitudesModeTests(TestCase):
     def setUp(self):
         user_model = get_user_model()

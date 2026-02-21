@@ -142,6 +142,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
 
+@login_required
 @permission_required("recetas.change_receta", raise_exception=True)
 @require_POST
 def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
@@ -415,6 +416,7 @@ def _load_driver_rows(uploaded) -> list[dict]:
     raise ValueError("Formato no soportado. Usa CSV o XLSX.")
 
 
+@login_required
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
@@ -464,6 +466,7 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     return render(request, "recetas/linea_form.html", _linea_form_context(receta, linea))
 
 
+@login_required
 @permission_required("recetas.add_lineareceta", raise_exception=True)
 def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
@@ -513,6 +516,7 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "recetas/linea_form.html", _linea_form_context(receta))
 
 
+@login_required
 @permission_required("recetas.delete_lineareceta", raise_exception=True)
 @require_POST
 def linea_delete(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
@@ -525,6 +529,7 @@ def linea_delete(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     return redirect("recetas:receta_detail", pk=pk)
 
 
+@login_required
 @permission_required("recetas.change_receta", raise_exception=True)
 def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
@@ -566,6 +571,7 @@ def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
 
+@login_required
 @permission_required("recetas.change_receta", raise_exception=True)
 def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
@@ -601,6 +607,7 @@ def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> Ht
     )
 
 
+@login_required
 @permission_required("recetas.change_receta", raise_exception=True)
 @require_POST
 def presentacion_delete(request: HttpRequest, pk: int, presentacion_id: int) -> HttpResponse:
@@ -619,6 +626,7 @@ def presentacion_delete(request: HttpRequest, pk: int, presentacion_id: int) -> 
     return redirect("recetas:receta_detail", pk=pk)
 
 
+@login_required
 @permission_required("recetas.view_receta", raise_exception=True)
 def receta_versiones_export(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
@@ -711,6 +719,7 @@ def receta_versiones_export(request: HttpRequest, pk: int) -> HttpResponse:
     return response
 
 
+@login_required
 @permission_required("recetas.change_receta", raise_exception=True)
 def drivers_costeo(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
@@ -800,6 +809,7 @@ def drivers_costeo(request: HttpRequest) -> HttpResponse:
     )
 
 
+@login_required
 @permission_required("recetas.change_receta", raise_exception=True)
 @require_POST
 def drivers_costeo_delete(request: HttpRequest, driver_id: int) -> HttpResponse:
@@ -809,6 +819,7 @@ def drivers_costeo_delete(request: HttpRequest, driver_id: int) -> HttpResponse:
     return redirect("recetas:drivers_costeo")
 
 
+@login_required
 @permission_required("recetas.change_receta", raise_exception=True)
 def drivers_costeo_plantilla(request: HttpRequest) -> HttpResponse:
     export_format = (request.GET.get("format") or "xlsx").strip().lower()
@@ -860,6 +871,7 @@ def drivers_costeo_plantilla(request: HttpRequest) -> HttpResponse:
     return response
 
 
+@login_required
 @permission_required("recetas.change_receta", raise_exception=True)
 @require_POST
 def drivers_costeo_importar(request: HttpRequest) -> HttpResponse:
@@ -943,6 +955,7 @@ def drivers_costeo_importar(request: HttpRequest) -> HttpResponse:
     return redirect("recetas:drivers_costeo")
 
 
+@login_required
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def matching_pendientes(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
@@ -975,6 +988,7 @@ def matching_pendientes(request: HttpRequest) -> HttpResponse:
     return render(request, "recetas/matching_pendientes.html", {"page": page, "q": q})
 
 
+@login_required
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def matching_insumos_search(request: HttpRequest) -> JsonResponse:
     q = (request.GET.get("q") or "").strip()
@@ -991,6 +1005,7 @@ def matching_insumos_search(request: HttpRequest) -> JsonResponse:
     items = list(queryset.order_by("nombre").values("id", "nombre")[:limit])
     return JsonResponse({"results": items, "count": len(items)})
 
+@login_required
 @permission_required("recetas.change_lineareceta", raise_exception=True)
 def aprobar_matching(request: HttpRequest, linea_id: int) -> HttpResponse:
     linea = get_object_or_404(LineaReceta, pk=linea_id)
@@ -1393,6 +1408,7 @@ def _load_pronostico_rows(uploaded) -> list[dict]:
     raise ValueError("Formato no soportado. Usa CSV o XLSX.")
 
 
+@login_required
 @permission_required("recetas.change_planproduccion", raise_exception=True)
 def pronosticos_descargar_plantilla(request: HttpRequest) -> HttpResponse:
     export_format = (request.GET.get("format") or "xlsx").strip().lower()
@@ -1429,6 +1445,7 @@ def pronosticos_descargar_plantilla(request: HttpRequest) -> HttpResponse:
     return response
 
 
+@login_required
 @permission_required("recetas.change_planproduccion", raise_exception=True)
 @require_POST
 def pronosticos_importar(request: HttpRequest) -> HttpResponse:
@@ -1519,6 +1536,7 @@ def pronosticos_importar(request: HttpRequest) -> HttpResponse:
     return redirect(next_url)
 
 
+@login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion(request: HttpRequest) -> HttpResponse:
     planes = PlanProduccion.objects.select_related("creado_por").prefetch_related("items").order_by("-fecha_produccion", "-id")
@@ -1552,6 +1570,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     )
 
 
+@login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion_export(request: HttpRequest, plan_id: int) -> HttpResponse:
     plan = get_object_or_404(PlanProduccion, pk=plan_id)
@@ -1564,6 +1583,7 @@ def plan_produccion_export(request: HttpRequest, plan_id: int) -> HttpResponse:
     return _export_plan_csv(plan, explosion)
 
 
+@login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion_solicitud_print(request: HttpRequest, plan_id: int) -> HttpResponse:
     plan = get_object_or_404(PlanProduccion, pk=plan_id)
@@ -1587,6 +1607,7 @@ def plan_produccion_solicitud_print(request: HttpRequest, plan_id: int) -> HttpR
     )
 
 
+@login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion_solicitud_compras_print(request: HttpRequest, plan_id: int) -> HttpResponse:
     plan = get_object_or_404(PlanProduccion, pk=plan_id)
@@ -1609,6 +1630,7 @@ def plan_produccion_solicitud_compras_print(request: HttpRequest, plan_id: int) 
     )
 
 
+@login_required
 @permission_required("recetas.add_planproduccion", raise_exception=True)
 @require_POST
 def plan_produccion_create(request: HttpRequest) -> HttpResponse:
@@ -1636,6 +1658,7 @@ def plan_produccion_create(request: HttpRequest) -> HttpResponse:
     return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
 
 
+@login_required
 @permission_required("recetas.change_planproduccion", raise_exception=True)
 @require_POST
 def plan_produccion_item_create(request: HttpRequest, plan_id: int) -> HttpResponse:
@@ -1667,6 +1690,7 @@ def plan_produccion_item_create(request: HttpRequest, plan_id: int) -> HttpRespo
     return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
 
 
+@login_required
 @permission_required("recetas.change_planproduccion", raise_exception=True)
 @require_POST
 def plan_produccion_item_delete(request: HttpRequest, plan_id: int, item_id: int) -> HttpResponse:
@@ -1677,6 +1701,7 @@ def plan_produccion_item_delete(request: HttpRequest, plan_id: int, item_id: int
     return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
 
 
+@login_required
 @permission_required("recetas.delete_planproduccion", raise_exception=True)
 @require_POST
 def plan_produccion_delete(request: HttpRequest, plan_id: int) -> HttpResponse:
