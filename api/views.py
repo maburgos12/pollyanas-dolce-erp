@@ -10,7 +10,16 @@ from rest_framework.permissions import IsAuthenticated
 
 from compras.models import SolicitudCompra
 from compras.models import OrdenCompra
-from core.access import can_manage_compras
+from core.access import can_manage_compras, can_view_compras
+from compras.views import (
+    _build_budget_context,
+    _build_budget_history,
+    _build_category_dashboard,
+    _build_consumo_vs_plan_dashboard,
+    _build_provider_dashboard,
+    _filtered_solicitudes,
+    _sanitize_consumo_ref_filter,
+)
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
@@ -58,6 +67,15 @@ def _parse_period(period_raw: str | None) -> tuple[int, int] | None:
     if year < 2000 or year > 2200 or month < 1 or month > 12:
         return None
     return year, month
+
+
+def _to_float(value, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError, InvalidOperation):
+        return default
 
 class MRPExplodeView(APIView):
     permission_classes = [IsAuthenticated]
@@ -426,6 +444,227 @@ class InventarioSugerenciasCompraView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class PresupuestosConsolidadoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, periodo: str):
+        if not can_view_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar presupuestos de compras."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        parsed = _parse_period(periodo)
+        if not parsed:
+            return Response(
+                {"detail": "Periodo inválido. Usa formato YYYY-MM."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        year, month = parsed
+        periodo_mes = f"{year:04d}-{month:02d}"
+        periodo_tipo = (request.GET.get("periodo_tipo") or "mes").strip().lower()
+        if periodo_tipo not in {"mes", "q1", "q2"}:
+            periodo_tipo = "mes"
+
+        source_raw = request.GET.get("source")
+        plan_raw = request.GET.get("plan_id")
+        categoria_raw = request.GET.get("categoria")
+        reabasto_raw = request.GET.get("reabasto")
+
+        (
+            solicitudes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            reabasto_filter,
+            _,
+            _periodo_tipo,
+            _periodo_mes,
+            periodo_label,
+        ) = _filtered_solicitudes(
+            source_raw,
+            plan_raw,
+            categoria_raw,
+            reabasto_raw,
+            periodo_tipo,
+            periodo_mes,
+        )
+        consumo_ref_filter = _sanitize_consumo_ref_filter(request.GET.get("consumo_ref"))
+
+        budget_ctx = _build_budget_context(
+            solicitudes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            _periodo_tipo,
+            _periodo_mes,
+        )
+        provider_dashboard = _build_provider_dashboard(
+            _periodo_mes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            budget_ctx["presupuesto_rows_proveedor"],
+        )
+        category_dashboard = _build_category_dashboard(
+            _periodo_mes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            budget_ctx.get("presupuesto_rows_categoria", []),
+        )
+        consumo_dashboard = _build_consumo_vs_plan_dashboard(
+            _periodo_tipo,
+            _periodo_mes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            consumo_ref_filter,
+        )
+        historial = _build_budget_history(_periodo_mes, source_filter, plan_filter, categoria_filter)
+
+        payload = {
+            "periodo": {
+                "path": periodo,
+                "tipo": _periodo_tipo,
+                "mes": _periodo_mes,
+                "label": periodo_label,
+            },
+            "filters": {
+                "source": source_filter,
+                "plan_id": plan_filter or "",
+                "categoria": categoria_filter or "",
+                "reabasto": reabasto_filter,
+                "consumo_ref": consumo_ref_filter,
+            },
+            "totals": {
+                "solicitudes_count": len(solicitudes),
+                "presupuesto_estimado_total": _to_float(budget_ctx["presupuesto_estimado_total"]),
+                "presupuesto_ejecutado_total": _to_float(budget_ctx["presupuesto_ejecutado_total"]),
+                "presupuesto_objetivo": _to_float(budget_ctx.get("presupuesto_objetivo")),
+                "presupuesto_variacion_objetivo": _to_float(budget_ctx.get("presupuesto_variacion_objetivo")),
+                "alertas_total": int(budget_ctx.get("presupuesto_alertas_total") or 0),
+                "alertas_excedidas": int(budget_ctx.get("presupuesto_alertas_excedidas") or 0),
+                "alertas_preventivas": int(budget_ctx.get("presupuesto_alertas_preventivas") or 0),
+            },
+            "alertas": [
+                {
+                    "nivel": row.get("nivel"),
+                    "scope": row.get("scope"),
+                    "nombre": row.get("nombre"),
+                    "estimado": _to_float(row.get("estimado")),
+                    "ejecutado": _to_float(row.get("ejecutado")),
+                    "objetivo": _to_float(row.get("objetivo")),
+                    "uso_objetivo_pct": _to_float(row.get("uso_objetivo_pct")) if row.get("uso_objetivo_pct") is not None else None,
+                    "variacion": _to_float(row.get("variacion")),
+                    "estado": row.get("estado"),
+                }
+                for row in budget_ctx.get("presupuesto_alertas", [])[:100]
+            ],
+            "proveedores": [
+                {
+                    "proveedor": row["proveedor"],
+                    "estimado": _to_float(row["estimado"]),
+                    "ejecutado": _to_float(row["ejecutado"]),
+                    "variacion": _to_float(row["variacion"]),
+                    "participacion_pct": _to_float(row["participacion_pct"]),
+                    "objetivo_proveedor": _to_float(row.get("objetivo_proveedor")),
+                    "uso_objetivo_pct": _to_float(row.get("uso_objetivo_pct")) if row.get("uso_objetivo_pct") is not None else None,
+                    "objetivo_estado": row.get("objetivo_estado"),
+                }
+                for row in budget_ctx["presupuesto_rows_proveedor"][:50]
+            ],
+            "categorias": [
+                {
+                    "categoria": row["categoria"],
+                    "estimado": _to_float(row["estimado"]),
+                    "ejecutado": _to_float(row["ejecutado"]),
+                    "variacion": _to_float(row["variacion"]),
+                    "participacion_pct": _to_float(row["participacion_pct"]),
+                    "objetivo_categoria": _to_float(row.get("objetivo_categoria")),
+                    "uso_objetivo_pct": _to_float(row.get("uso_objetivo_pct")) if row.get("uso_objetivo_pct") is not None else None,
+                    "objetivo_estado": row.get("objetivo_estado"),
+                }
+                for row in budget_ctx.get("presupuesto_rows_categoria", [])[:50]
+            ],
+            "historial_6m": [
+                {
+                    "periodo_mes": row["periodo_mes"],
+                    "objetivo": _to_float(row["objetivo"]),
+                    "estimado": _to_float(row["estimado"]),
+                    "ejecutado": _to_float(row["ejecutado"]),
+                    "ratio_pct": _to_float(row["ratio_pct"]) if row.get("ratio_pct") is not None else None,
+                    "estado_label": row["estado_label"],
+                }
+                for row in historial
+            ],
+            "trend": {
+                "proveedor_rows": [
+                    {
+                        "proveedor": row["proveedor"],
+                        "mes": row["mes"],
+                        "estimado": _to_float(row["estimado"]),
+                        "ejecutado": _to_float(row["ejecutado"]),
+                        "variacion": _to_float(row["variacion"]),
+                    }
+                    for row in provider_dashboard["trend_rows"]
+                ],
+                "categoria_rows": [
+                    {
+                        "categoria": row["categoria"],
+                        "mes": row["mes"],
+                        "estimado": _to_float(row["estimado"]),
+                        "ejecutado": _to_float(row["ejecutado"]),
+                        "variacion": _to_float(row["variacion"]),
+                    }
+                    for row in category_dashboard["trend_rows"]
+                ],
+            },
+            "consumo_vs_plan": {
+                "totals": {
+                    "plan_qty_total": _to_float(consumo_dashboard["totals"]["plan_qty_total"]),
+                    "consumo_real_qty_total": _to_float(consumo_dashboard["totals"]["consumo_real_qty_total"]),
+                    "plan_cost_total": _to_float(consumo_dashboard["totals"]["plan_cost_total"]),
+                    "consumo_real_cost_total": _to_float(consumo_dashboard["totals"]["consumo_real_cost_total"]),
+                    "variacion_cost_total": _to_float(consumo_dashboard["totals"]["variacion_cost_total"]),
+                    "semaforo_rojo_count": int(consumo_dashboard["totals"]["semaforo_rojo_count"] or 0),
+                    "semaforo_amarillo_count": int(consumo_dashboard["totals"]["semaforo_amarillo_count"] or 0),
+                    "semaforo_verde_count": int(consumo_dashboard["totals"]["semaforo_verde_count"] or 0),
+                    "sin_costo_count": int(consumo_dashboard["totals"]["sin_costo_count"] or 0),
+                    "cobertura_pct": (
+                        _to_float(consumo_dashboard["totals"]["cobertura_pct"])
+                        if consumo_dashboard["totals"]["cobertura_pct"] is not None
+                        else None
+                    ),
+                },
+                "rows": [
+                    {
+                        "insumo_id": row["insumo_id"],
+                        "insumo": row["insumo"],
+                        "categoria": row["categoria"],
+                        "unidad": row["unidad"],
+                        "cantidad_plan": _to_float(row["cantidad_plan"]),
+                        "cantidad_real": _to_float(row["cantidad_real"]),
+                        "variacion_qty": _to_float(row["variacion_qty"]),
+                        "costo_unitario": _to_float(row["costo_unitario"]),
+                        "costo_plan": _to_float(row["costo_plan"]),
+                        "costo_real": _to_float(row["costo_real"]),
+                        "variacion_cost": _to_float(row["variacion_cost"]),
+                        "consumo_pct": _to_float(row["consumo_pct"]) if row["consumo_pct"] is not None else None,
+                        "estado": row["estado"],
+                        "semaforo": row["semaforo"],
+                        "sin_costo": bool(row["sin_costo"]),
+                        "alerta": row["alerta"],
+                    }
+                    for row in consumo_dashboard["rows"]
+                ],
+            },
+        }
+
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class ComprasSolicitudCreateView(APIView):

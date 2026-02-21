@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from compras.models import OrdenCompra, SolicitudCompra
+from compras.models import OrdenCompra, PresupuestoCompraPeriodo, SolicitudCompra
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
@@ -214,3 +214,54 @@ class RecetasCosteoApiTests(TestCase):
             },
         )
         self.assertEqual(resp.status_code, 403)
+
+    def test_endpoint_presupuestos_consolidado_periodo(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Consolidado", lead_time_dias=4, activo=True)
+        self.insumo.proveedor_principal = proveedor
+        self.insumo.categoria = "Lacteos"
+        self.insumo.save(update_fields=["proveedor_principal", "categoria"])
+
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("50"),
+            source_hash="api-presupuesto-1",
+        )
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="planeacion",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("2"),
+            fecha_requerida=date(2026, 2, 12),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            fecha_emision=date(2026, 2, 13),
+            monto_estimado=Decimal("80"),
+            estatus=OrdenCompra.STATUS_ENVIADA,
+        )
+        PresupuestoCompraPeriodo.objects.create(
+            periodo_tipo=PresupuestoCompraPeriodo.TIPO_MES,
+            periodo_mes="2026-02",
+            monto_objetivo=Decimal("120"),
+        )
+
+        url = reverse("api_presupuestos_consolidado", args=["2026-02"])
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["periodo"]["mes"], "2026-02")
+        self.assertEqual(payload["periodo"]["tipo"], "mes")
+        self.assertEqual(payload["totals"]["solicitudes_count"], 1)
+        self.assertAlmostEqual(payload["totals"]["presupuesto_estimado_total"], 100.0, places=2)
+        self.assertAlmostEqual(payload["totals"]["presupuesto_ejecutado_total"], 80.0, places=2)
+        self.assertAlmostEqual(payload["totals"]["presupuesto_objetivo"], 120.0, places=2)
+        self.assertIn("consumo_vs_plan", payload)
+
+    def test_endpoint_presupuestos_consolidado_periodo_invalido(self):
+        url = reverse("api_presupuestos_consolidado", args=["2026-99"])
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 400)
