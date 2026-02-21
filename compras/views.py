@@ -45,6 +45,53 @@ def _to_decimal(value: str, default: str = "0") -> Decimal:
         return Decimal(default)
 
 
+def _build_import_preview_context(import_preview_payload) -> dict | None:
+    if not isinstance(import_preview_payload, dict):
+        return None
+
+    preview_rows = [x for x in (import_preview_payload.get("rows") or []) if isinstance(x, dict)]
+    try:
+        preview_score_min = int(import_preview_payload.get("score_min") or 90)
+    except (TypeError, ValueError):
+        preview_score_min = 90
+
+    preview_ready = 0
+    preview_with_issues = 0
+    preview_duplicates = 0
+    preview_without_match = 0
+    preview_invalid_qty = 0
+    for row in preview_rows:
+        if bool(row.get("include")):
+            preview_ready += 1
+        if row.get("notes"):
+            preview_with_issues += 1
+        if bool(row.get("duplicate")):
+            preview_duplicates += 1
+        if not str(row.get("insumo_id") or "").strip():
+            preview_without_match += 1
+        try:
+            cantidad_preview = _to_decimal(str(row.get("cantidad") or "0"), "0")
+        except Exception:
+            cantidad_preview = Decimal("0")
+        if cantidad_preview <= 0:
+            preview_invalid_qty += 1
+
+    return {
+        "rows": preview_rows,
+        "count": len(preview_rows),
+        "evitar_duplicados": bool(import_preview_payload.get("evitar_duplicados")),
+        "score_min": preview_score_min,
+        "ready_count": preview_ready,
+        "excluded_count": max(0, len(preview_rows) - preview_ready),
+        "issues_count": preview_with_issues,
+        "duplicates_count": preview_duplicates,
+        "without_match_count": preview_without_match,
+        "invalid_qty_count": preview_invalid_qty,
+        "file_name": str(import_preview_payload.get("file_name") or "").strip(),
+        "generated_at": str(import_preview_payload.get("generated_at") or "").strip(),
+    }
+
+
 def _map_import_header(name: str) -> str:
     n = normalizar_nombre(name or "").replace("_", " ")
     if n in {"insumo", "nombre insumo", "insumo nombre", "materia prima", "articulo", "item", "producto", "descripcion"}:
@@ -284,6 +331,55 @@ def _write_import_pending_csv(rows: list[dict]) -> str:
         for row in rows:
             writer.writerow({h: row.get(h, "") for h in headers})
     return str(filepath)
+
+
+def _export_import_preview_csv(import_preview: dict) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="compras_preview_solicitudes_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "row_id",
+            "source_row",
+            "include",
+            "insumo_origen",
+            "insumo_sugerencia",
+            "insumo_id",
+            "cantidad",
+            "area",
+            "solicitante",
+            "fecha_requerida",
+            "estatus",
+            "proveedor_id",
+            "score",
+            "metodo",
+            "duplicate",
+            "notes",
+        ]
+    )
+    for row in import_preview.get("rows", []):
+        writer.writerow(
+            [
+                row.get("row_id", ""),
+                row.get("source_row", ""),
+                "1" if row.get("include") else "0",
+                row.get("insumo_origen", ""),
+                row.get("insumo_sugerencia", ""),
+                row.get("insumo_id", ""),
+                row.get("cantidad", ""),
+                row.get("area", ""),
+                row.get("solicitante", ""),
+                row.get("fecha_requerida", ""),
+                row.get("estatus", ""),
+                row.get("proveedor_id", ""),
+                row.get("score", ""),
+                row.get("metodo", ""),
+                "1" if row.get("duplicate") else "0",
+                row.get("notes", ""),
+            ]
+        )
+    return response
 
 
 def _active_solicitud_statuses() -> set[str]:
@@ -2327,6 +2423,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         consumo_ref_filter,
     )
     total_presupuesto = budget_ctx["presupuesto_estimado_total"]
+    import_preview = _build_import_preview_context(request.session.get(IMPORT_PREVIEW_SESSION_KEY))
 
     export_format = (request.GET.get("export") or "").lower()
     if export_format == "csv":
@@ -2410,6 +2507,11 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             categoria_filter,
             consumo_ref_filter,
         )
+    if export_format == "import_preview_csv":
+        if not import_preview:
+            messages.warning(request, "No hay vista previa de importación activa para exportar.")
+            return redirect("compras:solicitudes")
+        return _export_import_preview_csv(import_preview)
     if export_format == "xlsx":
         return _export_solicitudes_xlsx(
             solicitudes,
@@ -2424,47 +2526,6 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
 
     query_without_export = request.GET.copy()
     query_without_export.pop("export", None)
-    import_preview = request.session.get(IMPORT_PREVIEW_SESSION_KEY)
-    if isinstance(import_preview, dict):
-        preview_rows = [x for x in (import_preview.get("rows") or []) if isinstance(x, dict)]
-        try:
-            preview_score_min = int(import_preview.get("score_min") or 90)
-        except (TypeError, ValueError):
-            preview_score_min = 90
-        preview_ready = 0
-        preview_with_issues = 0
-        preview_duplicates = 0
-        preview_without_match = 0
-        preview_invalid_qty = 0
-        for row in preview_rows:
-            if bool(row.get("include")):
-                preview_ready += 1
-            if row.get("notes"):
-                preview_with_issues += 1
-            if bool(row.get("duplicate")):
-                preview_duplicates += 1
-            if not str(row.get("insumo_id") or "").strip():
-                preview_without_match += 1
-            try:
-                cantidad_preview = _to_decimal(str(row.get("cantidad") or "0"), "0")
-            except Exception:
-                cantidad_preview = Decimal("0")
-            if cantidad_preview <= 0:
-                preview_invalid_qty += 1
-        import_preview = {
-            "rows": preview_rows,
-            "count": len(preview_rows),
-            "evitar_duplicados": bool(import_preview.get("evitar_duplicados")),
-            "score_min": preview_score_min,
-            "ready_count": preview_ready,
-            "excluded_count": max(0, len(preview_rows) - preview_ready),
-            "issues_count": preview_with_issues,
-            "duplicates_count": preview_duplicates,
-            "without_match_count": preview_without_match,
-            "invalid_qty_count": preview_invalid_qty,
-        }
-    else:
-        import_preview = None
 
     context = {
         "solicitudes": solicitudes,
@@ -3040,6 +3101,8 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
         "periodo_mes": periodo_mes,
         "evitar_duplicados": evitar_duplicados,
         "score_min": min_score,
+        "file_name": archivo.name,
+        "generated_at": timezone.localtime().strftime("%Y-%m-%d %H:%M"),
         "rows": preview_rows,
     }
     request.session.modified = True

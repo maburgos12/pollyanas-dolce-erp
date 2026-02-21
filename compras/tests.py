@@ -379,6 +379,7 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         preview_payload = self.client.session.get("compras_solicitudes_import_preview")
         self.assertIsNotNone(preview_payload)
+        self.assertEqual(SolicitudCompra.objects.count(), 0)
         rows = preview_payload["rows"]
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[1]["insumo_id"], "")
@@ -480,6 +481,8 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
     def test_import_preview_summary_counts_in_context(self):
         session = self.client.session
         session["compras_solicitudes_import_preview"] = {
+            "file_name": "solicitudes_test.csv",
+            "generated_at": "2026-02-20 09:10",
             "score_min": 90,
             "evitar_duplicados": True,
             "rows": [
@@ -513,6 +516,41 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         self.assertEqual(preview["duplicates_count"], 1)
         self.assertEqual(preview["without_match_count"], 1)
         self.assertEqual(preview["invalid_qty_count"], 1)
+        self.assertEqual(preview["file_name"], "solicitudes_test.csv")
+        self.assertEqual(preview["generated_at"], "2026-02-20 09:10")
+
+    def test_export_import_preview_csv(self):
+        session = self.client.session
+        session["compras_solicitudes_import_preview"] = {
+            "rows": [
+                {
+                    "row_id": "2",
+                    "source_row": 2,
+                    "include": True,
+                    "insumo_origen": "Harina Import",
+                    "insumo_sugerencia": "Harina Import",
+                    "insumo_id": str(self.insumo_harina.id),
+                    "cantidad": "2.000",
+                    "area": "Compras",
+                    "solicitante": "ana",
+                    "fecha_requerida": "2026-02-20",
+                    "estatus": SolicitudCompra.STATUS_BORRADOR,
+                    "proveedor_id": str(self.proveedor.id),
+                    "score": "100.0",
+                    "metodo": "EXACT",
+                    "duplicate": False,
+                    "notes": "",
+                }
+            ]
+        }
+        session.save()
+
+        response = self.client.get(reverse("compras:solicitudes"), {"export": "import_preview_csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        body = response.content.decode("utf-8")
+        self.assertIn("row_id,source_row,include,insumo_origen", body)
+        self.assertIn("Harina Import", body)
 
 
 class ComprasOrdenesRecepcionesFiltersTests(TestCase):

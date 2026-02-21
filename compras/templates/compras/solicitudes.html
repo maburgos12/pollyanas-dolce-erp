@@ -72,6 +72,16 @@
   <section class="card" style="margin-top: 14px;">
     <div class="card-header" style="padding:0 0 10px 0;border:0;">Vista previa de importación</div>
     <p class="muted">Filas: <strong>{{ import_preview.count }}</strong>. Puedes editar celdas, desmarcar filas para eliminarlas de la carga y luego confirmar.</p>
+    <p class="muted" style="margin-top:-4px;">
+      {% if import_preview.file_name %}Archivo: <strong>{{ import_preview.file_name }}</strong> · {% endif %}
+      {% if import_preview.generated_at %}Generada: <strong>{{ import_preview.generated_at }}</strong> · {% endif %}
+      Estado: <strong>sin guardar en solicitudes hasta confirmar</strong>.
+    </p>
+    <div class="toolbar" style="margin-bottom: 8px;">
+      <a class="btn btn-secondary" href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=import_preview_csv{% else %}?export=import_preview_csv{% endif %}">
+        Exportar preview CSV
+      </a>
+    </div>
     <div class="kpi-grid kpi-mini" style="margin-bottom: 8px;">
       <article class="kpi-card">
         <div class="kpi-number is-success" id="preview-ready-count">{{ import_preview.ready_count }}</div>
