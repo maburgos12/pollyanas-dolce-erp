@@ -84,6 +84,10 @@
     <form method="post" action="{% url 'recetas:plan_produccion_generar_solicitudes' plan_actual.id %}" class="inline-form" onsubmit="return confirm('Se generarán solicitudes de compra en borrador para materia prima de este plan. ¿Continuar?');">
       {% csrf_token %}
       <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="replace_prev" value="1" checked>
+        <span>Reemplazar borradores previos del plan</span>
+      </label>
+      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
         <input type="checkbox" name="auto_create_oc" value="1" checked>
         <span>Crear OC borrador por proveedor</span>
       </label>

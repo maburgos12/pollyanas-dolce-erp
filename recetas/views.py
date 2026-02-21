@@ -881,17 +881,22 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
     area_tag = f"PLAN_PRODUCCION:{plan.id}"
     referencia_plan = f"PLAN_PRODUCCION:{plan.id}"
     auto_create_oc = bool(request.POST.get("auto_create_oc"))
+    replace_prev_raw = (request.POST.get("replace_prev") or "1").strip().lower()
+    replace_prev = replace_prev_raw not in {"0", "false", "off", "no"}
 
-    # Idempotencia operativa: si vuelven a generar, reemplazamos únicamente borradores del plan.
-    borradores_previos = SolicitudCompra.objects.filter(
-        area=area_tag,
-        estatus=SolicitudCompra.STATUS_BORRADOR,
-    )
-    deleted_prev = borradores_previos.count()
-    if deleted_prev:
-        borradores_previos.delete()
+    deleted_prev = 0
+    if replace_prev:
+        # Idempotencia operativa: si vuelven a generar, reemplazamos únicamente borradores del plan.
+        borradores_previos = SolicitudCompra.objects.filter(
+            area=area_tag,
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        deleted_prev = borradores_previos.count()
+        if deleted_prev:
+            borradores_previos.delete()
 
     creadas = 0
+    actualizadas = 0
     sin_proveedor = 0
     oc_por_proveedor: dict[int, dict[str, Any]] = {}
     for row in materias_primas:
@@ -899,27 +904,63 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
         if not insumo:
             continue
         proveedor = insumo.proveedor_principal
-        solicitud = SolicitudCompra.objects.create(
-            area=area_tag,
-            solicitante=request.user.username,
-            insumo=insumo,
-            proveedor_sugerido=proveedor,
-            cantidad=Decimal(str(row["cantidad"])),
-            fecha_requerida=plan.fecha_produccion,
-            estatus=SolicitudCompra.STATUS_BORRADOR,
-        )
-        log_event(
-            request.user,
-            "CREATE",
-            "compras.SolicitudCompra",
-            solicitud.id,
-            {
-                "folio": solicitud.folio,
-                "source_plan_id": plan.id,
-                "source_plan_nombre": plan.nombre,
-            },
-        )
-        creadas += 1
+        qty = Decimal(str(row["cantidad"]))
+
+        solicitud = None
+        if not replace_prev:
+            solicitud = (
+                SolicitudCompra.objects.filter(
+                    area=area_tag,
+                    estatus=SolicitudCompra.STATUS_BORRADOR,
+                    insumo=insumo,
+                    fecha_requerida=plan.fecha_produccion,
+                )
+                .order_by("-creado_en")
+                .first()
+            )
+
+        if solicitud:
+            solicitud.cantidad = Decimal(str(solicitud.cantidad or 0)) + qty
+            if not solicitud.proveedor_sugerido_id and proveedor:
+                solicitud.proveedor_sugerido = proveedor
+                solicitud.save(update_fields=["cantidad", "proveedor_sugerido"])
+            else:
+                solicitud.save(update_fields=["cantidad"])
+            log_event(
+                request.user,
+                "UPDATE",
+                "compras.SolicitudCompra",
+                solicitud.id,
+                {
+                    "folio": solicitud.folio,
+                    "source_plan_id": plan.id,
+                    "source_plan_nombre": plan.nombre,
+                    "mode": "accumulate",
+                },
+            )
+            actualizadas += 1
+        else:
+            solicitud = SolicitudCompra.objects.create(
+                area=area_tag,
+                solicitante=request.user.username,
+                insumo=insumo,
+                proveedor_sugerido=proveedor,
+                cantidad=qty,
+                fecha_requerida=plan.fecha_produccion,
+                estatus=SolicitudCompra.STATUS_BORRADOR,
+            )
+            log_event(
+                request.user,
+                "CREATE",
+                "compras.SolicitudCompra",
+                solicitud.id,
+                {
+                    "folio": solicitud.folio,
+                    "source_plan_id": plan.id,
+                    "source_plan_nombre": plan.nombre,
+                },
+            )
+            creadas += 1
 
         if auto_create_oc:
             if not proveedor:
@@ -937,40 +978,75 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
 
     oc_prev_deleted = 0
     oc_creadas = 0
+    oc_actualizadas = 0
     if auto_create_oc:
-        ocs_previas = OrdenCompra.objects.filter(
-            referencia=referencia_plan,
-            estatus=OrdenCompra.STATUS_BORRADOR,
-            solicitud__isnull=True,
-        )
-        oc_prev_deleted = ocs_previas.count()
-        if oc_prev_deleted:
-            ocs_previas.delete()
+        if replace_prev:
+            ocs_previas = OrdenCompra.objects.filter(
+                referencia=referencia_plan,
+                estatus=OrdenCompra.STATUS_BORRADOR,
+                solicitud__isnull=True,
+            )
+            oc_prev_deleted = ocs_previas.count()
+            if oc_prev_deleted:
+                ocs_previas.delete()
 
         for data in oc_por_proveedor.values():
-            orden = OrdenCompra.objects.create(
-                solicitud=None,
-                referencia=referencia_plan,
-                proveedor_id=data["proveedor_id"],
-                fecha_emision=timezone.localdate(),
-                fecha_entrega_estimada=plan.fecha_produccion,
-                monto_estimado=data["monto_estimado"],
-                estatus=OrdenCompra.STATUS_BORRADOR,
-            )
-            log_event(
-                request.user,
-                "CREATE",
-                "compras.OrdenCompra",
-                orden.id,
-                {
-                    "folio": orden.folio,
-                    "estatus": orden.estatus,
-                    "source_plan_id": plan.id,
-                    "source_plan_nombre": plan.nombre,
-                    "proveedor": data["proveedor_nombre"],
-                },
-            )
-            oc_creadas += 1
+            orden = None
+            if not replace_prev:
+                orden = (
+                    OrdenCompra.objects.filter(
+                        referencia=referencia_plan,
+                        estatus=OrdenCompra.STATUS_BORRADOR,
+                        solicitud__isnull=True,
+                        proveedor_id=data["proveedor_id"],
+                    )
+                    .order_by("-creado_en")
+                    .first()
+                )
+
+            if orden:
+                orden.monto_estimado = Decimal(str(orden.monto_estimado or 0)) + data["monto_estimado"]
+                orden.fecha_entrega_estimada = plan.fecha_produccion
+                orden.save(update_fields=["monto_estimado", "fecha_entrega_estimada"])
+                log_event(
+                    request.user,
+                    "UPDATE",
+                    "compras.OrdenCompra",
+                    orden.id,
+                    {
+                        "folio": orden.folio,
+                        "estatus": orden.estatus,
+                        "source_plan_id": plan.id,
+                        "source_plan_nombre": plan.nombre,
+                        "proveedor": data["proveedor_nombre"],
+                        "mode": "accumulate",
+                    },
+                )
+                oc_actualizadas += 1
+            else:
+                orden = OrdenCompra.objects.create(
+                    solicitud=None,
+                    referencia=referencia_plan,
+                    proveedor_id=data["proveedor_id"],
+                    fecha_emision=timezone.localdate(),
+                    fecha_entrega_estimada=plan.fecha_produccion,
+                    monto_estimado=data["monto_estimado"],
+                    estatus=OrdenCompra.STATUS_BORRADOR,
+                )
+                log_event(
+                    request.user,
+                    "CREATE",
+                    "compras.OrdenCompra",
+                    orden.id,
+                    {
+                        "folio": orden.folio,
+                        "estatus": orden.estatus,
+                        "source_plan_id": plan.id,
+                        "source_plan_nombre": plan.nombre,
+                        "proveedor": data["proveedor_nombre"],
+                    },
+                )
+                oc_creadas += 1
 
     if creadas == 0:
         messages.warning(
@@ -978,9 +1054,19 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
             "No se generaron solicitudes: el plan no tiene materia prima con cantidad válida.",
         )
     else:
-        msg = f"Solicitudes generadas: {creadas}. Borradores reemplazados del plan: {deleted_prev}."
+        mode_label = "reemplazo" if replace_prev else "acumulado"
+        msg = (
+            f"Solicitudes generadas: {creadas}. "
+            f"Solicitudes actualizadas: {actualizadas}. "
+            f"Modo: {mode_label}. "
+            f"Borradores reemplazados del plan: {deleted_prev}."
+        )
         if auto_create_oc:
-            msg += f" OC borrador creadas (agrupadas por proveedor): {oc_creadas}. OCs borrador previas reemplazadas: {oc_prev_deleted}."
+            msg += (
+                f" OC borrador creadas (agrupadas por proveedor): {oc_creadas}. "
+                f"OC borrador actualizadas: {oc_actualizadas}. "
+                f"OCs borrador previas reemplazadas: {oc_prev_deleted}."
+            )
             if sin_proveedor:
                 msg += f" Insumos sin proveedor principal: {sin_proveedor} (no entraron a OC automática)."
         messages.success(request, msg)
