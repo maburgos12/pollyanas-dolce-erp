@@ -154,6 +154,7 @@ class InventarioAliasesPendingTests(TestCase):
             {
                 "action": "auto_apply_suggestions",
                 "auto_min_score": "90",
+                "auto_min_sources": "1",
                 "auto_max_rows": "50",
             },
         )
@@ -164,6 +165,64 @@ class InventarioAliasesPendingTests(TestCase):
 
         run.refresh_from_db()
         self.assertEqual(run.pending_preview, [])
+
+    def test_auto_apply_suggestions_min_sources_gate(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo = Insumo.objects.create(nombre="Azucar Glass", unidad_base=unidad)
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=timezone.now(),
+            matched=11,
+            unmatched=1,
+            pending_preview=[
+                {
+                    "source": "inventario",
+                    "row": 5,
+                    "nombre_origen": "Azucar glass fina",
+                    "nombre_normalizado": "azucar glass fina",
+                    "sugerencia": "Azucar Glass",
+                    "score": 96.0,
+                }
+            ],
+        )
+
+        # Con 2 fuentes mínimas no debe crear alias (solo existe en almacén).
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "auto_apply_suggestions",
+                "auto_min_score": "90",
+                "auto_min_sources": "2",
+                "auto_max_rows": "50",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(
+            InsumoAlias.objects.filter(nombre_normalizado="azucar glass fina", insumo=insumo).exists()
+        )
+
+        # Agregamos pendiente en Point para activar 2 fuentes y sí debe crear alias.
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="P-XYZ",
+            point_nombre="Azucar glass fina",
+            fuzzy_score=96.0,
+            fuzzy_sugerencia="Azucar Glass",
+        )
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "auto_apply_suggestions",
+                "auto_min_score": "90",
+                "auto_min_sources": "2",
+                "auto_max_rows": "50",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            InsumoAlias.objects.filter(nombre_normalizado="azucar glass fina", insumo=insumo).exists()
+        )
 
     def test_bulk_reassign_resolves_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)

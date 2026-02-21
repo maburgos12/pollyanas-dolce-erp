@@ -264,6 +264,100 @@ def _build_pending_grouped(pending_preview: list[dict]) -> list[dict]:
     )
 
 
+def _build_cross_unified_rows(pending_grouped: list[dict]) -> tuple[list[dict], int, int]:
+    unified = defaultdict(
+        lambda: {
+            "nombre_muestra": "",
+            "point_count": 0,
+            "almacen_count": 0,
+            "receta_count": 0,
+            "suggestion": "",
+            "score_max": 0.0,
+        }
+    )
+
+    for row in pending_grouped:
+        norm = row["nombre_normalizado"]
+        if not norm:
+            continue
+        item = unified[norm]
+        item["nombre_muestra"] = item["nombre_muestra"] or row["nombre_origen"]
+        item["almacen_count"] += int(row["count"] or 0)
+        if row.get("sugerencia") and not item["suggestion"]:
+            item["suggestion"] = row["sugerencia"]
+        item["score_max"] = max(item["score_max"], float(row.get("score_max") or 0.0))
+
+    point_pending_insumos = list(
+        PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).only("point_nombre", "fuzzy_sugerencia", "fuzzy_score")
+    )
+    for pending in point_pending_insumos:
+        norm = normalizar_nombre(pending.point_nombre or "")
+        if not norm:
+            continue
+        item = unified[norm]
+        item["nombre_muestra"] = item["nombre_muestra"] or (pending.point_nombre or "")
+        item["point_count"] += 1
+        if (pending.fuzzy_sugerencia or "").strip() and not item["suggestion"]:
+            item["suggestion"] = pending.fuzzy_sugerencia.strip()
+        item["score_max"] = max(item["score_max"], float(pending.fuzzy_score or 0.0))
+
+    receta_pending_lines_qs = LineaReceta.objects.filter(~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION)).filter(
+        Q(insumo__isnull=True) | Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW) | Q(match_status=LineaReceta.STATUS_REJECTED)
+    )
+    receta_pending_lines = 0
+    for linea in receta_pending_lines_qs.only("insumo_texto"):
+        norm = normalizar_nombre(linea.insumo_texto or "")
+        if not norm:
+            continue
+        item = unified[norm]
+        item["nombre_muestra"] = item["nombre_muestra"] or (linea.insumo_texto or "")
+        item["receta_count"] += 1
+        receta_pending_lines += 1
+
+    unified_rows = []
+    overlaps = 0
+    for norm, item in unified.items():
+        sources_active = sum(
+            1
+            for value in (item["point_count"], item["almacen_count"], item["receta_count"])
+            if value > 0
+        )
+        if sources_active >= 2:
+            overlaps += 1
+        unified_rows.append(
+            {
+                "nombre_normalizado": norm,
+                "nombre_muestra": item["nombre_muestra"] or norm,
+                "point_count": item["point_count"],
+                "almacen_count": item["almacen_count"],
+                "receta_count": item["receta_count"],
+                "sources_active": sources_active,
+                "total_count": item["point_count"] + item["almacen_count"] + item["receta_count"],
+                "suggestion": item["suggestion"],
+                "score_max": item["score_max"],
+            }
+        )
+    unified_rows.sort(key=lambda x: (-x["sources_active"], -x["total_count"], x["nombre_muestra"]))
+    return unified_rows, len(point_pending_insumos), receta_pending_lines
+
+
+def _load_visible_pending_preview(request: HttpRequest, max_rows: int = 120, max_runs: int = 20) -> list[dict]:
+    session_pending = list(request.session.get("inventario_pending_preview", []))[:max_rows]
+    if session_pending:
+        return session_pending
+
+    hidden_run_id = request.session.get("inventario_hidden_pending_run_id")
+    latest_runs = list(AlmacenSyncRun.objects.only("id", "pending_preview").order_by("-started_at")[:max_runs])
+    latest_pending_run = None
+    for run in latest_runs:
+        if hidden_run_id and run.id == hidden_run_id:
+            continue
+        if isinstance(run.pending_preview, list) and run.pending_preview:
+            latest_pending_run = run
+            break
+    return list((latest_pending_run.pending_preview if latest_pending_run else [])[:max_rows])
+
+
 def _export_cross_pending_csv(cross_unified_rows: list[dict]) -> HttpResponse:
     now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
     response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -979,24 +1073,14 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             min_score = max(0.0, min(100.0, min_score))
             max_rows = int(_to_decimal(request.POST.get("auto_max_rows"), "80"))
             max_rows = max(1, min(500, max_rows))
+            min_sources = int(_to_decimal(request.POST.get("auto_min_sources"), "2"))
+            min_sources = max(1, min(3, min_sources))
 
-            session_pending = list(request.session.get("inventario_pending_preview", []))[:500]
-            hidden_run_id = request.session.get("inventario_hidden_pending_run_id")
-            latest_runs = list(
-                AlmacenSyncRun.objects.only("id", "pending_preview").order_by("-started_at")[:20]
-            )
-            latest_pending_run = None
-            for run in latest_runs:
-                if hidden_run_id and run.id == hidden_run_id:
-                    continue
-                if isinstance(run.pending_preview, list) and run.pending_preview:
-                    latest_pending_run = run
-                    break
-            persisted_pending = list((latest_pending_run.pending_preview if latest_pending_run else [])[:500])
-            pending_preview = session_pending or persisted_pending
+            pending_preview = _load_visible_pending_preview(request, max_rows=500, max_runs=20)
             pending_grouped = _build_pending_grouped(pending_preview)
+            cross_unified_rows, _, _ = _build_cross_unified_rows(pending_grouped)
 
-            if not pending_grouped:
+            if not cross_unified_rows:
                 messages.info(request, "No hay pendientes visibles para auto-aplicar sugerencias.")
             else:
                 insumo_map = {
@@ -1007,6 +1091,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                 updated = 0
                 skipped_no_suggestion = 0
                 skipped_low_score = 0
+                skipped_low_sources = 0
                 skipped_unresolved = 0
                 skipped_invalid = 0
                 point_resolved_total = 0
@@ -1014,11 +1099,15 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                 processed = 0
                 cleaned_norms: set[str] = set()
 
-                for row in pending_grouped:
+                for row in cross_unified_rows:
                     if processed >= max_rows:
                         break
 
-                    suggestion = str(row.get("sugerencia") or "").strip()
+                    if int(row.get("sources_active") or 0) < min_sources:
+                        skipped_low_sources += 1
+                        continue
+
+                    suggestion = str(row.get("suggestion") or "").strip()
                     if not suggestion:
                         skipped_no_suggestion += 1
                         continue
@@ -1030,10 +1119,14 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
 
                     insumo = insumo_map.get(normalizar_nombre(suggestion))
                     if not insumo:
+                        candidate, candidate_score, _ = match_insumo(suggestion)
+                        if candidate and float(candidate_score or 0.0) >= min_score:
+                            insumo = candidate
+                    if not insumo:
                         skipped_unresolved += 1
                         continue
 
-                    ok, alias_norm, action_label = _upsert_alias(row["nombre_origen"], insumo)
+                    ok, alias_norm, action_label = _upsert_alias(row["nombre_muestra"], insumo)
                     if not ok:
                         skipped_invalid += 1
                         continue
@@ -1045,7 +1138,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                         updated += 1
                     cleaned_norms.add(alias_norm)
 
-                    point_resolved, recetas_resolved = _resolve_cross_source_with_alias(row["nombre_origen"], insumo)
+                    point_resolved, recetas_resolved = _resolve_cross_source_with_alias(row["nombre_muestra"], insumo)
                     point_resolved_total += point_resolved
                     recetas_resolved_total += recetas_resolved
 
@@ -1066,6 +1159,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                     request,
                     (
                         "Omitidos → "
+                        f"fuentes<{min_sources}: {skipped_low_sources}, "
                         f"sin sugerencia: {skipped_no_suggestion}, "
                         f"score<{min_score:.1f}: {skipped_low_score}, "
                         f"sugerencia sin insumo exacto: {skipped_unresolved}, "
@@ -1161,90 +1255,20 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
 
     pending_grouped = _build_pending_grouped(pending_preview)
     auto_default_score = 90.0
+    auto_default_min_sources = 2
+    unified_rows, point_unmatched_count, receta_pending_lines = _build_cross_unified_rows(pending_grouped)
+    overlaps = sum(1 for row in unified_rows if int(row.get("sources_active") or 0) >= 2)
     insumo_norm_set = set(
         Insumo.objects.filter(activo=True).values_list("nombre_normalizado", flat=True)
     )
     auto_apply_candidates = sum(
         1
-        for row in pending_grouped
-        if row.get("sugerencia")
+        for row in unified_rows
+        if int(row.get("sources_active") or 0) >= auto_default_min_sources
+        and row.get("suggestion")
         and float(row.get("score_max") or 0.0) >= auto_default_score
-        and normalizar_nombre(str(row.get("sugerencia") or "")) in insumo_norm_set
+        and normalizar_nombre(str(row.get("suggestion") or "")) in insumo_norm_set
     )
-
-    unified = defaultdict(
-        lambda: {
-            "nombre_muestra": "",
-            "point_count": 0,
-            "almacen_count": 0,
-            "receta_count": 0,
-            "suggestion": "",
-            "score_max": 0.0,
-        }
-    )
-
-    for row in pending_grouped:
-        norm = row["nombre_normalizado"]
-        if not norm:
-            continue
-        item = unified[norm]
-        item["nombre_muestra"] = item["nombre_muestra"] or row["nombre_origen"]
-        item["almacen_count"] += int(row["count"] or 0)
-        if row.get("sugerencia") and not item["suggestion"]:
-            item["suggestion"] = row["sugerencia"]
-        item["score_max"] = max(item["score_max"], float(row.get("score_max") or 0.0))
-
-    point_pending_insumos = list(
-        PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).only("point_nombre", "fuzzy_sugerencia", "fuzzy_score")
-    )
-    for p in point_pending_insumos:
-        norm = normalizar_nombre(p.point_nombre or "")
-        if not norm:
-            continue
-        item = unified[norm]
-        item["nombre_muestra"] = item["nombre_muestra"] or (p.point_nombre or "")
-        item["point_count"] += 1
-        if (p.fuzzy_sugerencia or "").strip() and not item["suggestion"]:
-            item["suggestion"] = p.fuzzy_sugerencia.strip()
-        item["score_max"] = max(item["score_max"], float(p.fuzzy_score or 0.0))
-
-    receta_pending_lines_qs = LineaReceta.objects.filter(~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION)).filter(
-        Q(insumo__isnull=True) | Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW) | Q(match_status=LineaReceta.STATUS_REJECTED)
-    )
-    receta_pending_lines = 0
-    for linea in receta_pending_lines_qs.only("insumo_texto"):
-        norm = normalizar_nombre(linea.insumo_texto or "")
-        if not norm:
-            continue
-        item = unified[norm]
-        item["nombre_muestra"] = item["nombre_muestra"] or (linea.insumo_texto or "")
-        item["receta_count"] += 1
-        receta_pending_lines += 1
-
-    unified_rows = []
-    overlaps = 0
-    for norm, item in unified.items():
-        sources_active = sum(
-            1
-            for v in (item["point_count"], item["almacen_count"], item["receta_count"])
-            if v > 0
-        )
-        if sources_active >= 2:
-            overlaps += 1
-        unified_rows.append(
-            {
-                "nombre_normalizado": norm,
-                "nombre_muestra": item["nombre_muestra"] or norm,
-                "point_count": item["point_count"],
-                "almacen_count": item["almacen_count"],
-                "receta_count": item["receta_count"],
-                "sources_active": sources_active,
-                "total_count": item["point_count"] + item["almacen_count"] + item["receta_count"],
-                "suggestion": item["suggestion"],
-                "score_max": item["score_max"],
-            }
-        )
-    unified_rows.sort(key=lambda x: (-x["sources_active"], -x["total_count"], x["nombre_muestra"]))
 
     export_format = (request.GET.get("export") or "").strip().lower()
     if export_format == "cross_pending_csv":
@@ -1280,12 +1304,13 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "pending_visible_count": len(pending_preview),
         "pending_unique_count": len(pending_grouped),
         "auto_default_score": auto_default_score,
+        "auto_default_min_sources": auto_default_min_sources,
         "auto_default_limit": 80,
         "auto_apply_candidates": auto_apply_candidates,
         "insumo_alias_targets": Insumo.objects.filter(activo=True).order_by("nombre")[:1200],
         "can_manage_inventario": can_manage_inventario(request.user),
         "cross_summary": {
-            "point_unmatched": len(point_pending_insumos),
+            "point_unmatched": point_unmatched_count,
             "almacen_unmatched": len(pending_preview),
             "recetas_unmatched": receta_pending_lines,
             "overlaps": overlaps,

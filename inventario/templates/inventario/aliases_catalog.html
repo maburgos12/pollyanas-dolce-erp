@@ -82,6 +82,22 @@
     {% endif %}
   </div>
 
+  {% if can_manage_inventario and cross_unified_rows %}
+  <form method="post" class="form-grid-auto" style="margin-top:10px; margin-bottom:10px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="auto_apply_suggestions">
+    <input type="hidden" name="next_q" value="{{ q }}">
+    <label class="muted" for="auto_min_score">Score mínimo</label>
+    <input id="auto_min_score" class="input-field" type="number" name="auto_min_score" min="0" max="100" step="0.1" value="{{ auto_default_score|floatformat:1 }}">
+    <label class="muted" for="auto_min_sources">Fuentes mínimas</label>
+    <input id="auto_min_sources" class="input-field" type="number" name="auto_min_sources" min="1" max="3" step="1" value="{{ auto_default_min_sources }}">
+    <label class="muted" for="auto_max_rows">Máx. filas a aplicar</label>
+    <input id="auto_max_rows" class="input-field" type="number" name="auto_max_rows" min="1" max="500" step="1" value="{{ auto_default_limit }}">
+    <button class="btn btn-primary" type="submit">Auto-aplicar sugerencias</button>
+    <span class="muted">Candidatos estimados: {{ auto_apply_candidates }}</span>
+  </form>
+  {% endif %}
+
   {% if cross_unified_rows %}
   <div class="table-responsive" style="margin-top:10px;">
     <table class="table table-striped">
@@ -393,19 +409,6 @@
 <section class="card">
   <div class="card-header">Pendientes Agrupados Para Corrección</div>
   <p class="muted">Prioriza los de mayor frecuencia para corregir más rápido.</p>
-  {% if can_manage_inventario %}
-  <form method="post" class="form-grid-auto" style="margin-top:10px; margin-bottom:10px;">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="auto_apply_suggestions">
-    <input type="hidden" name="next_q" value="{{ q }}">
-    <label class="muted" for="auto_min_score">Score mínimo</label>
-    <input id="auto_min_score" class="input-field" type="number" name="auto_min_score" min="0" max="100" step="0.1" value="{{ auto_default_score|floatformat:1 }}">
-    <label class="muted" for="auto_max_rows">Máx. filas a aplicar</label>
-    <input id="auto_max_rows" class="input-field" type="number" name="auto_max_rows" min="1" max="500" step="1" value="{{ auto_default_limit }}">
-    <button class="btn btn-primary" type="submit">Auto-aplicar sugerencias</button>
-    <span class="muted">Candidatos estimados: {{ auto_apply_candidates }}</span>
-  </form>
-  {% endif %}
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
