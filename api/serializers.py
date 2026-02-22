@@ -566,6 +566,7 @@ class SolicitudVentaAplicarForecastSerializer(serializers.Serializer):
     )
     receta_id = serializers.IntegerField(required=False)
     fuente = serializers.CharField(max_length=40, required=False, allow_blank=True, default="API_FORECAST_ADJUST")
+    dry_run = serializers.BooleanField(required=False, default=False)
     top = serializers.IntegerField(required=False, min_value=1, max_value=500, default=120)
 
     def validate_safety_pct(self, value):

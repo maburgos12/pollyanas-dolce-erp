@@ -5714,6 +5714,7 @@ class SolicitudVentaAplicarForecastView(APIView):
         fecha_base = data.get("fecha_base") or timezone.localdate()
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
+        dry_run = bool(data.get("dry_run", False))
         top = int(data.get("top") or 120)
 
         result = _build_forecast_from_history(
@@ -5767,8 +5768,10 @@ class SolicitudVentaAplicarForecastView(APIView):
         created = 0
         updated = 0
         skipped = 0
+        applied = 0
         adjusted_rows = []
-        with transaction.atomic():
+        tx_cm = nullcontext() if dry_run else transaction.atomic()
+        with tx_cm:
             for row in rows:
                 receta = Receta.objects.filter(pk=row["receta_id"]).first()
                 if receta is None:
@@ -5778,27 +5781,41 @@ class SolicitudVentaAplicarForecastView(APIView):
                 if nueva_cantidad < 0:
                     skipped += 1
                     continue
-                record, was_created = SolicitudVenta.objects.get_or_create(
+                record = SolicitudVenta.objects.filter(
                     receta=receta,
                     sucursal=sucursal,
                     alcance=model_alcance,
                     fecha_inicio=target_start,
                     fecha_fin=target_end,
-                    defaults={
-                        "periodo": result_periodo,
-                        "cantidad": nueva_cantidad,
-                        "fuente": fuente,
-                    },
-                )
-                old_qty = _to_decimal(record.cantidad if not was_created else 0)
+                ).first()
+                was_created = record is None
+                old_qty = _to_decimal(record.cantidad if record is not None else 0)
                 if was_created:
-                    created += 1
+                    if dry_run:
+                        created += 1
+                    else:
+                        SolicitudVenta.objects.create(
+                            receta=receta,
+                            sucursal=sucursal,
+                            alcance=model_alcance,
+                            periodo=result_periodo,
+                            fecha_inicio=target_start,
+                            fecha_fin=target_end,
+                            cantidad=nueva_cantidad,
+                            fuente=fuente,
+                        )
+                        created += 1
+                        applied += 1
                 else:
-                    record.periodo = result_periodo
-                    record.cantidad = nueva_cantidad
-                    record.fuente = fuente
-                    record.save(update_fields=["periodo", "cantidad", "fuente", "actualizado_en"])
-                    updated += 1
+                    if dry_run:
+                        updated += 1
+                    else:
+                        record.periodo = result_periodo
+                        record.cantidad = nueva_cantidad
+                        record.fuente = fuente
+                        record.save(update_fields=["periodo", "cantidad", "fuente", "actualizado_en"])
+                        updated += 1
+                        applied += 1
 
                 adjusted_rows.append(
                     {
@@ -5806,6 +5823,7 @@ class SolicitudVentaAplicarForecastView(APIView):
                         "receta": receta.nombre,
                         "anterior": _to_float(old_qty),
                         "nueva": _to_float(nueva_cantidad),
+                        "accion": "create" if was_created else "update",
                         "status_before": row.get("status") or "",
                     }
                 )
@@ -5823,9 +5841,11 @@ class SolicitudVentaAplicarForecastView(APIView):
                     "modo": modo,
                 },
                 "updated": {
+                    "dry_run": dry_run,
                     "created": created,
                     "updated": updated,
                     "skipped": skipped,
+                    "applied": applied,
                 },
                 "adjusted_rows": adjusted_rows[:top],
                 "compare_solicitud": compare_payload,
