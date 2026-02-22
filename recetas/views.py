@@ -1328,6 +1328,160 @@ def _plan_vs_pronostico(plan: PlanProduccion) -> Dict[str, Any]:
     }
 
 
+def _periodo_mrp_resumen(periodo_mes: str, periodo_tipo: str = "mes") -> Dict[str, Any]:
+    periodo = _normalize_periodo_mes(periodo_mes)
+    try:
+        year, month = periodo.split("-")
+        year_i = int(year)
+        month_i = int(month)
+    except Exception:
+        today = timezone.localdate()
+        year_i = today.year
+        month_i = today.month
+        periodo = f"{year_i:04d}-{month_i:02d}"
+
+    plans_qs = PlanProduccion.objects.filter(
+        fecha_produccion__year=year_i,
+        fecha_produccion__month=month_i,
+    ).order_by("fecha_produccion", "id")
+
+    periodo_tipo_norm = (periodo_tipo or "mes").strip().lower()
+    if periodo_tipo_norm not in {"mes", "q1", "q2"}:
+        periodo_tipo_norm = "mes"
+    if periodo_tipo_norm == "q1":
+        plans_qs = plans_qs.filter(fecha_produccion__day__lte=15)
+    elif periodo_tipo_norm == "q2":
+        plans_qs = plans_qs.filter(fecha_produccion__day__gte=16)
+
+    plans = list(plans_qs.only("id", "nombre", "fecha_produccion"))
+    if not plans:
+        return {
+            "periodo": periodo,
+            "periodo_tipo": periodo_tipo_norm,
+            "planes_count": 0,
+            "planes": [],
+            "insumos_count": 0,
+            "costo_total": Decimal("0"),
+            "alertas_capacidad": 0,
+            "lineas_sin_match": 0,
+            "lineas_sin_cantidad": 0,
+            "lineas_sin_costo_unitario": 0,
+            "insumos": [],
+        }
+
+    plan_items_map = {
+        row["plan_id"]: int(row["items_count"] or 0)
+        for row in (
+            PlanProduccionItem.objects.filter(plan_id__in=[p.id for p in plans])
+            .values("plan_id")
+            .annotate(items_count=Count("id"))
+        )
+    }
+
+    items = (
+        PlanProduccionItem.objects.filter(plan_id__in=[p.id for p in plans])
+        .select_related("plan", "receta")
+        .prefetch_related(
+            "receta__lineas__insumo__unidad_base",
+            "receta__lineas__insumo__proveedor_principal",
+            "receta__lineas__unidad",
+        )
+        .order_by("plan__fecha_produccion", "plan_id", "id")
+    )
+
+    unit_cost_cache: Dict[int, Decimal | None] = {}
+    insumos_map: Dict[int, Dict[str, Any]] = {}
+    lineas_sin_cantidad = 0
+    lineas_sin_costo_unitario = 0
+    lineas_sin_match = 0
+
+    for item in items:
+        multiplicador = Decimal(str(item.cantidad or 0))
+        if multiplicador <= 0:
+            continue
+        for linea in item.receta.lineas.all():
+            if not linea.insumo_id:
+                lineas_sin_match += 1
+                continue
+
+            qty_base = Decimal(str(linea.cantidad or 0))
+            if qty_base <= 0:
+                lineas_sin_cantidad += 1
+                continue
+
+            qty = qty_base * multiplicador
+            if qty <= 0:
+                continue
+
+            unit_code = _linea_unit_code(linea)
+            unit_cost = _linea_unit_cost(linea, unit_cost_cache)
+            if unit_cost is None or unit_cost <= 0:
+                lineas_sin_costo_unitario += 1
+                unit_cost = Decimal("0")
+            costo_linea = qty * unit_cost
+
+            key = linea.insumo_id
+            if key not in insumos_map:
+                insumo_obj = linea.insumo
+                origen = "Interno" if (insumo_obj.codigo or "").startswith("DERIVADO:RECETA:") else "Materia prima"
+                proveedor_sugerido = "-"
+                if insumo_obj.proveedor_principal_id and insumo_obj.proveedor_principal:
+                    proveedor_sugerido = insumo_obj.proveedor_principal.nombre
+                insumos_map[key] = {
+                    "insumo_id": key,
+                    "nombre": insumo_obj.nombre,
+                    "origen": origen,
+                    "proveedor_sugerido": proveedor_sugerido,
+                    "unidad": unit_code,
+                    "cantidad": Decimal("0"),
+                    "costo_total": Decimal("0"),
+                    "costo_unitario": unit_cost,
+                    "stock_actual": Decimal("0"),
+                }
+
+            insumos_map[key]["cantidad"] += qty
+            insumos_map[key]["costo_total"] += costo_linea
+            if insumos_map[key]["costo_unitario"] <= 0 and unit_cost > 0:
+                insumos_map[key]["costo_unitario"] = unit_cost
+
+    insumos = sorted(insumos_map.values(), key=lambda x: x["nombre"].lower())
+    existencias_map = {
+        e.insumo_id: Decimal(str(e.stock_actual or 0))
+        for e in ExistenciaInsumo.objects.filter(insumo_id__in=list(insumos_map.keys()))
+    }
+
+    alertas_capacidad = 0
+    for row in insumos:
+        row["stock_actual"] = existencias_map.get(row["insumo_id"], Decimal("0"))
+        faltante = Decimal(str(row["cantidad"] or 0)) - Decimal(str(row["stock_actual"] or 0))
+        row["faltante"] = faltante if faltante > 0 else Decimal("0")
+        row["alerta_capacidad"] = row["faltante"] > 0
+        if row["alerta_capacidad"]:
+            alertas_capacidad += 1
+
+    return {
+        "periodo": periodo,
+        "periodo_tipo": periodo_tipo_norm,
+        "planes_count": len(plans),
+        "planes": [
+            {
+                "id": p.id,
+                "nombre": p.nombre,
+                "fecha_produccion": p.fecha_produccion,
+                "items_count": plan_items_map.get(p.id, 0),
+            }
+            for p in plans
+        ],
+        "insumos_count": len(insumos),
+        "costo_total": sum((row["costo_total"] for row in insumos), Decimal("0")),
+        "alertas_capacidad": alertas_capacidad,
+        "lineas_sin_match": lineas_sin_match,
+        "lineas_sin_cantidad": lineas_sin_cantidad,
+        "lineas_sin_costo_unitario": lineas_sin_costo_unitario,
+        "insumos": insumos,
+    }
+
+
 def _export_plan_csv(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpResponse:
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     filename = f"plan_produccion_{plan.id}_{plan.fecha_produccion}.csv"
@@ -1675,6 +1829,11 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     explosion = _plan_explosion(plan_actual) if plan_actual else None
     plan_vs_pronostico = _plan_vs_pronostico(plan_actual) if plan_actual else None
     periodo_pronostico_default = _normalize_periodo_mes(request.GET.get("periodo"))
+    mrp_periodo = _normalize_periodo_mes(request.GET.get("mrp_periodo"))
+    mrp_periodo_tipo = (request.GET.get("mrp_periodo_tipo") or "mes").strip().lower()
+    if mrp_periodo_tipo not in {"mes", "q1", "q2"}:
+        mrp_periodo_tipo = "mes"
+    mrp_periodo_resumen = _periodo_mrp_resumen(mrp_periodo, mrp_periodo_tipo)
     pronosticos_unavailable = False
     try:
         pronosticos_periodo = PronosticoVenta.objects.filter(periodo=periodo_pronostico_default)
@@ -1694,6 +1853,9 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "explosion": explosion,
             "plan_vs_pronostico": plan_vs_pronostico,
             "periodo_pronostico_default": periodo_pronostico_default,
+            "mrp_periodo": mrp_periodo,
+            "mrp_periodo_tipo": mrp_periodo_tipo,
+            "mrp_periodo_resumen": mrp_periodo_resumen,
             "pronosticos_periodo_count": pronosticos_periodo_count,
             "pronosticos_periodo_total": pronosticos_periodo_total,
             "pronosticos_unavailable": pronosticos_unavailable,

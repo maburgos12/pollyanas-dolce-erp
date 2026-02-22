@@ -196,6 +196,76 @@ class PlanProduccionRobustnessTests(TestCase):
         self.assertTrue(response.context["plan_vs_pronostico"]["pronosticos_unavailable"])
 
 
+class PlanProduccionPeriodoMrpTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_plan_periodo",
+            email="admin_plan_periodo@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
+        unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(nombre="Insumo periodo", unidad_base=unidad, activo=True)
+        self.receta = Receta.objects.create(nombre="Receta periodo", hash_contenido="hash-periodo-001")
+        LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=self.insumo,
+            insumo_texto="Insumo periodo",
+            cantidad=Decimal("2"),
+            unidad=unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("10"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        self.plan_q1 = PlanProduccion.objects.create(
+            nombre="Plan q1",
+            fecha_produccion=date(2026, 2, 10),
+        )
+        self.plan_q2 = PlanProduccion.objects.create(
+            nombre="Plan q2",
+            fecha_produccion=date(2026, 2, 22),
+        )
+        PlanProduccionItem.objects.create(plan=self.plan_q1, receta=self.receta, cantidad=Decimal("1"))
+        PlanProduccionItem.objects.create(plan=self.plan_q2, receta=self.receta, cantidad=Decimal("3"))
+
+    def test_plan_produccion_contexto_mrp_periodo_mes(self):
+        response = self.client.get(
+            reverse("recetas:plan_produccion"),
+            {"mrp_periodo": "2026-02", "mrp_periodo_tipo": "mes"},
+        )
+        self.assertEqual(response.status_code, 200)
+        resumen = response.context["mrp_periodo_resumen"]
+        self.assertEqual(resumen["planes_count"], 2)
+        self.assertEqual(resumen["insumos_count"], 1)
+        self.assertEqual(resumen["periodo"], "2026-02")
+        self.assertEqual(resumen["periodo_tipo"], "mes")
+        self.assertEqual(resumen["insumos"][0]["cantidad"], Decimal("8"))
+        self.assertEqual(resumen["costo_total"], Decimal("80"))
+
+    def test_plan_produccion_contexto_mrp_periodo_q1_filtra_planes(self):
+        response = self.client.get(
+            reverse("recetas:plan_produccion"),
+            {"mrp_periodo": "2026-02", "mrp_periodo_tipo": "q1"},
+        )
+        self.assertEqual(response.status_code, 200)
+        resumen = response.context["mrp_periodo_resumen"]
+        self.assertEqual(resumen["planes_count"], 1)
+        self.assertEqual(len(resumen["planes"]), 1)
+        self.assertEqual(resumen["planes"][0]["id"], self.plan_q1.id)
+        self.assertEqual(resumen["insumos"][0]["cantidad"], Decimal("2"))
+
+
 class PlanProduccionSolicitudesModeTests(TestCase):
     def setUp(self):
         user_model = get_user_model()

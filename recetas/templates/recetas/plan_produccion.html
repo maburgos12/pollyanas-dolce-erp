@@ -72,6 +72,77 @@
 </div>
 
 <div class="card">
+  <div class="card-header">MRP Consolidado por Período</div>
+  <p class="muted mb-2">Calcula requerimientos agregados de insumos para todos los planes del período seleccionado.</p>
+  <form class="form-grid-auto mb-2" method="get" action="{% url 'recetas:plan_produccion' %}">
+    {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+    <div class="form-group">
+      <label class="form-label">Período (mes)</label>
+      <input class="form-control" type="month" name="mrp_periodo" value="{{ mrp_periodo }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Alcance</label>
+      <select class="form-select" name="mrp_periodo_tipo">
+        <option value="mes" {% if mrp_periodo_tipo == "mes" %}selected{% endif %}>Mes completo</option>
+        <option value="q1" {% if mrp_periodo_tipo == "q1" %}selected{% endif %}>1ra quincena (1-15)</option>
+        <option value="q2" {% if mrp_periodo_tipo == "q2" %}selected{% endif %}>2da quincena (16-fin)</option>
+      </select>
+    </div>
+    <div class="form-group" style="align-self:end;">
+      <button class="btn btn-primary" type="submit">Calcular período</button>
+    </div>
+  </form>
+  <div class="kpi-mini">
+    <div class="kpi-card">
+      <div class="kpi-number">{{ mrp_periodo_resumen.planes_count }}</div>
+      <div class="kpi-label">Planes incluidos</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">{{ mrp_periodo_resumen.insumos_count }}</div>
+      <div class="kpi-label">Insumos consolidados</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if mrp_periodo_resumen.alertas_capacidad > 0 %}is-danger{% else %}is-success{% endif %}">{{ mrp_periodo_resumen.alertas_capacidad }}</div>
+      <div class="kpi-label">Alertas capacidad</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number is-danger">${{ mrp_periodo_resumen.costo_total|floatformat:2 }}</div>
+      <div class="kpi-label">Costo total período</div>
+    </div>
+  </div>
+  {% if mrp_periodo_resumen.planes_count > 0 %}
+  <div class="table-responsive mt-2">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Plan</th>
+          <th>Fecha</th>
+          <th class="text-end">Renglones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in mrp_periodo_resumen.planes %}
+        <tr>
+          <td><a href="{% url 'recetas:plan_produccion' %}?plan_id={{ p.id }}&mrp_periodo={{ mrp_periodo }}&mrp_periodo_tipo={{ mrp_periodo_tipo }}">{{ p.nombre }}</a></td>
+          <td>{{ p.fecha_produccion }}</td>
+          <td class="text-end">{{ p.items_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if mrp_periodo_resumen.lineas_sin_match or mrp_periodo_resumen.lineas_sin_cantidad or mrp_periodo_resumen.lineas_sin_costo_unitario %}
+  <div class="alert alert-info mt-2">
+    Calidad de datos del período:
+    sin match {{ mrp_periodo_resumen.lineas_sin_match }},
+    sin cantidad {{ mrp_periodo_resumen.lineas_sin_cantidad }},
+    sin costo {{ mrp_periodo_resumen.lineas_sin_costo_unitario }}.
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
   <div class="card-header">Planes recientes</div>
   <div class="table-responsive">
     <table class="table align-middle">
