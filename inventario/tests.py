@@ -375,6 +375,40 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(preview[0]["alias"], "Fresa natural premium")
         self.assertEqual(stats["unresolved"], 1)
 
+    def test_alias_import_preview_export_csv_and_xlsx(self):
+        session = self.client.session
+        session["inventario_alias_import_preview"] = [
+            {
+                "row": 2,
+                "alias": "Fresa natural premium",
+                "insumo_archivo": "No Existe En Catalogo",
+                "sugerencia": "Fresa Fresca",
+                "score": 88.5,
+                "method": "FUZZY",
+                "motivo": "Insumo no resuelto (score<90.0).",
+            }
+        ]
+        session.save()
+
+        response_csv = self.client.get(reverse("inventario:aliases_catalog"), {"export": "alias_import_preview_csv"})
+        self.assertEqual(response_csv.status_code, 200)
+        self.assertIn("text/csv", response_csv["Content-Type"])
+        body_csv = response_csv.content.decode("utf-8")
+        self.assertIn("row,alias,insumo_archivo,sugerencia,score,method,motivo", body_csv)
+        self.assertIn("Fresa natural premium", body_csv)
+
+        response_xlsx = self.client.get(reverse("inventario:aliases_catalog"), {"export": "alias_import_preview_xlsx"})
+        self.assertEqual(response_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response_xlsx["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(response_xlsx.content), data_only=True)
+        ws = wb.active
+        headers = [ws.cell(row=1, column=i).value for i in range(1, 8)]
+        self.assertEqual(headers, ["row", "alias", "insumo_archivo", "sugerencia", "score", "method", "motivo"])
+        self.assertEqual(ws.cell(row=2, column=2).value, "Fresa natural premium")
+
     def test_alias_template_export_csv_and_xlsx(self):
         response_csv = self.client.get(reverse("inventario:aliases_catalog"), {"export": "alias_template_csv"})
         self.assertEqual(response_csv.status_code, 200)

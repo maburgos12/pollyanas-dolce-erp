@@ -241,6 +241,10 @@
 <section class="card">
   <div class="card-header">Pendientes de Importación (Alias)</div>
   <p class="muted">Filas que no se pudieron aplicar automáticamente. Corrige el nombre de insumo o usa "Usar en alta".</p>
+  <div class="toolbar" style="margin-bottom:8px;">
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_import_preview_csv">Exportar pendientes CSV</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_import_preview_xlsx">Exportar pendientes XLSX</a>
+  </div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>

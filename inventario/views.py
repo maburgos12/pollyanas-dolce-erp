@@ -91,11 +91,12 @@ def _read_alias_import_rows(uploaded: UploadedFile) -> list[dict]:
         uploaded.seek(0)
         wb = load_workbook(uploaded, read_only=True, data_only=True)
         ws = wb.active
-        values = list(ws.values)
-        if not values:
+        rows_iter = ws.iter_rows(values_only=True)
+        first_row = next(rows_iter, None)
+        if not first_row:
             return []
-        headers = [_map_alias_import_header(str(h or "")) for h in values[0]]
-        for raw in values[1:]:
+        headers = [_map_alias_import_header(str(h or "")) for h in first_row]
+        for raw in rows_iter:
             row = {}
             for idx, header in enumerate(headers):
                 if not header:
@@ -459,6 +460,63 @@ def _export_aliases_catalog_xlsx(aliases_qs) -> HttpResponse:
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     response["Content-Disposition"] = f'attachment; filename="inventario_aliases_catalogo_{now_str}.xlsx"'
+    return response
+
+
+def _export_alias_import_preview_csv(preview_rows: list[dict]) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="inventario_aliases_import_preview_{now_str}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["row", "alias", "insumo_archivo", "sugerencia", "score", "method", "motivo"])
+    for row in preview_rows:
+        writer.writerow(
+            [
+                row.get("row", ""),
+                row.get("alias", ""),
+                row.get("insumo_archivo", ""),
+                row.get("sugerencia", ""),
+                row.get("score", ""),
+                row.get("method", ""),
+                row.get("motivo", ""),
+            ]
+        )
+    return response
+
+
+def _export_alias_import_preview_xlsx(preview_rows: list[dict]) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "aliases_import_preview"
+    ws.append(["row", "alias", "insumo_archivo", "sugerencia", "score", "method", "motivo"])
+    for row in preview_rows:
+        ws.append(
+            [
+                row.get("row", ""),
+                row.get("alias", ""),
+                row.get("insumo_archivo", ""),
+                row.get("sugerencia", ""),
+                row.get("score", ""),
+                row.get("method", ""),
+                row.get("motivo", ""),
+            ]
+        )
+    ws.column_dimensions["A"].width = 10
+    ws.column_dimensions["B"].width = 36
+    ws.column_dimensions["C"].width = 36
+    ws.column_dimensions["D"].width = 36
+    ws.column_dimensions["E"].width = 12
+    ws.column_dimensions["F"].width = 14
+    ws.column_dimensions["G"].width = 40
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="inventario_aliases_import_preview_{now_str}.xlsx"'
     return response
 
 
@@ -876,14 +934,14 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                         i.nombre_normalizado: i
                         for i in Insumo.objects.filter(activo=True).only("id", "nombre", "nombre_normalizado")
                     }
+                    match_cache: dict[str, tuple[Insumo | None, float, str]] = {}
                     created = 0
                     updated = 0
                     invalid = 0
                     unresolved = 0
-                    point_resolved_total = 0
-                    recetas_resolved_total = 0
                     cleaned_norms: set[str] = set()
                     unresolved_preview: list[dict] = []
+                    cross_resolve_targets: dict[str, tuple[str, Insumo]] = {}
 
                     for idx, row in enumerate(rows, start=2):
                         alias_name = str(row.get("alias") or "").strip()
@@ -905,7 +963,12 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                                     method = "EXACT_NAME"
                                     suggested_name = resolved_insumo.nombre
                                 else:
-                                    candidate, candidate_score, candidate_method = match_insumo(insumo_raw)
+                                    lookup_key = normalizar_nombre(insumo_raw)
+                                    if lookup_key in match_cache:
+                                        candidate, candidate_score, candidate_method = match_cache[lookup_key]
+                                    else:
+                                        candidate, candidate_score, candidate_method = match_insumo(insumo_raw)
+                                        match_cache[lookup_key] = (candidate, candidate_score, candidate_method)
                                     if candidate and candidate_score >= min_score:
                                         resolved_insumo = candidate
                                         score = float(candidate_score or 0.0)
@@ -917,7 +980,12 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                                         method = candidate_method or "NO_MATCH"
                                         reason = f"Insumo no resuelto (score<{min_score:.1f})."
                             else:
-                                candidate, candidate_score, candidate_method = match_insumo(alias_name)
+                                lookup_key = normalizar_nombre(alias_name)
+                                if lookup_key in match_cache:
+                                    candidate, candidate_score, candidate_method = match_cache[lookup_key]
+                                else:
+                                    candidate, candidate_score, candidate_method = match_insumo(alias_name)
+                                    match_cache[lookup_key] = (candidate, candidate_score, candidate_method)
                                 if candidate and candidate_score >= min_score:
                                     resolved_insumo = candidate
                                     score = float(candidate_score or 0.0)
@@ -937,9 +1005,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                                 else:
                                     updated += 1
                                 cleaned_norms.add(alias_norm)
-                                point_resolved, recetas_resolved = _resolve_cross_source_with_alias(alias_name, resolved_insumo)
-                                point_resolved_total += point_resolved
-                                recetas_resolved_total += recetas_resolved
+                                cross_resolve_targets[alias_norm] = (alias_name, resolved_insumo)
                             else:
                                 reason = "Alias inválido tras normalización."
                                 invalid += 1
@@ -962,6 +1028,13 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                     if cleaned_norms:
                         _remove_pending_names_from_session(request, cleaned_norms)
                         _remove_pending_names_from_recent_runs(cleaned_norms)
+
+                    point_resolved_total = 0
+                    recetas_resolved_total = 0
+                    for alias_name, resolved_insumo in cross_resolve_targets.values():
+                        point_resolved, recetas_resolved = _resolve_cross_source_with_alias(alias_name, resolved_insumo)
+                        point_resolved_total += point_resolved
+                        recetas_resolved_total += recetas_resolved
 
                     request.session["inventario_alias_import_preview"] = unresolved_preview
                     request.session["inventario_alias_import_stats"] = {
@@ -1304,6 +1377,14 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         return _export_cross_pending_csv(cross_filtered_rows)
     if export_format in {"alias_template_csv", "alias_template_xlsx"}:
         return _export_alias_template(export_format)
+    if export_format in {"alias_import_preview_csv", "alias_import_preview_xlsx"}:
+        preview_rows = list(request.session.get("inventario_alias_import_preview", []))
+        if not preview_rows:
+            messages.warning(request, "No hay pendientes de importación para exportar.")
+            return redirect("inventario:aliases_catalog")
+        if export_format == "alias_import_preview_csv":
+            return _export_alias_import_preview_csv(preview_rows)
+        return _export_alias_import_preview_xlsx(preview_rows)
     if export_format == "aliases_csv":
         return _export_aliases_catalog_csv(aliases_qs)
     if export_format == "aliases_xlsx":
