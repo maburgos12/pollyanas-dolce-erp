@@ -394,6 +394,29 @@ class InventarioAliasesPendingTests(TestCase):
             InsumoAlias.objects.filter(nombre_normalizado="azucar morena premium", insumo=insumo_azucar).exists()
         )
 
+    def test_auto_apply_suggestions_redirect_keeps_cross_filters(self):
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "auto_apply_suggestions",
+                "auto_min_score": "90",
+                "auto_min_sources": "2",
+                "auto_max_rows": "50",
+                "next_q": "harina",
+                "cross_q": "mantequilla",
+                "cross_min_sources": "2",
+                "cross_score_min": "90",
+                "cross_only_suggested": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        location = response["Location"]
+        self.assertIn("q=harina", location)
+        self.assertIn("cross_q=mantequilla", location)
+        self.assertIn("cross_min_sources=2", location)
+        self.assertIn("cross_score_min=90.0", location)
+        self.assertIn("cross_only_suggested=1", location)
+
     def test_bulk_reassign_resolves_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
         insumo_a = Insumo.objects.create(nombre="Harina A", unidad_base=unidad)

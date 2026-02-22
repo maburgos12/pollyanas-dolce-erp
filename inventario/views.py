@@ -1362,8 +1362,22 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             messages.success(request, "Pendientes de importación limpiados.")
 
         base_url = reverse("inventario:aliases_catalog")
+        redirect_params = {}
         if next_q:
-            return redirect(f"{base_url}?{urlencode({'q': next_q})}")
+            redirect_params["q"] = next_q
+        cross_q_post, _, cross_only_suggested_post, cross_min_sources_post, cross_score_min_post = _read_cross_filters(
+            request.POST
+        )
+        if cross_q_post:
+            redirect_params["cross_q"] = cross_q_post
+        if "cross_min_sources" in request.POST:
+            redirect_params["cross_min_sources"] = cross_min_sources_post
+        if "cross_score_min" in request.POST:
+            redirect_params["cross_score_min"] = cross_score_min_post
+        if cross_only_suggested_post:
+            redirect_params["cross_only_suggested"] = "1"
+        if redirect_params:
+            return redirect(f"{base_url}?{urlencode(redirect_params)}")
         return redirect(base_url)
 
     q = (request.GET.get("q") or "").strip()

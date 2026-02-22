@@ -151,6 +151,12 @@
                 {% csrf_token %}
                 <input type="hidden" name="action" value="apply_suggestion">
                 <input type="hidden" name="next_q" value="{{ q }}">
+                <input type="hidden" name="cross_q" value="{{ cross_q }}">
+                <input type="hidden" name="cross_min_sources" value="{{ cross_min_sources }}">
+                <input type="hidden" name="cross_score_min" value="{{ cross_score_min }}">
+                {% if cross_only_suggested %}
+                <input type="hidden" name="cross_only_suggested" value="1">
+                {% endif %}
                 <input type="hidden" name="alias_name" value="{{ row.nombre_muestra }}">
                 <input type="hidden" name="suggestion" value="{{ row.suggestion }}">
                 <input type="hidden" name="score_min" value="90">
@@ -461,6 +467,12 @@
                 {% csrf_token %}
                 <input type="hidden" name="action" value="apply_suggestion">
                 <input type="hidden" name="next_q" value="{{ q }}">
+                <input type="hidden" name="cross_q" value="{{ cross_q }}">
+                <input type="hidden" name="cross_min_sources" value="{{ cross_min_sources }}">
+                <input type="hidden" name="cross_score_min" value="{{ cross_score_min }}">
+                {% if cross_only_suggested %}
+                <input type="hidden" name="cross_only_suggested" value="1">
+                {% endif %}
                 <input type="hidden" name="alias_name" value="{{ p.nombre_origen }}">
                 <input type="hidden" name="suggestion" value="{{ p.sugerencia }}">
                 <input type="hidden" name="score_min" value="90">
