@@ -478,8 +478,9 @@ def _can_transition_recepcion(current: str, new: str) -> bool:
     return new in transitions.get(current, set())
 
 
-def _build_insumo_options():
-    insumos = list(Insumo.objects.filter(activo=True).order_by("nombre")[:200])
+def _build_insumo_options(limit: int = 1200):
+    limit_safe = max(100, min(int(limit or 1200), 5000))
+    insumos = list(Insumo.objects.filter(activo=True).order_by("nombre")[:limit_safe])
     insumo_ids = [i.id for i in insumos]
     existencias = {e.insumo_id: e for e in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)}
 

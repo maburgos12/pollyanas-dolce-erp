@@ -16,6 +16,7 @@
     {% csrf_token %}
     <input class="input-field" name="area" placeholder="Área" required>
     <input class="input-field" name="solicitante" placeholder="Solicitante" required>
+    <input class="input-field" id="insumo_filter" type="text" placeholder="Buscar insumo (autocomplete)...">
     <select class="input-field" id="insumo_id" name="insumo_id" required>
       <option value="">Insumo</option>
       {% for i in insumo_options %}
@@ -1013,6 +1014,42 @@
     const cantidadInput = document.getElementById("cantidad");
     const stockHint = document.getElementById("stock-hint");
     if (insumoSelect && cantidadInput && stockHint) {
+      const insumoFilter = document.getElementById("insumo_filter");
+      const originalOptions = Array.from(insumoSelect.options).slice(1).map((opt) => ({
+        value: opt.value,
+        text: opt.textContent,
+        dataset: { ...opt.dataset },
+      }));
+
+      function rebuildOptions(queryText) {
+        const query = (queryText || "").trim().toLowerCase();
+        const selectedValue = insumoSelect.value || "";
+        insumoSelect.innerHTML = '<option value="">Insumo</option>';
+
+        const filtered = query
+          ? originalOptions.filter((item) => item.text.toLowerCase().includes(query))
+          : originalOptions;
+
+        filtered.slice(0, 250).forEach((item) => {
+          const opt = document.createElement("option");
+          opt.value = item.value;
+          opt.textContent = item.text;
+          Object.keys(item.dataset || {}).forEach((k) => {
+            opt.dataset[k] = item.dataset[k];
+          });
+          insumoSelect.appendChild(opt);
+        });
+
+        if (selectedValue && filtered.some((item) => String(item.value) === String(selectedValue))) {
+          insumoSelect.value = selectedValue;
+        } else if (query && filtered.length === 1) {
+          insumoSelect.value = String(filtered[0].value);
+        } else {
+          insumoSelect.value = "";
+        }
+        onInsumoChange();
+      }
+
       function onInsumoChange() {
         const selected = insumoSelect.options[insumoSelect.selectedIndex];
         if (!selected || !selected.value) {
@@ -1053,6 +1090,9 @@
       }
 
       insumoSelect.addEventListener("change", onInsumoChange);
+      if (insumoFilter) {
+        insumoFilter.addEventListener("input", () => rebuildOptions(insumoFilter.value));
+      }
     }
 
     const checkAll = document.getElementById("import-preview-check-all");

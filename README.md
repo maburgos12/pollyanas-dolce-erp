@@ -44,5 +44,5 @@ Sprint 1 entrega:
 - `logs/` (reportes CSV del import)
 
 ## Notas
-- El matching en la UI tiene dropdown limitado a 500 insumos (Sprint 2: autocomplete).
+- El matching y captura operativa en UI ya incluyen búsqueda/autocomplete para insumos.
 - El importador es idempotente por `source_hash` en costos y por `hash_contenido` en recetas.

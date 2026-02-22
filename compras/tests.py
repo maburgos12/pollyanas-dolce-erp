@@ -420,6 +420,22 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertEqual(row["en_transito"], Decimal("2"))
         self.assertEqual(row["recomendado"], Decimal("1.0"))
 
+    def test_nueva_solicitud_insumo_options_no_limita_a_200(self):
+        for idx in range(0, 230):
+            Insumo.objects.create(
+                nombre=f"Insumo extra {idx:03d}",
+                categoria="Masa",
+                unidad_base=self.unidad_kg,
+                proveedor_principal=self.proveedor,
+                activo=True,
+            )
+
+        response = self.client.get(reverse("compras:solicitudes"))
+        self.assertEqual(response.status_code, 200)
+        options = response.context["insumo_options"]
+        # Debe incluir más de 200 activos para evitar truncamiento operativo.
+        self.assertGreater(len(options), 200)
+
 
 class ComprasSolicitudesImportPreviewTests(TestCase):
     def setUp(self):
