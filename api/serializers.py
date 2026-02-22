@@ -355,6 +355,71 @@ class ComprasRecepcionStatusSerializer(serializers.Serializer):
     estatus = serializers.ChoiceField(choices=[choice[0] for choice in RecepcionCompra.STATUS_CHOICES])
 
 
+class ComprasSolicitudImportPreviewRowSerializer(serializers.Serializer):
+    insumo = serializers.CharField(max_length=250, required=False, allow_blank=True, default="")
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=3)
+    proveedor = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    fecha_requerida = serializers.DateField(required=False, allow_null=True)
+    area = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    estatus = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
+
+    def validate_cantidad(self, value):
+        if value < 0:
+            raise serializers.ValidationError("La cantidad no puede ser negativa.")
+        return value
+
+
+class ComprasSolicitudImportPreviewSerializer(serializers.Serializer):
+    rows = ComprasSolicitudImportPreviewRowSerializer(many=True)
+    periodo_tipo = serializers.ChoiceField(choices=["mes", "q1", "q2"], required=False, default="mes")
+    periodo_mes = serializers.CharField(max_length=7, required=False, allow_blank=True, default="")
+    area_default = serializers.CharField(max_length=120, required=False, allow_blank=True, default="Compras")
+    solicitante_default = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    estatus_default = serializers.ChoiceField(
+        choices=[choice[0] for choice in SolicitudCompra.STATUS_CHOICES],
+        required=False,
+        default=SolicitudCompra.STATUS_BORRADOR,
+    )
+    evitar_duplicados = serializers.BooleanField(required=False, default=True)
+    score_min = serializers.IntegerField(required=False, min_value=0, max_value=100, default=90)
+    top = serializers.IntegerField(required=False, min_value=1, max_value=500, default=120)
+
+    def validate_rows(self, value):
+        if not value:
+            raise serializers.ValidationError("Debes enviar al menos una fila.")
+        if len(value) > 5000:
+            raise serializers.ValidationError("Máximo 5000 filas por request.")
+        return value
+
+
+class ComprasSolicitudImportConfirmRowSerializer(serializers.Serializer):
+    row_id = serializers.CharField(max_length=40, required=False, allow_blank=True, default="")
+    include = serializers.BooleanField(required=False, default=True)
+    insumo_id = serializers.IntegerField(required=False, min_value=1)
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=3, required=False)
+    area = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    fecha_requerida = serializers.DateField(required=False, allow_null=True)
+    estatus = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
+    proveedor_id = serializers.IntegerField(required=False, min_value=1, allow_null=True)
+    insumo_origen = serializers.CharField(max_length=250, required=False, allow_blank=True, default="")
+
+
+class ComprasSolicitudImportConfirmSerializer(serializers.Serializer):
+    rows = ComprasSolicitudImportConfirmRowSerializer(many=True)
+    periodo_tipo = serializers.ChoiceField(choices=["mes", "q1", "q2"], required=False, default="mes")
+    periodo_mes = serializers.CharField(max_length=7, required=False, allow_blank=True, default="")
+    evitar_duplicados = serializers.BooleanField(required=False, default=True)
+
+    def validate_rows(self, value):
+        if not value:
+            raise serializers.ValidationError("Debes enviar al menos una fila.")
+        if len(value) > 5000:
+            raise serializers.ValidationError("Máximo 5000 filas por request.")
+        return value
+
+
 class ForecastEstadisticoRequestSerializer(serializers.Serializer):
     alcance = serializers.ChoiceField(choices=["mes", "semana", "fin_semana"], required=False, default="mes")
     periodo = serializers.CharField(max_length=7, required=False, allow_blank=True)

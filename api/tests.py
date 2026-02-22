@@ -1072,6 +1072,75 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("auto_crear_orden", resp.json())
 
+    def test_endpoint_compras_solicitudes_import_preview_y_confirm(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Import API", activo=True)
+        self.insumo.proveedor_principal = proveedor
+        self.insumo.save(update_fields=["proveedor_principal"])
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("25.5"),
+            source_hash="api-import-preview-1",
+        )
+
+        preview_url = reverse("api_compras_solicitudes_import_preview")
+        preview_resp = self.client.post(
+            preview_url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": "2026-02",
+                "evitar_duplicados": True,
+                "score_min": 90,
+                "rows": [
+                    {
+                        "insumo": self.insumo.nombre,
+                        "cantidad": "3.000",
+                        "area": "Compras",
+                        "solicitante": "api-import",
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(preview_resp.status_code, 200)
+        preview_payload = preview_resp.json()
+        self.assertEqual(preview_payload["totales"]["filas"], 1)
+        self.assertEqual(preview_payload["totales"]["ready_count"], 1)
+        row = preview_payload["preview"]["rows"][0]
+        self.assertEqual(int(row["insumo_id"]), self.insumo.id)
+        self.assertEqual(row["include"], True)
+
+        confirm_url = reverse("api_compras_solicitudes_import_confirm")
+        confirm_resp = self.client.post(
+            confirm_url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": "2026-02",
+                "evitar_duplicados": True,
+                "rows": [row],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(confirm_resp.status_code, 200)
+        confirm_payload = confirm_resp.json()
+        self.assertEqual(confirm_payload["totales"]["created"], 1)
+        self.assertEqual(SolicitudCompra.objects.count(), 1)
+
+        confirm_dup_resp = self.client.post(
+            confirm_url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": "2026-02",
+                "evitar_duplicados": True,
+                "rows": [row],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(confirm_dup_resp.status_code, 200)
+        confirm_dup_payload = confirm_dup_resp.json()
+        self.assertEqual(confirm_dup_payload["totales"]["created"], 0)
+        self.assertEqual(confirm_dup_payload["totales"]["skipped_duplicate"], 1)
+
     def test_endpoint_compras_solicitud_requiere_rol(self):
         user_model = get_user_model()
         user = user_model.objects.create_user(
@@ -1091,6 +1160,18 @@ class RecetasCosteoApiTests(TestCase):
             },
         )
         self.assertEqual(resp.status_code, 403)
+        preview_resp = self.client.post(
+            reverse("api_compras_solicitudes_import_preview"),
+            {"rows": [{"insumo": "X", "cantidad": "1"}]},
+            content_type="application/json",
+        )
+        self.assertEqual(preview_resp.status_code, 403)
+        confirm_resp = self.client.post(
+            reverse("api_compras_solicitudes_import_confirm"),
+            {"rows": [{"include": True, "insumo_id": self.insumo.id, "cantidad": "1"}]},
+            content_type="application/json",
+        )
+        self.assertEqual(confirm_resp.status_code, 403)
 
     def test_endpoint_compras_solicitud_estatus_update(self):
         solicitud = SolicitudCompra.objects.create(

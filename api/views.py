@@ -29,6 +29,7 @@ from core.audit import log_event
 from core.models import Sucursal
 from compras.views import (
     _apply_recepcion_to_inventario,
+    _active_solicitud_statuses,
     _build_budget_context,
     _build_budget_history,
     _build_category_dashboard,
@@ -36,8 +37,11 @@ from compras.views import (
     _can_transition_recepcion,
     _can_transition_solicitud,
     _build_consumo_vs_plan_dashboard,
+    _default_fecha_requerida,
+    _parse_date_value,
     _build_provider_dashboard,
     _filtered_solicitudes,
+    _resolve_proveedor_name,
     _sanitize_consumo_ref_filter,
 )
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo
@@ -71,8 +75,11 @@ from recetas.views import (
     _ui_to_model_alcance,
 )
 from recetas.utils.normalizacion import normalizar_nombre
+from recetas.utils.matching import match_insumo
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from .serializers import (
+    ComprasSolicitudImportConfirmSerializer,
+    ComprasSolicitudImportPreviewSerializer,
     ComprasCrearOrdenSerializer,
     ComprasOrdenStatusSerializer,
     ComprasRecepcionCreateSerializer,
@@ -2095,6 +2102,342 @@ class PresupuestosConsolidadoView(APIView):
         }
 
         return Response(payload, status=status.HTTP_200_OK)
+
+
+class ComprasSolicitudesImportPreviewView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not can_manage_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para importar solicitudes de compras."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ComprasSolicitudImportPreviewSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        periodo_tipo = (data.get("periodo_tipo") or "mes").strip() or "mes"
+        periodo_mes = (data.get("periodo_mes") or "").strip()
+        default_fecha = _default_fecha_requerida(periodo_tipo, periodo_mes)
+        area_default = (data.get("area_default") or "Compras").strip() or "Compras"
+        solicitante_default = (data.get("solicitante_default") or request.user.username).strip() or request.user.username
+        estatus_default = (data.get("estatus_default") or SolicitudCompra.STATUS_BORRADOR).strip().upper()
+        valid_status = {x[0] for x in SolicitudCompra.STATUS_CHOICES}
+        if estatus_default not in valid_status:
+            estatus_default = SolicitudCompra.STATUS_BORRADOR
+        evitar_duplicados = bool(data.get("evitar_duplicados", True))
+        min_score = int(data.get("score_min") or 90)
+        top = int(data.get("top") or 120)
+
+        provider_map = {
+            normalizar_nombre(p.nombre): p
+            for p in Proveedor.objects.filter(activo=True).only("id", "nombre")
+        }
+        match_cache: dict[str, tuple[Insumo | None, float, str]] = {}
+        parsed_rows: list[dict] = []
+        duplicate_keys_to_check: set[tuple[str, int, date]] = set()
+
+        for idx, row in enumerate(data.get("rows") or [], start=1):
+            insumo_raw = str(row.get("insumo") or "").strip()
+            cantidad = _to_decimal(row.get("cantidad"), Decimal("0"))
+            if insumo_raw:
+                cache_key = normalizar_nombre(insumo_raw)
+                insumo_match, score, method = match_cache.get(cache_key, (None, 0.0, "sin_match"))
+                if cache_key not in match_cache:
+                    insumo_match, score, method = match_insumo(insumo_raw)
+                    match_cache[cache_key] = (insumo_match, score, method)
+            else:
+                insumo_match, score, method = (None, 0.0, "sin_match")
+            insumo_id = int(insumo_match.id) if (insumo_match and score >= min_score) else 0
+
+            area = str(row.get("area") or area_default).strip() or area_default
+            solicitante = str(row.get("solicitante") or solicitante_default).strip() or solicitante_default
+            fecha_requerida = _parse_date_value(row.get("fecha_requerida"), default_fecha)
+            estatus = str(row.get("estatus") or estatus_default).strip().upper()
+            if estatus not in valid_status:
+                estatus = estatus_default
+            proveedor = _resolve_proveedor_name(str(row.get("proveedor") or ""), provider_map)
+            if not proveedor and insumo_match:
+                proveedor = insumo_match.proveedor_principal
+
+            parsed_rows.append(
+                {
+                    "row_id": str(idx),
+                    "source_row": idx,
+                    "insumo_origen": insumo_raw,
+                    "insumo_sugerencia": insumo_match.nombre if insumo_match else "",
+                    "insumo_id": insumo_id,
+                    "cantidad": cantidad,
+                    "area": area,
+                    "solicitante": solicitante,
+                    "fecha_requerida": fecha_requerida,
+                    "estatus": estatus,
+                    "proveedor_id": int(proveedor.id) if proveedor else 0,
+                    "score": float(score or 0),
+                    "metodo": method,
+                    "has_insumo_match": bool(insumo_match),
+                }
+            )
+            if evitar_duplicados and insumo_id:
+                duplicate_keys_to_check.add((area, insumo_id, fecha_requerida))
+
+        duplicates_found: set[tuple[str, int, date]] = set()
+        if duplicate_keys_to_check:
+            areas = sorted({k[0] for k in duplicate_keys_to_check})
+            insumo_ids = sorted({k[1] for k in duplicate_keys_to_check})
+            fechas = sorted({k[2] for k in duplicate_keys_to_check})
+            duplicates_found = {
+                (area, int(insumo_id), fecha)
+                for area, insumo_id, fecha in SolicitudCompra.objects.filter(
+                    area__in=areas,
+                    insumo_id__in=insumo_ids,
+                    fecha_requerida__in=fechas,
+                    estatus__in=_active_solicitud_statuses(),
+                ).values_list("area", "insumo_id", "fecha_requerida")
+            }
+
+        preview_cost_by_insumo: dict[int, Decimal] = {}
+        preview_insumo_ids = sorted({int(p["insumo_id"]) for p in parsed_rows if int(p["insumo_id"] or 0) > 0})
+        if preview_insumo_ids:
+            for c in CostoInsumo.objects.filter(insumo_id__in=preview_insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+                if c.insumo_id not in preview_cost_by_insumo:
+                    preview_cost_by_insumo[c.insumo_id] = c.costo_unitario
+
+        preview_rows: list[dict] = []
+        ready_count = 0
+        duplicates_count = 0
+        without_match_count = 0
+        invalid_qty_count = 0
+        ready_qty_total = Decimal("0")
+        ready_budget_total = Decimal("0")
+        for parsed in parsed_rows:
+            insumo_raw = str(parsed["insumo_origen"] or "").strip()
+            cantidad = parsed["cantidad"]
+            insumo_id = parsed["insumo_id"]
+            costo_unitario = preview_cost_by_insumo.get(insumo_id, Decimal("0")) if insumo_id else Decimal("0")
+            presupuesto_estimado = (cantidad * costo_unitario) if cantidad > 0 else Decimal("0")
+            area = parsed["area"]
+            fecha_requerida = parsed["fecha_requerida"]
+            duplicate = bool(insumo_id and (area, insumo_id, fecha_requerida) in duplicates_found)
+
+            notes: list[str] = []
+            hard_error = False
+            if not insumo_raw:
+                notes.append("Insumo vacío en fila.")
+                hard_error = True
+            if not insumo_id:
+                if parsed["has_insumo_match"]:
+                    notes.append(f"Score de match insuficiente (<{min_score}).")
+                else:
+                    notes.append("Sin match de insumo.")
+                hard_error = True
+                without_match_count += 1
+            if cantidad <= 0:
+                notes.append("Cantidad inválida (debe ser > 0).")
+                hard_error = True
+                invalid_qty_count += 1
+            if duplicate:
+                notes.append("Posible duplicado con solicitud activa.")
+                duplicates_count += 1
+
+            include = not hard_error
+            if include and cantidad > 0:
+                ready_count += 1
+                ready_qty_total += cantidad
+                ready_budget_total += max(presupuesto_estimado, Decimal("0"))
+
+            preview_rows.append(
+                {
+                    "row_id": parsed["row_id"],
+                    "source_row": parsed["source_row"],
+                    "insumo_origen": insumo_raw,
+                    "insumo_sugerencia": parsed["insumo_sugerencia"],
+                    "insumo_id": parsed["insumo_id"] or None,
+                    "cantidad": str(cantidad),
+                    "area": parsed["area"],
+                    "solicitante": parsed["solicitante"],
+                    "fecha_requerida": fecha_requerida.isoformat(),
+                    "estatus": parsed["estatus"],
+                    "proveedor_id": parsed["proveedor_id"] or None,
+                    "score": round(float(parsed["score"] or 0), 1),
+                    "metodo": parsed["metodo"],
+                    "costo_unitario": str(costo_unitario),
+                    "presupuesto_estimado": str(presupuesto_estimado),
+                    "duplicate": duplicate,
+                    "notes": " | ".join(notes),
+                    "include": include,
+                }
+            )
+
+        return Response(
+            {
+                "preview": {
+                    "periodo_tipo": periodo_tipo,
+                    "periodo_mes": periodo_mes,
+                    "evitar_duplicados": evitar_duplicados,
+                    "score_min": min_score,
+                    "rows": preview_rows[:top],
+                },
+                "totales": {
+                    "filas": len(preview_rows),
+                    "ready_count": ready_count,
+                    "excluded_count": max(0, len(preview_rows) - ready_count),
+                    "duplicates_count": duplicates_count,
+                    "without_match_count": without_match_count,
+                    "invalid_qty_count": invalid_qty_count,
+                    "ready_qty_total": str(ready_qty_total),
+                    "ready_budget_total": str(ready_budget_total),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ComprasSolicitudesImportConfirmView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not can_manage_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para confirmar importación de solicitudes."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ComprasSolicitudImportConfirmSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        rows = data.get("rows") or []
+        periodo_tipo = (data.get("periodo_tipo") or "mes").strip() or "mes"
+        periodo_mes = (data.get("periodo_mes") or "").strip()
+        evitar_duplicados = bool(data.get("evitar_duplicados", True))
+        default_fecha = _default_fecha_requerida(periodo_tipo, periodo_mes)
+        valid_status = {x[0] for x in SolicitudCompra.STATUS_CHOICES}
+
+        included_rows = [row for row in rows if bool(row.get("include", True))]
+        insumo_ids = sorted({int(row.get("insumo_id") or 0) for row in included_rows if int(row.get("insumo_id") or 0) > 0})
+        proveedor_ids = sorted(
+            {
+                int(row.get("proveedor_id") or 0)
+                for row in included_rows
+                if int(row.get("proveedor_id") or 0) > 0
+            }
+        )
+
+        insumos_map = Insumo.objects.select_related("proveedor_principal").in_bulk(insumo_ids)
+        proveedores_map = Proveedor.objects.filter(activo=True, id__in=proveedor_ids).in_bulk()
+
+        existing_duplicate_keys: set[tuple[str, int, date]] = set()
+        if evitar_duplicados:
+            batch_keys: set[tuple[str, int, date]] = set()
+            for row in included_rows:
+                area = (str(row.get("area") or "").strip() or "General")
+                insumo_id = int(row.get("insumo_id") or 0)
+                if insumo_id <= 0:
+                    continue
+                fecha_requerida = _parse_date_value(row.get("fecha_requerida"), default_fecha)
+                batch_keys.add((area, insumo_id, fecha_requerida))
+            if batch_keys:
+                areas = sorted({k[0] for k in batch_keys})
+                insumo_ids_batch = sorted({k[1] for k in batch_keys})
+                fechas = sorted({k[2] for k in batch_keys})
+                existing_duplicate_keys = {
+                    (area, int(insumo_id), fecha)
+                    for area, insumo_id, fecha in SolicitudCompra.objects.filter(
+                        area__in=areas,
+                        insumo_id__in=insumo_ids_batch,
+                        fecha_requerida__in=fechas,
+                        estatus__in=_active_solicitud_statuses(),
+                    ).values_list("area", "insumo_id", "fecha_requerida")
+                }
+
+        created = 0
+        skipped_invalid = 0
+        skipped_duplicate = 0
+        skipped_removed = max(0, len(rows) - len(included_rows))
+        created_duplicate_keys: set[tuple[str, int, date]] = set()
+        created_items: list[dict] = []
+
+        with transaction.atomic():
+            for row in rows:
+                if not bool(row.get("include", True)):
+                    continue
+
+                area = (str(row.get("area") or "").strip() or "General")
+                solicitante = (str(row.get("solicitante") or "").strip() or request.user.username)
+                estatus = (str(row.get("estatus") or SolicitudCompra.STATUS_BORRADOR).strip().upper())
+                if estatus not in valid_status:
+                    estatus = SolicitudCompra.STATUS_BORRADOR
+
+                insumo_id = int(row.get("insumo_id") or 0)
+                insumo = insumos_map.get(insumo_id)
+                if not insumo:
+                    skipped_invalid += 1
+                    continue
+
+                cantidad = _to_decimal(row.get("cantidad"), Decimal("0"))
+                if cantidad <= 0:
+                    skipped_invalid += 1
+                    continue
+
+                fecha_requerida = _parse_date_value(row.get("fecha_requerida"), default_fecha)
+                proveedor = proveedores_map.get(int(row.get("proveedor_id") or 0))
+                if not proveedor:
+                    proveedor = insumo.proveedor_principal
+
+                duplicate_key = (area, int(insumo.id), fecha_requerida)
+                if evitar_duplicados and ((duplicate_key in existing_duplicate_keys) or (duplicate_key in created_duplicate_keys)):
+                    skipped_duplicate += 1
+                    continue
+
+                solicitud = SolicitudCompra.objects.create(
+                    area=area,
+                    solicitante=solicitante,
+                    insumo=insumo,
+                    proveedor_sugerido=proveedor,
+                    cantidad=cantidad,
+                    fecha_requerida=fecha_requerida,
+                    estatus=estatus,
+                )
+                log_event(
+                    request.user,
+                    "CREATE",
+                    "compras.SolicitudCompra",
+                    solicitud.id,
+                    {"folio": solicitud.folio, "source": "api_import_confirm"},
+                )
+                if evitar_duplicados:
+                    created_duplicate_keys.add(duplicate_key)
+                created += 1
+                if len(created_items) < 80:
+                    created_items.append(
+                        {
+                            "id": solicitud.id,
+                            "folio": solicitud.folio,
+                            "insumo": solicitud.insumo.nombre,
+                            "cantidad": str(solicitud.cantidad),
+                            "fecha_requerida": solicitud.fecha_requerida.isoformat(),
+                            "estatus": solicitud.estatus,
+                        }
+                    )
+
+        return Response(
+            {
+                "periodo_tipo": periodo_tipo,
+                "periodo_mes": periodo_mes,
+                "totales": {
+                    "rows": len(rows),
+                    "created": created,
+                    "skipped_removed": skipped_removed,
+                    "skipped_duplicate": skipped_duplicate,
+                    "skipped_invalid": skipped_invalid,
+                },
+                "items": created_items,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ComprasSolicitudesListView(APIView):

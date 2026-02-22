@@ -35,6 +35,8 @@ Sprint 1 entrega:
 - API: GET /api/integraciones/point/resumen/ (KPI de homologación Point: insumos, recetas, proveedores y pendientes)
 - API: POST /api/inventario/point-pendientes/resolver/ (resolver/descartar pendientes Point por insumo, producto o proveedor)
 - API: GET /api/compras/solicitudes/ (listado de solicitudes con filtros, estatus y presupuesto estimado)
+- API: POST /api/compras/solicitudes/import-preview/ (vista previa de carga masiva de solicitudes en JSON)
+- API: POST /api/compras/solicitudes/import-confirm/ (confirmación de carga masiva usando filas de preview)
 - API: GET /api/compras/ordenes/ (listado de órdenes con filtros y monto total estimado)
 - API: GET /api/compras/recepciones/ (listado de recepciones con filtros y totales por estatus)
 - API: POST /api/compras/solicitud/{id}/estatus/ (cambio de estado con reglas de transición)
