@@ -104,6 +104,12 @@ class RecetasAuthRedirectTests(TestCase):
         self.assertIn("/login/", response["Location"])
         self.assertIn("next=", response["Location"])
 
+    def test_pronosticos_legacy_redirects_to_login_when_anonymous(self):
+        response = self.client.get(reverse("recetas:pronosticos_legacy"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response["Location"])
+        self.assertIn("next=", response["Location"])
+
     def test_matching_pendientes_redirects_to_login_when_anonymous(self):
         response = self.client.get(reverse("recetas:matching_pendientes"))
         self.assertEqual(response.status_code, 302)
