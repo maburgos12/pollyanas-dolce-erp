@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 import os
 import tempfile
+from io import BytesIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -9,7 +10,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from compras.models import OrdenCompra, SolicitudCompra
 from maestros.models import Insumo, Proveedor, UnidadMedida
@@ -73,6 +74,28 @@ class MatchingPendientesAutocompleteTests(TestCase):
         body = response.content.decode("utf-8")
         self.assertIn("receta,posicion,ingrediente,metodo,score,insumo_ligado", body)
         self.assertIn("Receta Test Match", body)
+
+    def test_matching_pendientes_export_xlsx(self):
+        response = self.client.get(reverse("recetas:matching_pendientes"), {"export": "xlsx", "q": "Harina"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(response.content), data_only=True)
+        ws = wb.active
+        headers = [ws.cell(row=1, column=i).value for i in range(1, 7)]
+        self.assertEqual(headers, ["receta", "posicion", "ingrediente", "metodo", "score", "insumo_ligado"])
+        self.assertEqual(ws.cell(row=2, column=1).value, "Receta Test Match")
+        self.assertEqual(ws.cell(row=2, column=3).value, "Harina")
+
+    def test_matching_pendientes_context_stats(self):
+        response = self.client.get(reverse("recetas:matching_pendientes"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["stats"]["total"], 1)
+        self.assertEqual(response.context["stats"]["recetas"], 1)
+        self.assertEqual(response.context["stats"]["fuzzy"], 1)
+        self.assertEqual(response.context["stats"]["no_match"], 0)
 
     def test_matching_insumos_search_filters_by_query(self):
         response = self.client.get(

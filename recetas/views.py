@@ -1027,6 +1027,11 @@ def matching_pendientes(request: HttpRequest) -> HttpResponse:
     if q:
         pendientes = pendientes.filter(insumo_texto__icontains=q)
 
+    total_pendientes = pendientes.count()
+    recetas_afectadas = pendientes.values("receta_id").distinct().count()
+    no_match_count = pendientes.filter(match_method=LineaReceta.MATCH_NONE).count()
+    fuzzy_count = pendientes.filter(match_method=LineaReceta.MATCH_FUZZY).count()
+
     export_format = (request.GET.get("export") or "").strip().lower()
     if export_format == "csv":
         now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
@@ -1046,10 +1051,56 @@ def matching_pendientes(request: HttpRequest) -> HttpResponse:
                 ]
             )
         return response
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "matching_pendientes"
+        ws.append(["receta", "posicion", "ingrediente", "metodo", "score", "insumo_ligado"])
+        for linea in pendientes.iterator(chunk_size=500):
+            ws.append(
+                [
+                    linea.receta.nombre,
+                    linea.posicion,
+                    linea.insumo_texto or "",
+                    linea.match_method or "",
+                    float(linea.match_score or 0),
+                    linea.insumo.nombre if linea.insumo_id and linea.insumo else "",
+                ]
+            )
+        ws.column_dimensions["A"].width = 38
+        ws.column_dimensions["B"].width = 10
+        ws.column_dimensions["C"].width = 34
+        ws.column_dimensions["D"].width = 16
+        ws.column_dimensions["E"].width = 12
+        ws.column_dimensions["F"].width = 34
+
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="matching_pendientes_{now_str}.xlsx"'
+        return response
 
     paginator = Paginator(pendientes, 25)
     page = paginator.get_page(request.GET.get("page"))
-    return render(request, "recetas/matching_pendientes.html", {"page": page, "q": q})
+    return render(
+        request,
+        "recetas/matching_pendientes.html",
+        {
+            "page": page,
+            "q": q,
+            "stats": {
+                "total": total_pendientes,
+                "recetas": recetas_afectadas,
+                "no_match": no_match_count,
+                "fuzzy": fuzzy_count,
+            },
+        },
+    )
 
 
 @login_required

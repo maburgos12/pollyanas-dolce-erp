@@ -9,6 +9,26 @@
       <button class="btn btn-outline-primary" type="submit">Filtrar</button>
     </form>
     <a class="btn btn-outline-secondary" href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=csv">Exportar CSV</a>
+    <a class="btn btn-outline-secondary" href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=xlsx">Exportar XLSX</a>
+  </div>
+</div>
+
+<div class="kpi-grid mb-3">
+  <div class="kpi-card">
+    <div class="kpi-number">{{ stats.total }}</div>
+    <div class="kpi-label">Líneas pendientes</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number">{{ stats.recetas }}</div>
+    <div class="kpi-label">Recetas afectadas</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number {% if stats.no_match > 0 %}is-danger{% else %}is-success{% endif %}">{{ stats.no_match }}</div>
+    <div class="kpi-label">Sin match</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number {% if stats.fuzzy > 0 %}is-warning{% else %}is-success{% endif %}">{{ stats.fuzzy }}</div>
+    <div class="kpi-label">Fuzzy</div>
   </div>
 </div>
 
