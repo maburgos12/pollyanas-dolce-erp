@@ -60,6 +60,10 @@ Sprint 1 entrega:
 4) Abre:
    - UI: http://localhost:8000/
    - Admin: http://localhost:8000/admin/
+5) (Opcional) generar token API para integraciones:
+   ```bash
+   docker compose exec web python manage.py generar_token_api --username admin
+   ```
 
 ## Opción B: correr sin Docker (dev)
 - Configura un Postgres local y variables de entorno similares a `.env.example`
@@ -69,6 +73,7 @@ Sprint 1 entrega:
   python manage.py migrate
   python manage.py createsuperuser
   python manage.py bootstrap_roles
+  python manage.py generar_token_api --username admin
   python manage.py runserver
   ```
 
