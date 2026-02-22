@@ -4597,6 +4597,7 @@ class VentasPipelineResumenView(APIView):
             )
 
         periodo = (request.GET.get("periodo") or "").strip()
+        top = _parse_bounded_int(request.GET.get("top", 120), default=120, min_value=1, max_value=500)
         if periodo:
             parsed_period = _parse_period(periodo)
             if not parsed_period:
@@ -4660,6 +4661,75 @@ class VentasPipelineResumenView(APIView):
         latest_pronostico = pronostico_qs.order_by("-actualizado_en").values_list("actualizado_en", flat=True).first()
         latest_solicitud = solicitudes_qs.order_by("-actualizado_en").values_list("actualizado_en", flat=True).first()
 
+        historial_map = {
+            int(row["receta_id"]): _to_decimal(row["total"])
+            for row in historial_qs.values("receta_id").annotate(total=Sum("cantidad"))
+        }
+        pronostico_map = {
+            int(row["receta_id"]): _to_decimal(row["total"])
+            for row in pronostico_qs.values("receta_id").annotate(total=Sum("cantidad"))
+        }
+        solicitud_map = {
+            int(row["receta_id"]): _to_decimal(row["total"])
+            for row in solicitudes_qs.values("receta_id").annotate(total=Sum("cantidad"))
+        }
+        receta_ids = sorted(set(historial_map.keys()) | set(pronostico_map.keys()) | set(solicitud_map.keys()))
+        receta_names = {
+            int(receta_id): nombre
+            for receta_id, nombre in Receta.objects.filter(id__in=receta_ids).values_list("id", "nombre")
+        }
+
+        rows_tmp: list[dict[str, Any]] = []
+        for receta_id in receta_ids:
+            historial_qty = historial_map.get(receta_id, Decimal("0"))
+            pronostico_qty = pronostico_map.get(receta_id, Decimal("0"))
+            solicitud_qty = solicitud_map.get(receta_id, Decimal("0"))
+            delta_solicitud_vs_pronostico = solicitud_qty - pronostico_qty
+            delta_historial_vs_solicitud = historial_qty - solicitud_qty
+
+            cobertura_pct = None
+            if pronostico_qty > 0:
+                cobertura_pct = ((solicitud_qty / pronostico_qty) * Decimal("100")).quantize(Decimal("0.1"))
+
+            cumplimiento_pct = None
+            if solicitud_qty > 0:
+                cumplimiento_pct = ((historial_qty / solicitud_qty) * Decimal("100")).quantize(Decimal("0.1"))
+
+            status_tag = "SIN_MOV"
+            if solicitud_qty > 0:
+                threshold = max(Decimal("1"), solicitud_qty * Decimal("0.10"))
+                if delta_historial_vs_solicitud > threshold:
+                    status_tag = "SOBRE"
+                elif delta_historial_vs_solicitud < (threshold * Decimal("-1")):
+                    status_tag = "BAJO"
+                else:
+                    status_tag = "OK"
+            elif historial_qty > 0:
+                status_tag = "SIN_SOLICITUD"
+            elif pronostico_qty > 0:
+                status_tag = "SIN_SOLICITUD"
+
+            rows_tmp.append(
+                {
+                    "_sort": abs(delta_historial_vs_solicitud),
+                    "receta_id": receta_id,
+                    "receta": receta_names.get(receta_id) or f"Receta {receta_id}",
+                    "historial_qty": _to_float(historial_qty),
+                    "pronostico_qty": _to_float(pronostico_qty),
+                    "solicitud_qty": _to_float(solicitud_qty),
+                    "delta_solicitud_vs_pronostico": _to_float(delta_solicitud_vs_pronostico.quantize(Decimal("0.001"))),
+                    "delta_historial_vs_solicitud": _to_float(delta_historial_vs_solicitud.quantize(Decimal("0.001"))),
+                    "cobertura_pct": _to_float(cobertura_pct) if cobertura_pct is not None else None,
+                    "cumplimiento_pct": _to_float(cumplimiento_pct) if cumplimiento_pct is not None else None,
+                    "status": status_tag,
+                }
+            )
+        rows_tmp.sort(key=lambda row: row["_sort"], reverse=True)
+        rows = []
+        for row in rows_tmp[:top]:
+            row.pop("_sort", None)
+            rows.append(row)
+
         return Response(
             {
                 "scope": {
@@ -4667,6 +4737,7 @@ class VentasPipelineResumenView(APIView):
                     "sucursal_id": sucursal.id if sucursal else None,
                     "sucursal": sucursal.nombre if sucursal else "Todas",
                     "incluir_preparaciones": incluir_preparaciones,
+                    "top": top,
                 },
                 "totales": {
                     "historial_qty": _to_float(historial_total),
@@ -4679,6 +4750,7 @@ class VentasPipelineResumenView(APIView):
                     "historial_recetas": historial_qs.values("receta_id").distinct().count(),
                     "pronostico_recetas": pronostico_qs.values("receta_id").distinct().count(),
                     "solicitud_recetas": solicitudes_qs.values("receta_id").distinct().count(),
+                    "rows_count": len(receta_ids),
                 },
                 "solicitud_by_alcance": {
                     "MES": _to_float(by_alcance[SolicitudVenta.ALCANCE_MES]),
@@ -4690,6 +4762,7 @@ class VentasPipelineResumenView(APIView):
                     "pronostico": latest_pronostico,
                     "solicitud": latest_solicitud,
                 },
+                "rows": rows,
             },
             status=status.HTTP_200_OK,
         )

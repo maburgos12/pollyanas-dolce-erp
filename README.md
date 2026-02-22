@@ -19,7 +19,7 @@ Sprint 1 entrega:
 - API: GET /api/ventas/pronostico-insights/ (perfil estacional por mes/día, top recetas y participación)
 - API: GET /api/ventas/historial/ (histórico de ventas filtrable por sucursal/receta/fecha)
 - API: GET /api/ventas/pronostico/ (pronósticos filtrables por periodo/rango/receta)
-- API: GET /api/ventas/pipeline/resumen/ (resumen ejecutivo historial vs pronóstico vs solicitud por periodo)
+- API: GET /api/ventas/pipeline/resumen/ (resumen ejecutivo + detalle por receta: historial vs pronóstico vs solicitud)
 - API: GET /api/ventas/solicitud/list/ (solicitudes de ventas filtrables por alcance/sucursal/periodo)
 - API: POST /api/ventas/pronostico/bulk/ (carga masiva de pronóstico con dry_run)
 - API: POST /api/ventas/pronostico/import-preview/ (previsualiza carga de pronóstico sin aplicar cambios)

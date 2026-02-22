@@ -1945,6 +1945,10 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["totales"]["solicitud_qty"], 50.0)
         self.assertEqual(payload["solicitud_by_alcance"]["MES"], 40.0)
         self.assertEqual(payload["solicitud_by_alcance"]["SEMANA"], 10.0)
+        self.assertGreaterEqual(payload["totales"]["rows_count"], 1)
+        self.assertGreaterEqual(len(payload["rows"]), 1)
+        self.assertEqual(payload["rows"][0]["receta_id"], self.receta.id)
+        self.assertEqual(payload["rows"][0]["status"], "BAJO")
 
     def test_endpoint_ventas_listados_requires_perm(self):
         user_model = get_user_model()
