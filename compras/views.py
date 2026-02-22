@@ -3300,10 +3300,41 @@ def confirmar_importacion_solicitudes(request: HttpRequest) -> HttpResponse:
     insumos_map = Insumo.objects.select_related("proveedor_principal").in_bulk(insumo_ids)
     proveedores_map = Proveedor.objects.filter(activo=True, id__in=proveedor_ids).in_bulk()
 
+    existing_duplicate_keys: set[tuple[str, int, date]] = set()
+    if evitar_duplicados:
+        batch_keys: set[tuple[str, int, date]] = set()
+        for row in rows:
+            row_id = str(row.get("row_id") or "")
+            if request.POST.get(f"row_{row_id}_include") != "on":
+                continue
+            area = (request.POST.get(f"row_{row_id}_area") or "").strip() or "General"
+            try:
+                insumo_id = int(request.POST.get(f"row_{row_id}_insumo_id") or "0")
+            except ValueError:
+                insumo_id = 0
+            if insumo_id <= 0:
+                continue
+            fecha_requerida = _parse_date_value(request.POST.get(f"row_{row_id}_fecha_requerida"), default_fecha)
+            batch_keys.add((area, insumo_id, fecha_requerida))
+        if batch_keys:
+            areas = sorted({k[0] for k in batch_keys})
+            insumo_ids_batch = sorted({k[1] for k in batch_keys})
+            fechas = sorted({k[2] for k in batch_keys})
+            existing_duplicate_keys = {
+                (area, int(insumo_id), fecha)
+                for area, insumo_id, fecha in SolicitudCompra.objects.filter(
+                    area__in=areas,
+                    insumo_id__in=insumo_ids_batch,
+                    fecha_requerida__in=fechas,
+                    estatus__in=_active_solicitud_statuses(),
+                ).values_list("area", "insumo_id", "fecha_requerida")
+            }
+
     created = 0
     skipped_invalid = 0
     skipped_duplicate = 0
     skipped_removed = 0
+    created_duplicate_keys: set[tuple[str, int, date]] = set()
 
     for row in rows:
         row_id = str(row.get("row_id") or "")
@@ -3342,14 +3373,9 @@ def confirmar_importacion_solicitudes(request: HttpRequest) -> HttpResponse:
         if not proveedor:
             proveedor = insumo.proveedor_principal
 
+        duplicate_key = (area, int(insumo.id), fecha_requerida)
         if evitar_duplicados:
-            exists = SolicitudCompra.objects.filter(
-                area=area,
-                insumo=insumo,
-                fecha_requerida=fecha_requerida,
-                estatus__in=_active_solicitud_statuses(),
-            ).exists()
-            if exists:
+            if (duplicate_key in existing_duplicate_keys) or (duplicate_key in created_duplicate_keys):
                 skipped_duplicate += 1
                 continue
 
@@ -3372,6 +3398,8 @@ def confirmar_importacion_solicitudes(request: HttpRequest) -> HttpResponse:
                 "source": "import_preview_confirm",
             },
         )
+        if evitar_duplicados:
+            created_duplicate_keys.add(duplicate_key)
         created += 1
 
     request.session.pop(IMPORT_PREVIEW_SESSION_KEY, None)

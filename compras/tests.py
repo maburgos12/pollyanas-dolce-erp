@@ -673,6 +673,77 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         self.assertTrue(row["duplicate"])
         self.assertIn("Posible duplicado", row["notes"])
 
+    def test_confirm_import_evita_duplicados_dentro_del_mismo_archivo(self):
+        session = self.client.session
+        session["compras_solicitudes_import_preview"] = {
+            "periodo_tipo": "mes",
+            "periodo_mes": "2026-02",
+            "evitar_duplicados": True,
+            "rows": [
+                {
+                    "row_id": "2",
+                    "source_row": 2,
+                    "insumo_origen": "Harina Import",
+                    "insumo_sugerencia": "Harina Import",
+                    "insumo_id": str(self.insumo_harina.id),
+                    "cantidad": "2.000",
+                    "area": "Compras",
+                    "solicitante": "ana",
+                    "fecha_requerida": "2026-02-20",
+                    "estatus": SolicitudCompra.STATUS_BORRADOR,
+                    "proveedor_id": str(self.proveedor.id),
+                    "score": "100.0",
+                    "metodo": "EXACT",
+                    "duplicate": False,
+                    "notes": "",
+                    "include": True,
+                },
+                {
+                    "row_id": "3",
+                    "source_row": 3,
+                    "insumo_origen": "Harina Import",
+                    "insumo_sugerencia": "Harina Import",
+                    "insumo_id": str(self.insumo_harina.id),
+                    "cantidad": "1.000",
+                    "area": "Compras",
+                    "solicitante": "ana",
+                    "fecha_requerida": "2026-02-20",
+                    "estatus": SolicitudCompra.STATUS_BORRADOR,
+                    "proveedor_id": str(self.proveedor.id),
+                    "score": "100.0",
+                    "metodo": "EXACT",
+                    "duplicate": False,
+                    "notes": "",
+                    "include": True,
+                },
+            ],
+        }
+        session.save()
+
+        response = self.client.post(
+            reverse("compras:solicitudes_importar_confirmar"),
+            {
+                "row_2_include": "on",
+                "row_2_insumo_id": str(self.insumo_harina.id),
+                "row_2_cantidad": "2.000",
+                "row_2_fecha_requerida": "2026-02-20",
+                "row_2_area": "Compras",
+                "row_2_solicitante": "ana",
+                "row_2_proveedor_id": str(self.proveedor.id),
+                "row_2_estatus": SolicitudCompra.STATUS_BORRADOR,
+                "row_3_include": "on",
+                "row_3_insumo_id": str(self.insumo_harina.id),
+                "row_3_cantidad": "1.000",
+                "row_3_fecha_requerida": "2026-02-20",
+                "row_3_area": "Compras",
+                "row_3_solicitante": "ana",
+                "row_3_proveedor_id": str(self.proveedor.id),
+                "row_3_estatus": SolicitudCompra.STATUS_BORRADOR,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(SolicitudCompra.objects.count(), 1)
+
 
 class ComprasOrdenesRecepcionesFiltersTests(TestCase):
     def setUp(self):
