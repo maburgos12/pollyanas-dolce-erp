@@ -2714,6 +2714,108 @@ def solicitud_ventas_importar(request: HttpRequest) -> HttpResponse:
 @login_required
 @permission_required("recetas.change_planproduccion", raise_exception=True)
 @require_POST
+def solicitud_ventas_aplicar_desde_forecast(request: HttpRequest) -> HttpResponse:
+    plan_id = (request.POST.get("plan_id") or "").strip()
+    next_params: dict[str, str] = {}
+    if plan_id:
+        next_params["plan_id"] = plan_id
+
+    payload = request.session.get("pronostico_estadistico_preview")
+    if not payload:
+        messages.error(request, "No hay preview de pronóstico activo. Ejecuta primero la previsualización.")
+        if next_params:
+            return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+        return redirect(reverse("recetas:plan_produccion"))
+
+    sucursal_id = payload.get("sucursal_id")
+    if not sucursal_id:
+        messages.error(request, "Selecciona una sucursal en la previsualización para aplicar ajuste automático.")
+        if next_params:
+            return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+        return redirect(reverse("recetas:plan_produccion"))
+
+    compare = _forecast_vs_solicitud_preview(payload)
+    if not compare or not compare.get("rows"):
+        messages.warning(request, "No hay filas disponibles para aplicar ajustes.")
+        if next_params:
+            return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+        return redirect(reverse("recetas:plan_produccion"))
+
+    modo = (request.POST.get("modo") or "desviadas").strip().lower()
+    receta_id = _to_int_safe(request.POST.get("receta_id"), default=0)
+    rows = list(compare["rows"])
+    if modo == "sobre":
+        rows = [r for r in rows if r["status"] == "SOBRE"]
+    elif modo == "bajo":
+        rows = [r for r in rows if r["status"] == "BAJO"]
+    elif modo == "receta":
+        rows = [r for r in rows if int(r["receta_id"]) == receta_id]
+    else:
+        rows = [r for r in rows if r["status"] in {"SOBRE", "BAJO"}]
+
+    if not rows:
+        messages.info(request, "No hay filas objetivo para el ajuste seleccionado.")
+        if next_params:
+            return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+        return redirect(reverse("recetas:plan_produccion"))
+
+    alcance = _ui_to_model_alcance(payload.get("alcance"))
+    periodo = _normalize_periodo_mes(payload.get("periodo"))
+    target_start = _parse_date_safe(payload.get("target_start")) or compare["target_start"]
+    target_end = _parse_date_safe(payload.get("target_end")) or compare["target_end"]
+    fuente = (request.POST.get("fuente") or "AUTO_FORECAST_ADJUST").strip()[:40] or "AUTO_FORECAST_ADJUST"
+
+    sucursal = Sucursal.objects.filter(pk=sucursal_id).first()
+    if sucursal is None:
+        messages.error(request, "La sucursal del preview ya no existe; vuelve a generar el pronóstico.")
+        if next_params:
+            return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+        return redirect(reverse("recetas:plan_produccion"))
+
+    created = 0
+    updated = 0
+    skipped = 0
+    for row in rows:
+        forecast_qty = Decimal(str(row.get("forecast_qty") or 0))
+        if forecast_qty < 0:
+            skipped += 1
+            continue
+        receta = Receta.objects.filter(pk=row["receta_id"]).first()
+        if receta is None:
+            skipped += 1
+            continue
+        record, was_created = SolicitudVenta.objects.get_or_create(
+            receta=receta,
+            sucursal=sucursal,
+            alcance=alcance,
+            fecha_inicio=target_start,
+            fecha_fin=target_end,
+            defaults={
+                "periodo": periodo,
+                "cantidad": forecast_qty,
+                "fuente": fuente,
+            },
+        )
+        if was_created:
+            created += 1
+            continue
+        record.periodo = periodo
+        record.cantidad = forecast_qty
+        record.fuente = fuente
+        record.save(update_fields=["periodo", "cantidad", "fuente", "actualizado_en"])
+        updated += 1
+
+    messages.success(
+        request,
+        f"Ajuste aplicado desde forecast. Creadas: {created}. Actualizadas: {updated}. Omitidas: {skipped}.",
+    )
+    next_params["periodo"] = periodo
+    return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
 def ventas_historicas_importar(request: HttpRequest) -> HttpResponse:
     uploaded = request.FILES.get("archivo")
     plan_id = (request.POST.get("plan_id") or "").strip()

@@ -62,6 +62,11 @@ urlpatterns = [
         name="solicitud_ventas_importar",
     ),
     path(
+        "plan-produccion/solicitud-ventas/aplicar-forecast/",
+        views.solicitud_ventas_aplicar_desde_forecast,
+        name="solicitud_ventas_aplicar_desde_forecast",
+    ),
+    path(
         "plan-produccion/pronosticos/estadistico/",
         views.pronostico_estadistico_desde_historial,
         name="pronostico_estadistico_desde_historial",
