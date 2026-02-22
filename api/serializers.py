@@ -117,6 +117,31 @@ class PlanDesdePronosticoRequestSerializer(serializers.Serializer):
         return f"{year:04d}-{month:02d}"
 
 
+class PlanProduccionItemCreateSerializer(serializers.Serializer):
+    receta_id = serializers.IntegerField()
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=3)
+    notas = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
+
+    def validate_cantidad(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("La cantidad debe ser mayor a 0.")
+        return value
+
+
+class PlanProduccionCreateSerializer(serializers.Serializer):
+    nombre = serializers.CharField(max_length=140, required=False, allow_blank=True, default="")
+    fecha_produccion = serializers.DateField(required=False)
+    notas = serializers.CharField(required=False, allow_blank=True, default="")
+    items = PlanProduccionItemCreateSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError("Debes enviar al menos una fila en items.")
+        if len(value) > 400:
+            raise serializers.ValidationError("Máximo 400 renglones por plan.")
+        return value
+
+
 class ComprasSolicitudCreateSerializer(serializers.Serializer):
     area = serializers.CharField(max_length=120)
     solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True)

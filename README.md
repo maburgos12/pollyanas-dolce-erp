@@ -9,6 +9,7 @@ Sprint 1 entrega:
 - Ajustes de inventario con flujo de aprobación/rechazo (ADMIN) y trazabilidad
 - Recepciones de compra cerradas impactan inventario automáticamente (entrada + bitácora)
 - API: POST /api/mrp/explode/
+- API: GET/POST /api/mrp/planes/ (listado y creación manual de planes de producción)
 - API: POST /api/mrp/calcular-requerimientos/ (por plan, por periodo o por lista manual)
 - API: POST /api/mrp/generar-plan-pronostico/ (crea plan de producción desde pronóstico)
 - API: POST /api/ventas/pronostico-backtest/ (mide precisión histórica: MAPE/Bias por ventana)

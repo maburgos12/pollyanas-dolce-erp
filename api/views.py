@@ -72,6 +72,7 @@ from .serializers import (
     InventarioAjusteDecisionSerializer,
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
+    PlanProduccionCreateSerializer,
     PlanDesdePronosticoRequestSerializer,
     PronosticoVentaBulkSerializer,
     RecetaCostoVersionSerializer,
@@ -2027,6 +2028,177 @@ class MRPRequerimientosView(APIView):
             **data,
         }
         return Response(response, status=status.HTTP_200_OK)
+
+
+class PlanProduccionListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _serialize_plan(plan: PlanProduccion, include_items: bool = False) -> dict:
+        rows = list(plan.items.select_related("receta").all().order_by("id"))
+        cantidad_total = sum((_to_decimal(r.cantidad) for r in rows), Decimal("0"))
+        costo_total = sum((_to_decimal(r.costo_total_estimado) for r in rows), Decimal("0"))
+        payload = {
+            "id": plan.id,
+            "nombre": plan.nombre,
+            "fecha_produccion": str(plan.fecha_produccion),
+            "notas": plan.notas or "",
+            "items_count": len(rows),
+            "cantidad_total": str(cantidad_total),
+            "costo_total_estimado": str(costo_total.quantize(Decimal("0.001"))),
+            "creado_por": plan.creado_por.username if plan.creado_por_id else "",
+            "actualizado_en": plan.actualizado_en,
+        }
+        if include_items:
+            payload["items"] = [
+                {
+                    "id": r.id,
+                    "receta_id": r.receta_id,
+                    "receta": r.receta.nombre,
+                    "codigo_point": r.receta.codigo_point,
+                    "cantidad": str(_to_decimal(r.cantidad)),
+                    "costo_total_estimado": str(_to_decimal(r.costo_total_estimado).quantize(Decimal("0.001"))),
+                    "notas": r.notas or "",
+                }
+                for r in rows
+            ]
+        return payload
+
+    def get(self, request):
+        if not request.user.has_perm("recetas.view_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para consultar planes de producción."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        q = (request.GET.get("q") or "").strip()
+        periodo = (request.GET.get("periodo") or request.GET.get("mes") or "").strip()
+        fecha_desde_raw = (request.GET.get("fecha_desde") or "").strip()
+        fecha_hasta_raw = (request.GET.get("fecha_hasta") or "").strip()
+        include_items = _parse_bool(request.GET.get("include_items"), default=False)
+        limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=400)
+
+        fecha_desde = _parse_iso_date(fecha_desde_raw)
+        if fecha_desde_raw and fecha_desde is None:
+            return Response(
+                {"detail": "fecha_desde inválida. Usa formato YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fecha_hasta = _parse_iso_date(fecha_hasta_raw)
+        if fecha_hasta_raw and fecha_hasta is None:
+            return Response(
+                {"detail": "fecha_hasta inválida. Usa formato YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if fecha_desde and fecha_hasta and fecha_hasta < fecha_desde:
+            return Response(
+                {"detail": "fecha_hasta no puede ser menor que fecha_desde."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = PlanProduccion.objects.prefetch_related("items__receta").order_by("-fecha_produccion", "-id")
+        parsed_period = _parse_period(periodo)
+        if periodo and not parsed_period:
+            return Response(
+                {"detail": "periodo inválido. Usa formato YYYY-MM."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if parsed_period:
+            y, m = parsed_period
+            qs = qs.filter(fecha_produccion__year=y, fecha_produccion__month=m)
+            periodo = f"{y:04d}-{m:02d}"
+        else:
+            periodo = ""
+
+        if fecha_desde:
+            qs = qs.filter(fecha_produccion__gte=fecha_desde)
+        if fecha_hasta:
+            qs = qs.filter(fecha_produccion__lte=fecha_hasta)
+        if q:
+            qs = qs.filter(
+                Q(nombre__icontains=q) | Q(notas__icontains=q) | Q(items__receta__nombre__icontains=q)
+            ).distinct()
+
+        plans = list(qs[:limit])
+        items = []
+        items_count_total = 0
+        cantidad_total = Decimal("0")
+        costo_total = Decimal("0")
+        for p in plans:
+            serialized = self._serialize_plan(p, include_items=include_items)
+            items.append(serialized)
+            items_count_total += int(serialized["items_count"])
+            cantidad_total += _to_decimal(serialized["cantidad_total"])
+            costo_total += _to_decimal(serialized["costo_total_estimado"])
+
+        return Response(
+            {
+                "filters": {
+                    "q": q,
+                    "periodo": periodo,
+                    "fecha_desde": str(fecha_desde) if fecha_desde else "",
+                    "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
+                    "include_items": include_items,
+                    "limit": limit,
+                },
+                "totales": {
+                    "planes": len(items),
+                    "renglones": items_count_total,
+                    "cantidad_total": str(cantidad_total),
+                    "costo_total_estimado": str(costo_total.quantize(Decimal("0.001"))),
+                },
+                "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.add_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para crear planes de producción."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = PlanProduccionCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        fecha_produccion = data.get("fecha_produccion") or timezone.localdate()
+        nombre = (data.get("nombre") or "").strip()
+        notas = (data.get("notas") or "").strip()
+        rows = data["items"]
+
+        receta_ids = sorted({int(row["receta_id"]) for row in rows})
+        recetas = Receta.objects.filter(id__in=receta_ids).only("id", "nombre", "codigo_point")
+        receta_map = {r.id: r for r in recetas}
+        missing_ids = [rid for rid in receta_ids if rid not in receta_map]
+        if missing_ids:
+            return Response(
+                {"detail": "Hay recetas inexistentes en items.", "missing_receta_ids": missing_ids},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            plan = PlanProduccion.objects.create(
+                nombre=nombre or f"Plan {fecha_produccion} #{PlanProduccion.objects.count() + 1}",
+                fecha_produccion=fecha_produccion,
+                notas=notas,
+                creado_por=request.user if request.user.is_authenticated else None,
+            )
+            for row in rows:
+                receta = receta_map[int(row["receta_id"])]
+                PlanProduccionItem.objects.create(
+                    plan=plan,
+                    receta=receta,
+                    cantidad=_to_decimal(row.get("cantidad")),
+                    notas=(row.get("notas") or "").strip()[:160],
+                )
+
+        payload = self._serialize_plan(plan, include_items=True)
+        return Response(
+            {"created": True, "plan": payload},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class PlanDesdePronosticoCreateView(APIView):

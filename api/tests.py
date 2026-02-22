@@ -217,6 +217,58 @@ class RecetasCosteoApiTests(TestCase):
         payload = resp.json()
         self.assertIn("non_field_errors", payload)
 
+    def test_endpoint_mrp_planes_create_and_list(self):
+        url = reverse("api_mrp_planes")
+        resp_create = self.client.post(
+            url,
+            {
+                "nombre": "Plan API Manual",
+                "fecha_produccion": "2026-03-15",
+                "notas": "Carga API",
+                "items": [
+                    {
+                        "receta_id": self.receta.id,
+                        "cantidad": "2.500",
+                        "notas": "Turno A",
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_create.status_code, 201)
+        payload_create = resp_create.json()
+        self.assertTrue(payload_create["created"])
+        plan_id = payload_create["plan"]["id"]
+        self.assertEqual(payload_create["plan"]["items_count"], 1)
+        self.assertEqual(Decimal(payload_create["plan"]["cantidad_total"]), Decimal("2.500"))
+
+        resp_list = self.client.get(url, {"periodo": "2026-03", "include_items": 1})
+        self.assertEqual(resp_list.status_code, 200)
+        payload_list = resp_list.json()
+        self.assertEqual(payload_list["totales"]["planes"], 1)
+        self.assertEqual(payload_list["items"][0]["id"], plan_id)
+        self.assertEqual(len(payload_list["items"][0]["items"]), 1)
+        self.assertEqual(payload_list["items"][0]["items"][0]["receta_id"], self.receta.id)
+
+    def test_endpoint_mrp_planes_requires_permission(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_planes_api",
+            email="sin_perm_planes_api@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+        url = reverse("api_mrp_planes")
+
+        resp_list = self.client.get(url)
+        self.assertEqual(resp_list.status_code, 403)
+        resp_create = self.client.post(
+            url,
+            {"items": [{"receta_id": self.receta.id, "cantidad": "1"}]},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_create.status_code, 403)
+
     def test_endpoint_inventario_sugerencias_compra_por_plan(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor API", lead_time_dias=3, activo=True)
         self.insumo.proveedor_principal = proveedor

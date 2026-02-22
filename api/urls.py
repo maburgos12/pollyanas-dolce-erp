@@ -15,6 +15,7 @@ from .views import (
     InventarioAjusteDecisionView,
     InventarioSugerenciasCompraView,
     MRPExplodeView,
+    PlanProduccionListCreateView,
     MRPRequerimientosView,
     PlanDesdePronosticoCreateView,
     PronosticoVentaBulkUpsertView,
@@ -32,6 +33,7 @@ from .views import (
 
 urlpatterns = [
     path("mrp/explode/", MRPExplodeView.as_view(), name="api_mrp_explode"),
+    path("mrp/planes/", PlanProduccionListCreateView.as_view(), name="api_mrp_planes"),
     path("mrp/calcular-requerimientos/", MRPRequerimientosView.as_view(), name="api_mrp_calcular_requerimientos"),
     path("mrp/generar-plan-pronostico/", PlanDesdePronosticoCreateView.as_view(), name="api_mrp_generar_plan_pronostico"),
     path("ventas/pronostico-backtest/", ForecastBacktestView.as_view(), name="api_ventas_pronostico_backtest"),
