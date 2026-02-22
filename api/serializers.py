@@ -171,6 +171,22 @@ class PlanProduccionItemUpdateSerializer(serializers.Serializer):
         return value
 
 
+class InventarioAliasCreateSerializer(serializers.Serializer):
+    alias = serializers.CharField(max_length=250)
+    insumo_id = serializers.IntegerField()
+    resolver_cross_source = serializers.BooleanField(required=False, default=True)
+
+
+class InventarioAliasMassReassignSerializer(serializers.Serializer):
+    alias_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False,
+        max_length=500,
+    )
+    insumo_id = serializers.IntegerField(min_value=1)
+    resolver_cross_source = serializers.BooleanField(required=False, default=True)
+
+
 class ComprasSolicitudCreateSerializer(serializers.Serializer):
     area = serializers.CharField(max_length=120)
     solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True)

@@ -10,8 +10,8 @@ from django.urls import reverse
 
 from core.models import Sucursal
 from compras.models import OrdenCompra, PresupuestoCompraPeriodo, RecepcionCompra, SolicitudCompra
-from inventario.models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
-from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
+from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
+from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 from recetas.models import (
     LineaReceta,
     PlanProduccion,
@@ -383,6 +383,127 @@ class RecetasCosteoApiTests(TestCase):
             403,
         )
         self.assertEqual(self.client.delete(url_item_detail).status_code, 403)
+
+    def test_endpoint_inventario_aliases_list_create_and_reassign(self):
+        insumo_destino = Insumo.objects.create(nombre="Harina Pan API", unidad_base=self.unidad, activo=True)
+
+        url_aliases = reverse("api_inventario_aliases")
+        resp_create = self.client.post(
+            url_aliases,
+            {"alias": "Harina pastelera 25kg", "insumo_id": self.insumo.id},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_create.status_code, 201)
+        payload_create = resp_create.json()
+        self.assertTrue(payload_create["created"])
+        alias_id = payload_create["alias"]["id"]
+
+        resp_list = self.client.get(url_aliases, {"q": "harina", "limit": 20})
+        self.assertEqual(resp_list.status_code, 200)
+        payload_list = resp_list.json()
+        self.assertGreaterEqual(payload_list["totales"]["rows"], 1)
+
+        resp_update = self.client.post(
+            url_aliases,
+            {"alias": "Harina pastelera 25kg", "insumo_id": insumo_destino.id, "resolver_cross_source": False},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_update.status_code, 200)
+        payload_update = resp_update.json()
+        self.assertTrue(payload_update["updated"])
+        self.assertEqual(payload_update["alias"]["insumo_id"], insumo_destino.id)
+
+        url_reasignar = reverse("api_inventario_aliases_reasignar")
+        resp_reasignar = self.client.post(
+            url_reasignar,
+            {"alias_ids": [alias_id], "insumo_id": self.insumo.id, "resolver_cross_source": False},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_reasignar.status_code, 200)
+        payload_reasignar = resp_reasignar.json()
+        self.assertEqual(payload_reasignar["updated"], 1)
+        self.assertEqual(payload_reasignar["target_insumo"]["id"], self.insumo.id)
+
+    def test_endpoint_inventario_aliases_pendientes_summary(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-001",
+            point_nombre="Harina pastelera premium",
+            method="FUZZY",
+            fuzzy_score=88.0,
+            fuzzy_sugerencia="Harina API",
+        )
+        receta_pending = Receta.objects.create(
+            nombre="Receta pending alias",
+            sheet_name="Insumos pending alias",
+            hash_contenido="hash-api-pending-001",
+        )
+        LineaReceta.objects.create(
+            receta=receta_pending,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Harina pastelera premium",
+            cantidad=Decimal("1.0"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_score=88.0,
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[
+                {
+                    "nombre_origen": "Harina pastelera premium",
+                    "nombre_normalizado": "harina pastelera premium",
+                    "suggestion": "Harina API",
+                    "score": 90,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                }
+            ],
+        )
+
+        url = reverse("api_inventario_aliases_pendientes")
+        resp = self.client.get(url, {"limit": 50, "runs": 5})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertGreaterEqual(payload["totales"]["almacen"], 1)
+        self.assertGreaterEqual(payload["totales"]["point"], 1)
+        self.assertGreaterEqual(payload["totales"]["recetas"], 1)
+        self.assertGreaterEqual(len(payload["items"]["almacen"]), 1)
+        self.assertGreaterEqual(len(payload["items"]["point"]), 1)
+        self.assertGreaterEqual(len(payload["items"]["recetas"]), 1)
+
+    def test_endpoint_inventario_aliases_requires_permissions(self):
+        alias = InsumoAlias.objects.create(nombre="Azucar especial", insumo=self.insumo)
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_aliases_api",
+            email="sin_perm_aliases_api@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+
+        self.assertEqual(self.client.get(reverse("api_inventario_aliases")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("api_inventario_aliases_pendientes")).status_code, 403)
+        self.assertEqual(
+            self.client.post(
+                reverse("api_inventario_aliases"),
+                {"alias": "X", "insumo_id": self.insumo.id},
+                content_type="application/json",
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                reverse("api_inventario_aliases_reasignar"),
+                {"alias_ids": [alias.id], "insumo_id": self.insumo.id},
+                content_type="application/json",
+            ).status_code,
+            403,
+        )
 
     def test_endpoint_inventario_sugerencias_compra_por_plan(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor API", lead_time_dias=3, activo=True)

@@ -36,9 +36,9 @@ from compras.views import (
     _filtered_solicitudes,
     _sanitize_consumo_ref_filter,
 )
-from inventario.models import AjusteInventario, ExistenciaInsumo
-from inventario.views import _apply_ajuste
-from maestros.models import CostoInsumo, Insumo, Proveedor
+from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo
+from inventario.views import _apply_ajuste, _resolve_cross_source_with_alias
+from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor
 from recetas.models import (
     LineaReceta,
     PlanProduccion,
@@ -58,6 +58,7 @@ from recetas.views import (
     _resolve_sucursal_for_sales,
     _ui_to_model_alcance,
 )
+from recetas.utils.normalizacion import normalizar_nombre
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from .serializers import (
     ComprasCrearOrdenSerializer,
@@ -70,6 +71,8 @@ from .serializers import (
     ForecastEstadisticoRequestSerializer,
     InventarioAjusteCreateSerializer,
     InventarioAjusteDecisionSerializer,
+    InventarioAliasCreateSerializer,
+    InventarioAliasMassReassignSerializer,
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
     PlanProduccionCreateSerializer,
@@ -722,6 +725,281 @@ class InventarioSugerenciasCompraView(APIView):
                     "costo_estimado_total": str(total_costo),
                 },
                 "items": rows[:limit],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InventarioAliasesListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _serialize_alias(alias: InsumoAlias) -> dict:
+        return {
+            "id": alias.id,
+            "alias": alias.nombre,
+            "normalizado": alias.nombre_normalizado,
+            "insumo_id": alias.insumo_id,
+            "insumo": alias.insumo.nombre if alias.insumo_id else "",
+            "unidad": alias.insumo.unidad_base.codigo if alias.insumo_id and alias.insumo.unidad_base_id else "",
+            "categoria": alias.insumo.categoria if alias.insumo_id else "",
+        }
+
+    def get(self, request):
+        if not can_view_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar aliases de inventario."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        q = (request.GET.get("q") or "").strip()
+        insumo_id_raw = (request.GET.get("insumo_id") or "").strip()
+        limit = _parse_bounded_int(request.GET.get("limit", 250), default=250, min_value=1, max_value=1200)
+
+        qs = InsumoAlias.objects.select_related("insumo__unidad_base").order_by("nombre")
+        if q:
+            q_norm = normalizar_nombre(q)
+            qs = qs.filter(
+                Q(nombre__icontains=q)
+                | Q(nombre_normalizado__icontains=q_norm)
+                | Q(insumo__nombre__icontains=q)
+                | Q(insumo__codigo_point__icontains=q)
+            )
+
+        insumo_id = None
+        if insumo_id_raw:
+            try:
+                insumo_id = int(insumo_id_raw)
+            except ValueError:
+                return Response(
+                    {"detail": "insumo_id inválido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            qs = qs.filter(insumo_id=insumo_id)
+
+        total_rows = qs.count()
+        rows = [self._serialize_alias(a) for a in qs[:limit]]
+        return Response(
+            {
+                "filters": {"q": q, "insumo_id": insumo_id, "limit": limit},
+                "totales": {"rows": total_rows, "returned": len(rows)},
+                "items": rows,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        if not can_manage_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para crear/editar aliases de inventario."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = InventarioAliasCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        alias_name = (data.get("alias") or "").strip()
+        alias_norm = normalizar_nombre(alias_name)
+        if not alias_norm:
+            return Response(
+                {"detail": "Alias inválido: nombre vacío después de normalizar."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        insumo = Insumo.objects.filter(pk=data["insumo_id"], activo=True).select_related("unidad_base").first()
+        if insumo is None:
+            return Response(
+                {"detail": "insumo_id no encontrado o inactivo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        alias, created = InsumoAlias.objects.get_or_create(
+            nombre_normalizado=alias_norm,
+            defaults={"nombre": alias_name[:250], "insumo": insumo},
+        )
+
+        updated = False
+        if not created:
+            changed = []
+            if alias.insumo_id != insumo.id:
+                alias.insumo = insumo
+                changed.append("insumo")
+            if alias.nombre != alias_name[:250]:
+                alias.nombre = alias_name[:250]
+                changed.append("nombre")
+            if changed:
+                alias.save(update_fields=changed)
+                updated = True
+
+        point_resolved = 0
+        recetas_resolved = 0
+        if bool(data.get("resolver_cross_source", True)):
+            point_resolved, recetas_resolved = _resolve_cross_source_with_alias(alias_name, insumo)
+
+        alias.refresh_from_db()
+        return Response(
+            {
+                "created": created,
+                "updated": updated,
+                "alias": self._serialize_alias(alias),
+                "resolved": {
+                    "point_pending": point_resolved,
+                    "recetas_pending": recetas_resolved,
+                },
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class InventarioAliasesMassReassignView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not can_manage_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para reasignar aliases de inventario."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = InventarioAliasMassReassignSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        insumo = Insumo.objects.filter(pk=data["insumo_id"], activo=True).select_related("unidad_base").first()
+        if insumo is None:
+            return Response(
+                {"detail": "insumo_id no encontrado o inactivo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        alias_ids = list(dict.fromkeys(int(aid) for aid in data["alias_ids"]))
+        aliases = list(InsumoAlias.objects.filter(id__in=alias_ids).select_related("insumo"))
+        if not aliases:
+            return Response(
+                {"detail": "No se encontraron aliases con los IDs enviados."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        resolver_cross = bool(data.get("resolver_cross_source", True))
+        updated = 0
+        point_resolved = 0
+        recetas_resolved = 0
+        touched_ids: list[int] = []
+        for alias in aliases:
+            if alias.insumo_id == insumo.id:
+                continue
+            alias.insumo = insumo
+            alias.save(update_fields=["insumo"])
+            updated += 1
+            touched_ids.append(alias.id)
+            if resolver_cross:
+                p_count, r_count = _resolve_cross_source_with_alias(alias.nombre, insumo)
+                point_resolved += p_count
+                recetas_resolved += r_count
+
+        return Response(
+            {
+                "target_insumo": {"id": insumo.id, "nombre": insumo.nombre},
+                "selected": len(alias_ids),
+                "found": len(aliases),
+                "updated": updated,
+                "touched_alias_ids": touched_ids,
+                "resolved": {
+                    "point_pending": point_resolved,
+                    "recetas_pending": recetas_resolved,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InventarioAliasesPendientesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar pendientes de homologación."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=400)
+        runs_to_scan = _parse_bounded_int(request.GET.get("runs", 5), default=5, min_value=1, max_value=30)
+
+        almacen_rows: list[dict] = []
+        sync_runs = list(AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at")[:runs_to_scan])
+        for run in sync_runs:
+            for row in run.pending_preview or []:
+                nombre_origen = str((row or {}).get("nombre_origen") or "").strip()
+                if not nombre_origen:
+                    continue
+                almacen_rows.append(
+                    {
+                        "run_id": run.id,
+                        "run_started_at": run.started_at,
+                        "nombre_origen": nombre_origen,
+                        "nombre_normalizado": str((row or {}).get("nombre_normalizado") or normalizar_nombre(nombre_origen)),
+                        "sugerencia": str((row or {}).get("suggestion") or ""),
+                        "score": float((row or {}).get("score") or 0),
+                        "metodo": str((row or {}).get("method") or ""),
+                        "fuente": str((row or {}).get("fuente") or "ALMACEN"),
+                    }
+                )
+                if len(almacen_rows) >= limit:
+                    break
+            if len(almacen_rows) >= limit:
+                break
+
+        point_qs = PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).order_by("-fuzzy_score", "point_nombre")
+        point_total = point_qs.count()
+        point_rows = [
+            {
+                "id": p.id,
+                "point_codigo": p.point_codigo,
+                "point_nombre": p.point_nombre,
+                "sugerencia": p.fuzzy_sugerencia or "",
+                "score": float(p.fuzzy_score or 0),
+                "metodo": p.method or "",
+                "actualizado_en": p.actualizado_en,
+            }
+            for p in point_qs[:limit]
+        ]
+
+        recetas_qs = (
+            LineaReceta.objects.filter(insumo__isnull=True)
+            .filter(match_status__in=[LineaReceta.STATUS_NEEDS_REVIEW, LineaReceta.STATUS_REJECTED])
+            .select_related("receta")
+            .order_by("-match_score", "receta__nombre", "posicion")
+        )
+        recetas_total = recetas_qs.count()
+        recetas_rows = [
+            {
+                "id": linea.id,
+                "receta_id": linea.receta_id,
+                "receta": linea.receta.nombre,
+                "insumo_texto": linea.insumo_texto or "",
+                "nombre_normalizado": normalizar_nombre(linea.insumo_texto or ""),
+                "score": float(linea.match_score or 0),
+                "metodo": linea.match_method or "",
+                "estatus": linea.match_status,
+            }
+            for linea in recetas_qs[:limit]
+        ]
+
+        return Response(
+            {
+                "filters": {"limit": limit, "runs": runs_to_scan},
+                "totales": {
+                    "almacen": len(almacen_rows),
+                    "point": point_total,
+                    "recetas": recetas_total,
+                },
+                "items": {
+                    "almacen": almacen_rows,
+                    "point": point_rows,
+                    "recetas": recetas_rows,
+                },
             },
             status=status.HTTP_200_OK,
         )
