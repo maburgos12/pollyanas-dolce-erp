@@ -46,6 +46,9 @@ Sprint 1 entrega:
 - API: POST /api/compras/recepcion/{id}/estatus/ (actualiza recepción y cierra OC automáticamente si aplica)
 - API: POST /api/auth/token/ (obtiene token para integraciones API)
 - API: POST /api/auth/token/rotate/ (rota token del usuario autenticado)
+- API: POST /api/auth/token/revoke/ (revoca el token del usuario autenticado)
+- API: GET /api/auth/me/ (perfil + roles/capacidades del usuario autenticado)
+- API: GET /api/audit/logs/ (bitácora operativa filtrable para ADMIN/DG)
 
 ## Requisitos
 - Docker Desktop (Mac/Windows) **o** Python 3.12 + Postgres 16

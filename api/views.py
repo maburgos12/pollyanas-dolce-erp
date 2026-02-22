@@ -20,13 +20,14 @@ from core.access import (
     ROLE_DG,
     can_manage_compras,
     can_manage_inventario,
+    can_view_audit,
     can_view_compras,
     can_view_inventario,
     can_view_maestros,
     has_any_role,
 )
 from core.audit import log_event
-from core.models import Sucursal
+from core.models import AuditLog, Sucursal
 from compras.views import (
     _apply_recepcion_to_inventario,
     _active_solicitud_statuses,
@@ -209,6 +210,108 @@ class ApiTokenRotateView(APIView):
         Token.objects.filter(user=request.user).delete()
         token = Token.objects.create(user=request.user)
         return Response({"token": token.key}, status=status.HTTP_200_OK)
+
+
+class ApiTokenRevokeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        deleted, _ = Token.objects.filter(user=request.user).delete()
+        return Response({"revoked": bool(deleted)}, status=status.HTTP_200_OK)
+
+
+class ApiAuthMeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        group_names = list(user.groups.values_list("name", flat=True)) if user.is_authenticated else []
+        return Response(
+            {
+                "id": user.id,
+                "username": user.get_username(),
+                "email": getattr(user, "email", "") or "",
+                "is_superuser": bool(user.is_superuser),
+                "is_staff": bool(user.is_staff),
+                "groups": sorted(group_names),
+                "permissions": {
+                    "can_view_compras": can_view_compras(user),
+                    "can_manage_compras": can_manage_compras(user),
+                    "can_view_inventario": can_view_inventario(user),
+                    "can_manage_inventario": can_manage_inventario(user),
+                    "can_view_maestros": can_view_maestros(user),
+                    "can_view_audit": can_view_audit(user),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AuditLogListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_audit(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar bitácora."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        q = (request.GET.get("q") or "").strip()
+        action = (request.GET.get("action") or "").strip().upper()
+        model_name = (request.GET.get("model") or "").strip()
+        user_id_raw = (request.GET.get("user_id") or "").strip()
+        limit = _parse_bounded_int(request.GET.get("limit", 200), default=200, min_value=1, max_value=1000)
+
+        qs = AuditLog.objects.select_related("user").order_by("-timestamp", "-id")
+        if q:
+            qs = qs.filter(
+                Q(action__icontains=q)
+                | Q(model__icontains=q)
+                | Q(object_id__icontains=q)
+                | Q(payload__icontains=q)
+                | Q(user__username__icontains=q)
+            )
+        if action:
+            qs = qs.filter(action=action)
+        if model_name:
+            qs = qs.filter(model__icontains=model_name)
+        if user_id_raw:
+            try:
+                user_id = int(user_id_raw)
+            except ValueError:
+                return Response({"detail": "user_id inválido."}, status=status.HTTP_400_BAD_REQUEST)
+            qs = qs.filter(user_id=user_id)
+
+        total = qs.count()
+        rows = []
+        for log in qs[:limit]:
+            rows.append(
+                {
+                    "id": log.id,
+                    "timestamp": log.timestamp,
+                    "action": log.action,
+                    "model": log.model,
+                    "object_id": log.object_id,
+                    "user_id": log.user_id,
+                    "user": log.user.username if log.user_id else "",
+                    "payload": log.payload or {},
+                }
+            )
+        return Response(
+            {
+                "filters": {
+                    "q": q,
+                    "action": action,
+                    "model": model_name,
+                    "user_id": user_id_raw,
+                    "limit": limit,
+                },
+                "totales": {"rows": total, "returned": len(rows)},
+                "items": rows,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 def _can_approve_ajustes(user) -> bool:

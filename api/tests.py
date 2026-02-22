@@ -9,7 +9,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.authtoken.models import Token
 
-from core.models import Sucursal
+from core.models import AuditLog, Sucursal
 from compras.models import OrdenCompra, PresupuestoCompraPeriodo, RecepcionCompra, SolicitudCompra
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
@@ -124,6 +124,60 @@ class RecetasCosteoApiTests(TestCase):
         self.client.logout()
         resp = self.client.post(reverse("api_auth_token_rotate"), {}, content_type="application/json")
         self.assertIn(resp.status_code, {401, 403})
+
+    def test_endpoint_auth_me(self):
+        url = reverse("api_auth_me")
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["username"], self.user.username)
+        self.assertTrue(payload["is_superuser"])
+        self.assertIn("permissions", payload)
+        self.assertTrue(payload["permissions"]["can_view_compras"])
+
+    def test_endpoint_auth_token_revoke(self):
+        token = Token.objects.create(user=self.user)
+        self.client.logout()
+        revoke_resp = self.client.post(
+            reverse("api_auth_token_revoke"),
+            {},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Token {token.key}",
+        )
+        self.assertEqual(revoke_resp.status_code, 200)
+        self.assertTrue(revoke_resp.json()["revoked"])
+        self.assertFalse(Token.objects.filter(key=token.key).exists())
+
+        protected = self.client.get(
+            reverse("api_mrp_planes"),
+            HTTP_AUTHORIZATION=f"Token {token.key}",
+        )
+        self.assertIn(protected.status_code, {401, 403})
+
+    def test_endpoint_audit_logs_list_and_filters(self):
+        AuditLog.objects.create(user=self.user, action="CREATE", model="x.Model", object_id="1", payload={"k": "v1"})
+        AuditLog.objects.create(user=self.user, action="UPDATE", model="x.Model", object_id="2", payload={"k": "v2"})
+        AuditLog.objects.create(user=self.user, action="DELETE", model="y.Model", object_id="3", payload={"k": "v3"})
+
+        url = reverse("api_audit_logs")
+        resp = self.client.get(url, {"action": "UPDATE", "model": "x.", "limit": 20})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertGreaterEqual(payload["totales"]["rows"], 1)
+        self.assertGreaterEqual(payload["totales"]["returned"], 1)
+        self.assertEqual(payload["items"][0]["action"], "UPDATE")
+        self.assertIn("x.Model", payload["items"][0]["model"])
+
+    def test_endpoint_audit_logs_requires_permission(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_audit_api",
+            email="sin_perm_audit_api@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("api_audit_logs"))
+        self.assertEqual(resp.status_code, 403)
 
     def test_endpoint_versiones(self):
         url = reverse("api_receta_versiones", args=[self.receta.id])
