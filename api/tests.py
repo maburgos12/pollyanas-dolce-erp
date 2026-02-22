@@ -572,6 +572,59 @@ class RecetasCosteoApiTests(TestCase):
         resp = self.client.get(url, {"point_tipo": "CUALQUIERA"})
         self.assertEqual(resp.status_code, 400)
 
+    def test_endpoint_inventario_aliases_pendientes_unificados(self):
+        nombre_cross = "Harina pastelera premium"
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CROSS-01",
+            point_nombre=nombre_cross,
+            method="FUZZY",
+            fuzzy_score=87.0,
+            fuzzy_sugerencia="Harina API",
+        )
+        receta_cross = Receta.objects.create(
+            nombre="Receta Cross API",
+            sheet_name="Insumos Cross",
+            hash_contenido="hash-api-cross-001",
+        )
+        LineaReceta.objects.create(
+            receta=receta_cross,
+            posicion=1,
+            insumo=None,
+            insumo_texto=nombre_cross,
+            cantidad=Decimal("1.0"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_score=87.0,
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[
+                {
+                    "nombre_origen": nombre_cross,
+                    "nombre_normalizado": "harina pastelera premium",
+                    "suggestion": "Harina API",
+                    "score": 91,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                }
+            ],
+        )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados")
+        resp = self.client.get(url, {"min_sources": 2, "score_min": 0, "limit": 50})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertGreaterEqual(payload["totales"]["unified_total"], 1)
+        self.assertGreaterEqual(payload["totales"]["filtered_total"], 1)
+        self.assertGreaterEqual(payload["totales"]["overlap_2_plus"], 1)
+        row = payload["items"][0]
+        self.assertGreaterEqual(int(row["sources_active"]), 2)
+        self.assertEqual(row["nombre_normalizado"], "harina pastelera premium")
+
     def test_endpoint_inventario_point_pendientes_resolver_insumos(self):
         pending = PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,
@@ -698,6 +751,7 @@ class RecetasCosteoApiTests(TestCase):
 
         self.assertEqual(self.client.get(reverse("api_inventario_aliases")).status_code, 403)
         self.assertEqual(self.client.get(reverse("api_inventario_aliases_pendientes")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("api_inventario_aliases_pendientes_unificados")).status_code, 403)
         self.assertEqual(
             self.client.post(
                 reverse("api_inventario_aliases"),

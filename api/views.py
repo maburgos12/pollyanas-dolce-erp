@@ -40,7 +40,13 @@ from compras.views import (
     _sanitize_consumo_ref_filter,
 )
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo
-from inventario.views import _apply_ajuste, _resolve_cross_source_with_alias
+from inventario.views import (
+    _apply_ajuste,
+    _apply_cross_filters,
+    _build_cross_unified_rows,
+    _build_pending_grouped,
+    _resolve_cross_source_with_alias,
+)
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor
 from recetas.models import (
     LineaReceta,
@@ -1062,6 +1068,82 @@ class InventarioAliasesPendientesView(APIView):
                     "point": point_rows,
                     "recetas": recetas_rows,
                 },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InventarioAliasesPendientesUnificadosView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar pendientes de homologación."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=600)
+        runs_to_scan = _parse_bounded_int(request.GET.get("runs", 5), default=5, min_value=1, max_value=30)
+        q = (request.GET.get("q") or "").strip()
+        q_norm = normalizar_nombre(q)
+        only_suggested = _parse_bool(request.GET.get("only_suggested"), default=False)
+        min_sources = _parse_bounded_int(request.GET.get("min_sources", 1), default=1, min_value=1, max_value=3)
+        score_min = float(_to_decimal(request.GET.get("score_min"), Decimal("0")))
+        score_min = max(0.0, min(100.0, score_min))
+
+        pending_rows: list[dict] = []
+        sync_runs = list(AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at")[:runs_to_scan])
+        for run in sync_runs:
+            for row in run.pending_preview or []:
+                nombre_origen = str((row or {}).get("nombre_origen") or "").strip()
+                if not nombre_origen:
+                    continue
+                pending_rows.append(
+                    {
+                        "nombre_origen": nombre_origen,
+                        "nombre_normalizado": str((row or {}).get("nombre_normalizado") or normalizar_nombre(nombre_origen)),
+                        "sugerencia": str((row or {}).get("suggestion") or ""),
+                        "score": float((row or {}).get("score") or 0),
+                        "source": str((row or {}).get("fuente") or "ALMACEN"),
+                    }
+                )
+
+        pending_grouped = _build_pending_grouped(pending_rows)
+        unified_rows, point_unmatched_count, receta_pending_lines = _build_cross_unified_rows(pending_grouped)
+        filtered_rows = _apply_cross_filters(
+            unified_rows,
+            cross_q_norm=q_norm,
+            cross_only_suggested=only_suggested,
+            cross_min_sources=min_sources,
+            cross_score_min=score_min,
+        )
+
+        overlap_2_plus = sum(1 for row in unified_rows if int(row.get("sources_active") or 0) >= 2)
+        items = filtered_rows[:limit]
+
+        return Response(
+            {
+                "filters": {
+                    "limit": limit,
+                    "runs": runs_to_scan,
+                    "q": q,
+                    "min_sources": min_sources,
+                    "score_min": round(score_min, 2),
+                    "only_suggested": only_suggested,
+                },
+                "totales": {
+                    "runs_scanned": len(sync_runs),
+                    "almacen_rows_raw": len(pending_rows),
+                    "almacen_grouped": len(pending_grouped),
+                    "unified_total": len(unified_rows),
+                    "filtered_total": len(filtered_rows),
+                    "returned": len(items),
+                    "overlap_2_plus": overlap_2_plus,
+                    "point_unmatched": point_unmatched_count,
+                    "recetas_pending_lines": receta_pending_lines,
+                },
+                "items": items,
             },
             status=status.HTTP_200_OK,
         )
