@@ -5863,6 +5863,9 @@ class SolicitudVentaAplicarForecastView(APIView):
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
         dry_run = bool(data.get("dry_run", False))
+        max_variacion_pct = _to_decimal(data.get("max_variacion_pct"), default=Decimal("-1"))
+        if max_variacion_pct < 0:
+            max_variacion_pct = None
         top = int(data.get("top") or 120)
 
         result = _build_forecast_from_history(
@@ -5916,6 +5919,7 @@ class SolicitudVentaAplicarForecastView(APIView):
         created = 0
         updated = 0
         skipped = 0
+        skipped_cap = 0
         applied = 0
         adjusted_rows = []
         tx_cm = nullcontext() if dry_run else transaction.atomic()
@@ -5938,6 +5942,14 @@ class SolicitudVentaAplicarForecastView(APIView):
                 ).first()
                 was_created = record is None
                 old_qty = _to_decimal(record.cantidad if record is not None else 0)
+                variacion_pct = None
+                if old_qty > 0:
+                    variacion_pct = ((nueva_cantidad - old_qty) / old_qty * Decimal("100")).quantize(Decimal("0.1"))
+                if (max_variacion_pct is not None) and (variacion_pct is not None):
+                    if abs(variacion_pct) > max_variacion_pct:
+                        skipped += 1
+                        skipped_cap += 1
+                        continue
                 if was_created:
                     if dry_run:
                         created += 1
@@ -5971,6 +5983,7 @@ class SolicitudVentaAplicarForecastView(APIView):
                         "receta": receta.nombre,
                         "anterior": _to_float(old_qty),
                         "nueva": _to_float(nueva_cantidad),
+                        "variacion_pct": _to_float(variacion_pct) if variacion_pct is not None else None,
                         "accion": "create" if was_created else "update",
                         "status_before": row.get("status") or "",
                     }
@@ -5993,6 +6006,7 @@ class SolicitudVentaAplicarForecastView(APIView):
                     "created": created,
                     "updated": updated,
                     "skipped": skipped,
+                    "skipped_cap": skipped_cap,
                     "applied": applied,
                 },
                 "adjusted_rows": adjusted_rows[:top],

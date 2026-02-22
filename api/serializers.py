@@ -573,11 +573,19 @@ class SolicitudVentaAplicarForecastSerializer(serializers.Serializer):
     receta_id = serializers.IntegerField(required=False)
     fuente = serializers.CharField(max_length=40, required=False, allow_blank=True, default="API_FORECAST_ADJUST")
     dry_run = serializers.BooleanField(required=False, default=False)
+    max_variacion_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True, default=None)
     top = serializers.IntegerField(required=False, min_value=1, max_value=500, default=120)
 
     def validate_safety_pct(self, value):
         if value < -30 or value > 100:
             raise serializers.ValidationError("safety_pct debe estar entre -30 y 100.")
+        return value
+
+    def validate_max_variacion_pct(self, value):
+        if value is None:
+            return value
+        if value < 0 or value > 500:
+            raise serializers.ValidationError("max_variacion_pct debe estar entre 0 y 500.")
         return value
 
     def validate_periodo(self, value):

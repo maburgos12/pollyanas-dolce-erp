@@ -2300,6 +2300,56 @@ class RecetasCosteoApiTests(TestCase):
         )
         self.assertEqual(unchanged.cantidad, Decimal("10"))
 
+    def test_endpoint_ventas_solicitud_aplicar_forecast_max_variacion_cap(self):
+        sucursal = Sucursal.objects.create(codigo="CAP", nombre="Sucursal Cap", activa=True)
+        for month_idx, qty in [(10, "20"), (11, "24"), (12, "28"), (1, "30"), (2, "35")]:
+            year = 2025 if month_idx >= 10 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_solicitud_aplicar_forecast")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "mes",
+                "periodo": "2026-03",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "modo": "receta",
+                "receta_id": self.receta.id,
+                "max_variacion_pct": "50",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["updated"]["applied"], 0)
+        self.assertGreaterEqual(payload["updated"]["skipped_cap"], 1)
+
+        unchanged = SolicitudVenta.objects.get(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+        )
+        self.assertEqual(unchanged.cantidad, Decimal("10"))
+
     def test_endpoint_ventas_historial_bulk_dry_run_y_apply(self):
         sucursal = Sucursal.objects.create(codigo="CENTRO", nombre="Sucursal Centro", activa=True)
         url = reverse("api_ventas_historial_bulk")
