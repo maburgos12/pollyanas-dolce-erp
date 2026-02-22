@@ -3001,6 +3001,15 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
     run_mode = (request.POST.get("run_mode") or "preview").strip().lower()
     if run_mode not in {"preview", "apply_pronostico", "crear_plan", "aplicar_y_plan"}:
         run_mode = "preview"
+    escenario = (request.POST.get("escenario") or "base").strip().lower()
+    if escenario not in {"base", "bajo", "alto"}:
+        escenario = "base"
+    escenario_to_key = {
+        "base": "forecast_qty",
+        "bajo": "forecast_low",
+        "alto": "forecast_high",
+    }
+    qty_key = escenario_to_key.get(escenario, "forecast_qty")
     safety_pct = _to_decimal_safe(request.POST.get("safety_pct"))
     if safety_pct < Decimal("-30"):
         safety_pct = Decimal("-30")
@@ -3036,11 +3045,11 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
                 receta = Receta.objects.filter(pk=row["receta_id"]).first()
                 if receta is None:
                     continue
-                forecast_qty = Decimal(str(row["forecast_qty"]))
+                forecast_qty = Decimal(str(row.get(qty_key) or 0))
                 current = PronosticoVenta.objects.filter(receta=receta, periodo=resultado["periodo"]).first()
                 if current:
                     current.cantidad = forecast_qty
-                    current.fuente = "AUTO_HISTORIAL"
+                    current.fuente = f"AUTO_HIST_{escenario.upper()}"[:40]
                     current.save(update_fields=["cantidad", "fuente", "actualizado_en"])
                     updated_forecast += 1
                 else:
@@ -3048,7 +3057,7 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
                         receta=receta,
                         periodo=resultado["periodo"],
                         cantidad=forecast_qty,
-                        fuente="AUTO_HISTORIAL",
+                        fuente=f"AUTO_HIST_{escenario.upper()}"[:40],
                     )
                     created_forecast += 1
 
@@ -3069,7 +3078,7 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
         )
         lines = 0
         for row in rows:
-            qty = Decimal(str(row["forecast_qty"]))
+            qty = Decimal(str(row.get(qty_key) or 0))
             if qty <= 0:
                 continue
             PlanProduccionItem.objects.create(
@@ -3092,7 +3101,10 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
     if created_forecast or updated_forecast:
         messages.success(
             request,
-            f"Pronóstico mensual aplicado desde historial. Creados: {created_forecast}. Actualizados: {updated_forecast}.",
+            (
+                f"Pronóstico mensual aplicado desde historial ({escenario}). "
+                f"Creados: {created_forecast}. Actualizados: {updated_forecast}."
+            ),
         )
     if run_mode in {"crear_plan", "aplicar_y_plan"} and created_plan is None:
         messages.info(request, "Se generó la vista previa estadística, pero no se creó plan.")

@@ -272,6 +272,14 @@
       <input class="form-control" type="number" step="0.1" name="safety_pct" value="0">
     </div>
     <div class="form-group">
+      <label class="form-label">Escenario</label>
+      <select class="form-select" name="escenario">
+        <option value="base">Base (forecast)</option>
+        <option value="bajo">Conservador (banda baja)</option>
+        <option value="alto">Agresivo (banda alta)</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label class="form-label">Alcance recetas</label>
       <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
         <input type="checkbox" name="incluir_preparaciones" value="1">
@@ -294,6 +302,8 @@
       Rango: {{ forecast_preview.target_start }} a {{ forecast_preview.target_end }} ·
       Recetas: {{ forecast_preview.totals.recetas_count }} ·
       Forecast total: {{ forecast_preview.totals.forecast_total|floatformat:2 }} ·
+      Banda baja: {{ forecast_preview.totals.forecast_low_total|floatformat:2 }} ·
+      Banda alta: {{ forecast_preview.totals.forecast_high_total|floatformat:2 }} ·
       Pronóstico actual: {{ forecast_preview.totals.pronostico_total|floatformat:2 }} ·
       Delta: {{ forecast_preview.totals.delta_total|floatformat:2 }}
     </p>
@@ -303,6 +313,8 @@
           <tr>
             <th>Receta</th>
             <th class="text-end">Forecast</th>
+            <th class="text-end">Banda baja</th>
+            <th class="text-end">Banda alta</th>
             <th class="text-end">Pronóstico actual</th>
             <th class="text-end">Delta</th>
             <th>Recomendación</th>
@@ -315,6 +327,8 @@
           <tr>
             <td>{{ row.receta }}</td>
             <td class="text-end">{{ row.forecast_qty|floatformat:2 }}</td>
+            <td class="text-end">{{ row.forecast_low|floatformat:2 }}</td>
+            <td class="text-end">{{ row.forecast_high|floatformat:2 }}</td>
             <td class="text-end">{{ row.pronostico_actual|floatformat:2 }}</td>
             <td class="text-end">{{ row.delta|floatformat:2 }}</td>
             <td>
@@ -330,7 +344,7 @@
             <td class="text-end">{{ row.observaciones }}</td>
           </tr>
           {% empty %}
-          <tr><td colspan="7" class="text-muted">Sin filas para el filtro actual.</td></tr>
+          <tr><td colspan="9" class="text-muted">Sin filas para el filtro actual.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -362,6 +376,18 @@
       <div class="kpi-card">
         <div class="kpi-number">{{ forecast_vs_solicitud.totals.sin_base_count }}</div>
         <div class="kpi-label">Sin base histórica</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-number is-success">{{ forecast_vs_solicitud.totals.en_rango_count }}</div>
+        <div class="kpi-label">En rango</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-number is-danger">{{ forecast_vs_solicitud.totals.sobre_rango_count }}</div>
+        <div class="kpi-label">Sobre rango</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-number is-danger">{{ forecast_vs_solicitud.totals.bajo_rango_count }}</div>
+        <div class="kpi-label">Bajo rango</div>
       </div>
     </div>
     {% if forecast_vs_solicitud.sucursal_id %}
@@ -396,10 +422,13 @@
           <tr>
             <th>Receta</th>
             <th class="text-end">Forecast</th>
+            <th class="text-end">Baja</th>
+            <th class="text-end">Alta</th>
             <th class="text-end">Solicitud</th>
             <th class="text-end">Delta</th>
             <th class="text-end">% variación</th>
             <th>Estatus</th>
+            <th>Rango</th>
             <th>Acción</th>
           </tr>
         </thead>
@@ -408,6 +437,8 @@
           <tr>
             <td>{{ row.receta }}</td>
             <td class="text-end">{{ row.forecast_qty|floatformat:2 }}</td>
+            <td class="text-end">{{ row.forecast_low|floatformat:2 }}</td>
+            <td class="text-end">{{ row.forecast_high|floatformat:2 }}</td>
             <td class="text-end">{{ row.solicitud_qty|floatformat:2 }}</td>
             <td class="text-end">{{ row.delta_qty|floatformat:2 }}</td>
             <td class="text-end">
@@ -429,6 +460,17 @@
               {% endif %}
             </td>
             <td>
+              {% if row.status_rango == "EN_RANGO" %}
+                <span class="badge badge-verde">En rango</span>
+              {% elif row.status_rango == "SOBRE_RANGO" %}
+                <span class="badge badge-rojo">Sobre rango</span>
+              {% elif row.status_rango == "BAJO_RANGO" %}
+                <span class="badge badge-amarillo">Bajo rango</span>
+              {% else %}
+                <span class="badge badge-amarillo">Sin base</span>
+              {% endif %}
+            </td>
+            <td>
               {% if forecast_vs_solicitud.sucursal_id and row.status != "OK" %}
               <form method="post" action="{% url 'recetas:solicitud_ventas_aplicar_desde_forecast' %}" class="inline-form">
                 {% csrf_token %}
@@ -443,7 +485,7 @@
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="7" class="text-muted">Sin filas para el filtro actual.</td></tr>
+          <tr><td colspan="10" class="text-muted">Sin filas para el filtro actual.</td></tr>
           {% endfor %}
         </tbody>
       </table>
