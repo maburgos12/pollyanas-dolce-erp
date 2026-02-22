@@ -104,6 +104,11 @@
 {% if plan_forecast_semaforo %}
 <section class="card">
     <div class="card-header">Desviación Mensual Plan vs Pronóstico ({{ plan_forecast_semaforo.periodo_mes }})</div>
+    {% if plan_forecast_semaforo.data_unavailable %}
+    <div class="alert alert-info" style="margin-bottom:12px;">
+        Datos de plan/pronóstico no disponibles temporalmente en este entorno.
+    </div>
+    {% endif %}
     <div class="kpi-mini">
         <article class="kpi-card">
             <div class="kpi-label">Semáforo</div>

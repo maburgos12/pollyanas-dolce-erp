@@ -33,6 +33,11 @@
     Registros: <strong>{{ pronosticos_periodo_count }}</strong> ·
     Total: <strong>{{ pronosticos_periodo_total|floatformat:2 }}</strong>
   </p>
+  {% if pronosticos_unavailable %}
+  <div class="alert alert-info" style="margin-bottom: 12px;">
+    No se pudo leer la tabla de pronósticos en este entorno. Ejecuta migraciones para habilitar este bloque.
+  </div>
+  {% endif %}
   <div class="toolbar mb-2">
     <a class="btn btn-secondary" href="{% url 'recetas:pronosticos_plantilla' %}?format=xlsx">Descargar plantilla XLSX</a>
     <a class="btn btn-secondary" href="{% url 'recetas:pronosticos_plantilla' %}?format=csv">Descargar plantilla CSV</a>
@@ -207,6 +212,11 @@
 {% if plan_vs_pronostico %}
 <div class="card">
   <div class="card-header">Plan vs Pronóstico ({{ plan_vs_pronostico.periodo }})</div>
+  {% if plan_vs_pronostico.pronosticos_unavailable %}
+  <div class="alert alert-info" style="margin-bottom: 12px;">
+    Pronóstico no disponible temporalmente en este entorno; se muestra solo el plan actual.
+  </div>
+  {% endif %}
   <div class="kpi-mini">
     <div class="kpi-card">
       <div class="kpi-number">{{ plan_vs_pronostico.total_plan|floatformat:2 }}</div>

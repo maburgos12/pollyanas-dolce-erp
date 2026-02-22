@@ -5,6 +5,7 @@ from datetime import date
 from datetime import timedelta
 from decimal import Decimal
 
+from django.db import OperationalError, ProgrammingError
 from django.db.models import F
 from django.db.models import Avg, Sum
 from django.core.paginator import Paginator
@@ -163,16 +164,28 @@ def _compute_plan_forecast_semaforo(periodo_mes: str) -> dict:
         m = today.month
         periodo_mes = f"{y:04d}-{m:02d}"
 
-    pron_rows = (
-        PronosticoVenta.objects.filter(periodo=periodo_mes)
-        .values("receta_id", "receta__nombre")
-        .annotate(total=Sum("cantidad"))
-    )
-    plan_rows = (
-        PlanProduccionItem.objects.filter(plan__fecha_produccion__year=y, plan__fecha_produccion__month=m)
-        .values("receta_id", "receta__nombre")
-        .annotate(total=Sum("cantidad"))
-    )
+    # In local or partially migrated environments, forecast tables may not exist yet.
+    pron_unavailable = False
+    plan_unavailable = False
+    try:
+        pron_rows = list(
+            PronosticoVenta.objects.filter(periodo=periodo_mes)
+            .values("receta_id", "receta__nombre")
+            .annotate(total=Sum("cantidad"))
+        )
+    except (OperationalError, ProgrammingError):
+        pron_rows = []
+        pron_unavailable = True
+
+    try:
+        plan_rows = list(
+            PlanProduccionItem.objects.filter(plan__fecha_produccion__year=y, plan__fecha_produccion__month=m)
+            .values("receta_id", "receta__nombre")
+            .annotate(total=Sum("cantidad"))
+        )
+    except (OperationalError, ProgrammingError):
+        plan_rows = []
+        plan_unavailable = True
 
     merged: dict[int, dict] = {}
     for row in pron_rows:
@@ -245,6 +258,7 @@ def _compute_plan_forecast_semaforo(periodo_mes: str) -> dict:
         "semaforo_label": semaforo,
         "semaforo_badge": semaforo_badge,
         "rows_top": rows[:8],
+        "data_unavailable": pron_unavailable or plan_unavailable,
     }
 
 

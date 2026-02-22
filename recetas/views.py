@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.db import OperationalError, ProgrammingError
 from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -1174,7 +1175,15 @@ def _plan_vs_pronostico(plan: PlanProduccion) -> Dict[str, Any]:
         for r in plan_rows
     }
 
-    pronosticos = PronosticoVenta.objects.filter(periodo=periodo)
+    pronosticos_unavailable = False
+    try:
+        pronosticos = list(
+            PronosticoVenta.objects.filter(periodo=periodo).select_related("receta")
+        )
+    except (OperationalError, ProgrammingError):
+        pronosticos = []
+        pronosticos_unavailable = True
+
     for p in pronosticos:
         row = plan_map.get(p.receta_id)
         if row:
@@ -1201,6 +1210,7 @@ def _plan_vs_pronostico(plan: PlanProduccion) -> Dict[str, Any]:
         "total_plan": sum((r["cantidad_plan"] for r in rows), Decimal("0")),
         "total_pronostico": sum((r["cantidad_pronostico"] for r in rows), Decimal("0")),
         "desviaciones": con_desviacion,
+        "pronosticos_unavailable": pronosticos_unavailable,
     }
 
 
@@ -1551,9 +1561,15 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     explosion = _plan_explosion(plan_actual) if plan_actual else None
     plan_vs_pronostico = _plan_vs_pronostico(plan_actual) if plan_actual else None
     periodo_pronostico_default = _normalize_periodo_mes(request.GET.get("periodo"))
-    pronosticos_periodo = PronosticoVenta.objects.filter(periodo=periodo_pronostico_default)
-    pronosticos_periodo_count = pronosticos_periodo.count()
-    pronosticos_periodo_total = pronosticos_periodo.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
+    pronosticos_unavailable = False
+    try:
+        pronosticos_periodo = PronosticoVenta.objects.filter(periodo=periodo_pronostico_default)
+        pronosticos_periodo_count = pronosticos_periodo.count()
+        pronosticos_periodo_total = pronosticos_periodo.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
+    except (OperationalError, ProgrammingError):
+        pronosticos_periodo_count = 0
+        pronosticos_periodo_total = Decimal("0")
+        pronosticos_unavailable = True
     return render(
         request,
         "recetas/plan_produccion.html",
@@ -1566,6 +1582,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "periodo_pronostico_default": periodo_pronostico_default,
             "pronosticos_periodo_count": pronosticos_periodo_count,
             "pronosticos_periodo_total": pronosticos_periodo_total,
+            "pronosticos_unavailable": pronosticos_unavailable,
         },
     )
 

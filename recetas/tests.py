@@ -2,9 +2,11 @@ from datetime import date
 from decimal import Decimal
 import os
 import tempfile
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
 from openpyxl import Workbook
@@ -113,6 +115,56 @@ class RecetasAuthRedirectTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login/", response["Location"])
         self.assertIn("next=", response["Location"])
+
+
+class PlanProduccionRobustnessTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_plan_robust",
+            email="admin_plan_robust@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(nombre="Insumo robust", unidad_base=self.unidad, activo=True)
+        self.receta = Receta.objects.create(nombre="Receta robust", hash_contenido="hash-robust-001")
+        LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=self.insumo,
+            insumo_texto="Insumo robust",
+            cantidad=Decimal("1"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("10"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        self.plan = PlanProduccion.objects.create(
+            nombre="Plan robust",
+            fecha_produccion=date(2026, 2, 20),
+        )
+        PlanProduccionItem.objects.create(
+            plan=self.plan,
+            receta=self.receta,
+            cantidad=Decimal("2"),
+        )
+
+    def test_plan_produccion_graceful_when_pronostico_table_unavailable(self):
+        with patch("recetas.views.PronosticoVenta.objects.filter", side_effect=OperationalError("missing table")):
+            response = self.client.get(reverse("recetas:plan_produccion"), {"plan_id": self.plan.id})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["pronosticos_unavailable"])
+        self.assertTrue(response.context["plan_vs_pronostico"]["pronosticos_unavailable"])
 
 
 class PlanProduccionSolicitudesModeTests(TestCase):
