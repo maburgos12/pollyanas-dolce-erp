@@ -280,6 +280,14 @@
       </select>
     </div>
     <div class="form-group">
+      <label class="form-label">Backtest ventanas</label>
+      <input class="form-control" type="number" name="backtest_periods" min="1" max="12" value="{{ backtest_periods|default:'3' }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Backtest top errores</label>
+      <input class="form-control" type="number" name="backtest_top" min="1" max="30" value="{{ backtest_top|default:'10' }}">
+    </div>
+    <div class="form-group">
       <label class="form-label">Alcance recetas</label>
       <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
         <input type="checkbox" name="incluir_preparaciones" value="1">
@@ -289,6 +297,7 @@
     <div class="form-group full">
       <div class="toolbar">
         <button class="btn btn-secondary" type="submit" name="run_mode" value="preview">Previsualizar</button>
+        <button class="btn btn-secondary" type="submit" name="run_mode" value="backtest">Ejecutar backtest</button>
         <button class="btn btn-primary" type="submit" name="run_mode" value="apply_pronostico">Aplicar a pronóstico mensual</button>
         <button class="btn btn-primary" type="submit" name="run_mode" value="crear_plan">Crear plan estadístico</button>
         <button class="btn btn-success" type="submit" name="run_mode" value="aplicar_y_plan">Aplicar + Crear plan</button>
@@ -345,6 +354,49 @@
           </tr>
           {% empty %}
           <tr><td colspan="9" class="text-muted">Sin filas para el filtro actual.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  {% if forecast_backtest %}
+  <div class="card" style="margin-top:12px;">
+    <div class="card-header">Backtest estadístico · {{ forecast_backtest.scope.alcance|upper }} · {{ forecast_backtest.scope.sucursal_nombre }}</div>
+    <p class="muted mb-2">
+      Ventanas: {{ forecast_backtest.totals.windows_evaluated }} ·
+      Forecast total: {{ forecast_backtest.totals.forecast_total|floatformat:2 }} ·
+      Real total: {{ forecast_backtest.totals.actual_total|floatformat:2 }} ·
+      Bias: {{ forecast_backtest.totals.bias_total|floatformat:2 }} ·
+      MAE: {{ forecast_backtest.totals.mae_promedio|floatformat:2 }} ·
+      MAPE: {% if forecast_backtest.totals.mape_promedio is not None %}{{ forecast_backtest.totals.mape_promedio|floatformat:1 }}%{% else %}-{% endif %}
+    </p>
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Ventana</th>
+            <th class="text-end">Recetas</th>
+            <th class="text-end">Forecast</th>
+            <th class="text-end">Real</th>
+            <th class="text-end">Bias</th>
+            <th class="text-end">MAE</th>
+            <th class="text-end">MAPE</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in forecast_backtest.windows %}
+          <tr>
+            <td>{{ w.window_start }} a {{ w.window_end }}</td>
+            <td class="text-end">{{ w.recetas_count }}</td>
+            <td class="text-end">{{ w.forecast_total|floatformat:2 }}</td>
+            <td class="text-end">{{ w.actual_total|floatformat:2 }}</td>
+            <td class="text-end">{{ w.bias_total|floatformat:2 }}</td>
+            <td class="text-end">{{ w.mae|floatformat:2 }}</td>
+            <td class="text-end">{% if w.mape is not None %}{{ w.mape|floatformat:1 }}%{% else %}-{% endif %}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" class="text-muted">Sin ventanas evaluadas.</td></tr>
           {% endfor %}
         </tbody>
       </table>

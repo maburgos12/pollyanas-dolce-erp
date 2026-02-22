@@ -6,6 +6,7 @@ Sprint 1 entrega:
 - UI web (Django) para ver recetas, detalle, pendientes y MRP básico
 - Historial de ventas (CSV/XLSX) por sucursal + pronóstico estadístico (mes / semana / fin de semana)
 - Recomendación automática subir/bajar solicitud de Ventas según histórico
+- Backtest estadístico visible en Plan Producción (MAPE/Bias por ventana)
 - Ajustes de inventario con flujo de aprobación/rechazo (ADMIN) y trazabilidad
 - Recepciones de compra cerradas impactan inventario automáticamente (entrada + bitácora)
 - API: POST /api/mrp/explode/

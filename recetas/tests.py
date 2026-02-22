@@ -698,6 +698,42 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
         self.assertIsNotNone(pron)
         self.assertGreater(pron.cantidad, Decimal("0"))
 
+    def test_pronostico_estadistico_backtest_genera_contexto(self):
+        for month_idx, qty in [(9, "30"), (10, "35"), (11, "40"), (12, "46"), (1, "50"), (2, "55"), (3, "60")]:
+            year = 2025 if month_idx >= 9 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=self.sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="TEST_BACKTEST",
+            )
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "mes",
+                "periodo": "2026-04",
+                "fecha_base": "2026-04-15",
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "backtest",
+                "backtest_periods": "4",
+                "backtest_top": "5",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        preview = self.client.session.get("pronostico_backtest_preview")
+        self.assertIsNotNone(preview)
+        self.assertGreaterEqual(preview["totals"]["windows_evaluated"], 1)
+        self.assertIn("mape_promedio", preview["totals"])
+        self.assertGreaterEqual(len(preview["windows"]), 1)
+
+        response = self.client.get(reverse("recetas:plan_produccion"), {"periodo": "2026-04"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("forecast_backtest", response.context)
+        self.assertIsNotNone(response.context["forecast_backtest"])
+
 
 class SolicitudVentasForecastTests(TestCase):
     def setUp(self):
