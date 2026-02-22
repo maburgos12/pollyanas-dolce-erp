@@ -77,15 +77,26 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
 @login_required
 def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
-    if not receta.versiones_costo.exists():
-        _sync_cost_version_safe(request, receta, "AUTO_BOOTSTRAP")
+    versiones_unavailable = False
+    versiones_all = []
+    versiones_recientes = []
+    comparativo = None
+    try:
+        if not receta.versiones_costo.exists():
+            _sync_cost_version_safe(request, receta, "AUTO_BOOTSTRAP")
+        versiones_all = _load_versiones_costeo(receta, 80)
+        versiones_recientes = versiones_all[:8]
+        comparativo = comparativo_versiones(versiones_recientes)
+    except (OperationalError, ProgrammingError):
+        versiones_unavailable = True
+        messages.warning(
+            request,
+            "Histórico de versiones de costo no disponible en este entorno. Ejecuta migraciones para habilitarlo.",
+        )
 
     lineas = list(receta.lineas.select_related("insumo").order_by("posicion"))
     presentaciones = receta.presentaciones.all().order_by("nombre")
     costeo_actual = calcular_costeo_receta(receta)
-    versiones_all = list(receta.versiones_costo.order_by("-version_num")[:80])
-    versiones_recientes = versiones_all[:8]
-    comparativo = comparativo_versiones(versiones_recientes)
 
     selected_base = None
     selected_target = None
@@ -136,6 +147,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "versiones_recientes": versiones_recientes,
             "versiones_all": versiones_all,
             "versiones_comparativo": comparativo,
+            "versiones_unavailable": versiones_unavailable,
             "selected_base": selected_base,
             "selected_target": selected_target,
             "version_compare": compare_data,
@@ -292,6 +304,10 @@ def _sync_cost_version_safe(request: HttpRequest, receta: Receta, fuente: str) -
             request,
             "Se guardaron cambios, pero falló el versionado automático de costos.",
         )
+
+
+def _load_versiones_costeo(receta: Receta, limit: int) -> list[RecetaCostoVersion]:
+    return list(receta.versiones_costo.order_by("-version_num")[:limit])
 
 
 def _compare_versions(base: RecetaCostoVersion, target: RecetaCostoVersion) -> dict[str, Decimal]:
@@ -632,7 +648,10 @@ def presentacion_delete(request: HttpRequest, pk: int, presentacion_id: int) -> 
 def receta_versiones_export(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     export_format = (request.GET.get("format") or "csv").strip().lower()
-    versiones = list(receta.versiones_costo.order_by("-version_num")[:300])
+    try:
+        versiones = _load_versiones_costeo(receta, 300)
+    except (OperationalError, ProgrammingError):
+        versiones = []
 
     if export_format == "xlsx":
         wb = Workbook()

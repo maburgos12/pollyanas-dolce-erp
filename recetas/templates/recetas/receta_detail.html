@@ -133,6 +133,11 @@
     <h3 class="mb-0">Histórico de Versiones de Costo</h3>
     <span class="text-muted">Total {{ versiones_all|length }} versiones</span>
   </div>
+  {% if versiones_unavailable %}
+  <div class="alert alert-warning mt-2">
+    El histórico de versiones de costo no está disponible en este entorno.
+  </div>
+  {% endif %}
   <form class="recipes-filters mb-3" method="get">
     <div>
       <label class="form-label">Base</label>

@@ -438,6 +438,23 @@ class RecetaPhase2ViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("spreadsheetml", resp["Content-Type"])
 
+    def test_receta_detail_handles_missing_version_table_gracefully(self):
+        with patch("recetas.views._load_versiones_costeo", side_effect=OperationalError("missing table")):
+            resp = self.client.get(reverse("recetas:receta_detail", args=[self.receta.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["versiones_unavailable"])
+        self.assertContains(resp, "no está disponible en este entorno")
+
+    def test_receta_versiones_export_handles_missing_version_table_gracefully(self):
+        with patch("recetas.views._load_versiones_costeo", side_effect=OperationalError("missing table")):
+            resp = self.client.get(
+                reverse("recetas:receta_versiones_export", args=[self.receta.id]),
+                {"format": "csv"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/csv", resp["Content-Type"])
+        self.assertIn("version,fecha,fuente", resp.content.decode("utf-8"))
+
     def test_drivers_costeo_create_and_list(self):
         payload = {
             "scope": CostoDriver.SCOPE_PRODUCTO,
