@@ -1,12 +1,14 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from decimal import Decimal
 from openpyxl import load_workbook
 from io import BytesIO
 
-from inventario.models import AlmacenSyncRun
+from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import Insumo, InsumoAlias, PointPendingMatch, UnidadMedida
 from recetas.models import LineaReceta, Receta
 
@@ -620,3 +622,126 @@ class InventarioAliasesPendingTests(TestCase):
         ws = wb.active
         headers = [ws.cell(row=1, column=1).value, ws.cell(row=1, column=2).value, ws.cell(row=1, column=3).value]
         self.assertEqual(headers, ["alias", "normalizado", "insumo_oficial"])
+
+
+class InventarioAjustesApprovalTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.admin = user_model.objects.create_user(
+            username="admin_aprueba_inv",
+            email="admin_aprueba_inv@example.com",
+            password="test12345",
+        )
+        self.almacen = user_model.objects.create_user(
+            username="almacen_inv",
+            email="almacen_inv@example.com",
+            password="test12345",
+        )
+        admin_group, _ = Group.objects.get_or_create(name="ADMIN")
+        almacen_group, _ = Group.objects.get_or_create(name="ALMACEN")
+        self.admin.groups.add(admin_group)
+        self.almacen.groups.add(almacen_group)
+
+        self.unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        self.insumo = Insumo.objects.create(nombre="Azucar Ajuste", unidad_base=self.unidad, activo=True)
+        self.existencia = ExistenciaInsumo.objects.create(insumo=self.insumo, stock_actual=Decimal("10"))
+
+    def test_almacen_registra_ajuste_queda_pendiente(self):
+        self.client.force_login(self.almacen)
+        response = self.client.post(
+            reverse("inventario:ajustes"),
+            {
+                "action": "create",
+                "insumo_id": self.insumo.id,
+                "cantidad_sistema": "10",
+                "cantidad_fisica": "8",
+                "motivo": "Conteo semanal",
+                "create_and_apply": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        ajuste = AjusteInventario.objects.latest("id")
+        self.assertEqual(ajuste.estatus, AjusteInventario.STATUS_PENDIENTE)
+        self.assertEqual(ajuste.solicitado_por_id, self.almacen.id)
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.stock_actual, Decimal("10"))
+        self.assertFalse(MovimientoInventario.objects.filter(referencia=ajuste.folio).exists())
+
+    def test_admin_aprueba_y_aplica_ajuste(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("8"),
+            motivo="Conteo mensual",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse("inventario:ajustes"),
+            {
+                "action": "approve",
+                "ajuste_id": ajuste.id,
+                "comentario_revision": "Aprobado por diferencias de merma",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        ajuste.refresh_from_db()
+        self.assertEqual(ajuste.estatus, AjusteInventario.STATUS_APLICADO)
+        self.assertEqual(ajuste.aprobado_por_id, self.admin.id)
+        self.assertIsNotNone(ajuste.aprobado_en)
+        self.assertIsNotNone(ajuste.aplicado_en)
+
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.stock_actual, Decimal("8"))
+        movimiento = MovimientoInventario.objects.filter(referencia=ajuste.folio).first()
+        self.assertIsNotNone(movimiento)
+        self.assertEqual(movimiento.cantidad, Decimal("2"))
+        self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_SALIDA)
+
+    def test_admin_rechaza_ajuste_sin_afectar_stock(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("7"),
+            motivo="Conteo de cierre",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse("inventario:ajustes"),
+            {
+                "action": "reject",
+                "ajuste_id": ajuste.id,
+                "comentario_revision": "Falta evidencia de conteo físico",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        ajuste.refresh_from_db()
+        self.assertEqual(ajuste.estatus, AjusteInventario.STATUS_RECHAZADO)
+        self.assertEqual(ajuste.aprobado_por_id, self.admin.id)
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.stock_actual, Decimal("10"))
+        self.assertFalse(MovimientoInventario.objects.filter(referencia=ajuste.folio).exists())
+
+    def test_almacen_no_puede_aprobar_ajuste(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("9"),
+            motivo="Conteo rápido",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        self.client.force_login(self.almacen)
+        response = self.client.post(
+            reverse("inventario:ajustes"),
+            {"action": "approve", "ajuste_id": ajuste.id},
+        )
+        self.assertEqual(response.status_code, 403)

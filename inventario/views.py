@@ -22,7 +22,7 @@ from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 
-from core.access import can_manage_inventario, can_view_inventario
+from core.access import ROLE_ADMIN, ROLE_DG, can_manage_inventario, can_view_inventario, has_any_role
 from core.audit import log_event
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch
 from recetas.models import LineaReceta
@@ -141,6 +141,70 @@ def _apply_movimiento(movimiento: MovimientoInventario) -> None:
         existencia.stock_actual -= movimiento.cantidad
     existencia.actualizado_en = timezone.now()
     existencia.save()
+
+
+def _can_approve_ajustes(user) -> bool:
+    return has_any_role(user, ROLE_ADMIN, ROLE_DG)
+
+
+def _apply_ajuste(ajuste: AjusteInventario, acted_by, comentario: str = "") -> None:
+    existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo_id=ajuste.insumo_id)
+    prev_stock = existencia.stock_actual
+    existencia.stock_actual = ajuste.cantidad_fisica
+    existencia.actualizado_en = timezone.now()
+    existencia.save()
+    log_event(
+        acted_by,
+        "APPLY",
+        "inventario.ExistenciaInsumo",
+        existencia.id,
+        {
+            "source": ajuste.folio,
+            "insumo_id": ajuste.insumo_id,
+            "from_stock": str(prev_stock),
+            "to_stock": str(existencia.stock_actual),
+        },
+    )
+
+    delta = ajuste.cantidad_fisica - ajuste.cantidad_sistema
+    if delta != 0:
+        movimiento_ajuste = MovimientoInventario.objects.create(
+            tipo=MovimientoInventario.TIPO_ENTRADA if delta > 0 else MovimientoInventario.TIPO_SALIDA,
+            insumo_id=ajuste.insumo_id,
+            cantidad=abs(delta),
+            referencia=ajuste.folio,
+        )
+        log_event(
+            acted_by,
+            "CREATE",
+            "inventario.MovimientoInventario",
+            movimiento_ajuste.id,
+            {
+                "tipo": movimiento_ajuste.tipo,
+                "insumo_id": movimiento_ajuste.insumo_id,
+                "cantidad": str(movimiento_ajuste.cantidad),
+                "referencia": movimiento_ajuste.referencia,
+            },
+        )
+
+    ajuste.estatus = AjusteInventario.STATUS_APLICADO
+    ajuste.aprobado_por = acted_by if acted_by and acted_by.is_authenticated else None
+    now = timezone.now()
+    ajuste.aprobado_en = now
+    ajuste.aplicado_en = now
+    ajuste.comentario_revision = (comentario or ajuste.comentario_revision or "")[:255]
+    ajuste.save(update_fields=["estatus", "aprobado_por", "aprobado_en", "aplicado_en", "comentario_revision"])
+    log_event(
+        acted_by,
+        "APPLY",
+        "inventario.AjusteInventario",
+        ajuste.id,
+        {
+            "folio": ajuste.folio,
+            "estatus": ajuste.estatus,
+            "comentario_revision": ajuste.comentario_revision,
+        },
+    )
 
 
 def _classify_upload(filename: str) -> tuple[str | None, str | None]:
@@ -1795,7 +1859,60 @@ def ajustes(request: HttpRequest) -> HttpResponse:
     if not can_view_inventario(request.user):
         raise PermissionDenied("No tienes permisos para ver Inventario.")
 
+    can_approve_ajustes = _can_approve_ajustes(request.user)
+
     if request.method == "POST":
+        action = (request.POST.get("action") or "create").strip().lower()
+
+        if action in {"approve", "reject", "apply"}:
+            if not can_approve_ajustes:
+                raise PermissionDenied("No tienes permisos para aprobar/rechazar ajustes.")
+            ajuste_id = request.POST.get("ajuste_id")
+            ajuste = AjusteInventario.objects.select_related("insumo").filter(pk=ajuste_id).first()
+            if not ajuste:
+                messages.error(request, "No se encontró el ajuste seleccionado.")
+                return redirect("inventario:ajustes")
+
+            comentario = (request.POST.get("comentario_revision") or "").strip()[:255]
+            if action == "reject":
+                if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+                    messages.error(request, "No se puede rechazar un ajuste ya aplicado.")
+                    return redirect("inventario:ajustes")
+                ajuste.estatus = AjusteInventario.STATUS_RECHAZADO
+                ajuste.aprobado_por = request.user
+                ajuste.aprobado_en = timezone.now()
+                ajuste.aplicado_en = None
+                ajuste.comentario_revision = comentario
+                ajuste.save(
+                    update_fields=[
+                        "estatus",
+                        "aprobado_por",
+                        "aprobado_en",
+                        "aplicado_en",
+                        "comentario_revision",
+                    ]
+                )
+                log_event(
+                    request.user,
+                    "REJECT",
+                    "inventario.AjusteInventario",
+                    ajuste.id,
+                    {"folio": ajuste.folio, "estatus": ajuste.estatus, "comentario_revision": comentario},
+                )
+                messages.success(request, f"Ajuste {ajuste.folio} rechazado.")
+                return redirect("inventario:ajustes")
+
+            if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+                messages.info(request, f"El ajuste {ajuste.folio} ya estaba aplicado.")
+                return redirect("inventario:ajustes")
+            if ajuste.estatus == AjusteInventario.STATUS_RECHAZADO:
+                messages.error(request, f"El ajuste {ajuste.folio} fue rechazado y no puede aplicarse.")
+                return redirect("inventario:ajustes")
+
+            _apply_ajuste(ajuste, request.user, comentario=comentario)
+            messages.success(request, f"Ajuste {ajuste.folio} aprobado y aplicado.")
+            return redirect("inventario:ajustes")
+
         if not can_manage_inventario(request.user):
             raise PermissionDenied("No tienes permisos para registrar ajustes.")
         insumo_id = request.POST.get("insumo_id")
@@ -1811,7 +1928,8 @@ def ajustes(request: HttpRequest) -> HttpResponse:
                 cantidad_sistema=cantidad_sistema,
                 cantidad_fisica=cantidad_fisica,
                 motivo=request.POST.get("motivo", "").strip() or "Sin motivo",
-                estatus=request.POST.get("estatus") or AjusteInventario.STATUS_PENDIENTE,
+                estatus=AjusteInventario.STATUS_PENDIENTE,
+                solicitado_por=request.user if request.user.is_authenticated else None,
             )
             log_event(
                 request.user,
@@ -1824,59 +1942,27 @@ def ajustes(request: HttpRequest) -> HttpResponse:
                     "cantidad_sistema": str(ajuste.cantidad_sistema),
                     "cantidad_fisica": str(ajuste.cantidad_fisica),
                     "estatus": ajuste.estatus,
+                    "solicitado_por": request.user.username if request.user.is_authenticated else "",
                 },
             )
 
-            if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
-                existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo_id=ajuste.insumo_id)
-                prev_stock = existencia.stock_actual
-                existencia.stock_actual = ajuste.cantidad_fisica
-                existencia.actualizado_en = timezone.now()
-                existencia.save()
-                log_event(
-                    request.user,
-                    "APPLY",
-                    "inventario.ExistenciaInsumo",
-                    existencia.id,
-                    {
-                        "source": ajuste.folio,
-                        "insumo_id": ajuste.insumo_id,
-                        "from_stock": str(prev_stock),
-                        "to_stock": str(existencia.stock_actual),
-                    },
-                )
-
-                delta = ajuste.cantidad_fisica - ajuste.cantidad_sistema
-                if delta != 0:
-                    movimiento_ajuste = MovimientoInventario.objects.create(
-                        tipo=(
-                            MovimientoInventario.TIPO_ENTRADA
-                            if delta > 0
-                            else MovimientoInventario.TIPO_SALIDA
-                        ),
-                        insumo_id=ajuste.insumo_id,
-                        cantidad=abs(delta),
-                        referencia=ajuste.folio,
-                    )
-                    log_event(
-                        request.user,
-                        "CREATE",
-                        "inventario.MovimientoInventario",
-                        movimiento_ajuste.id,
-                        {
-                            "tipo": movimiento_ajuste.tipo,
-                            "insumo_id": movimiento_ajuste.insumo_id,
-                            "cantidad": str(movimiento_ajuste.cantidad),
-                            "referencia": movimiento_ajuste.referencia,
-                        },
-                    )
+            if request.POST.get("create_and_apply") == "1":
+                if can_approve_ajustes:
+                    comentario = (request.POST.get("comentario_revision") or "").strip()[:255]
+                    _apply_ajuste(ajuste, request.user, comentario=comentario)
+                    messages.success(request, f"Ajuste {ajuste.folio} creado y aplicado.")
+                else:
+                    messages.info(request, f"Ajuste {ajuste.folio} creado en pendiente (requiere aprobación ADMIN).")
+            else:
+                messages.success(request, f"Ajuste {ajuste.folio} creado en pendiente.")
         return redirect("inventario:ajustes")
 
     context = {
-        "ajustes": AjusteInventario.objects.select_related("insumo")[:100],
+        "ajustes": AjusteInventario.objects.select_related("insumo", "solicitado_por", "aprobado_por")[:150],
         "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:200],
         "status_choices": AjusteInventario.STATUS_CHOICES,
         "can_manage_inventario": can_manage_inventario(request.user),
+        "can_approve_ajustes": can_approve_ajustes,
     }
     return render(request, "inventario/ajustes.html", context)
 

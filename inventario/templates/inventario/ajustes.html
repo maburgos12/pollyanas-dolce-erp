@@ -17,6 +17,7 @@
   {% if can_manage_inventario %}
   <form method="post" class="form-grid-auto">
     {% csrf_token %}
+    <input type="hidden" name="action" value="create">
     <select class="input-field" name="insumo_id" required>
       <option value="">Insumo</option>
       {% for i in insumos %}<option value="{{ i.id }}">{{ i.nombre }}</option>{% endfor %}
@@ -24,9 +25,10 @@
     <input class="input-field" type="number" min="0" step="0.001" name="cantidad_sistema" placeholder="Cantidad sistema" required>
     <input class="input-field" type="number" min="0" step="0.001" name="cantidad_fisica" placeholder="Cantidad física" required>
     <input class="input-field" name="motivo" placeholder="Motivo" required>
-    <select class="input-field" name="estatus">
-      {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-    </select>
+    {% if can_approve_ajustes %}
+    <label class="inline-check"><input type="checkbox" name="create_and_apply" value="1"> Aprobar y aplicar inmediato</label>
+    <input class="input-field" name="comentario_revision" placeholder="Comentario aprobación (opcional)">
+    {% endif %}
     <button class="btn btn-primary" type="submit">Registrar ajuste</button>
   </form>
   {% else %}
@@ -42,10 +44,13 @@
         <tr>
           <th>Folio</th>
           <th>Insumo</th>
+          <th>Solicitó</th>
           <th class="text-end">Sistema</th>
           <th class="text-end">Físico</th>
           <th>Motivo</th>
           <th>Estatus</th>
+          <th>Revisión</th>
+          {% if can_approve_ajustes %}<th>Acciones</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -53,13 +58,54 @@
         <tr>
           <td>{{ a.folio }}</td>
           <td>{{ a.insumo.nombre }}</td>
+          <td>{% if a.solicitado_por %}{{ a.solicitado_por.username }}{% else %}-{% endif %}</td>
           <td class="text-end">{{ a.cantidad_sistema }}</td>
           <td class="text-end">{{ a.cantidad_fisica }}</td>
           <td>{{ a.motivo }}</td>
-          <td><span class="badge bg-primary">{{ a.get_estatus_display }}</span></td>
+          <td>
+            {% if a.estatus == "APLICADO" %}
+              <span class="badge bg-success">{{ a.get_estatus_display }}</span>
+            {% elif a.estatus == "RECHAZADO" %}
+              <span class="badge bg-danger">{{ a.get_estatus_display }}</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">{{ a.get_estatus_display }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if a.aprobado_por %}
+              {{ a.aprobado_por.username }} · {{ a.aprobado_en|date:"Y-m-d H:i" }}
+            {% else %}
+              -
+            {% endif %}
+            {% if a.comentario_revision %}
+              <div class="text-muted">{{ a.comentario_revision }}</div>
+            {% endif %}
+          </td>
+          {% if can_approve_ajustes %}
+          <td>
+            {% if a.estatus == "PENDIENTE" %}
+            <form method="post" class="d-flex gap-2 flex-wrap">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="approve">
+              <input type="hidden" name="ajuste_id" value="{{ a.id }}">
+              <input class="input-field" name="comentario_revision" placeholder="Comentario (opcional)">
+              <button class="btn btn-primary btn-small" type="submit">Aprobar y aplicar</button>
+            </form>
+            <form method="post" class="d-flex gap-2 mt-1">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="reject">
+              <input type="hidden" name="ajuste_id" value="{{ a.id }}">
+              <input class="input-field" name="comentario_revision" placeholder="Motivo rechazo" required>
+              <button class="btn btn-danger btn-small" type="submit">Rechazar</button>
+            </form>
+            {% else %}
+            <span class="text-muted">Sin acciones</span>
+            {% endif %}
+          </td>
+          {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="6" class="text-muted">Sin ajustes registrados.</td></tr>
+        <tr><td colspan="{% if can_approve_ajustes %}10{% else %}9{% endif %}" class="text-muted">Sin ajustes registrados.</td></tr>
         {% endfor %}
       </tbody>
     </table>

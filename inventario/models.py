@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -55,9 +56,11 @@ class MovimientoInventario(models.Model):
 class AjusteInventario(models.Model):
     STATUS_PENDIENTE = "PENDIENTE"
     STATUS_APLICADO = "APLICADO"
+    STATUS_RECHAZADO = "RECHAZADO"
     STATUS_CHOICES = [
         (STATUS_PENDIENTE, "Pendiente aprobación"),
         (STATUS_APLICADO, "Aplicado"),
+        (STATUS_RECHAZADO, "Rechazado"),
     ]
 
     folio = models.CharField(max_length=20, unique=True, blank=True)
@@ -66,6 +69,23 @@ class AjusteInventario(models.Model):
     cantidad_fisica = models.DecimalField(max_digits=18, decimal_places=3)
     motivo = models.CharField(max_length=255)
     estatus = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDIENTE)
+    solicitado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ajustes_inventario_solicitados",
+    )
+    aprobado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ajustes_inventario_aprobados",
+    )
+    aprobado_en = models.DateTimeField(null=True, blank=True)
+    aplicado_en = models.DateTimeField(null=True, blank=True)
+    comentario_revision = models.CharField(max_length=255, blank=True, default="")
     creado_en = models.DateTimeField(default=timezone.now)
 
     class Meta:
