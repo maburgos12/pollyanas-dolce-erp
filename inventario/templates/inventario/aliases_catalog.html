@@ -73,6 +73,7 @@
     <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}?tipo=INSUMO">Revisar pendientes Point</a>
     <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Revisar pendientes Recetas</a>
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_csv&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes CSV</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_xlsx&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes XLSX</a>
     {% if can_manage_inventario %}
     <form method="post" class="inline-form">
       {% csrf_token %}

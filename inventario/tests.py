@@ -128,6 +128,55 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn("nombre_muestra", body)
         self.assertIn("Mantequilla Barra", body)
 
+    def test_export_cross_pending_xlsx(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="P-101",
+            point_nombre="Mantequilla Barra",
+            fuzzy_score=88.5,
+            fuzzy_sugerencia="Mantequilla",
+        )
+        receta = Receta.objects.create(nombre="Receta Test Export XLSX", hash_contenido="hash-export-xlsx-001")
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Mantequilla Barra",
+            cantidad=1,
+            unidad=None,
+            unidad_texto="kg",
+            costo_unitario_snapshot=0,
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+
+        response = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {"export": "cross_pending_xlsx"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(response.content), data_only=True)
+        ws = wb.active
+        headers = [ws.cell(row=1, column=i).value for i in range(1, 10)]
+        self.assertEqual(
+            headers,
+            [
+                "nombre_muestra",
+                "nombre_normalizado",
+                "point_count",
+                "almacen_count",
+                "receta_count",
+                "fuentes_activas",
+                "total_count",
+                "sugerencia",
+                "score_max",
+            ],
+        )
+        self.assertEqual(ws.cell(row=2, column=1).value, "Mantequilla Barra")
+
     def test_export_cross_pending_csv_with_filters(self):
         PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,

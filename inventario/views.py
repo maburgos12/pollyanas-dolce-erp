@@ -394,6 +394,59 @@ def _export_cross_pending_csv(cross_unified_rows: list[dict]) -> HttpResponse:
     return response
 
 
+def _export_cross_pending_xlsx(cross_unified_rows: list[dict]) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "homologacion_pendientes"
+    ws.append(
+        [
+            "nombre_muestra",
+            "nombre_normalizado",
+            "point_count",
+            "almacen_count",
+            "receta_count",
+            "fuentes_activas",
+            "total_count",
+            "sugerencia",
+            "score_max",
+        ]
+    )
+    for row in cross_unified_rows:
+        ws.append(
+            [
+                row.get("nombre_muestra", ""),
+                row.get("nombre_normalizado", ""),
+                row.get("point_count", 0),
+                row.get("almacen_count", 0),
+                row.get("receta_count", 0),
+                row.get("sources_active", 0),
+                row.get("total_count", 0),
+                row.get("suggestion", ""),
+                row.get("score_max", 0.0),
+            ]
+        )
+    ws.column_dimensions["A"].width = 36
+    ws.column_dimensions["B"].width = 36
+    ws.column_dimensions["C"].width = 14
+    ws.column_dimensions["D"].width = 16
+    ws.column_dimensions["E"].width = 14
+    ws.column_dimensions["F"].width = 16
+    ws.column_dimensions["G"].width = 12
+    ws.column_dimensions["H"].width = 34
+    ws.column_dimensions["I"].width = 12
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="inventario_homologacion_pendientes_{now_str}.xlsx"'
+    return response
+
+
 def _export_alias_template(export_format: str) -> HttpResponse:
     headers = ["alias", "insumo"]
     sample_rows = [
@@ -1375,6 +1428,8 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     export_format = (request.GET.get("export") or "").strip().lower()
     if export_format == "cross_pending_csv":
         return _export_cross_pending_csv(cross_filtered_rows)
+    if export_format == "cross_pending_xlsx":
+        return _export_cross_pending_xlsx(cross_filtered_rows)
     if export_format in {"alias_template_csv", "alias_template_xlsx"}:
         return _export_alias_template(export_format)
     if export_format in {"alias_import_preview_csv", "alias_import_preview_xlsx"}:
