@@ -19,6 +19,8 @@ Sprint 1 entrega:
 - API: POST /api/ventas/solicitud/aplicar-forecast/ (ajuste automático de solicitud al forecast)
 - API: GET/POST /api/inventario/ajustes/ (consulta y alta de ajustes en pendiente / aplicado)
 - API: POST /api/inventario/ajustes/{id}/decision/ (aprobar/aplicar/rechazar ajuste)
+- API: POST /api/compras/solicitud/{id}/estatus/ (cambio de estado con reglas de transición)
+- API: POST /api/compras/solicitud/{id}/crear-orden/ (genera OC desde solicitud aprobada, idempotente)
 
 ## Requisitos
 - Docker Desktop (Mac/Windows) **o** Python 3.12 + Postgres 16

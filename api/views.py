@@ -28,6 +28,7 @@ from compras.views import (
     _build_budget_context,
     _build_budget_history,
     _build_category_dashboard,
+    _can_transition_solicitud,
     _build_consumo_vs_plan_dashboard,
     _build_provider_dashboard,
     _filtered_solicitudes,
@@ -35,7 +36,7 @@ from compras.views import (
 )
 from inventario.models import AjusteInventario, ExistenciaInsumo
 from inventario.views import _apply_ajuste
-from maestros.models import CostoInsumo, Insumo
+from maestros.models import CostoInsumo, Insumo, Proveedor
 from recetas.models import (
     LineaReceta,
     PlanProduccion,
@@ -57,7 +58,9 @@ from recetas.views import (
 )
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from .serializers import (
+    ComprasCrearOrdenSerializer,
     ComprasSolicitudCreateSerializer,
+    ComprasSolicitudStatusSerializer,
     ForecastBacktestRequestSerializer,
     ForecastEstadisticoRequestSerializer,
     InventarioAjusteCreateSerializer,
@@ -1149,6 +1152,176 @@ class ComprasSolicitudCreateView(APIView):
             "orden_estatus": orden.estatus if orden else "",
         }
         return Response(payload, status=status.HTTP_201_CREATED)
+
+
+class ComprasSolicitudStatusUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, solicitud_id: int):
+        if not can_manage_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para aprobar/rechazar solicitudes de compra."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        solicitud = get_object_or_404(SolicitudCompra.objects.select_related("insumo"), pk=solicitud_id)
+        ser = ComprasSolicitudStatusSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        estatus_new = ser.validated_data["estatus"]
+
+        estatus_prev = solicitud.estatus
+        if estatus_prev == estatus_new:
+            return Response(
+                {
+                    "id": solicitud.id,
+                    "folio": solicitud.folio,
+                    "from": estatus_prev,
+                    "to": estatus_new,
+                    "updated": False,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if not _can_transition_solicitud(estatus_prev, estatus_new):
+            return Response(
+                {
+                    "detail": (
+                        f"Transición inválida de solicitud: {estatus_prev} -> {estatus_new}."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        solicitud.estatus = estatus_new
+        solicitud.save(update_fields=["estatus"])
+        log_event(
+            request.user,
+            "APPROVE",
+            "compras.SolicitudCompra",
+            solicitud.id,
+            {"from": estatus_prev, "to": estatus_new, "folio": solicitud.folio, "source": "api"},
+        )
+
+        return Response(
+            {
+                "id": solicitud.id,
+                "folio": solicitud.folio,
+                "from": estatus_prev,
+                "to": estatus_new,
+                "updated": True,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ComprasSolicitudCrearOrdenView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, solicitud_id: int):
+        if not can_manage_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para crear órdenes desde solicitud."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        solicitud = get_object_or_404(
+            SolicitudCompra.objects.select_related("insumo", "proveedor_sugerido", "insumo__proveedor_principal"),
+            pk=solicitud_id,
+        )
+        if solicitud.estatus != SolicitudCompra.STATUS_APROBADA:
+            return Response(
+                {"detail": f"La solicitud {solicitud.folio} no está aprobada."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        existing = (
+            OrdenCompra.objects.filter(solicitud=solicitud)
+            .exclude(estatus=OrdenCompra.STATUS_CERRADA)
+            .select_related("proveedor")
+            .first()
+        )
+        if existing:
+            return Response(
+                {
+                    "created": False,
+                    "id": existing.id,
+                    "folio": existing.folio,
+                    "estatus": existing.estatus,
+                    "proveedor": existing.proveedor.nombre,
+                    "solicitud_folio": solicitud.folio,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        ser = ComprasCrearOrdenSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        estatus = data.get("estatus") or OrdenCompra.STATUS_BORRADOR
+        if estatus not in {OrdenCompra.STATUS_BORRADOR, OrdenCompra.STATUS_ENVIADA}:
+            return Response(
+                {
+                    "detail": (
+                        "Estatus inicial de OC inválido. "
+                        "Solo se permite BORRADOR o ENVIADA al crear desde solicitud."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        proveedor = None
+        proveedor_id = data.get("proveedor_id")
+        if proveedor_id:
+            proveedor = get_object_or_404(Proveedor, pk=proveedor_id, activo=True)
+        if proveedor is None:
+            proveedor = solicitud.proveedor_sugerido or solicitud.insumo.proveedor_principal
+        if proveedor is None:
+            return Response(
+                {
+                    "detail": (
+                        f"La solicitud {solicitud.folio} no tiene proveedor sugerido "
+                        "ni proveedor principal en el insumo."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        costo_qs = CostoInsumo.objects.filter(insumo=solicitud.insumo).order_by("-fecha", "-id")
+        costo = costo_qs.filter(proveedor=proveedor).first() or costo_qs.first()
+        costo_unitario = _to_decimal(costo.costo_unitario if costo else 0)
+        monto_estimado = ((solicitud.cantidad or Decimal("0")) * costo_unitario).quantize(Decimal("0.01"))
+
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            referencia=f"SOLICITUD:{solicitud.folio}",
+            fecha_emision=data.get("fecha_emision") or timezone.localdate(),
+            fecha_entrega_estimada=data.get("fecha_entrega_estimada") or solicitud.fecha_requerida,
+            monto_estimado=monto_estimado,
+            estatus=estatus,
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "compras.OrdenCompra",
+            orden.id,
+            {"folio": orden.folio, "estatus": orden.estatus, "source": f"api:solicitud:{solicitud.folio}"},
+        )
+
+        return Response(
+            {
+                "created": True,
+                "id": orden.id,
+                "folio": orden.folio,
+                "estatus": orden.estatus,
+                "solicitud_id": solicitud.id,
+                "solicitud_folio": solicitud.folio,
+                "proveedor_id": proveedor.id,
+                "proveedor": proveedor.nombre,
+                "monto_estimado": str(orden.monto_estimado),
+                "costo_unitario": str(costo_unitario),
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class MRPRequerimientosView(APIView):

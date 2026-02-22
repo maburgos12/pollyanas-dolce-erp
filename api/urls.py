@@ -1,6 +1,8 @@
 from django.urls import path
 from .views import (
+    ComprasSolicitudCrearOrdenView,
     ComprasSolicitudCreateView,
+    ComprasSolicitudStatusUpdateView,
     ForecastBacktestView,
     ForecastEstadisticoView,
     InventarioAjustesView,
@@ -34,6 +36,8 @@ urlpatterns = [
     path("inventario/ajustes/<int:ajuste_id>/decision/", InventarioAjusteDecisionView.as_view(), name="api_inventario_ajuste_decision"),
     path("inventario/sugerencias-compra/", InventarioSugerenciasCompraView.as_view(), name="api_inventario_sugerencias_compra"),
     path("compras/solicitud/", ComprasSolicitudCreateView.as_view(), name="api_compras_solicitud"),
+    path("compras/solicitud/<int:solicitud_id>/estatus/", ComprasSolicitudStatusUpdateView.as_view(), name="api_compras_solicitud_estatus"),
+    path("compras/solicitud/<int:solicitud_id>/crear-orden/", ComprasSolicitudCrearOrdenView.as_view(), name="api_compras_solicitud_crear_orden"),
     path("presupuestos/consolidado/<str:periodo>/", PresupuestosConsolidadoView.as_view(), name="api_presupuestos_consolidado"),
     path("recetas/<int:receta_id>/versiones/", RecetaVersionesView.as_view(), name="api_receta_versiones"),
     path("recetas/<int:receta_id>/costo-historico/", RecetaCostoHistoricoView.as_view(), name="api_receta_costo_historico"),

@@ -149,6 +149,21 @@ class ComprasSolicitudCreateSerializer(serializers.Serializer):
         return attrs
 
 
+class ComprasSolicitudStatusSerializer(serializers.Serializer):
+    estatus = serializers.ChoiceField(choices=[choice[0] for choice in SolicitudCompra.STATUS_CHOICES])
+
+
+class ComprasCrearOrdenSerializer(serializers.Serializer):
+    proveedor_id = serializers.IntegerField(required=False)
+    estatus = serializers.ChoiceField(
+        choices=[choice[0] for choice in OrdenCompra.STATUS_CHOICES],
+        required=False,
+        default=OrdenCompra.STATUS_BORRADOR,
+    )
+    fecha_emision = serializers.DateField(required=False)
+    fecha_entrega_estimada = serializers.DateField(required=False)
+
+
 class ForecastEstadisticoRequestSerializer(serializers.Serializer):
     alcance = serializers.ChoiceField(choices=["mes", "semana", "fin_semana"], required=False, default="mes")
     periodo = serializers.CharField(max_length=7, required=False, allow_blank=True)

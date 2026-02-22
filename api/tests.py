@@ -376,6 +376,93 @@ class RecetasCosteoApiTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
 
+    def test_endpoint_compras_solicitud_estatus_update(self):
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        url = reverse("api_compras_solicitud_estatus", args=[solicitud.id])
+        resp = self.client.post(url, {"estatus": SolicitudCompra.STATUS_EN_REVISION}, content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload["updated"])
+        self.assertEqual(payload["from"], SolicitudCompra.STATUS_BORRADOR)
+        self.assertEqual(payload["to"], SolicitudCompra.STATUS_EN_REVISION)
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estatus, SolicitudCompra.STATUS_EN_REVISION)
+
+    def test_endpoint_compras_solicitud_estatus_transition_invalida(self):
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        url = reverse("api_compras_solicitud_estatus", args=[solicitud.id])
+        resp = self.client.post(url, {"estatus": SolicitudCompra.STATUS_RECHAZADA}, content_type="application/json")
+        self.assertEqual(resp.status_code, 400)
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estatus, SolicitudCompra.STATUS_APROBADA)
+
+    def test_endpoint_compras_solicitud_crear_orden(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor flujo API", activo=True)
+        self.insumo.proveedor_principal = proveedor
+        self.insumo.save(update_fields=["proveedor_principal"])
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("14.00"),
+            source_hash="api-crear-orden-1",
+        )
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("3"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+
+        url = reverse("api_compras_solicitud_crear_orden", args=[solicitud.id])
+        resp = self.client.post(url, {"estatus": OrdenCompra.STATUS_ENVIADA}, content_type="application/json")
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertTrue(payload["created"])
+        self.assertEqual(payload["estatus"], OrdenCompra.STATUS_ENVIADA)
+        self.assertEqual(Decimal(payload["monto_estimado"]), Decimal("42.00"))
+        orden = OrdenCompra.objects.get(pk=payload["id"])
+        self.assertEqual(orden.solicitud_id, solicitud.id)
+
+        # Segundo intento: debe responder idempotente con la misma orden activa.
+        resp_existing = self.client.post(url, {}, content_type="application/json")
+        self.assertEqual(resp_existing.status_code, 200)
+        payload_existing = resp_existing.json()
+        self.assertFalse(payload_existing["created"])
+        self.assertEqual(payload_existing["id"], orden.id)
+
+    def test_endpoint_compras_solicitud_crear_orden_requires_perm(self):
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            cantidad=Decimal("1"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="no_perm_crear_orden",
+            email="no_perm_crear_orden@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+        url = reverse("api_compras_solicitud_crear_orden", args=[solicitud.id])
+        resp = self.client.post(url, {}, content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
+
     def test_endpoint_presupuestos_consolidado_periodo(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Consolidado", lead_time_dias=4, activo=True)
         self.insumo.proveedor_principal = proveedor
