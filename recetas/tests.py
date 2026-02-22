@@ -467,6 +467,13 @@ class RecetaPhase2ViewsTests(TestCase):
         body = resp.content.decode("utf-8")
         self.assertIn("scope,nombre,receta", body)
 
+    def test_drivers_costeo_handles_missing_table_gracefully(self):
+        with patch("recetas.views.CostoDriver.objects.select_related", side_effect=OperationalError("missing table")):
+            resp = self.client.get(reverse("recetas:drivers_costeo"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["drivers_unavailable"])
+        self.assertContains(resp, "no disponibles en este entorno")
+
 
 class ImportCosteoDriverExcelTests(TestCase):
     def setUp(self):

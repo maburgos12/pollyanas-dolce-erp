@@ -728,22 +728,32 @@ def drivers_costeo(request: HttpRequest) -> HttpResponse:
     edit_raw = (request.GET.get("edit") or "").strip()
     edit_driver = None
 
-    qs = CostoDriver.objects.select_related("receta").order_by("scope", "prioridad", "id")
-    if q:
-        qs = qs.filter(
-            Q(nombre__icontains=q)
-            | Q(familia__icontains=q)
-            | Q(receta__nombre__icontains=q)
-        )
-    if scope in {CostoDriver.SCOPE_PRODUCTO, CostoDriver.SCOPE_FAMILIA, CostoDriver.SCOPE_LOTE, CostoDriver.SCOPE_GLOBAL}:
-        qs = qs.filter(scope=scope)
-    if edit_raw:
-        try:
-            edit_driver = CostoDriver.objects.select_related("receta").filter(pk=int(edit_raw)).first()
-        except Exception:
-            edit_driver = None
+    drivers_unavailable = False
+    drivers = []
+    try:
+        qs = CostoDriver.objects.select_related("receta").order_by("scope", "prioridad", "id")
+        if q:
+            qs = qs.filter(
+                Q(nombre__icontains=q)
+                | Q(familia__icontains=q)
+                | Q(receta__nombre__icontains=q)
+            )
+        if scope in {CostoDriver.SCOPE_PRODUCTO, CostoDriver.SCOPE_FAMILIA, CostoDriver.SCOPE_LOTE, CostoDriver.SCOPE_GLOBAL}:
+            qs = qs.filter(scope=scope)
+        if edit_raw:
+            try:
+                edit_driver = CostoDriver.objects.select_related("receta").filter(pk=int(edit_raw)).first()
+            except Exception:
+                edit_driver = None
+        drivers = list(qs[:400])
+    except (OperationalError, ProgrammingError):
+        drivers_unavailable = True
+        edit_driver = None
 
     if request.method == "POST":
+        if drivers_unavailable:
+            messages.error(request, "Drivers de costeo no disponibles en este entorno. Ejecuta migraciones.")
+            return redirect("recetas:drivers_costeo")
         driver_id = (request.POST.get("driver_id") or "").strip()
         nombre = (request.POST.get("nombre") or "").strip()
         driver_scope = _normalize_driver_scope(request.POST.get("scope"))
@@ -767,39 +777,43 @@ def drivers_costeo(request: HttpRequest) -> HttpResponse:
             messages.error(request, "Para scope PRODUCTO debes seleccionar una receta.")
             return redirect("recetas:drivers_costeo")
 
-        if driver_id:
-            driver = CostoDriver.objects.filter(pk=driver_id).first()
-            if not driver:
-                messages.error(request, "Driver no encontrado para editar.")
-                return redirect("recetas:drivers_costeo")
-        else:
-            driver = CostoDriver()
+        try:
+            if driver_id:
+                driver = CostoDriver.objects.filter(pk=driver_id).first()
+                if not driver:
+                    messages.error(request, "Driver no encontrado para editar.")
+                    return redirect("recetas:drivers_costeo")
+            else:
+                driver = CostoDriver()
 
-        driver.nombre = nombre[:120]
-        driver.scope = driver_scope
-        driver.receta = receta
-        driver.familia = familia[:120]
-        driver.lote_desde = lote_desde
-        driver.lote_hasta = lote_hasta
-        driver.mo_pct = mo_pct
-        driver.indirecto_pct = indirecto_pct
-        driver.mo_fijo = mo_fijo
-        driver.indirecto_fijo = indirecto_fijo
-        driver.prioridad = max(prioridad, 0)
-        driver.activo = activo
-        driver.save()
-        messages.success(request, "Driver guardado.")
+            driver.nombre = nombre[:120]
+            driver.scope = driver_scope
+            driver.receta = receta
+            driver.familia = familia[:120]
+            driver.lote_desde = lote_desde
+            driver.lote_hasta = lote_hasta
+            driver.mo_pct = mo_pct
+            driver.indirecto_pct = indirecto_pct
+            driver.mo_fijo = mo_fijo
+            driver.indirecto_fijo = indirecto_fijo
+            driver.prioridad = max(prioridad, 0)
+            driver.activo = activo
+            driver.save()
+            messages.success(request, "Driver guardado.")
+        except (OperationalError, ProgrammingError):
+            messages.error(request, "No se pudo guardar el driver. Ejecuta migraciones pendientes.")
         return redirect("recetas:drivers_costeo")
 
     return render(
         request,
         "recetas/drivers_costeo.html",
         {
-            "drivers": qs[:400],
+            "drivers": drivers,
             "recetas": Receta.objects.order_by("nombre"),
             "q": q,
             "scope": scope,
             "edit_driver": edit_driver,
+            "drivers_unavailable": drivers_unavailable,
             "scope_choices": [
                 CostoDriver.SCOPE_PRODUCTO,
                 CostoDriver.SCOPE_FAMILIA,
@@ -814,9 +828,12 @@ def drivers_costeo(request: HttpRequest) -> HttpResponse:
 @permission_required("recetas.change_receta", raise_exception=True)
 @require_POST
 def drivers_costeo_delete(request: HttpRequest, driver_id: int) -> HttpResponse:
-    driver = get_object_or_404(CostoDriver, pk=driver_id)
-    driver.delete()
-    messages.success(request, "Driver eliminado.")
+    try:
+        driver = get_object_or_404(CostoDriver, pk=driver_id)
+        driver.delete()
+        messages.success(request, "Driver eliminado.")
+    except (OperationalError, ProgrammingError):
+        messages.error(request, "No se pudo eliminar el driver. Ejecuta migraciones pendientes.")
     return redirect("recetas:drivers_costeo")
 
 
@@ -876,6 +893,12 @@ def drivers_costeo_plantilla(request: HttpRequest) -> HttpResponse:
 @permission_required("recetas.change_receta", raise_exception=True)
 @require_POST
 def drivers_costeo_importar(request: HttpRequest) -> HttpResponse:
+    try:
+        CostoDriver.objects.exists()
+    except (OperationalError, ProgrammingError):
+        messages.error(request, "Drivers de costeo no disponibles en este entorno. Ejecuta migraciones.")
+        return redirect("recetas:drivers_costeo")
+
     uploaded = request.FILES.get("archivo")
     modo = (request.POST.get("modo") or "upsert").strip().lower()
     if modo not in {"upsert", "replace"}:

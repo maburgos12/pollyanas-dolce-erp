@@ -7,6 +7,11 @@
   <p class="muted mb-3">
     Configura mano de obra e indirectos por alcance (producto, familia, lote o global).
   </p>
+  {% if drivers_unavailable %}
+  <div class="alert alert-info" style="margin-bottom: 12px;">
+    Drivers de costeo no disponibles en este entorno. Ejecuta migraciones para habilitar este módulo.
+  </div>
+  {% endif %}
   <div class="toolbar">
     <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo_plantilla' %}?format=xlsx">Descargar plantilla XLSX</a>
     <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo_plantilla' %}?format=csv">Descargar plantilla CSV</a>
