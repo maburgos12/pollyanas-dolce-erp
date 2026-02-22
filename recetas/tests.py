@@ -897,6 +897,59 @@ class SolicitudVentasForecastTests(TestCase):
         )
         self.assertEqual(solicitud.cantidad, expected_qty)
 
+    def test_aplicar_ajuste_desde_forecast_con_tope_omite_cambios_grandes(self):
+        for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
+            year = 2025 if month_idx >= 11 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=self.sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="TEST_HIST_CAP",
+            )
+
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=self.sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-04",
+            fecha_inicio=date(2026, 4, 1),
+            fecha_fin=date(2026, 4, 30),
+            cantidad=Decimal("500"),
+            fuente="TEST_SOL_CAP",
+        )
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "mes",
+                "periodo": "2026-04",
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "preview",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response = self.client.post(
+            reverse("recetas:solicitud_ventas_aplicar_desde_forecast"),
+            {
+                "modo": "receta",
+                "receta_id": str(self.receta.id),
+                "max_variacion_pct": "10",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        solicitud = SolicitudVenta.objects.get(
+            receta=self.receta,
+            sucursal=self.sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            fecha_inicio=date(2026, 4, 1),
+            fecha_fin=date(2026, 4, 30),
+        )
+        self.assertEqual(solicitud.cantidad, Decimal("500"))
+
 
 class RecetaPhase2ViewsTests(TestCase):
     def setUp(self):

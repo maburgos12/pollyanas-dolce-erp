@@ -448,18 +448,21 @@
         {% csrf_token %}
         {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
         <input type="hidden" name="modo" value="desviadas">
+        <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)" style="max-width:130px;">
         <button class="btn btn-secondary" type="submit">Ajustar desviadas (sobre+bajo)</button>
       </form>
       <form method="post" action="{% url 'recetas:solicitud_ventas_aplicar_desde_forecast' %}" class="inline-form">
         {% csrf_token %}
         {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
         <input type="hidden" name="modo" value="sobre">
+        <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)" style="max-width:130px;">
         <button class="btn btn-secondary" type="submit">Ajustar solo sobre-solicitud</button>
       </form>
       <form method="post" action="{% url 'recetas:solicitud_ventas_aplicar_desde_forecast' %}" class="inline-form">
         {% csrf_token %}
         {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
         <input type="hidden" name="modo" value="bajo">
+        <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)" style="max-width:130px;">
         <button class="btn btn-secondary" type="submit">Ajustar solo bajo-solicitud</button>
       </form>
     </div>
@@ -529,6 +532,7 @@
                 {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
                 <input type="hidden" name="modo" value="receta">
                 <input type="hidden" name="receta_id" value="{{ row.receta_id }}">
+                <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope %" style="max-width:95px;">
                 <button class="btn btn-primary" type="submit">Ajustar a forecast</button>
               </form>
               {% else %}

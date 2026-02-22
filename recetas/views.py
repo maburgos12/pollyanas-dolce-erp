@@ -2976,6 +2976,13 @@ def solicitud_ventas_aplicar_desde_forecast(request: HttpRequest) -> HttpRespons
 
     modo = (request.POST.get("modo") or "desviadas").strip().lower()
     receta_id = _to_int_safe(request.POST.get("receta_id"), default=0)
+    max_variacion_pct = None
+    max_variacion_raw = (request.POST.get("max_variacion_pct") or "").strip()
+    if max_variacion_raw:
+        parsed_cap = _to_decimal_safe(max_variacion_raw)
+        if parsed_cap < 0:
+            parsed_cap = Decimal("0")
+        max_variacion_pct = parsed_cap
     rows = list(compare["rows"])
     if modo == "sobre":
         rows = [r for r in rows if r["status"] == "SOBRE"]
@@ -3008,6 +3015,7 @@ def solicitud_ventas_aplicar_desde_forecast(request: HttpRequest) -> HttpRespons
     created = 0
     updated = 0
     skipped = 0
+    skipped_cap = 0
     for row in rows:
         forecast_qty = Decimal(str(row.get("forecast_qty") or 0))
         if forecast_qty < 0:
@@ -3032,16 +3040,33 @@ def solicitud_ventas_aplicar_desde_forecast(request: HttpRequest) -> HttpRespons
         if was_created:
             created += 1
             continue
+        old_qty = Decimal(str(record.cantidad or 0))
+        if max_variacion_pct is not None and old_qty > 0:
+            variacion_pct = abs(((forecast_qty - old_qty) / old_qty) * Decimal("100"))
+            if variacion_pct > max_variacion_pct:
+                skipped += 1
+                skipped_cap += 1
+                continue
         record.periodo = periodo
         record.cantidad = forecast_qty
         record.fuente = fuente
         record.save(update_fields=["periodo", "cantidad", "fuente", "actualizado_en"])
         updated += 1
 
-    messages.success(
-        request,
-        f"Ajuste aplicado desde forecast. Creadas: {created}. Actualizadas: {updated}. Omitidas: {skipped}.",
-    )
+    if max_variacion_pct is None:
+        messages.success(
+            request,
+            f"Ajuste aplicado desde forecast. Creadas: {created}. Actualizadas: {updated}. Omitidas: {skipped}.",
+        )
+    else:
+        messages.success(
+            request,
+            (
+                f"Ajuste aplicado con tope {max_variacion_pct}%."
+                f" Creadas: {created}. Actualizadas: {updated}. Omitidas: {skipped}."
+                f" Omitidas por tope: {skipped_cap}."
+            ),
+        )
     next_params["periodo"] = periodo
     return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
 
