@@ -118,6 +118,122 @@
   </form>
   <p class="muted mb-0">Columnas sugeridas: <code>receta</code>, <code>codigo_point</code>, <code>sucursal_codigo</code>, <code>fecha</code>, <code>cantidad</code>.</p>
   <hr>
+  <div class="card-header" style="margin-top:8px;">Solicitud de Ventas (por Sucursal)</div>
+  <p class="muted mb-2">
+    Registros periodo {{ periodo_pronostico_default }}:
+    <strong>{{ solicitudes_venta_count }}</strong> ·
+    Cantidad solicitada: <strong>{{ solicitudes_venta_total|floatformat:2 }}</strong> ·
+    Última fecha: <strong>{% if solicitudes_venta_fecha_max %}{{ solicitudes_venta_fecha_max }}{% else %}-{% endif %}</strong>
+  </p>
+  {% if solicitudes_venta_unavailable %}
+  <div class="alert alert-info" style="margin-bottom: 12px;">
+    La tabla de solicitudes de ventas no está disponible en este entorno; ejecuta migraciones para habilitarla.
+  </div>
+  {% endif %}
+  <div class="toolbar mb-2">
+    <a class="btn btn-secondary" href="{% url 'recetas:solicitud_ventas_plantilla' %}?format=xlsx">Plantilla solicitud XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:solicitud_ventas_plantilla' %}?format=csv">Plantilla solicitud CSV</a>
+  </div>
+  <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:solicitud_ventas_guardar' %}">
+    {% csrf_token %}
+    {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+    <div class="form-group">
+      <label class="form-label">Receta</label>
+      <select class="form-select" name="receta_id" required>
+        <option value="">Selecciona...</option>
+        {% for r in recetas_disponibles %}
+          <option value="{{ r.id }}">{{ r.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Sucursal</label>
+      <select class="form-select" name="sucursal_id">
+        <option value="">Todas</option>
+        {% for s in sucursales %}
+        <option value="{{ s.id }}">{{ s.codigo }} - {{ s.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Alcance</label>
+      <select class="form-select" name="alcance">
+        <option value="mes" selected>Mes</option>
+        <option value="semana">Semana</option>
+        <option value="fin_semana">Fin de semana</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Periodo (si alcance = mes)</label>
+      <input class="form-control" type="month" name="periodo" value="{{ periodo_pronostico_default }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fecha base (semana/fin semana)</label>
+      <input class="form-control" type="date" name="fecha_base" value="{{ fecha_base_estadistica }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Cantidad solicitada</label>
+      <input class="form-control" type="number" min="0.001" step="0.001" name="cantidad" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fuente</label>
+      <input class="form-control" name="fuente" value="UI_SOL_VENTAS" maxlength="40">
+    </div>
+    <div class="form-group" style="align-self:end;">
+      <button class="btn btn-primary" type="submit">Guardar solicitud ventas</button>
+    </div>
+  </form>
+  <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:solicitud_ventas_importar' %}" enctype="multipart/form-data">
+    {% csrf_token %}
+    {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+    <div class="form-group">
+      <label class="form-label">Archivo solicitud</label>
+      <input class="form-control" type="file" name="archivo" accept=".xlsx,.xlsm,.csv" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Alcance default</label>
+      <select class="form-select" name="alcance_default">
+        <option value="mes" selected>Mes</option>
+        <option value="semana">Semana</option>
+        <option value="fin_semana">Fin de semana</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Periodo default</label>
+      <input class="form-control" type="month" name="periodo_default" value="{{ periodo_pronostico_default }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fecha base default</label>
+      <input class="form-control" type="date" name="fecha_base_default" value="{{ fecha_base_estadistica }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Sucursal default (opcional)</label>
+      <select class="form-select" name="sucursal_default_id">
+        <option value="">Sin default</option>
+        {% for s in sucursales %}
+        <option value="{{ s.id }}">{{ s.codigo }} - {{ s.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Modo</label>
+      <select class="form-select" name="modo">
+        <option value="replace" selected>Reemplazar receta+sucursal+rango</option>
+        <option value="accumulate">Acumular cantidad</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fuente</label>
+      <input class="form-control" name="fuente" value="UI_SOL_VENTAS" maxlength="40">
+    </div>
+    <div class="form-group" style="align-self:end;">
+      <button class="btn btn-primary" type="submit">Importar solicitudes ventas</button>
+    </div>
+  </form>
+  <p class="muted mb-0">
+    Columnas sugeridas: <code>receta</code>, <code>codigo_point</code>, <code>sucursal_codigo</code>, <code>alcance</code>, <code>periodo</code>, <code>fecha_inicio</code>, <code>fecha_fin</code>, <code>cantidad</code>.
+  </p>
+  <hr>
   <div class="card-header" style="margin-top:8px;">Pronóstico Estadístico desde Historial</div>
   <p class="muted mb-2">
     Calcula temporalidad por sucursal y recomienda si Ventas debe subir/bajar solicitud.
@@ -215,6 +331,79 @@
           </tr>
           {% empty %}
           <tr><td colspan="7" class="text-muted">Sin filas para el filtro actual.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  {% if forecast_vs_solicitud %}
+  <div class="card" style="margin-top:12px;">
+    <div class="card-header">Pronóstico vs Solicitud de Ventas · {{ forecast_vs_solicitud.sucursal_nombre }}</div>
+    <p class="muted mb-2">
+      Rango: {{ forecast_vs_solicitud.target_start }} a {{ forecast_vs_solicitud.target_end }} ·
+      Forecast total: {{ forecast_vs_solicitud.totals.forecast_total|floatformat:2 }} ·
+      Solicitud total: {{ forecast_vs_solicitud.totals.solicitud_total|floatformat:2 }} ·
+      Delta: {{ forecast_vs_solicitud.totals.delta_total|floatformat:2 }}
+    </p>
+    <div class="kpi-mini">
+      <div class="kpi-card">
+        <div class="kpi-number is-success">{{ forecast_vs_solicitud.totals.ok_count }}</div>
+        <div class="kpi-label">Alineadas</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-number is-danger">{{ forecast_vs_solicitud.totals.sobre_count }}</div>
+        <div class="kpi-label">Sobre-solicitud</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-number is-danger">{{ forecast_vs_solicitud.totals.bajo_count }}</div>
+        <div class="kpi-label">Bajo-solicitud</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-number">{{ forecast_vs_solicitud.totals.sin_base_count }}</div>
+        <div class="kpi-label">Sin base histórica</div>
+      </div>
+    </div>
+    <div class="table-responsive mt-2">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Receta</th>
+            <th class="text-end">Forecast</th>
+            <th class="text-end">Solicitud</th>
+            <th class="text-end">Delta</th>
+            <th class="text-end">% variación</th>
+            <th>Estatus</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in forecast_vs_solicitud.rows %}
+          <tr>
+            <td>{{ row.receta }}</td>
+            <td class="text-end">{{ row.forecast_qty|floatformat:2 }}</td>
+            <td class="text-end">{{ row.solicitud_qty|floatformat:2 }}</td>
+            <td class="text-end">{{ row.delta_qty|floatformat:2 }}</td>
+            <td class="text-end">
+              {% if row.variacion_pct is not None %}
+                {{ row.variacion_pct|floatformat:1 }}%
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>
+              {% if row.status == "OK" %}
+                <span class="badge badge-verde">Alineada</span>
+              {% elif row.status == "SOBRE" %}
+                <span class="badge badge-rojo">Sobre</span>
+              {% elif row.status == "BAJO" %}
+                <span class="badge badge-amarillo">Bajo</span>
+              {% else %}
+                <span class="badge badge-amarillo">Sin base</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="text-muted">Sin filas para el filtro actual.</td></tr>
           {% endfor %}
         </tbody>
       </table>

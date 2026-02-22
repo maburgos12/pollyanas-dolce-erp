@@ -23,6 +23,7 @@ from recetas.models import (
     PronosticoVenta,
     Receta,
     RecetaCostoVersion,
+    SolicitudVenta,
     VentaHistorica,
 )
 from recetas.utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta
@@ -696,6 +697,110 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
         pron = PronosticoVenta.objects.filter(receta=self.receta, periodo="2026-03").first()
         self.assertIsNotNone(pron)
         self.assertGreater(pron.cantidad, Decimal("0"))
+
+
+class SolicitudVentasForecastTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_sol_ventas",
+            email="admin_sol_ventas@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+        self.sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        self.receta = Receta.objects.create(
+            nombre="Pastel Solicitud",
+            codigo_point="P-SOL-01",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-sol-ventas-001",
+        )
+
+    def test_guardar_solicitud_venta_reemplaza_por_rango(self):
+        payload = {
+            "receta_id": str(self.receta.id),
+            "sucursal_id": str(self.sucursal.id),
+            "alcance": "mes",
+            "periodo": "2026-04",
+            "cantidad": "120",
+            "fuente": "TEST_SOL",
+        }
+        response = self.client.post(reverse("recetas:solicitud_ventas_guardar"), payload)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(SolicitudVenta.objects.count(), 1)
+        row = SolicitudVenta.objects.first()
+        self.assertEqual(row.periodo, "2026-04")
+        self.assertEqual(row.cantidad, Decimal("120"))
+
+        payload["cantidad"] = "145"
+        response = self.client.post(reverse("recetas:solicitud_ventas_guardar"), payload)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(SolicitudVenta.objects.count(), 1)
+        row.refresh_from_db()
+        self.assertEqual(row.cantidad, Decimal("145"))
+
+    def test_import_solicitud_ventas_csv_crea_registros(self):
+        csv_data = (
+            "codigo_point,sucursal_codigo,alcance,periodo,cantidad\n"
+            "P-SOL-01,MATRIZ,MES,2026-04,88\n"
+            "P-SOL-01,MATRIZ,SEMANA,2026-04,24\n"
+        ).encode("utf-8")
+        upload = SimpleUploadedFile("solicitudes_ventas.csv", csv_data, content_type="text/csv")
+        response = self.client.post(
+            reverse("recetas:solicitud_ventas_importar"),
+            {
+                "archivo": upload,
+                "modo": "replace",
+                "periodo_default": "2026-04",
+                "fecha_base_default": "2026-04-10",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(SolicitudVenta.objects.count(), 2)
+
+    def test_contexto_muestra_comparativo_pronostico_vs_solicitud(self):
+        for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
+            year = 2025 if month_idx >= 11 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=self.sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="TEST_HIST_SOL",
+            )
+
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=self.sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-04",
+            fecha_inicio=date(2026, 4, 1),
+            fecha_fin=date(2026, 4, 30),
+            cantidad=Decimal("110"),
+            fuente="TEST_SOL",
+        )
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "mes",
+                "periodo": "2026-04",
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "preview",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response = self.client.get(reverse("recetas:plan_produccion"), {"periodo": "2026-04"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("forecast_vs_solicitud", response.context)
+        compare = response.context["forecast_vs_solicitud"]
+        self.assertIsNotNone(compare)
+        self.assertGreater(len(compare["rows"]), 0)
+        row = next((r for r in compare["rows"] if r["receta_id"] == self.receta.id), None)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["solicitud_qty"], Decimal("110"))
 
 
 class RecetaPhase2ViewsTests(TestCase):

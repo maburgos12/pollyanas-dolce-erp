@@ -47,6 +47,21 @@ urlpatterns = [
         name="ventas_historicas_importar",
     ),
     path(
+        "plan-produccion/solicitud-ventas/plantilla/",
+        views.solicitud_ventas_descargar_plantilla,
+        name="solicitud_ventas_plantilla",
+    ),
+    path(
+        "plan-produccion/solicitud-ventas/guardar/",
+        views.solicitud_ventas_guardar,
+        name="solicitud_ventas_guardar",
+    ),
+    path(
+        "plan-produccion/solicitud-ventas/importar/",
+        views.solicitud_ventas_importar,
+        name="solicitud_ventas_importar",
+    ),
+    path(
         "plan-produccion/pronosticos/estadistico/",
         views.pronostico_estadistico_desde_historial,
         name="pronostico_estadistico_desde_historial",

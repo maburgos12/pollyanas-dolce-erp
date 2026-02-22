@@ -34,6 +34,7 @@ from .models import (
     PlanProduccion,
     PlanProduccionItem,
     PronosticoVenta,
+    SolicitudVenta,
     VentaHistorica,
 )
 from .utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
@@ -1859,6 +1860,67 @@ def _load_ventas_rows(uploaded) -> list[dict]:
     raise ValueError("Formato no soportado. Usa CSV o XLSX.")
 
 
+def _map_solicitud_ventas_header(header: str) -> str:
+    key = normalizar_nombre(header).replace("_", " ")
+    if key in {"receta", "producto", "nombre receta", "nombre producto", "nombre"}:
+        return "receta"
+    if key in {"codigo point", "codigo", "sku", "codigo producto"}:
+        return "codigo_point"
+    if key in {"sucursal", "tienda", "store"}:
+        return "sucursal"
+    if key in {"sucursal codigo", "codigo sucursal", "store code"}:
+        return "sucursal_codigo"
+    if key in {"alcance", "tipo periodo", "scope"}:
+        return "alcance"
+    if key in {"periodo", "mes"}:
+        return "periodo"
+    if key in {"fecha", "fecha base", "base"}:
+        return "fecha_base"
+    if key in {"fecha inicio", "inicio", "start date"}:
+        return "fecha_inicio"
+    if key in {"fecha fin", "fin", "end date"}:
+        return "fecha_fin"
+    if key in {"cantidad", "cantidad solicitada", "qty", "solicitud"}:
+        return "cantidad"
+    return key
+
+
+def _load_solicitud_ventas_rows(uploaded) -> list[dict]:
+    filename = (uploaded.name or "").lower()
+    rows: list[dict] = []
+    if filename.endswith(".csv"):
+        uploaded.seek(0)
+        content = uploaded.read().decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            parsed = {}
+            for key, value in (row or {}).items():
+                if not key:
+                    continue
+                parsed[_map_solicitud_ventas_header(str(key))] = value
+            rows.append(parsed)
+        return rows
+
+    if filename.endswith(".xlsx") or filename.endswith(".xlsm"):
+        uploaded.seek(0)
+        wb = load_workbook(uploaded, read_only=True, data_only=True)
+        ws = wb.active
+        values = list(ws.values)
+        if not values:
+            return []
+        headers = [_map_solicitud_ventas_header(str(h or "")) for h in values[0]]
+        for raw in values[1:]:
+            parsed = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                parsed[header] = raw[idx] if idx < len(raw) else None
+            rows.append(parsed)
+        return rows
+
+    raise ValueError("Formato no soportado. Usa CSV o XLSX.")
+
+
 def _parse_date_safe(value: object) -> date | None:
     if value is None:
         return None
@@ -1911,6 +1973,56 @@ def _resolve_sucursal_for_sales(sucursal_name: str, sucursal_codigo: str, defaul
     if sucursal is None and sucursal_name:
         sucursal = Sucursal.objects.filter(nombre__iexact=sucursal_name).order_by("id").first()
     return sucursal or default_sucursal
+
+
+def _normalize_alcance_solicitud(raw: str | None) -> str:
+    key = normalizar_nombre(str(raw or "")).replace(" ", "_")
+    if key in {"mes", "mensual"}:
+        return SolicitudVenta.ALCANCE_MES
+    if key in {"semana", "semanal", "week"}:
+        return SolicitudVenta.ALCANCE_SEMANA
+    if key in {"fin_semana", "fin_de_semana", "weekend"}:
+        return SolicitudVenta.ALCANCE_FIN_SEMANA
+    return SolicitudVenta.ALCANCE_MES
+
+
+def _ui_to_model_alcance(raw: str | None) -> str:
+    key = (raw or "").strip().lower()
+    if key == "semana":
+        return SolicitudVenta.ALCANCE_SEMANA
+    if key == "fin_semana":
+        return SolicitudVenta.ALCANCE_FIN_SEMANA
+    return SolicitudVenta.ALCANCE_MES
+
+
+def _resolve_solicitud_window(
+    *,
+    alcance: str,
+    periodo_raw: str | None,
+    fecha_base_raw: object,
+    fecha_inicio_raw: object,
+    fecha_fin_raw: object,
+    periodo_default: str,
+    fecha_base_default: date,
+) -> tuple[str, date, date]:
+    if alcance == SolicitudVenta.ALCANCE_MES:
+        periodo = _normalize_periodo_mes(periodo_raw or periodo_default)
+        fecha_inicio, fecha_fin = _month_start_end(periodo)
+        return periodo, fecha_inicio, fecha_fin
+
+    fecha_inicio = _parse_date_safe(fecha_inicio_raw)
+    fecha_fin = _parse_date_safe(fecha_fin_raw)
+    if fecha_inicio and fecha_fin and fecha_fin >= fecha_inicio:
+        periodo = f"{fecha_inicio.year:04d}-{fecha_inicio.month:02d}"
+        return periodo, fecha_inicio, fecha_fin
+
+    base = _parse_date_safe(fecha_base_raw) or fecha_inicio or fecha_base_default
+    if alcance == SolicitudVenta.ALCANCE_FIN_SEMANA:
+        fecha_inicio, fecha_fin = _weekend_start_end(base)
+    else:
+        fecha_inicio, fecha_fin = _week_start_end(base)
+    periodo = f"{fecha_inicio.year:04d}-{fecha_inicio.month:02d}"
+    return periodo, fecha_inicio, fecha_fin
 
 
 def _month_start_end(periodo: str) -> tuple[date, date]:
@@ -2145,6 +2257,7 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
         "periodo": result["periodo"],
         "target_start": str(result["target_start"]),
         "target_end": str(result["target_end"]),
+        "sucursal_id": int(result["sucursal_id"]) if result["sucursal_id"] else None,
         "sucursal_nombre": result["sucursal_nombre"],
         "rows": rows,
         "totals": {
@@ -2152,6 +2265,124 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
             "forecast_total": float(result["totals"]["forecast_total"]),
             "pronostico_total": float(result["totals"]["pronostico_total"]),
             "delta_total": float(result["totals"]["delta_total"]),
+        },
+    }
+
+
+def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not payload:
+        return None
+    rows_payload = payload.get("rows") or []
+    if not rows_payload:
+        return None
+
+    try:
+        target_start = date.fromisoformat(str(payload.get("target_start")))
+        target_end = date.fromisoformat(str(payload.get("target_end")))
+    except Exception:
+        return None
+
+    sucursal_id = payload.get("sucursal_id")
+    forecast_map: dict[int, dict[str, Any]] = {}
+    receta_ids: list[int] = []
+    for row in rows_payload:
+        try:
+            rid = int(row.get("receta_id") or 0)
+        except Exception:
+            rid = 0
+        if rid <= 0:
+            continue
+        receta_ids.append(rid)
+        forecast_map[rid] = {
+            "receta_id": rid,
+            "receta": str(row.get("receta") or ""),
+            "forecast_qty": Decimal(str(row.get("forecast_qty") or 0)),
+        }
+
+    if not forecast_map:
+        return None
+
+    solicitud_qs = SolicitudVenta.objects.filter(
+        fecha_inicio__lte=target_end,
+        fecha_fin__gte=target_start,
+    )
+    solicitud_qs = solicitud_qs.filter(alcance=_ui_to_model_alcance(str(payload.get("alcance") or "")))
+    if sucursal_id:
+        solicitud_qs = solicitud_qs.filter(sucursal_id=sucursal_id)
+    solicitud_map = {
+        int(r["receta_id"]): Decimal(str(r["total"] or 0))
+        for r in solicitud_qs.values("receta_id").annotate(total=Sum("cantidad"))
+    }
+
+    missing_receta_ids = [rid for rid in solicitud_map.keys() if rid not in forecast_map]
+    if missing_receta_ids:
+        for receta in Receta.objects.filter(id__in=missing_receta_ids).only("id", "nombre"):
+            forecast_map[receta.id] = {
+                "receta_id": receta.id,
+                "receta": receta.nombre,
+                "forecast_qty": Decimal("0"),
+            }
+
+    rows: list[dict[str, Any]] = []
+    for rid, base in forecast_map.items():
+        forecast_qty = Decimal(str(base["forecast_qty"] or 0))
+        solicitud_qty = solicitud_map.get(rid, Decimal("0"))
+        delta = solicitud_qty - forecast_qty
+        tolerance = max(Decimal("1"), forecast_qty * Decimal("0.05"))
+        if forecast_qty <= 0 and solicitud_qty > 0:
+            status = "SIN_BASE"
+            variacion_pct = None
+        elif abs(delta) <= tolerance:
+            status = "OK"
+            variacion_pct = (
+                (delta / forecast_qty) * Decimal("100")
+                if forecast_qty > 0
+                else Decimal("0")
+            )
+        elif delta > 0:
+            status = "SOBRE"
+            variacion_pct = (
+                (delta / forecast_qty) * Decimal("100")
+                if forecast_qty > 0
+                else None
+            )
+        else:
+            status = "BAJO"
+            variacion_pct = (
+                (delta / forecast_qty) * Decimal("100")
+                if forecast_qty > 0
+                else None
+            )
+
+        rows.append(
+            {
+                "receta_id": rid,
+                "receta": base["receta"],
+                "forecast_qty": forecast_qty,
+                "solicitud_qty": solicitud_qty,
+                "delta_qty": delta,
+                "variacion_pct": variacion_pct,
+                "status": status,
+            }
+        )
+
+    rows.sort(key=lambda x: abs(x["delta_qty"]), reverse=True)
+    total_forecast = sum((r["forecast_qty"] for r in rows), Decimal("0"))
+    total_solicitud = sum((r["solicitud_qty"] for r in rows), Decimal("0"))
+    return {
+        "target_start": target_start,
+        "target_end": target_end,
+        "sucursal_id": sucursal_id,
+        "sucursal_nombre": payload.get("sucursal_nombre") or "Todas",
+        "rows": rows,
+        "totals": {
+            "forecast_total": total_forecast,
+            "solicitud_total": total_solicitud,
+            "delta_total": total_solicitud - total_forecast,
+            "ok_count": len([r for r in rows if r["status"] == "OK"]),
+            "sobre_count": len([r for r in rows if r["status"] == "SOBRE"]),
+            "bajo_count": len([r for r in rows if r["status"] == "BAJO"]),
+            "sin_base_count": len([r for r in rows if r["status"] == "SIN_BASE"]),
         },
     }
 
@@ -2228,6 +2459,256 @@ def ventas_historicas_descargar_plantilla(request: HttpRequest) -> HttpResponse:
     )
     response["Content-Disposition"] = 'attachment; filename="plantilla_ventas_historicas.xlsx"'
     return response
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+def solicitud_ventas_descargar_plantilla(request: HttpRequest) -> HttpResponse:
+    export_format = (request.GET.get("format") or "xlsx").strip().lower()
+    headers = [
+        "receta",
+        "codigo_point",
+        "sucursal_codigo",
+        "sucursal",
+        "alcance",
+        "periodo",
+        "fecha_inicio",
+        "fecha_fin",
+        "cantidad",
+    ]
+    sample_rows = [
+        [
+            "Pastel Fresas Con Crema - Chico",
+            "PFC-CHICO",
+            "MATRIZ",
+            "Matriz",
+            "MES",
+            timezone.localdate().strftime("%Y-%m"),
+            "",
+            "",
+            "120",
+        ],
+        [
+            "Pastel Fresas Con Crema - Chico",
+            "PFC-CHICO",
+            "NORTE",
+            "Sucursal Norte",
+            "SEMANA",
+            "",
+            timezone.localdate().isoformat(),
+            "",
+            "34",
+        ],
+    ]
+
+    if export_format == "csv":
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="plantilla_solicitud_ventas.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(sample_rows)
+        return response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "solicitud_ventas"
+    ws.append(headers)
+    for row in sample_rows:
+        ws.append(row)
+    for col in ("A", "B", "C", "D", "E", "F", "G", "H", "I"):
+        ws.column_dimensions[col].width = 24
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="plantilla_solicitud_ventas.xlsx"'
+    return response
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def solicitud_ventas_guardar(request: HttpRequest) -> HttpResponse:
+    plan_id = (request.POST.get("plan_id") or "").strip()
+    next_params: dict[str, str] = {}
+    if plan_id:
+        next_params["plan_id"] = plan_id
+
+    receta = Receta.objects.filter(pk=request.POST.get("receta_id")).first()
+    if receta is None:
+        messages.error(request, "Selecciona una receta válida para registrar solicitud de ventas.")
+        if next_params:
+            return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+        return redirect(reverse("recetas:plan_produccion"))
+
+    sucursal = Sucursal.objects.filter(pk=request.POST.get("sucursal_id")).first()
+    alcance = _ui_to_model_alcance(request.POST.get("alcance"))
+    periodo_default = _normalize_periodo_mes(request.POST.get("periodo"))
+    fecha_base_default = _parse_date_safe(request.POST.get("fecha_base")) or timezone.localdate()
+    cantidad = _to_decimal_safe(request.POST.get("cantidad"))
+    if cantidad <= 0:
+        messages.error(request, "La cantidad solicitada debe ser mayor a 0.")
+        if next_params:
+            return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+        return redirect(reverse("recetas:plan_produccion"))
+
+    periodo, fecha_inicio, fecha_fin = _resolve_solicitud_window(
+        alcance=alcance,
+        periodo_raw=request.POST.get("periodo"),
+        fecha_base_raw=request.POST.get("fecha_base"),
+        fecha_inicio_raw=request.POST.get("fecha_inicio"),
+        fecha_fin_raw=request.POST.get("fecha_fin"),
+        periodo_default=periodo_default,
+        fecha_base_default=fecha_base_default,
+    )
+    fuente = (request.POST.get("fuente") or "UI_SOL_VENTAS").strip()[:40] or "UI_SOL_VENTAS"
+    solicitud, created = SolicitudVenta.objects.get_or_create(
+        receta=receta,
+        sucursal=sucursal,
+        alcance=alcance,
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        defaults={
+            "periodo": periodo,
+            "cantidad": cantidad,
+            "fuente": fuente,
+        },
+    )
+    if created:
+        messages.success(request, "Solicitud de ventas registrada.")
+    else:
+        solicitud.periodo = periodo
+        solicitud.cantidad = cantidad
+        solicitud.fuente = fuente
+        solicitud.save(update_fields=["periodo", "cantidad", "fuente", "actualizado_en"])
+        messages.success(request, "Solicitud de ventas actualizada.")
+
+    next_params["periodo"] = periodo
+    if next_params:
+        return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+    return redirect(reverse("recetas:plan_produccion"))
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def solicitud_ventas_importar(request: HttpRequest) -> HttpResponse:
+    uploaded = request.FILES.get("archivo")
+    plan_id = (request.POST.get("plan_id") or "").strip()
+    modo = (request.POST.get("modo") or "replace").strip().lower()
+    if modo not in {"replace", "accumulate"}:
+        modo = "replace"
+    periodo_default = _normalize_periodo_mes(request.POST.get("periodo_default"))
+    fecha_base_default = _parse_date_safe(request.POST.get("fecha_base_default")) or timezone.localdate()
+    alcance_default = _ui_to_model_alcance(request.POST.get("alcance_default"))
+    fuente = (request.POST.get("fuente") or "UI_SOL_VENTAS").strip()[:40] or "UI_SOL_VENTAS"
+    sucursal_default = Sucursal.objects.filter(pk=request.POST.get("sucursal_default_id")).first()
+
+    next_params: dict[str, str] = {}
+    if plan_id:
+        next_params["plan_id"] = plan_id
+    next_params["periodo"] = periodo_default
+
+    if not uploaded:
+        messages.error(request, "Selecciona un archivo para importar solicitudes de ventas.")
+        return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+
+    try:
+        rows = _load_solicitud_ventas_rows(uploaded)
+    except Exception as exc:
+        messages.error(request, f"No se pudo leer el archivo: {exc}")
+        return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+
+    if not rows:
+        messages.warning(request, "Archivo sin filas válidas para solicitud de ventas.")
+        return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+
+    created = 0
+    updated = 0
+    skipped = 0
+    unresolved_recetas: list[str] = []
+    unresolved_sucursales: list[str] = []
+
+    for row in rows:
+        receta_name = str(row.get("receta") or "").strip()
+        codigo_point = str(row.get("codigo_point") or "").strip()
+        receta = _resolve_receta_for_sales(receta_name, codigo_point)
+        if receta is None:
+            unresolved_recetas.append(receta_name or codigo_point or "sin_identificador")
+            skipped += 1
+            continue
+
+        cantidad = _to_decimal_safe(row.get("cantidad"))
+        if cantidad < 0:
+            skipped += 1
+            continue
+
+        sucursal_name = str(row.get("sucursal") or "").strip()
+        sucursal_codigo = str(row.get("sucursal_codigo") or "").strip()
+        sucursal = _resolve_sucursal_for_sales(sucursal_name, sucursal_codigo, sucursal_default)
+        if (sucursal_name or sucursal_codigo) and sucursal is None:
+            unresolved_sucursales.append(sucursal_codigo or sucursal_name)
+            skipped += 1
+            continue
+
+        alcance = _normalize_alcance_solicitud(str(row.get("alcance") or ""))
+        if not str(row.get("alcance") or "").strip():
+            alcance = alcance_default
+        periodo, fecha_inicio, fecha_fin = _resolve_solicitud_window(
+            alcance=alcance,
+            periodo_raw=str(row.get("periodo") or ""),
+            fecha_base_raw=row.get("fecha_base"),
+            fecha_inicio_raw=row.get("fecha_inicio"),
+            fecha_fin_raw=row.get("fecha_fin"),
+            periodo_default=periodo_default,
+            fecha_base_default=fecha_base_default,
+        )
+
+        record = SolicitudVenta.objects.filter(
+            receta=receta,
+            sucursal=sucursal,
+            alcance=alcance,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        ).first()
+        if record:
+            if modo == "accumulate":
+                record.cantidad = Decimal(str(record.cantidad or 0)) + cantidad
+            else:
+                record.cantidad = cantidad
+            record.periodo = periodo
+            record.fuente = fuente
+            record.save(update_fields=["cantidad", "periodo", "fuente", "actualizado_en"])
+            updated += 1
+        else:
+            SolicitudVenta.objects.create(
+                receta=receta,
+                sucursal=sucursal,
+                alcance=alcance,
+                periodo=periodo,
+                fecha_inicio=fecha_inicio,
+                fecha_fin=fecha_fin,
+                cantidad=cantidad,
+                fuente=fuente,
+            )
+            created += 1
+
+    messages.success(
+        request,
+        f"Solicitudes de ventas importadas. Creadas: {created}. Actualizadas: {updated}. Omitidas: {skipped}.",
+    )
+    if unresolved_recetas:
+        sample = ", ".join(unresolved_recetas[:5])
+        extra = "" if len(unresolved_recetas) <= 5 else f" (+{len(unresolved_recetas) - 5} más)"
+        messages.warning(request, f"Sin receta equivalente para: {sample}{extra}.")
+    if unresolved_sucursales:
+        sample = ", ".join(unresolved_sucursales[:5])
+        extra = "" if len(unresolved_sucursales) <= 5 else f" (+{len(unresolved_sucursales) - 5} más)"
+        messages.warning(request, f"Sucursales no encontradas: {sample}{extra}.")
+    return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
 
 
 @login_required
@@ -2647,6 +3128,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     mrp_periodo_resumen = _periodo_mrp_resumen(mrp_periodo, mrp_periodo_tipo)
     pronosticos_unavailable = False
     ventas_historicas_unavailable = False
+    solicitudes_venta_unavailable = False
     try:
         pronosticos_periodo = PronosticoVenta.objects.filter(periodo=periodo_pronostico_default)
         pronosticos_periodo_count = pronosticos_periodo.count()
@@ -2664,7 +3146,22 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         ventas_historicas_total = Decimal("0")
         ventas_hist_fecha_max = None
         ventas_historicas_unavailable = True
+    try:
+        solicitudes_venta_periodo = SolicitudVenta.objects.filter(periodo=periodo_pronostico_default)
+        solicitudes_venta_count = solicitudes_venta_periodo.count()
+        solicitudes_venta_total = solicitudes_venta_periodo.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
+        solicitudes_venta_fecha_max = solicitudes_venta_periodo.order_by("-fecha_inicio").values_list("fecha_inicio", flat=True).first()
+    except (OperationalError, ProgrammingError):
+        solicitudes_venta_count = 0
+        solicitudes_venta_total = Decimal("0")
+        solicitudes_venta_fecha_max = None
+        solicitudes_venta_unavailable = True
     forecast_preview = request.session.get("pronostico_estadistico_preview")
+    try:
+        forecast_vs_solicitud = _forecast_vs_solicitud_preview(forecast_preview)
+    except (OperationalError, ProgrammingError):
+        forecast_vs_solicitud = None
+        solicitudes_venta_unavailable = True
     sucursales = Sucursal.objects.filter(activa=True).order_by("codigo", "nombre")
     return render(
         request,
@@ -2686,7 +3183,12 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "ventas_historicas_total": ventas_historicas_total,
             "ventas_hist_fecha_max": ventas_hist_fecha_max,
             "ventas_historicas_unavailable": ventas_historicas_unavailable,
+            "solicitudes_venta_count": solicitudes_venta_count,
+            "solicitudes_venta_total": solicitudes_venta_total,
+            "solicitudes_venta_fecha_max": solicitudes_venta_fecha_max,
+            "solicitudes_venta_unavailable": solicitudes_venta_unavailable,
             "forecast_preview": forecast_preview,
+            "forecast_vs_solicitud": forecast_vs_solicitud,
             "sucursales": sucursales,
             "alcance_estadistico": alcance_estadistico,
             "fecha_base_estadistica": fecha_base_estadistica,

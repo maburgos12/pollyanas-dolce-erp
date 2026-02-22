@@ -323,6 +323,38 @@ class VentaHistorica(models.Model):
         return f"{self.fecha} · {suc} · {self.receta.nombre} · {self.cantidad}"
 
 
+class SolicitudVenta(models.Model):
+    ALCANCE_MES = "MES"
+    ALCANCE_SEMANA = "SEMANA"
+    ALCANCE_FIN_SEMANA = "FIN_SEMANA"
+    ALCANCE_CHOICES = [
+        (ALCANCE_MES, "Mes"),
+        (ALCANCE_SEMANA, "Semana"),
+        (ALCANCE_FIN_SEMANA, "Fin de semana"),
+    ]
+
+    receta = models.ForeignKey(Receta, related_name="solicitudes_venta", on_delete=models.CASCADE)
+    sucursal = models.ForeignKey("core.Sucursal", null=True, blank=True, on_delete=models.SET_NULL)
+    alcance = models.CharField(max_length=20, choices=ALCANCE_CHOICES, default=ALCANCE_MES, db_index=True)
+    periodo = models.CharField(max_length=7, blank=True, default="", db_index=True)  # YYYY-MM
+    fecha_inicio = models.DateField(db_index=True)
+    fecha_fin = models.DateField(db_index=True)
+    cantidad = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    fuente = models.CharField(max_length=40, blank=True, default="UI_SOL_VENTAS")
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Solicitud de venta"
+        verbose_name_plural = "Solicitudes de venta"
+        ordering = ["-fecha_inicio", "receta__nombre"]
+        unique_together = [("receta", "sucursal", "alcance", "fecha_inicio", "fecha_fin")]
+
+    def __str__(self) -> str:
+        suc = self.sucursal.codigo if self.sucursal_id else "GLOBAL"
+        return f"{self.alcance} {self.fecha_inicio}..{self.fecha_fin} · {suc} · {self.receta.nombre} · {self.cantidad}"
+
+
 class PronosticoVenta(models.Model):
     receta = models.ForeignKey(Receta, related_name="pronosticos", on_delete=models.CASCADE)
     periodo = models.CharField(max_length=7, db_index=True)  # YYYY-MM
