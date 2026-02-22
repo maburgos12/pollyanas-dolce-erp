@@ -1,0 +1,66 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<div id="content-main">
+  <h1>{{ title }}</h1>
+  <p>
+    <strong>Plan:</strong> {{ plan.nombre }} |
+    <strong>Fecha:</strong> {{ plan.fecha_produccion }} |
+    <strong>Periodo:</strong> {{ periodo }}
+  </p>
+
+  {% if pronosticos_unavailable %}
+    <p style="color:#9a3412;">
+      Tabla de pronósticos no disponible en este entorno. Se muestra solo información del plan.
+    </p>
+  {% endif %}
+
+  <div style="margin:12px 0;display:flex;gap:18px;flex-wrap:wrap;">
+    <div><strong>Total plan:</strong> {{ total_plan|floatformat:2 }}</div>
+    <div><strong>Total pronóstico:</strong> {{ total_pronostico|floatformat:2 }}</div>
+    <div><strong>Delta (plan-pronóstico):</strong> {{ total_delta|floatformat:2 }}</div>
+    <div><strong>Delta absoluto:</strong> {{ total_delta_abs|floatformat:2 }}</div>
+    <div><strong>Recetas con desviación:</strong> {{ desviaciones }}</div>
+  </div>
+
+  <table id="result_list">
+    <thead>
+      <tr>
+        <th>Receta</th>
+        <th>Plan</th>
+        <th>Pronóstico</th>
+        <th>Delta</th>
+        <th>Estatus</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.receta }}</td>
+        <td>{{ row.cantidad_plan|floatformat:2 }}</td>
+        <td>{{ row.cantidad_pronostico|floatformat:2 }}</td>
+        <td>{{ row.delta|floatformat:2 }}</td>
+        <td>
+          {% if row.sin_pronostico %}
+            Sin pronóstico
+          {% elif row.delta == 0 %}
+            Alineado
+          {% else %}
+            Desviación
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="5">Sin datos para comparar en este periodo.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p style="margin-top:16px;">
+    <a href="{% url 'admin:recetas_planproduccion_change' plan.id %}">Volver al plan</a>
+  </p>
+</div>
+{% endblock %}

@@ -196,6 +196,56 @@ class PlanProduccionRobustnessTests(TestCase):
         self.assertTrue(response.context["plan_vs_pronostico"]["pronosticos_unavailable"])
 
 
+class PlanProduccionAdminComparativoTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_plan_admin",
+            email="admin_plan_admin@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
+        unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        insumo = Insumo.objects.create(nombre="Insumo admin", unidad_base=unidad, activo=True)
+        receta = Receta.objects.create(nombre="Receta admin", hash_contenido="hash-admin-001")
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=insumo,
+            insumo_texto="Insumo admin",
+            cantidad=Decimal("1"),
+            unidad=unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        self.plan = PlanProduccion.objects.create(nombre="Plan admin", fecha_produccion=date(2026, 2, 10))
+        PlanProduccionItem.objects.create(plan=self.plan, receta=receta, cantidad=Decimal("3"))
+        PronosticoVenta.objects.create(receta=receta, periodo="2026-02", cantidad=Decimal("2"))
+
+    def test_admin_comparativo_view_loads(self):
+        response = self.client.get(
+            reverse("admin:recetas_planproduccion_comparativo_pronostico", args=[self.plan.id])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Comparativo Plan vs Pronóstico")
+        self.assertContains(response, "Plan admin")
+        self.assertContains(response, "Receta admin")
+
+    def test_admin_changelist_shows_comparativo_link(self):
+        response = self.client.get(reverse("admin:recetas_planproduccion_changelist"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ver plan vs pronóstico")
+
+
 class PlanProduccionPeriodoMrpTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
