@@ -57,11 +57,40 @@ class MRPRequerimientoItemInputSerializer(serializers.Serializer):
 class MRPRequerimientosRequestSerializer(serializers.Serializer):
     plan_id = serializers.IntegerField(required=False)
     fecha_referencia = serializers.DateField(required=False)
+    periodo = serializers.CharField(max_length=7, required=False, allow_blank=True)
+    periodo_tipo = serializers.ChoiceField(
+        choices=["mes", "q1", "q2"],
+        required=False,
+        default="mes",
+    )
     items = MRPRequerimientoItemInputSerializer(many=True, required=False)
 
     def validate(self, attrs):
-        if not attrs.get("plan_id") and not attrs.get("items"):
-            raise serializers.ValidationError("Debes enviar plan_id o items.")
+        plan_id = attrs.get("plan_id")
+        items = attrs.get("items") or []
+        periodo_raw = (attrs.get("periodo") or "").strip()
+
+        selected_sources = int(bool(plan_id)) + int(bool(items)) + int(bool(periodo_raw))
+        if selected_sources == 0:
+            raise serializers.ValidationError("Debes enviar uno de: plan_id, items o periodo.")
+        if selected_sources > 1:
+            raise serializers.ValidationError(
+                "Envía una sola fuente por request: plan_id, items o periodo (no combinados)."
+            )
+
+        if periodo_raw:
+            parts = periodo_raw.split("-")
+            if len(parts) != 2:
+                raise serializers.ValidationError({"periodo": "Usa formato YYYY-MM."})
+            try:
+                year = int(parts[0])
+                month = int(parts[1])
+            except ValueError:
+                raise serializers.ValidationError({"periodo": "Usa formato YYYY-MM."})
+            if year < 2000 or year > 2200 or month < 1 or month > 12:
+                raise serializers.ValidationError({"periodo": "Periodo fuera de rango válido (YYYY-MM)."})
+            attrs["periodo"] = f"{year:04d}-{month:02d}"
+
         return attrs
 
 

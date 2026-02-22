@@ -56,11 +56,16 @@ cat logs/import_summary_*.csv
 
 ## Probar API MRP
 ```bash
-# Primero obtén un recipe_id del admin
+# Primero obtén un receta_id del admin
 # Luego:
 curl -X POST http://localhost:8000/api/mrp/explode/ \
   -H "Content-Type: application/json" \
-  -d '{"recipe_id": "TU-UUID-AQUI", "multiplier": 5}'
+  -d '{"receta_id": 1, "multiplicador": 5}'
+
+# Requerimientos agregados por periodo (mes completo)
+curl -X POST http://localhost:8000/api/mrp/calcular-requerimientos/ \
+  -H "Content-Type: application/json" \
+  -d '{"periodo":"2026-02","periodo_tipo":"mes"}'
 ```
 
 ---

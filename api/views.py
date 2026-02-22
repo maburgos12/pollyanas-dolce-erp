@@ -792,6 +792,64 @@ class ComprasSolicitudCreateView(APIView):
 class MRPRequerimientosView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def _payload_from_plan(self, plan: PlanProduccion) -> list[tuple[Receta, Decimal]]:
+        items_payload: list[tuple[Receta, Decimal]] = []
+        for item in plan.items.select_related("receta").all():
+            items_payload.append((item.receta, Decimal(str(item.cantidad or 0))))
+        return items_payload
+
+    def _payload_from_periodo(
+        self,
+        periodo: str,
+        periodo_tipo: str,
+    ) -> tuple[list[tuple[Receta, Decimal]], dict]:
+        parsed = _parse_period(periodo)
+        if not parsed:
+            return [], {"periodo": periodo, "periodo_tipo": periodo_tipo, "planes_count": 0, "planes": []}
+
+        year, month = parsed
+        plans_qs = PlanProduccion.objects.filter(
+            fecha_produccion__year=year,
+            fecha_produccion__month=month,
+        ).order_by("fecha_produccion", "id")
+        if periodo_tipo == "q1":
+            plans_qs = plans_qs.filter(fecha_produccion__day__lte=15)
+        elif periodo_tipo == "q2":
+            plans_qs = plans_qs.filter(fecha_produccion__day__gte=16)
+
+        plans = list(plans_qs.only("id", "nombre", "fecha_produccion"))
+        plan_ids = [p.id for p in plans]
+        if not plan_ids:
+            return [], {
+                "periodo": f"{year:04d}-{month:02d}",
+                "periodo_tipo": periodo_tipo,
+                "planes_count": 0,
+                "planes": [],
+            }
+
+        items_payload: list[tuple[Receta, Decimal]] = []
+        items_qs = (
+            PlanProduccionItem.objects.filter(plan_id__in=plan_ids)
+            .select_related("receta")
+            .only("receta_id", "cantidad", "plan_id", "receta__id", "receta__nombre")
+        )
+        for item in items_qs:
+            items_payload.append((item.receta, Decimal(str(item.cantidad or 0))))
+
+        return items_payload, {
+            "periodo": f"{year:04d}-{month:02d}",
+            "periodo_tipo": periodo_tipo,
+            "planes_count": len(plans),
+            "planes": [
+                {
+                    "id": p.id,
+                    "nombre": p.nombre,
+                    "fecha_produccion": str(p.fecha_produccion),
+                }
+                for p in plans[:50]
+            ],
+        }
+
     def _aggregate(self, items_payload: list[tuple[Receta, Decimal]]) -> dict:
         insumos = {}
         lineas_sin_match = 0
@@ -801,7 +859,7 @@ class MRPRequerimientosView(APIView):
         for receta, factor in items_payload:
             if factor <= 0:
                 continue
-            for linea in receta.lineas.select_related("insumo").all():
+            for linea in receta.lineas.select_related("insumo", "insumo__unidad_base").all():
                 if not linea.insumo_id:
                     lineas_sin_match += 1
                     continue
@@ -880,21 +938,46 @@ class MRPRequerimientosView(APIView):
         ser = MRPRequerimientosRequestSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         plan_id = ser.validated_data.get("plan_id")
+        periodo = (ser.validated_data.get("periodo") or "").strip()
+        periodo_tipo = ser.validated_data.get("periodo_tipo") or "mes"
         raw_items = ser.validated_data.get("items") or []
+        fecha_referencia = ser.validated_data.get("fecha_referencia")
 
         items_payload: list[tuple[Receta, Decimal]] = []
         source = "manual"
         plan = None
+        periodo_scope = {
+            "periodo": "",
+            "periodo_tipo": periodo_tipo,
+            "planes_count": 0,
+            "planes": [],
+        }
 
         if plan_id:
             plan = get_object_or_404(PlanProduccion, pk=plan_id)
             source = "plan"
-            for item in plan.items.select_related("receta").all():
-                items_payload.append((item.receta, Decimal(str(item.cantidad or 0))))
+            items_payload = self._payload_from_plan(plan)
+            periodo_scope = {
+                "periodo": plan.fecha_produccion.strftime("%Y-%m"),
+                "periodo_tipo": "mes",
+                "planes_count": 1,
+                "planes": [
+                    {
+                        "id": plan.id,
+                        "nombre": plan.nombre,
+                        "fecha_produccion": str(plan.fecha_produccion),
+                    }
+                ],
+            }
+        elif periodo:
+            source = "periodo"
+            items_payload, periodo_scope = self._payload_from_periodo(periodo, periodo_tipo)
         else:
             for item in raw_items:
                 receta = get_object_or_404(Receta, pk=item["receta_id"])
                 items_payload.append((receta, Decimal(str(item["cantidad"]))))
+            if fecha_referencia:
+                periodo_scope["periodo"] = fecha_referencia.strftime("%Y-%m")
 
         data = self._aggregate(items_payload)
         response = {
@@ -902,6 +985,10 @@ class MRPRequerimientosView(APIView):
             "plan_id": plan.id if plan else None,
             "plan_nombre": plan.nombre if plan else "",
             "plan_fecha": str(plan.fecha_produccion) if plan else "",
+            "periodo": periodo_scope["periodo"],
+            "periodo_tipo": periodo_scope["periodo_tipo"],
+            "planes_count": periodo_scope["planes_count"],
+            "planes": periodo_scope["planes"],
             **data,
         }
         return Response(response, status=status.HTTP_200_OK)

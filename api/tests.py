@@ -147,6 +147,66 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(payload["totales"]["alertas_capacidad"], 1)
         self.assertEqual(payload["items"][0]["insumo"], self.insumo.nombre)
 
+    def test_endpoint_mrp_calcular_requerimientos_por_periodo_mes(self):
+        plan_1 = PlanProduccion.objects.create(nombre="Plan API mes 1", fecha_produccion=date(2026, 2, 10))
+        plan_2 = PlanProduccion.objects.create(nombre="Plan API mes 2", fecha_produccion=date(2026, 2, 20))
+        PlanProduccionItem.objects.create(plan=plan_1, receta=self.receta, cantidad=Decimal("2"))
+        PlanProduccionItem.objects.create(plan=plan_2, receta=self.receta, cantidad=Decimal("1"))
+
+        url = reverse("api_mrp_calcular_requerimientos")
+        resp = self.client.post(
+            url,
+            {"periodo": "2026-02", "periodo_tipo": "mes"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["source"], "periodo")
+        self.assertEqual(payload["periodo"], "2026-02")
+        self.assertEqual(payload["periodo_tipo"], "mes")
+        self.assertEqual(payload["planes_count"], 2)
+        self.assertEqual(Decimal(payload["items"][0]["cantidad_requerida"]), Decimal("6"))
+
+    def test_endpoint_mrp_calcular_requerimientos_por_periodo_quincena(self):
+        plan_q1 = PlanProduccion.objects.create(nombre="Plan API q1", fecha_produccion=date(2026, 2, 12))
+        plan_q2 = PlanProduccion.objects.create(nombre="Plan API q2", fecha_produccion=date(2026, 2, 22))
+        PlanProduccionItem.objects.create(plan=plan_q1, receta=self.receta, cantidad=Decimal("1"))
+        PlanProduccionItem.objects.create(plan=plan_q2, receta=self.receta, cantidad=Decimal("3"))
+
+        url = reverse("api_mrp_calcular_requerimientos")
+        resp_q1 = self.client.post(
+            url,
+            {"periodo": "2026-02", "periodo_tipo": "q1"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_q1.status_code, 200)
+        payload_q1 = resp_q1.json()
+        self.assertEqual(payload_q1["planes_count"], 1)
+        self.assertEqual(Decimal(payload_q1["items"][0]["cantidad_requerida"]), Decimal("2"))
+
+        resp_q2 = self.client.post(
+            url,
+            {"periodo": "2026-02", "periodo_tipo": "q2"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_q2.status_code, 200)
+        payload_q2 = resp_q2.json()
+        self.assertEqual(payload_q2["planes_count"], 1)
+        self.assertEqual(Decimal(payload_q2["items"][0]["cantidad_requerida"]), Decimal("6"))
+
+    def test_endpoint_mrp_calcular_requerimientos_rechaza_fuentes_combinadas(self):
+        plan = PlanProduccion.objects.create(nombre="Plan API combinado", fecha_produccion=date(2026, 2, 21))
+        PlanProduccionItem.objects.create(plan=plan, receta=self.receta, cantidad=Decimal("1"))
+        url = reverse("api_mrp_calcular_requerimientos")
+        resp = self.client.post(
+            url,
+            {"plan_id": plan.id, "periodo": "2026-02"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        payload = resp.json()
+        self.assertIn("non_field_errors", payload)
+
     def test_endpoint_inventario_sugerencias_compra_por_plan(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor API", lead_time_dias=3, activo=True)
         self.insumo.proveedor_principal = proveedor
