@@ -19,7 +19,16 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-DEBUG = env_bool("DEBUG", default=False)
+RUNNING_ON_RAILWAY = any(
+    os.getenv(name)
+    for name in (
+        "RAILWAY_PROJECT_ID",
+        "RAILWAY_SERVICE_ID",
+        "RAILWAY_ENVIRONMENT_ID",
+        "RAILWAY_PUBLIC_DOMAIN",
+    )
+)
+DEBUG = env_bool("DEBUG", default=not RUNNING_ON_RAILWAY)
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-dev-key-change-me")
 if not DEBUG and SECRET_KEY == "django-insecure-dev-key-change-me":
     raise ValueError("SECRET_KEY must be set when DEBUG=False")
