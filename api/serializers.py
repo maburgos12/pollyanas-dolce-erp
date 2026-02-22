@@ -195,6 +195,58 @@ class ForecastBacktestRequestSerializer(serializers.Serializer):
         return value
 
 
+class PronosticoVentaBulkRowSerializer(serializers.Serializer):
+    receta_id = serializers.IntegerField(required=False)
+    receta = serializers.CharField(max_length=220, required=False, allow_blank=True)
+    codigo_point = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    periodo = serializers.CharField(max_length=7)
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=3)
+
+    def validate_cantidad(self, value):
+        if value < 0:
+            raise serializers.ValidationError("La cantidad no puede ser negativa.")
+        return value
+
+    def validate_periodo(self, value):
+        raw = (value or "").strip()
+        parts = raw.split("-")
+        if len(parts) != 2:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        try:
+            year = int(parts[0])
+            month = int(parts[1])
+        except ValueError:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        if year < 2000 or year > 2200 or month < 1 or month > 12:
+            raise serializers.ValidationError("Periodo fuera de rango válido (YYYY-MM).")
+        return f"{year:04d}-{month:02d}"
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        has_receta_ref = bool(attrs.get("receta_id")) or bool((attrs.get("receta") or "").strip()) or bool(
+            (attrs.get("codigo_point") or "").strip()
+        )
+        if not has_receta_ref:
+            raise serializers.ValidationError("Debes enviar receta_id o receta/codigo_point.")
+        return attrs
+
+
+class PronosticoVentaBulkSerializer(serializers.Serializer):
+    rows = PronosticoVentaBulkRowSerializer(many=True)
+    modo = serializers.ChoiceField(choices=["replace", "accumulate"], required=False, default="replace")
+    fuente = serializers.CharField(max_length=40, required=False, allow_blank=True, default="API_PRON_BULK")
+    dry_run = serializers.BooleanField(required=False, default=True)
+    stop_on_error = serializers.BooleanField(required=False, default=False)
+    top = serializers.IntegerField(required=False, min_value=1, max_value=500, default=120)
+
+    def validate_rows(self, value):
+        if not value:
+            raise serializers.ValidationError("Debes enviar al menos una fila.")
+        if len(value) > 5000:
+            raise serializers.ValidationError("Máximo 5000 filas por request.")
+        return value
+
+
 class SolicitudVentaUpsertSerializer(serializers.Serializer):
     receta_id = serializers.IntegerField()
     sucursal_id = serializers.IntegerField(required=False, allow_null=True)

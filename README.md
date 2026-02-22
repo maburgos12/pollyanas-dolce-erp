@@ -10,6 +10,7 @@ Sprint 1 entrega:
 - API: POST /api/mrp/calcular-requerimientos/ (por plan, por periodo o por lista manual)
 - API: POST /api/mrp/generar-plan-pronostico/ (crea plan de producción desde pronóstico)
 - API: POST /api/ventas/pronostico-backtest/ (mide precisión histórica: MAPE/Bias por ventana)
+- API: POST /api/ventas/pronostico/bulk/ (carga masiva de pronóstico con dry_run)
 - API: POST /api/ventas/pronostico-estadistico/ (forecast por sucursal + comparativo contra solicitud de ventas)
 - API: POST /api/ventas/historial/bulk/ (carga masiva de historial de ventas con dry_run)
 - API: POST /api/ventas/solicitud/ (alta/actualización de solicitud de ventas)

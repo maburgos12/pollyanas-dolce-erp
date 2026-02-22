@@ -552,6 +552,64 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(len(payload["windows"]), 1)
         self.assertIn("mape_promedio", payload["totals"])
 
+    def test_endpoint_ventas_pronostico_bulk_dry_run_y_apply(self):
+        url = reverse("api_ventas_pronostico_bulk")
+
+        payload_dry = {
+            "dry_run": True,
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "periodo": "2026-03",
+                    "cantidad": "18",
+                },
+                {
+                    "receta_id": 999999,
+                    "periodo": "2026-03",
+                    "cantidad": "10",
+                },
+            ],
+        }
+        resp_dry = self.client.post(url, payload_dry, content_type="application/json")
+        self.assertEqual(resp_dry.status_code, 200)
+        data_dry = resp_dry.json()
+        self.assertTrue(data_dry["dry_run"])
+        self.assertEqual(data_dry["summary"]["created"], 1)
+        self.assertEqual(data_dry["summary"]["skipped"], 1)
+        self.assertEqual(PronosticoVenta.objects.count(), 0)
+
+        resp_apply = self.client.post(
+            url,
+            {
+                "dry_run": False,
+                "rows": [
+                    {"receta_id": self.receta.id, "periodo": "2026-03", "cantidad": "18"},
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_apply.status_code, 200)
+        data_apply = resp_apply.json()
+        self.assertEqual(data_apply["summary"]["created"], 1)
+        self.assertEqual(PronosticoVenta.objects.count(), 1)
+
+        resp_acc = self.client.post(
+            url,
+            {
+                "dry_run": False,
+                "modo": "accumulate",
+                "rows": [
+                    {"receta_id": self.receta.id, "periodo": "2026-03", "cantidad": "2"},
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_acc.status_code, 200)
+        data_acc = resp_acc.json()
+        self.assertEqual(data_acc["summary"]["updated"], 1)
+        pron = PronosticoVenta.objects.get(receta=self.receta, periodo="2026-03")
+        self.assertEqual(pron.cantidad, Decimal("20"))
+
     def test_endpoint_ventas_solicitud_upsert(self):
         sucursal = Sucursal.objects.create(codigo="NORTE", nombre="Sucursal Norte", activa=True)
         url = reverse("api_ventas_solicitud")
