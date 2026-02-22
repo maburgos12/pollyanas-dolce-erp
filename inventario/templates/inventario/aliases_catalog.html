@@ -88,6 +88,12 @@
     {% csrf_token %}
     <input type="hidden" name="action" value="auto_apply_suggestions">
     <input type="hidden" name="next_q" value="{{ q }}">
+    <input type="hidden" name="cross_q" value="{{ cross_q }}">
+    <input type="hidden" name="cross_min_sources" value="{{ cross_min_sources }}">
+    <input type="hidden" name="cross_score_min" value="{{ cross_score_min }}">
+    {% if cross_only_suggested %}
+    <input type="hidden" name="cross_only_suggested" value="1">
+    {% endif %}
     <label class="muted" for="auto_min_score">Score mínimo</label>
     <input id="auto_min_score" class="input-field" type="number" name="auto_min_score" min="0" max="100" step="0.1" value="{{ auto_default_score|floatformat:1 }}">
     <label class="muted" for="auto_min_sources">Fuentes mínimas</label>

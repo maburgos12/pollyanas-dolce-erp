@@ -327,6 +327,73 @@ class InventarioAliasesPendingTests(TestCase):
             InsumoAlias.objects.filter(nombre_normalizado="azucar glass fina", insumo=insumo).exists()
         )
 
+    def test_auto_apply_suggestions_respects_cross_filters(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo_mantequilla = Insumo.objects.create(nombre="Mantequilla", unidad_base=unidad)
+        insumo_azucar = Insumo.objects.create(nombre="Azucar Morena", unidad_base=unidad)
+
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=timezone.now(),
+            matched=20,
+            unmatched=2,
+            pending_preview=[
+                {
+                    "source": "inventario",
+                    "row": 7,
+                    "nombre_origen": "Mantequilla barra",
+                    "nombre_normalizado": "mantequilla barra",
+                    "sugerencia": "Mantequilla",
+                    "score": 95.0,
+                },
+                {
+                    "source": "inventario",
+                    "row": 8,
+                    "nombre_origen": "Azucar morena premium",
+                    "nombre_normalizado": "azucar morena premium",
+                    "sugerencia": "Azucar Morena",
+                    "score": 96.0,
+                },
+            ],
+        )
+        # Damos 2 fuentes activas a ambas filas para evitar filtros por fuente.
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PM-001",
+            point_nombre="Mantequilla barra",
+            fuzzy_score=95.0,
+            fuzzy_sugerencia="Mantequilla",
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PM-002",
+            point_nombre="Azucar morena premium",
+            fuzzy_score=96.0,
+            fuzzy_sugerencia="Azucar Morena",
+        )
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "auto_apply_suggestions",
+                "auto_min_score": "90",
+                "auto_min_sources": "1",
+                "auto_max_rows": "50",
+                "cross_q": "mantequilla",
+                "cross_min_sources": "1",
+                "cross_score_min": "0",
+                "cross_only_suggested": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            InsumoAlias.objects.filter(nombre_normalizado="mantequilla barra", insumo=insumo_mantequilla).exists()
+        )
+        self.assertFalse(
+            InsumoAlias.objects.filter(nombre_normalizado="azucar morena premium", insumo=insumo_azucar).exists()
+        )
+
     def test_bulk_reassign_resolves_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
         insumo_a = Insumo.objects.create(nombre="Harina A", unidad_base=unidad)

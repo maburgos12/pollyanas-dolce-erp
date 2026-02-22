@@ -342,6 +342,47 @@ def _build_cross_unified_rows(pending_grouped: list[dict]) -> tuple[list[dict], 
     return unified_rows, len(point_pending_insumos), receta_pending_lines
 
 
+def _read_cross_filters(params) -> tuple[str, str, bool, int, float]:
+    cross_q = (params.get("cross_q") or "").strip()
+    cross_q_norm = normalizar_nombre(cross_q)
+    cross_only_suggested = (params.get("cross_only_suggested") or "").strip().lower() in {"1", "true", "on", "yes"}
+    cross_min_sources = int(_to_decimal(params.get("cross_min_sources"), "1"))
+    cross_min_sources = max(1, min(3, cross_min_sources))
+    cross_score_min = float(_to_decimal(params.get("cross_score_min"), "0"))
+    cross_score_min = max(0.0, min(100.0, cross_score_min))
+    return cross_q, cross_q_norm, cross_only_suggested, cross_min_sources, cross_score_min
+
+
+def _apply_cross_filters(
+    unified_rows: list[dict],
+    cross_q_norm: str,
+    cross_only_suggested: bool,
+    cross_min_sources: int,
+    cross_score_min: float,
+) -> list[dict]:
+    filtered_rows = []
+    for row in unified_rows:
+        sources_active = int(row.get("sources_active") or 0)
+        score_max = float(row.get("score_max") or 0.0)
+        suggestion = str(row.get("suggestion") or "").strip()
+        nombre_muestra_norm = normalizar_nombre(str(row.get("nombre_muestra") or ""))
+        nombre_norm = str(row.get("nombre_normalizado") or "")
+        suggestion_norm = normalizar_nombre(suggestion)
+
+        if sources_active < cross_min_sources:
+            continue
+        if score_max < cross_score_min:
+            continue
+        if cross_only_suggested and not suggestion:
+            continue
+        if cross_q_norm and (cross_q_norm not in nombre_muestra_norm) and (cross_q_norm not in nombre_norm) and (
+            cross_q_norm not in suggestion_norm
+        ):
+            continue
+        filtered_rows.append(row)
+    return filtered_rows
+
+
 def _load_visible_pending_preview(request: HttpRequest, max_rows: int = 120, max_runs: int = 20) -> list[dict]:
     session_pending = list(request.session.get("inventario_pending_preview", []))[:max_rows]
     if session_pending:
@@ -1201,10 +1242,20 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             max_rows = max(1, min(500, max_rows))
             min_sources = int(_to_decimal(request.POST.get("auto_min_sources"), "2"))
             min_sources = max(1, min(3, min_sources))
+            _, cross_q_norm_post, cross_only_suggested_post, cross_min_sources_post, cross_score_min_post = (
+                _read_cross_filters(request.POST)
+            )
 
             pending_preview = _load_visible_pending_preview(request, max_rows=500, max_runs=20)
             pending_grouped = _build_pending_grouped(pending_preview)
             cross_unified_rows, _, _ = _build_cross_unified_rows(pending_grouped)
+            cross_unified_rows = _apply_cross_filters(
+                cross_unified_rows,
+                cross_q_norm=cross_q_norm_post,
+                cross_only_suggested=cross_only_suggested_post,
+                cross_min_sources=cross_min_sources_post,
+                cross_score_min=cross_score_min_post,
+            )
 
             if not cross_unified_rows:
                 messages.info(request, "No hay pendientes visibles para auto-aplicar sugerencias.")
@@ -1396,34 +1447,14 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         and normalizar_nombre(str(row.get("suggestion") or "")) in insumo_norm_set
     )
 
-    cross_q = (request.GET.get("cross_q") or "").strip()
-    cross_q_norm = normalizar_nombre(cross_q)
-    cross_only_suggested = (request.GET.get("cross_only_suggested") or "").strip().lower() in {"1", "true", "on", "yes"}
-    cross_min_sources = int(_to_decimal(request.GET.get("cross_min_sources"), "1"))
-    cross_min_sources = max(1, min(3, cross_min_sources))
-    cross_score_min = float(_to_decimal(request.GET.get("cross_score_min"), "0"))
-    cross_score_min = max(0.0, min(100.0, cross_score_min))
-
-    cross_filtered_rows = []
-    for row in unified_rows:
-        sources_active = int(row.get("sources_active") or 0)
-        score_max = float(row.get("score_max") or 0.0)
-        suggestion = str(row.get("suggestion") or "").strip()
-        nombre_muestra_norm = normalizar_nombre(str(row.get("nombre_muestra") or ""))
-        nombre_norm = str(row.get("nombre_normalizado") or "")
-        suggestion_norm = normalizar_nombre(suggestion)
-
-        if sources_active < cross_min_sources:
-            continue
-        if score_max < cross_score_min:
-            continue
-        if cross_only_suggested and not suggestion:
-            continue
-        if cross_q_norm and (cross_q_norm not in nombre_muestra_norm) and (cross_q_norm not in nombre_norm) and (
-            cross_q_norm not in suggestion_norm
-        ):
-            continue
-        cross_filtered_rows.append(row)
+    cross_q, cross_q_norm, cross_only_suggested, cross_min_sources, cross_score_min = _read_cross_filters(request.GET)
+    cross_filtered_rows = _apply_cross_filters(
+        unified_rows,
+        cross_q_norm=cross_q_norm,
+        cross_only_suggested=cross_only_suggested,
+        cross_min_sources=cross_min_sources,
+        cross_score_min=cross_score_min,
+    )
 
     export_format = (request.GET.get("export") or "").strip().lower()
     if export_format == "cross_pending_csv":
