@@ -1,7 +1,9 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
 
@@ -60,6 +62,18 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(payload["total"], 1)
         self.assertIn("items", payload)
         self.assertIn("costo_total", payload["items"][0])
+        self.assertFalse(payload["data_unavailable"])
+
+    def test_endpoint_versiones_handles_missing_table_gracefully(self):
+        url = reverse("api_receta_versiones", args=[self.receta.id])
+        with patch("api.views._load_versiones_costeo", side_effect=OperationalError("missing table")):
+            resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload["data_unavailable"])
+        self.assertEqual(payload["total"], 0)
+        self.assertEqual(payload["items"], [])
+        self.assertGreaterEqual(len(payload["warnings"]), 1)
 
     def test_endpoint_costo_historico_con_comparativo(self):
         self.linea.costo_unitario_snapshot = Decimal("4")
@@ -74,6 +88,18 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(len(payload["puntos"]), 2)
         self.assertIn("comparativo", payload)
         self.assertIn("delta_total", payload["comparativo"])
+        self.assertFalse(payload["data_unavailable"])
+
+    def test_endpoint_costo_historico_handles_missing_table_gracefully(self):
+        url = reverse("api_receta_costo_historico", args=[self.receta.id])
+        with patch("api.views._load_versiones_costeo", side_effect=OperationalError("missing table")):
+            resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload["data_unavailable"])
+        self.assertEqual(payload["puntos"], [])
+        self.assertNotIn("comparativo", payload)
+        self.assertGreaterEqual(len(payload["warnings"]), 1)
 
     def test_endpoint_costo_historico_comparativo_seleccionado(self):
         self.linea.costo_unitario_snapshot = Decimal("4")

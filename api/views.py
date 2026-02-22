@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from django.db import transaction
+from django.db import transaction, OperationalError, ProgrammingError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -31,6 +31,10 @@ from .serializers import (
     MRPRequerimientosRequestSerializer,
     RecetaCostoVersionSerializer,
 )
+
+
+def _load_versiones_costeo(receta: Receta, limit: int):
+    return list(receta.versiones_costo.order_by("-version_num")[:limit])
 
 
 def _to_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
@@ -123,10 +127,21 @@ class RecetaVersionesView(APIView):
 
     def get(self, request, receta_id: int):
         receta = get_object_or_404(Receta, pk=receta_id)
-        asegurar_version_costeo(receta, fuente="API_VERSIONES")
+        data_unavailable = False
+        warnings: list[str] = []
+        try:
+            asegurar_version_costeo(receta, fuente="API_VERSIONES")
+        except (OperationalError, ProgrammingError):
+            data_unavailable = True
+            warnings.append("Versionado automático no disponible en este entorno.")
         limit = int(request.GET.get("limit", 25))
         limit = max(1, min(limit, 200))
-        versiones = list(receta.versiones_costo.order_by("-version_num")[:limit])
+        try:
+            versiones = _load_versiones_costeo(receta, limit)
+        except (OperationalError, ProgrammingError):
+            data_unavailable = True
+            versiones = []
+            warnings.append("Histórico de versiones no disponible en este entorno.")
         payload = RecetaCostoVersionSerializer(versiones, many=True).data
         return Response(
             {
@@ -134,6 +149,8 @@ class RecetaVersionesView(APIView):
                 "receta_nombre": receta.nombre,
                 "total": len(payload),
                 "items": payload,
+                "data_unavailable": data_unavailable,
+                "warnings": warnings,
             },
             status=status.HTTP_200_OK,
         )
@@ -144,16 +161,29 @@ class RecetaCostoHistoricoView(APIView):
 
     def get(self, request, receta_id: int):
         receta = get_object_or_404(Receta, pk=receta_id)
-        asegurar_version_costeo(receta, fuente="API_HISTORICO")
+        data_unavailable = False
+        warnings: list[str] = []
+        try:
+            asegurar_version_costeo(receta, fuente="API_HISTORICO")
+        except (OperationalError, ProgrammingError):
+            data_unavailable = True
+            warnings.append("Versionado automático no disponible en este entorno.")
         limit = int(request.GET.get("limit", 60))
         limit = max(1, min(limit, 300))
-        versiones = list(receta.versiones_costo.order_by("-version_num")[:limit])
+        try:
+            versiones = _load_versiones_costeo(receta, limit)
+        except (OperationalError, ProgrammingError):
+            data_unavailable = True
+            versiones = []
+            warnings.append("Histórico de costos no disponible en este entorno.")
         payload = RecetaCostoVersionSerializer(versiones, many=True).data
         comparativo = comparativo_versiones(versiones)
         data = {
             "receta_id": receta.id,
             "receta_nombre": receta.nombre,
             "puntos": payload,
+            "data_unavailable": data_unavailable,
+            "warnings": warnings,
         }
         if comparativo:
             data["comparativo"] = {
