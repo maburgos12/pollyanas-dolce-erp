@@ -23,12 +23,13 @@ from compras.views import (
 )
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo
-from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
+from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PronosticoVenta, Receta
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from .serializers import (
     ComprasSolicitudCreateSerializer,
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
+    PlanDesdePronosticoRequestSerializer,
     RecetaCostoVersionSerializer,
 )
 
@@ -992,3 +993,89 @@ class MRPRequerimientosView(APIView):
             **data,
         }
         return Response(response, status=status.HTTP_200_OK)
+
+
+class PlanDesdePronosticoCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.add_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para generar planes de producción."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = PlanDesdePronosticoRequestSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        periodo = data["periodo"]
+        incluir_preparaciones = bool(data.get("incluir_preparaciones"))
+        nombre = (data.get("nombre") or "").strip() or f"Plan desde pronóstico {periodo}"
+        fecha_produccion = data.get("fecha_produccion")
+        if not fecha_produccion:
+            fecha_produccion = date.fromisoformat(f"{periodo}-01")
+
+        pronosticos_qs = (
+            PronosticoVenta.objects.filter(periodo=periodo)
+            .select_related("receta")
+            .order_by("receta__nombre")
+        )
+        if not incluir_preparaciones:
+            pronosticos_qs = pronosticos_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+
+        pronosticos = list(pronosticos_qs)
+        if not pronosticos:
+            return Response(
+                {
+                    "detail": "No hay pronósticos para generar plan en ese período con los filtros actuales.",
+                    "periodo": periodo,
+                    "incluir_preparaciones": incluir_preparaciones,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            plan = PlanProduccion.objects.create(
+                nombre=nombre[:140],
+                fecha_produccion=fecha_produccion,
+                notas=f"Generado desde pronóstico {periodo}",
+                creado_por=request.user if request.user.is_authenticated else None,
+            )
+            created = 0
+            skipped = 0
+            for p in pronosticos:
+                qty = _to_decimal(getattr(p, "cantidad", 0))
+                if qty <= 0:
+                    skipped += 1
+                    continue
+                PlanProduccionItem.objects.create(
+                    plan=plan,
+                    receta=p.receta,
+                    cantidad=qty,
+                    notas=f"Pronóstico {periodo}",
+                )
+                created += 1
+
+            if created == 0:
+                plan.delete()
+                return Response(
+                    {
+                        "detail": "No se creó plan: todos los pronósticos tenían cantidad 0.",
+                        "periodo": periodo,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        return Response(
+            {
+                "plan_id": plan.id,
+                "plan_nombre": plan.nombre,
+                "plan_fecha": str(plan.fecha_produccion),
+                "periodo": periodo,
+                "incluir_preparaciones": incluir_preparaciones,
+                "renglones_creados": created,
+                "renglones_omitidos_cantidad_cero": skipped,
+            },
+            status=status.HTTP_201_CREATED,
+        )

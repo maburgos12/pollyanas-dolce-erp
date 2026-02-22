@@ -4,6 +4,7 @@ from .views import (
     InventarioSugerenciasCompraView,
     MRPExplodeView,
     MRPRequerimientosView,
+    PlanDesdePronosticoCreateView,
     PresupuestosConsolidadoView,
     RecetaCostoHistoricoView,
     RecetaVersionesView,
@@ -12,6 +13,7 @@ from .views import (
 urlpatterns = [
     path("mrp/explode/", MRPExplodeView.as_view(), name="api_mrp_explode"),
     path("mrp/calcular-requerimientos/", MRPRequerimientosView.as_view(), name="api_mrp_calcular_requerimientos"),
+    path("mrp/generar-plan-pronostico/", PlanDesdePronosticoCreateView.as_view(), name="api_mrp_generar_plan_pronostico"),
     path("inventario/sugerencias-compra/", InventarioSugerenciasCompraView.as_view(), name="api_inventario_sugerencias_compra"),
     path("compras/solicitud/", ComprasSolicitudCreateView.as_view(), name="api_compras_solicitud"),
     path("presupuestos/consolidado/<str:periodo>/", PresupuestosConsolidadoView.as_view(), name="api_presupuestos_consolidado"),

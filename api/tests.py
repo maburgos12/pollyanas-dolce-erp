@@ -10,7 +10,7 @@ from django.urls import reverse
 from compras.models import OrdenCompra, PresupuestoCompraPeriodo, SolicitudCompra
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
-from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
+from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PronosticoVenta, Receta
 from recetas.utils.costeo_versionado import asegurar_version_costeo
 
 
@@ -416,3 +416,47 @@ class RecetasCosteoApiTests(TestCase):
         url = reverse("api_presupuestos_consolidado", args=["2026-99"])
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 400)
+
+    def test_endpoint_mrp_generar_plan_pronostico(self):
+        receta_final = Receta.objects.create(
+            nombre="Producto API forecast",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-api-forecast-final",
+        )
+        receta_prep = Receta.objects.create(
+            nombre="Preparacion API forecast",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="hash-api-forecast-prep",
+        )
+        PronosticoVenta.objects.create(receta=receta_final, periodo="2026-03", cantidad=Decimal("10"))
+        PronosticoVenta.objects.create(receta=receta_prep, periodo="2026-03", cantidad=Decimal("5"))
+
+        url = reverse("api_mrp_generar_plan_pronostico")
+        resp = self.client.post(
+            url,
+            {"periodo": "2026-03", "fecha_produccion": "2026-03-12"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertEqual(payload["periodo"], "2026-03")
+        self.assertEqual(payload["renglones_creados"], 1)
+        plan = PlanProduccion.objects.get(pk=payload["plan_id"])
+        self.assertEqual(plan.items.count(), 1)
+        self.assertEqual(plan.items.first().receta_id, receta_final.id)
+
+    def test_endpoint_mrp_generar_plan_pronostico_requires_perm(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="api_forecast_sin_perm",
+            email="api_forecast_sin_perm@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+        url = reverse("api_mrp_generar_plan_pronostico")
+        resp = self.client.post(
+            url,
+            {"periodo": "2026-03"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)

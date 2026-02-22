@@ -6,6 +6,7 @@ Sprint 1 entrega:
 - UI web (Django) para ver recetas, detalle, pendientes y MRP básico
 - API: POST /api/mrp/explode/
 - API: POST /api/mrp/calcular-requerimientos/ (por plan, por periodo o por lista manual)
+- API: POST /api/mrp/generar-plan-pronostico/ (crea plan de producción desde pronóstico)
 
 ## Requisitos
 - Docker Desktop (Mac/Windows) **o** Python 3.12 + Postgres 16

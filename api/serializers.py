@@ -94,6 +94,27 @@ class MRPRequerimientosRequestSerializer(serializers.Serializer):
         return attrs
 
 
+class PlanDesdePronosticoRequestSerializer(serializers.Serializer):
+    periodo = serializers.CharField(max_length=7)
+    fecha_produccion = serializers.DateField(required=False)
+    nombre = serializers.CharField(max_length=140, required=False, allow_blank=True)
+    incluir_preparaciones = serializers.BooleanField(required=False, default=False)
+
+    def validate_periodo(self, value):
+        raw = (value or "").strip()
+        parts = raw.split("-")
+        if len(parts) != 2:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        try:
+            year = int(parts[0])
+            month = int(parts[1])
+        except ValueError:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        if year < 2000 or year > 2200 or month < 1 or month > 12:
+            raise serializers.ValidationError("Periodo fuera de rango válido (YYYY-MM).")
+        return f"{year:04d}-{month:02d}"
+
+
 class ComprasSolicitudCreateSerializer(serializers.Serializer):
     area = serializers.CharField(max_length=120)
     solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True)

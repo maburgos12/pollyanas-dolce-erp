@@ -66,6 +66,11 @@ curl -X POST http://localhost:8000/api/mrp/explode/ \
 curl -X POST http://localhost:8000/api/mrp/calcular-requerimientos/ \
   -H "Content-Type: application/json" \
   -d '{"periodo":"2026-02","periodo_tipo":"mes"}'
+
+# Crear plan de producción desde pronóstico mensual
+curl -X POST http://localhost:8000/api/mrp/generar-plan-pronostico/ \
+  -H "Content-Type: application/json" \
+  -d '{"periodo":"2026-02","fecha_produccion":"2026-02-20","incluir_preparaciones":false}'
 ```
 
 ---
