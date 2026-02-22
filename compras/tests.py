@@ -631,6 +631,48 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         )
         self.assertEqual(ws.cell(row=2, column=4).value, "Harina Import")
 
+    def test_import_preview_detecta_duplicado_en_lote(self):
+        SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="ana",
+            insumo=self.insumo_harina,
+            proveedor_sugerido=self.proveedor,
+            cantidad=Decimal("2"),
+            fecha_requerida=date(2026, 2, 20),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        csv_content = (
+            "insumo,cantidad,area,solicitante,fecha_requerida,estatus\n"
+            "Harina Import,2,Compras,ana,2026-02-20,BORRADOR\n"
+        )
+        archivo = SimpleUploadedFile("solicitudes_dup.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        with patch(
+            "compras.views.match_insumo",
+            return_value=(self.insumo_harina, 100.0, "exact"),
+        ):
+            response = self.client.post(
+                reverse("compras:solicitudes_importar"),
+                {
+                    "archivo": archivo,
+                    "periodo_tipo": "mes",
+                    "periodo_mes": "2026-02",
+                    "area": "Compras",
+                    "solicitante": "ana",
+                    "estatus": SolicitudCompra.STATUS_BORRADOR,
+                    "score_min": "90",
+                    "evitar_duplicados": "on",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        preview_payload = self.client.session.get("compras_solicitudes_import_preview")
+        self.assertIsNotNone(preview_payload)
+        self.assertEqual(len(preview_payload["rows"]), 1)
+        row = preview_payload["rows"][0]
+        self.assertTrue(row["duplicate"])
+        self.assertIn("Posible duplicado", row["notes"])
+
 
 class ComprasOrdenesRecepcionesFiltersTests(TestCase):
     def setUp(self):

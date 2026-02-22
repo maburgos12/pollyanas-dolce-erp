@@ -133,11 +133,12 @@ def _read_import_rows(uploaded) -> list[dict]:
         uploaded.seek(0)
         wb = load_workbook(uploaded, read_only=True, data_only=True)
         ws = wb.active
-        values = list(ws.values)
-        if not values:
+        rows_iter = ws.iter_rows(values_only=True)
+        first_row = next(rows_iter, None)
+        if not first_row:
             return []
-        headers = [_map_import_header(str(h or "")) for h in values[0]]
-        for raw in values[1:]:
+        headers = [_map_import_header(str(h or "")) for h in first_row]
+        for raw in rows_iter:
             row = {}
             for idx, header in enumerate(headers):
                 if not header:
@@ -3127,16 +3128,24 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
         normalizar_nombre(p.nombre): p
         for p in Proveedor.objects.filter(activo=True).only("id", "nombre")
     }
-    preview_rows: list[dict] = []
+    match_cache: dict[str, tuple[Insumo | None, float, str]] = {}
+    parsed_rows: list[dict] = []
+    duplicate_keys_to_check: set[tuple[str, int, date]] = set()
 
     for idx, row in enumerate(rows, start=2):
         insumo_raw = str(row.get("insumo") or "").strip()
         cantidad_raw = str(row.get("cantidad") or "").strip()
         cantidad = _to_decimal(cantidad_raw, "0")
-        insumo_match, score, method = (None, 0.0, "sin_match")
         if insumo_raw:
-            insumo_match, score, method = match_insumo(insumo_raw)
-        insumo_id = insumo_match.id if (insumo_match and score >= min_score) else ""
+            cache_key = normalizar_nombre(insumo_raw)
+            insumo_match, score, method = match_cache.get(cache_key, (None, 0.0, "sin_match"))
+            if cache_key not in match_cache:
+                insumo_match, score, method = match_insumo(insumo_raw)
+                match_cache[cache_key] = (insumo_match, score, method)
+        else:
+            insumo_match, score, method = (None, 0.0, "sin_match")
+        insumo_id = int(insumo_match.id) if (insumo_match and score >= min_score) else 0
+
         area = str(row.get("area") or area_default).strip() or area_default
         solicitante = str(row.get("solicitante") or solicitante_default).strip() or solicitante_default
         fecha_requerida = _parse_date_value(row.get("fecha_requerida"), fecha_default)
@@ -3147,14 +3156,54 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
         if not proveedor and insumo_match:
             proveedor = insumo_match.proveedor_principal
 
-        duplicate = False
+        parsed_rows.append(
+            {
+                "row_id": str(idx),
+                "source_row": idx,
+                "insumo_origen": insumo_raw,
+                "insumo_sugerencia": insumo_match.nombre if insumo_match else "",
+                "insumo_id": insumo_id,
+                "cantidad": cantidad,
+                "cantidad_origen": cantidad_raw,
+                "area": area,
+                "solicitante": solicitante,
+                "fecha_requerida": fecha_requerida,
+                "estatus": estatus,
+                "proveedor_id": int(proveedor.id) if proveedor else 0,
+                "score": float(score or 0),
+                "metodo": method,
+                "has_insumo_match": bool(insumo_match),
+            }
+        )
         if evitar_duplicados and insumo_id:
-            duplicate = SolicitudCompra.objects.filter(
-                area=area,
-                insumo_id=insumo_id,
-                fecha_requerida=fecha_requerida,
+            duplicate_keys_to_check.add((area, insumo_id, fecha_requerida))
+
+    duplicates_found: set[tuple[str, int, date]] = set()
+    if duplicate_keys_to_check:
+        areas = sorted({k[0] for k in duplicate_keys_to_check})
+        insumo_ids = sorted({k[1] for k in duplicate_keys_to_check})
+        fechas = sorted({k[2] for k in duplicate_keys_to_check})
+        duplicates_found = {
+            (area, int(insumo_id), fecha)
+            for area, insumo_id, fecha in SolicitudCompra.objects.filter(
+                area__in=areas,
+                insumo_id__in=insumo_ids,
+                fecha_requerida__in=fechas,
                 estatus__in=_active_solicitud_statuses(),
-            ).exists()
+            ).values_list("area", "insumo_id", "fecha_requerida")
+        }
+
+    preview_rows: list[dict] = []
+    for parsed in parsed_rows:
+        insumo_raw = str(parsed["insumo_origen"] or "").strip()
+        cantidad = parsed["cantidad"]
+        cantidad_raw = parsed["cantidad_origen"]
+        insumo_id = parsed["insumo_id"]
+        area = parsed["area"]
+        solicitante = parsed["solicitante"]
+        fecha_requerida = parsed["fecha_requerida"]
+        estatus = parsed["estatus"]
+        duplicate = bool(insumo_id and (area, insumo_id, fecha_requerida) in duplicates_found)
 
         notes: list[str] = []
         hard_error = False
@@ -3162,7 +3211,7 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
             notes.append("Insumo vacío en archivo.")
             hard_error = True
         if not insumo_id:
-            if insumo_match:
+            if parsed["has_insumo_match"]:
                 notes.append(f"Score de match insuficiente (<{min_score}).")
             else:
                 notes.append("Sin match de insumo.")
@@ -3175,10 +3224,10 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
 
         preview_rows.append(
             {
-                "row_id": str(idx),
-                "source_row": idx,
+                "row_id": parsed["row_id"],
+                "source_row": parsed["source_row"],
                 "insumo_origen": insumo_raw,
-                "insumo_sugerencia": insumo_match.nombre if insumo_match else "",
+                "insumo_sugerencia": parsed["insumo_sugerencia"],
                 "insumo_id": str(insumo_id) if insumo_id else "",
                 "cantidad": str(cantidad),
                 "cantidad_origen": cantidad_raw,
@@ -3186,9 +3235,9 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
                 "solicitante": solicitante,
                 "fecha_requerida": fecha_requerida.isoformat(),
                 "estatus": estatus,
-                "proveedor_id": str(proveedor.id) if proveedor else "",
-                "score": f"{score:.1f}",
-                "metodo": method,
+                "proveedor_id": str(parsed["proveedor_id"]) if parsed["proveedor_id"] else "",
+                "score": f"{parsed['score']:.1f}",
+                "metodo": parsed["metodo"],
                 "duplicate": duplicate,
                 "notes": " | ".join(notes),
                 "include": not hard_error,
