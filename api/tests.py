@@ -595,3 +595,155 @@ class RecetasCosteoApiTests(TestCase):
             fecha_fin=date(2026, 3, 31),
         )
         self.assertNotEqual(updated.cantidad, Decimal("100"))
+
+    def test_endpoint_ventas_historial_bulk_dry_run_y_apply(self):
+        sucursal = Sucursal.objects.create(codigo="CENTRO", nombre="Sucursal Centro", activa=True)
+        url = reverse("api_ventas_historial_bulk")
+
+        payload_dry = {
+            "dry_run": True,
+            "fuente": "API_TEST_BULK",
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "fecha": "2026-03-10",
+                    "cantidad": "12",
+                    "sucursal_id": sucursal.id,
+                    "tickets": 5,
+                },
+                {
+                    "receta_id": self.receta.id,
+                    "fecha": "2026-03-11",
+                    "cantidad": "9",
+                },
+                {
+                    "receta_id": 999999,
+                    "fecha": "2026-03-12",
+                    "cantidad": "2",
+                },
+            ],
+        }
+        resp_dry = self.client.post(url, payload_dry, content_type="application/json")
+        self.assertEqual(resp_dry.status_code, 200)
+        data_dry = resp_dry.json()
+        self.assertTrue(data_dry["dry_run"])
+        self.assertEqual(data_dry["summary"]["created"], 2)
+        self.assertEqual(data_dry["summary"]["skipped"], 1)
+        self.assertEqual(VentaHistorica.objects.count(), 0)
+
+        payload_apply = {
+            "dry_run": False,
+            "modo": "replace",
+            "fuente": "API_TEST_BULK",
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "fecha": "2026-03-10",
+                    "cantidad": "12",
+                    "sucursal_id": sucursal.id,
+                    "tickets": 5,
+                },
+                {
+                    "receta_id": self.receta.id,
+                    "fecha": "2026-03-11",
+                    "cantidad": "9",
+                },
+            ],
+        }
+        resp_apply = self.client.post(url, payload_apply, content_type="application/json")
+        self.assertEqual(resp_apply.status_code, 200)
+        data_apply = resp_apply.json()
+        self.assertFalse(data_apply["dry_run"])
+        self.assertEqual(data_apply["summary"]["created"], 2)
+        self.assertEqual(VentaHistorica.objects.count(), 2)
+
+        resp_acc = self.client.post(
+            url,
+            {
+                "dry_run": False,
+                "modo": "accumulate",
+                "rows": [
+                    {
+                        "receta_id": self.receta.id,
+                        "fecha": "2026-03-10",
+                        "cantidad": "3",
+                        "sucursal_id": sucursal.id,
+                        "tickets": 2,
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_acc.status_code, 200)
+        data_acc = resp_acc.json()
+        self.assertEqual(data_acc["summary"]["updated"], 1)
+        venta = VentaHistorica.objects.get(receta=self.receta, sucursal=sucursal, fecha=date(2026, 3, 10))
+        self.assertEqual(venta.cantidad, Decimal("15"))
+        self.assertEqual(venta.tickets, 7)
+
+    def test_endpoint_ventas_solicitud_bulk_dry_run_y_apply(self):
+        sucursal = Sucursal.objects.create(codigo="PONIENTE", nombre="Sucursal Poniente", activa=True)
+        url = reverse("api_ventas_solicitud_bulk")
+
+        payload_dry = {
+            "dry_run": True,
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "sucursal_id": sucursal.id,
+                    "alcance": "mes",
+                    "periodo": "2026-03",
+                    "cantidad": "40",
+                },
+                {
+                    "receta_id": self.receta.id,
+                    "sucursal_id": sucursal.id,
+                    "alcance": "semana",
+                    "fecha_base": "2026-03-20",
+                    "cantidad": "12",
+                },
+            ],
+        }
+        resp_dry = self.client.post(url, payload_dry, content_type="application/json")
+        self.assertEqual(resp_dry.status_code, 200)
+        data_dry = resp_dry.json()
+        self.assertTrue(data_dry["dry_run"])
+        self.assertEqual(data_dry["summary"]["created"], 2)
+        self.assertEqual(SolicitudVenta.objects.count(), 0)
+
+        payload_apply = dict(payload_dry)
+        payload_apply["dry_run"] = False
+        resp_apply = self.client.post(url, payload_apply, content_type="application/json")
+        self.assertEqual(resp_apply.status_code, 200)
+        data_apply = resp_apply.json()
+        self.assertEqual(data_apply["summary"]["created"], 2)
+        self.assertEqual(SolicitudVenta.objects.count(), 2)
+
+        resp_acc = self.client.post(
+            url,
+            {
+                "dry_run": False,
+                "modo": "accumulate",
+                "rows": [
+                    {
+                        "receta_id": self.receta.id,
+                        "sucursal_id": sucursal.id,
+                        "alcance": "mes",
+                        "periodo": "2026-03",
+                        "cantidad": "5",
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_acc.status_code, 200)
+        data_acc = resp_acc.json()
+        self.assertEqual(data_acc["summary"]["updated"], 1)
+        solicitud_mes = SolicitudVenta.objects.get(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+        )
+        self.assertEqual(solicitud_mes.cantidad, Decimal("45"))

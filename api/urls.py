@@ -10,7 +10,9 @@ from .views import (
     RecetaCostoHistoricoView,
     RecetaVersionesView,
     SolicitudVentaAplicarForecastView,
+    SolicitudVentaBulkUpsertView,
     SolicitudVentaUpsertView,
+    VentaHistoricaBulkUpsertView,
 )
 
 urlpatterns = [
@@ -18,7 +20,9 @@ urlpatterns = [
     path("mrp/calcular-requerimientos/", MRPRequerimientosView.as_view(), name="api_mrp_calcular_requerimientos"),
     path("mrp/generar-plan-pronostico/", PlanDesdePronosticoCreateView.as_view(), name="api_mrp_generar_plan_pronostico"),
     path("ventas/pronostico-estadistico/", ForecastEstadisticoView.as_view(), name="api_ventas_pronostico_estadistico"),
+    path("ventas/historial/bulk/", VentaHistoricaBulkUpsertView.as_view(), name="api_ventas_historial_bulk"),
     path("ventas/solicitud/", SolicitudVentaUpsertView.as_view(), name="api_ventas_solicitud"),
+    path("ventas/solicitud/bulk/", SolicitudVentaBulkUpsertView.as_view(), name="api_ventas_solicitud_bulk"),
     path("ventas/solicitud/aplicar-forecast/", SolicitudVentaAplicarForecastView.as_view(), name="api_ventas_solicitud_aplicar_forecast"),
     path("inventario/sugerencias-compra/", InventarioSugerenciasCompraView.as_view(), name="api_inventario_sugerencias_compra"),
     path("compras/solicitud/", ComprasSolicitudCreateView.as_view(), name="api_compras_solicitud"),

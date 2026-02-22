@@ -1,4 +1,5 @@
 from collections import defaultdict
+from contextlib import nullcontext
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from django.db import transaction, OperationalError, ProgrammingError
@@ -24,13 +25,23 @@ from compras.views import (
 )
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo
-from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PronosticoVenta, Receta, SolicitudVenta
+from recetas.models import (
+    LineaReceta,
+    PlanProduccion,
+    PlanProduccionItem,
+    PronosticoVenta,
+    Receta,
+    SolicitudVenta,
+    VentaHistorica,
+)
 from recetas.views import (
     _build_forecast_from_history,
     _forecast_session_payload,
     _forecast_vs_solicitud_preview,
     _normalize_periodo_mes,
+    _resolve_receta_for_sales,
     _resolve_solicitud_window,
+    _resolve_sucursal_for_sales,
     _ui_to_model_alcance,
 )
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
@@ -42,7 +53,9 @@ from .serializers import (
     PlanDesdePronosticoRequestSerializer,
     RecetaCostoVersionSerializer,
     SolicitudVentaAplicarForecastSerializer,
+    SolicitudVentaBulkSerializer,
     SolicitudVentaUpsertSerializer,
+    VentaHistoricaBulkSerializer,
 )
 
 
@@ -154,6 +167,56 @@ def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict
             "sin_base_count": int(totals.get("sin_base_count") or 0),
         },
     }
+
+
+def _resolve_receta_bulk_ref(
+    *,
+    receta_id: int | None,
+    receta_name: str,
+    codigo_point: str,
+    cache: dict[tuple[int, str, str], Receta | None],
+) -> Receta | None:
+    receta_id_int = int(receta_id) if receta_id else 0
+    code_norm = (codigo_point or "").strip().lower()
+    name_norm = (receta_name or "").strip().lower()
+    key = (receta_id_int, code_norm, name_norm)
+    if key in cache:
+        return cache[key]
+
+    receta = None
+    if receta_id_int > 0:
+        receta = Receta.objects.filter(pk=receta_id_int).first()
+    if receta is None:
+        receta = _resolve_receta_for_sales(receta_name, codigo_point)
+    cache[key] = receta
+    return receta
+
+
+def _resolve_sucursal_bulk_ref(
+    *,
+    sucursal_id: int | None,
+    sucursal_name: str,
+    sucursal_codigo: str,
+    default_sucursal: Sucursal | None,
+    cache: dict[tuple[int, str, str, int], Sucursal | None],
+) -> Sucursal | None:
+    sucursal_id_int = int(sucursal_id) if sucursal_id else 0
+    code_norm = (sucursal_codigo or "").strip().lower()
+    name_norm = (sucursal_name or "").strip().lower()
+    default_id = int(default_sucursal.id) if default_sucursal else 0
+    key = (sucursal_id_int, code_norm, name_norm, default_id)
+    if key in cache:
+        return cache[key]
+
+    sucursal = None
+    if sucursal_id_int > 0:
+        sucursal = Sucursal.objects.filter(pk=sucursal_id_int, activa=True).first()
+    else:
+        sucursal = _resolve_sucursal_for_sales(sucursal_name, sucursal_codigo, default_sucursal)
+        if sucursal and not sucursal.activa:
+            sucursal = None
+    cache[key] = sucursal
+    return sucursal
 
 
 class MRPExplodeView(APIView):
@@ -1143,6 +1206,392 @@ class PlanDesdePronosticoCreateView(APIView):
                 "renglones_omitidos_cantidad_cero": skipped,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class VentaHistoricaBulkUpsertView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.change_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para importar historial de ventas."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = VentaHistoricaBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        rows = data["rows"]
+        modo = data.get("modo") or "replace"
+        fuente = (data.get("fuente") or "API_VENTAS_BULK").strip()[:40] or "API_VENTAS_BULK"
+        dry_run = bool(data.get("dry_run", True))
+        stop_on_error = bool(data.get("stop_on_error", False))
+        top = int(data.get("top") or 120)
+
+        default_sucursal = None
+        default_sucursal_id = data.get("sucursal_default_id")
+        if default_sucursal_id is not None:
+            default_sucursal = Sucursal.objects.filter(pk=default_sucursal_id, activa=True).first()
+            if default_sucursal is None:
+                return Response(
+                    {"detail": "Sucursal default no encontrada o inactiva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        receta_cache: dict[tuple[int, str, str], Receta | None] = {}
+        sucursal_cache: dict[tuple[int, str, str, int], Sucursal | None] = {}
+        created = 0
+        updated = 0
+        skipped = 0
+        terminated_early = False
+        result_rows: list[dict] = []
+
+        tx_cm = nullcontext() if dry_run else transaction.atomic()
+        with tx_cm:
+            for index, row in enumerate(rows, start=1):
+                receta_id = row.get("receta_id")
+                receta_name = str(row.get("receta") or "").strip()
+                codigo_point = str(row.get("codigo_point") or "").strip()
+                receta = _resolve_receta_bulk_ref(
+                    receta_id=receta_id,
+                    receta_name=receta_name,
+                    codigo_point=codigo_point,
+                    cache=receta_cache,
+                )
+                if receta is None:
+                    skipped += 1
+                    result_rows.append(
+                        {
+                            "row": index,
+                            "status": "ERROR",
+                            "reason": "receta_not_found",
+                            "receta_id": int(receta_id or 0) or None,
+                            "receta_input": receta_name or codigo_point,
+                        }
+                    )
+                    if stop_on_error:
+                        terminated_early = True
+                        break
+                    continue
+
+                sucursal_id = row.get("sucursal_id")
+                sucursal_name = str(row.get("sucursal") or "").strip()
+                sucursal_codigo = str(row.get("sucursal_codigo") or "").strip()
+                has_sucursal_ref = bool(sucursal_id) or bool(sucursal_name) or bool(sucursal_codigo)
+                sucursal = _resolve_sucursal_bulk_ref(
+                    sucursal_id=sucursal_id,
+                    sucursal_name=sucursal_name,
+                    sucursal_codigo=sucursal_codigo,
+                    default_sucursal=default_sucursal,
+                    cache=sucursal_cache,
+                )
+                if has_sucursal_ref and sucursal is None:
+                    skipped += 1
+                    result_rows.append(
+                        {
+                            "row": index,
+                            "status": "ERROR",
+                            "reason": "sucursal_not_found",
+                            "receta_id": receta.id,
+                            "receta": receta.nombre,
+                            "sucursal_input": sucursal_codigo or sucursal_name or str(sucursal_id),
+                        }
+                    )
+                    if stop_on_error:
+                        terminated_early = True
+                        break
+                    continue
+
+                fecha = row["fecha"]
+                cantidad = _to_decimal(row.get("cantidad"), default=Decimal("0"))
+                tickets = int(row.get("tickets") or 0)
+                monto_total_raw = row.get("monto_total", None)
+                monto_total = _to_decimal(monto_total_raw) if monto_total_raw is not None else None
+                if monto_total is not None and monto_total <= 0:
+                    monto_total = None
+
+                existing_qs = VentaHistorica.objects.filter(receta=receta, fecha=fecha)
+                if sucursal:
+                    existing_qs = existing_qs.filter(sucursal=sucursal)
+                else:
+                    existing_qs = existing_qs.filter(sucursal__isnull=True)
+                existing = existing_qs.order_by("id").first()
+
+                previous_qty = _to_decimal(existing.cantidad, default=Decimal("0")) if existing else Decimal("0")
+                previous_tickets = int(existing.tickets or 0) if existing else 0
+                if existing:
+                    if modo == "accumulate":
+                        new_qty = previous_qty + cantidad
+                        new_tickets = previous_tickets + tickets
+                    else:
+                        new_qty = cantidad
+                        new_tickets = tickets
+                    action = "UPDATED"
+                    updated += 1
+                else:
+                    new_qty = cantidad
+                    new_tickets = tickets
+                    action = "CREATED"
+                    created += 1
+
+                if not dry_run:
+                    if existing:
+                        existing.cantidad = new_qty
+                        existing.tickets = new_tickets
+                        if modo == "accumulate":
+                            if monto_total is not None:
+                                existing.monto_total = _to_decimal(existing.monto_total, default=Decimal("0")) + monto_total
+                        else:
+                            existing.monto_total = monto_total
+                        existing.fuente = fuente
+                        existing.save(update_fields=["cantidad", "tickets", "monto_total", "fuente", "actualizado_en"])
+                    else:
+                        VentaHistorica.objects.create(
+                            receta=receta,
+                            sucursal=sucursal,
+                            fecha=fecha,
+                            cantidad=new_qty,
+                            tickets=new_tickets,
+                            monto_total=monto_total,
+                            fuente=fuente,
+                        )
+
+                result_rows.append(
+                    {
+                        "row": index,
+                        "status": action,
+                        "receta_id": receta.id,
+                        "receta": receta.nombre,
+                        "sucursal_id": sucursal.id if sucursal else None,
+                        "sucursal": sucursal.nombre if sucursal else "",
+                        "fecha": str(fecha),
+                        "cantidad_prev": float(previous_qty),
+                        "cantidad_nueva": float(new_qty),
+                        "tickets_prev": previous_tickets,
+                        "tickets_nuevos": new_tickets,
+                    }
+                )
+
+        error_count = sum(1 for row in result_rows if row.get("status") == "ERROR")
+        return Response(
+            {
+                "dry_run": dry_run,
+                "mode": modo,
+                "fuente": fuente,
+                "terminated_early": terminated_early,
+                "summary": {
+                    "total_rows": len(rows),
+                    "created": created,
+                    "updated": updated,
+                    "skipped": skipped,
+                    "errors": error_count,
+                    "applied": 0 if dry_run else (created + updated),
+                },
+                "rows": result_rows[:top],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SolicitudVentaBulkUpsertView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.change_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para importar solicitudes de ventas."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = SolicitudVentaBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        rows = data["rows"]
+        modo = data.get("modo") or "replace"
+        fuente = (data.get("fuente") or "API_SOL_BULK").strip()[:40] or "API_SOL_BULK"
+        dry_run = bool(data.get("dry_run", True))
+        stop_on_error = bool(data.get("stop_on_error", False))
+        top = int(data.get("top") or 120)
+
+        default_sucursal = None
+        default_sucursal_id = data.get("sucursal_default_id")
+        if default_sucursal_id is not None:
+            default_sucursal = Sucursal.objects.filter(pk=default_sucursal_id, activa=True).first()
+            if default_sucursal is None:
+                return Response(
+                    {"detail": "Sucursal default no encontrada o inactiva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        receta_cache: dict[tuple[int, str, str], Receta | None] = {}
+        sucursal_cache: dict[tuple[int, str, str, int], Sucursal | None] = {}
+        created = 0
+        updated = 0
+        skipped = 0
+        terminated_early = False
+        result_rows: list[dict] = []
+
+        tx_cm = nullcontext() if dry_run else transaction.atomic()
+        with tx_cm:
+            for index, row in enumerate(rows, start=1):
+                receta_id = row.get("receta_id")
+                receta_name = str(row.get("receta") or "").strip()
+                codigo_point = str(row.get("codigo_point") or "").strip()
+                receta = _resolve_receta_bulk_ref(
+                    receta_id=receta_id,
+                    receta_name=receta_name,
+                    codigo_point=codigo_point,
+                    cache=receta_cache,
+                )
+                if receta is None:
+                    skipped += 1
+                    result_rows.append(
+                        {
+                            "row": index,
+                            "status": "ERROR",
+                            "reason": "receta_not_found",
+                            "receta_id": int(receta_id or 0) or None,
+                            "receta_input": receta_name or codigo_point,
+                        }
+                    )
+                    if stop_on_error:
+                        terminated_early = True
+                        break
+                    continue
+
+                sucursal_id = row.get("sucursal_id")
+                sucursal_name = str(row.get("sucursal") or "").strip()
+                sucursal_codigo = str(row.get("sucursal_codigo") or "").strip()
+                has_sucursal_ref = bool(sucursal_id) or bool(sucursal_name) or bool(sucursal_codigo)
+                sucursal = _resolve_sucursal_bulk_ref(
+                    sucursal_id=sucursal_id,
+                    sucursal_name=sucursal_name,
+                    sucursal_codigo=sucursal_codigo,
+                    default_sucursal=default_sucursal,
+                    cache=sucursal_cache,
+                )
+                if has_sucursal_ref and sucursal is None:
+                    skipped += 1
+                    result_rows.append(
+                        {
+                            "row": index,
+                            "status": "ERROR",
+                            "reason": "sucursal_not_found",
+                            "receta_id": receta.id,
+                            "receta": receta.nombre,
+                            "sucursal_input": sucursal_codigo or sucursal_name or str(sucursal_id),
+                        }
+                    )
+                    if stop_on_error:
+                        terminated_early = True
+                        break
+                    continue
+
+                alcance_ui = str(row.get("alcance") or "mes").strip().lower()
+                alcance_model = _ui_to_model_alcance(alcance_ui)
+                periodo_default = _normalize_periodo_mes(row.get("periodo"))
+                fecha_base_default = row.get("fecha_base") or timezone.localdate()
+                periodo, fecha_inicio, fecha_fin = _resolve_solicitud_window(
+                    alcance=alcance_model,
+                    periodo_raw=row.get("periodo"),
+                    fecha_base_raw=row.get("fecha_base"),
+                    fecha_inicio_raw=row.get("fecha_inicio"),
+                    fecha_fin_raw=row.get("fecha_fin"),
+                    periodo_default=periodo_default,
+                    fecha_base_default=fecha_base_default,
+                )
+                cantidad = _to_decimal(row.get("cantidad"), default=Decimal("0"))
+                if cantidad <= 0:
+                    skipped += 1
+                    result_rows.append(
+                        {
+                            "row": index,
+                            "status": "ERROR",
+                            "reason": "invalid_qty",
+                            "receta_id": receta.id,
+                            "receta": receta.nombre,
+                            "cantidad": float(cantidad),
+                        }
+                    )
+                    if stop_on_error:
+                        terminated_early = True
+                        break
+                    continue
+
+                existing = SolicitudVenta.objects.filter(
+                    receta=receta,
+                    sucursal=sucursal,
+                    alcance=alcance_model,
+                    fecha_inicio=fecha_inicio,
+                    fecha_fin=fecha_fin,
+                ).first()
+
+                previous_qty = _to_decimal(existing.cantidad, default=Decimal("0")) if existing else Decimal("0")
+                if existing:
+                    new_qty = previous_qty + cantidad if modo == "accumulate" else cantidad
+                    action = "UPDATED"
+                    updated += 1
+                else:
+                    new_qty = cantidad
+                    action = "CREATED"
+                    created += 1
+
+                if not dry_run:
+                    if existing:
+                        existing.periodo = periodo
+                        existing.cantidad = new_qty
+                        existing.fuente = fuente
+                        existing.save(update_fields=["periodo", "cantidad", "fuente", "actualizado_en"])
+                    else:
+                        SolicitudVenta.objects.create(
+                            receta=receta,
+                            sucursal=sucursal,
+                            alcance=alcance_model,
+                            periodo=periodo,
+                            fecha_inicio=fecha_inicio,
+                            fecha_fin=fecha_fin,
+                            cantidad=new_qty,
+                            fuente=fuente,
+                        )
+
+                result_rows.append(
+                    {
+                        "row": index,
+                        "status": action,
+                        "receta_id": receta.id,
+                        "receta": receta.nombre,
+                        "sucursal_id": sucursal.id if sucursal else None,
+                        "sucursal": sucursal.nombre if sucursal else "",
+                        "alcance": alcance_model,
+                        "periodo": periodo,
+                        "fecha_inicio": str(fecha_inicio),
+                        "fecha_fin": str(fecha_fin),
+                        "cantidad_prev": float(previous_qty),
+                        "cantidad_nueva": float(new_qty),
+                    }
+                )
+
+        error_count = sum(1 for row in result_rows if row.get("status") == "ERROR")
+        return Response(
+            {
+                "dry_run": dry_run,
+                "mode": modo,
+                "fuente": fuente,
+                "terminated_early": terminated_early,
+                "summary": {
+                    "total_rows": len(rows),
+                    "created": created,
+                    "updated": updated,
+                    "skipped": skipped,
+                    "errors": error_count,
+                    "applied": 0 if dry_run else (created + updated),
+                },
+                "rows": result_rows[:top],
+            },
+            status=status.HTTP_200_OK,
         )
 
 
