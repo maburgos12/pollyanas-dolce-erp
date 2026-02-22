@@ -38,6 +38,8 @@ Sprint 1 entrega:
 - API: POST /api/compras/orden/{id}/estatus/ (cambio de estado de OC con validaciones)
 - API: POST /api/compras/orden/{id}/recepciones/ (registra recepción y puede cerrar OC)
 - API: POST /api/compras/recepcion/{id}/estatus/ (actualiza recepción y cierra OC automáticamente si aplica)
+- API: POST /api/auth/token/ (obtiene token para integraciones API)
+- API: POST /api/auth/token/rotate/ (rota token del usuario autenticado)
 
 ## Requisitos
 - Docker Desktop (Mac/Windows) **o** Python 3.12 + Postgres 16

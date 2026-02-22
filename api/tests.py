@@ -7,6 +7,7 @@ from django.contrib.auth.models import Group
 from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
+from rest_framework.authtoken.models import Token
 
 from core.models import Sucursal
 from compras.models import OrdenCompra, PresupuestoCompraPeriodo, RecepcionCompra, SolicitudCompra
@@ -62,6 +63,66 @@ class RecetasCosteoApiTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
         asegurar_version_costeo(self.receta, fuente="TEST_API")
+
+    def test_endpoint_auth_token_obtain_and_access_api(self):
+        self.client.logout()
+        resp = self.client.post(
+            reverse("api_auth_token"),
+            {"username": self.user.username, "password": "test12345"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        token = payload.get("token")
+        self.assertTrue(token)
+        self.assertEqual(payload["user"]["username"], self.user.username)
+
+        resp_protected = self.client.get(
+            reverse("api_mrp_planes"),
+            HTTP_AUTHORIZATION=f"Token {token}",
+        )
+        self.assertEqual(resp_protected.status_code, 200)
+
+    def test_endpoint_auth_token_rejects_invalid_credentials(self):
+        self.client.logout()
+        resp = self.client.post(
+            reverse("api_auth_token"),
+            {"username": self.user.username, "password": "password_incorrecto"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_endpoint_auth_token_rotate_replaces_previous_token(self):
+        token = Token.objects.create(user=self.user)
+        self.client.logout()
+        resp_rotate = self.client.post(
+            reverse("api_auth_token_rotate"),
+            {},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Token {token.key}",
+        )
+        self.assertEqual(resp_rotate.status_code, 200)
+        new_token = resp_rotate.json().get("token")
+        self.assertTrue(new_token)
+        self.assertNotEqual(new_token, token.key)
+        self.assertFalse(Token.objects.filter(key=token.key).exists())
+
+        resp_old = self.client.get(
+            reverse("api_mrp_planes"),
+            HTTP_AUTHORIZATION=f"Token {token.key}",
+        )
+        self.assertNotEqual(resp_old.status_code, 200)
+
+        resp_new = self.client.get(
+            reverse("api_mrp_planes"),
+            HTTP_AUTHORIZATION=f"Token {new_token}",
+        )
+        self.assertEqual(resp_new.status_code, 200)
+
+    def test_endpoint_auth_token_rotate_requires_authentication(self):
+        self.client.logout()
+        resp = self.client.post(reverse("api_auth_token_rotate"), {}, content_type="application/json")
+        self.assertIn(resp.status_code, {401, 403})
 
     def test_endpoint_versiones(self):
         url = reverse("api_receta_versiones", args=[self.receta.id])

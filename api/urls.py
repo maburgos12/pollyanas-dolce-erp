@@ -1,5 +1,7 @@
 from django.urls import path
 from .views import (
+    ApiTokenAuthView,
+    ApiTokenRotateView,
     ComprasOrdenesListView,
     ComprasRecepcionesListView,
     ComprasSolicitudesListView,
@@ -38,6 +40,8 @@ from .views import (
 )
 
 urlpatterns = [
+    path("auth/token/", ApiTokenAuthView.as_view(), name="api_auth_token"),
+    path("auth/token/rotate/", ApiTokenRotateView.as_view(), name="api_auth_token_rotate"),
     path("mrp/explode/", MRPExplodeView.as_view(), name="api_mrp_explode"),
     path("mrp/planes/", PlanProduccionListCreateView.as_view(), name="api_mrp_planes"),
     path("mrp/planes/<int:plan_id>/", PlanProduccionDetailView.as_view(), name="api_mrp_plan_detail"),

@@ -9,7 +9,9 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.authtoken.models import Token
+from rest_framework.authtoken.views import ObtainAuthToken
 
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from core.access import (
@@ -157,6 +159,37 @@ def _to_float(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError, InvalidOperation):
         return default
+
+
+class ApiTokenAuthView(ObtainAuthToken):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response(
+            {
+                "token": token.key,
+                "user": {
+                    "id": user.id,
+                    "username": user.get_username(),
+                    "is_superuser": bool(user.is_superuser),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ApiTokenRotateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        Token.objects.filter(user=request.user).delete()
+        token = Token.objects.create(user=request.user)
+        return Response({"token": token.key}, status=status.HTTP_200_OK)
 
 
 def _can_approve_ajustes(user) -> bool:
