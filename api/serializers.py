@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from compras.models import OrdenCompra, SolicitudCompra
+from recetas.models import SolicitudVenta
 
 
 class MRPRequestSerializer(serializers.Serializer):
@@ -144,4 +145,113 @@ class ComprasSolicitudCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"auto_crear_orden": "Para crear OC automática, la solicitud debe ir en estatus APROBADA."}
             )
+        return attrs
+
+
+class ForecastEstadisticoRequestSerializer(serializers.Serializer):
+    alcance = serializers.ChoiceField(choices=["mes", "semana", "fin_semana"], required=False, default="mes")
+    periodo = serializers.CharField(max_length=7, required=False, allow_blank=True)
+    fecha_base = serializers.DateField(required=False)
+    sucursal_id = serializers.IntegerField(required=False, allow_null=True)
+    incluir_preparaciones = serializers.BooleanField(required=False, default=False)
+    safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
+    include_solicitud_compare = serializers.BooleanField(required=False, default=True)
+    top = serializers.IntegerField(required=False, min_value=1, max_value=500, default=120)
+
+    def validate_safety_pct(self, value):
+        if value < -30 or value > 100:
+            raise serializers.ValidationError("safety_pct debe estar entre -30 y 100.")
+        return value
+
+    def validate_periodo(self, value):
+        raw = (value or "").strip()
+        if raw == "":
+            return raw
+        parts = raw.split("-")
+        if len(parts) != 2:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        try:
+            year = int(parts[0])
+            month = int(parts[1])
+        except ValueError:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        if year < 2000 or year > 2200 or month < 1 or month > 12:
+            raise serializers.ValidationError("Periodo fuera de rango válido (YYYY-MM).")
+        return f"{year:04d}-{month:02d}"
+
+
+class SolicitudVentaUpsertSerializer(serializers.Serializer):
+    receta_id = serializers.IntegerField()
+    sucursal_id = serializers.IntegerField(required=False, allow_null=True)
+    alcance = serializers.ChoiceField(choices=["mes", "semana", "fin_semana"], required=False, default="mes")
+    periodo = serializers.CharField(max_length=7, required=False, allow_blank=True)
+    fecha_base = serializers.DateField(required=False)
+    fecha_inicio = serializers.DateField(required=False)
+    fecha_fin = serializers.DateField(required=False)
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=3)
+    fuente = serializers.CharField(max_length=40, required=False, allow_blank=True, default="API_SOL_VENTAS")
+
+    def validate_cantidad(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("La cantidad debe ser mayor a 0.")
+        return value
+
+    def validate_periodo(self, value):
+        raw = (value or "").strip()
+        if raw == "":
+            return raw
+        parts = raw.split("-")
+        if len(parts) != 2:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        try:
+            year = int(parts[0])
+            month = int(parts[1])
+        except ValueError:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        if year < 2000 or year > 2200 or month < 1 or month > 12:
+            raise serializers.ValidationError("Periodo fuera de rango válido (YYYY-MM).")
+        return f"{year:04d}-{month:02d}"
+
+
+class SolicitudVentaAplicarForecastSerializer(serializers.Serializer):
+    alcance = serializers.ChoiceField(choices=["mes", "semana", "fin_semana"], required=False, default="mes")
+    periodo = serializers.CharField(max_length=7, required=False, allow_blank=True)
+    fecha_base = serializers.DateField(required=False)
+    sucursal_id = serializers.IntegerField(required=True)
+    incluir_preparaciones = serializers.BooleanField(required=False, default=False)
+    safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
+    modo = serializers.ChoiceField(
+        choices=["desviadas", "sobre", "bajo", "receta", "todas"],
+        required=False,
+        default="desviadas",
+    )
+    receta_id = serializers.IntegerField(required=False)
+    fuente = serializers.CharField(max_length=40, required=False, allow_blank=True, default="API_FORECAST_ADJUST")
+    top = serializers.IntegerField(required=False, min_value=1, max_value=500, default=120)
+
+    def validate_safety_pct(self, value):
+        if value < -30 or value > 100:
+            raise serializers.ValidationError("safety_pct debe estar entre -30 y 100.")
+        return value
+
+    def validate_periodo(self, value):
+        raw = (value or "").strip()
+        if raw == "":
+            return raw
+        parts = raw.split("-")
+        if len(parts) != 2:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        try:
+            year = int(parts[0])
+            month = int(parts[1])
+        except ValueError:
+            raise serializers.ValidationError("Usa formato YYYY-MM.")
+        if year < 2000 or year > 2200 or month < 1 or month > 12:
+            raise serializers.ValidationError("Periodo fuera de rango válido (YYYY-MM).")
+        return f"{year:04d}-{month:02d}"
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs.get("modo") == "receta" and not attrs.get("receta_id"):
+            raise serializers.ValidationError({"receta_id": "Es requerido cuando modo=receta."})
         return attrs

@@ -9,6 +9,9 @@ Sprint 1 entrega:
 - API: POST /api/mrp/explode/
 - API: POST /api/mrp/calcular-requerimientos/ (por plan, por periodo o por lista manual)
 - API: POST /api/mrp/generar-plan-pronostico/ (crea plan de producción desde pronóstico)
+- API: POST /api/ventas/pronostico-estadistico/ (forecast por sucursal + comparativo contra solicitud de ventas)
+- API: POST /api/ventas/solicitud/ (alta/actualización de solicitud de ventas)
+- API: POST /api/ventas/solicitud/aplicar-forecast/ (ajuste automático de solicitud al forecast)
 
 ## Requisitos
 - Docker Desktop (Mac/Windows) **o** Python 3.12 + Postgres 16

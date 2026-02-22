@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from compras.models import SolicitudCompra
 from compras.models import OrdenCompra
 from core.access import can_manage_compras, can_view_compras
+from core.models import Sucursal
 from compras.views import (
     _build_budget_context,
     _build_budget_history,
@@ -23,14 +24,25 @@ from compras.views import (
 )
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo
-from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PronosticoVenta, Receta
+from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PronosticoVenta, Receta, SolicitudVenta
+from recetas.views import (
+    _build_forecast_from_history,
+    _forecast_session_payload,
+    _forecast_vs_solicitud_preview,
+    _normalize_periodo_mes,
+    _resolve_solicitud_window,
+    _ui_to_model_alcance,
+)
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from .serializers import (
     ComprasSolicitudCreateSerializer,
+    ForecastEstadisticoRequestSerializer,
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
     PlanDesdePronosticoRequestSerializer,
     RecetaCostoVersionSerializer,
+    SolicitudVentaAplicarForecastSerializer,
+    SolicitudVentaUpsertSerializer,
 )
 
 
@@ -90,6 +102,59 @@ def _to_float(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError, InvalidOperation):
         return default
+
+
+def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict:
+    if not compare:
+        return {
+            "target_start": "",
+            "target_end": "",
+            "sucursal_id": None,
+            "sucursal_nombre": "",
+            "rows": [],
+            "totals": {
+                "forecast_total": 0.0,
+                "solicitud_total": 0.0,
+                "delta_total": 0.0,
+                "ok_count": 0,
+                "sobre_count": 0,
+                "bajo_count": 0,
+                "sin_base_count": 0,
+            },
+        }
+
+    rows = []
+    for row in (compare.get("rows") or [])[:top]:
+        variacion = row.get("variacion_pct")
+        rows.append(
+            {
+                "receta_id": int(row.get("receta_id") or 0),
+                "receta": row.get("receta") or "",
+                "forecast_qty": _to_float(row.get("forecast_qty")),
+                "solicitud_qty": _to_float(row.get("solicitud_qty")),
+                "delta_qty": _to_float(row.get("delta_qty")),
+                "variacion_pct": _to_float(variacion) if variacion is not None else None,
+                "status": row.get("status") or "",
+            }
+        )
+    totals = compare.get("totals") or {}
+    return {
+        "target_start": str(compare.get("target_start") or ""),
+        "target_end": str(compare.get("target_end") or ""),
+        "sucursal_id": compare.get("sucursal_id"),
+        "sucursal_nombre": compare.get("sucursal_nombre") or "",
+        "rows": rows,
+        "totals": {
+            "forecast_total": _to_float(totals.get("forecast_total")),
+            "solicitud_total": _to_float(totals.get("solicitud_total")),
+            "delta_total": _to_float(totals.get("delta_total")),
+            "ok_count": int(totals.get("ok_count") or 0),
+            "sobre_count": int(totals.get("sobre_count") or 0),
+            "bajo_count": int(totals.get("bajo_count") or 0),
+            "sin_base_count": int(totals.get("sin_base_count") or 0),
+        },
+    }
+
 
 class MRPExplodeView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1078,4 +1143,294 @@ class PlanDesdePronosticoCreateView(APIView):
                 "renglones_omitidos_cantidad_cero": skipped,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class ForecastEstadisticoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.view_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para consultar pronóstico estadístico."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ForecastEstadisticoRequestSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        periodo = _normalize_periodo_mes(data.get("periodo"))
+        fecha_base = data.get("fecha_base") or timezone.localdate()
+        alcance = data.get("alcance") or "mes"
+        incluir_preparaciones = bool(data.get("incluir_preparaciones"))
+        safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
+        top = int(data.get("top") or 120)
+
+        sucursal = None
+        sucursal_id = data.get("sucursal_id")
+        if sucursal_id is not None:
+            sucursal = Sucursal.objects.filter(pk=sucursal_id, activa=True).first()
+            if sucursal is None:
+                return Response(
+                    {"detail": "Sucursal no encontrada o inactiva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        result = _build_forecast_from_history(
+            alcance=alcance,
+            periodo=periodo,
+            fecha_base=fecha_base,
+            sucursal=sucursal,
+            incluir_preparaciones=incluir_preparaciones,
+            safety_pct=safety_pct,
+        )
+        payload = _forecast_session_payload(result, top_rows=top)
+
+        compare_payload = None
+        if bool(data.get("include_solicitud_compare", True)):
+            full_payload = _forecast_session_payload(result, top_rows=max(len(result.get("rows") or []), 1))
+            compare_payload = _serialize_forecast_compare(
+                _forecast_vs_solicitud_preview(full_payload),
+                top=top,
+            )
+
+        return Response(
+            {
+                "scope": {
+                    "alcance": payload["alcance"],
+                    "periodo": payload["periodo"],
+                    "target_start": payload["target_start"],
+                    "target_end": payload["target_end"],
+                    "sucursal_nombre": payload["sucursal_nombre"],
+                    "sucursal_id": payload.get("sucursal_id"),
+                },
+                "totals": payload["totals"],
+                "rows": payload["rows"],
+                "compare_solicitud": compare_payload,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SolicitudVentaUpsertView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.change_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para capturar solicitudes de ventas."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = SolicitudVentaUpsertSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        receta = get_object_or_404(Receta, pk=data["receta_id"])
+        sucursal = None
+        if data.get("sucursal_id") is not None:
+            sucursal = Sucursal.objects.filter(pk=data["sucursal_id"], activa=True).first()
+            if sucursal is None:
+                return Response(
+                    {"detail": "Sucursal no encontrada o inactiva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        alcance = _ui_to_model_alcance(data.get("alcance"))
+        periodo_default = _normalize_periodo_mes(data.get("periodo"))
+        fecha_base_default = data.get("fecha_base") or timezone.localdate()
+        periodo, fecha_inicio, fecha_fin = _resolve_solicitud_window(
+            alcance=alcance,
+            periodo_raw=data.get("periodo"),
+            fecha_base_raw=data.get("fecha_base"),
+            fecha_inicio_raw=data.get("fecha_inicio"),
+            fecha_fin_raw=data.get("fecha_fin"),
+            periodo_default=periodo_default,
+            fecha_base_default=fecha_base_default,
+        )
+        cantidad = _to_decimal(data.get("cantidad"))
+        fuente = (data.get("fuente") or "API_SOL_VENTAS").strip()[:40] or "API_SOL_VENTAS"
+
+        with transaction.atomic():
+            record, created = SolicitudVenta.objects.get_or_create(
+                receta=receta,
+                sucursal=sucursal,
+                alcance=alcance,
+                fecha_inicio=fecha_inicio,
+                fecha_fin=fecha_fin,
+                defaults={
+                    "periodo": periodo,
+                    "cantidad": cantidad,
+                    "fuente": fuente,
+                },
+            )
+            if not created:
+                record.periodo = periodo
+                record.cantidad = cantidad
+                record.fuente = fuente
+                record.save(update_fields=["periodo", "cantidad", "fuente", "actualizado_en"])
+
+        return Response(
+            {
+                "created": created,
+                "id": record.id,
+                "receta_id": record.receta_id,
+                "receta": record.receta.nombre,
+                "sucursal_id": record.sucursal_id,
+                "sucursal": record.sucursal.nombre if record.sucursal_id else "",
+                "alcance": record.alcance,
+                "periodo": record.periodo,
+                "fecha_inicio": str(record.fecha_inicio),
+                "fecha_fin": str(record.fecha_fin),
+                "cantidad": str(record.cantidad),
+                "fuente": record.fuente,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class SolicitudVentaAplicarForecastView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.change_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para ajustar solicitudes de ventas."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = SolicitudVentaAplicarForecastSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        sucursal = Sucursal.objects.filter(pk=data["sucursal_id"], activa=True).first()
+        if sucursal is None:
+            return Response(
+                {"detail": "Sucursal no encontrada o inactiva."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        alcance = data.get("alcance") or "mes"
+        periodo = _normalize_periodo_mes(data.get("periodo"))
+        fecha_base = data.get("fecha_base") or timezone.localdate()
+        incluir_preparaciones = bool(data.get("incluir_preparaciones"))
+        safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
+        top = int(data.get("top") or 120)
+
+        result = _build_forecast_from_history(
+            alcance=alcance,
+            periodo=periodo,
+            fecha_base=fecha_base,
+            sucursal=sucursal,
+            incluir_preparaciones=incluir_preparaciones,
+            safety_pct=safety_pct,
+        )
+        if not result.get("rows"):
+            return Response(
+                {"detail": "No hay historial suficiente para generar forecast en ese alcance/filtro."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        full_payload = _forecast_session_payload(result, top_rows=max(len(result.get("rows") or []), 1))
+        compare_raw = _forecast_vs_solicitud_preview(full_payload)
+        if not compare_raw or not compare_raw.get("rows"):
+            return Response(
+                {"detail": "No hay filas de comparación forecast vs solicitud para aplicar ajuste."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        modo = data.get("modo") or "desviadas"
+        receta_id = data.get("receta_id")
+        rows = list(compare_raw["rows"])
+        if modo == "sobre":
+            rows = [r for r in rows if r.get("status") == "SOBRE"]
+        elif modo == "bajo":
+            rows = [r for r in rows if r.get("status") == "BAJO"]
+        elif modo == "todas":
+            rows = [r for r in rows if r.get("status") in {"SOBRE", "BAJO", "SIN_BASE", "OK"}]
+        elif modo == "receta":
+            rows = [r for r in rows if int(r.get("receta_id") or 0) == int(receta_id)]
+        else:
+            rows = [r for r in rows if r.get("status") in {"SOBRE", "BAJO"}]
+
+        if not rows:
+            return Response(
+                {"detail": "No hay filas objetivo para el modo seleccionado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        model_alcance = _ui_to_model_alcance(alcance)
+        target_start = result["target_start"]
+        target_end = result["target_end"]
+        result_periodo = result["periodo"]
+        fuente = (data.get("fuente") or "API_FORECAST_ADJUST").strip()[:40] or "API_FORECAST_ADJUST"
+
+        created = 0
+        updated = 0
+        skipped = 0
+        adjusted_rows = []
+        with transaction.atomic():
+            for row in rows:
+                receta = Receta.objects.filter(pk=row["receta_id"]).first()
+                if receta is None:
+                    skipped += 1
+                    continue
+                nueva_cantidad = _to_decimal(row.get("forecast_qty"))
+                if nueva_cantidad < 0:
+                    skipped += 1
+                    continue
+                record, was_created = SolicitudVenta.objects.get_or_create(
+                    receta=receta,
+                    sucursal=sucursal,
+                    alcance=model_alcance,
+                    fecha_inicio=target_start,
+                    fecha_fin=target_end,
+                    defaults={
+                        "periodo": result_periodo,
+                        "cantidad": nueva_cantidad,
+                        "fuente": fuente,
+                    },
+                )
+                old_qty = _to_decimal(record.cantidad if not was_created else 0)
+                if was_created:
+                    created += 1
+                else:
+                    record.periodo = result_periodo
+                    record.cantidad = nueva_cantidad
+                    record.fuente = fuente
+                    record.save(update_fields=["periodo", "cantidad", "fuente", "actualizado_en"])
+                    updated += 1
+
+                adjusted_rows.append(
+                    {
+                        "receta_id": receta.id,
+                        "receta": receta.nombre,
+                        "anterior": _to_float(old_qty),
+                        "nueva": _to_float(nueva_cantidad),
+                        "status_before": row.get("status") or "",
+                    }
+                )
+
+        compare_payload = _serialize_forecast_compare(compare_raw, top=top)
+        return Response(
+            {
+                "scope": {
+                    "alcance": alcance,
+                    "periodo": result_periodo,
+                    "target_start": str(target_start),
+                    "target_end": str(target_end),
+                    "sucursal_id": sucursal.id,
+                    "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}",
+                    "modo": modo,
+                },
+                "updated": {
+                    "created": created,
+                    "updated": updated,
+                    "skipped": skipped,
+                },
+                "adjusted_rows": adjusted_rows[:top],
+                "compare_solicitud": compare_payload,
+            },
+            status=status.HTTP_200_OK,
         )

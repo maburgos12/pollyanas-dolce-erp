@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -7,10 +7,19 @@ from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
 
+from core.models import Sucursal
 from compras.models import OrdenCompra, PresupuestoCompraPeriodo, SolicitudCompra
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
-from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PronosticoVenta, Receta
+from recetas.models import (
+    LineaReceta,
+    PlanProduccion,
+    PlanProduccionItem,
+    PronosticoVenta,
+    Receta,
+    SolicitudVenta,
+    VentaHistorica,
+)
 from recetas.utils.costeo_versionado import asegurar_version_costeo
 
 
@@ -460,3 +469,129 @@ class RecetasCosteoApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 403)
+
+    def test_endpoint_ventas_pronostico_estadistico(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        for week in range(1, 7):
+            week_start = date(2026, 3, 20) - timedelta(days=(7 * week))
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=week_start,
+                cantidad=Decimal("10"),
+                fuente="API_TEST",
+            )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_SEMANA,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 16),
+            fecha_fin=date(2026, 3, 22),
+            cantidad=Decimal("8"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_pronostico_estadistico")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "semana",
+                "fecha_base": "2026-03-20",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "include_solicitud_compare": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["alcance"], "semana")
+        self.assertEqual(payload["scope"]["sucursal_id"], sucursal.id)
+        self.assertGreaterEqual(payload["totals"]["recetas_count"], 1)
+        self.assertIn("compare_solicitud", payload)
+        self.assertGreaterEqual(len(payload["compare_solicitud"]["rows"]), 1)
+
+    def test_endpoint_ventas_solicitud_upsert(self):
+        sucursal = Sucursal.objects.create(codigo="NORTE", nombre="Sucursal Norte", activa=True)
+        url = reverse("api_ventas_solicitud")
+        resp = self.client.post(
+            url,
+            {
+                "receta_id": self.receta.id,
+                "sucursal_id": sucursal.id,
+                "alcance": "mes",
+                "periodo": "2026-04",
+                "cantidad": "40",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertTrue(payload["created"])
+        self.assertEqual(Decimal(payload["cantidad"]), Decimal("40"))
+
+        resp = self.client.post(
+            url,
+            {
+                "receta_id": self.receta.id,
+                "sucursal_id": sucursal.id,
+                "alcance": "mes",
+                "periodo": "2026-04",
+                "cantidad": "52",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertFalse(payload["created"])
+        self.assertEqual(Decimal(payload["cantidad"]), Decimal("52"))
+
+    def test_endpoint_ventas_solicitud_aplicar_forecast(self):
+        sucursal = Sucursal.objects.create(codigo="SUR", nombre="Sucursal Sur", activa=True)
+        for month_idx, qty in [(10, "30"), (11, "36"), (12, "40"), (1, "44"), (2, "48")]:
+            year = 2025 if month_idx >= 10 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("100"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_solicitud_aplicar_forecast")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "mes",
+                "periodo": "2026-03",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "modo": "receta",
+                "receta_id": self.receta.id,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["updated"]["created"], 0)
+        self.assertGreaterEqual(payload["updated"]["updated"], 1)
+        self.assertGreaterEqual(len(payload["adjusted_rows"]), 1)
+        updated = SolicitudVenta.objects.get(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+        )
+        self.assertNotEqual(updated.cantidad, Decimal("100"))
