@@ -1857,6 +1857,39 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["totales"]["by_alcance"][SolicitudVenta.ALCANCE_MES], 1)
         self.assertEqual(len(payload["items"]), 1)
 
+    def test_endpoint_ventas_pronostico_insights(self):
+        sucursal = Sucursal.objects.create(codigo="INS", nombre="Sucursal Insights", activa=True)
+        for fecha, cantidad in [
+            (date(2026, 1, 5), Decimal("10")),   # Lun
+            (date(2026, 1, 6), Decimal("5")),    # Mar
+            (date(2026, 2, 2), Decimal("12")),   # Lun
+            (date(2026, 2, 3), Decimal("6")),    # Mar
+            (date(2026, 2, 9), Decimal("11")),   # Lun
+        ]:
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=fecha,
+                cantidad=cantidad,
+                fuente="API_TEST",
+            )
+
+        resp = self.client.get(
+            reverse("api_ventas_pronostico_insights"),
+            {"months": 6, "sucursal_id": sucursal.id, "fecha_hasta": "2026-02-28", "incluir_preparaciones": "1"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["months"], 6)
+        self.assertEqual(payload["totales"]["recetas"], 1)
+        self.assertGreater(payload["totales"]["cantidad_total"], 0)
+        self.assertGreaterEqual(len(payload["seasonality"]["by_month"]), 1)
+        self.assertEqual(len(payload["seasonality"]["by_weekday"]), 7)
+        self.assertGreaterEqual(len(payload["top_recetas"]), 1)
+
+        weekday = {row["label"]: row["avg_qty"] for row in payload["seasonality"]["by_weekday"]}
+        self.assertGreater(weekday["Lun"], weekday["Mar"])
+
     def test_endpoint_ventas_listados_requires_perm(self):
         user_model = get_user_model()
         user = user_model.objects.create_user(
@@ -1866,7 +1899,12 @@ class RecetasCosteoApiTests(TestCase):
         )
         self.client.force_login(user)
 
-        for name in ("api_ventas_historial", "api_ventas_pronostico", "api_ventas_solicitudes"):
+        for name in (
+            "api_ventas_historial",
+            "api_ventas_pronostico",
+            "api_ventas_solicitudes",
+            "api_ventas_pronostico_insights",
+        ):
             resp = self.client.get(reverse(name))
             self.assertEqual(resp.status_code, 403)
 

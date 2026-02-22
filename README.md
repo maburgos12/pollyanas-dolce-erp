@@ -16,6 +16,7 @@ Sprint 1 entrega:
 - API: POST /api/mrp/calcular-requerimientos/ (por plan, por periodo o por lista manual)
 - API: POST /api/mrp/generar-plan-pronostico/ (crea plan de producción desde pronóstico)
 - API: POST /api/ventas/pronostico-backtest/ (mide precisión histórica: MAPE/Bias por ventana)
+- API: GET /api/ventas/pronostico-insights/ (perfil estacional por mes/día, top recetas y participación)
 - API: GET /api/ventas/historial/ (histórico de ventas filtrable por sucursal/receta/fecha)
 - API: GET /api/ventas/pronostico/ (pronósticos filtrables por periodo/rango/receta)
 - API: GET /api/ventas/solicitud/list/ (solicitudes de ventas filtrables por alcance/sucursal/periodo)

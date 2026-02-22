@@ -4112,6 +4112,222 @@ class ForecastBacktestView(APIView):
         )
 
 
+class ForecastInsightsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.has_perm("recetas.view_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para consultar insights de pronóstico."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        months = _parse_bounded_int(request.GET.get("months", 12), default=12, min_value=1, max_value=36)
+        top = _parse_bounded_int(request.GET.get("top", 20), default=20, min_value=1, max_value=100)
+        incluir_preparaciones = _parse_bool(request.GET.get("incluir_preparaciones"), default=False)
+
+        fecha_hasta_raw = (request.GET.get("fecha_hasta") or "").strip()
+        fecha_hasta = _parse_iso_date(fecha_hasta_raw)
+        if fecha_hasta_raw and fecha_hasta is None:
+            return Response(
+                {"detail": "fecha_hasta inválida. Usa formato YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if fecha_hasta is None:
+            fecha_hasta = timezone.localdate()
+        fecha_desde = fecha_hasta - timedelta(days=(months * 31) - 1)
+
+        sucursal = None
+        sucursal_id_raw = (request.GET.get("sucursal_id") or "").strip()
+        if sucursal_id_raw:
+            if not sucursal_id_raw.isdigit():
+                return Response(
+                    {"detail": "sucursal_id debe ser numérico."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            sucursal = Sucursal.objects.filter(pk=int(sucursal_id_raw), activa=True).first()
+            if sucursal is None:
+                return Response(
+                    {"detail": "Sucursal no encontrada o inactiva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        receta = None
+        receta_id_raw = (request.GET.get("receta_id") or "").strip()
+        if receta_id_raw:
+            if not receta_id_raw.isdigit():
+                return Response(
+                    {"detail": "receta_id debe ser numérico."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            receta = Receta.objects.filter(pk=int(receta_id_raw)).first()
+            if receta is None:
+                return Response(
+                    {"detail": "Receta no encontrada."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        qs = VentaHistorica.objects.filter(fecha__gte=fecha_desde, fecha__lte=fecha_hasta)
+        if sucursal:
+            qs = qs.filter(sucursal=sucursal)
+        if receta:
+            qs = qs.filter(receta=receta)
+        if not incluir_preparaciones:
+            qs = qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+
+        rows = list(
+            qs.values("fecha", "receta_id", "receta__nombre")
+            .annotate(total=Sum("cantidad"))
+            .order_by("fecha", "receta_id")
+        )
+        if not rows:
+            return Response(
+                {
+                    "scope": {
+                        "months": months,
+                        "fecha_desde": str(fecha_desde),
+                        "fecha_hasta": str(fecha_hasta),
+                        "sucursal_id": sucursal.id if sucursal else None,
+                        "sucursal": sucursal.nombre if sucursal else "Todas",
+                        "receta_id": receta.id if receta else None,
+                        "receta": receta.nombre if receta else "Todas",
+                    },
+                    "totales": {
+                        "filas": 0,
+                        "dias_con_venta": 0,
+                        "recetas": 0,
+                        "cantidad_total": 0.0,
+                        "promedio_diario": 0.0,
+                    },
+                    "seasonality": {"by_month": [], "by_weekday": []},
+                    "top_recetas": [],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        date_totals: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
+        recipe_totals: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+        recipe_days: dict[int, set[date]] = defaultdict(set)
+        recipe_names: dict[int, str] = {}
+
+        for row in rows:
+            d = row["fecha"]
+            receta_id = int(row["receta_id"])
+            qty = _to_decimal(row["total"])
+            date_totals[d] += qty
+            recipe_totals[receta_id] += qty
+            recipe_days[receta_id].add(d)
+            recipe_names[receta_id] = row["receta__nombre"]
+
+        daily_values = list(date_totals.values())
+        total_qty = sum(daily_values, Decimal("0"))
+        global_avg = total_qty / Decimal(str(len(daily_values) or 1))
+
+        month_map: dict[int, list[Decimal]] = defaultdict(list)
+        weekday_map: dict[int, list[Decimal]] = defaultdict(list)
+        for d, qty in date_totals.items():
+            month_map[d.month].append(qty)
+            weekday_map[d.weekday()].append(qty)
+
+        month_labels = {
+            1: "Ene",
+            2: "Feb",
+            3: "Mar",
+            4: "Abr",
+            5: "May",
+            6: "Jun",
+            7: "Jul",
+            8: "Ago",
+            9: "Sep",
+            10: "Oct",
+            11: "Nov",
+            12: "Dic",
+        }
+        weekday_labels = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"]
+
+        month_rows = []
+        for month in sorted(month_map.keys()):
+            samples = month_map[month]
+            avg_qty = sum(samples, Decimal("0")) / Decimal(str(len(samples) or 1))
+            index_pct = Decimal("100")
+            if global_avg > 0:
+                index_pct = (avg_qty / global_avg) * Decimal("100")
+            month_rows.append(
+                {
+                    "month": month,
+                    "label": month_labels.get(month, str(month)),
+                    "samples": len(samples),
+                    "avg_qty": _to_float(avg_qty),
+                    "index_pct": _to_float(index_pct.quantize(Decimal("0.1"))),
+                }
+            )
+
+        weekday_rows = []
+        for wd in range(7):
+            samples = weekday_map.get(wd, [])
+            avg_qty = Decimal("0")
+            index_pct = Decimal("0")
+            if samples:
+                avg_qty = sum(samples, Decimal("0")) / Decimal(str(len(samples)))
+                index_pct = Decimal("100")
+                if global_avg > 0:
+                    index_pct = (avg_qty / global_avg) * Decimal("100")
+            weekday_rows.append(
+                {
+                    "weekday": wd,
+                    "label": weekday_labels[wd],
+                    "samples": len(samples),
+                    "avg_qty": _to_float(avg_qty),
+                    "index_pct": _to_float(index_pct.quantize(Decimal("0.1"))) if samples else 0.0,
+                }
+            )
+
+        top_recetas = []
+        for receta_id, qty_total in sorted(recipe_totals.items(), key=lambda item: item[1], reverse=True)[:top]:
+            days_count = len(recipe_days.get(receta_id, set())) or 1
+            avg_day = qty_total / Decimal(str(days_count))
+            share = Decimal("0")
+            if total_qty > 0:
+                share = (qty_total / total_qty) * Decimal("100")
+            top_recetas.append(
+                {
+                    "receta_id": receta_id,
+                    "receta": recipe_names.get(receta_id) or f"Receta {receta_id}",
+                    "cantidad_total": _to_float(qty_total),
+                    "promedio_dia_activo": _to_float(avg_day.quantize(Decimal("0.001"))),
+                    "dias_con_venta": days_count,
+                    "participacion_pct": _to_float(share.quantize(Decimal("0.1"))),
+                }
+            )
+
+        return Response(
+            {
+                "scope": {
+                    "months": months,
+                    "fecha_desde": str(fecha_desde),
+                    "fecha_hasta": str(fecha_hasta),
+                    "sucursal_id": sucursal.id if sucursal else None,
+                    "sucursal": sucursal.nombre if sucursal else "Todas",
+                    "receta_id": receta.id if receta else None,
+                    "receta": receta.nombre if receta else "Todas",
+                },
+                "totales": {
+                    "filas": len(rows),
+                    "dias_con_venta": len(date_totals),
+                    "recetas": len(recipe_totals),
+                    "cantidad_total": _to_float(total_qty),
+                    "promedio_diario": _to_float(global_avg.quantize(Decimal("0.001"))),
+                },
+                "seasonality": {
+                    "by_month": month_rows,
+                    "by_weekday": weekday_rows,
+                },
+                "top_recetas": top_recetas,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class VentaHistoricaListView(APIView):
     permission_classes = [IsAuthenticated]
 
