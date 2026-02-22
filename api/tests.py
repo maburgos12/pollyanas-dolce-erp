@@ -1890,6 +1890,62 @@ class RecetasCosteoApiTests(TestCase):
         weekday = {row["label"]: row["avg_qty"] for row in payload["seasonality"]["by_weekday"]}
         self.assertGreater(weekday["Lun"], weekday["Mar"])
 
+    def test_endpoint_ventas_pipeline_resumen(self):
+        sucursal = Sucursal.objects.create(codigo="PIPE", nombre="Sucursal Pipeline", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 3, 5),
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 3, 12),
+            cantidad=Decimal("15"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("50"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("40"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_SEMANA,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 3),
+            fecha_fin=date(2026, 3, 9),
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_pipeline_resumen"),
+            {"periodo": "2026-03", "sucursal_id": sucursal.id, "incluir_preparaciones": "1"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["periodo"], "2026-03")
+        self.assertEqual(payload["totales"]["historial_qty"], 35.0)
+        self.assertEqual(payload["totales"]["pronostico_qty"], 50.0)
+        self.assertEqual(payload["totales"]["solicitud_qty"], 50.0)
+        self.assertEqual(payload["solicitud_by_alcance"]["MES"], 40.0)
+        self.assertEqual(payload["solicitud_by_alcance"]["SEMANA"], 10.0)
+
     def test_endpoint_ventas_listados_requires_perm(self):
         user_model = get_user_model()
         user = user_model.objects.create_user(
@@ -1904,6 +1960,7 @@ class RecetasCosteoApiTests(TestCase):
             "api_ventas_pronostico",
             "api_ventas_solicitudes",
             "api_ventas_pronostico_insights",
+            "api_ventas_pipeline_resumen",
         ):
             resp = self.client.get(reverse(name))
             self.assertEqual(resp.status_code, 403)

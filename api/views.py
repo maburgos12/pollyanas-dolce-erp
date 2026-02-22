@@ -4586,6 +4586,115 @@ class PronosticoVentaListView(APIView):
         )
 
 
+class VentasPipelineResumenView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.has_perm("recetas.view_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para consultar resumen del pipeline de ventas."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        periodo = (request.GET.get("periodo") or "").strip()
+        if periodo:
+            parsed_period = _parse_period(periodo)
+            if not parsed_period:
+                return Response(
+                    {"detail": "periodo inválido. Usa formato YYYY-MM."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            periodo = f"{parsed_period[0]:04d}-{parsed_period[1]:02d}"
+        else:
+            today = timezone.localdate()
+            periodo = f"{today.year:04d}-{today.month:02d}"
+            parsed_period = (today.year, today.month)
+        year, month = parsed_period
+
+        incluir_preparaciones = _parse_bool(request.GET.get("incluir_preparaciones"), default=False)
+        sucursal = None
+        sucursal_id_raw = (request.GET.get("sucursal_id") or "").strip()
+        if sucursal_id_raw:
+            if not sucursal_id_raw.isdigit():
+                return Response(
+                    {"detail": "sucursal_id debe ser numérico."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            sucursal = Sucursal.objects.filter(pk=int(sucursal_id_raw), activa=True).first()
+            if sucursal is None:
+                return Response(
+                    {"detail": "Sucursal no encontrada o inactiva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        historial_qs = VentaHistorica.objects.filter(fecha__year=year, fecha__month=month)
+        solicitudes_qs = SolicitudVenta.objects.filter(periodo=periodo)
+        pronostico_qs = PronosticoVenta.objects.filter(periodo=periodo)
+
+        if sucursal:
+            historial_qs = historial_qs.filter(sucursal=sucursal)
+            solicitudes_qs = solicitudes_qs.filter(sucursal=sucursal)
+
+        if not incluir_preparaciones:
+            historial_qs = historial_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+            solicitudes_qs = solicitudes_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+            pronostico_qs = pronostico_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+
+        historial_total = _to_decimal(historial_qs.aggregate(total=Sum("cantidad"))["total"])
+        solicitud_total = _to_decimal(solicitudes_qs.aggregate(total=Sum("cantidad"))["total"])
+        pronostico_total = _to_decimal(pronostico_qs.aggregate(total=Sum("cantidad"))["total"])
+
+        by_alcance = {k: Decimal("0") for k in [SolicitudVenta.ALCANCE_MES, SolicitudVenta.ALCANCE_SEMANA, SolicitudVenta.ALCANCE_FIN_SEMANA]}
+        for row in solicitudes_qs.values("alcance").annotate(total=Sum("cantidad")):
+            by_alcance[row["alcance"]] = _to_decimal(row["total"])
+
+        cobertura_solicitud_pct = None
+        if pronostico_total > 0:
+            cobertura_solicitud_pct = ((solicitud_total / pronostico_total) * Decimal("100")).quantize(Decimal("0.1"))
+
+        cumplimiento_historial_pct = None
+        if solicitud_total > 0:
+            cumplimiento_historial_pct = ((historial_total / solicitud_total) * Decimal("100")).quantize(Decimal("0.1"))
+
+        latest_historial = historial_qs.order_by("-actualizado_en").values_list("actualizado_en", flat=True).first()
+        latest_pronostico = pronostico_qs.order_by("-actualizado_en").values_list("actualizado_en", flat=True).first()
+        latest_solicitud = solicitudes_qs.order_by("-actualizado_en").values_list("actualizado_en", flat=True).first()
+
+        return Response(
+            {
+                "scope": {
+                    "periodo": periodo,
+                    "sucursal_id": sucursal.id if sucursal else None,
+                    "sucursal": sucursal.nombre if sucursal else "Todas",
+                    "incluir_preparaciones": incluir_preparaciones,
+                },
+                "totales": {
+                    "historial_qty": _to_float(historial_total),
+                    "pronostico_qty": _to_float(pronostico_total),
+                    "solicitud_qty": _to_float(solicitud_total),
+                    "delta_solicitud_vs_pronostico": _to_float((solicitud_total - pronostico_total).quantize(Decimal("0.001"))),
+                    "delta_historial_vs_solicitud": _to_float((historial_total - solicitud_total).quantize(Decimal("0.001"))),
+                    "cobertura_solicitud_pct": _to_float(cobertura_solicitud_pct) if cobertura_solicitud_pct is not None else None,
+                    "cumplimiento_historial_pct": _to_float(cumplimiento_historial_pct) if cumplimiento_historial_pct is not None else None,
+                    "historial_recetas": historial_qs.values("receta_id").distinct().count(),
+                    "pronostico_recetas": pronostico_qs.values("receta_id").distinct().count(),
+                    "solicitud_recetas": solicitudes_qs.values("receta_id").distinct().count(),
+                },
+                "solicitud_by_alcance": {
+                    "MES": _to_float(by_alcance[SolicitudVenta.ALCANCE_MES]),
+                    "SEMANA": _to_float(by_alcance[SolicitudVenta.ALCANCE_SEMANA]),
+                    "FIN_SEMANA": _to_float(by_alcance[SolicitudVenta.ALCANCE_FIN_SEMANA]),
+                },
+                "latest_updates": {
+                    "historial": latest_historial,
+                    "pronostico": latest_pronostico,
+                    "solicitud": latest_solicitud,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class SolicitudVentaListView(APIView):
     permission_classes = [IsAuthenticated]
 
