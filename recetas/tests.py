@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 import os
 import tempfile
@@ -13,6 +13,7 @@ from django.urls import reverse
 from openpyxl import Workbook, load_workbook
 
 from compras.models import OrdenCompra, SolicitudCompra
+from core.models import Sucursal
 from maestros.models import Insumo, Proveedor, UnidadMedida
 from recetas.models import (
     CostoDriver,
@@ -22,6 +23,7 @@ from recetas.models import (
     PronosticoVenta,
     Receta,
     RecetaCostoVersion,
+    VentaHistorica,
 )
 from recetas.utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta
 from recetas.utils.importador import ImportadorCosteo
@@ -595,6 +597,105 @@ class PlanGeneradoDesdePronosticoTests(TestCase):
         self.assertEqual(response.status_code, 302)
         plan = PlanProduccion.objects.get(nombre="Plan pronostico con preparaciones")
         self.assertEqual(plan.items.count(), 2)
+
+
+class PronosticoEstadisticoDesdeHistorialTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_hist_forecast",
+            email="admin_hist_forecast@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+        self.sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        self.receta = Receta.objects.create(
+            nombre="Pastel Forecast",
+            codigo_point="P-FC-01",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-forecast-hist-001",
+        )
+
+    def test_import_ventas_historicas_crea_registros(self):
+        csv_data = (
+            "receta,codigo_point,sucursal_codigo,fecha,cantidad,tickets,monto_total\n"
+            "Pastel Forecast,P-FC-01,MATRIZ,2026-01-10,12,8,1200\n"
+            "Pastel Forecast,P-FC-01,MATRIZ,2026-01-11,9,6,900\n"
+        ).encode("utf-8")
+        upload = SimpleUploadedFile("ventas.csv", csv_data, content_type="text/csv")
+        response = self.client.post(
+            reverse("recetas:ventas_historicas_importar"),
+            {"archivo": upload, "modo": "replace", "fuente": "TEST_VENTAS"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(VentaHistorica.objects.count(), 2)
+        row = VentaHistorica.objects.order_by("fecha").first()
+        self.assertEqual(row.sucursal_id, self.sucursal.id)
+        self.assertEqual(row.receta_id, self.receta.id)
+        self.assertEqual(row.fuente, "TEST_VENTAS")
+
+    def test_pronostico_estadistico_crea_plan(self):
+        base = date(2026, 3, 12)  # jueves
+        # 8 semanas de historial con patrón estable por día.
+        for w in range(1, 9):
+            week_start = base - timedelta(days=base.weekday()) - timedelta(days=(7 * w))
+            for d in range(7):
+                VentaHistorica.objects.create(
+                    receta=self.receta,
+                    sucursal=self.sucursal,
+                    fecha=week_start + timedelta(days=d),
+                    cantidad=Decimal("5"),
+                    fuente="TEST_SEMANA",
+                )
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "semana",
+                "fecha_base": "2026-03-12",
+                "periodo": "2026-03",
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "crear_plan",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        plan = PlanProduccion.objects.order_by("-id").first()
+        self.assertIsNotNone(plan)
+        self.assertIn("pronóstico estadístico", plan.notas.lower())
+        self.assertEqual(plan.items.count(), 1)
+        self.assertGreater(plan.items.first().cantidad, Decimal("0"))
+
+        preview = self.client.session.get("pronostico_estadistico_preview")
+        self.assertIsNotNone(preview)
+        self.assertEqual(preview["sucursal_nombre"], "MATRIZ - Matriz")
+        self.assertGreaterEqual(preview["totals"]["recetas_count"], 1)
+
+    def test_pronostico_estadistico_aplica_pronostico_mensual(self):
+        for month_idx, qty in [(10, "40"), (11, "50"), (12, "60"), (1, "65"), (2, "70")]:
+            year = 2025 if month_idx >= 10 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=self.sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="TEST_MENSUAL",
+            )
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "mes",
+                "periodo": "2026-03",
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "apply_pronostico",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        pron = PronosticoVenta.objects.filter(receta=self.receta, periodo="2026-03").first()
+        self.assertIsNotNone(pron)
+        self.assertGreater(pron.cantidad, Decimal("0"))
 
 
 class RecetaPhase2ViewsTests(TestCase):

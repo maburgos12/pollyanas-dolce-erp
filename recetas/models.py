@@ -302,6 +302,27 @@ class RecetaPresentacion(models.Model):
         return f"{self.receta.nombre} - {self.nombre}"
 
 
+class VentaHistorica(models.Model):
+    receta = models.ForeignKey(Receta, related_name="ventas_historicas", on_delete=models.CASCADE)
+    sucursal = models.ForeignKey("core.Sucursal", null=True, blank=True, on_delete=models.SET_NULL)
+    fecha = models.DateField(db_index=True)
+    cantidad = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    tickets = models.PositiveIntegerField(default=0)
+    monto_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    fuente = models.CharField(max_length=40, blank=True, default="IMPORT_VENTAS")
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Venta histórica"
+        verbose_name_plural = "Ventas históricas"
+        ordering = ["-fecha", "receta__nombre"]
+
+    def __str__(self) -> str:
+        suc = self.sucursal.codigo if self.sucursal_id else "GLOBAL"
+        return f"{self.fecha} · {suc} · {self.receta.nombre} · {self.cantidad}"
+
+
 class PronosticoVenta(models.Model):
     receta = models.ForeignKey(Receta, related_name="pronosticos", on_delete=models.CASCADE)
     periodo = models.CharField(max_length=7, db_index=True)  # YYYY-MM

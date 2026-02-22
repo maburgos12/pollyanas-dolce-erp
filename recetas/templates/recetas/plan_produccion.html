@@ -70,6 +70,158 @@
   </form>
   <p class="muted mb-0">Columnas sugeridas: <code>receta</code>, <code>codigo_point</code>, <code>periodo</code> (YYYY-MM), <code>cantidad</code>.</p>
   <hr>
+  <div class="card-header" style="margin-top:8px;">Historial de Ventas (Base Estadística)</div>
+  <p class="muted mb-2">
+    Registros: <strong>{{ ventas_historicas_count }}</strong> ·
+    Cantidad acumulada: <strong>{{ ventas_historicas_total|floatformat:2 }}</strong> ·
+    Última fecha: <strong>{% if ventas_hist_fecha_max %}{{ ventas_hist_fecha_max }}{% else %}-{% endif %}</strong>
+  </p>
+  {% if ventas_historicas_unavailable %}
+  <div class="alert alert-info" style="margin-bottom: 12px;">
+    La tabla de historial de ventas no está disponible en este entorno; ejecuta migraciones para habilitarla.
+  </div>
+  {% endif %}
+  <div class="toolbar mb-2">
+    <a class="btn btn-secondary" href="{% url 'recetas:ventas_historicas_plantilla' %}?format=xlsx">Plantilla ventas XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:ventas_historicas_plantilla' %}?format=csv">Plantilla ventas CSV</a>
+  </div>
+  <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:ventas_historicas_importar' %}" enctype="multipart/form-data">
+    {% csrf_token %}
+    {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+    <div class="form-group">
+      <label class="form-label">Archivo ventas</label>
+      <input class="form-control" type="file" name="archivo" accept=".xlsx,.xlsm,.csv" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Sucursal default (opcional)</label>
+      <select class="form-select" name="sucursal_default_id">
+        <option value="">Sin default</option>
+        {% for s in sucursales %}
+        <option value="{{ s.id }}">{{ s.codigo }} - {{ s.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Modo</label>
+      <select class="form-select" name="modo">
+        <option value="replace" selected>Reemplazar receta+sucursal+fecha</option>
+        <option value="accumulate">Acumular</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fuente</label>
+      <input class="form-control" name="fuente" value="UI_VENTAS" maxlength="40">
+    </div>
+    <div class="form-group" style="align-self:end;">
+      <button class="btn btn-primary" type="submit">Importar historial</button>
+    </div>
+  </form>
+  <p class="muted mb-0">Columnas sugeridas: <code>receta</code>, <code>codigo_point</code>, <code>sucursal_codigo</code>, <code>fecha</code>, <code>cantidad</code>.</p>
+  <hr>
+  <div class="card-header" style="margin-top:8px;">Pronóstico Estadístico desde Historial</div>
+  <p class="muted mb-2">
+    Calcula temporalidad por sucursal y recomienda si Ventas debe subir/bajar solicitud.
+    Alcances soportados: mes, semana o fin de semana.
+  </p>
+  <form class="form-grid-auto" method="post" action="{% url 'recetas:pronostico_estadistico_desde_historial' %}">
+    {% csrf_token %}
+    {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+    <div class="form-group">
+      <label class="form-label">Alcance</label>
+      <select class="form-select" name="alcance">
+        <option value="mes" {% if alcance_estadistico == "mes" %}selected{% endif %}>Mes</option>
+        <option value="semana" {% if alcance_estadistico == "semana" %}selected{% endif %}>Semana (lun-dom)</option>
+        <option value="fin_semana" {% if alcance_estadistico == "fin_semana" %}selected{% endif %}>Fin de semana</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Periodo mensual</label>
+      <input class="form-control" type="month" name="periodo" value="{{ periodo_pronostico_default }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fecha base (semana / fin semana)</label>
+      <input class="form-control" type="date" name="fecha_base" value="{{ fecha_base_estadistica }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Sucursal</label>
+      <select class="form-select" name="sucursal_id">
+        <option value="">Todas</option>
+        {% for s in sucursales %}
+        <option value="{{ s.id }}">{{ s.codigo }} - {{ s.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Ajuste seguridad %</label>
+      <input class="form-control" type="number" step="0.1" name="safety_pct" value="0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Alcance recetas</label>
+      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="incluir_preparaciones" value="1">
+        <span>Incluir preparaciones internas</span>
+      </label>
+    </div>
+    <div class="form-group full">
+      <div class="toolbar">
+        <button class="btn btn-secondary" type="submit" name="run_mode" value="preview">Previsualizar</button>
+        <button class="btn btn-primary" type="submit" name="run_mode" value="apply_pronostico">Aplicar a pronóstico mensual</button>
+        <button class="btn btn-primary" type="submit" name="run_mode" value="crear_plan">Crear plan estadístico</button>
+        <button class="btn btn-success" type="submit" name="run_mode" value="aplicar_y_plan">Aplicar + Crear plan</button>
+      </div>
+    </div>
+  </form>
+  {% if forecast_preview %}
+  <div class="card" style="margin-top:12px;">
+    <div class="card-header">Preview estadístico · {{ forecast_preview.alcance|upper }} · {{ forecast_preview.sucursal_nombre }}</div>
+    <p class="muted mb-2">
+      Rango: {{ forecast_preview.target_start }} a {{ forecast_preview.target_end }} ·
+      Recetas: {{ forecast_preview.totals.recetas_count }} ·
+      Forecast total: {{ forecast_preview.totals.forecast_total|floatformat:2 }} ·
+      Pronóstico actual: {{ forecast_preview.totals.pronostico_total|floatformat:2 }} ·
+      Delta: {{ forecast_preview.totals.delta_total|floatformat:2 }}
+    </p>
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Receta</th>
+            <th class="text-end">Forecast</th>
+            <th class="text-end">Pronóstico actual</th>
+            <th class="text-end">Delta</th>
+            <th>Recomendación</th>
+            <th class="text-end">Confianza</th>
+            <th class="text-end">Observaciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in forecast_preview.rows %}
+          <tr>
+            <td>{{ row.receta }}</td>
+            <td class="text-end">{{ row.forecast_qty|floatformat:2 }}</td>
+            <td class="text-end">{{ row.pronostico_actual|floatformat:2 }}</td>
+            <td class="text-end">{{ row.delta|floatformat:2 }}</td>
+            <td>
+              {% if row.recomendacion == "SUBIR" %}
+              <span class="badge badge-verde">Subir</span>
+              {% elif row.recomendacion == "BAJAR" %}
+              <span class="badge badge-rojo">Bajar</span>
+              {% else %}
+              <span class="badge badge-amarillo">Mantener</span>
+              {% endif %}
+            </td>
+            <td class="text-end">{{ row.confianza|floatformat:1 }}%</td>
+            <td class="text-end">{{ row.observaciones }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" class="text-muted">Sin filas para el filtro actual.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  <hr>
   <div class="card-header" style="margin-top:8px;">Generar Plan desde Pronóstico</div>
   <form class="form-grid-auto" method="post" action="{% url 'recetas:plan_produccion_generar_desde_pronostico' %}">
     {% csrf_token %}

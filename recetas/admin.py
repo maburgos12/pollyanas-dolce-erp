@@ -14,6 +14,7 @@ from .models import (
     Receta,
     RecetaCodigoPointAlias,
     RecetaCostoVersion,
+    VentaHistorica,
 )
 
 class LineaRecetaInline(admin.TabularInline):
@@ -220,3 +221,11 @@ class PronosticoVentaAdmin(admin.ModelAdmin):
     list_filter = ("periodo", "fuente")
     search_fields = ("receta__nombre", "receta__codigo_point", "periodo")
     autocomplete_fields = ("receta",)
+
+
+@admin.register(VentaHistorica)
+class VentaHistoricaAdmin(admin.ModelAdmin):
+    list_display = ("fecha", "sucursal", "receta", "cantidad", "tickets", "fuente", "actualizado_en")
+    list_filter = ("sucursal", "fuente", "fecha")
+    search_fields = ("receta__nombre", "receta__codigo_point", "sucursal__codigo", "sucursal__nombre")
+    autocomplete_fields = ("receta", "sucursal")

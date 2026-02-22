@@ -1,6 +1,8 @@
 import csv
 from io import BytesIO
-from datetime import date
+from datetime import date, timedelta
+from calendar import monthrange
+from collections import defaultdict
 from decimal import Decimal
 from typing import Dict, Any, List
 from urllib.parse import urlencode
@@ -20,6 +22,7 @@ from openpyxl import Workbook, load_workbook
 from compras.models import OrdenCompra, SolicitudCompra
 from core.access import can_manage_compras
 from core.audit import log_event
+from core.models import Sucursal
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from .models import (
@@ -31,6 +34,7 @@ from .models import (
     PlanProduccion,
     PlanProduccionItem,
     PronosticoVenta,
+    VentaHistorica,
 )
 from .utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
 from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
@@ -1798,6 +1802,360 @@ def _load_pronostico_rows(uploaded) -> list[dict]:
     raise ValueError("Formato no soportado. Usa CSV o XLSX.")
 
 
+def _map_ventas_header(header: str) -> str:
+    key = normalizar_nombre(header).replace("_", " ")
+    if key in {"receta", "producto", "nombre receta", "nombre producto", "nombre"}:
+        return "receta"
+    if key in {"codigo point", "codigo", "sku", "codigo producto"}:
+        return "codigo_point"
+    if key in {"fecha", "dia", "date"}:
+        return "fecha"
+    if key in {"cantidad", "cantidad vendida", "unidades", "qty", "ventas"}:
+        return "cantidad"
+    if key in {"sucursal", "tienda", "store"}:
+        return "sucursal"
+    if key in {"sucursal codigo", "codigo sucursal", "store code"}:
+        return "sucursal_codigo"
+    if key in {"tickets", "ticket count", "num tickets"}:
+        return "tickets"
+    if key in {"monto", "total", "monto total", "importe"}:
+        return "monto_total"
+    return key
+
+
+def _load_ventas_rows(uploaded) -> list[dict]:
+    filename = (uploaded.name or "").lower()
+    rows: list[dict] = []
+    if filename.endswith(".csv"):
+        uploaded.seek(0)
+        content = uploaded.read().decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            parsed = {}
+            for key, value in (row or {}).items():
+                if not key:
+                    continue
+                parsed[_map_ventas_header(str(key))] = value
+            rows.append(parsed)
+        return rows
+
+    if filename.endswith(".xlsx") or filename.endswith(".xlsm"):
+        uploaded.seek(0)
+        wb = load_workbook(uploaded, read_only=True, data_only=True)
+        ws = wb.active
+        values = list(ws.values)
+        if not values:
+            return []
+        headers = [_map_ventas_header(str(h or "")) for h in values[0]]
+        for raw in values[1:]:
+            parsed = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                parsed[header] = raw[idx] if idx < len(raw) else None
+            rows.append(parsed)
+        return rows
+
+    raise ValueError("Formato no soportado. Usa CSV o XLSX.")
+
+
+def _parse_date_safe(value: object) -> date | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    raw = raw.replace("/", "-")
+    try:
+        return date.fromisoformat(raw[:10])
+    except Exception:
+        pass
+    parts = raw.split("-")
+    if len(parts) == 3:
+        try:
+            if len(parts[0]) == 4:
+                y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+            else:
+                d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
+            return date(y, m, d)
+        except Exception:
+            return None
+    return None
+
+
+def _to_int_safe(value: object, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        txt = str(value).strip()
+        if txt == "":
+            return default
+        return int(float(txt))
+    except Exception:
+        return default
+
+
+def _resolve_receta_for_sales(receta_name: str, codigo_point: str) -> Receta | None:
+    receta = None
+    if codigo_point:
+        receta = Receta.objects.filter(codigo_point__iexact=codigo_point).order_by("id").first()
+    if receta is None and receta_name:
+        receta = Receta.objects.filter(nombre_normalizado=normalizar_nombre(receta_name)).order_by("id").first()
+    return receta
+
+
+def _resolve_sucursal_for_sales(sucursal_name: str, sucursal_codigo: str, default_sucursal: Sucursal | None) -> Sucursal | None:
+    sucursal = None
+    if sucursal_codigo:
+        sucursal = Sucursal.objects.filter(codigo__iexact=sucursal_codigo).order_by("id").first()
+    if sucursal is None and sucursal_name:
+        sucursal = Sucursal.objects.filter(nombre__iexact=sucursal_name).order_by("id").first()
+    return sucursal or default_sucursal
+
+
+def _month_start_end(periodo: str) -> tuple[date, date]:
+    y_txt, m_txt = periodo.split("-")
+    y = int(y_txt)
+    m = int(m_txt)
+    start = date(y, m, 1)
+    end = date(y, m, monthrange(y, m)[1])
+    return start, end
+
+
+def _week_start_end(base: date) -> tuple[date, date]:
+    start = base - timedelta(days=base.weekday())
+    end = start + timedelta(days=6)
+    return start, end
+
+
+def _weekend_start_end(base: date) -> tuple[date, date]:
+    wd = base.weekday()
+    if wd == 5:
+        start = base
+    elif wd == 6:
+        start = base - timedelta(days=1)
+    else:
+        start = base + timedelta(days=(5 - wd))
+    return start, start + timedelta(days=1)
+
+
+def _weighted_avg_decimal(values: list[Decimal]) -> Decimal:
+    clean = [Decimal(str(v)) for v in values if Decimal(str(v)) >= 0]
+    if not clean:
+        return Decimal("0")
+    total_weight = Decimal("0")
+    total = Decimal("0")
+    for idx, value in enumerate(clean, start=1):
+        weight = Decimal(str(idx))
+        total += value * weight
+        total_weight += weight
+    if total_weight <= 0:
+        return Decimal("0")
+    return total / total_weight
+
+
+def _forecast_month_qty(day_rows: list[tuple[date, Decimal]], target_start: date) -> tuple[Decimal, int, Decimal]:
+    if not day_rows:
+        return Decimal("0"), 0, Decimal("0")
+
+    monthly_totals: dict[tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0"))
+    for d, qty in day_rows:
+        monthly_totals[(d.year, d.month)] += qty
+    ordered_keys = sorted(monthly_totals.keys())
+    ordered_values = [monthly_totals[k] for k in ordered_keys]
+
+    recent_values = ordered_values[-3:] if len(ordered_values) >= 3 else ordered_values
+    recent_avg = sum(recent_values, Decimal("0")) / Decimal(str(len(recent_values) or 1))
+
+    seasonal_values = [v for (y, m), v in monthly_totals.items() if m == target_start.month and (y, m) != (target_start.year, target_start.month)]
+    seasonal_avg = (
+        sum(seasonal_values, Decimal("0")) / Decimal(str(len(seasonal_values)))
+        if seasonal_values
+        else recent_avg
+    )
+
+    trend_values = ordered_values[-6:] if len(ordered_values) >= 6 else ordered_values
+    trend_next = recent_avg
+    if len(trend_values) >= 2:
+        slope = (trend_values[-1] - trend_values[0]) / Decimal(str(len(trend_values) - 1))
+        trend_next = max(trend_values[-1] + slope, Decimal("0"))
+
+    weighted = (
+        (recent_avg * Decimal("0.50"))
+        + (seasonal_avg * Decimal("0.30"))
+        + (trend_next * Decimal("0.20"))
+    )
+    confidence = min(Decimal("1"), Decimal(str(len(ordered_values))) / Decimal("12"))
+    return weighted, len(day_rows), confidence
+
+
+def _forecast_range_qty(day_rows: list[tuple[date, Decimal]], target_start: date, target_end: date) -> tuple[Decimal, int, Decimal]:
+    if not day_rows:
+        return Decimal("0"), 0, Decimal("0")
+
+    by_dow: dict[int, list[Decimal]] = defaultdict(list)
+    lower_window = target_start - timedelta(days=84)
+    for d, qty in day_rows:
+        if d < target_start and d >= lower_window:
+            by_dow[d.weekday()].append(qty)
+
+    all_daily = [qty for _, qty in day_rows[-120:]]
+    global_avg = sum(all_daily, Decimal("0")) / Decimal(str(len(all_daily) or 1))
+
+    horizon_days: list[date] = []
+    pointer = target_start
+    while pointer <= target_end:
+        horizon_days.append(pointer)
+        pointer += timedelta(days=1)
+
+    used_samples = 0
+    pred_total = Decimal("0")
+    for d in horizon_days:
+        samples = by_dow.get(d.weekday(), [])
+        if samples:
+            day_pred = _weighted_avg_decimal(samples[-8:])
+            used_samples += len(samples[-8:])
+        else:
+            day_pred = global_avg
+        pred_total += day_pred
+
+    confidence = Decimal("0")
+    if horizon_days:
+        confidence = min(
+            Decimal("1"),
+            Decimal(str(used_samples)) / Decimal(str(len(horizon_days) * 8)),
+        )
+    return pred_total, len(day_rows), confidence
+
+
+def _build_forecast_from_history(
+    *,
+    alcance: str,
+    periodo: str,
+    fecha_base: date | None,
+    sucursal: Sucursal | None,
+    incluir_preparaciones: bool,
+    safety_pct: Decimal,
+) -> dict[str, Any]:
+    if alcance == "mes":
+        target_start, target_end = _month_start_end(periodo)
+    else:
+        base = fecha_base or timezone.localdate()
+        if alcance == "fin_semana":
+            target_start, target_end = _weekend_start_end(base)
+        else:
+            target_start, target_end = _week_start_end(base)
+
+    qs = VentaHistorica.objects.filter(fecha__lt=target_start).select_related("receta", "sucursal")
+    if sucursal:
+        qs = qs.filter(sucursal=sucursal)
+    if not incluir_preparaciones:
+        qs = qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+
+    grouped: dict[int, dict[str, Any]] = {}
+    for row in qs.values("receta_id", "receta__nombre", "fecha").annotate(total=Sum("cantidad")).order_by("receta_id", "fecha"):
+        rid = int(row["receta_id"])
+        item = grouped.setdefault(
+            rid,
+            {
+                "receta_id": rid,
+                "receta": row["receta__nombre"],
+                "days": [],
+            },
+        )
+        item["days"].append((row["fecha"], Decimal(str(row["total"] or 0))))
+
+    periodo_target = f"{target_start.year:04d}-{target_start.month:02d}"
+    pron_map = {
+        p.receta_id: Decimal(str(p.cantidad or 0))
+        for p in PronosticoVenta.objects.filter(periodo=periodo_target)
+    }
+
+    rows = []
+    safety_factor = Decimal("1") + (safety_pct / Decimal("100"))
+    for rid, item in grouped.items():
+        days = item["days"]
+        if alcance == "mes":
+            predicted, obs, confidence = _forecast_month_qty(days, target_start)
+        else:
+            predicted, obs, confidence = _forecast_range_qty(days, target_start, target_end)
+        predicted = max(predicted * safety_factor, Decimal("0"))
+        predicted = predicted.quantize(Decimal("0.001"))
+        if predicted <= 0:
+            continue
+
+        current = pron_map.get(rid, Decimal("0"))
+        delta = predicted - current
+        threshold = max(Decimal("1.000"), current * Decimal("0.05"))
+        if delta > threshold:
+            recomendacion = "SUBIR"
+        elif delta < (threshold * Decimal("-1")):
+            recomendacion = "BAJAR"
+        else:
+            recomendacion = "MANTENER"
+
+        rows.append(
+            {
+                "receta_id": rid,
+                "receta": item["receta"],
+                "forecast_qty": predicted,
+                "pronostico_actual": current.quantize(Decimal("0.001")),
+                "delta": delta.quantize(Decimal("0.001")),
+                "recomendacion": recomendacion,
+                "observaciones": obs,
+                "confianza": (confidence * Decimal("100")).quantize(Decimal("0.1")),
+            }
+        )
+
+    rows.sort(key=lambda x: x["forecast_qty"], reverse=True)
+    return {
+        "alcance": alcance,
+        "periodo": periodo_target,
+        "target_start": target_start,
+        "target_end": target_end,
+        "sucursal_id": sucursal.id if sucursal else None,
+        "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
+        "rows": rows,
+        "totals": {
+            "recetas_count": len(rows),
+            "forecast_total": sum((r["forecast_qty"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+            "pronostico_total": sum((r["pronostico_actual"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+            "delta_total": sum((r["delta"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+        },
+    }
+
+
+def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dict[str, Any]:
+    rows = []
+    for row in result["rows"][:top_rows]:
+        rows.append(
+            {
+                "receta_id": int(row["receta_id"]),
+                "receta": row["receta"],
+                "forecast_qty": float(row["forecast_qty"]),
+                "pronostico_actual": float(row["pronostico_actual"]),
+                "delta": float(row["delta"]),
+                "recomendacion": row["recomendacion"],
+                "observaciones": int(row["observaciones"]),
+                "confianza": float(row["confianza"]),
+            }
+        )
+    return {
+        "alcance": result["alcance"],
+        "periodo": result["periodo"],
+        "target_start": str(result["target_start"]),
+        "target_end": str(result["target_end"]),
+        "sucursal_nombre": result["sucursal_nombre"],
+        "rows": rows,
+        "totals": {
+            "recetas_count": int(result["totals"]["recetas_count"]),
+            "forecast_total": float(result["totals"]["forecast_total"]),
+            "pronostico_total": float(result["totals"]["pronostico_total"]),
+            "delta_total": float(result["totals"]["delta_total"]),
+        },
+    }
+
+
 @login_required
 @permission_required("recetas.change_planproduccion", raise_exception=True)
 def pronosticos_descargar_plantilla(request: HttpRequest) -> HttpResponse:
@@ -1833,6 +2191,276 @@ def pronosticos_descargar_plantilla(request: HttpRequest) -> HttpResponse:
     )
     response["Content-Disposition"] = 'attachment; filename="plantilla_pronosticos.xlsx"'
     return response
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+def ventas_historicas_descargar_plantilla(request: HttpRequest) -> HttpResponse:
+    export_format = (request.GET.get("format") or "xlsx").strip().lower()
+    headers = ["receta", "codigo_point", "sucursal_codigo", "sucursal", "fecha", "cantidad", "tickets", "monto_total"]
+    sample_rows = [
+        ["Pastel Fresas Con Crema - Chico", "PFC-CHICO", "MATRIZ", "Matriz", timezone.localdate().isoformat(), "24", "18", "3580"],
+        ["Pastel Fresas Con Crema - Chico", "PFC-CHICO", "NORTE", "Sucursal Norte", timezone.localdate().isoformat(), "13", "9", "1970"],
+    ]
+
+    if export_format == "csv":
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="plantilla_ventas_historicas.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(sample_rows)
+        return response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ventas_historicas"
+    ws.append(headers)
+    for row in sample_rows:
+        ws.append(row)
+    for col in ("A", "B", "C", "D", "E", "F", "G", "H"):
+        ws.column_dimensions[col].width = 24
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="plantilla_ventas_historicas.xlsx"'
+    return response
+
+
+@login_required
+@permission_required("recetas.change_planproduccion", raise_exception=True)
+@require_POST
+def ventas_historicas_importar(request: HttpRequest) -> HttpResponse:
+    uploaded = request.FILES.get("archivo")
+    plan_id = (request.POST.get("plan_id") or "").strip()
+    modo = (request.POST.get("modo") or "replace").strip().lower()
+    if modo not in {"replace", "accumulate"}:
+        modo = "replace"
+    fuente = (request.POST.get("fuente") or "UI_VENTAS").strip()[:40] or "UI_VENTAS"
+    sucursal_default = Sucursal.objects.filter(pk=request.POST.get("sucursal_default_id")).first()
+
+    next_url = reverse("recetas:plan_produccion")
+    if plan_id:
+        next_url = f"{next_url}?{urlencode({'plan_id': plan_id})}"
+
+    if not uploaded:
+        messages.error(request, "Selecciona un archivo para importar historial de ventas.")
+        return redirect(next_url)
+
+    try:
+        rows = _load_ventas_rows(uploaded)
+    except Exception as exc:
+        messages.error(request, f"No se pudo leer el archivo: {exc}")
+        return redirect(next_url)
+
+    if not rows:
+        messages.warning(request, "Archivo sin filas válidas para historial de ventas.")
+        return redirect(next_url)
+
+    created = 0
+    updated = 0
+    skipped = 0
+    unresolved_recetas: list[str] = []
+    unresolved_sucursales: list[str] = []
+
+    for row in rows:
+        receta_name = str(row.get("receta") or "").strip()
+        codigo_point = str(row.get("codigo_point") or "").strip()
+        receta = _resolve_receta_for_sales(receta_name, codigo_point)
+        if receta is None:
+            unresolved_recetas.append(receta_name or codigo_point or "sin_identificador")
+            skipped += 1
+            continue
+
+        fecha = _parse_date_safe(row.get("fecha"))
+        if not fecha:
+            skipped += 1
+            continue
+
+        cantidad = _to_decimal_safe(row.get("cantidad"))
+        if cantidad < 0:
+            skipped += 1
+            continue
+
+        sucursal_name = str(row.get("sucursal") or "").strip()
+        sucursal_codigo = str(row.get("sucursal_codigo") or "").strip()
+        sucursal = _resolve_sucursal_for_sales(sucursal_name, sucursal_codigo, sucursal_default)
+        if (sucursal_name or sucursal_codigo) and sucursal is None:
+            unresolved_sucursales.append(sucursal_codigo or sucursal_name)
+            skipped += 1
+            continue
+
+        tickets = max(0, _to_int_safe(row.get("tickets"), default=0))
+        monto_total = _to_decimal_safe(row.get("monto_total"))
+
+        existing_qs = VentaHistorica.objects.filter(receta=receta, fecha=fecha)
+        if sucursal:
+            existing_qs = existing_qs.filter(sucursal=sucursal)
+        else:
+            existing_qs = existing_qs.filter(sucursal__isnull=True)
+        existing = existing_qs.order_by("id").first()
+
+        if existing:
+            if modo == "accumulate":
+                existing.cantidad = Decimal(str(existing.cantidad or 0)) + cantidad
+                existing.tickets = int(existing.tickets or 0) + tickets
+                if monto_total > 0:
+                    existing.monto_total = Decimal(str(existing.monto_total or 0)) + monto_total
+            else:
+                existing.cantidad = cantidad
+                existing.tickets = tickets
+                existing.monto_total = monto_total if monto_total > 0 else None
+            existing.fuente = fuente
+            existing.save(update_fields=["cantidad", "tickets", "monto_total", "fuente", "actualizado_en"])
+            updated += 1
+        else:
+            VentaHistorica.objects.create(
+                receta=receta,
+                sucursal=sucursal,
+                fecha=fecha,
+                cantidad=cantidad,
+                tickets=tickets,
+                monto_total=monto_total if monto_total > 0 else None,
+                fuente=fuente,
+            )
+            created += 1
+
+    messages.success(
+        request,
+        f"Historial de ventas importado. Creados: {created}. Actualizados: {updated}. Omitidos: {skipped}.",
+    )
+    if unresolved_recetas:
+        sample = ", ".join(unresolved_recetas[:5])
+        extra = "" if len(unresolved_recetas) <= 5 else f" (+{len(unresolved_recetas) - 5} más)"
+        messages.warning(request, f"Sin receta equivalente para: {sample}{extra}.")
+    if unresolved_sucursales:
+        sample = ", ".join(unresolved_sucursales[:5])
+        extra = "" if len(unresolved_sucursales) <= 5 else f" (+{len(unresolved_sucursales) - 5} más)"
+        messages.warning(request, f"Sucursales no encontradas: {sample}{extra}.")
+    return redirect(next_url)
+
+
+@login_required
+@permission_required("recetas.add_planproduccion", raise_exception=True)
+@require_POST
+def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse:
+    plan_id = (request.POST.get("plan_id") or "").strip()
+    next_params: dict[str, str] = {}
+    if plan_id:
+        next_params["plan_id"] = plan_id
+
+    alcance = (request.POST.get("alcance") or "mes").strip().lower()
+    if alcance not in {"mes", "semana", "fin_semana"}:
+        alcance = "mes"
+    periodo = _normalize_periodo_mes(request.POST.get("periodo"))
+    fecha_base = _parse_date_safe(request.POST.get("fecha_base")) or timezone.localdate()
+    incluir_preparaciones = request.POST.get("incluir_preparaciones") == "1"
+    run_mode = (request.POST.get("run_mode") or "preview").strip().lower()
+    if run_mode not in {"preview", "apply_pronostico", "crear_plan", "aplicar_y_plan"}:
+        run_mode = "preview"
+    safety_pct = _to_decimal_safe(request.POST.get("safety_pct"))
+    if safety_pct < Decimal("-30"):
+        safety_pct = Decimal("-30")
+    if safety_pct > Decimal("100"):
+        safety_pct = Decimal("100")
+
+    sucursal = Sucursal.objects.filter(pk=request.POST.get("sucursal_id")).first()
+
+    resultado = _build_forecast_from_history(
+        alcance=alcance,
+        periodo=periodo,
+        fecha_base=fecha_base,
+        sucursal=sucursal,
+        incluir_preparaciones=incluir_preparaciones,
+        safety_pct=safety_pct,
+    )
+    request.session["pronostico_estadistico_preview"] = _forecast_session_payload(resultado, top_rows=120)
+
+    rows = resultado["rows"]
+    if not rows:
+        messages.warning(request, "No hay suficiente historial para generar pronóstico estadístico con esos filtros.")
+        if next_params:
+            return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+        return redirect(reverse("recetas:plan_produccion"))
+
+    created_forecast = 0
+    updated_forecast = 0
+    if run_mode in {"apply_pronostico", "aplicar_y_plan"}:
+        if alcance != "mes":
+            messages.warning(request, "Aplicar pronóstico mensual solo está disponible cuando el alcance es 'Mes'.")
+        else:
+            for row in rows:
+                receta = Receta.objects.filter(pk=row["receta_id"]).first()
+                if receta is None:
+                    continue
+                forecast_qty = Decimal(str(row["forecast_qty"]))
+                current = PronosticoVenta.objects.filter(receta=receta, periodo=resultado["periodo"]).first()
+                if current:
+                    current.cantidad = forecast_qty
+                    current.fuente = "AUTO_HISTORIAL"
+                    current.save(update_fields=["cantidad", "fuente", "actualizado_en"])
+                    updated_forecast += 1
+                else:
+                    PronosticoVenta.objects.create(
+                        receta=receta,
+                        periodo=resultado["periodo"],
+                        cantidad=forecast_qty,
+                        fuente="AUTO_HISTORIAL",
+                    )
+                    created_forecast += 1
+
+    created_plan = None
+    if run_mode in {"crear_plan", "aplicar_y_plan"}:
+        target_start = resultado["target_start"]
+        default_name = f"Plan estadístico {resultado['target_start']} a {resultado['target_end']}"
+        name = (request.POST.get("nombre_plan") or "").strip() or default_name
+        plan = PlanProduccion.objects.create(
+            nombre=name[:140],
+            fecha_produccion=target_start,
+            notas=(
+                f"Generado por pronóstico estadístico ({alcance}) "
+                f"{resultado['target_start']}..{resultado['target_end']} "
+                f"- sucursal: {resultado['sucursal_nombre']}"
+            )[:500],
+            creado_por=request.user if request.user.is_authenticated else None,
+        )
+        lines = 0
+        for row in rows:
+            qty = Decimal(str(row["forecast_qty"]))
+            if qty <= 0:
+                continue
+            PlanProduccionItem.objects.create(
+                plan=plan,
+                receta_id=row["receta_id"],
+                cantidad=qty,
+                notas="Pronóstico estadístico",
+            )
+            lines += 1
+        if lines == 0:
+            plan.delete()
+            messages.warning(request, "No se creó plan: el pronóstico estadístico resultó en cantidades 0.")
+        else:
+            created_plan = plan
+            next_params["plan_id"] = str(plan.id)
+            messages.success(request, f"Plan estadístico creado con {lines} renglones.")
+
+    if run_mode == "preview":
+        messages.success(request, f"Vista previa generada ({len(rows)} recetas) para {resultado['sucursal_nombre']}.")
+    if created_forecast or updated_forecast:
+        messages.success(
+            request,
+            f"Pronóstico mensual aplicado desde historial. Creados: {created_forecast}. Actualizados: {updated_forecast}.",
+        )
+    if run_mode in {"crear_plan", "aplicar_y_plan"} and created_plan is None:
+        messages.info(request, "Se generó la vista previa estadística, pero no se creó plan.")
+
+    next_params["periodo"] = resultado["periodo"]
+    if next_params:
+        return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
+    return redirect(reverse("recetas:plan_produccion"))
 
 
 @login_required
@@ -2010,10 +2638,15 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     periodo_pronostico_default = _normalize_periodo_mes(request.GET.get("periodo"))
     mrp_periodo = _normalize_periodo_mes(request.GET.get("mrp_periodo"))
     mrp_periodo_tipo = (request.GET.get("mrp_periodo_tipo") or "mes").strip().lower()
+    alcance_estadistico = (request.GET.get("alcance_estadistico") or "mes").strip().lower()
+    if alcance_estadistico not in {"mes", "semana", "fin_semana"}:
+        alcance_estadistico = "mes"
+    fecha_base_estadistica = request.GET.get("fecha_base_estadistica") or timezone.localdate().isoformat()
     if mrp_periodo_tipo not in {"mes", "q1", "q2"}:
         mrp_periodo_tipo = "mes"
     mrp_periodo_resumen = _periodo_mrp_resumen(mrp_periodo, mrp_periodo_tipo)
     pronosticos_unavailable = False
+    ventas_historicas_unavailable = False
     try:
         pronosticos_periodo = PronosticoVenta.objects.filter(periodo=periodo_pronostico_default)
         pronosticos_periodo_count = pronosticos_periodo.count()
@@ -2022,6 +2655,17 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         pronosticos_periodo_count = 0
         pronosticos_periodo_total = Decimal("0")
         pronosticos_unavailable = True
+    try:
+        ventas_historicas_count = VentaHistorica.objects.count()
+        ventas_historicas_total = VentaHistorica.objects.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
+        ventas_hist_fecha_max = VentaHistorica.objects.order_by("-fecha").values_list("fecha", flat=True).first()
+    except (OperationalError, ProgrammingError):
+        ventas_historicas_count = 0
+        ventas_historicas_total = Decimal("0")
+        ventas_hist_fecha_max = None
+        ventas_historicas_unavailable = True
+    forecast_preview = request.session.get("pronostico_estadistico_preview")
+    sucursales = Sucursal.objects.filter(activa=True).order_by("codigo", "nombre")
     return render(
         request,
         "recetas/plan_produccion.html",
@@ -2038,6 +2682,14 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "pronosticos_periodo_count": pronosticos_periodo_count,
             "pronosticos_periodo_total": pronosticos_periodo_total,
             "pronosticos_unavailable": pronosticos_unavailable,
+            "ventas_historicas_count": ventas_historicas_count,
+            "ventas_historicas_total": ventas_historicas_total,
+            "ventas_hist_fecha_max": ventas_hist_fecha_max,
+            "ventas_historicas_unavailable": ventas_historicas_unavailable,
+            "forecast_preview": forecast_preview,
+            "sucursales": sucursales,
+            "alcance_estadistico": alcance_estadistico,
+            "fecha_base_estadistica": fecha_base_estadistica,
         },
     )
 

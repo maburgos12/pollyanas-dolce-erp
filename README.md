@@ -4,6 +4,8 @@ Sprint 1 entrega:
 - Importación desde Excel: catálogo de costos (Costo Materia Prima) + recetas (hojas con “Ingredientes”)
 - Matching de insumos (EXACT / CONTAINS / FUZZY) con cola “Needs review”
 - UI web (Django) para ver recetas, detalle, pendientes y MRP básico
+- Historial de ventas (CSV/XLSX) por sucursal + pronóstico estadístico (mes / semana / fin de semana)
+- Recomendación automática subir/bajar solicitud de Ventas según histórico
 - API: POST /api/mrp/explode/
 - API: POST /api/mrp/calcular-requerimientos/ (por plan, por periodo o por lista manual)
 - API: POST /api/mrp/generar-plan-pronostico/ (crea plan de producción desde pronóstico)

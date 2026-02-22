@@ -37,6 +37,21 @@ urlpatterns = [
     path("plan-produccion/pronosticos/plantilla/", views.pronosticos_descargar_plantilla, name="pronosticos_plantilla"),
     path("plan-produccion/pronosticos/importar/", views.pronosticos_importar, name="pronosticos_importar"),
     path(
+        "plan-produccion/ventas-historicas/plantilla/",
+        views.ventas_historicas_descargar_plantilla,
+        name="ventas_historicas_plantilla",
+    ),
+    path(
+        "plan-produccion/ventas-historicas/importar/",
+        views.ventas_historicas_importar,
+        name="ventas_historicas_importar",
+    ),
+    path(
+        "plan-produccion/pronosticos/estadistico/",
+        views.pronostico_estadistico_desde_historial,
+        name="pronostico_estadistico_desde_historial",
+    ),
+    path(
         "plan-produccion/pronosticos/generar-plan/",
         views.plan_produccion_generar_desde_pronostico,
         name="plan_produccion_generar_desde_pronostico",
