@@ -537,6 +537,15 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 201)
         payload = resp.json()
         self.assertEqual(payload["estatus"], RecepcionCompra.STATUS_CERRADA)
+        existencia = ExistenciaInsumo.objects.get(insumo=self.insumo)
+        self.assertEqual(existencia.stock_actual, Decimal("2"))
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                source_hash=f"recepcion:{payload['id']}:entrada",
+                tipo=MovimientoInventario.TIPO_ENTRADA,
+            ).count(),
+            1,
+        )
         orden.refresh_from_db()
         self.assertEqual(orden.estatus, OrdenCompra.STATUS_CERRADA)
 
@@ -568,6 +577,22 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["to"], RecepcionCompra.STATUS_CERRADA)
         recepcion.refresh_from_db()
         self.assertEqual(recepcion.estatus, RecepcionCompra.STATUS_CERRADA)
+        existencia = ExistenciaInsumo.objects.get(insumo=self.insumo)
+        self.assertEqual(existencia.stock_actual, Decimal("2"))
+        self.assertEqual(
+            MovimientoInventario.objects.filter(source_hash=f"recepcion:{recepcion.id}:entrada").count(),
+            1,
+        )
+
+        # Repetir cierre no debe duplicar movimiento ni stock.
+        resp_retry = self.client.post(url, {"estatus": RecepcionCompra.STATUS_CERRADA}, content_type="application/json")
+        self.assertEqual(resp_retry.status_code, 200)
+        existencia.refresh_from_db()
+        self.assertEqual(existencia.stock_actual, Decimal("2"))
+        self.assertEqual(
+            MovimientoInventario.objects.filter(source_hash=f"recepcion:{recepcion.id}:entrada").count(),
+            1,
+        )
         orden.refresh_from_db()
         self.assertEqual(orden.estatus, OrdenCompra.STATUS_CERRADA)
 

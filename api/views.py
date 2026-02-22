@@ -24,6 +24,7 @@ from core.access import (
 from core.audit import log_event
 from core.models import Sucursal
 from compras.views import (
+    _apply_recepcion_to_inventario,
     _build_budget_context,
     _build_budget_history,
     _build_category_dashboard,
@@ -1430,17 +1431,19 @@ class ComprasOrdenCreateRecepcionView(APIView):
             {"folio": recepcion.folio, "estatus": recepcion.estatus, "source": "api"},
         )
 
-        if recepcion.estatus == RecepcionCompra.STATUS_CERRADA and orden.estatus != OrdenCompra.STATUS_CERRADA:
-            orden_prev = orden.estatus
-            orden.estatus = OrdenCompra.STATUS_CERRADA
-            orden.save(update_fields=["estatus"])
-            log_event(
-                request.user,
-                "APPROVE",
-                "compras.OrdenCompra",
-                orden.id,
-                {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": orden.folio, "source": recepcion.folio},
-            )
+        if recepcion.estatus == RecepcionCompra.STATUS_CERRADA:
+            _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+            if orden.estatus != OrdenCompra.STATUS_CERRADA:
+                orden_prev = orden.estatus
+                orden.estatus = OrdenCompra.STATUS_CERRADA
+                orden.save(update_fields=["estatus"])
+                log_event(
+                    request.user,
+                    "APPROVE",
+                    "compras.OrdenCompra",
+                    orden.id,
+                    {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": orden.folio, "source": recepcion.folio},
+                )
 
         return Response(
             {
@@ -1502,17 +1505,19 @@ class ComprasRecepcionStatusUpdateView(APIView):
             {"from": estatus_prev, "to": estatus_new, "folio": recepcion.folio, "source": "api"},
         )
 
-        if estatus_new == RecepcionCompra.STATUS_CERRADA and recepcion.orden.estatus != OrdenCompra.STATUS_CERRADA:
-            orden_prev = recepcion.orden.estatus
-            recepcion.orden.estatus = OrdenCompra.STATUS_CERRADA
-            recepcion.orden.save(update_fields=["estatus"])
-            log_event(
-                request.user,
-                "APPROVE",
-                "compras.OrdenCompra",
-                recepcion.orden.id,
-                {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": recepcion.orden.folio, "source": recepcion.folio},
-            )
+        if estatus_new == RecepcionCompra.STATUS_CERRADA:
+            _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+            if recepcion.orden.estatus != OrdenCompra.STATUS_CERRADA:
+                orden_prev = recepcion.orden.estatus
+                recepcion.orden.estatus = OrdenCompra.STATUS_CERRADA
+                recepcion.orden.save(update_fields=["estatus"])
+                log_event(
+                    request.user,
+                    "APPROVE",
+                    "compras.OrdenCompra",
+                    recepcion.orden.id,
+                    {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": recepcion.orden.folio, "source": recepcion.folio},
+                )
 
         return Response(
             {

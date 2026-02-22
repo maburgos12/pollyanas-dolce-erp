@@ -498,6 +498,62 @@ def _can_transition_recepcion(current: str, new: str) -> bool:
     return new in transitions.get(current, set())
 
 
+def _apply_recepcion_to_inventario(recepcion: RecepcionCompra, acted_by=None) -> dict:
+    orden = recepcion.orden
+    solicitud = orden.solicitud
+    if not solicitud or not solicitud.insumo_id:
+        return {"applied": False, "reason": "sin_solicitud_o_insumo"}
+
+    cantidad = _to_decimal(str(solicitud.cantidad or 0), "0")
+    if cantidad <= 0:
+        return {"applied": False, "reason": "cantidad_no_positiva"}
+
+    source_hash = f"recepcion:{recepcion.id}:entrada"
+    if MovimientoInventario.objects.filter(source_hash=source_hash).exists():
+        return {"applied": False, "reason": "ya_aplicado"}
+
+    existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=solicitud.insumo)
+    prev_stock = existencia.stock_actual
+    existencia.stock_actual = prev_stock + cantidad
+    existencia.actualizado_en = timezone.now()
+    existencia.save()
+
+    movimiento = MovimientoInventario.objects.create(
+        tipo=MovimientoInventario.TIPO_ENTRADA,
+        insumo=solicitud.insumo,
+        cantidad=cantidad,
+        referencia=recepcion.folio,
+        source_hash=source_hash,
+    )
+
+    log_event(
+        acted_by,
+        "CREATE",
+        "inventario.MovimientoInventario",
+        movimiento.id,
+        {
+            "tipo": movimiento.tipo,
+            "insumo_id": movimiento.insumo_id,
+            "cantidad": str(movimiento.cantidad),
+            "referencia": movimiento.referencia,
+            "source": recepcion.folio,
+        },
+    )
+    log_event(
+        acted_by,
+        "UPDATE",
+        "inventario.ExistenciaInsumo",
+        existencia.id,
+        {
+            "insumo_id": solicitud.insumo_id,
+            "from_stock": str(prev_stock),
+            "to_stock": str(existencia.stock_actual),
+            "source": recepcion.folio,
+        },
+    )
+    return {"applied": True, "movimiento_id": movimiento.id}
+
+
 def _build_insumo_options(limit: int = 1200):
     limit_safe = max(100, min(int(limit or 1200), 5000))
     insumos = list(Insumo.objects.filter(activo=True).order_by("nombre")[:limit_safe])
@@ -4114,17 +4170,19 @@ def recepciones(request: HttpRequest) -> HttpResponse:
                 recepcion.id,
                 {"folio": recepcion.folio, "estatus": recepcion.estatus},
             )
-            if recepcion.estatus == RecepcionCompra.STATUS_CERRADA and orden.estatus != OrdenCompra.STATUS_CERRADA:
-                orden_prev = orden.estatus
-                orden.estatus = OrdenCompra.STATUS_CERRADA
-                orden.save(update_fields=["estatus"])
-                log_event(
-                    request.user,
-                    "APPROVE",
-                    "compras.OrdenCompra",
-                    orden.id,
-                    {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": orden.folio, "source": recepcion.folio},
-                )
+            if recepcion.estatus == RecepcionCompra.STATUS_CERRADA:
+                _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+                if orden.estatus != OrdenCompra.STATUS_CERRADA:
+                    orden_prev = orden.estatus
+                    orden.estatus = OrdenCompra.STATUS_CERRADA
+                    orden.save(update_fields=["estatus"])
+                    log_event(
+                        request.user,
+                        "APPROVE",
+                        "compras.OrdenCompra",
+                        orden.id,
+                        {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": orden.folio, "source": recepcion.folio},
+                    )
         return redirect("compras:recepciones")
 
     recepciones_qs = RecepcionCompra.objects.select_related("orden", "orden__proveedor").order_by("-creado_en")
@@ -4274,17 +4332,19 @@ def actualizar_recepcion_estatus(request: HttpRequest, pk: int, estatus: str) ->
         )
 
         # Si la recepción quedó cerrada, marcamos la orden cerrada automáticamente.
-        if estatus == RecepcionCompra.STATUS_CERRADA and recepcion.orden.estatus != OrdenCompra.STATUS_CERRADA:
-            orden_prev = recepcion.orden.estatus
-            recepcion.orden.estatus = OrdenCompra.STATUS_CERRADA
-            recepcion.orden.save(update_fields=["estatus"])
-            log_event(
-                request.user,
-                "APPROVE",
-                "compras.OrdenCompra",
-                recepcion.orden.id,
-                {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": recepcion.orden.folio, "source": recepcion.folio},
-            )
+        if estatus == RecepcionCompra.STATUS_CERRADA:
+            _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+            if recepcion.orden.estatus != OrdenCompra.STATUS_CERRADA:
+                orden_prev = recepcion.orden.estatus
+                recepcion.orden.estatus = OrdenCompra.STATUS_CERRADA
+                recepcion.orden.save(update_fields=["estatus"])
+                log_event(
+                    request.user,
+                    "APPROVE",
+                    "compras.OrdenCompra",
+                    recepcion.orden.id,
+                    {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": recepcion.orden.folio, "source": recepcion.folio},
+                )
     return redirect("compras:recepciones")
 
 

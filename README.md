@@ -7,6 +7,7 @@ Sprint 1 entrega:
 - Historial de ventas (CSV/XLSX) por sucursal + pronóstico estadístico (mes / semana / fin de semana)
 - Recomendación automática subir/bajar solicitud de Ventas según histórico
 - Ajustes de inventario con flujo de aprobación/rechazo (ADMIN) y trazabilidad
+- Recepciones de compra cerradas impactan inventario automáticamente (entrada + bitácora)
 - API: POST /api/mrp/explode/
 - API: POST /api/mrp/calcular-requerimientos/ (por plan, por periodo o por lista manual)
 - API: POST /api/mrp/generar-plan-pronostico/ (crea plan de producción desde pronóstico)

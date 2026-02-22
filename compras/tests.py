@@ -18,7 +18,7 @@ from compras.models import (
     RecepcionCompra,
     SolicitudCompra,
 )
-from inventario.models import MovimientoInventario
+from inventario.models import ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
 
@@ -968,3 +968,56 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         values = [row[0] for row in ws.iter_rows(min_row=2, max_col=1, values_only=True) if row and row[0]]
         self.assertIn(self.recepcion_pendiente.folio, values)
         self.assertNotIn(self.recepcion_cerrada.folio, values)
+
+    def test_recepcion_cerrada_aplica_entrada_a_inventario(self):
+        existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=self.insumo)
+        self.assertEqual(existencia.stock_actual, Decimal("0"))
+
+        response = self.client.post(
+            reverse("compras:recepciones"),
+            {
+                "orden_id": self.orden_enviada.id,
+                "fecha_recepcion": "2026-02-22",
+                "conformidad_pct": "100",
+                "estatus": RecepcionCompra.STATUS_CERRADA,
+                "observaciones": "cierre test",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        recepcion = RecepcionCompra.objects.filter(orden=self.orden_enviada).order_by("-id").first()
+        self.assertIsNotNone(recepcion)
+        existencia.refresh_from_db()
+        self.assertEqual(existencia.stock_actual, Decimal("2"))
+        movimiento = MovimientoInventario.objects.get(source_hash=f"recepcion:{recepcion.id}:entrada")
+        self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
+        self.assertEqual(movimiento.cantidad, Decimal("2"))
+        self.orden_enviada.refresh_from_db()
+        self.assertEqual(self.orden_enviada.estatus, OrdenCompra.STATUS_CERRADA)
+
+    def test_cerrar_recepcion_desde_estatus_aplica_entrada_una_sola_vez(self):
+        existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=self.insumo)
+        self.assertEqual(existencia.stock_actual, Decimal("0"))
+
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+        self.recepcion_pendiente.refresh_from_db()
+        self.assertEqual(self.recepcion_pendiente.estatus, RecepcionCompra.STATUS_CERRADA)
+        existencia.refresh_from_db()
+        self.assertEqual(existencia.stock_actual, Decimal("2"))
+        self.assertEqual(
+            MovimientoInventario.objects.filter(source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada").count(),
+            1,
+        )
+
+        # Reintento no debe duplicar entrada de inventario.
+        response_retry = self.client.post(url)
+        self.assertEqual(response_retry.status_code, 302)
+        self.assertEqual(
+            MovimientoInventario.objects.filter(source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada").count(),
+            1,
+        )
