@@ -74,6 +74,14 @@ def _parse_period(period_raw: str | None) -> tuple[int, int] | None:
     return year, month
 
 
+def _parse_bounded_int(raw_value, *, default: int, min_value: int, max_value: int) -> int:
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        value = default
+    return max(min_value, min(value, max_value))
+
+
 def _to_float(value, default: float = 0.0) -> float:
     if value is None:
         return default
@@ -134,8 +142,12 @@ class RecetaVersionesView(APIView):
         except (OperationalError, ProgrammingError):
             data_unavailable = True
             warnings.append("Versionado automático no disponible en este entorno.")
-        limit = int(request.GET.get("limit", 25))
-        limit = max(1, min(limit, 200))
+        limit = _parse_bounded_int(
+            request.GET.get("limit", 25),
+            default=25,
+            min_value=1,
+            max_value=200,
+        )
         try:
             versiones = _load_versiones_costeo(receta, limit)
         except (OperationalError, ProgrammingError):
@@ -168,8 +180,12 @@ class RecetaCostoHistoricoView(APIView):
         except (OperationalError, ProgrammingError):
             data_unavailable = True
             warnings.append("Versionado automático no disponible en este entorno.")
-        limit = int(request.GET.get("limit", 60))
-        limit = max(1, min(limit, 300))
+        limit = _parse_bounded_int(
+            request.GET.get("limit", 60),
+            default=60,
+            min_value=1,
+            max_value=300,
+        )
         try:
             versiones = _load_versiones_costeo(receta, limit)
         except (OperationalError, ProgrammingError):

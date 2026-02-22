@@ -75,6 +75,14 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["items"], [])
         self.assertGreaterEqual(len(payload["warnings"]), 1)
 
+    def test_endpoint_versiones_limit_invalido_no_rompe(self):
+        url = reverse("api_receta_versiones", args=[self.receta.id])
+        resp = self.client.get(url, {"limit": "abc"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("items", payload)
+        self.assertGreaterEqual(payload["total"], 1)
+
     def test_endpoint_costo_historico_con_comparativo(self):
         self.linea.costo_unitario_snapshot = Decimal("4")
         self.linea.save(update_fields=["costo_unitario_snapshot"])
@@ -100,6 +108,14 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["puntos"], [])
         self.assertNotIn("comparativo", payload)
         self.assertGreaterEqual(len(payload["warnings"]), 1)
+
+    def test_endpoint_costo_historico_limit_invalido_no_rompe(self):
+        url = reverse("api_receta_costo_historico", args=[self.receta.id])
+        resp = self.client.get(url, {"limit": "xyz"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("puntos", payload)
+        self.assertGreaterEqual(len(payload["puntos"]), 1)
 
     def test_endpoint_costo_historico_comparativo_seleccionado(self):
         self.linea.costo_unitario_snapshot = Decimal("4")
