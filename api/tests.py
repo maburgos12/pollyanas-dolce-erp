@@ -1742,6 +1742,13 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(row["forecast_high"], row["forecast_qty"])
         self.assertIn("compare_solicitud", payload)
         self.assertGreaterEqual(len(payload["compare_solicitud"]["rows"]), 1)
+        compare_row = payload["compare_solicitud"]["rows"][0]
+        self.assertIn("forecast_low", compare_row)
+        self.assertIn("forecast_high", compare_row)
+        self.assertIn("status_rango", compare_row)
+        self.assertIn("en_rango_count", payload["compare_solicitud"]["totals"])
+        self.assertIn("sobre_rango_count", payload["compare_solicitud"]["totals"])
+        self.assertIn("bajo_rango_count", payload["compare_solicitud"]["totals"])
 
     def test_endpoint_ventas_pronostico_estadistico_guardar(self):
         sucursal = Sucursal.objects.create(codigo="MATRIZ2", nombre="Matriz 2", activa=True)

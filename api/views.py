@@ -356,6 +356,9 @@ def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict
                 "sobre_count": 0,
                 "bajo_count": 0,
                 "sin_base_count": 0,
+                "en_rango_count": 0,
+                "sobre_rango_count": 0,
+                "bajo_rango_count": 0,
             },
         }
 
@@ -367,10 +370,13 @@ def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict
                 "receta_id": int(row.get("receta_id") or 0),
                 "receta": row.get("receta") or "",
                 "forecast_qty": _to_float(row.get("forecast_qty")),
+                "forecast_low": _to_float(row.get("forecast_low")),
+                "forecast_high": _to_float(row.get("forecast_high")),
                 "solicitud_qty": _to_float(row.get("solicitud_qty")),
                 "delta_qty": _to_float(row.get("delta_qty")),
                 "variacion_pct": _to_float(variacion) if variacion is not None else None,
                 "status": row.get("status") or "",
+                "status_rango": row.get("status_rango") or "",
             }
         )
     totals = compare.get("totals") or {}
@@ -388,6 +394,9 @@ def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict
             "sobre_count": int(totals.get("sobre_count") or 0),
             "bajo_count": int(totals.get("bajo_count") or 0),
             "sin_base_count": int(totals.get("sin_base_count") or 0),
+            "en_rango_count": int(totals.get("en_rango_count") or 0),
+            "sobre_rango_count": int(totals.get("sobre_rango_count") or 0),
+            "bajo_rango_count": int(totals.get("bajo_rango_count") or 0),
         },
     }
 

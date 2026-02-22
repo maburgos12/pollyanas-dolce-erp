@@ -2333,6 +2333,8 @@ def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, 
             "receta_id": rid,
             "receta": str(row.get("receta") or ""),
             "forecast_qty": Decimal(str(row.get("forecast_qty") or 0)),
+            "forecast_low": Decimal(str(row.get("forecast_low") or row.get("forecast_qty") or 0)),
+            "forecast_high": Decimal(str(row.get("forecast_high") or row.get("forecast_qty") or 0)),
         }
 
     if not forecast_map:
@@ -2357,11 +2359,15 @@ def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, 
                 "receta_id": receta.id,
                 "receta": receta.nombre,
                 "forecast_qty": Decimal("0"),
+                "forecast_low": Decimal("0"),
+                "forecast_high": Decimal("0"),
             }
 
     rows: list[dict[str, Any]] = []
     for rid, base in forecast_map.items():
         forecast_qty = Decimal(str(base["forecast_qty"] or 0))
+        forecast_low = Decimal(str(base.get("forecast_low") or forecast_qty or 0))
+        forecast_high = Decimal(str(base.get("forecast_high") or forecast_qty or 0))
         solicitud_qty = solicitud_map.get(rid, Decimal("0"))
         delta = solicitud_qty - forecast_qty
         tolerance = max(Decimal("1"), forecast_qty * Decimal("0.05"))
@@ -2390,15 +2396,27 @@ def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, 
                 else None
             )
 
+        if forecast_qty <= 0 and solicitud_qty > 0:
+            status_rango = "SIN_BASE"
+        elif solicitud_qty < forecast_low:
+            status_rango = "BAJO_RANGO"
+        elif solicitud_qty > forecast_high:
+            status_rango = "SOBRE_RANGO"
+        else:
+            status_rango = "EN_RANGO"
+
         rows.append(
             {
                 "receta_id": rid,
                 "receta": base["receta"],
                 "forecast_qty": forecast_qty,
+                "forecast_low": forecast_low,
+                "forecast_high": forecast_high,
                 "solicitud_qty": solicitud_qty,
                 "delta_qty": delta,
                 "variacion_pct": variacion_pct,
                 "status": status,
+                "status_rango": status_rango,
             }
         )
 
@@ -2419,6 +2437,9 @@ def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, 
             "sobre_count": len([r for r in rows if r["status"] == "SOBRE"]),
             "bajo_count": len([r for r in rows if r["status"] == "BAJO"]),
             "sin_base_count": len([r for r in rows if r["status"] == "SIN_BASE"]),
+            "en_rango_count": len([r for r in rows if r["status_rango"] == "EN_RANGO"]),
+            "sobre_rango_count": len([r for r in rows if r["status_rango"] == "SOBRE_RANGO"]),
+            "bajo_rango_count": len([r for r in rows if r["status_rango"] == "BAJO_RANGO"]),
         },
     }
 
