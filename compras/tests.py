@@ -10,7 +10,14 @@ from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 
-from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
+from compras.models import (
+    OrdenCompra,
+    PresupuestoCompraCategoria,
+    PresupuestoCompraPeriodo,
+    PresupuestoCompraProveedor,
+    RecepcionCompra,
+    SolicitudCompra,
+)
 from inventario.models import MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta
@@ -197,6 +204,84 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertEqual(response.context["categoria_filter"], "Masa")
         self.assertEqual(len(response.context["solicitudes"]), 2)
         self.assertIn("categoria=Masa", response.context["current_query"])
+
+    def test_resumen_api_incluye_semaforo_objetivo_por_proveedor_y_categoria(self):
+        periodo = PresupuestoCompraPeriodo.objects.create(
+            periodo_tipo=PresupuestoCompraPeriodo.TIPO_MES,
+            periodo_mes=self.periodo_mes,
+            monto_objetivo=Decimal("500"),
+            actualizado_por=self.user,
+        )
+        PresupuestoCompraProveedor.objects.create(
+            presupuesto_periodo=periodo,
+            proveedor=self.proveedor,
+            monto_objetivo=Decimal("20"),
+            actualizado_por=self.user,
+        )
+        PresupuestoCompraCategoria.objects.create(
+            presupuesto_periodo=periodo,
+            categoria="Masa",
+            monto_objetivo=Decimal("25"),
+            actualizado_por=self.user,
+        )
+
+        response = self.client.get(
+            reverse("compras:solicitudes_resumen_api"),
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": self.periodo_mes,
+                "categoria": "Masa",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(payload["totals"]["proveedor_objetivo_excedido_count"], 1)
+        self.assertEqual(payload["totals"]["categoria_objetivo_excedido_count"], 1)
+
+        proveedor = next((r for r in payload["top_proveedores"] if r["proveedor"] == self.proveedor.nombre), None)
+        self.assertIsNotNone(proveedor)
+        self.assertEqual(proveedor["objetivo_estado"], "excedido")
+        self.assertEqual(proveedor["objetivo_estado_label"], "Excedido")
+
+        categoria = next((r for r in payload["top_categorias"] if r["categoria"] == "Masa"), None)
+        self.assertIsNotNone(categoria)
+        self.assertEqual(categoria["objetivo_estado"], "excedido")
+        self.assertEqual(categoria["objetivo_estado_label"], "Excedido")
+
+    def test_export_consolidado_csv_incluye_columna_estado_objetivo(self):
+        periodo = PresupuestoCompraPeriodo.objects.create(
+            periodo_tipo=PresupuestoCompraPeriodo.TIPO_MES,
+            periodo_mes=self.periodo_mes,
+            monto_objetivo=Decimal("500"),
+            actualizado_por=self.user,
+        )
+        PresupuestoCompraProveedor.objects.create(
+            presupuesto_periodo=periodo,
+            proveedor=self.proveedor,
+            monto_objetivo=Decimal("20"),
+            actualizado_por=self.user,
+        )
+        PresupuestoCompraCategoria.objects.create(
+            presupuesto_periodo=periodo,
+            categoria="Masa",
+            monto_objetivo=Decimal("25"),
+            actualizado_por=self.user,
+        )
+
+        response = self.client.get(
+            reverse("compras:solicitudes"),
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": self.periodo_mes,
+                "categoria": "Masa",
+                "export": "consolidado_csv",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("Estado objetivo", body)
+        self.assertIn("Excedido", body)
 
     def test_consumo_vs_plan_api_retorna_totales(self):
         url = reverse("compras:solicitudes_consumo_vs_plan_api")

@@ -1185,6 +1185,15 @@ def _build_budget_context(
     periodo_tipo: str,
     periodo_mes: str,
 ) -> dict:
+    def _estado_objetivo_label(estado: str) -> str:
+        if estado == "excedido":
+            return "Excedido"
+        if estado == "preventivo":
+            return "Preventivo"
+        if estado == "ok":
+            return "OK"
+        return "Sin objetivo"
+
     total_estimado = sum((s.presupuesto_estimado for s in solicitudes), Decimal("0"))
 
     start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
@@ -1270,6 +1279,12 @@ def _build_budget_context(
         | set(objetivos_proveedor_by_name.keys())
     )
     rows_proveedor = []
+    proveedor_estado_counts = {
+        "excedido": 0,
+        "preventivo": 0,
+        "ok": 0,
+        "sin_objetivo": 0,
+    }
     for proveedor_nombre in proveedores:
         estimado = estimado_by_proveedor.get(proveedor_nombre, Decimal("0"))
         ejecutado = ejecutado_by_proveedor.get(proveedor_nombre, Decimal("0"))
@@ -1292,6 +1307,7 @@ def _build_budget_context(
                 objetivo_estado = "preventivo"
             else:
                 objetivo_estado = "ok"
+        proveedor_estado_counts[objetivo_estado] = proveedor_estado_counts.get(objetivo_estado, 0) + 1
         share = (estimado * Decimal("100") / total_estimado) if total_estimado > 0 else Decimal("0")
         rows_proveedor.append(
             {
@@ -1303,6 +1319,7 @@ def _build_budget_context(
                 "objetivo_proveedor": objetivo_proveedor,
                 "uso_objetivo_pct": uso_objetivo_pct,
                 "objetivo_estado": objetivo_estado,
+                "objetivo_estado_label": _estado_objetivo_label(objetivo_estado),
             }
         )
     rows_proveedor.sort(
@@ -1324,6 +1341,12 @@ def _build_budget_context(
         )
     )
     rows_categoria = []
+    categoria_estado_counts = {
+        "excedido": 0,
+        "preventivo": 0,
+        "ok": 0,
+        "sin_objetivo": 0,
+    }
     for categoria_nombre in categorias:
         categoria_display = " ".join((categoria_nombre or "").strip().split()) or "Sin categoría"
         categoria_norm = _normalize_categoria_text(categoria_display)
@@ -1348,6 +1371,7 @@ def _build_budget_context(
                 objetivo_estado = "preventivo"
             else:
                 objetivo_estado = "ok"
+        categoria_estado_counts[objetivo_estado] = categoria_estado_counts.get(objetivo_estado, 0) + 1
         share = (estimado * Decimal("100") / total_estimado) if total_estimado > 0 else Decimal("0")
         rows_categoria.append(
             {
@@ -1359,6 +1383,7 @@ def _build_budget_context(
                 "objetivo_categoria": objetivo_categoria,
                 "uso_objetivo_pct": uso_objetivo_pct,
                 "objetivo_estado": objetivo_estado,
+                "objetivo_estado_label": _estado_objetivo_label(objetivo_estado),
             }
         )
     rows_categoria.sort(
@@ -1522,6 +1547,14 @@ def _build_budget_context(
                 "periodo_ejecutado",
             }
         ),
+        "presupuesto_proveedor_excedido_count": proveedor_estado_counts.get("excedido", 0),
+        "presupuesto_proveedor_preventivo_count": proveedor_estado_counts.get("preventivo", 0),
+        "presupuesto_proveedor_ok_count": proveedor_estado_counts.get("ok", 0),
+        "presupuesto_proveedor_sin_objetivo_count": proveedor_estado_counts.get("sin_objetivo", 0),
+        "presupuesto_categoria_excedido_count": categoria_estado_counts.get("excedido", 0),
+        "presupuesto_categoria_preventivo_count": categoria_estado_counts.get("preventivo", 0),
+        "presupuesto_categoria_ok_count": categoria_estado_counts.get("ok", 0),
+        "presupuesto_categoria_sin_objetivo_count": categoria_estado_counts.get("sin_objetivo", 0),
     }
 
 
@@ -1692,6 +1725,10 @@ def _export_consolidado_csv(
     writer.writerow(["Ejecutado ordenes", budget_ctx["presupuesto_ejecutado_total"]])
     writer.writerow(["Variacion vs objetivo", budget_ctx.get("presupuesto_variacion_objetivo") or ""])
     writer.writerow(["Variacion ejecutado vs estimado", budget_ctx["presupuesto_variacion_ejecutado_estimado"]])
+    writer.writerow(["Proveedores excedidos", budget_ctx.get("presupuesto_proveedor_excedido_count") or 0])
+    writer.writerow(["Proveedores preventivos", budget_ctx.get("presupuesto_proveedor_preventivo_count") or 0])
+    writer.writerow(["Categorias excedidas", budget_ctx.get("presupuesto_categoria_excedido_count") or 0])
+    writer.writerow(["Categorias preventivas", budget_ctx.get("presupuesto_categoria_preventivo_count") or 0])
     writer.writerow([])
     writer.writerow(["ALERTAS"])
     writer.writerow(["Nivel", "Tipo", "Titulo", "Detalle"])
@@ -1709,6 +1746,7 @@ def _export_consolidado_csv(
             "Participacion estimado %",
             "Objetivo proveedor",
             "% Uso objetivo proveedor",
+            "Estado objetivo",
         ]
     )
     for row in budget_ctx["presupuesto_rows_proveedor"]:
@@ -1721,6 +1759,7 @@ def _export_consolidado_csv(
                 round(float(row["participacion_pct"]), 2),
                 row.get("objetivo_proveedor", Decimal("0")),
                 round(float(row["uso_objetivo_pct"] or 0), 2) if row.get("uso_objetivo_pct") is not None else "",
+                row.get("objetivo_estado_label", ""),
             ]
         )
     writer.writerow([])
@@ -1735,6 +1774,7 @@ def _export_consolidado_csv(
             "Participacion estimado %",
             "Objetivo categoria",
             "% Uso objetivo categoria",
+            "Estado objetivo",
         ]
     )
     for row in budget_ctx.get("presupuesto_rows_categoria", []):
@@ -1747,6 +1787,7 @@ def _export_consolidado_csv(
                 round(float(row["participacion_pct"]), 2),
                 row.get("objetivo_categoria", Decimal("0")),
                 round(float(row["uso_objetivo_pct"] or 0), 2) if row.get("uso_objetivo_pct") is not None else "",
+                row.get("objetivo_estado_label", ""),
             ]
         )
     writer.writerow([])
@@ -1808,6 +1849,10 @@ def _export_consolidado_xlsx(
     ws_resumen.append(["Ejecutado ordenes", float(budget_ctx["presupuesto_ejecutado_total"] or 0)])
     ws_resumen.append(["Variacion vs objetivo", float((budget_ctx.get("presupuesto_variacion_objetivo") or 0))])
     ws_resumen.append(["Variacion ejecutado vs estimado", float(budget_ctx["presupuesto_variacion_ejecutado_estimado"] or 0)])
+    ws_resumen.append(["Proveedores excedidos", int(budget_ctx.get("presupuesto_proveedor_excedido_count") or 0)])
+    ws_resumen.append(["Proveedores preventivos", int(budget_ctx.get("presupuesto_proveedor_preventivo_count") or 0)])
+    ws_resumen.append(["Categorias excedidas", int(budget_ctx.get("presupuesto_categoria_excedido_count") or 0)])
+    ws_resumen.append(["Categorias preventivas", int(budget_ctx.get("presupuesto_categoria_preventivo_count") or 0)])
     ws_resumen.append([])
     ws_resumen.append(["ALERTAS"])
     ws_resumen.append(["Nivel", "Tipo", "Titulo", "Detalle"])
@@ -1831,6 +1876,7 @@ def _export_consolidado_xlsx(
             "Participacion estimado %",
             "Objetivo proveedor",
             "% Uso objetivo proveedor",
+            "Estado objetivo",
         ]
     )
     for row in budget_ctx["presupuesto_rows_proveedor"]:
@@ -1843,6 +1889,7 @@ def _export_consolidado_xlsx(
                 float(row["participacion_pct"] or 0),
                 float(row.get("objetivo_proveedor") or 0),
                 float(row["uso_objetivo_pct"] or 0) if row.get("uso_objetivo_pct") is not None else None,
+                row.get("objetivo_estado_label", ""),
             ]
         )
     ws_resumen.append([])
@@ -1856,6 +1903,7 @@ def _export_consolidado_xlsx(
             "Participacion estimado %",
             "Objetivo categoria",
             "% Uso objetivo categoria",
+            "Estado objetivo",
         ]
     )
     for row in budget_ctx.get("presupuesto_rows_categoria", []):
@@ -1868,6 +1916,7 @@ def _export_consolidado_xlsx(
                 float(row["participacion_pct"] or 0),
                 float(row.get("objetivo_categoria") or 0),
                 float(row["uso_objetivo_pct"] or 0) if row.get("uso_objetivo_pct") is not None else None,
+                row.get("objetivo_estado_label", ""),
             ]
         )
 
@@ -1943,6 +1992,7 @@ def _export_tablero_proveedor_csv(
             "Participacion %",
             "Objetivo proveedor",
             "% Uso objetivo proveedor",
+            "Estado objetivo",
         ]
     )
     for row in provider_dashboard["top_desviaciones"]:
@@ -1955,6 +2005,7 @@ def _export_tablero_proveedor_csv(
                 round(float(row["participacion_pct"] or 0), 2),
                 row.get("objetivo_proveedor", Decimal("0")),
                 round(float(row["uso_objetivo_pct"] or 0), 2) if row.get("uso_objetivo_pct") is not None else "",
+                row.get("objetivo_estado_label", ""),
             ]
         )
     writer.writerow([])
@@ -2000,6 +2051,7 @@ def _export_tablero_proveedor_xlsx(
             "Participacion %",
             "Objetivo proveedor",
             "% Uso objetivo proveedor",
+            "Estado objetivo",
         ]
     )
     for row in provider_dashboard["top_desviaciones"]:
@@ -2012,6 +2064,7 @@ def _export_tablero_proveedor_xlsx(
                 float(row["participacion_pct"] or 0),
                 float(row.get("objetivo_proveedor") or 0),
                 float(row["uso_objetivo_pct"] or 0) if row.get("uso_objetivo_pct") is not None else None,
+                row.get("objetivo_estado_label", ""),
             ]
         )
 
@@ -2068,6 +2121,7 @@ def _export_tablero_categoria_csv(
             "Participacion %",
             "Objetivo categoria",
             "% Uso objetivo categoria",
+            "Estado objetivo",
         ]
     )
     for row in category_dashboard["top_desviaciones"]:
@@ -2080,6 +2134,7 @@ def _export_tablero_categoria_csv(
                 round(float(row["participacion_pct"] or 0), 2),
                 row.get("objetivo_categoria", Decimal("0")),
                 round(float(row["uso_objetivo_pct"] or 0), 2) if row.get("uso_objetivo_pct") is not None else "",
+                row.get("objetivo_estado_label", ""),
             ]
         )
     writer.writerow([])
@@ -2124,6 +2179,7 @@ def _export_tablero_categoria_xlsx(
             "Participacion %",
             "Objetivo categoria",
             "% Uso objetivo categoria",
+            "Estado objetivo",
         ]
     )
     for row in category_dashboard["top_desviaciones"]:
@@ -2136,6 +2192,7 @@ def _export_tablero_categoria_xlsx(
                 float(row["participacion_pct"] or 0),
                 float(row.get("objetivo_categoria") or 0),
                 float(row["uso_objetivo_pct"] or 0) if row.get("uso_objetivo_pct") is not None else None,
+                row.get("objetivo_estado_label", ""),
             ]
         )
 
@@ -3557,6 +3614,10 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
             "alertas_total": int(budget_ctx.get("presupuesto_alertas_total") or 0),
             "alertas_excedidas": int(budget_ctx.get("presupuesto_alertas_excedidas") or 0),
             "alertas_preventivas": int(budget_ctx.get("presupuesto_alertas_preventivas") or 0),
+            "proveedor_objetivo_excedido_count": int(budget_ctx.get("presupuesto_proveedor_excedido_count") or 0),
+            "proveedor_objetivo_preventivo_count": int(budget_ctx.get("presupuesto_proveedor_preventivo_count") or 0),
+            "categoria_objetivo_excedido_count": int(budget_ctx.get("presupuesto_categoria_excedido_count") or 0),
+            "categoria_objetivo_preventivo_count": int(budget_ctx.get("presupuesto_categoria_preventivo_count") or 0),
         },
         "top_proveedores": [
             {
@@ -3571,6 +3632,8 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
                     if row.get("uso_objetivo_pct") is not None
                     else None
                 ),
+                "objetivo_estado": row.get("objetivo_estado") or "",
+                "objetivo_estado_label": row.get("objetivo_estado_label") or "",
             }
             for row in budget_ctx["presupuesto_rows_proveedor"][:10]
         ],
@@ -3587,6 +3650,8 @@ def solicitudes_resumen_api(request: HttpRequest) -> JsonResponse:
                     if row.get("uso_objetivo_pct") is not None
                     else None
                 ),
+                "objetivo_estado": row.get("objetivo_estado") or "",
+                "objetivo_estado_label": row.get("objetivo_estado_label") or "",
             }
             for row in budget_ctx.get("presupuesto_rows_categoria", [])[:10]
         ],
