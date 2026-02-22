@@ -89,6 +89,7 @@ from .serializers import (
     ComprasSolicitudCreateSerializer,
     ComprasSolicitudStatusSerializer,
     ForecastBacktestRequestSerializer,
+    ForecastEstadisticoGuardarSerializer,
     ForecastEstadisticoRequestSerializer,
     InventarioAjusteCreateSerializer,
     InventarioAjusteDecisionSerializer,
@@ -5606,6 +5607,144 @@ class ForecastEstadisticoView(APIView):
                 "totals": payload["totals"],
                 "rows": payload["rows"],
                 "compare_solicitud": compare_payload,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ForecastEstadisticoGuardarView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    _ESCENARIO_TO_KEY = {
+        "base": "forecast_qty",
+        "bajo": "forecast_low",
+        "alto": "forecast_high",
+    }
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.change_pronosticoventa"):
+            return Response(
+                {"detail": "No tienes permisos para guardar pronóstico estadístico."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ForecastEstadisticoGuardarSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        periodo = _normalize_periodo_mes(data.get("periodo"))
+        fecha_base = data.get("fecha_base") or timezone.localdate()
+        alcance = data.get("alcance") or "mes"
+        incluir_preparaciones = bool(data.get("incluir_preparaciones"))
+        safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
+        top = int(data.get("top") or 120)
+        escenario = str(data.get("escenario") or "base").lower()
+        qty_key = self._ESCENARIO_TO_KEY.get(escenario, "forecast_qty")
+        replace_existing = bool(data.get("replace_existing", True))
+        fuente = (data.get("fuente") or "API_FORECAST_STAT").strip()[:40] or "API_FORECAST_STAT"
+
+        sucursal = None
+        sucursal_id = data.get("sucursal_id")
+        if sucursal_id is not None:
+            sucursal = Sucursal.objects.filter(pk=sucursal_id, activa=True).first()
+            if sucursal is None:
+                return Response(
+                    {"detail": "Sucursal no encontrada o inactiva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        result = _build_forecast_from_history(
+            alcance=alcance,
+            periodo=periodo,
+            fecha_base=fecha_base,
+            sucursal=sucursal,
+            incluir_preparaciones=incluir_preparaciones,
+            safety_pct=safety_pct,
+        )
+        if not result.get("rows"):
+            return Response(
+                {"detail": "No hay historial suficiente para generar forecast en ese alcance/filtro."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = _forecast_session_payload(result, top_rows=top)
+        recetas_map = {r.id: r for r in Receta.objects.filter(id__in=[int(x["receta_id"]) for x in result["rows"]]).only("id", "nombre")}
+
+        created = 0
+        updated = 0
+        skipped_existing = 0
+        skipped_invalid = 0
+        applied_rows: list[dict[str, Any]] = []
+
+        with transaction.atomic():
+            for row in result["rows"]:
+                receta_id = int(row["receta_id"])
+                receta = recetas_map.get(receta_id)
+                if receta is None:
+                    skipped_invalid += 1
+                    continue
+
+                qty = _to_decimal(row.get(qty_key))
+                if qty <= 0:
+                    skipped_invalid += 1
+                    continue
+                qty = qty.quantize(Decimal("0.001"))
+
+                existing = PronosticoVenta.objects.filter(receta=receta, periodo=result["periodo"]).first()
+                old_qty = _to_decimal(existing.cantidad if existing else 0).quantize(Decimal("0.001"))
+                if existing is None:
+                    PronosticoVenta.objects.create(
+                        receta=receta,
+                        periodo=result["periodo"],
+                        cantidad=qty,
+                        fuente=fuente,
+                    )
+                    created += 1
+                    action = "create"
+                else:
+                    if not replace_existing:
+                        skipped_existing += 1
+                        continue
+                    existing.cantidad = qty
+                    existing.fuente = fuente
+                    existing.save(update_fields=["cantidad", "fuente", "actualizado_en"])
+                    updated += 1
+                    action = "update"
+
+                if len(applied_rows) < top:
+                    applied_rows.append(
+                        {
+                            "receta_id": receta.id,
+                            "receta": receta.nombre,
+                            "escenario": escenario,
+                            "cantidad_anterior": _to_float(old_qty),
+                            "cantidad_nueva": _to_float(qty),
+                            "accion": action,
+                        }
+                    )
+
+        return Response(
+            {
+                "scope": {
+                    "alcance": payload["alcance"],
+                    "periodo": payload["periodo"],
+                    "target_start": payload["target_start"],
+                    "target_end": payload["target_end"],
+                    "sucursal_nombre": payload["sucursal_nombre"],
+                    "sucursal_id": payload.get("sucursal_id"),
+                    "escenario": escenario,
+                    "qty_key": qty_key,
+                },
+                "totals": payload["totals"],
+                "persisted": {
+                    "created": created,
+                    "updated": updated,
+                    "skipped_existing": skipped_existing,
+                    "skipped_invalid": skipped_invalid,
+                    "applied": created + updated,
+                },
+                "rows": payload["rows"],
+                "applied_rows": applied_rows,
             },
             status=status.HTTP_200_OK,
         )

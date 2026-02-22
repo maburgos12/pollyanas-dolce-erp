@@ -1743,6 +1743,78 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("compare_solicitud", payload)
         self.assertGreaterEqual(len(payload["compare_solicitud"]["rows"]), 1)
 
+    def test_endpoint_ventas_pronostico_estadistico_guardar(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ2", nombre="Matriz 2", activa=True)
+        for week, qty in [(1, "10"), (2, "13"), (3, "11"), (4, "16"), (5, "12"), (6, "17")]:
+            week_start = date(2026, 3, 22) - timedelta(days=(7 * week))
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=week_start,
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+
+        url = reverse("api_ventas_pronostico_estadistico_guardar")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "semana",
+                "fecha_base": "2026-03-22",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "escenario": "base",
+                "replace_existing": True,
+                "fuente": "API_FORECAST_TEST",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertGreaterEqual(payload["persisted"]["created"], 1)
+        self.assertGreaterEqual(payload["persisted"]["applied"], 1)
+        self.assertEqual(payload["scope"]["escenario"], "base")
+
+        periodo = payload["scope"]["periodo"]
+        first = PronosticoVenta.objects.get(receta=self.receta, periodo=periodo)
+        qty_base = first.cantidad
+
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "semana",
+                "fecha_base": "2026-03-22",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "escenario": "alto",
+                "replace_existing": True,
+                "fuente": "API_FORECAST_TEST",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertGreaterEqual(payload["persisted"]["updated"], 1)
+        self.assertEqual(payload["scope"]["escenario"], "alto")
+        first.refresh_from_db()
+        self.assertGreaterEqual(first.cantidad, qty_base)
+
+    def test_endpoint_ventas_pronostico_estadistico_guardar_requires_perm(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_forecast_guardar",
+            email="sin_perm_forecast_guardar@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+        url = reverse("api_ventas_pronostico_estadistico_guardar")
+        resp = self.client.post(
+            url,
+            {"alcance": "mes", "periodo": "2026-03"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
     def test_endpoint_ventas_pronostico_backtest(self):
         sucursal = Sucursal.objects.create(codigo="BT", nombre="Backtest", activa=True)
         monthly_data = [

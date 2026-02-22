@@ -467,6 +467,12 @@ class ForecastBacktestRequestSerializer(serializers.Serializer):
         return value
 
 
+class ForecastEstadisticoGuardarSerializer(ForecastEstadisticoRequestSerializer):
+    escenario = serializers.ChoiceField(choices=["base", "bajo", "alto"], required=False, default="base")
+    replace_existing = serializers.BooleanField(required=False, default=True)
+    fuente = serializers.CharField(max_length=40, required=False, allow_blank=True, default="API_FORECAST_STAT")
+
+
 class PronosticoVentaBulkRowSerializer(serializers.Serializer):
     receta_id = serializers.IntegerField(required=False)
     receta = serializers.CharField(max_length=220, required=False, allow_blank=True)
