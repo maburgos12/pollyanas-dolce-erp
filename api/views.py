@@ -1,8 +1,9 @@
 from collections import defaultdict
 from contextlib import nullcontext
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from django.db import transaction, OperationalError, ProgrammingError
+from django.db.models import Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -47,6 +48,7 @@ from recetas.views import (
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from .serializers import (
     ComprasSolicitudCreateSerializer,
+    ForecastBacktestRequestSerializer,
     ForecastEstadisticoRequestSerializer,
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
@@ -217,6 +219,48 @@ def _resolve_sucursal_bulk_ref(
             sucursal = None
     cache[key] = sucursal
     return sucursal
+
+
+def _month_start(value: date) -> date:
+    return date(value.year, value.month, 1)
+
+
+def _shift_month(start: date, months: int) -> date:
+    month_index = (start.year * 12 + (start.month - 1)) + months
+    year = month_index // 12
+    month = (month_index % 12) + 1
+    return date(year, month, 1)
+
+
+def _forecast_backtest_windows(alcance: str, fecha_base: date, periods: int) -> list[tuple[date, date]]:
+    windows: list[tuple[date, date]] = []
+    if alcance == "mes":
+        anchor = _month_start(fecha_base)
+        for lag in range(periods, 0, -1):
+            start = _shift_month(anchor, -lag)
+            end = _shift_month(start, 1) - timedelta(days=1)
+            windows.append((start, end))
+        return windows
+
+    if alcance == "fin_semana":
+        wd = fecha_base.weekday()
+        if wd == 5:
+            anchor = fecha_base
+        elif wd == 6:
+            anchor = fecha_base - timedelta(days=1)
+        else:
+            anchor = fecha_base + timedelta(days=(5 - wd))
+        for lag in range(periods, 0, -1):
+            start = anchor - timedelta(days=7 * lag)
+            windows.append((start, start + timedelta(days=1)))
+        return windows
+
+    # semana
+    anchor = fecha_base - timedelta(days=fecha_base.weekday())
+    for lag in range(periods, 0, -1):
+        start = anchor - timedelta(days=7 * lag)
+        windows.append((start, start + timedelta(days=6)))
+    return windows
 
 
 class MRPExplodeView(APIView):
@@ -1206,6 +1250,186 @@ class PlanDesdePronosticoCreateView(APIView):
                 "renglones_omitidos_cantidad_cero": skipped,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class ForecastBacktestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.view_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para consultar backtest de pronóstico."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ForecastBacktestRequestSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        alcance = data.get("alcance") or "mes"
+        fecha_base = data.get("fecha_base") or timezone.localdate()
+        incluir_preparaciones = bool(data.get("incluir_preparaciones"))
+        safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
+        periods = int(data.get("periods") or 3)
+        top = int(data.get("top") or 10)
+
+        sucursal = None
+        sucursal_id = data.get("sucursal_id")
+        if sucursal_id is not None:
+            sucursal = Sucursal.objects.filter(pk=sucursal_id, activa=True).first()
+            if sucursal is None:
+                return Response(
+                    {"detail": "Sucursal no encontrada o inactiva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        windows = _forecast_backtest_windows(alcance, fecha_base, periods)
+        if not windows:
+            return Response(
+                {"detail": "No se pudo construir ventanas de backtest."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        windows_payload: list[dict] = []
+        sum_forecast_total = Decimal("0")
+        sum_actual_total = Decimal("0")
+        sum_abs_error = Decimal("0")
+        ape_sum = Decimal("0")
+        ape_count = 0
+
+        for window_start, window_end in windows:
+            periodo_window = f"{window_start.year:04d}-{window_start.month:02d}"
+            forecast_result = _build_forecast_from_history(
+                alcance=alcance,
+                periodo=periodo_window,
+                fecha_base=window_start,
+                sucursal=sucursal,
+                incluir_preparaciones=incluir_preparaciones,
+                safety_pct=safety_pct,
+            )
+            forecast_map = {
+                int(row["receta_id"]): _to_decimal(row["forecast_qty"])
+                for row in (forecast_result.get("rows") or [])
+            }
+
+            actual_qs = VentaHistorica.objects.filter(fecha__gte=window_start, fecha__lte=window_end)
+            if sucursal:
+                actual_qs = actual_qs.filter(sucursal=sucursal)
+            if not incluir_preparaciones:
+                actual_qs = actual_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+            actual_map = {
+                int(row["receta_id"]): _to_decimal(row["total"])
+                for row in actual_qs.values("receta_id").annotate(total=Sum("cantidad"))
+            }
+
+            union_ids = sorted(set(forecast_map.keys()) | set(actual_map.keys()))
+            if not union_ids:
+                continue
+
+            receta_names = {
+                r.id: r.nombre for r in Receta.objects.filter(id__in=union_ids).only("id", "nombre")
+            }
+            rows = []
+            forecast_total = Decimal("0")
+            actual_total = Decimal("0")
+            abs_error_total = Decimal("0")
+            local_ape_sum = Decimal("0")
+            local_ape_count = 0
+            for receta_id in union_ids:
+                forecast_qty = forecast_map.get(receta_id, Decimal("0"))
+                actual_qty = actual_map.get(receta_id, Decimal("0"))
+                delta_qty = forecast_qty - actual_qty
+                abs_error = abs(delta_qty)
+
+                forecast_total += forecast_qty
+                actual_total += actual_qty
+                abs_error_total += abs_error
+
+                variacion_pct = None
+                status_tag = "SIN_BASE"
+                if actual_qty > 0:
+                    variacion_pct = ((delta_qty / actual_qty) * Decimal("100")).quantize(Decimal("0.1"))
+                    local_ape_sum += abs(variacion_pct)
+                    local_ape_count += 1
+                    if variacion_pct > Decimal("10"):
+                        status_tag = "SOBRE"
+                    elif variacion_pct < Decimal("-10"):
+                        status_tag = "BAJO"
+                    else:
+                        status_tag = "OK"
+
+                rows.append(
+                    {
+                        "receta_id": receta_id,
+                        "receta": receta_names.get(receta_id) or f"Receta {receta_id}",
+                        "forecast_qty": float(forecast_qty),
+                        "actual_qty": float(actual_qty),
+                        "delta_qty": float(delta_qty),
+                        "abs_error": float(abs_error),
+                        "variacion_pct": float(variacion_pct) if variacion_pct is not None else None,
+                        "status": status_tag,
+                    }
+                )
+
+            rows.sort(key=lambda r: abs(r["abs_error"]), reverse=True)
+            mae = (abs_error_total / Decimal(str(len(union_ids)))).quantize(Decimal("0.001"))
+            mape = None
+            if local_ape_count > 0:
+                mape = (local_ape_sum / Decimal(str(local_ape_count))).quantize(Decimal("0.1"))
+                ape_sum += local_ape_sum
+                ape_count += local_ape_count
+
+            sum_forecast_total += forecast_total
+            sum_actual_total += actual_total
+            sum_abs_error += abs_error_total
+
+            windows_payload.append(
+                {
+                    "window_start": str(window_start),
+                    "window_end": str(window_end),
+                    "periodo": periodo_window,
+                    "recetas_count": len(union_ids),
+                    "forecast_total": float(forecast_total),
+                    "actual_total": float(actual_total),
+                    "bias_total": float((forecast_total - actual_total).quantize(Decimal("0.001"))),
+                    "mae": float(mae),
+                    "mape": float(mape) if mape is not None else None,
+                    "top_errors": rows[:top],
+                }
+            )
+
+        if not windows_payload:
+            return Response(
+                {"detail": "No hay historial suficiente para evaluar backtest en el alcance seleccionado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        overall_mape = None
+        if ape_count > 0:
+            overall_mape = (ape_sum / Decimal(str(ape_count))).quantize(Decimal("0.1"))
+        overall_mae = (sum_abs_error / Decimal(str(max(1, len(windows_payload))))).quantize(Decimal("0.001"))
+
+        return Response(
+            {
+                "scope": {
+                    "alcance": alcance,
+                    "fecha_base": str(fecha_base),
+                    "periods": periods,
+                    "sucursal_id": sucursal.id if sucursal else None,
+                    "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
+                },
+                "totals": {
+                    "windows_evaluated": len(windows_payload),
+                    "forecast_total": float(sum_forecast_total),
+                    "actual_total": float(sum_actual_total),
+                    "bias_total": float((sum_forecast_total - sum_actual_total).quantize(Decimal("0.001"))),
+                    "mae_promedio": float(overall_mae),
+                    "mape_promedio": float(overall_mape) if overall_mape is not None else None,
+                },
+                "windows": windows_payload,
+            },
+            status=status.HTTP_200_OK,
         )
 
 

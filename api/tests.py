@@ -512,6 +512,46 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("compare_solicitud", payload)
         self.assertGreaterEqual(len(payload["compare_solicitud"]["rows"]), 1)
 
+    def test_endpoint_ventas_pronostico_backtest(self):
+        sucursal = Sucursal.objects.create(codigo="BT", nombre="Backtest", activa=True)
+        monthly_data = [
+            (2025, 9, "20"),
+            (2025, 10, "24"),
+            (2025, 11, "28"),
+            (2025, 12, "30"),
+            (2026, 1, "33"),
+            (2026, 2, "36"),
+        ]
+        for year, month, qty in monthly_data:
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=date(year, month, 15),
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+
+        url = reverse("api_ventas_pronostico_backtest")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "mes",
+                "fecha_base": "2026-03-15",
+                "periods": 3,
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["alcance"], "mes")
+        self.assertEqual(payload["scope"]["sucursal_id"], sucursal.id)
+        self.assertGreaterEqual(payload["totals"]["windows_evaluated"], 1)
+        self.assertIn("windows", payload)
+        self.assertGreaterEqual(len(payload["windows"]), 1)
+        self.assertIn("mape_promedio", payload["totals"])
+
     def test_endpoint_ventas_solicitud_upsert(self):
         sucursal = Sucursal.objects.create(codigo="NORTE", nombre="Sucursal Norte", activa=True)
         url = reverse("api_ventas_solicitud")

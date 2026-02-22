@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
     ComprasSolicitudCreateView,
+    ForecastBacktestView,
     ForecastEstadisticoView,
     InventarioSugerenciasCompraView,
     MRPExplodeView,
@@ -19,6 +20,7 @@ urlpatterns = [
     path("mrp/explode/", MRPExplodeView.as_view(), name="api_mrp_explode"),
     path("mrp/calcular-requerimientos/", MRPRequerimientosView.as_view(), name="api_mrp_calcular_requerimientos"),
     path("mrp/generar-plan-pronostico/", PlanDesdePronosticoCreateView.as_view(), name="api_mrp_generar_plan_pronostico"),
+    path("ventas/pronostico-backtest/", ForecastBacktestView.as_view(), name="api_ventas_pronostico_backtest"),
     path("ventas/pronostico-estadistico/", ForecastEstadisticoView.as_view(), name="api_ventas_pronostico_estadistico"),
     path("ventas/historial/bulk/", VentaHistoricaBulkUpsertView.as_view(), name="api_ventas_historial_bulk"),
     path("ventas/solicitud/", SolicitudVentaUpsertView.as_view(), name="api_ventas_solicitud"),

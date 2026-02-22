@@ -180,6 +180,21 @@ class ForecastEstadisticoRequestSerializer(serializers.Serializer):
         return f"{year:04d}-{month:02d}"
 
 
+class ForecastBacktestRequestSerializer(serializers.Serializer):
+    alcance = serializers.ChoiceField(choices=["mes", "semana", "fin_semana"], required=False, default="mes")
+    fecha_base = serializers.DateField(required=False)
+    sucursal_id = serializers.IntegerField(required=False, allow_null=True)
+    incluir_preparaciones = serializers.BooleanField(required=False, default=False)
+    safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
+    periods = serializers.IntegerField(required=False, min_value=1, max_value=12, default=3)
+    top = serializers.IntegerField(required=False, min_value=1, max_value=50, default=10)
+
+    def validate_safety_pct(self, value):
+        if value < -30 or value > 100:
+            raise serializers.ValidationError("safety_pct debe estar entre -30 y 100.")
+        return value
+
+
 class SolicitudVentaUpsertSerializer(serializers.Serializer):
     receta_id = serializers.IntegerField()
     sucursal_id = serializers.IntegerField(required=False, allow_null=True)
