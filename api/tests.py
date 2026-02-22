@@ -1728,6 +1728,18 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["scope"]["alcance"], "semana")
         self.assertEqual(payload["scope"]["sucursal_id"], sucursal.id)
         self.assertGreaterEqual(payload["totals"]["recetas_count"], 1)
+        self.assertIn("forecast_low_total", payload["totals"])
+        self.assertIn("forecast_high_total", payload["totals"])
+        self.assertGreaterEqual(payload["totals"]["forecast_high_total"], payload["totals"]["forecast_total"])
+        self.assertLessEqual(payload["totals"]["forecast_low_total"], payload["totals"]["forecast_total"])
+        self.assertGreaterEqual(len(payload["rows"]), 1)
+        row = payload["rows"][0]
+        self.assertIn("forecast_low", row)
+        self.assertIn("forecast_high", row)
+        self.assertIn("desviacion", row)
+        self.assertIn("muestras", row)
+        self.assertLessEqual(row["forecast_low"], row["forecast_qty"])
+        self.assertGreaterEqual(row["forecast_high"], row["forecast_qty"])
         self.assertIn("compare_solicitud", payload)
         self.assertGreaterEqual(len(payload["compare_solicitud"]["rows"]), 1)
 

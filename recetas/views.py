@@ -1,5 +1,6 @@
 import csv
 from io import BytesIO
+from math import sqrt
 from datetime import date, timedelta
 from calendar import monthrange
 from collections import defaultdict
@@ -2066,9 +2067,20 @@ def _weighted_avg_decimal(values: list[Decimal]) -> Decimal:
     return total / total_weight
 
 
-def _forecast_month_qty(day_rows: list[tuple[date, Decimal]], target_start: date) -> tuple[Decimal, int, Decimal]:
+def _stddev_decimal(values: list[Decimal]) -> Decimal:
+    clean = [Decimal(str(v)) for v in values]
+    if len(clean) <= 1:
+        return Decimal("0")
+    mean = sum(clean, Decimal("0")) / Decimal(str(len(clean)))
+    variance = sum(((v - mean) ** 2 for v in clean), Decimal("0")) / Decimal(str(len(clean)))
+    return Decimal(str(sqrt(float(variance))))
+
+
+def _forecast_month_qty(
+    day_rows: list[tuple[date, Decimal]], target_start: date
+) -> tuple[Decimal, int, Decimal, Decimal, int]:
     if not day_rows:
-        return Decimal("0"), 0, Decimal("0")
+        return Decimal("0"), 0, Decimal("0"), Decimal("0"), 0
 
     monthly_totals: dict[tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0"))
     for d, qty in day_rows:
@@ -2097,13 +2109,17 @@ def _forecast_month_qty(day_rows: list[tuple[date, Decimal]], target_start: date
         + (seasonal_avg * Decimal("0.30"))
         + (trend_next * Decimal("0.20"))
     )
+    variance_samples = ordered_values[-12:] if len(ordered_values) >= 12 else ordered_values
+    dispersion = _stddev_decimal(variance_samples)
     confidence = min(Decimal("1"), Decimal(str(len(ordered_values))) / Decimal("12"))
-    return weighted, len(day_rows), confidence
+    return weighted, len(day_rows), confidence, dispersion, len(variance_samples)
 
 
-def _forecast_range_qty(day_rows: list[tuple[date, Decimal]], target_start: date, target_end: date) -> tuple[Decimal, int, Decimal]:
+def _forecast_range_qty(
+    day_rows: list[tuple[date, Decimal]], target_start: date, target_end: date
+) -> tuple[Decimal, int, Decimal, Decimal, int]:
     if not day_rows:
-        return Decimal("0"), 0, Decimal("0")
+        return Decimal("0"), 0, Decimal("0"), Decimal("0"), 0
 
     by_dow: dict[int, list[Decimal]] = defaultdict(list)
     lower_window = target_start - timedelta(days=84)
@@ -2122,13 +2138,17 @@ def _forecast_range_qty(day_rows: list[tuple[date, Decimal]], target_start: date
 
     used_samples = 0
     pred_total = Decimal("0")
+    variance_samples: list[Decimal] = []
     for d in horizon_days:
         samples = by_dow.get(d.weekday(), [])
         if samples:
-            day_pred = _weighted_avg_decimal(samples[-8:])
-            used_samples += len(samples[-8:])
+            recent = samples[-8:]
+            day_pred = _weighted_avg_decimal(recent)
+            used_samples += len(recent)
+            variance_samples.extend(recent)
         else:
             day_pred = global_avg
+            variance_samples.append(global_avg)
         pred_total += day_pred
 
     confidence = Decimal("0")
@@ -2137,7 +2157,8 @@ def _forecast_range_qty(day_rows: list[tuple[date, Decimal]], target_start: date
             Decimal("1"),
             Decimal(str(used_samples)) / Decimal(str(len(horizon_days) * 8)),
         )
-    return pred_total, len(day_rows), confidence
+    dispersion = _stddev_decimal(variance_samples)
+    return pred_total, len(day_rows), confidence, dispersion, len(variance_samples)
 
 
 def _build_forecast_from_history(
@@ -2188,11 +2209,14 @@ def _build_forecast_from_history(
     for rid, item in grouped.items():
         days = item["days"]
         if alcance == "mes":
-            predicted, obs, confidence = _forecast_month_qty(days, target_start)
+            predicted, obs, confidence, dispersion, samples_count = _forecast_month_qty(days, target_start)
         else:
-            predicted, obs, confidence = _forecast_range_qty(days, target_start, target_end)
+            predicted, obs, confidence, dispersion, samples_count = _forecast_range_qty(days, target_start, target_end)
         predicted = max(predicted * safety_factor, Decimal("0"))
         predicted = predicted.quantize(Decimal("0.001"))
+        dispersion = max(dispersion * safety_factor, Decimal("0")).quantize(Decimal("0.001"))
+        forecast_low = max(predicted - dispersion, Decimal("0")).quantize(Decimal("0.001"))
+        forecast_high = max(predicted + dispersion, Decimal("0")).quantize(Decimal("0.001"))
         if predicted <= 0:
             continue
 
@@ -2211,6 +2235,10 @@ def _build_forecast_from_history(
                 "receta_id": rid,
                 "receta": item["receta"],
                 "forecast_qty": predicted,
+                "forecast_low": forecast_low,
+                "forecast_high": forecast_high,
+                "desviacion": dispersion,
+                "muestras": int(samples_count),
                 "pronostico_actual": current.quantize(Decimal("0.001")),
                 "delta": delta.quantize(Decimal("0.001")),
                 "recomendacion": recomendacion,
@@ -2231,6 +2259,8 @@ def _build_forecast_from_history(
         "totals": {
             "recetas_count": len(rows),
             "forecast_total": sum((r["forecast_qty"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+            "forecast_low_total": sum((r["forecast_low"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+            "forecast_high_total": sum((r["forecast_high"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
             "pronostico_total": sum((r["pronostico_actual"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
             "delta_total": sum((r["delta"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
         },
@@ -2245,6 +2275,10 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
                 "receta_id": int(row["receta_id"]),
                 "receta": row["receta"],
                 "forecast_qty": float(row["forecast_qty"]),
+                "forecast_low": float(row.get("forecast_low", row["forecast_qty"])),
+                "forecast_high": float(row.get("forecast_high", row["forecast_qty"])),
+                "desviacion": float(row.get("desviacion", 0)),
+                "muestras": int(row.get("muestras", 0)),
                 "pronostico_actual": float(row["pronostico_actual"]),
                 "delta": float(row["delta"]),
                 "recomendacion": row["recomendacion"],
@@ -2263,6 +2297,8 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
         "totals": {
             "recetas_count": int(result["totals"]["recetas_count"]),
             "forecast_total": float(result["totals"]["forecast_total"]),
+            "forecast_low_total": float(result["totals"].get("forecast_low_total", result["totals"]["forecast_total"])),
+            "forecast_high_total": float(result["totals"].get("forecast_high_total", result["totals"]["forecast_total"])),
             "pronostico_total": float(result["totals"]["pronostico_total"]),
             "delta_total": float(result["totals"]["delta_total"]),
         },
