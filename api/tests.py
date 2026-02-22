@@ -699,6 +699,79 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(payload["inventario"]["almacen_pending_preview"], 1)
         self.assertGreaterEqual(payload["inventario"]["recetas_pending_match"], 1)
 
+    def test_endpoint_inventario_aliases_pendientes_unificados_resolver_dry_run_and_apply(self):
+        target = Insumo.objects.create(nombre="Harina API Target", unidad_base=self.unidad, activo=True)
+        nombre_cross = "Harina pastelera premium"
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CROSS-RSLV-01",
+            point_nombre=nombre_cross,
+            method="FUZZY",
+            fuzzy_score=93.0,
+            fuzzy_sugerencia=target.nombre,
+        )
+        receta_cross = Receta.objects.create(
+            nombre="Receta Cross Resolver API",
+            sheet_name="Insumos Cross Resolver",
+            hash_contenido="hash-api-cross-resolver-001",
+        )
+        linea = LineaReceta.objects.create(
+            receta=receta_cross,
+            posicion=1,
+            insumo=None,
+            insumo_texto=nombre_cross,
+            cantidad=Decimal("1.0"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_score=90.0,
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[
+                {
+                    "nombre_origen": nombre_cross,
+                    "nombre_normalizado": "harina pastelera premium",
+                    "suggestion": target.nombre,
+                    "score": 95,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                }
+            ],
+        )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados_resolver")
+        resp_dry = self.client.post(
+            url,
+            {"dry_run": True, "min_sources": 2, "only_suggested": True, "score_min": 0},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_dry.status_code, 200)
+        payload_dry = resp_dry.json()
+        self.assertTrue(payload_dry["dry_run"])
+        self.assertGreaterEqual(payload_dry["totales"]["resueltos"], 1)
+        self.assertEqual(payload_dry["totales"]["aliases_creados"], 0)
+        self.assertFalse(InsumoAlias.objects.filter(nombre_normalizado="harina pastelera premium").exists())
+
+        resp_apply = self.client.post(
+            url,
+            {"dry_run": False, "min_sources": 2, "only_suggested": True, "score_min": 0},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_apply.status_code, 200)
+        payload_apply = resp_apply.json()
+        self.assertFalse(payload_apply["dry_run"])
+        self.assertGreaterEqual(payload_apply["totales"]["resueltos"], 1)
+        self.assertGreaterEqual(payload_apply["totales"]["aliases_creados"], 1)
+        self.assertGreaterEqual(payload_apply["totales"]["point_resueltos"], 1)
+        self.assertGreaterEqual(payload_apply["totales"]["recetas_resueltas"], 1)
+        self.assertTrue(InsumoAlias.objects.filter(nombre_normalizado="harina pastelera premium", insumo=target).exists())
+        self.assertFalse(PointPendingMatch.objects.filter(point_codigo="PT-CROSS-RSLV-01").exists())
+        linea.refresh_from_db()
+        self.assertEqual(linea.insumo_id, target.id)
+
     def test_endpoint_inventario_point_pendientes_resolver_insumos(self):
         pending = PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,
@@ -827,6 +900,14 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(self.client.get(reverse("api_inventario_aliases_pendientes")).status_code, 403)
         self.assertEqual(self.client.get(reverse("api_inventario_aliases_pendientes_unificados")).status_code, 403)
         self.assertEqual(self.client.get(reverse("api_integraciones_point_resumen")).status_code, 403)
+        self.assertEqual(
+            self.client.post(
+                reverse("api_inventario_aliases_pendientes_unificados_resolver"),
+                {"dry_run": True},
+                content_type="application/json",
+            ).status_code,
+            403,
+        )
         self.assertEqual(
             self.client.post(
                 reverse("api_inventario_aliases"),

@@ -262,6 +262,28 @@ class InventarioPointPendingResolveSerializer(serializers.Serializer):
         return attrs
 
 
+class InventarioCrossPendientesResolveSerializer(serializers.Serializer):
+    nombres = serializers.ListField(
+        child=serializers.CharField(max_length=250),
+        required=False,
+        allow_empty=True,
+        default=list,
+    )
+    q = serializers.CharField(required=False, allow_blank=True, default="")
+    runs = serializers.IntegerField(required=False, min_value=1, max_value=30, default=5)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=800, default=300)
+    min_sources = serializers.IntegerField(required=False, min_value=1, max_value=3, default=2)
+    score_min = serializers.FloatField(required=False, default=0)
+    only_suggested = serializers.BooleanField(required=False, default=True)
+    dry_run = serializers.BooleanField(required=False, default=True)
+
+    def validate_score_min(self, value):
+        if value < 0:
+            return 0.0
+        if value > 100:
+            return 100.0
+        return float(value)
+
 class ComprasSolicitudCreateSerializer(serializers.Serializer):
     area = serializers.CharField(max_length=120)
     solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True)

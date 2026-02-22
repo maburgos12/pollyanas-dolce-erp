@@ -31,6 +31,7 @@ Sprint 1 entrega:
 - API: POST /api/inventario/aliases/reasignar/ (reasignación masiva de alias a insumo oficial)
 - API: GET /api/inventario/aliases/pendientes/ (pendientes de homologación: almacén, Point y recetas)
 - API: GET /api/inventario/aliases/pendientes-unificados/ (tablero unificado de pendientes cross-fuente con filtros)
+- API: POST /api/inventario/aliases/pendientes-unificados/resolver/ (auto-resuelve alias cross-fuente con dry_run/commit)
 - API: GET /api/integraciones/point/resumen/ (KPI de homologación Point: insumos, recetas, proveedores y pendientes)
 - API: POST /api/inventario/point-pendientes/resolver/ (resolver/descartar pendientes Point por insumo, producto o proveedor)
 - API: GET /api/compras/solicitudes/ (listado de solicitudes con filtros, estatus y presupuesto estimado)

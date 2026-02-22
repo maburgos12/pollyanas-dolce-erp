@@ -84,6 +84,7 @@ from .serializers import (
     InventarioAjusteCreateSerializer,
     InventarioAjusteDecisionSerializer,
     InventarioAliasCreateSerializer,
+    InventarioCrossPendientesResolveSerializer,
     InventarioAliasMassReassignSerializer,
     InventarioPointPendingResolveSerializer,
     MRPRequestSerializer,
@@ -1145,6 +1146,197 @@ class InventarioAliasesPendientesUnificadosView(APIView):
                     "recetas_pending_lines": receta_pending_lines,
                 },
                 "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InventarioAliasesPendientesUnificadosResolveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not has_any_role(request.user, ROLE_ADMIN, ROLE_DG, ROLE_COMPRAS):
+            return Response(
+                {"detail": "No tienes permisos para resolver pendientes unificados."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = InventarioCrossPendientesResolveSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        limit = int(data.get("limit") or 300)
+        runs_to_scan = int(data.get("runs") or 5)
+        q = str(data.get("q") or "").strip()
+        q_norm = normalizar_nombre(q)
+        min_sources = int(data.get("min_sources") or 2)
+        score_min = float(data.get("score_min") or 0)
+        score_min = max(0.0, min(100.0, score_min))
+        only_suggested = bool(data.get("only_suggested", True))
+        dry_run = bool(data.get("dry_run", True))
+        nombres = [str(x or "").strip() for x in (data.get("nombres") or [])]
+        selected_norms = {normalizar_nombre(x) for x in nombres if normalizar_nombre(x)}
+
+        pending_rows: list[dict] = []
+        sync_runs = list(AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at")[:runs_to_scan])
+        for run in sync_runs:
+            for row in run.pending_preview or []:
+                nombre_origen = str((row or {}).get("nombre_origen") or "").strip()
+                if not nombre_origen:
+                    continue
+                pending_rows.append(
+                    {
+                        "nombre_origen": nombre_origen,
+                        "nombre_normalizado": str((row or {}).get("nombre_normalizado") or normalizar_nombre(nombre_origen)),
+                        "sugerencia": str((row or {}).get("suggestion") or ""),
+                        "score": float((row or {}).get("score") or 0),
+                        "source": str((row or {}).get("fuente") or "ALMACEN"),
+                    }
+                )
+
+        pending_grouped = _build_pending_grouped(pending_rows)
+        unified_rows, _, _ = _build_cross_unified_rows(pending_grouped)
+        filtered_rows = _apply_cross_filters(
+            unified_rows,
+            cross_q_norm=q_norm,
+            cross_only_suggested=only_suggested,
+            cross_min_sources=min_sources,
+            cross_score_min=score_min,
+        )
+        if selected_norms:
+            filtered_rows = [row for row in filtered_rows if (row.get("nombre_normalizado") or "") in selected_norms]
+        rows_to_process = filtered_rows[:limit]
+
+        processed = 0
+        resolved = 0
+        created_aliases = 0
+        updated_aliases = 0
+        unchanged = 0
+        skipped_no_suggestion = 0
+        skipped_no_target = 0
+        point_resolved_total = 0
+        recetas_resolved_total = 0
+        preview_actions: list[dict] = []
+
+        write_context = nullcontext()
+        if not dry_run:
+            write_context = transaction.atomic()
+
+        with write_context:
+            for row in rows_to_process:
+                processed += 1
+                alias_name = str(row.get("nombre_muestra") or "").strip()
+                alias_norm = normalizar_nombre(alias_name)
+                suggestion_name = str(row.get("suggestion") or "").strip()
+                suggestion_norm = normalizar_nombre(suggestion_name)
+                if not suggestion_norm:
+                    skipped_no_suggestion += 1
+                    if len(preview_actions) < 120:
+                        preview_actions.append(
+                            {
+                                "nombre_muestra": alias_name,
+                                "sugerencia": suggestion_name,
+                                "action": "skip_no_suggestion",
+                            }
+                        )
+                    continue
+
+                insumo_target = Insumo.objects.filter(activo=True, nombre_normalizado=suggestion_norm).first()
+                if not insumo_target:
+                    skipped_no_target += 1
+                    if len(preview_actions) < 120:
+                        preview_actions.append(
+                            {
+                                "nombre_muestra": alias_name,
+                                "sugerencia": suggestion_name,
+                                "action": "skip_no_target",
+                            }
+                        )
+                    continue
+
+                action_name = "noop"
+                if not alias_norm or alias_norm == insumo_target.nombre_normalizado:
+                    unchanged += 1
+                    action_name = "noop_same_name"
+                else:
+                    alias_obj = InsumoAlias.objects.filter(nombre_normalizado=alias_norm).first()
+                    if dry_run:
+                        if alias_obj is None:
+                            action_name = "create_alias"
+                        elif alias_obj.insumo_id != insumo_target.id or alias_obj.nombre != alias_name[:250]:
+                            action_name = "update_alias"
+                        else:
+                            action_name = "noop_alias_exists"
+                            unchanged += 1
+                    else:
+                        if alias_obj is None:
+                            InsumoAlias.objects.create(
+                                nombre=alias_name[:250],
+                                nombre_normalizado=alias_norm,
+                                insumo=insumo_target,
+                            )
+                            created_aliases += 1
+                            action_name = "create_alias"
+                        else:
+                            changes = []
+                            if alias_obj.insumo_id != insumo_target.id:
+                                alias_obj.insumo = insumo_target
+                                changes.append("insumo")
+                            if alias_obj.nombre != alias_name[:250]:
+                                alias_obj.nombre = alias_name[:250]
+                                changes.append("nombre")
+                            if changes:
+                                alias_obj.save(update_fields=changes)
+                                updated_aliases += 1
+                                action_name = "update_alias"
+                            else:
+                                unchanged += 1
+                                action_name = "noop_alias_exists"
+
+                if not dry_run:
+                    p_count, r_count = _resolve_cross_source_with_alias(alias_name or suggestion_name, insumo_target)
+                    point_resolved_total += p_count
+                    recetas_resolved_total += r_count
+
+                resolved += 1
+                if len(preview_actions) < 120:
+                    preview_actions.append(
+                        {
+                            "nombre_muestra": alias_name,
+                            "sugerencia": suggestion_name,
+                            "insumo_target": insumo_target.nombre,
+                            "insumo_id": insumo_target.id,
+                            "action": action_name,
+                            "sources_active": int(row.get("sources_active") or 0),
+                            "total_count": int(row.get("total_count") or 0),
+                        }
+                    )
+
+        return Response(
+            {
+                "dry_run": dry_run,
+                "filters": {
+                    "q": q,
+                    "runs": runs_to_scan,
+                    "limit": limit,
+                    "min_sources": min_sources,
+                    "score_min": round(score_min, 2),
+                    "only_suggested": only_suggested,
+                    "selected_names_count": len(selected_norms),
+                },
+                "totales": {
+                    "candidatos_filtrados": len(filtered_rows),
+                    "procesados": processed,
+                    "resueltos": resolved,
+                    "aliases_creados": created_aliases,
+                    "aliases_actualizados": updated_aliases,
+                    "sin_cambio": unchanged,
+                    "sin_sugerencia": skipped_no_suggestion,
+                    "sin_insumo_objetivo": skipped_no_target,
+                    "point_resueltos": point_resolved_total,
+                    "recetas_resueltas": recetas_resolved_total,
+                },
+                "items": preview_actions,
             },
             status=status.HTTP_200_OK,
         )
