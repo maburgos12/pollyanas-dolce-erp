@@ -146,3 +146,36 @@ class PointPendingReviewTests(TestCase):
         self.assertTrue(
             InsumoAlias.objects.filter(nombre_normalizado=alias_norm, insumo=self.insumo_harina).exists()
         )
+
+    def test_auto_resolve_sugerencias_uses_current_filter_when_no_selection(self):
+        pending_ok = PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-INS-020",
+            point_nombre="Harina Point Filtrada",
+            fuzzy_sugerencia="Harina Pastelera",
+            fuzzy_score=95.0,
+            method="FUZZY",
+        )
+        pending_other = PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-INS-021",
+            point_nombre="Azucar Point",
+            fuzzy_sugerencia="Azucar",
+            fuzzy_score=99.0,
+            method="FUZZY",
+        )
+
+        response = self.client.post(
+            reverse("maestros:point_pending_review"),
+            {
+                "tipo": "INSUMO",
+                "action": "resolve_sugerencias_insumos",
+                "q": "Harina",
+                "score_min": "90",
+                "auto_score_min": "90",
+                "create_aliases": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(PointPendingMatch.objects.filter(id=pending_ok.id).exists())
+        self.assertTrue(PointPendingMatch.objects.filter(id=pending_other.id).exists())

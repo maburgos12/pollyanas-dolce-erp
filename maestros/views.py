@@ -308,7 +308,22 @@ def point_pending_review(request):
 
         pending_ids = [pid for pid in request.POST.getlist("pending_ids") if pid.isdigit()]
         selected = PointPendingMatch.objects.filter(id__in=pending_ids, tipo=tipo)
-        if not pending_ids:
+
+        if not pending_ids and action == "resolve_sugerencias_insumos":
+            q_filter = (request.POST.get("q") or "").strip()
+            score_filter = max(0.0, min(100.0, _to_float(request.POST.get("score_min"), 0)))
+            selected = PointPendingMatch.objects.filter(tipo=tipo)
+            if q_filter:
+                selected = selected.filter(
+                    Q(point_nombre__icontains=q_filter)
+                    | Q(point_codigo__icontains=q_filter)
+                    | Q(fuzzy_sugerencia__icontains=q_filter)
+                )
+            if score_filter > 0:
+                selected = selected.filter(fuzzy_score__gte=score_filter)
+            selected = selected.order_by("-fuzzy_score", "point_nombre")
+
+        if not pending_ids and not selected.exists():
             messages.error(request, "Selecciona al menos un pendiente.")
             return redirect("maestros:point_pending_review")
 
