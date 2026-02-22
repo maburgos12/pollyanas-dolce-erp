@@ -269,6 +269,121 @@ class RecetasCosteoApiTests(TestCase):
         )
         self.assertEqual(resp_create.status_code, 403)
 
+    def test_endpoint_mrp_plan_detail_and_items_crud(self):
+        receta_extra = Receta.objects.create(
+            nombre="Receta API secundaria",
+            sheet_name="Insumos API 2",
+            hash_contenido="hash-api-002",
+        )
+        plan = PlanProduccion.objects.create(
+            nombre="Plan CRUD API",
+            fecha_produccion=date(2026, 3, 20),
+            notas="Inicial",
+            creado_por=self.user,
+        )
+        item_base = PlanProduccionItem.objects.create(
+            plan=plan,
+            receta=self.receta,
+            cantidad=Decimal("1.500"),
+            notas="Base",
+        )
+
+        url_detail = reverse("api_mrp_plan_detail", args=[plan.id])
+        resp_get = self.client.get(url_detail)
+        self.assertEqual(resp_get.status_code, 200)
+        payload_get = resp_get.json()
+        self.assertEqual(payload_get["id"], plan.id)
+        self.assertEqual(payload_get["totals"]["items_count"], 1)
+        self.assertEqual(payload_get["items"][0]["id"], item_base.id)
+
+        resp_patch = self.client.patch(
+            url_detail,
+            {"nombre": "Plan CRUD API actualizado", "notas": "Ajustado"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_patch.status_code, 200)
+        payload_patch = resp_patch.json()
+        self.assertTrue(payload_patch["updated"])
+        self.assertEqual(payload_patch["nombre"], "Plan CRUD API actualizado")
+
+        url_item_create = reverse("api_mrp_plan_item_create", args=[plan.id])
+        resp_add = self.client.post(
+            url_item_create,
+            {"receta_id": receta_extra.id, "cantidad": "3.250", "notas": "Turno B"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_add.status_code, 201)
+        payload_add = resp_add.json()
+        self.assertTrue(payload_add["created"])
+        new_item_id = payload_add["item"]["id"]
+        self.assertEqual(payload_add["plan_totals"]["items_count"], 2)
+
+        url_item_detail = reverse("api_mrp_plan_item_detail", args=[new_item_id])
+        resp_item_patch = self.client.patch(
+            url_item_detail,
+            {"cantidad": "4.000", "notas": "Ajuste final"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_item_patch.status_code, 200)
+        payload_item_patch = resp_item_patch.json()
+        self.assertTrue(payload_item_patch["updated"])
+        self.assertEqual(Decimal(payload_item_patch["item"]["cantidad"]), Decimal("4.000"))
+
+        resp_item_delete = self.client.delete(url_item_detail)
+        self.assertEqual(resp_item_delete.status_code, 200)
+        payload_item_delete = resp_item_delete.json()
+        self.assertTrue(payload_item_delete["deleted"])
+        self.assertEqual(payload_item_delete["plan_totals"]["items_count"], 1)
+
+        resp_delete_plan = self.client.delete(url_detail)
+        self.assertEqual(resp_delete_plan.status_code, 200)
+        self.assertTrue(resp_delete_plan.json()["deleted"])
+        self.assertFalse(PlanProduccion.objects.filter(pk=plan.id).exists())
+
+    def test_endpoint_mrp_plan_detail_and_items_require_permissions(self):
+        plan = PlanProduccion.objects.create(
+            nombre="Plan sin permisos",
+            fecha_produccion=date(2026, 3, 21),
+        )
+        item = PlanProduccionItem.objects.create(
+            plan=plan,
+            receta=self.receta,
+            cantidad=Decimal("1.000"),
+        )
+
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_plan_detail_api",
+            email="sin_perm_plan_detail_api@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+
+        url_detail = reverse("api_mrp_plan_detail", args=[plan.id])
+        self.assertEqual(self.client.get(url_detail).status_code, 403)
+        self.assertEqual(
+            self.client.patch(url_detail, {"nombre": "X"}, content_type="application/json").status_code,
+            403,
+        )
+        self.assertEqual(self.client.delete(url_detail).status_code, 403)
+
+        url_item_create = reverse("api_mrp_plan_item_create", args=[plan.id])
+        self.assertEqual(
+            self.client.post(
+                url_item_create,
+                {"receta_id": self.receta.id, "cantidad": "1.000"},
+                content_type="application/json",
+            ).status_code,
+            403,
+        )
+
+        url_item_detail = reverse("api_mrp_plan_item_detail", args=[item.id])
+        self.assertEqual(
+            self.client.patch(url_item_detail, {"cantidad": "2.000"}, content_type="application/json").status_code,
+            403,
+        )
+        self.assertEqual(self.client.delete(url_item_detail).status_code, 403)
+
     def test_endpoint_inventario_sugerencias_compra_por_plan(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor API", lead_time_dias=3, activo=True)
         self.insumo.proveedor_principal = proveedor

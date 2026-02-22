@@ -73,6 +73,9 @@ from .serializers import (
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
     PlanProduccionCreateSerializer,
+    PlanProduccionItemCreateSerializer,
+    PlanProduccionItemUpdateSerializer,
+    PlanProduccionUpdateSerializer,
     PlanDesdePronosticoRequestSerializer,
     PronosticoVentaBulkSerializer,
     RecetaCostoVersionSerializer,
@@ -2198,6 +2201,204 @@ class PlanProduccionListCreateView(APIView):
         return Response(
             {"created": True, "plan": payload},
             status=status.HTTP_201_CREATED,
+        )
+
+
+class PlanProduccionDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _serialize_item(row: PlanProduccionItem) -> dict:
+        return {
+            "id": row.id,
+            "receta_id": row.receta_id,
+            "receta": row.receta.nombre,
+            "codigo_point": row.receta.codigo_point,
+            "cantidad": str(_to_decimal(row.cantidad)),
+            "costo_total_estimado": str(_to_decimal(row.costo_total_estimado).quantize(Decimal("0.001"))),
+            "notas": row.notas or "",
+        }
+
+    @staticmethod
+    def _plan_totals(plan: PlanProduccion) -> dict:
+        rows = list(plan.items.select_related("receta").all())
+        cantidad_total = sum((_to_decimal(r.cantidad) for r in rows), Decimal("0"))
+        costo_total = sum((_to_decimal(r.costo_total_estimado) for r in rows), Decimal("0"))
+        return {
+            "items_count": len(rows),
+            "cantidad_total": str(cantidad_total),
+            "costo_total_estimado": str(costo_total.quantize(Decimal("0.001"))),
+        }
+
+    def get(self, request, plan_id: int):
+        if not request.user.has_perm("recetas.view_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para consultar planes de producción."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        plan = get_object_or_404(PlanProduccion.objects.prefetch_related("items__receta"), pk=plan_id)
+        totals = self._plan_totals(plan)
+        items = [self._serialize_item(r) for r in plan.items.select_related("receta").all().order_by("id")]
+        return Response(
+            {
+                "id": plan.id,
+                "nombre": plan.nombre,
+                "fecha_produccion": str(plan.fecha_produccion),
+                "notas": plan.notas or "",
+                "creado_por": plan.creado_por.username if plan.creado_por_id else "",
+                "actualizado_en": plan.actualizado_en,
+                "totals": totals,
+                "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def patch(self, request, plan_id: int):
+        if not request.user.has_perm("recetas.change_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para editar planes de producción."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        plan = get_object_or_404(PlanProduccion, pk=plan_id)
+        ser = PlanProduccionUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        update_fields = []
+        if "nombre" in data:
+            nombre = (data.get("nombre") or "").strip()
+            if nombre:
+                plan.nombre = nombre[:140]
+                update_fields.append("nombre")
+        if "fecha_produccion" in data:
+            plan.fecha_produccion = data["fecha_produccion"]
+            update_fields.append("fecha_produccion")
+        if "notas" in data:
+            plan.notas = (data.get("notas") or "").strip()
+            update_fields.append("notas")
+        if update_fields:
+            plan.save(update_fields=update_fields + ["actualizado_en"])
+        return Response(
+            {
+                "updated": bool(update_fields),
+                "id": plan.id,
+                "nombre": plan.nombre,
+                "fecha_produccion": str(plan.fecha_produccion),
+                "notas": plan.notas or "",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request, plan_id: int):
+        if not request.user.has_perm("recetas.delete_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para eliminar planes de producción."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        plan = get_object_or_404(PlanProduccion, pk=plan_id)
+        payload = {"id": plan.id, "nombre": plan.nombre}
+        plan.delete()
+        return Response(
+            {"deleted": True, "plan": payload},
+            status=status.HTTP_200_OK,
+        )
+
+
+class PlanProduccionItemCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, plan_id: int):
+        if not request.user.has_perm("recetas.change_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para editar renglones de plan de producción."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        plan = get_object_or_404(PlanProduccion, pk=plan_id)
+        ser = PlanProduccionItemCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        receta = Receta.objects.filter(pk=data["receta_id"]).only("id", "nombre", "codigo_point").first()
+        if receta is None:
+            return Response(
+                {"detail": "receta_id no encontrada."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        item = PlanProduccionItem.objects.create(
+            plan=plan,
+            receta=receta,
+            cantidad=_to_decimal(data["cantidad"]),
+            notas=(data.get("notas") or "").strip()[:160],
+        )
+        return Response(
+            {
+                "created": True,
+                "item": PlanProduccionDetailView._serialize_item(item),
+                "plan_totals": PlanProduccionDetailView._plan_totals(plan),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PlanProduccionItemDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, item_id: int):
+        if not request.user.has_perm("recetas.change_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para editar renglones de plan de producción."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        item = get_object_or_404(PlanProduccionItem.objects.select_related("plan", "receta"), pk=item_id)
+        ser = PlanProduccionItemUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        update_fields = []
+        if "receta_id" in data:
+            receta = Receta.objects.filter(pk=data["receta_id"]).only("id", "nombre", "codigo_point").first()
+            if receta is None:
+                return Response(
+                    {"detail": "receta_id no encontrada."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            item.receta = receta
+            update_fields.append("receta")
+        if "cantidad" in data:
+            item.cantidad = _to_decimal(data["cantidad"])
+            update_fields.append("cantidad")
+        if "notas" in data:
+            item.notas = (data.get("notas") or "").strip()[:160]
+            update_fields.append("notas")
+        if update_fields:
+            item.save(update_fields=update_fields)
+        item.refresh_from_db()
+        return Response(
+            {
+                "updated": bool(update_fields),
+                "item": PlanProduccionDetailView._serialize_item(item),
+                "plan_totals": PlanProduccionDetailView._plan_totals(item.plan),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request, item_id: int):
+        if not request.user.has_perm("recetas.change_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para eliminar renglones de plan de producción."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        item = get_object_or_404(PlanProduccionItem.objects.select_related("plan"), pk=item_id)
+        plan = item.plan
+        payload = {"id": item.id, "plan_id": item.plan_id}
+        item.delete()
+        return Response(
+            {
+                "deleted": True,
+                "item": payload,
+                "plan_totals": PlanProduccionDetailView._plan_totals(plan),
+            },
+            status=status.HTTP_200_OK,
         )
 
 

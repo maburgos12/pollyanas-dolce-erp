@@ -142,6 +142,35 @@ class PlanProduccionCreateSerializer(serializers.Serializer):
         return value
 
 
+class PlanProduccionUpdateSerializer(serializers.Serializer):
+    nombre = serializers.CharField(max_length=140, required=False, allow_blank=True)
+    fecha_produccion = serializers.DateField(required=False)
+    notas = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if not attrs:
+            raise serializers.ValidationError("Envía al menos un campo para actualizar.")
+        return attrs
+
+
+class PlanProduccionItemUpdateSerializer(serializers.Serializer):
+    receta_id = serializers.IntegerField(required=False)
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=3, required=False)
+    notas = serializers.CharField(max_length=160, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if not attrs:
+            raise serializers.ValidationError("Envía al menos un campo para actualizar.")
+        return attrs
+
+    def validate_cantidad(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("La cantidad debe ser mayor a 0.")
+        return value
+
+
 class ComprasSolicitudCreateSerializer(serializers.Serializer):
     area = serializers.CharField(max_length=120)
     solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True)
