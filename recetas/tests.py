@@ -543,6 +543,60 @@ class PronosticoImportViewTests(TestCase):
         self.assertEqual(record.cantidad, Decimal("120"))
 
 
+class PlanGeneradoDesdePronosticoTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_plan_gen",
+            email="admin_plan_gen@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
+        self.receta_final = Receta.objects.create(
+            nombre="Producto Final Test",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-plan-gen-final",
+        )
+        self.receta_prep = Receta.objects.create(
+            nombre="Preparacion Test",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="hash-plan-gen-prep",
+        )
+        PronosticoVenta.objects.create(receta=self.receta_final, periodo="2026-03", cantidad=Decimal("12"))
+        PronosticoVenta.objects.create(receta=self.receta_prep, periodo="2026-03", cantidad=Decimal("8"))
+
+    def test_genera_plan_desde_pronostico_solo_producto_final_por_default(self):
+        response = self.client.post(
+            reverse("recetas:plan_produccion_generar_desde_pronostico"),
+            {
+                "periodo": "2026-03",
+                "fecha_produccion": "2026-03-10",
+                "nombre": "Plan desde pronostico test",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        plan = PlanProduccion.objects.get(nombre="Plan desde pronostico test")
+        items = list(plan.items.select_related("receta").all())
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].receta_id, self.receta_final.id)
+        self.assertEqual(items[0].cantidad, Decimal("12"))
+
+    def test_genera_plan_desde_pronostico_incluyendo_preparaciones(self):
+        response = self.client.post(
+            reverse("recetas:plan_produccion_generar_desde_pronostico"),
+            {
+                "periodo": "2026-03",
+                "fecha_produccion": "2026-03-12",
+                "nombre": "Plan pronostico con preparaciones",
+                "incluir_preparaciones": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        plan = PlanProduccion.objects.get(nombre="Plan pronostico con preparaciones")
+        self.assertEqual(plan.items.count(), 2)
+
+
 class RecetaPhase2ViewsTests(TestCase):
     def setUp(self):
         user_model = get_user_model()

@@ -1927,6 +1927,73 @@ def pronosticos_importar(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@permission_required("recetas.add_planproduccion", raise_exception=True)
+@require_POST
+def plan_produccion_generar_desde_pronostico(request: HttpRequest) -> HttpResponse:
+    periodo = _normalize_periodo_mes(request.POST.get("periodo"))
+    nombre = (request.POST.get("nombre") or "").strip()
+    fecha_raw = (request.POST.get("fecha_produccion") or "").strip()
+    incluir_preparaciones = request.POST.get("incluir_preparaciones") == "1"
+
+    if not nombre:
+        nombre = f"Plan desde pronóstico {periodo}"
+
+    try:
+        fecha_plan = date.fromisoformat(fecha_raw) if fecha_raw else date.fromisoformat(f"{periodo}-01")
+    except Exception:
+        messages.error(request, "Fecha de producción inválida.")
+        return redirect(f"{reverse('recetas:plan_produccion')}?periodo={periodo}")
+
+    pronosticos_qs = PronosticoVenta.objects.filter(periodo=periodo).select_related("receta").order_by("receta__nombre")
+    if not incluir_preparaciones:
+        pronosticos_qs = pronosticos_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+
+    pronosticos = list(pronosticos_qs)
+    if not pronosticos:
+        messages.warning(
+            request,
+            "No hay pronósticos para generar plan en ese período con los filtros actuales.",
+        )
+        return redirect(f"{reverse('recetas:plan_produccion')}?periodo={periodo}")
+
+    plan = PlanProduccion.objects.create(
+        nombre=nombre[:140],
+        fecha_produccion=fecha_plan,
+        notas=f"Generado desde pronóstico {periodo}",
+        creado_por=request.user if request.user.is_authenticated else None,
+    )
+
+    created = 0
+    skipped = 0
+    for p in pronosticos:
+        qty = Decimal(str(p.cantidad or 0))
+        if qty <= 0:
+            skipped += 1
+            continue
+        PlanProduccionItem.objects.create(
+            plan=plan,
+            receta=p.receta,
+            cantidad=qty,
+            notas=f"Pronóstico {periodo}",
+        )
+        created += 1
+
+    if created == 0:
+        plan.delete()
+        messages.warning(
+            request,
+            "No se creó plan: todos los pronósticos tenían cantidad 0.",
+        )
+        return redirect(f"{reverse('recetas:plan_produccion')}?periodo={periodo}")
+
+    messages.success(
+        request,
+        f"Plan generado desde pronóstico {periodo}. Renglones creados: {created}. Omitidos por cantidad 0: {skipped}.",
+    )
+    return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}&periodo={periodo}")
+
+
+@login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion(request: HttpRequest) -> HttpResponse:
     planes = PlanProduccion.objects.select_related("creado_por").prefetch_related("items").order_by("-fecha_produccion", "-id")

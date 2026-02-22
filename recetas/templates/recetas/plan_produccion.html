@@ -69,6 +69,33 @@
     </div>
   </form>
   <p class="muted mb-0">Columnas sugeridas: <code>receta</code>, <code>codigo_point</code>, <code>periodo</code> (YYYY-MM), <code>cantidad</code>.</p>
+  <hr>
+  <div class="card-header" style="margin-top:8px;">Generar Plan desde Pronóstico</div>
+  <form class="form-grid-auto" method="post" action="{% url 'recetas:plan_produccion_generar_desde_pronostico' %}">
+    {% csrf_token %}
+    <div class="form-group">
+      <label class="form-label">Periodo</label>
+      <input class="form-control" type="month" name="periodo" value="{{ periodo_pronostico_default }}" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fecha de producción</label>
+      <input class="form-control" type="date" name="fecha_produccion">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nombre del plan</label>
+      <input class="form-control" name="nombre" placeholder="Se autogenera si se deja vacío">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Alcance de recetas</label>
+      <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="incluir_preparaciones" value="1">
+        <span>Incluir preparaciones internas (además de producto final)</span>
+      </label>
+    </div>
+    <div class="form-group" style="align-self:end;">
+      <button class="btn btn-primary" type="submit">Generar plan automáticamente</button>
+    </div>
+  </form>
 </div>
 
 <div class="card">
