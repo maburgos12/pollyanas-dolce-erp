@@ -96,7 +96,16 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
     lineas = list(receta.lineas.select_related("insumo").order_by("posicion"))
     presentaciones = receta.presentaciones.all().order_by("nombre")
-    costeo_actual = calcular_costeo_receta(receta)
+    costeo_unavailable = False
+    try:
+        costeo_actual = calcular_costeo_receta(receta)
+    except (OperationalError, ProgrammingError):
+        costeo_unavailable = True
+        costeo_actual = _empty_costeo_actual()
+        messages.warning(
+            request,
+            "Costeo avanzado no disponible en este entorno. Ejecuta migraciones para habilitar drivers.",
+        )
 
     selected_base = None
     selected_target = None
@@ -144,6 +153,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "costo_por_kg_estimado": receta.costo_por_kg_estimado,
             "linea_tipo_choices": LineaReceta.TIPO_CHOICES,
             "costeo_actual": costeo_actual,
+            "costeo_unavailable": costeo_unavailable,
             "versiones_recientes": versiones_recientes,
             "versiones_all": versiones_all,
             "versiones_comparativo": comparativo,
@@ -308,6 +318,17 @@ def _sync_cost_version_safe(request: HttpRequest, receta: Receta, fuente: str) -
 
 def _load_versiones_costeo(receta: Receta, limit: int) -> list[RecetaCostoVersion]:
     return list(receta.versiones_costo.order_by("-version_num")[:limit])
+
+
+def _empty_costeo_actual() -> dict[str, Any]:
+    return {
+        "driver": None,
+        "costo_mp": Decimal("0"),
+        "costo_mo": Decimal("0"),
+        "costo_indirecto": Decimal("0"),
+        "costo_total": Decimal("0"),
+        "costo_por_unidad_rendimiento": Decimal("0"),
+    }
 
 
 def _compare_versions(base: RecetaCostoVersion, target: RecetaCostoVersion) -> dict[str, Decimal]:

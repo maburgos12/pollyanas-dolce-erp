@@ -445,6 +445,13 @@ class RecetaPhase2ViewsTests(TestCase):
         self.assertTrue(resp.context["versiones_unavailable"])
         self.assertContains(resp, "no está disponible en este entorno")
 
+    def test_receta_detail_handles_missing_driver_table_gracefully(self):
+        with patch("recetas.views.calcular_costeo_receta", side_effect=OperationalError("missing table")):
+            resp = self.client.get(reverse("recetas:receta_detail", args=[self.receta.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["costeo_unavailable"])
+        self.assertContains(resp, "costeo avanzado por drivers no está disponible")
+
     def test_receta_versiones_export_handles_missing_version_table_gracefully(self):
         with patch("recetas.views._load_versiones_costeo", side_effect=OperationalError("missing table")):
             resp = self.client.get(

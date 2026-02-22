@@ -96,6 +96,11 @@
     <h3 class="mb-0">Costeo Completo (Fase 2)</h3>
     <span class="badge bg-primary">Driver: {{ costeo_actual.driver.scope|default:"GLOBAL" }}{% if costeo_actual.driver %} · {{ costeo_actual.driver.nombre }}{% endif %}</span>
   </div>
+  {% if costeo_unavailable %}
+  <div class="alert alert-warning mt-2">
+    El costeo avanzado por drivers no está disponible en este entorno.
+  </div>
+  {% endif %}
   <div class="toolbar">
     <a class="btn btn-secondary" href="{% url 'recetas:receta_versiones_export' receta.id %}?format=csv">Exportar versiones CSV</a>
     <a class="btn btn-secondary" href="{% url 'recetas:receta_versiones_export' receta.id %}?format=xlsx">Exportar versiones XLSX</a>
