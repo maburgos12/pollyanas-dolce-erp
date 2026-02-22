@@ -3,7 +3,7 @@ from contextlib import nullcontext
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from django.db import transaction, OperationalError, ProgrammingError
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -1082,6 +1082,284 @@ class PresupuestosConsolidadoView(APIView):
         }
 
         return Response(payload, status=status.HTTP_200_OK)
+
+
+class ComprasSolicitudesListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar solicitudes de compra."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        estatus = (request.GET.get("estatus") or "").strip().upper()
+        area = (request.GET.get("area") or "").strip()
+        q = (request.GET.get("q") or "").strip()
+        periodo = (request.GET.get("mes") or request.GET.get("periodo") or "").strip()
+        limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=500)
+
+        qs = (
+            SolicitudCompra.objects.select_related("insumo", "insumo__unidad_base", "proveedor_sugerido")
+            .order_by("-creado_en")
+        )
+        valid_status = {choice[0] for choice in SolicitudCompra.STATUS_CHOICES}
+        if estatus in valid_status:
+            qs = qs.filter(estatus=estatus)
+        else:
+            estatus = ""
+        if area:
+            qs = qs.filter(area__icontains=area)
+        parsed_period = _parse_period(periodo)
+        if parsed_period:
+            y, m = parsed_period
+            qs = qs.filter(fecha_requerida__year=y, fecha_requerida__month=m)
+            periodo = f"{y:04d}-{m:02d}"
+        else:
+            periodo = ""
+        if q:
+            qs = qs.filter(
+                Q(folio__icontains=q)
+                | Q(solicitante__icontains=q)
+                | Q(area__icontains=q)
+                | Q(insumo__nombre__icontains=q)
+                | Q(proveedor_sugerido__nombre__icontains=q)
+            )
+
+        rows = list(qs[:limit])
+        insumo_ids = [r.insumo_id for r in rows]
+        latest_cost_by_insumo: dict[int, Decimal] = {}
+        if insumo_ids:
+            for c in CostoInsumo.objects.filter(insumo_id__in=insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+                if c.insumo_id not in latest_cost_by_insumo:
+                    latest_cost_by_insumo[c.insumo_id] = _to_decimal(c.costo_unitario)
+
+        items = []
+        presupuesto_total = Decimal("0")
+        by_status = {k: 0 for k in valid_status}
+        for r in rows:
+            costo_unitario = _to_decimal(latest_cost_by_insumo.get(r.insumo_id, 0))
+            presupuesto = (_to_decimal(r.cantidad) * costo_unitario).quantize(Decimal("0.01"))
+            presupuesto_total += presupuesto
+            by_status[r.estatus] = by_status.get(r.estatus, 0) + 1
+            items.append(
+                {
+                    "id": r.id,
+                    "folio": r.folio,
+                    "estatus": r.estatus,
+                    "area": r.area,
+                    "solicitante": r.solicitante,
+                    "insumo_id": r.insumo_id,
+                    "insumo": r.insumo.nombre,
+                    "unidad": r.insumo.unidad_base.codigo if r.insumo.unidad_base_id and r.insumo.unidad_base else "",
+                    "cantidad": str(r.cantidad),
+                    "fecha_requerida": str(r.fecha_requerida),
+                    "proveedor_sugerido": r.proveedor_sugerido.nombre if r.proveedor_sugerido_id else "",
+                    "costo_unitario": str(costo_unitario),
+                    "presupuesto_estimado": str(presupuesto),
+                    "creado_en": r.creado_en,
+                }
+            )
+
+        return Response(
+            {
+                "filters": {
+                    "estatus": estatus,
+                    "area": area,
+                    "q": q,
+                    "periodo": periodo,
+                    "limit": limit,
+                },
+                "totales": {
+                    "rows": len(items),
+                    "presupuesto_estimado_total": str(presupuesto_total),
+                    "by_status": by_status,
+                },
+                "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ComprasOrdenesListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar órdenes de compra."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        estatus = (request.GET.get("estatus") or "").strip().upper()
+        q = (request.GET.get("q") or "").strip()
+        periodo = (request.GET.get("mes") or request.GET.get("periodo") or "").strip()
+        proveedor_id_raw = (request.GET.get("proveedor_id") or "").strip()
+        limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=500)
+
+        qs = OrdenCompra.objects.select_related("proveedor", "solicitud", "solicitud__insumo").order_by("-creado_en")
+        valid_status = {choice[0] for choice in OrdenCompra.STATUS_CHOICES}
+        if estatus in valid_status:
+            qs = qs.filter(estatus=estatus)
+        else:
+            estatus = ""
+
+        if proveedor_id_raw.isdigit():
+            qs = qs.filter(proveedor_id=int(proveedor_id_raw))
+        else:
+            proveedor_id_raw = ""
+
+        parsed_period = _parse_period(periodo)
+        if parsed_period:
+            y, m = parsed_period
+            qs = qs.filter(fecha_emision__year=y, fecha_emision__month=m)
+            periodo = f"{y:04d}-{m:02d}"
+        else:
+            periodo = ""
+
+        if q:
+            qs = qs.filter(
+                Q(folio__icontains=q)
+                | Q(referencia__icontains=q)
+                | Q(proveedor__nombre__icontains=q)
+                | Q(solicitud__folio__icontains=q)
+            )
+
+        rows = list(qs[:limit])
+        items = []
+        monto_total = Decimal("0")
+        by_status = {k: 0 for k in valid_status}
+        for r in rows:
+            monto = _to_decimal(r.monto_estimado)
+            monto_total += monto
+            by_status[r.estatus] = by_status.get(r.estatus, 0) + 1
+            items.append(
+                {
+                    "id": r.id,
+                    "folio": r.folio,
+                    "estatus": r.estatus,
+                    "proveedor_id": r.proveedor_id,
+                    "proveedor": r.proveedor.nombre if r.proveedor_id else "",
+                    "solicitud_id": r.solicitud_id,
+                    "solicitud_folio": r.solicitud.folio if r.solicitud_id and r.solicitud else "",
+                    "insumo": (
+                        r.solicitud.insumo.nombre
+                        if r.solicitud_id and getattr(r.solicitud, "insumo_id", None) and r.solicitud.insumo
+                        else ""
+                    ),
+                    "referencia": r.referencia,
+                    "fecha_emision": str(r.fecha_emision) if r.fecha_emision else "",
+                    "fecha_entrega_estimada": str(r.fecha_entrega_estimada) if r.fecha_entrega_estimada else "",
+                    "monto_estimado": str(monto),
+                    "creado_en": r.creado_en,
+                }
+            )
+
+        return Response(
+            {
+                "filters": {
+                    "estatus": estatus,
+                    "q": q,
+                    "periodo": periodo,
+                    "proveedor_id": proveedor_id_raw,
+                    "limit": limit,
+                },
+                "totales": {
+                    "rows": len(items),
+                    "monto_estimado_total": str(monto_total),
+                    "by_status": by_status,
+                },
+                "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ComprasRecepcionesListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar recepciones de compra."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        estatus = (request.GET.get("estatus") or "").strip().upper()
+        q = (request.GET.get("q") or "").strip()
+        periodo = (request.GET.get("mes") or request.GET.get("periodo") or "").strip()
+        proveedor_id_raw = (request.GET.get("proveedor_id") or "").strip()
+        limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=500)
+
+        qs = RecepcionCompra.objects.select_related("orden", "orden__proveedor").order_by("-creado_en")
+        valid_status = {choice[0] for choice in RecepcionCompra.STATUS_CHOICES}
+        if estatus in valid_status:
+            qs = qs.filter(estatus=estatus)
+        else:
+            estatus = ""
+
+        if proveedor_id_raw.isdigit():
+            qs = qs.filter(orden__proveedor_id=int(proveedor_id_raw))
+        else:
+            proveedor_id_raw = ""
+
+        parsed_period = _parse_period(periodo)
+        if parsed_period:
+            y, m = parsed_period
+            qs = qs.filter(fecha_recepcion__year=y, fecha_recepcion__month=m)
+            periodo = f"{y:04d}-{m:02d}"
+        else:
+            periodo = ""
+
+        if q:
+            qs = qs.filter(
+                Q(folio__icontains=q)
+                | Q(orden__folio__icontains=q)
+                | Q(orden__proveedor__nombre__icontains=q)
+                | Q(observaciones__icontains=q)
+            )
+
+        rows = list(qs[:limit])
+        items = []
+        by_status = {k: 0 for k in valid_status}
+        for r in rows:
+            by_status[r.estatus] = by_status.get(r.estatus, 0) + 1
+            items.append(
+                {
+                    "id": r.id,
+                    "folio": r.folio,
+                    "estatus": r.estatus,
+                    "orden_id": r.orden_id,
+                    "orden_folio": r.orden.folio if r.orden_id and r.orden else "",
+                    "orden_estatus": r.orden.estatus if r.orden_id and r.orden else "",
+                    "proveedor_id": r.orden.proveedor_id if r.orden_id and r.orden else None,
+                    "proveedor": (
+                        r.orden.proveedor.nombre
+                        if r.orden_id and r.orden and r.orden.proveedor_id and r.orden.proveedor
+                        else ""
+                    ),
+                    "fecha_recepcion": str(r.fecha_recepcion) if r.fecha_recepcion else "",
+                    "conformidad_pct": str(_to_decimal(r.conformidad_pct)),
+                    "observaciones": r.observaciones,
+                    "creado_en": r.creado_en,
+                }
+            )
+
+        return Response(
+            {
+                "filters": {
+                    "estatus": estatus,
+                    "q": q,
+                    "periodo": periodo,
+                    "proveedor_id": proveedor_id_raw,
+                    "limit": limit,
+                },
+                "totales": {"rows": len(items), "by_status": by_status},
+                "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ComprasSolicitudCreateView(APIView):

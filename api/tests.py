@@ -596,6 +596,153 @@ class RecetasCosteoApiTests(TestCase):
         orden.refresh_from_db()
         self.assertEqual(orden.estatus, OrdenCompra.STATUS_CERRADA)
 
+    def test_endpoint_compras_solicitudes_list_filters_and_totals(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor lista solicitudes", activo=True)
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("11.25"),
+            source_hash="api-list-sol-1",
+        )
+        SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="planeacion",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("4"),
+            fecha_requerida=date(2026, 2, 18),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        SolicitudCompra.objects.create(
+            area="Produccion",
+            solicitante="jefe",
+            insumo=self.insumo,
+            cantidad=Decimal("2"),
+            fecha_requerida=date(2026, 3, 2),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+
+        url = reverse("api_compras_solicitudes")
+        resp = self.client.get(url, {"mes": "2026-02", "q": "planea"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["periodo"], "2026-02")
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(Decimal(payload["totales"]["presupuesto_estimado_total"]), Decimal("45.00"))
+        self.assertEqual(payload["totales"]["by_status"][SolicitudCompra.STATUS_APROBADA], 1)
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["solicitante"], "planeacion")
+
+    def test_endpoint_compras_ordenes_list_filters_and_totals(self):
+        proveedor_a = Proveedor.objects.create(nombre="Proveedor orden A", activo=True)
+        proveedor_b = Proveedor.objects.create(nombre="Proveedor orden B", activo=True)
+        solicitud_a = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor_a,
+            cantidad=Decimal("3"),
+            fecha_requerida=date(2026, 2, 10),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        solicitud_b = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor_b,
+            cantidad=Decimal("2"),
+            fecha_requerida=date(2026, 2, 12),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        OrdenCompra.objects.create(
+            solicitud=solicitud_a,
+            proveedor=proveedor_a,
+            referencia="OC-API-A",
+            fecha_emision=date(2026, 2, 14),
+            monto_estimado=Decimal("120.50"),
+            estatus=OrdenCompra.STATUS_ENVIADA,
+        )
+        OrdenCompra.objects.create(
+            solicitud=solicitud_b,
+            proveedor=proveedor_b,
+            referencia="OC-API-B",
+            fecha_emision=date(2026, 2, 15),
+            monto_estimado=Decimal("90.00"),
+            estatus=OrdenCompra.STATUS_BORRADOR,
+        )
+
+        url = reverse("api_compras_ordenes")
+        resp = self.client.get(
+            url,
+            {
+                "mes": "2026-02",
+                "estatus": OrdenCompra.STATUS_ENVIADA,
+                "proveedor_id": proveedor_a.id,
+                "q": "API-A",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(Decimal(payload["totales"]["monto_estimado_total"]), Decimal("120.50"))
+        self.assertEqual(payload["totales"]["by_status"][OrdenCompra.STATUS_ENVIADA], 1)
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["proveedor_id"], proveedor_a.id)
+
+    def test_endpoint_compras_recepciones_list_filters(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor recepciones list", activo=True)
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("2"),
+            fecha_requerida=date(2026, 2, 10),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            referencia="REC-LIST",
+            fecha_emision=date(2026, 2, 11),
+            monto_estimado=Decimal("55"),
+            estatus=OrdenCompra.STATUS_PARCIAL,
+        )
+        RecepcionCompra.objects.create(
+            orden=orden,
+            fecha_recepcion=date(2026, 2, 20),
+            estatus=RecepcionCompra.STATUS_CERRADA,
+            observaciones="Entrada completa",
+        )
+        RecepcionCompra.objects.create(
+            orden=orden,
+            fecha_recepcion=date(2026, 3, 1),
+            estatus=RecepcionCompra.STATUS_PENDIENTE,
+            observaciones="Pendiente validacion",
+        )
+
+        url = reverse("api_compras_recepciones")
+        resp = self.client.get(url, {"mes": "2026-02", "estatus": RecepcionCompra.STATUS_CERRADA, "q": "completa"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(payload["totales"]["by_status"][RecepcionCompra.STATUS_CERRADA], 1)
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["estatus"], RecepcionCompra.STATUS_CERRADA)
+
+    def test_endpoint_compras_listados_requiere_permiso_view(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_listados_compras",
+            email="sin_perm_listados_compras@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+
+        for name in ("api_compras_solicitudes", "api_compras_ordenes", "api_compras_recepciones"):
+            resp = self.client.get(reverse(name))
+            self.assertEqual(resp.status_code, 403)
+
     def test_endpoint_presupuestos_consolidado_periodo(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Consolidado", lead_time_dias=4, activo=True)
         self.insumo.proveedor_principal = proveedor

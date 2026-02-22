@@ -1,5 +1,8 @@
 from django.urls import path
 from .views import (
+    ComprasOrdenesListView,
+    ComprasRecepcionesListView,
+    ComprasSolicitudesListView,
     ComprasSolicitudCrearOrdenView,
     ComprasSolicitudCreateView,
     ComprasSolicitudStatusUpdateView,
@@ -38,6 +41,9 @@ urlpatterns = [
     path("inventario/ajustes/", InventarioAjustesView.as_view(), name="api_inventario_ajustes"),
     path("inventario/ajustes/<int:ajuste_id>/decision/", InventarioAjusteDecisionView.as_view(), name="api_inventario_ajuste_decision"),
     path("inventario/sugerencias-compra/", InventarioSugerenciasCompraView.as_view(), name="api_inventario_sugerencias_compra"),
+    path("compras/solicitudes/", ComprasSolicitudesListView.as_view(), name="api_compras_solicitudes"),
+    path("compras/ordenes/", ComprasOrdenesListView.as_view(), name="api_compras_ordenes"),
+    path("compras/recepciones/", ComprasRecepcionesListView.as_view(), name="api_compras_recepciones"),
     path("compras/solicitud/", ComprasSolicitudCreateView.as_view(), name="api_compras_solicitud"),
     path("compras/solicitud/<int:solicitud_id>/estatus/", ComprasSolicitudStatusUpdateView.as_view(), name="api_compras_solicitud_estatus"),
     path("compras/solicitud/<int:solicitud_id>/crear-orden/", ComprasSolicitudCrearOrdenView.as_view(), name="api_compras_solicitud_crear_orden"),
