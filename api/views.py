@@ -22,6 +22,7 @@ from core.access import (
     can_manage_inventario,
     can_view_compras,
     can_view_inventario,
+    can_view_maestros,
     has_any_role,
 )
 from core.audit import log_event
@@ -1144,6 +1145,92 @@ class InventarioAliasesPendientesUnificadosView(APIView):
                     "recetas_pending_lines": receta_pending_lines,
                 },
                 "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class IntegracionPointResumenView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_maestros(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar resumen de integración Point."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        insumos_activos_qs = Insumo.objects.filter(activo=True)
+        insumos_activos = insumos_activos_qs.count()
+        insumos_con_codigo = insumos_activos_qs.exclude(Q(codigo_point="") | Q(codigo_point__isnull=True)).count()
+        insumos_sin_codigo = max(insumos_activos - insumos_con_codigo, 0)
+        insumos_cobertura = round((insumos_con_codigo * 100.0 / insumos_activos), 2) if insumos_activos else 100.0
+
+        recetas_total = Receta.objects.count()
+        receta_ids_primary = set(
+            Receta.objects.exclude(Q(codigo_point="") | Q(codigo_point__isnull=True)).values_list("id", flat=True)
+        )
+        receta_ids_alias = set(
+            RecetaCodigoPointAlias.objects.filter(activo=True).values_list("receta_id", flat=True)
+        )
+        recetas_homologadas_ids = receta_ids_primary.union(receta_ids_alias)
+        recetas_homologadas = len(recetas_homologadas_ids)
+        recetas_sin_homologar = max(recetas_total - recetas_homologadas, 0)
+        recetas_cobertura = round((recetas_homologadas * 100.0 / recetas_total), 2) if recetas_total else 100.0
+
+        point_pending_by_tipo = {
+            row["tipo"]: row["count"]
+            for row in (
+                PointPendingMatch.objects.values("tipo")
+                .annotate(count=Count("id"))
+                .order_by("tipo")
+            )
+        }
+        point_pending_total = sum(point_pending_by_tipo.values())
+
+        latest_run = AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at").first()
+        almacen_pending_count = len((latest_run.pending_preview or [])) if latest_run else 0
+
+        recetas_pending_lines = (
+            LineaReceta.objects.filter(insumo__isnull=True)
+            .filter(match_status__in=[LineaReceta.STATUS_NEEDS_REVIEW, LineaReceta.STATUS_REJECTED])
+            .count()
+        )
+
+        proveedores_activos = Proveedor.objects.filter(activo=True).count()
+        proveedores_pending_point = int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0))
+
+        return Response(
+            {
+                "generated_at": timezone.now(),
+                "insumos": {
+                    "activos": insumos_activos,
+                    "con_codigo_point": insumos_con_codigo,
+                    "sin_codigo_point": insumos_sin_codigo,
+                    "cobertura_pct": insumos_cobertura,
+                },
+                "recetas": {
+                    "total": recetas_total,
+                    "homologadas": recetas_homologadas,
+                    "sin_homologar": recetas_sin_homologar,
+                    "con_codigo_point_primario": len(receta_ids_primary),
+                    "con_alias_codigo_point": len(receta_ids_alias),
+                    "cobertura_pct": recetas_cobertura,
+                },
+                "proveedores": {
+                    "activos": proveedores_activos,
+                    "point_pending": proveedores_pending_point,
+                },
+                "point_pending": {
+                    "total": point_pending_total,
+                    "por_tipo": point_pending_by_tipo,
+                },
+                "inventario": {
+                    "almacen_pending_preview": almacen_pending_count,
+                    "almacen_latest_run_id": latest_run.id if latest_run else None,
+                    "almacen_latest_run_at": latest_run.started_at if latest_run else None,
+                    "recetas_pending_match": recetas_pending_lines,
+                },
             },
             status=status.HTTP_200_OK,
         )

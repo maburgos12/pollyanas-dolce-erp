@@ -625,6 +625,80 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(int(row["sources_active"]), 2)
         self.assertEqual(row["nombre_normalizado"], "harina pastelera premium")
 
+    def test_endpoint_integraciones_point_resumen(self):
+        self.insumo.codigo_point = "PT-INS-01"
+        self.insumo.save(update_fields=["codigo_point"])
+        receta_homologada = Receta.objects.create(
+            nombre="Receta homologada API",
+            codigo_point="PT-REC-01",
+            sheet_name="Insumos API",
+            hash_contenido="hash-api-point-resumen-001",
+        )
+        receta_alias = Receta.objects.create(
+            nombre="Receta alias API",
+            sheet_name="Insumos API",
+            hash_contenido="hash-api-point-resumen-002",
+        )
+        RecetaCodigoPointAlias.objects.create(
+            receta=receta_alias,
+            codigo_point="PT-REC-ALIAS-01",
+            nombre_point="Producto Point Alias",
+            activo=True,
+        )
+
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-PENDING-INS",
+            point_nombre="Insumo pendiente point",
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_PRODUCTO,
+            point_codigo="PT-PENDING-PROD",
+            point_nombre="Producto pendiente point",
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_PROVEEDOR,
+            point_codigo="PT-PENDING-PROV",
+            point_nombre="Proveedor pendiente point",
+        )
+
+        receta_pendiente = Receta.objects.create(
+            nombre="Receta pending point resumen",
+            sheet_name="Insumos API",
+            hash_contenido="hash-api-point-resumen-003",
+        )
+        LineaReceta.objects.create(
+            receta=receta_pendiente,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Insumo pendiente point",
+            cantidad=Decimal("1"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_score=70,
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[{"nombre_origen": "Insumo pendiente point"}],
+        )
+
+        url = reverse("api_integraciones_point_resumen")
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("insumos", payload)
+        self.assertIn("recetas", payload)
+        self.assertIn("point_pending", payload)
+        self.assertIn("inventario", payload)
+        self.assertGreaterEqual(payload["insumos"]["con_codigo_point"], 1)
+        self.assertGreaterEqual(payload["recetas"]["homologadas"], 2)
+        self.assertGreaterEqual(payload["point_pending"]["total"], 3)
+        self.assertGreaterEqual(payload["inventario"]["almacen_pending_preview"], 1)
+        self.assertGreaterEqual(payload["inventario"]["recetas_pending_match"], 1)
+
     def test_endpoint_inventario_point_pendientes_resolver_insumos(self):
         pending = PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,
@@ -752,6 +826,7 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(self.client.get(reverse("api_inventario_aliases")).status_code, 403)
         self.assertEqual(self.client.get(reverse("api_inventario_aliases_pendientes")).status_code, 403)
         self.assertEqual(self.client.get(reverse("api_inventario_aliases_pendientes_unificados")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("api_integraciones_point_resumen")).status_code, 403)
         self.assertEqual(
             self.client.post(
                 reverse("api_inventario_aliases"),
