@@ -21,6 +21,8 @@ Sprint 1 entrega:
 - API: GET /api/ventas/pronostico/ (pronósticos filtrables por periodo/rango/receta)
 - API: GET /api/ventas/solicitud/list/ (solicitudes de ventas filtrables por alcance/sucursal/periodo)
 - API: POST /api/ventas/pronostico/bulk/ (carga masiva de pronóstico con dry_run)
+- API: POST /api/ventas/pronostico/import-preview/ (previsualiza carga de pronóstico sin aplicar cambios)
+- API: POST /api/ventas/pronostico/import-confirm/ (confirma y aplica carga de pronóstico)
 - API: POST /api/ventas/pronostico-estadistico/ (forecast por sucursal + comparativo contra solicitud de ventas)
 - API: POST /api/ventas/historial/bulk/ (carga masiva de historial de ventas con dry_run)
 - API: POST /api/ventas/historial/import-preview/ (previsualiza carga de historial de ventas sin aplicar cambios)

@@ -1966,6 +1966,50 @@ class RecetasCosteoApiTests(TestCase):
         pron = PronosticoVenta.objects.get(receta=self.receta, periodo="2026-03")
         self.assertEqual(pron.cantidad, Decimal("20"))
 
+    def test_endpoint_ventas_pronostico_import_preview_y_confirm(self):
+        preview_url = reverse("api_ventas_pronostico_import_preview")
+        confirm_url = reverse("api_ventas_pronostico_import_confirm")
+        payload = {
+            "dry_run": False,
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "periodo": "2026-05",
+                    "cantidad": "11",
+                }
+            ],
+        }
+
+        resp_preview = self.client.post(preview_url, payload, content_type="application/json")
+        self.assertEqual(resp_preview.status_code, 200)
+        data_preview = resp_preview.json()
+        self.assertTrue(data_preview["preview"])
+        self.assertTrue(data_preview["dry_run"])
+        self.assertEqual(data_preview["summary"]["created"], 1)
+        self.assertEqual(PronosticoVenta.objects.count(), 0)
+
+        resp_confirm = self.client.post(confirm_url, payload, content_type="application/json")
+        self.assertEqual(resp_confirm.status_code, 200)
+        data_confirm = resp_confirm.json()
+        self.assertFalse(data_confirm["preview"])
+        self.assertFalse(data_confirm["dry_run"])
+        self.assertEqual(data_confirm["summary"]["created"], 1)
+        self.assertEqual(PronosticoVenta.objects.count(), 1)
+
+    def test_endpoint_ventas_pronostico_import_preview_confirm_requires_perm(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_pronostico_import_api",
+            email="sin_perm_pronostico_import_api@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+
+        payload = {"rows": [{"receta_id": self.receta.id, "periodo": "2026-05", "cantidad": "7"}]}
+        for name in ("api_ventas_pronostico_import_preview", "api_ventas_pronostico_import_confirm"):
+            resp = self.client.post(reverse(name), payload, content_type="application/json")
+            self.assertEqual(resp.status_code, 403)
+
     def test_endpoint_ventas_solicitud_upsert(self):
         sucursal = Sucursal.objects.create(codigo="NORTE", nombre="Sucursal Norte", activa=True)
         url = reverse("api_ventas_solicitud")

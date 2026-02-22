@@ -4728,6 +4728,144 @@ class SolicitudVentaListView(APIView):
         )
 
 
+def _process_pronostico_venta_bulk(
+    data: dict[str, Any],
+    *,
+    dry_run_override: bool | None = None,
+) -> dict[str, Any]:
+    rows = data["rows"]
+    modo = data.get("modo") or "replace"
+    fuente = (data.get("fuente") or "API_PRON_BULK").strip()[:40] or "API_PRON_BULK"
+    dry_run = bool(data.get("dry_run", True) if dry_run_override is None else dry_run_override)
+    stop_on_error = bool(data.get("stop_on_error", False))
+    top = int(data.get("top") or 120)
+
+    receta_cache: dict[tuple[int, str, str], Receta | None] = {}
+    created = 0
+    updated = 0
+    skipped = 0
+    terminated_early = False
+    result_rows: list[dict] = []
+
+    tx_cm = nullcontext() if dry_run else transaction.atomic()
+    with tx_cm:
+        for index, row in enumerate(rows, start=1):
+            receta_id = row.get("receta_id")
+            receta_name = str(row.get("receta") or "").strip()
+            codigo_point = str(row.get("codigo_point") or "").strip()
+            receta = _resolve_receta_bulk_ref(
+                receta_id=receta_id,
+                receta_name=receta_name,
+                codigo_point=codigo_point,
+                cache=receta_cache,
+            )
+            if receta is None:
+                skipped += 1
+                result_rows.append(
+                    {
+                        "row": index,
+                        "status": "ERROR",
+                        "reason": "receta_not_found",
+                        "receta_id": int(receta_id or 0) or None,
+                        "receta_input": receta_name or codigo_point,
+                    }
+                )
+                if stop_on_error:
+                    terminated_early = True
+                    break
+                continue
+
+            periodo = _normalize_periodo_mes(row.get("periodo"))
+            cantidad = _to_decimal(row.get("cantidad"), default=Decimal("0"))
+            existing = PronosticoVenta.objects.filter(receta=receta, periodo=periodo).first()
+
+            previous_qty = _to_decimal(existing.cantidad, default=Decimal("0")) if existing else Decimal("0")
+            if existing:
+                new_qty = previous_qty + cantidad if modo == "accumulate" else cantidad
+                action = "UPDATED"
+                updated += 1
+            else:
+                new_qty = cantidad
+                action = "CREATED"
+                created += 1
+
+            if not dry_run:
+                if existing:
+                    existing.cantidad = new_qty
+                    existing.fuente = fuente
+                    existing.save(update_fields=["cantidad", "fuente", "actualizado_en"])
+                else:
+                    PronosticoVenta.objects.create(
+                        receta=receta,
+                        periodo=periodo,
+                        cantidad=new_qty,
+                        fuente=fuente,
+                    )
+
+            result_rows.append(
+                {
+                    "row": index,
+                    "status": action,
+                    "receta_id": receta.id,
+                    "receta": receta.nombre,
+                    "periodo": periodo,
+                    "cantidad_prev": float(previous_qty),
+                    "cantidad_nueva": float(new_qty),
+                }
+            )
+
+    error_count = sum(1 for row in result_rows if row.get("status") == "ERROR")
+    return {
+        "dry_run": dry_run,
+        "mode": modo,
+        "fuente": fuente,
+        "terminated_early": terminated_early,
+        "summary": {
+            "total_rows": len(rows),
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "errors": error_count,
+            "applied": 0 if dry_run else (created + updated),
+        },
+        "rows": result_rows[:top],
+    }
+
+
+class PronosticoVentaImportPreviewView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.change_pronosticoventa"):
+            return Response(
+                {"detail": "No tienes permisos para previsualizar pronósticos de venta."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = PronosticoVentaBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        payload = _process_pronostico_venta_bulk(ser.validated_data, dry_run_override=True)
+        payload["preview"] = True
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class PronosticoVentaImportConfirmView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.has_perm("recetas.change_pronosticoventa"):
+            return Response(
+                {"detail": "No tienes permisos para confirmar importación de pronósticos de venta."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = PronosticoVentaBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        payload = _process_pronostico_venta_bulk(ser.validated_data, dry_run_override=False)
+        payload["preview"] = False
+        return Response(payload, status=status.HTTP_200_OK)
+
+
 class PronosticoVentaBulkUpsertView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -4740,108 +4878,8 @@ class PronosticoVentaBulkUpsertView(APIView):
 
         ser = PronosticoVentaBulkSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        data = ser.validated_data
-
-        rows = data["rows"]
-        modo = data.get("modo") or "replace"
-        fuente = (data.get("fuente") or "API_PRON_BULK").strip()[:40] or "API_PRON_BULK"
-        dry_run = bool(data.get("dry_run", True))
-        stop_on_error = bool(data.get("stop_on_error", False))
-        top = int(data.get("top") or 120)
-
-        receta_cache: dict[tuple[int, str, str], Receta | None] = {}
-        created = 0
-        updated = 0
-        skipped = 0
-        terminated_early = False
-        result_rows: list[dict] = []
-
-        tx_cm = nullcontext() if dry_run else transaction.atomic()
-        with tx_cm:
-            for index, row in enumerate(rows, start=1):
-                receta_id = row.get("receta_id")
-                receta_name = str(row.get("receta") or "").strip()
-                codigo_point = str(row.get("codigo_point") or "").strip()
-                receta = _resolve_receta_bulk_ref(
-                    receta_id=receta_id,
-                    receta_name=receta_name,
-                    codigo_point=codigo_point,
-                    cache=receta_cache,
-                )
-                if receta is None:
-                    skipped += 1
-                    result_rows.append(
-                        {
-                            "row": index,
-                            "status": "ERROR",
-                            "reason": "receta_not_found",
-                            "receta_id": int(receta_id or 0) or None,
-                            "receta_input": receta_name or codigo_point,
-                        }
-                    )
-                    if stop_on_error:
-                        terminated_early = True
-                        break
-                    continue
-
-                periodo = _normalize_periodo_mes(row.get("periodo"))
-                cantidad = _to_decimal(row.get("cantidad"), default=Decimal("0"))
-                existing = PronosticoVenta.objects.filter(receta=receta, periodo=periodo).first()
-
-                previous_qty = _to_decimal(existing.cantidad, default=Decimal("0")) if existing else Decimal("0")
-                if existing:
-                    new_qty = previous_qty + cantidad if modo == "accumulate" else cantidad
-                    action = "UPDATED"
-                    updated += 1
-                else:
-                    new_qty = cantidad
-                    action = "CREATED"
-                    created += 1
-
-                if not dry_run:
-                    if existing:
-                        existing.cantidad = new_qty
-                        existing.fuente = fuente
-                        existing.save(update_fields=["cantidad", "fuente", "actualizado_en"])
-                    else:
-                        PronosticoVenta.objects.create(
-                            receta=receta,
-                            periodo=periodo,
-                            cantidad=new_qty,
-                            fuente=fuente,
-                        )
-
-                result_rows.append(
-                    {
-                        "row": index,
-                        "status": action,
-                        "receta_id": receta.id,
-                        "receta": receta.nombre,
-                        "periodo": periodo,
-                        "cantidad_prev": float(previous_qty),
-                        "cantidad_nueva": float(new_qty),
-                    }
-                )
-
-        error_count = sum(1 for row in result_rows if row.get("status") == "ERROR")
-        return Response(
-            {
-                "dry_run": dry_run,
-                "mode": modo,
-                "fuente": fuente,
-                "terminated_early": terminated_early,
-                "summary": {
-                    "total_rows": len(rows),
-                    "created": created,
-                    "updated": updated,
-                    "skipped": skipped,
-                    "errors": error_count,
-                    "applied": 0 if dry_run else (created + updated),
-                },
-                "rows": result_rows[:top],
-            },
-            status=status.HTTP_200_OK,
-        )
+        payload = _process_pronostico_venta_bulk(ser.validated_data)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 def _process_venta_historica_bulk(
