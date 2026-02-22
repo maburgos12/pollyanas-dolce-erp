@@ -129,6 +129,44 @@
 </div>
 
 <section class="card">
+    <div class="card-header">Control de Homologación y Matching</div>
+    <div class="kpi-grid kpi-mini">
+        <article class="kpi-card">
+            <div class="kpi-number {% if homologacion_total_pending > 0 %}is-danger{% else %}is-success{% endif %}">
+                {{ homologacion_total_pending }}
+            </div>
+            <div class="kpi-label">Pendientes totales</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number {% if point_pending_total > 0 %}is-warning{% else %}is-success{% endif %}">
+                {{ point_pending_total }}
+            </div>
+            <div class="kpi-label">Pendientes Point</div>
+            <div class="muted" style="margin-top:6px;">
+                Insumos {{ point_pending_insumos }} · Productos {{ point_pending_productos }} · Proveedores {{ point_pending_proveedores }}
+            </div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number {% if recetas_pending_matching_count > 0 %}is-warning{% else %}is-success{% endif %}">
+                {{ recetas_pending_matching_count }}
+            </div>
+            <div class="kpi-label">Líneas recetas por revisar</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number {% if inventario_last_unmatched_count > 0 %}is-warning{% else %}is-success{% endif %}">
+                {{ inventario_last_unmatched_count }}
+            </div>
+            <div class="kpi-label">Sin match último sync almacén</div>
+        </article>
+    </div>
+    <div class="quick-actions" style="margin-top: 10px;">
+        <a href="{% url 'maestros:point_pending_review' %}" class="btn btn-secondary">Pendientes Point</a>
+        <a href="{% url 'recetas:matching_pendientes' %}" class="btn btn-secondary">Matching Recetas</a>
+        <a href="{% url 'inventario:aliases_catalog' %}" class="btn btn-secondary">Aliases Inventario</a>
+    </div>
+</section>
+
+<section class="card">
     <div class="card-header">Indicadores de Inventario (Control de Almacén)</div>
     <div class="kpi-grid">
         <article class="kpi-card">

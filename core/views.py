@@ -24,10 +24,10 @@ from core.access import (
     can_view_recetas,
     can_view_reportes,
 )
-from maestros.models import Insumo, Proveedor
+from maestros.models import Insumo, Proveedor, PointPendingMatch
 from maestros.models import CostoInsumo
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra, OrdenCompra
-from recetas.models import PlanProduccionItem, PronosticoVenta, Receta
+from recetas.models import PlanProduccionItem, PronosticoVenta, Receta, LineaReceta
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from core.models import AuditLog
 from core.audit import log_event
@@ -315,6 +315,13 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "budget_alerts_active": 0,
         "latest_budget_alert": None,
         "plan_forecast_semaforo": None,
+        "point_pending_total": 0,
+        "point_pending_insumos": 0,
+        "point_pending_productos": 0,
+        "point_pending_proveedores": 0,
+        "recetas_pending_matching_count": 0,
+        "inventario_last_unmatched_count": 0,
+        "homologacion_total_pending": 0,
     }
     try:
         existencias_qs = ExistenciaInsumo.objects.all()
@@ -387,6 +394,29 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             .first()
         )
         ctx["latest_almacen_sync"] = latest_sync
+        inventario_last_unmatched_count = int(latest_sync.unmatched or 0) if latest_sync else 0
+        point_pending_insumos = PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).count()
+        point_pending_productos = PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_PRODUCTO).count()
+        point_pending_proveedores = PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_PROVEEDOR).count()
+        point_pending_total = point_pending_insumos + point_pending_productos + point_pending_proveedores
+        recetas_pending_matching_count = (
+            LineaReceta.objects.exclude(tipo_linea=LineaReceta.TIPO_SUBSECCION)
+            .filter(match_status__in=[LineaReceta.STATUS_NEEDS_REVIEW, LineaReceta.STATUS_REJECTED])
+            .count()
+        )
+        ctx.update(
+            {
+                "point_pending_total": point_pending_total,
+                "point_pending_insumos": point_pending_insumos,
+                "point_pending_productos": point_pending_productos,
+                "point_pending_proveedores": point_pending_proveedores,
+                "recetas_pending_matching_count": recetas_pending_matching_count,
+                "inventario_last_unmatched_count": inventario_last_unmatched_count,
+                "homologacion_total_pending": (
+                    point_pending_total + recetas_pending_matching_count + inventario_last_unmatched_count
+                ),
+            }
+        )
 
         auto_sync_enabled = os.getenv("ENABLE_AUTO_SYNC_ALMACEN", "0").strip().lower() in {
             "1",
