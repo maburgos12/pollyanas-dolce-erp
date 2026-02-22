@@ -107,6 +107,14 @@
         <div class="kpi-number {% if import_preview.without_match_count > 0 %}is-danger{% else %}is-success{% endif %}">{{ import_preview.without_match_count }}</div>
         <div class="kpi-label">Sin insumo asignado</div>
       </article>
+      <article class="kpi-card">
+        <div class="kpi-number is-warning" id="preview-ready-qty">{{ import_preview.ready_qty_total|floatformat:3 }}</div>
+        <div class="kpi-label">Cantidad total a importar</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number is-danger" id="preview-ready-budget">${{ import_preview.ready_budget_total|floatformat:2 }}</div>
+        <div class="kpi-label">Presupuesto estimado (preview)</div>
+      </article>
     </div>
     <form method="post" action="{% url 'compras:solicitudes_importar_confirmar' %}">
       {% csrf_token %}
@@ -124,6 +132,8 @@
               <th>Insumo (archivo)</th>
               <th>Insumo final</th>
               <th class="text-end">Cantidad</th>
+              <th class="text-end">Costo unitario</th>
+              <th class="text-end">Presupuesto fila</th>
               <th>Fecha</th>
               <th>Área</th>
               <th>Solicitante</th>
@@ -135,7 +145,7 @@
           <tbody>
             {% for row in import_preview.rows %}
             <tr>
-              <td><input class="import-preview-row-check" type="checkbox" name="row_{{ row.row_id }}_include" {% if row.include %}checked{% endif %}></td>
+              <td><input class="import-preview-row-check" type="checkbox" name="row_{{ row.row_id }}_include" data-qty="{{ row.cantidad }}" data-budget="{{ row.presupuesto_estimado|default:'0' }}" {% if row.include %}checked{% endif %}></td>
               <td>{{ row.source_row }}</td>
               <td>
                 {{ row.insumo_origen|default:"-" }}
@@ -152,8 +162,10 @@
                 </select>
               </td>
               <td>
-                <input class="input-field text-end" type="number" step="0.001" min="0" name="row_{{ row.row_id }}_cantidad" value="{{ row.cantidad }}">
+                <input class="input-field text-end import-preview-qty" type="number" step="0.001" min="0" name="row_{{ row.row_id }}_cantidad" data-unit-cost="{{ row.costo_unitario|default:'0' }}" value="{{ row.cantidad }}">
               </td>
+              <td class="text-end">${{ row.costo_unitario|default:'0'|floatformat:2 }}</td>
+              <td class="text-end">${{ row.presupuesto_estimado|default:'0'|floatformat:2 }}</td>
               <td>
                 <input class="input-field" type="date" name="row_{{ row.row_id }}_fecha_requerida" value="{{ row.fecha_requerida }}">
               </td>
@@ -1098,6 +1110,8 @@
     const checkAll = document.getElementById("import-preview-check-all");
     const rowChecks = Array.from(document.querySelectorAll(".import-preview-row-check"));
     const readyCount = document.getElementById("preview-ready-count");
+    const readyQty = document.getElementById("preview-ready-qty");
+    const readyBudget = document.getElementById("preview-ready-budget");
     if (!checkAll || rowChecks.length === 0) return;
 
     function syncCheckAllState() {
@@ -1106,6 +1120,30 @@
       checkAll.indeterminate = checkedCount > 0 && checkedCount < rowChecks.length;
       if (readyCount) {
         readyCount.textContent = String(checkedCount);
+      }
+      if (readyQty || readyBudget) {
+        let qtyTotal = 0;
+        let budgetTotal = 0;
+        rowChecks.forEach((check) => {
+          if (!check.checked) return;
+          const row = check.closest("tr");
+          if (!row) return;
+          const qtyInput = row.querySelector(".import-preview-qty");
+          const qty = Number((qtyInput && qtyInput.value) || check.dataset.qty || 0);
+          const unitCost = Number((qtyInput && qtyInput.dataset.unitCost) || 0);
+          if (!Number.isNaN(qty) && qty > 0) {
+            qtyTotal += qty;
+            if (!Number.isNaN(unitCost) && unitCost > 0) {
+              budgetTotal += qty * unitCost;
+            }
+          }
+        });
+        if (readyQty) {
+          readyQty.textContent = qtyTotal.toFixed(3);
+        }
+        if (readyBudget) {
+          readyBudget.textContent = "$" + budgetTotal.toFixed(2);
+        }
       }
     }
 
@@ -1117,6 +1155,7 @@
     });
 
     rowChecks.forEach((x) => x.addEventListener("change", syncCheckAllState));
+    document.querySelectorAll(".import-preview-qty").forEach((x) => x.addEventListener("input", syncCheckAllState));
     syncCheckAllState();
   })();
 </script>

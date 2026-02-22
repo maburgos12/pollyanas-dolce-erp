@@ -616,6 +616,8 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
                     "duplicate": False,
                     "insumo_id": str(self.insumo_harina.id),
                     "cantidad": "2.000",
+                    "costo_unitario": "10.00",
+                    "presupuesto_estimado": "20.00",
                     "notes": "",
                 },
                 {
@@ -640,6 +642,8 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         self.assertEqual(preview["duplicates_count"], 1)
         self.assertEqual(preview["without_match_count"], 1)
         self.assertEqual(preview["invalid_qty_count"], 1)
+        self.assertEqual(preview["ready_qty_total"], Decimal("2.000"))
+        self.assertEqual(preview["ready_budget_total"], Decimal("20.00"))
         self.assertEqual(preview["file_name"], "solicitudes_test.csv")
         self.assertEqual(preview["generated_at"], "2026-02-20 09:10")
 
@@ -662,6 +666,8 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
                     "proveedor_id": str(self.proveedor.id),
                     "score": "100.0",
                     "metodo": "EXACT",
+                    "costo_unitario": "10.00",
+                    "presupuesto_estimado": "20.00",
                     "duplicate": False,
                     "notes": "",
                 }
@@ -674,6 +680,7 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         self.assertIn("text/csv", response["Content-Type"])
         body = response.content.decode("utf-8")
         self.assertIn("row_id,source_row,include,insumo_origen", body)
+        self.assertIn("costo_unitario,presupuesto_estimado", body)
         self.assertIn("Harina Import", body)
 
     def test_export_import_preview_xlsx(self):
@@ -695,6 +702,8 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
                     "proveedor_id": str(self.proveedor.id),
                     "score": "100.0",
                     "metodo": "EXACT",
+                    "costo_unitario": "10.00",
+                    "presupuesto_estimado": "20.00",
                     "duplicate": False,
                     "notes": "",
                 }
@@ -708,7 +717,7 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
 
         wb = load_workbook(BytesIO(response.content), data_only=True)
         ws = wb.active
-        headers = [ws.cell(row=1, column=i).value for i in range(1, 17)]
+        headers = [ws.cell(row=1, column=i).value for i in range(1, 19)]
         self.assertEqual(
             headers,
             [
@@ -726,6 +735,8 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
                 "proveedor_id",
                 "score",
                 "metodo",
+                "costo_unitario",
+                "presupuesto_estimado",
                 "duplicate",
                 "notes",
             ],

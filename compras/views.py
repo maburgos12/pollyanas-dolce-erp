@@ -60,8 +60,11 @@ def _build_import_preview_context(import_preview_payload) -> dict | None:
     preview_duplicates = 0
     preview_without_match = 0
     preview_invalid_qty = 0
+    preview_ready_qty = Decimal("0")
+    preview_ready_budget = Decimal("0")
     for row in preview_rows:
-        if bool(row.get("include")):
+        row_include = bool(row.get("include"))
+        if row_include:
             preview_ready += 1
         if row.get("notes"):
             preview_with_issues += 1
@@ -75,6 +78,13 @@ def _build_import_preview_context(import_preview_payload) -> dict | None:
             cantidad_preview = Decimal("0")
         if cantidad_preview <= 0:
             preview_invalid_qty += 1
+        if row_include and cantidad_preview > 0:
+            preview_ready_qty += cantidad_preview
+            presupuesto_estimado = _to_decimal(str(row.get("presupuesto_estimado") or "0"), "0")
+            if presupuesto_estimado <= 0:
+                costo_unitario = _to_decimal(str(row.get("costo_unitario") or "0"), "0")
+                presupuesto_estimado = cantidad_preview * max(costo_unitario, Decimal("0"))
+            preview_ready_budget += max(presupuesto_estimado, Decimal("0"))
 
     return {
         "rows": preview_rows,
@@ -87,6 +97,8 @@ def _build_import_preview_context(import_preview_payload) -> dict | None:
         "duplicates_count": preview_duplicates,
         "without_match_count": preview_without_match,
         "invalid_qty_count": preview_invalid_qty,
+        "ready_qty_total": preview_ready_qty,
+        "ready_budget_total": preview_ready_budget,
         "file_name": str(import_preview_payload.get("file_name") or "").strip(),
         "generated_at": str(import_preview_payload.get("generated_at") or "").strip(),
     }
@@ -355,6 +367,8 @@ def _export_import_preview_csv(import_preview: dict) -> HttpResponse:
             "proveedor_id",
             "score",
             "metodo",
+            "costo_unitario",
+            "presupuesto_estimado",
             "duplicate",
             "notes",
         ]
@@ -376,6 +390,8 @@ def _export_import_preview_csv(import_preview: dict) -> HttpResponse:
                 row.get("proveedor_id", ""),
                 row.get("score", ""),
                 row.get("metodo", ""),
+                row.get("costo_unitario", ""),
+                row.get("presupuesto_estimado", ""),
                 "1" if row.get("duplicate") else "0",
                 row.get("notes", ""),
             ]
@@ -404,6 +420,8 @@ def _export_import_preview_xlsx(import_preview: dict) -> HttpResponse:
             "proveedor_id",
             "score",
             "metodo",
+            "costo_unitario",
+            "presupuesto_estimado",
             "duplicate",
             "notes",
         ]
@@ -425,6 +443,8 @@ def _export_import_preview_xlsx(import_preview: dict) -> HttpResponse:
                 row.get("proveedor_id", ""),
                 row.get("score", ""),
                 row.get("metodo", ""),
+                row.get("costo_unitario", ""),
+                row.get("presupuesto_estimado", ""),
                 1 if row.get("duplicate") else 0,
                 row.get("notes", ""),
             ]
@@ -3251,12 +3271,21 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
             ).values_list("area", "insumo_id", "fecha_requerida")
         }
 
+    preview_cost_by_insumo: dict[int, Decimal] = {}
+    preview_insumo_ids = sorted({int(p["insumo_id"]) for p in parsed_rows if int(p["insumo_id"] or 0) > 0})
+    if preview_insumo_ids:
+        for c in CostoInsumo.objects.filter(insumo_id__in=preview_insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+            if c.insumo_id not in preview_cost_by_insumo:
+                preview_cost_by_insumo[c.insumo_id] = c.costo_unitario
+
     preview_rows: list[dict] = []
     for parsed in parsed_rows:
         insumo_raw = str(parsed["insumo_origen"] or "").strip()
         cantidad = parsed["cantidad"]
         cantidad_raw = parsed["cantidad_origen"]
         insumo_id = parsed["insumo_id"]
+        costo_unitario = preview_cost_by_insumo.get(insumo_id, Decimal("0")) if insumo_id else Decimal("0")
+        presupuesto_estimado = (cantidad * costo_unitario) if cantidad > 0 else Decimal("0")
         area = parsed["area"]
         solicitante = parsed["solicitante"]
         fecha_requerida = parsed["fecha_requerida"]
@@ -3296,6 +3325,8 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
                 "proveedor_id": str(parsed["proveedor_id"]) if parsed["proveedor_id"] else "",
                 "score": f"{parsed['score']:.1f}",
                 "metodo": parsed["metodo"],
+                "costo_unitario": str(costo_unitario),
+                "presupuesto_estimado": str(presupuesto_estimado),
                 "duplicate": duplicate,
                 "notes": " | ".join(notes),
                 "include": not hard_error,
