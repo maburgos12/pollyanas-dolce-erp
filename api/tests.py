@@ -19,6 +19,7 @@ from recetas.models import (
     PlanProduccionItem,
     PronosticoVenta,
     Receta,
+    RecetaCodigoPointAlias,
     SolicitudVenta,
     VentaHistorica,
 )
@@ -571,6 +572,120 @@ class RecetasCosteoApiTests(TestCase):
         resp = self.client.get(url, {"point_tipo": "CUALQUIERA"})
         self.assertEqual(resp.status_code, 400)
 
+    def test_endpoint_inventario_point_pendientes_resolver_insumos(self):
+        pending = PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-IN-001",
+            point_nombre="Azucar cristal Point",
+            method="FUZZY",
+            fuzzy_score=95.0,
+            fuzzy_sugerencia=self.insumo.nombre,
+        )
+
+        url = reverse("api_inventario_point_pendientes_resolver")
+        resp = self.client.post(
+            url,
+            {
+                "action": "resolve_insumos",
+                "tipo": "INSUMO",
+                "pending_ids": [pending.id],
+                "insumo_id": self.insumo.id,
+                "create_aliases": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["resolved"], 1)
+        self.assertEqual(payload["conflicts"], 0)
+        self.assertGreaterEqual(payload["aliases_created"], 1)
+        self.assertFalse(PointPendingMatch.objects.filter(id=pending.id).exists())
+
+        self.insumo.refresh_from_db()
+        self.assertEqual(self.insumo.codigo_point, "PT-IN-001")
+        self.assertEqual(self.insumo.nombre_point, "Azucar cristal Point")
+        self.assertTrue(InsumoAlias.objects.filter(insumo=self.insumo, nombre_normalizado="azucar cristal point").exists())
+
+    def test_endpoint_inventario_point_pendientes_resolver_auto_sugerencias(self):
+        target = Insumo.objects.create(nombre="Harina Point API", unidad_base=self.unidad, activo=True)
+        pending_ok = PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-IN-002",
+            point_nombre="Harina pastelera premium",
+            method="FUZZY",
+            fuzzy_score=96.0,
+            fuzzy_sugerencia=target.nombre,
+        )
+        pending_low = PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-IN-003",
+            point_nombre="Harina score bajo",
+            method="FUZZY",
+            fuzzy_score=74.0,
+            fuzzy_sugerencia=target.nombre,
+        )
+
+        url = reverse("api_inventario_point_pendientes_resolver")
+        resp = self.client.post(
+            url,
+            {
+                "action": "auto_resolve_sugerencias_insumos",
+                "tipo": "INSUMO",
+                "score_min": 90,
+                "create_aliases": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["resolved"], 1)
+        self.assertEqual(payload["conflicts"], 0)
+        self.assertEqual(payload["skipped"]["low_score"], 1)
+        self.assertFalse(PointPendingMatch.objects.filter(id=pending_ok.id).exists())
+        self.assertTrue(PointPendingMatch.objects.filter(id=pending_low.id).exists())
+
+    def test_endpoint_inventario_point_pendientes_resolver_productos_crea_alias(self):
+        receta_target = Receta.objects.create(
+            nombre="Pastel API Producto",
+            codigo_point="POINT-ORIGINAL",
+            sheet_name="Insumos API",
+            hash_contenido="hash-api-prod-001",
+        )
+        pending = PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_PRODUCTO,
+            point_codigo="POINT-NUEVO-01",
+            point_nombre="Pastel API Point",
+            method="FUZZY",
+            fuzzy_score=89.0,
+            fuzzy_sugerencia=receta_target.nombre,
+        )
+
+        url = reverse("api_inventario_point_pendientes_resolver")
+        resp = self.client.post(
+            url,
+            {
+                "action": "resolve_productos",
+                "tipo": "PRODUCTO",
+                "pending_ids": [pending.id],
+                "receta_id": receta_target.id,
+                "create_aliases": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["resolved"], 1)
+        self.assertEqual(payload["conflicts"], 0)
+        self.assertEqual(payload["aliases_created"], 1)
+        self.assertFalse(PointPendingMatch.objects.filter(id=pending.id).exists())
+        self.assertTrue(
+            RecetaCodigoPointAlias.objects.filter(
+                receta=receta_target,
+                codigo_point_normalizado="pointnuevo01",
+                activo=True,
+            ).exists()
+        )
+
     def test_endpoint_inventario_aliases_requires_permissions(self):
         alias = InsumoAlias.objects.create(nombre="Azucar especial", insumo=self.insumo)
         user_model = get_user_model()
@@ -595,6 +710,14 @@ class RecetasCosteoApiTests(TestCase):
             self.client.post(
                 reverse("api_inventario_aliases_reasignar"),
                 {"alias_ids": [alias.id], "insumo_id": self.insumo.id},
+                content_type="application/json",
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                reverse("api_inventario_point_pendientes_resolver"),
+                {"action": "discard_selected", "tipo": "INSUMO", "pending_ids": [1]},
                 content_type="application/json",
             ).status_code,
             403,

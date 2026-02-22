@@ -16,6 +16,7 @@ from rest_framework.authtoken.views import ObtainAuthToken
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from core.access import (
     ROLE_ADMIN,
+    ROLE_COMPRAS,
     ROLE_DG,
     can_manage_compras,
     can_manage_inventario,
@@ -47,8 +48,10 @@ from recetas.models import (
     PlanProduccionItem,
     PronosticoVenta,
     Receta,
+    RecetaCodigoPointAlias,
     SolicitudVenta,
     VentaHistorica,
+    normalizar_codigo_point,
 )
 from recetas.views import (
     _build_forecast_from_history,
@@ -75,6 +78,7 @@ from .serializers import (
     InventarioAjusteDecisionSerializer,
     InventarioAliasCreateSerializer,
     InventarioAliasMassReassignSerializer,
+    InventarioPointPendingResolveSerializer,
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
     PlanProduccionCreateSerializer,
@@ -1061,6 +1065,302 @@ class InventarioAliasesPendientesView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class InventarioPointPendingResolveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _resolve_pending_insumo_row(
+        pending: PointPendingMatch,
+        insumo_target: Insumo,
+        create_aliases_enabled: bool,
+    ) -> tuple[bool, bool, int]:
+        point_code = (pending.point_codigo or "").strip()
+        if point_code and insumo_target.codigo_point and insumo_target.codigo_point != point_code:
+            return False, True, 0
+
+        changed = []
+        if point_code and insumo_target.codigo_point != point_code:
+            insumo_target.codigo_point = point_code[:80]
+            changed.append("codigo_point")
+        if insumo_target.nombre_point != pending.point_nombre:
+            insumo_target.nombre_point = (pending.point_nombre or "")[:250]
+            changed.append("nombre_point")
+        if changed:
+            insumo_target.save(update_fields=changed)
+
+        alias_created = 0
+        if create_aliases_enabled:
+            alias_norm = normalizar_nombre(pending.point_nombre or "")
+            if alias_norm and alias_norm != insumo_target.nombre_normalizado:
+                alias, was_created = InsumoAlias.objects.get_or_create(
+                    nombre_normalizado=alias_norm,
+                    defaults={"nombre": (pending.point_nombre or "")[:250], "insumo": insumo_target},
+                )
+                if not was_created and alias.insumo_id != insumo_target.id:
+                    alias.insumo = insumo_target
+                    alias.save(update_fields=["insumo"])
+                if was_created:
+                    alias_created = 1
+
+        pending.delete()
+        return True, False, alias_created
+
+    def post(self, request):
+        if not has_any_role(request.user, ROLE_ADMIN, ROLE_COMPRAS):
+            return Response(
+                {"detail": "No tienes permisos para resolver pendientes Point."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = InventarioPointPendingResolveSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        action = data["action"]
+        tipo = data["tipo"]
+        pending_ids = list(dict.fromkeys(data.get("pending_ids") or []))
+        q = (data.get("q") or "").strip()
+        score_min = float(data.get("score_min", 90.0) or 0)
+        create_aliases = bool(data.get("create_aliases", True))
+
+        selected_qs = PointPendingMatch.objects.filter(tipo=tipo)
+        if pending_ids:
+            selected_qs = selected_qs.filter(id__in=pending_ids)
+        elif action == InventarioPointPendingResolveSerializer.ACTION_AUTO_RESOLVE_INSUMOS:
+            if q:
+                selected_qs = selected_qs.filter(
+                    Q(point_nombre__icontains=q)
+                    | Q(point_codigo__icontains=q)
+                    | Q(fuzzy_sugerencia__icontains=q)
+                )
+        selected_qs = selected_qs.order_by("-fuzzy_score", "point_nombre")
+
+        selected = list(selected_qs)
+        if not selected:
+            return Response(
+                {"detail": "No se encontraron pendientes para procesar con los filtros enviados."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        resolved = 0
+        conflicts = 0
+        aliases_created = 0
+        skipped_low_score = 0
+        skipped_no_suggestion = 0
+        skipped_no_target = 0
+        proveedores_created = 0
+
+        if action == InventarioPointPendingResolveSerializer.ACTION_RESOLVE_INSUMOS:
+            insumo_target = Insumo.objects.filter(pk=data.get("insumo_id"), activo=True).first()
+            if insumo_target is None:
+                return Response(
+                    {"detail": "insumo_id no encontrado o inactivo."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            for pending in selected:
+                row_resolved, row_conflict, row_alias_created = self._resolve_pending_insumo_row(
+                    pending=pending,
+                    insumo_target=insumo_target,
+                    create_aliases_enabled=create_aliases,
+                )
+                if row_conflict:
+                    conflicts += 1
+                    continue
+                if row_resolved:
+                    resolved += 1
+                    aliases_created += row_alias_created
+
+            return Response(
+                {
+                    "action": action,
+                    "tipo": tipo,
+                    "selected": len(selected),
+                    "resolved": resolved,
+                    "conflicts": conflicts,
+                    "aliases_created": aliases_created,
+                    "target": {"insumo_id": insumo_target.id, "insumo": insumo_target.nombre},
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if action == InventarioPointPendingResolveSerializer.ACTION_AUTO_RESOLVE_INSUMOS:
+            if tipo != PointPendingMatch.TIPO_INSUMO:
+                return Response(
+                    {"detail": "La auto-resolución por sugerencia aplica solo para tipo=INSUMO."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            for pending in selected:
+                if float(pending.fuzzy_score or 0.0) < score_min:
+                    skipped_low_score += 1
+                    continue
+
+                sugerencia_norm = normalizar_nombre(pending.fuzzy_sugerencia or "")
+                if not sugerencia_norm:
+                    skipped_no_suggestion += 1
+                    continue
+
+                insumo_target = (
+                    Insumo.objects.filter(activo=True, nombre_normalizado=sugerencia_norm)
+                    .only("id", "codigo_point", "nombre_point", "nombre_normalizado")
+                    .first()
+                )
+                if not insumo_target:
+                    skipped_no_target += 1
+                    continue
+
+                row_resolved, row_conflict, row_alias_created = self._resolve_pending_insumo_row(
+                    pending=pending,
+                    insumo_target=insumo_target,
+                    create_aliases_enabled=create_aliases,
+                )
+                if row_conflict:
+                    conflicts += 1
+                    continue
+                if row_resolved:
+                    resolved += 1
+                    aliases_created += row_alias_created
+
+            return Response(
+                {
+                    "action": action,
+                    "tipo": tipo,
+                    "selected": len(selected),
+                    "resolved": resolved,
+                    "conflicts": conflicts,
+                    "aliases_created": aliases_created,
+                    "skipped": {
+                        "low_score": skipped_low_score,
+                        "no_suggestion": skipped_no_suggestion,
+                        "no_target": skipped_no_target,
+                    },
+                    "score_min": round(score_min, 2),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if action == InventarioPointPendingResolveSerializer.ACTION_RESOLVE_PRODUCTOS:
+            receta_target = Receta.objects.filter(pk=data.get("receta_id")).first()
+            if receta_target is None:
+                return Response(
+                    {"detail": "receta_id no encontrada."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            for pending in selected:
+                point_code = (pending.point_codigo or "").strip()
+                if point_code:
+                    point_norm = normalizar_codigo_point(point_code)
+                    primary_norm = normalizar_codigo_point(receta_target.codigo_point)
+                    if not receta_target.codigo_point:
+                        receta_target.codigo_point = point_code[:80]
+                        receta_target.save(update_fields=["codigo_point"])
+                    elif primary_norm != point_norm:
+                        if not point_norm:
+                            conflicts += 1
+                            continue
+                        if not create_aliases:
+                            conflicts += 1
+                            continue
+
+                        alias, was_created = RecetaCodigoPointAlias.objects.get_or_create(
+                            codigo_point_normalizado=point_norm,
+                            defaults={
+                                "receta": receta_target,
+                                "codigo_point": point_code[:80],
+                                "nombre_point": (pending.point_nombre or "")[:250],
+                                "activo": True,
+                            },
+                        )
+                        if not was_created and alias.receta_id != receta_target.id:
+                            conflicts += 1
+                            continue
+
+                        changed = []
+                        if alias.codigo_point != point_code[:80]:
+                            alias.codigo_point = point_code[:80]
+                            changed.append("codigo_point")
+                        if (pending.point_nombre or "").strip() and alias.nombre_point != (pending.point_nombre or "")[:250]:
+                            alias.nombre_point = (pending.point_nombre or "")[:250]
+                            changed.append("nombre_point")
+                        if not alias.activo:
+                            alias.activo = True
+                            changed.append("activo")
+                        if changed:
+                            alias.save(update_fields=changed)
+                        if was_created:
+                            aliases_created += 1
+
+                pending.delete()
+                resolved += 1
+
+            return Response(
+                {
+                    "action": action,
+                    "tipo": tipo,
+                    "selected": len(selected),
+                    "resolved": resolved,
+                    "conflicts": conflicts,
+                    "aliases_created": aliases_created,
+                    "target": {"receta_id": receta_target.id, "receta": receta_target.nombre},
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if action == InventarioPointPendingResolveSerializer.ACTION_RESOLVE_PROVEEDORES:
+            proveedor_target = None
+            proveedor_id = data.get("proveedor_id")
+            if proveedor_id:
+                proveedor_target = Proveedor.objects.filter(pk=proveedor_id).first()
+                if proveedor_target is None:
+                    return Response(
+                        {"detail": "proveedor_id no encontrado."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            for pending in selected:
+                if proveedor_target is None:
+                    _, was_created = Proveedor.objects.get_or_create(
+                        nombre=(pending.point_nombre or "")[:200],
+                        defaults={"activo": True},
+                    )
+                    if was_created:
+                        proveedores_created += 1
+                pending.delete()
+                resolved += 1
+
+            return Response(
+                {
+                    "action": action,
+                    "tipo": tipo,
+                    "selected": len(selected),
+                    "resolved": resolved,
+                    "proveedores_created": proveedores_created,
+                    "target": (
+                        {"proveedor_id": proveedor_target.id, "proveedor": proveedor_target.nombre}
+                        if proveedor_target
+                        else None
+                    ),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if action == InventarioPointPendingResolveSerializer.ACTION_DISCARD:
+            deleted, _ = PointPendingMatch.objects.filter(id__in=[p.id for p in selected], tipo=tipo).delete()
+            return Response(
+                {
+                    "action": action,
+                    "tipo": tipo,
+                    "selected": len(selected),
+                    "discarded": deleted,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response({"detail": "Acción no soportada."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class InventarioAjustesView(APIView):

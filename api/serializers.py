@@ -187,6 +187,81 @@ class InventarioAliasMassReassignSerializer(serializers.Serializer):
     resolver_cross_source = serializers.BooleanField(required=False, default=True)
 
 
+class InventarioPointPendingResolveSerializer(serializers.Serializer):
+    ACTION_RESOLVE_INSUMOS = "resolve_insumos"
+    ACTION_AUTO_RESOLVE_INSUMOS = "auto_resolve_sugerencias_insumos"
+    ACTION_RESOLVE_PRODUCTOS = "resolve_productos"
+    ACTION_RESOLVE_PROVEEDORES = "resolve_proveedores"
+    ACTION_DISCARD = "discard_selected"
+
+    TIPO_INSUMO = "INSUMO"
+    TIPO_PRODUCTO = "PRODUCTO"
+    TIPO_PROVEEDOR = "PROVEEDOR"
+
+    action = serializers.ChoiceField(
+        choices=[
+            ACTION_RESOLVE_INSUMOS,
+            ACTION_AUTO_RESOLVE_INSUMOS,
+            ACTION_RESOLVE_PRODUCTOS,
+            ACTION_RESOLVE_PROVEEDORES,
+            ACTION_DISCARD,
+        ]
+    )
+    tipo = serializers.ChoiceField(
+        choices=[TIPO_INSUMO, TIPO_PRODUCTO, TIPO_PROVEEDOR],
+        required=False,
+        allow_blank=False,
+    )
+    pending_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+        max_length=2000,
+        default=list,
+    )
+    insumo_id = serializers.IntegerField(required=False, min_value=1)
+    receta_id = serializers.IntegerField(required=False, min_value=1)
+    proveedor_id = serializers.IntegerField(required=False, min_value=1)
+    create_aliases = serializers.BooleanField(required=False, default=True)
+    score_min = serializers.FloatField(required=False, default=90.0)
+    q = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_score_min(self, value):
+        if value < 0:
+            return 0.0
+        if value > 100:
+            return 100.0
+        return float(value)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        action = attrs.get("action")
+        tipo = attrs.get("tipo")
+        pending_ids = attrs.get("pending_ids") or []
+
+        default_tipo_by_action = {
+            self.ACTION_RESOLVE_INSUMOS: self.TIPO_INSUMO,
+            self.ACTION_AUTO_RESOLVE_INSUMOS: self.TIPO_INSUMO,
+            self.ACTION_RESOLVE_PRODUCTOS: self.TIPO_PRODUCTO,
+            self.ACTION_RESOLVE_PROVEEDORES: self.TIPO_PROVEEDOR,
+            self.ACTION_DISCARD: self.TIPO_INSUMO,
+        }
+
+        if not tipo:
+            attrs["tipo"] = default_tipo_by_action.get(action, self.TIPO_INSUMO)
+
+        if action == self.ACTION_RESOLVE_INSUMOS and not attrs.get("insumo_id"):
+            raise serializers.ValidationError({"insumo_id": "Es requerido para resolve_insumos."})
+
+        if action == self.ACTION_RESOLVE_PRODUCTOS and not attrs.get("receta_id"):
+            raise serializers.ValidationError({"receta_id": "Es requerido para resolve_productos."})
+
+        if action != self.ACTION_AUTO_RESOLVE_INSUMOS and not pending_ids:
+            raise serializers.ValidationError({"pending_ids": "Selecciona al menos un pendiente."})
+
+        return attrs
+
+
 class ComprasSolicitudCreateSerializer(serializers.Serializer):
     area = serializers.CharField(max_length=120)
     solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True)
