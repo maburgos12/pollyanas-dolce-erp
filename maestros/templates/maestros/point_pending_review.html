@@ -22,8 +22,11 @@
   <form method="get" class="form-grid-auto mb-3">
     <input type="hidden" name="tipo" value="{{ tipo }}">
     <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por nombre, código o sugerencia...">
+    <input class="input-field" type="number" name="score_min" min="0" max="100" step="0.1" value="{{ score_min|default:0 }}" placeholder="Score mínimo">
     <button class="btn btn-primary" type="submit">Buscar</button>
     <a class="btn btn-secondary" href="?tipo={{ tipo }}">Limpiar</a>
+    <a class="btn btn-secondary" href="?tipo={{ tipo }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if score_min %}&score_min={{ score_min }}{% endif %}&export=csv">Exportar CSV</a>
+    <a class="btn btn-secondary" href="?tipo={{ tipo }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if score_min %}&score_min={{ score_min }}{% endif %}&export=xlsx">Exportar XLSX</a>
   </form>
 
   {% if can_manage and page.object_list %}
@@ -73,6 +76,8 @@
         <span>Crear alias automáticamente</span>
       </label>
       <button class="btn btn-primary" type="submit" name="action" value="resolve_insumos">Resolver insumos</button>
+      <input class="input-field" type="number" name="auto_score_min" min="0" max="100" step="0.1" value="90" placeholder="Score auto">
+      <button class="btn btn-secondary" type="submit" name="action" value="resolve_sugerencias_insumos">Auto-resolver por sugerencia</button>
       <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar pendientes seleccionados?');">Descartar seleccionados</button>
     </div>
     {% elif tipo == "PRODUCTO" %}

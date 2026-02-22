@@ -1,4 +1,5 @@
 import csv
+from io import BytesIO
 
 from django.contrib import messages
 from django.http import HttpResponse
@@ -10,6 +11,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.urls import reverse_lazy
 from django.db.models import Count, Q
 from django.contrib.auth.decorators import login_required
+from openpyxl import Workbook
 from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_maestros, has_any_role
 from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
@@ -196,6 +198,93 @@ def insumo_point_mapping_csv(request):
     return response
 
 
+def _to_float(raw, default=0.0) -> float:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _export_point_pending_csv(tipo: str, q: str, score_min: float, qs):
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="point_pendientes_{tipo.lower()}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["tipo", "filtro_q", "score_min", "count"])
+    writer.writerow([tipo, q or "", f"{score_min:.1f}", qs.count()])
+    writer.writerow([])
+    writer.writerow(
+        [
+            "id",
+            "tipo",
+            "codigo_point",
+            "nombre_point",
+            "sugerencia",
+            "score",
+            "metodo",
+            "creado_en",
+        ]
+    )
+    for row in qs.iterator(chunk_size=500):
+        writer.writerow(
+            [
+                row.id,
+                row.tipo,
+                row.point_codigo or "",
+                row.point_nombre or "",
+                row.fuzzy_sugerencia or "",
+                f"{float(row.fuzzy_score or 0):.1f}",
+                row.method or "",
+                row.creado_en.strftime("%Y-%m-%d %H:%M") if row.creado_en else "",
+            ]
+        )
+    return response
+
+
+def _export_point_pending_xlsx(tipo: str, q: str, score_min: float, qs):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "point_pendientes"
+
+    ws.append(["tipo", "filtro_q", "score_min", "count"])
+    ws.append([tipo, q or "", float(score_min), int(qs.count())])
+    ws.append([])
+    ws.append(
+        [
+            "id",
+            "tipo",
+            "codigo_point",
+            "nombre_point",
+            "sugerencia",
+            "score",
+            "metodo",
+            "creado_en",
+        ]
+    )
+
+    for row in qs.iterator(chunk_size=500):
+        ws.append(
+            [
+                row.id,
+                row.tipo,
+                row.point_codigo or "",
+                row.point_nombre or "",
+                row.fuzzy_sugerencia or "",
+                float(row.fuzzy_score or 0),
+                row.method or "",
+                row.creado_en.strftime("%Y-%m-%d %H:%M") if row.creado_en else "",
+            ]
+        )
+
+    stream = BytesIO()
+    wb.save(stream)
+    response = HttpResponse(
+        stream.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="point_pendientes_{tipo.lower()}.xlsx"'
+    return response
+
+
 @login_required
 def point_pending_review(request):
     if not can_view_maestros(request.user):
@@ -223,6 +312,38 @@ def point_pending_review(request):
             messages.error(request, "Selecciona al menos un pendiente.")
             return redirect("maestros:point_pending_review")
 
+        def _resolve_pending_insumo_row(pending, insumo_target, create_aliases_enabled):
+            point_code = (pending.point_codigo or "").strip()
+            if point_code and insumo_target.codigo_point and insumo_target.codigo_point != point_code:
+                return False, True, 0
+
+            changed = []
+            if point_code and insumo_target.codigo_point != point_code:
+                insumo_target.codigo_point = point_code
+                changed.append("codigo_point")
+            if insumo_target.nombre_point != pending.point_nombre:
+                insumo_target.nombre_point = pending.point_nombre
+                changed.append("nombre_point")
+            if changed:
+                insumo_target.save(update_fields=changed)
+
+            alias_created = 0
+            if create_aliases_enabled:
+                alias_norm = normalizar_nombre(pending.point_nombre)
+                if alias_norm and alias_norm != insumo_target.nombre_normalizado:
+                    alias, was_created = InsumoAlias.objects.get_or_create(
+                        nombre_normalizado=alias_norm,
+                        defaults={"nombre": pending.point_nombre[:250], "insumo": insumo_target},
+                    )
+                    if not was_created and alias.insumo_id != insumo_target.id:
+                        alias.insumo = insumo_target
+                        alias.save(update_fields=["insumo"])
+                    if was_created:
+                        alias_created = 1
+
+            pending.delete()
+            return True, False, alias_created
+
         if action == "resolve_insumos":
             insumo_id = (request.POST.get("insumo_id") or "").strip()
             create_aliases = request.POST.get("create_aliases") == "on"
@@ -235,36 +356,17 @@ def point_pending_review(request):
             conflicts = 0
             aliases_created = 0
             for p in selected:
-                point_code = (p.point_codigo or "").strip()
-                if point_code and target.codigo_point and target.codigo_point != point_code:
+                row_resolved, row_conflict, row_alias_created = _resolve_pending_insumo_row(
+                    p,
+                    target,
+                    create_aliases,
+                )
+                if row_conflict:
                     conflicts += 1
                     continue
-
-                changed = []
-                if point_code and target.codigo_point != point_code:
-                    target.codigo_point = point_code
-                    changed.append("codigo_point")
-                if target.nombre_point != p.point_nombre:
-                    target.nombre_point = p.point_nombre
-                    changed.append("nombre_point")
-                if changed:
-                    target.save(update_fields=changed)
-
-                if create_aliases:
-                    alias_norm = normalizar_nombre(p.point_nombre)
-                    if alias_norm and alias_norm != target.nombre_normalizado:
-                        alias, was_created = InsumoAlias.objects.get_or_create(
-                            nombre_normalizado=alias_norm,
-                            defaults={"nombre": p.point_nombre[:250], "insumo": target},
-                        )
-                        if not was_created and alias.insumo_id != target.id:
-                            alias.insumo = target
-                            alias.save(update_fields=["insumo"])
-                        if was_created:
-                            aliases_created += 1
-
-                p.delete()
-                resolved += 1
+                if row_resolved:
+                    resolved += 1
+                    aliases_created += row_alias_created
 
             messages.success(
                 request,
@@ -274,6 +376,69 @@ def point_pending_review(request):
                 messages.warning(
                     request,
                     f"Pendientes con conflicto de código Point (no aplicados): {conflicts}.",
+                )
+        elif action == "resolve_sugerencias_insumos":
+            if tipo != PointPendingMatch.TIPO_INSUMO:
+                messages.error(request, "La auto-resolución por sugerencia aplica solo para pendientes de insumos.")
+                return redirect("maestros:point_pending_review")
+            min_score = max(0.0, min(100.0, _to_float(request.POST.get("auto_score_min"), 90.0)))
+            create_aliases = request.POST.get("create_aliases") == "on"
+
+            resolved = 0
+            conflicts = 0
+            skipped_low_score = 0
+            skipped_no_suggestion = 0
+            skipped_no_target = 0
+            aliases_created = 0
+
+            for p in selected:
+                if float(p.fuzzy_score or 0.0) < min_score:
+                    skipped_low_score += 1
+                    continue
+
+                sugerencia_norm = normalizar_nombre(p.fuzzy_sugerencia or "")
+                if not sugerencia_norm:
+                    skipped_no_suggestion += 1
+                    continue
+
+                target = Insumo.objects.filter(
+                    activo=True,
+                    nombre_normalizado=sugerencia_norm,
+                ).only("id", "codigo_point", "nombre_point", "nombre_normalizado").first()
+                if not target:
+                    skipped_no_target += 1
+                    continue
+
+                row_resolved, row_conflict, row_alias_created = _resolve_pending_insumo_row(
+                    p,
+                    target,
+                    create_aliases,
+                )
+                if row_conflict:
+                    conflicts += 1
+                    continue
+                if row_resolved:
+                    resolved += 1
+                    aliases_created += row_alias_created
+
+            messages.success(
+                request,
+                (
+                    f"Auto-resueltos por sugerencia: {resolved}. "
+                    f"Aliases creados: {aliases_created}. "
+                    f"Score mínimo: {min_score:.1f}."
+                ),
+            )
+            if conflicts or skipped_low_score or skipped_no_suggestion or skipped_no_target:
+                messages.warning(
+                    request,
+                    (
+                        "No procesados: "
+                        f"conflicto código Point {conflicts}, "
+                        f"score bajo {skipped_low_score}, "
+                        f"sin sugerencia {skipped_no_suggestion}, "
+                        f"sugerencia sin insumo activo {skipped_no_target}."
+                    ),
                 )
 
         elif action == "resolve_productos":
@@ -368,6 +533,7 @@ def point_pending_review(request):
     if tipo not in allowed_types:
         tipo = PointPendingMatch.TIPO_INSUMO
     q = (request.GET.get("q") or "").strip()
+    score_min = max(0.0, min(100.0, _to_float(request.GET.get("score_min"), 0)))
 
     qs = PointPendingMatch.objects.filter(tipo=tipo).order_by("-fuzzy_score", "point_nombre")
     if q:
@@ -376,6 +542,14 @@ def point_pending_review(request):
             | Q(point_codigo__icontains=q)
             | Q(fuzzy_sugerencia__icontains=q)
         )
+    if score_min > 0:
+        qs = qs.filter(fuzzy_score__gte=score_min)
+
+    export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format == "csv":
+        return _export_point_pending_csv(tipo, q, score_min, qs)
+    if export_format == "xlsx":
+        return _export_point_pending_xlsx(tipo, q, score_min, qs)
 
     paginator = Paginator(qs, 200)
     page = paginator.get_page(request.GET.get("page"))
@@ -394,6 +568,7 @@ def point_pending_review(request):
             "page": page,
             "counts": counts,
             "can_manage": can_manage,
+            "score_min": score_min,
             "insumos": Insumo.objects.filter(activo=True).order_by("nombre")[:1500],
             "recetas": Receta.objects.order_by("nombre")[:1500],
             "proveedores": Proveedor.objects.filter(activo=True).order_by("nombre")[:800],
