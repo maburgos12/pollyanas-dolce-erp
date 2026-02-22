@@ -3,13 +3,14 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
 
 from core.models import Sucursal
 from compras.models import OrdenCompra, PresupuestoCompraPeriodo, SolicitudCompra
-from inventario.models import ExistenciaInsumo
+from inventario.models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import (
     LineaReceta,
@@ -845,3 +846,155 @@ class RecetasCosteoApiTests(TestCase):
             fecha_fin=date(2026, 3, 31),
         )
         self.assertEqual(solicitud_mes.cantidad, Decimal("45"))
+
+
+class InventarioAjustesApiTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.admin = user_model.objects.create_superuser(
+            username="admin_api_ajustes",
+            email="admin_api_ajustes@example.com",
+            password="test12345",
+        )
+        self.almacen = user_model.objects.create_user(
+            username="almacen_api_ajustes",
+            email="almacen_api_ajustes@example.com",
+            password="test12345",
+        )
+        group_almacen, _ = Group.objects.get_or_create(name="ALMACEN")
+        self.almacen.groups.add(group_almacen)
+        self.lector = user_model.objects.create_user(
+            username="lector_api_ajustes",
+            email="lector_api_ajustes@example.com",
+            password="test12345",
+        )
+
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo API Ajuste",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(
+            nombre="Harina API Ajustes",
+            unidad_base=self.unidad,
+            activo=True,
+        )
+        self.existencia = ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            stock_actual=Decimal("10"),
+        )
+
+    def test_list_ajustes_requires_view_perm(self):
+        self.client.force_login(self.lector)
+        resp = self.client.get(reverse("api_inventario_ajustes"))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_almacen_can_create_pending_ajuste(self):
+        self.client.force_login(self.almacen)
+        resp = self.client.post(
+            reverse("api_inventario_ajustes"),
+            {
+                "insumo_id": self.insumo.id,
+                "cantidad_sistema": "10",
+                "cantidad_fisica": "8",
+                "motivo": "Conteo semanal",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertEqual(payload["estatus"], AjusteInventario.STATUS_PENDIENTE)
+        self.assertEqual(payload["solicitado_por"], self.almacen.username)
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.stock_actual, Decimal("10"))
+
+    def test_almacen_cannot_apply_inmediato(self):
+        self.client.force_login(self.almacen)
+        resp = self.client.post(
+            reverse("api_inventario_ajustes"),
+            {
+                "insumo_id": self.insumo.id,
+                "cantidad_sistema": "10",
+                "cantidad_fisica": "7",
+                "motivo": "Conteo semanal",
+                "aplicar_inmediato": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(AjusteInventario.objects.count(), 0)
+
+    def test_admin_create_apply_inmediato_updates_stock(self):
+        self.client.force_login(self.admin)
+        resp = self.client.post(
+            reverse("api_inventario_ajustes"),
+            {
+                "insumo_id": self.insumo.id,
+                "cantidad_sistema": "10",
+                "cantidad_fisica": "13",
+                "motivo": "Correccion entrada",
+                "aplicar_inmediato": True,
+                "comentario_revision": "ok admin",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertTrue(payload["aplicado"])
+        self.assertEqual(payload["estatus"], AjusteInventario.STATUS_APLICADO)
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.stock_actual, Decimal("13"))
+        mov = MovimientoInventario.objects.get(referencia=payload["folio"])
+        self.assertEqual(mov.tipo, MovimientoInventario.TIPO_ENTRADA)
+        self.assertEqual(mov.cantidad, Decimal("3"))
+
+    def test_admin_can_decide_approve(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("7"),
+            motivo="Merma",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.post(
+            reverse("api_inventario_ajuste_decision", args=[ajuste.id]),
+            {"action": "approve", "comentario_revision": "aprobado api"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["estatus"], AjusteInventario.STATUS_APLICADO)
+        ajuste.refresh_from_db()
+        self.assertEqual(ajuste.estatus, AjusteInventario.STATUS_APLICADO)
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.stock_actual, Decimal("7"))
+        mov = MovimientoInventario.objects.get(referencia=ajuste.folio)
+        self.assertEqual(mov.tipo, MovimientoInventario.TIPO_SALIDA)
+        self.assertEqual(mov.cantidad, Decimal("3"))
+
+    def test_admin_can_decide_reject(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("6"),
+            motivo="Revision",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.post(
+            reverse("api_inventario_ajuste_decision", args=[ajuste.id]),
+            {"action": "reject", "comentario_revision": "no procede"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["estatus"], AjusteInventario.STATUS_RECHAZADO)
+        ajuste.refresh_from_db()
+        self.assertEqual(ajuste.estatus, AjusteInventario.STATUS_RECHAZADO)
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.stock_actual, Decimal("10"))
+        self.assertEqual(MovimientoInventario.objects.count(), 0)

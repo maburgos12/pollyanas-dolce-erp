@@ -13,7 +13,16 @@ from rest_framework.permissions import IsAuthenticated
 
 from compras.models import SolicitudCompra
 from compras.models import OrdenCompra
-from core.access import can_manage_compras, can_view_compras
+from core.access import (
+    ROLE_ADMIN,
+    ROLE_DG,
+    can_manage_compras,
+    can_manage_inventario,
+    can_view_compras,
+    can_view_inventario,
+    has_any_role,
+)
+from core.audit import log_event
 from core.models import Sucursal
 from compras.views import (
     _build_budget_context,
@@ -24,7 +33,8 @@ from compras.views import (
     _filtered_solicitudes,
     _sanitize_consumo_ref_filter,
 )
-from inventario.models import ExistenciaInsumo
+from inventario.models import AjusteInventario, ExistenciaInsumo
+from inventario.views import _apply_ajuste
 from maestros.models import CostoInsumo, Insumo
 from recetas.models import (
     LineaReceta,
@@ -50,6 +60,8 @@ from .serializers import (
     ComprasSolicitudCreateSerializer,
     ForecastBacktestRequestSerializer,
     ForecastEstadisticoRequestSerializer,
+    InventarioAjusteCreateSerializer,
+    InventarioAjusteDecisionSerializer,
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
     PlanDesdePronosticoRequestSerializer,
@@ -118,6 +130,30 @@ def _to_float(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError, InvalidOperation):
         return default
+
+
+def _can_approve_ajustes(user) -> bool:
+    return has_any_role(user, ROLE_ADMIN, ROLE_DG)
+
+
+def _serialize_ajuste_row(ajuste: AjusteInventario) -> dict:
+    return {
+        "id": ajuste.id,
+        "folio": ajuste.folio,
+        "insumo_id": ajuste.insumo_id,
+        "insumo": ajuste.insumo.nombre if ajuste.insumo_id else "",
+        "cantidad_sistema": str(ajuste.cantidad_sistema),
+        "cantidad_fisica": str(ajuste.cantidad_fisica),
+        "delta": str(_to_decimal(ajuste.cantidad_fisica) - _to_decimal(ajuste.cantidad_sistema)),
+        "motivo": ajuste.motivo,
+        "estatus": ajuste.estatus,
+        "solicitado_por": ajuste.solicitado_por.username if ajuste.solicitado_por_id else "",
+        "aprobado_por": ajuste.aprobado_por.username if ajuste.aprobado_por_id else "",
+        "comentario_revision": ajuste.comentario_revision or "",
+        "creado_en": ajuste.creado_en,
+        "aprobado_en": ajuste.aprobado_en,
+        "aplicado_en": ajuste.aplicado_en,
+    }
 
 
 def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict:
@@ -665,6 +701,158 @@ class InventarioSugerenciasCompraView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class InventarioAjustesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar ajustes de inventario."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        estatus = (request.GET.get("estatus") or "").strip().upper()
+        valid_status = {
+            AjusteInventario.STATUS_PENDIENTE,
+            AjusteInventario.STATUS_APLICADO,
+            AjusteInventario.STATUS_RECHAZADO,
+        }
+        qs = AjusteInventario.objects.select_related("insumo", "solicitado_por", "aprobado_por").order_by("-creado_en")
+        if estatus in valid_status:
+            qs = qs.filter(estatus=estatus)
+
+        limit = _parse_bounded_int(
+            request.GET.get("limit", 120),
+            default=120,
+            min_value=1,
+            max_value=500,
+        )
+        items = [_serialize_ajuste_row(a) for a in qs[:limit]]
+
+        totals_qs = qs if estatus in valid_status else AjusteInventario.objects.all()
+        return Response(
+            {
+                "filters": {"estatus": estatus if estatus in valid_status else "", "limit": limit},
+                "totales": {
+                    "rows": len(items),
+                    "pendientes": totals_qs.filter(estatus=AjusteInventario.STATUS_PENDIENTE).count(),
+                    "aplicados": totals_qs.filter(estatus=AjusteInventario.STATUS_APLICADO).count(),
+                    "rechazados": totals_qs.filter(estatus=AjusteInventario.STATUS_RECHAZADO).count(),
+                },
+                "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        if not can_manage_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para registrar ajustes de inventario."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = InventarioAjusteCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        insumo = get_object_or_404(Insumo, pk=data["insumo_id"])
+        aplicar_inmediato = bool(data.get("aplicar_inmediato"))
+        comentario = data.get("comentario_revision") or ""
+        if aplicar_inmediato and not _can_approve_ajustes(request.user):
+            return Response(
+                {
+                    "detail": (
+                        "No tienes permisos para aplicar ajustes inmediatamente. "
+                        "Registra el ajuste en pendiente y solicita aprobación."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        with transaction.atomic():
+            ajuste = AjusteInventario.objects.create(
+                insumo=insumo,
+                cantidad_sistema=data["cantidad_sistema"],
+                cantidad_fisica=data["cantidad_fisica"],
+                motivo=data["motivo"],
+                estatus=AjusteInventario.STATUS_PENDIENTE,
+                solicitado_por=request.user,
+            )
+            if aplicar_inmediato:
+                _apply_ajuste(ajuste, request.user, comentario=comentario)
+
+        payload = _serialize_ajuste_row(ajuste)
+        payload["aplicado"] = ajuste.estatus == AjusteInventario.STATUS_APLICADO
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+
+class InventarioAjusteDecisionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, ajuste_id: int):
+        if not _can_approve_ajustes(request.user):
+            return Response(
+                {"detail": "No tienes permisos para aprobar/rechazar ajustes de inventario."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ajuste = get_object_or_404(
+            AjusteInventario.objects.select_related("insumo", "solicitado_por", "aprobado_por"),
+            pk=ajuste_id,
+        )
+        ser = InventarioAjusteDecisionSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        action = ser.validated_data["action"]
+        comentario = ser.validated_data.get("comentario_revision") or ""
+
+        if action == "reject":
+            if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+                return Response(
+                    {"detail": "No se puede rechazar un ajuste ya aplicado."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            ajuste.estatus = AjusteInventario.STATUS_RECHAZADO
+            ajuste.aprobado_por = request.user
+            ajuste.aprobado_en = timezone.now()
+            ajuste.aplicado_en = None
+            ajuste.comentario_revision = comentario
+            ajuste.save(
+                update_fields=[
+                    "estatus",
+                    "aprobado_por",
+                    "aprobado_en",
+                    "aplicado_en",
+                    "comentario_revision",
+                ]
+            )
+            log_event(
+                request.user,
+                "REJECT",
+                "inventario.AjusteInventario",
+                ajuste.id,
+                {"folio": ajuste.folio, "estatus": ajuste.estatus, "comentario_revision": comentario},
+            )
+        else:
+            if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+                return Response(
+                    {
+                        "detail": "El ajuste ya estaba aplicado.",
+                        "item": _serialize_ajuste_row(ajuste),
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            if ajuste.estatus == AjusteInventario.STATUS_RECHAZADO:
+                return Response(
+                    {"detail": "El ajuste fue rechazado y no puede aplicarse."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            _apply_ajuste(ajuste, request.user, comentario=comentario)
+
+        payload = _serialize_ajuste_row(ajuste)
+        payload["action"] = action
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class PresupuestosConsolidadoView(APIView):

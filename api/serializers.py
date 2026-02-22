@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from compras.models import OrdenCompra, SolicitudCompra
+from inventario.models import AjusteInventario
 from recetas.models import SolicitudVenta
 
 
@@ -428,3 +429,49 @@ class SolicitudVentaBulkSerializer(serializers.Serializer):
         if len(value) > 5000:
             raise serializers.ValidationError("Máximo 5000 filas por request.")
         return value
+
+
+class InventarioAjusteCreateSerializer(serializers.Serializer):
+    insumo_id = serializers.IntegerField()
+    cantidad_sistema = serializers.DecimalField(max_digits=18, decimal_places=3)
+    cantidad_fisica = serializers.DecimalField(max_digits=18, decimal_places=3)
+    motivo = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    aplicar_inmediato = serializers.BooleanField(required=False, default=False)
+    comentario_revision = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs["cantidad_sistema"] < 0 or attrs["cantidad_fisica"] < 0:
+            raise serializers.ValidationError("cantidad_sistema y cantidad_fisica no pueden ser negativas.")
+        attrs["motivo"] = (attrs.get("motivo") or "").strip() or "Sin motivo"
+        attrs["comentario_revision"] = (attrs.get("comentario_revision") or "").strip()[:255]
+        return attrs
+
+
+class InventarioAjusteDecisionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=["approve", "apply", "reject"])
+    comentario_revision = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        attrs["action"] = str(attrs.get("action") or "").strip().lower()
+        attrs["comentario_revision"] = (attrs.get("comentario_revision") or "").strip()[:255]
+        return attrs
+
+
+class InventarioAjusteResponseSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    folio = serializers.CharField()
+    insumo_id = serializers.IntegerField()
+    insumo = serializers.CharField()
+    cantidad_sistema = serializers.DecimalField(max_digits=18, decimal_places=3)
+    cantidad_fisica = serializers.DecimalField(max_digits=18, decimal_places=3)
+    delta = serializers.DecimalField(max_digits=18, decimal_places=3)
+    motivo = serializers.CharField()
+    estatus = serializers.ChoiceField(choices=[choice[0] for choice in AjusteInventario.STATUS_CHOICES])
+    solicitado_por = serializers.CharField(allow_blank=True)
+    aprobado_por = serializers.CharField(allow_blank=True)
+    comentario_revision = serializers.CharField(allow_blank=True)
+    creado_en = serializers.DateTimeField()
+    aprobado_en = serializers.DateTimeField(allow_null=True)
+    aplicado_en = serializers.DateTimeField(allow_null=True)
