@@ -2097,6 +2097,55 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(venta.cantidad, Decimal("15"))
         self.assertEqual(venta.tickets, 7)
 
+    def test_endpoint_ventas_historial_import_preview_y_confirm(self):
+        sucursal = Sucursal.objects.create(codigo="ORIENTE", nombre="Sucursal Oriente", activa=True)
+        url_preview = reverse("api_ventas_historial_import_preview")
+        url_confirm = reverse("api_ventas_historial_import_confirm")
+
+        payload = {
+            "dry_run": False,
+            "modo": "replace",
+            "rows": [
+                {
+                    "receta_id": self.receta.id,
+                    "fecha": "2026-03-14",
+                    "cantidad": "5",
+                    "sucursal_id": sucursal.id,
+                    "tickets": 2,
+                }
+            ],
+        }
+
+        preview_resp = self.client.post(url_preview, payload, content_type="application/json")
+        self.assertEqual(preview_resp.status_code, 200)
+        preview_data = preview_resp.json()
+        self.assertTrue(preview_data["dry_run"])
+        self.assertTrue(preview_data["preview"])
+        self.assertEqual(preview_data["summary"]["created"], 1)
+        self.assertEqual(VentaHistorica.objects.count(), 0)
+
+        confirm_resp = self.client.post(url_confirm, payload, content_type="application/json")
+        self.assertEqual(confirm_resp.status_code, 200)
+        confirm_data = confirm_resp.json()
+        self.assertFalse(confirm_data["dry_run"])
+        self.assertFalse(confirm_data["preview"])
+        self.assertEqual(confirm_data["summary"]["created"], 1)
+        self.assertEqual(VentaHistorica.objects.count(), 1)
+
+    def test_endpoint_ventas_historial_import_preview_confirm_requires_perm(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_historial_import_api",
+            email="sin_perm_historial_import_api@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+
+        payload = {"rows": [{"receta_id": self.receta.id, "fecha": "2026-03-15", "cantidad": "4"}]}
+        for name in ("api_ventas_historial_import_preview", "api_ventas_historial_import_confirm"):
+            resp = self.client.post(reverse(name), payload, content_type="application/json")
+            self.assertEqual(resp.status_code, 403)
+
     def test_endpoint_ventas_solicitud_bulk_dry_run_y_apply(self):
         sucursal = Sucursal.objects.create(codigo="PONIENTE", nombre="Sucursal Poniente", activa=True)
         url = reverse("api_ventas_solicitud_bulk")

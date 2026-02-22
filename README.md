@@ -22,6 +22,8 @@ Sprint 1 entrega:
 - API: POST /api/ventas/pronostico/bulk/ (carga masiva de pronóstico con dry_run)
 - API: POST /api/ventas/pronostico-estadistico/ (forecast por sucursal + comparativo contra solicitud de ventas)
 - API: POST /api/ventas/historial/bulk/ (carga masiva de historial de ventas con dry_run)
+- API: POST /api/ventas/historial/import-preview/ (previsualiza carga de historial de ventas sin aplicar cambios)
+- API: POST /api/ventas/historial/import-confirm/ (confirma y aplica carga de historial de ventas)
 - API: POST /api/ventas/solicitud/ (alta/actualización de solicitud de ventas)
 - API: POST /api/ventas/solicitud/bulk/ (carga masiva de solicitudes de ventas con dry_run)
 - API: POST /api/ventas/solicitud/aplicar-forecast/ (ajuste automático de solicitud al forecast)

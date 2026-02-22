@@ -46,6 +46,8 @@ from .views import (
     PronosticoVentaListView,
     VentaHistoricaListView,
     VentaHistoricaBulkUpsertView,
+    VentaHistoricaImportPreviewView,
+    VentaHistoricaImportConfirmView,
 )
 
 urlpatterns = [
@@ -68,6 +70,8 @@ urlpatterns = [
     path("ventas/pronostico/bulk/", PronosticoVentaBulkUpsertView.as_view(), name="api_ventas_pronostico_bulk"),
     path("ventas/pronostico-estadistico/", ForecastEstadisticoView.as_view(), name="api_ventas_pronostico_estadistico"),
     path("ventas/historial/bulk/", VentaHistoricaBulkUpsertView.as_view(), name="api_ventas_historial_bulk"),
+    path("ventas/historial/import-preview/", VentaHistoricaImportPreviewView.as_view(), name="api_ventas_historial_import_preview"),
+    path("ventas/historial/import-confirm/", VentaHistoricaImportConfirmView.as_view(), name="api_ventas_historial_import_confirm"),
     path("ventas/solicitud/", SolicitudVentaUpsertView.as_view(), name="api_ventas_solicitud"),
     path("ventas/solicitud/bulk/", SolicitudVentaBulkUpsertView.as_view(), name="api_ventas_solicitud_bulk"),
     path("ventas/solicitud/aplicar-forecast/", SolicitudVentaAplicarForecastView.as_view(), name="api_ventas_solicitud_aplicar_forecast"),
