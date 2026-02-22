@@ -920,6 +920,105 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(len(payload["windows"]), 1)
         self.assertIn("mape_promedio", payload["totals"])
 
+    def test_endpoint_ventas_historial_list_filters_and_totals(self):
+        sucursal = Sucursal.objects.create(codigo="MAT", nombre="Matriz API", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 2, 10),
+            cantidad=Decimal("10"),
+            tickets=5,
+            monto_total=Decimal("320"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 3, 10),
+            cantidad=Decimal("4"),
+            tickets=2,
+            monto_total=Decimal("120"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_historial")
+        resp = self.client.get(url, {"periodo": "2026-02", "sucursal_id": sucursal.id})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(Decimal(payload["totales"]["cantidad_total"]), Decimal("10"))
+        self.assertEqual(payload["totales"]["tickets_total"], 5)
+        self.assertEqual(Decimal(payload["totales"]["monto_total"]), Decimal("320"))
+        self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_ventas_pronostico_list_filters_and_totals(self):
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("18"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-04",
+            cantidad=Decimal("22"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_pronostico")
+        resp = self.client.get(url, {"periodo_desde": "2026-03", "periodo_hasta": "2026-03"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(Decimal(payload["totales"]["cantidad_total"]), Decimal("18"))
+        self.assertEqual(payload["totales"]["periodos_count"], 1)
+        self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_ventas_solicitudes_list_filters_and_totals(self):
+        sucursal = Sucursal.objects.create(codigo="SUR", nombre="Sucursal Sur API", activa=True)
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("30"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_SEMANA,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 2),
+            fecha_fin=date(2026, 3, 8),
+            cantidad=Decimal("8"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_solicitudes")
+        resp = self.client.get(url, {"periodo": "2026-03", "alcance": "MES"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(Decimal(payload["totales"]["cantidad_total"]), Decimal("30"))
+        self.assertEqual(payload["totales"]["by_alcance"][SolicitudVenta.ALCANCE_MES], 1)
+        self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_ventas_listados_requires_perm(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_listados_ventas",
+            email="sin_perm_listados_ventas@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+
+        for name in ("api_ventas_historial", "api_ventas_pronostico", "api_ventas_solicitudes"):
+            resp = self.client.get(reverse(name))
+            self.assertEqual(resp.status_code, 403)
+
     def test_endpoint_ventas_pronostico_bulk_dry_run_y_apply(self):
         url = reverse("api_ventas_pronostico_bulk")
 

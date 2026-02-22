@@ -22,8 +22,11 @@ from .views import (
     RecetaCostoHistoricoView,
     RecetaVersionesView,
     SolicitudVentaAplicarForecastView,
+    SolicitudVentaListView,
     SolicitudVentaBulkUpsertView,
     SolicitudVentaUpsertView,
+    PronosticoVentaListView,
+    VentaHistoricaListView,
     VentaHistoricaBulkUpsertView,
 )
 
@@ -32,6 +35,9 @@ urlpatterns = [
     path("mrp/calcular-requerimientos/", MRPRequerimientosView.as_view(), name="api_mrp_calcular_requerimientos"),
     path("mrp/generar-plan-pronostico/", PlanDesdePronosticoCreateView.as_view(), name="api_mrp_generar_plan_pronostico"),
     path("ventas/pronostico-backtest/", ForecastBacktestView.as_view(), name="api_ventas_pronostico_backtest"),
+    path("ventas/historial/", VentaHistoricaListView.as_view(), name="api_ventas_historial"),
+    path("ventas/pronostico/", PronosticoVentaListView.as_view(), name="api_ventas_pronostico"),
+    path("ventas/solicitud/list/", SolicitudVentaListView.as_view(), name="api_ventas_solicitudes"),
     path("ventas/pronostico/bulk/", PronosticoVentaBulkUpsertView.as_view(), name="api_ventas_pronostico_bulk"),
     path("ventas/pronostico-estadistico/", ForecastEstadisticoView.as_view(), name="api_ventas_pronostico_estadistico"),
     path("ventas/historial/bulk/", VentaHistoricaBulkUpsertView.as_view(), name="api_ventas_historial_bulk"),

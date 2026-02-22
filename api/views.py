@@ -123,6 +123,18 @@ def _parse_period(period_raw: str | None) -> tuple[int, int] | None:
     return year, month
 
 
+def _parse_iso_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
 def _parse_bounded_int(raw_value, *, default: int, min_value: int, max_value: int) -> int:
     try:
         value = int(raw_value)
@@ -2278,6 +2290,406 @@ class ForecastBacktestView(APIView):
                     "mape_promedio": float(overall_mape) if overall_mape is not None else None,
                 },
                 "windows": windows_payload,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class VentaHistoricaListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.has_perm("recetas.view_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para consultar historial de ventas."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        q = (request.GET.get("q") or "").strip()
+        periodo = (request.GET.get("periodo") or request.GET.get("mes") or "").strip()
+        sucursal_id_raw = (request.GET.get("sucursal_id") or "").strip()
+        receta_id_raw = (request.GET.get("receta_id") or "").strip()
+        fecha_desde_raw = (request.GET.get("fecha_desde") or "").strip()
+        fecha_hasta_raw = (request.GET.get("fecha_hasta") or "").strip()
+        limit = _parse_bounded_int(request.GET.get("limit", 150), default=150, min_value=1, max_value=1000)
+
+        fecha_desde = _parse_iso_date(fecha_desde_raw)
+        if fecha_desde_raw and fecha_desde is None:
+            return Response(
+                {"detail": "fecha_desde inválida. Usa formato YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fecha_hasta = _parse_iso_date(fecha_hasta_raw)
+        if fecha_hasta_raw and fecha_hasta is None:
+            return Response(
+                {"detail": "fecha_hasta inválida. Usa formato YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if fecha_desde and fecha_hasta and fecha_hasta < fecha_desde:
+            return Response(
+                {"detail": "fecha_hasta no puede ser menor que fecha_desde."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = VentaHistorica.objects.select_related("receta", "sucursal").order_by("-fecha", "-id")
+        parsed_period = _parse_period(periodo)
+        if periodo and not parsed_period:
+            return Response(
+                {"detail": "periodo inválido. Usa formato YYYY-MM."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if parsed_period:
+            year, month = parsed_period
+            qs = qs.filter(fecha__year=year, fecha__month=month)
+            periodo = f"{year:04d}-{month:02d}"
+        else:
+            periodo = ""
+
+        if fecha_desde:
+            qs = qs.filter(fecha__gte=fecha_desde)
+        if fecha_hasta:
+            qs = qs.filter(fecha__lte=fecha_hasta)
+
+        if sucursal_id_raw:
+            if not sucursal_id_raw.isdigit():
+                return Response(
+                    {"detail": "sucursal_id debe ser numérico."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            qs = qs.filter(sucursal_id=int(sucursal_id_raw))
+
+        if receta_id_raw:
+            if not receta_id_raw.isdigit():
+                return Response(
+                    {"detail": "receta_id debe ser numérico."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            qs = qs.filter(receta_id=int(receta_id_raw))
+
+        if q:
+            qs = qs.filter(
+                Q(receta__nombre__icontains=q)
+                | Q(receta__codigo_point__icontains=q)
+                | Q(sucursal__nombre__icontains=q)
+                | Q(sucursal__codigo__icontains=q)
+                | Q(fuente__icontains=q)
+            )
+
+        rows = list(qs[:limit])
+        items = []
+        cantidad_total = Decimal("0")
+        tickets_total = 0
+        monto_total = Decimal("0")
+        by_sucursal: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+
+        for r in rows:
+            cantidad = _to_decimal(r.cantidad)
+            cantidad_total += cantidad
+            tickets_total += int(r.tickets or 0)
+            monto = _to_decimal(r.monto_total)
+            monto_total += monto
+            sucursal_key = r.sucursal.codigo if r.sucursal_id and r.sucursal else "GLOBAL"
+            by_sucursal[sucursal_key] += cantidad
+            items.append(
+                {
+                    "id": r.id,
+                    "fecha": str(r.fecha),
+                    "receta_id": r.receta_id,
+                    "receta": r.receta.nombre,
+                    "codigo_point": r.receta.codigo_point,
+                    "sucursal_id": r.sucursal_id,
+                    "sucursal": r.sucursal.nombre if r.sucursal_id and r.sucursal else "",
+                    "sucursal_codigo": r.sucursal.codigo if r.sucursal_id and r.sucursal else "",
+                    "cantidad": str(cantidad),
+                    "tickets": int(r.tickets or 0),
+                    "monto_total": str(monto),
+                    "fuente": r.fuente,
+                    "actualizado_en": r.actualizado_en,
+                }
+            )
+
+        sucursales_payload = [
+            {"sucursal": k, "cantidad_total": str(v)}
+            for k, v in sorted(by_sucursal.items(), key=lambda entry: entry[1], reverse=True)
+        ]
+
+        return Response(
+            {
+                "filters": {
+                    "q": q,
+                    "periodo": periodo,
+                    "sucursal_id": sucursal_id_raw,
+                    "receta_id": receta_id_raw,
+                    "fecha_desde": str(fecha_desde) if fecha_desde else "",
+                    "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
+                    "limit": limit,
+                },
+                "totales": {
+                    "rows": len(items),
+                    "cantidad_total": str(cantidad_total),
+                    "tickets_total": tickets_total,
+                    "monto_total": str(monto_total),
+                    "by_sucursal": sucursales_payload,
+                },
+                "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class PronosticoVentaListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.has_perm("recetas.view_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para consultar pronósticos de venta."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        q = (request.GET.get("q") or "").strip()
+        periodo = (request.GET.get("periodo") or "").strip()
+        periodo_desde = (request.GET.get("periodo_desde") or "").strip()
+        periodo_hasta = (request.GET.get("periodo_hasta") or "").strip()
+        receta_id_raw = (request.GET.get("receta_id") or "").strip()
+        limit = _parse_bounded_int(request.GET.get("limit", 150), default=150, min_value=1, max_value=1000)
+
+        if periodo:
+            parsed_period = _parse_period(periodo)
+            if not parsed_period:
+                return Response(
+                    {"detail": "periodo inválido. Usa formato YYYY-MM."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            year, month = parsed_period
+            periodo = f"{year:04d}-{month:02d}"
+
+        if periodo_desde:
+            parsed_since = _parse_period(periodo_desde)
+            if not parsed_since:
+                return Response(
+                    {"detail": "periodo_desde inválido. Usa formato YYYY-MM."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            periodo_desde = f"{parsed_since[0]:04d}-{parsed_since[1]:02d}"
+
+        if periodo_hasta:
+            parsed_until = _parse_period(periodo_hasta)
+            if not parsed_until:
+                return Response(
+                    {"detail": "periodo_hasta inválido. Usa formato YYYY-MM."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            periodo_hasta = f"{parsed_until[0]:04d}-{parsed_until[1]:02d}"
+
+        if periodo_desde and periodo_hasta and periodo_hasta < periodo_desde:
+            return Response(
+                {"detail": "periodo_hasta no puede ser menor que periodo_desde."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = PronosticoVenta.objects.select_related("receta").order_by("-periodo", "receta__nombre")
+        if periodo:
+            qs = qs.filter(periodo=periodo)
+        if periodo_desde:
+            qs = qs.filter(periodo__gte=periodo_desde)
+        if periodo_hasta:
+            qs = qs.filter(periodo__lte=periodo_hasta)
+
+        if receta_id_raw:
+            if not receta_id_raw.isdigit():
+                return Response(
+                    {"detail": "receta_id debe ser numérico."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            qs = qs.filter(receta_id=int(receta_id_raw))
+
+        if q:
+            qs = qs.filter(
+                Q(receta__nombre__icontains=q)
+                | Q(receta__codigo_point__icontains=q)
+                | Q(fuente__icontains=q)
+            )
+
+        rows = list(qs[:limit])
+        items = []
+        cantidad_total = Decimal("0")
+        periodos = set()
+        for r in rows:
+            qty = _to_decimal(r.cantidad)
+            cantidad_total += qty
+            periodos.add(r.periodo)
+            items.append(
+                {
+                    "id": r.id,
+                    "receta_id": r.receta_id,
+                    "receta": r.receta.nombre,
+                    "codigo_point": r.receta.codigo_point,
+                    "periodo": r.periodo,
+                    "cantidad": str(qty),
+                    "fuente": r.fuente,
+                    "actualizado_en": r.actualizado_en,
+                }
+            )
+
+        return Response(
+            {
+                "filters": {
+                    "q": q,
+                    "periodo": periodo,
+                    "periodo_desde": periodo_desde,
+                    "periodo_hasta": periodo_hasta,
+                    "receta_id": receta_id_raw,
+                    "limit": limit,
+                },
+                "totales": {
+                    "rows": len(items),
+                    "cantidad_total": str(cantidad_total),
+                    "periodos_count": len(periodos),
+                },
+                "items": items,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SolicitudVentaListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.has_perm("recetas.view_planproduccion"):
+            return Response(
+                {"detail": "No tienes permisos para consultar solicitudes de venta."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        q = (request.GET.get("q") or "").strip()
+        periodo = (request.GET.get("periodo") or "").strip()
+        alcance = (request.GET.get("alcance") or "").strip().upper()
+        sucursal_id_raw = (request.GET.get("sucursal_id") or "").strip()
+        receta_id_raw = (request.GET.get("receta_id") or "").strip()
+        fecha_desde_raw = (request.GET.get("fecha_desde") or "").strip()
+        fecha_hasta_raw = (request.GET.get("fecha_hasta") or "").strip()
+        limit = _parse_bounded_int(request.GET.get("limit", 150), default=150, min_value=1, max_value=1000)
+
+        if periodo:
+            parsed_period = _parse_period(periodo)
+            if not parsed_period:
+                return Response(
+                    {"detail": "periodo inválido. Usa formato YYYY-MM."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            periodo = f"{parsed_period[0]:04d}-{parsed_period[1]:02d}"
+
+        allowed_alcance = {
+            SolicitudVenta.ALCANCE_MES,
+            SolicitudVenta.ALCANCE_SEMANA,
+            SolicitudVenta.ALCANCE_FIN_SEMANA,
+        }
+        if alcance and alcance not in allowed_alcance:
+            return Response(
+                {"detail": "alcance inválido. Usa MES, SEMANA o FIN_SEMANA."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        fecha_desde = _parse_iso_date(fecha_desde_raw)
+        if fecha_desde_raw and fecha_desde is None:
+            return Response(
+                {"detail": "fecha_desde inválida. Usa formato YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fecha_hasta = _parse_iso_date(fecha_hasta_raw)
+        if fecha_hasta_raw and fecha_hasta is None:
+            return Response(
+                {"detail": "fecha_hasta inválida. Usa formato YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if fecha_desde and fecha_hasta and fecha_hasta < fecha_desde:
+            return Response(
+                {"detail": "fecha_hasta no puede ser menor que fecha_desde."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = SolicitudVenta.objects.select_related("receta", "sucursal").order_by("-fecha_inicio", "receta__nombre")
+        if periodo:
+            qs = qs.filter(periodo=periodo)
+        if alcance:
+            qs = qs.filter(alcance=alcance)
+        if fecha_desde:
+            qs = qs.filter(fecha_inicio__gte=fecha_desde)
+        if fecha_hasta:
+            qs = qs.filter(fecha_fin__lte=fecha_hasta)
+
+        if sucursal_id_raw:
+            if not sucursal_id_raw.isdigit():
+                return Response(
+                    {"detail": "sucursal_id debe ser numérico."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            qs = qs.filter(sucursal_id=int(sucursal_id_raw))
+
+        if receta_id_raw:
+            if not receta_id_raw.isdigit():
+                return Response(
+                    {"detail": "receta_id debe ser numérico."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            qs = qs.filter(receta_id=int(receta_id_raw))
+
+        if q:
+            qs = qs.filter(
+                Q(receta__nombre__icontains=q)
+                | Q(receta__codigo_point__icontains=q)
+                | Q(sucursal__nombre__icontains=q)
+                | Q(sucursal__codigo__icontains=q)
+                | Q(fuente__icontains=q)
+            )
+
+        rows = list(qs[:limit])
+        items = []
+        cantidad_total = Decimal("0")
+        by_alcance = {k: 0 for k in allowed_alcance}
+        for r in rows:
+            qty = _to_decimal(r.cantidad)
+            cantidad_total += qty
+            by_alcance[r.alcance] = by_alcance.get(r.alcance, 0) + 1
+            items.append(
+                {
+                    "id": r.id,
+                    "receta_id": r.receta_id,
+                    "receta": r.receta.nombre,
+                    "codigo_point": r.receta.codigo_point,
+                    "sucursal_id": r.sucursal_id,
+                    "sucursal": r.sucursal.nombre if r.sucursal_id and r.sucursal else "",
+                    "sucursal_codigo": r.sucursal.codigo if r.sucursal_id and r.sucursal else "",
+                    "alcance": r.alcance,
+                    "periodo": r.periodo,
+                    "fecha_inicio": str(r.fecha_inicio),
+                    "fecha_fin": str(r.fecha_fin),
+                    "cantidad": str(qty),
+                    "fuente": r.fuente,
+                    "actualizado_en": r.actualizado_en,
+                }
+            )
+
+        return Response(
+            {
+                "filters": {
+                    "q": q,
+                    "periodo": periodo,
+                    "alcance": alcance,
+                    "sucursal_id": sucursal_id_raw,
+                    "receta_id": receta_id_raw,
+                    "fecha_desde": str(fecha_desde) if fecha_desde else "",
+                    "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
+                    "limit": limit,
+                },
+                "totales": {
+                    "rows": len(items),
+                    "cantidad_total": str(cantidad_total),
+                    "by_alcance": by_alcance,
+                },
+                "items": items,
             },
             status=status.HTTP_200_OK,
         )
