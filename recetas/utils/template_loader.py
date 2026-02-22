@@ -96,6 +96,13 @@ def _resolve_line_type(raw: Any) -> str:
 
 
 def _unit_from_text(unit_text: str) -> UnidadMedida | None:
+    code = _unit_code_from_text(unit_text)
+    if not code:
+        return None
+    return UnidadMedida.objects.filter(codigo=code).first()
+
+
+def _unit_code_from_text(unit_text: str) -> str | None:
     if not unit_text:
         return None
     u = normalizar_nombre(unit_text)
@@ -111,8 +118,26 @@ def _unit_from_text(unit_text: str) -> UnidadMedida | None:
         "pieza": "pza",
         "unidad": "pza",
     }
-    code = convert.get(u, u)
-    return UnidadMedida.objects.filter(codigo=code).first()
+    return convert.get(u, u)
+
+
+def _build_unit_cache(unit_texts: set[str]) -> dict[str, UnidadMedida | None]:
+    if not unit_texts:
+        return {}
+    text_to_code = {
+        text: _unit_code_from_text(text)
+        for text in unit_texts
+        if text
+    }
+    codes = {code for code in text_to_code.values() if code}
+    units_by_code = {
+        unit.codigo: unit
+        for unit in UnidadMedida.objects.filter(codigo__in=codes)
+    }
+    return {
+        text: (units_by_code.get(code) if code else None)
+        for text, code in text_to_code.items()
+    }
 
 
 def _latest_cost_by_insumo(insumo_id: int) -> Decimal | None:
@@ -123,6 +148,22 @@ def _latest_cost_by_insumo(insumo_id: int) -> Decimal | None:
         .first()
     )
     return Decimal(str(cost)) if cost is not None else None
+
+
+def _latest_cost_by_insumos(insumo_ids: set[int]) -> dict[int, Decimal | None]:
+    if not insumo_ids:
+        return {}
+    latest_costs: dict[int, Decimal | None] = {insumo_id: None for insumo_id in insumo_ids}
+    rows = (
+        CostoInsumo.objects.filter(insumo_id__in=insumo_ids)
+        .order_by("insumo_id", "-fecha", "-id")
+        .values_list("insumo_id", "costo_unitario")
+    )
+    for insumo_id, costo in rows:
+        if latest_costs.get(insumo_id) is not None:
+            continue
+        latest_costs[insumo_id] = Decimal(str(costo)) if costo is not None else None
+    return latest_costs
 
 
 def _should_autocreate_component(
@@ -273,9 +314,27 @@ def import_template(filepath: str, replace_existing: bool = False) -> TemplateIm
         grouped.setdefault(receta_name, []).append(row)
 
     # Reduce roundtrips in bulk imports (especially over public DB connection).
-    unit_cache: dict[str, UnidadMedida | None] = {}
+    unit_cache: dict[str, UnidadMedida | None] = _build_unit_cache(
+        {
+            str(r.get("unidad") or "").strip()
+            for r in rows
+            if str(r.get("unidad") or "").strip()
+        }
+    )
     match_cache: dict[str, tuple[Any, float, str]] = {}
-    cost_cache: dict[int, Decimal | None] = {}
+    for ingrediente in {
+        str(r.get("ingrediente") or "").strip()
+        for r in rows
+        if str(r.get("ingrediente") or "").strip()
+    }:
+        match_cache[ingrediente] = match_insumo(ingrediente)
+    cost_cache: dict[int, Decimal | None] = _latest_cost_by_insumos(
+        {
+            int(insumo.id)
+            for insumo, _, _ in match_cache.values()
+            if insumo is not None
+        }
+    )
 
     for receta_name, recipe_rows in grouped.items():
         receta_norm = normalizar_nombre(receta_name)
