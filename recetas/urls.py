@@ -28,6 +28,7 @@ urlpatterns = [
     path("plan-produccion/nuevo/", views.plan_produccion_create, name="plan_produccion_create"),
     path("plan-produccion/<int:plan_id>/eliminar/", views.plan_produccion_delete, name="plan_produccion_delete"),
     path("plan-produccion/<int:plan_id>/exportar/", views.plan_produccion_export, name="plan_produccion_export"),
+    path("plan-produccion/periodo/exportar/", views.plan_produccion_periodo_export, name="plan_produccion_periodo_export"),
     path("plan-produccion/<int:plan_id>/solicitud-imprimir/", views.plan_produccion_solicitud_print, name="plan_produccion_solicitud_print"),
     path("plan-produccion/<int:plan_id>/solicitud-compras-imprimir/", views.plan_produccion_solicitud_compras_print, name="plan_produccion_solicitud_compras_print"),
     path("plan-produccion/<int:plan_id>/generar-solicitudes/", views.plan_produccion_generar_solicitudes, name="plan_produccion_generar_solicitudes"),

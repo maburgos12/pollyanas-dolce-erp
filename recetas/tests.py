@@ -265,6 +265,29 @@ class PlanProduccionPeriodoMrpTests(TestCase):
         self.assertEqual(resumen["planes"][0]["id"], self.plan_q1.id)
         self.assertEqual(resumen["insumos"][0]["cantidad"], Decimal("2"))
 
+    def test_plan_produccion_periodo_export_csv(self):
+        response = self.client.get(
+            reverse("recetas:plan_produccion_periodo_export"),
+            {"mrp_periodo": "2026-02", "mrp_periodo_tipo": "mes", "format": "csv"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        content = response.content.decode("utf-8")
+        self.assertIn("MRP CONSOLIDADO POR PERIODO", content)
+        self.assertIn("Insumo periodo", content)
+
+    def test_plan_produccion_periodo_export_xlsx(self):
+        response = self.client.get(
+            reverse("recetas:plan_produccion_periodo_export"),
+            {"mrp_periodo": "2026-02", "mrp_periodo_tipo": "q2", "format": "xlsx"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("spreadsheetml", response["Content-Type"])
+        wb = load_workbook(BytesIO(response.content), data_only=True)
+        self.assertIn("Resumen", wb.sheetnames)
+        self.assertIn("Planes", wb.sheetnames)
+        self.assertIn("Insumos", wb.sheetnames)
+
 
 class PlanProduccionSolicitudesModeTests(TestCase):
     def setUp(self):

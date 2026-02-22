@@ -1603,6 +1603,118 @@ def _export_plan_point_xlsx(plan: PlanProduccion) -> HttpResponse:
     return response
 
 
+def _export_periodo_mrp_csv(resumen: Dict[str, Any]) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    filename = f"mrp_periodo_{resumen['periodo']}_{resumen['periodo_tipo']}.csv"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+
+    writer.writerow(["MRP CONSOLIDADO POR PERIODO", resumen["periodo"]])
+    writer.writerow(["Alcance", resumen["periodo_tipo"]])
+    writer.writerow(["Planes", resumen["planes_count"]])
+    writer.writerow(["Insumos", resumen["insumos_count"]])
+    writer.writerow(["Costo total", str(resumen["costo_total"])])
+    writer.writerow(["Alertas capacidad", resumen["alertas_capacidad"]])
+    writer.writerow([])
+
+    writer.writerow(["PLANES INCLUIDOS"])
+    writer.writerow(["Plan", "Fecha producción", "Renglones"])
+    for plan in resumen["planes"]:
+        writer.writerow([plan["nombre"], str(plan["fecha_produccion"]), plan["items_count"]])
+    writer.writerow([])
+
+    writer.writerow(["INSUMOS CONSOLIDADOS"])
+    writer.writerow(
+        [
+            "Insumo",
+            "Origen",
+            "Proveedor sugerido",
+            "Cantidad requerida",
+            "Stock actual",
+            "Faltante",
+            "Unidad",
+            "Costo unitario",
+            "Costo total",
+            "Alerta capacidad",
+        ]
+    )
+    for row in resumen["insumos"]:
+        writer.writerow(
+            [
+                row["nombre"],
+                row["origen"],
+                row.get("proveedor_sugerido") or "-",
+                f"{Decimal(str(row['cantidad'])):.3f}",
+                f"{Decimal(str(row['stock_actual'])):.3f}",
+                f"{Decimal(str(row['faltante'])):.3f}",
+                row["unidad"],
+                f"{Decimal(str(row['costo_unitario'])):.2f}",
+                f"{Decimal(str(row['costo_total'])):.2f}",
+                "SI" if row.get("alerta_capacidad") else "NO",
+            ]
+        )
+    return response
+
+
+def _export_periodo_mrp_xlsx(resumen: Dict[str, Any]) -> HttpResponse:
+    wb = Workbook()
+    ws_resumen = wb.active
+    ws_resumen.title = "Resumen"
+    ws_resumen.append(["Periodo", resumen["periodo"]])
+    ws_resumen.append(["Alcance", resumen["periodo_tipo"]])
+    ws_resumen.append(["Planes", resumen["planes_count"]])
+    ws_resumen.append(["Insumos", resumen["insumos_count"]])
+    ws_resumen.append(["Costo total", float(resumen["costo_total"] or 0)])
+    ws_resumen.append(["Alertas capacidad", resumen["alertas_capacidad"]])
+
+    ws_planes = wb.create_sheet("Planes")
+    ws_planes.append(["Plan", "Fecha producción", "Renglones"])
+    for plan in resumen["planes"]:
+        ws_planes.append([plan["nombre"], str(plan["fecha_produccion"]), plan["items_count"]])
+
+    ws_insumos = wb.create_sheet("Insumos")
+    ws_insumos.append(
+        [
+            "Insumo",
+            "Origen",
+            "Proveedor sugerido",
+            "Cantidad requerida",
+            "Stock actual",
+            "Faltante",
+            "Unidad",
+            "Costo unitario",
+            "Costo total",
+            "Alerta capacidad",
+        ]
+    )
+    for row in resumen["insumos"]:
+        ws_insumos.append(
+            [
+                row["nombre"],
+                row["origen"],
+                row.get("proveedor_sugerido") or "-",
+                float(row["cantidad"] or 0),
+                float(row["stock_actual"] or 0),
+                float(row["faltante"] or 0),
+                row["unidad"],
+                float(row["costo_unitario"] or 0),
+                float(row["costo_total"] or 0),
+                "SI" if row.get("alerta_capacidad") else "NO",
+            ]
+        )
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    filename = f"mrp_periodo_{resumen['periodo']}_{resumen['periodo_tipo']}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 def _normalize_periodo_mes(raw: str | None) -> str:
     txt = (raw or "").strip()
     if not txt:
@@ -1874,6 +1986,20 @@ def plan_produccion_export(request: HttpRequest, plan_id: int) -> HttpResponse:
     if export_format == "xlsx":
         return _export_plan_xlsx(plan, explosion)
     return _export_plan_csv(plan, explosion)
+
+
+@login_required
+@permission_required("recetas.view_planproduccion", raise_exception=True)
+def plan_produccion_periodo_export(request: HttpRequest) -> HttpResponse:
+    periodo = _normalize_periodo_mes(request.GET.get("mrp_periodo"))
+    periodo_tipo = (request.GET.get("mrp_periodo_tipo") or "mes").strip().lower()
+    if periodo_tipo not in {"mes", "q1", "q2"}:
+        periodo_tipo = "mes"
+    export_format = (request.GET.get("format") or "csv").strip().lower()
+    resumen = _periodo_mrp_resumen(periodo, periodo_tipo)
+    if export_format == "xlsx":
+        return _export_periodo_mrp_xlsx(resumen)
+    return _export_periodo_mrp_csv(resumen)
 
 
 @login_required

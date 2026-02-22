@@ -92,6 +92,10 @@
       <button class="btn btn-primary" type="submit">Calcular período</button>
     </div>
   </form>
+  <div class="toolbar mb-2">
+    <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_periodo_export' %}?mrp_periodo={{ mrp_periodo }}&mrp_periodo_tipo={{ mrp_periodo_tipo }}&format=csv">Exportar período CSV</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_periodo_export' %}?mrp_periodo={{ mrp_periodo }}&mrp_periodo_tipo={{ mrp_periodo_tipo }}&format=xlsx">Exportar período XLSX</a>
+  </div>
   <div class="kpi-mini">
     <div class="kpi-card">
       <div class="kpi-number">{{ mrp_periodo_resumen.planes_count }}</div>
