@@ -382,6 +382,63 @@ def _export_import_preview_csv(import_preview: dict) -> HttpResponse:
     return response
 
 
+def _export_import_preview_xlsx(import_preview: dict) -> HttpResponse:
+    now_str = timezone.localtime().strftime("%Y%m%d_%H%M")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "preview_import"
+    ws.append(
+        [
+            "row_id",
+            "source_row",
+            "include",
+            "insumo_origen",
+            "insumo_sugerencia",
+            "insumo_id",
+            "cantidad",
+            "area",
+            "solicitante",
+            "fecha_requerida",
+            "estatus",
+            "proveedor_id",
+            "score",
+            "metodo",
+            "duplicate",
+            "notes",
+        ]
+    )
+    for row in import_preview.get("rows", []):
+        ws.append(
+            [
+                row.get("row_id", ""),
+                row.get("source_row", ""),
+                1 if row.get("include") else 0,
+                row.get("insumo_origen", ""),
+                row.get("insumo_sugerencia", ""),
+                row.get("insumo_id", ""),
+                row.get("cantidad", ""),
+                row.get("area", ""),
+                row.get("solicitante", ""),
+                row.get("fecha_requerida", ""),
+                row.get("estatus", ""),
+                row.get("proveedor_id", ""),
+                row.get("score", ""),
+                row.get("metodo", ""),
+                1 if row.get("duplicate") else 0,
+                row.get("notes", ""),
+            ]
+        )
+    bio = BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    response = HttpResponse(
+        bio.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="compras_preview_solicitudes_{now_str}.xlsx"'
+    return response
+
+
 def _active_solicitud_statuses() -> set[str]:
     return {
         SolicitudCompra.STATUS_BORRADOR,
@@ -2549,6 +2606,11 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             messages.warning(request, "No hay vista previa de importación activa para exportar.")
             return redirect("compras:solicitudes")
         return _export_import_preview_csv(import_preview)
+    if export_format == "import_preview_xlsx":
+        if not import_preview:
+            messages.warning(request, "No hay vista previa de importación activa para exportar.")
+            return redirect("compras:solicitudes")
+        return _export_import_preview_xlsx(import_preview)
     if export_format == "xlsx":
         return _export_solicitudes_xlsx(
             solicitudes,

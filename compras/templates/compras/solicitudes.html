@@ -85,6 +85,9 @@
       <a class="btn btn-secondary" href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=import_preview_csv{% else %}?export=import_preview_csv{% endif %}">
         Exportar preview CSV
       </a>
+      <a class="btn btn-secondary" href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=import_preview_xlsx{% else %}?export=import_preview_xlsx{% endif %}">
+        Exportar preview XLSX
+      </a>
     </div>
     <div class="kpi-grid kpi-mini" style="margin-bottom: 8px;">
       <article class="kpi-card">

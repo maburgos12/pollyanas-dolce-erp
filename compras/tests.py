@@ -575,6 +575,62 @@ class ComprasSolicitudesImportPreviewTests(TestCase):
         self.assertIn("row_id,source_row,include,insumo_origen", body)
         self.assertIn("Harina Import", body)
 
+    def test_export_import_preview_xlsx(self):
+        session = self.client.session
+        session["compras_solicitudes_import_preview"] = {
+            "rows": [
+                {
+                    "row_id": "2",
+                    "source_row": 2,
+                    "include": True,
+                    "insumo_origen": "Harina Import",
+                    "insumo_sugerencia": "Harina Import",
+                    "insumo_id": str(self.insumo_harina.id),
+                    "cantidad": "2.000",
+                    "area": "Compras",
+                    "solicitante": "ana",
+                    "fecha_requerida": "2026-02-20",
+                    "estatus": SolicitudCompra.STATUS_BORRADOR,
+                    "proveedor_id": str(self.proveedor.id),
+                    "score": "100.0",
+                    "metodo": "EXACT",
+                    "duplicate": False,
+                    "notes": "",
+                }
+            ]
+        }
+        session.save()
+
+        response = self.client.get(reverse("compras:solicitudes"), {"export": "import_preview_xlsx"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response["Content-Type"])
+
+        wb = load_workbook(BytesIO(response.content), data_only=True)
+        ws = wb.active
+        headers = [ws.cell(row=1, column=i).value for i in range(1, 17)]
+        self.assertEqual(
+            headers,
+            [
+                "row_id",
+                "source_row",
+                "include",
+                "insumo_origen",
+                "insumo_sugerencia",
+                "insumo_id",
+                "cantidad",
+                "area",
+                "solicitante",
+                "fecha_requerida",
+                "estatus",
+                "proveedor_id",
+                "score",
+                "metodo",
+                "duplicate",
+                "notes",
+            ],
+        )
+        self.assertEqual(ws.cell(row=2, column=4).value, "Harina Import")
+
 
 class ComprasOrdenesRecepcionesFiltersTests(TestCase):
     def setUp(self):
