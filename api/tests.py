@@ -537,6 +537,40 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(len(payload["items"]["point"]), 1)
         self.assertGreaterEqual(len(payload["items"]["recetas"]), 1)
 
+    def test_endpoint_inventario_aliases_pendientes_point_tipo_todos(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-002",
+            point_nombre="Azucar punto",
+            method="EXACT",
+            fuzzy_score=100.0,
+            fuzzy_sugerencia="Azucar API",
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_PRODUCTO,
+            point_codigo="PT-PROD-01",
+            point_nombre="Pastel de prueba",
+            method="FUZZY",
+            fuzzy_score=75.0,
+            fuzzy_sugerencia="Receta API",
+        )
+
+        url = reverse("api_inventario_aliases_pendientes")
+        resp = self.client.get(url, {"point_tipo": "TODOS", "limit": 50})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertGreaterEqual(payload["totales"]["point"], 2)
+        self.assertIn(PointPendingMatch.TIPO_INSUMO, payload["totales"]["point_by_tipo"])
+        self.assertIn(PointPendingMatch.TIPO_PRODUCTO, payload["totales"]["point_by_tipo"])
+        tipos = {row["tipo"] for row in payload["items"]["point"]}
+        self.assertIn(PointPendingMatch.TIPO_INSUMO, tipos)
+        self.assertIn(PointPendingMatch.TIPO_PRODUCTO, tipos)
+
+    def test_endpoint_inventario_aliases_pendientes_point_tipo_invalido(self):
+        url = reverse("api_inventario_aliases_pendientes")
+        resp = self.client.get(url, {"point_tipo": "CUALQUIERA"})
+        self.assertEqual(resp.status_code, 400)
+
     def test_endpoint_inventario_aliases_requires_permissions(self):
         alias = InsumoAlias.objects.create(nombre="Azucar especial", insumo=self.insumo)
         user_model = get_user_model()

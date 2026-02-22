@@ -3,7 +3,7 @@ from contextlib import nullcontext
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from django.db import transaction, OperationalError, ProgrammingError
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -959,6 +959,19 @@ class InventarioAliasesPendientesView(APIView):
 
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=400)
         runs_to_scan = _parse_bounded_int(request.GET.get("runs", 5), default=5, min_value=1, max_value=30)
+        point_tipo = (request.GET.get("point_tipo") or PointPendingMatch.TIPO_INSUMO).strip().upper()
+        valid_point_tipos = {
+            PointPendingMatch.TIPO_INSUMO,
+            PointPendingMatch.TIPO_PROVEEDOR,
+            PointPendingMatch.TIPO_PRODUCTO,
+            "TODOS",
+            "ALL",
+        }
+        if point_tipo not in valid_point_tipos:
+            return Response(
+                {"detail": "point_tipo inválido. Usa INSUMO, PROVEEDOR, PRODUCTO o TODOS."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         almacen_rows: list[dict] = []
         sync_runs = list(AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at")[:runs_to_scan])
@@ -984,11 +997,22 @@ class InventarioAliasesPendientesView(APIView):
             if len(almacen_rows) >= limit:
                 break
 
-        point_qs = PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).order_by("-fuzzy_score", "point_nombre")
+        point_qs = PointPendingMatch.objects.order_by("-fuzzy_score", "point_nombre")
+        if point_tipo not in {"TODOS", "ALL"}:
+            point_qs = point_qs.filter(tipo=point_tipo)
         point_total = point_qs.count()
+        point_totals_by_tipo = {
+            row["tipo"]: row["count"]
+            for row in (
+                point_qs.values("tipo")
+                .annotate(count=Count("id"))
+                .order_by("tipo")
+            )
+        }
         point_rows = [
             {
                 "id": p.id,
+                "tipo": p.tipo,
                 "point_codigo": p.point_codigo,
                 "point_nombre": p.point_nombre,
                 "sugerencia": p.fuzzy_sugerencia or "",
@@ -1022,10 +1046,11 @@ class InventarioAliasesPendientesView(APIView):
 
         return Response(
             {
-                "filters": {"limit": limit, "runs": runs_to_scan},
+                "filters": {"limit": limit, "runs": runs_to_scan, "point_tipo": point_tipo},
                 "totales": {
                     "almacen": len(almacen_rows),
                     "point": point_total,
+                    "point_by_tipo": point_totals_by_tipo,
                     "recetas": recetas_total,
                 },
                 "items": {
