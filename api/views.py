@@ -11,8 +11,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
-from compras.models import SolicitudCompra
-from compras.models import OrdenCompra
+from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from core.access import (
     ROLE_ADMIN,
     ROLE_DG,
@@ -28,6 +27,8 @@ from compras.views import (
     _build_budget_context,
     _build_budget_history,
     _build_category_dashboard,
+    _can_transition_orden,
+    _can_transition_recepcion,
     _can_transition_solicitud,
     _build_consumo_vs_plan_dashboard,
     _build_provider_dashboard,
@@ -59,6 +60,9 @@ from recetas.views import (
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from .serializers import (
     ComprasCrearOrdenSerializer,
+    ComprasOrdenStatusSerializer,
+    ComprasRecepcionCreateSerializer,
+    ComprasRecepcionStatusSerializer,
     ComprasSolicitudCreateSerializer,
     ComprasSolicitudStatusSerializer,
     ForecastBacktestRequestSerializer,
@@ -1321,6 +1325,207 @@ class ComprasSolicitudCrearOrdenView(APIView):
                 "costo_unitario": str(costo_unitario),
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class ComprasOrdenStatusUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, orden_id: int):
+        if not can_manage_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para operar órdenes de compra."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        orden = get_object_or_404(OrdenCompra, pk=orden_id)
+        ser = ComprasOrdenStatusSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        estatus_new = ser.validated_data["estatus"]
+        estatus_prev = orden.estatus
+
+        if estatus_prev == estatus_new:
+            return Response(
+                {
+                    "id": orden.id,
+                    "folio": orden.folio,
+                    "from": estatus_prev,
+                    "to": estatus_new,
+                    "updated": False,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if estatus_new == OrdenCompra.STATUS_CERRADA:
+            has_closed_recepcion = RecepcionCompra.objects.filter(
+                orden=orden,
+                estatus=RecepcionCompra.STATUS_CERRADA,
+            ).exists()
+            if not has_closed_recepcion:
+                return Response(
+                    {"detail": f"No puedes cerrar {orden.folio} sin al menos una recepción cerrada."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if not _can_transition_orden(estatus_prev, estatus_new):
+            return Response(
+                {"detail": f"Transición inválida de orden: {estatus_prev} -> {estatus_new}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        orden.estatus = estatus_new
+        orden.save(update_fields=["estatus"])
+        log_event(
+            request.user,
+            "APPROVE",
+            "compras.OrdenCompra",
+            orden.id,
+            {"from": estatus_prev, "to": estatus_new, "folio": orden.folio, "source": "api"},
+        )
+        return Response(
+            {
+                "id": orden.id,
+                "folio": orden.folio,
+                "from": estatus_prev,
+                "to": estatus_new,
+                "updated": True,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ComprasOrdenCreateRecepcionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, orden_id: int):
+        if not can_manage_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para registrar recepciones."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        orden = get_object_or_404(OrdenCompra.objects.select_related("proveedor"), pk=orden_id)
+        if orden.estatus in {OrdenCompra.STATUS_BORRADOR, OrdenCompra.STATUS_CERRADA}:
+            return Response(
+                {"detail": f"La orden {orden.folio} no admite recepciones en estatus {orden.estatus}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ser = ComprasRecepcionCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        recepcion = RecepcionCompra.objects.create(
+            orden=orden,
+            fecha_recepcion=data.get("fecha_recepcion") or timezone.localdate(),
+            conformidad_pct=data.get("conformidad_pct", Decimal("100")),
+            estatus=data.get("estatus") or RecepcionCompra.STATUS_PENDIENTE,
+            observaciones=(data.get("observaciones") or "").strip(),
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "compras.RecepcionCompra",
+            recepcion.id,
+            {"folio": recepcion.folio, "estatus": recepcion.estatus, "source": "api"},
+        )
+
+        if recepcion.estatus == RecepcionCompra.STATUS_CERRADA and orden.estatus != OrdenCompra.STATUS_CERRADA:
+            orden_prev = orden.estatus
+            orden.estatus = OrdenCompra.STATUS_CERRADA
+            orden.save(update_fields=["estatus"])
+            log_event(
+                request.user,
+                "APPROVE",
+                "compras.OrdenCompra",
+                orden.id,
+                {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": orden.folio, "source": recepcion.folio},
+            )
+
+        return Response(
+            {
+                "id": recepcion.id,
+                "folio": recepcion.folio,
+                "orden_id": orden.id,
+                "orden_folio": orden.folio,
+                "estatus": recepcion.estatus,
+                "conformidad_pct": str(recepcion.conformidad_pct),
+                "fecha_recepcion": str(recepcion.fecha_recepcion),
+                "orden_estatus": orden.estatus,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ComprasRecepcionStatusUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, recepcion_id: int):
+        if not can_manage_compras(request.user):
+            return Response(
+                {"detail": "No tienes permisos para cerrar recepciones."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        recepcion = get_object_or_404(RecepcionCompra.objects.select_related("orden"), pk=recepcion_id)
+        ser = ComprasRecepcionStatusSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        estatus_new = ser.validated_data["estatus"]
+        estatus_prev = recepcion.estatus
+
+        if estatus_prev == estatus_new:
+            return Response(
+                {
+                    "id": recepcion.id,
+                    "folio": recepcion.folio,
+                    "from": estatus_prev,
+                    "to": estatus_new,
+                    "updated": False,
+                    "orden_estatus": recepcion.orden.estatus,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if not _can_transition_recepcion(estatus_prev, estatus_new):
+            return Response(
+                {"detail": f"Transición inválida de recepción: {estatus_prev} -> {estatus_new}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        recepcion.estatus = estatus_new
+        recepcion.save(update_fields=["estatus"])
+        log_event(
+            request.user,
+            "APPROVE",
+            "compras.RecepcionCompra",
+            recepcion.id,
+            {"from": estatus_prev, "to": estatus_new, "folio": recepcion.folio, "source": "api"},
+        )
+
+        if estatus_new == RecepcionCompra.STATUS_CERRADA and recepcion.orden.estatus != OrdenCompra.STATUS_CERRADA:
+            orden_prev = recepcion.orden.estatus
+            recepcion.orden.estatus = OrdenCompra.STATUS_CERRADA
+            recepcion.orden.save(update_fields=["estatus"])
+            log_event(
+                request.user,
+                "APPROVE",
+                "compras.OrdenCompra",
+                recepcion.orden.id,
+                {"from": orden_prev, "to": OrdenCompra.STATUS_CERRADA, "folio": recepcion.orden.folio, "source": recepcion.folio},
+            )
+
+        return Response(
+            {
+                "id": recepcion.id,
+                "folio": recepcion.folio,
+                "from": estatus_prev,
+                "to": estatus_new,
+                "updated": True,
+                "orden_id": recepcion.orden_id,
+                "orden_folio": recepcion.orden.folio,
+                "orden_estatus": recepcion.orden.estatus,
+            },
+            status=status.HTTP_200_OK,
         )
 
 

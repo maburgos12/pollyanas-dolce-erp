@@ -9,7 +9,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.models import Sucursal
-from compras.models import OrdenCompra, PresupuestoCompraPeriodo, SolicitudCompra
+from compras.models import OrdenCompra, PresupuestoCompraPeriodo, RecepcionCompra, SolicitudCompra
 from inventario.models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import (
@@ -462,6 +462,114 @@ class RecetasCosteoApiTests(TestCase):
         url = reverse("api_compras_solicitud_crear_orden", args=[solicitud.id])
         resp = self.client.post(url, {}, content_type="application/json")
         self.assertEqual(resp.status_code, 403)
+
+    def test_endpoint_compras_orden_estatus_update(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor orden estatus", activo=True)
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            estatus=OrdenCompra.STATUS_BORRADOR,
+            monto_estimado=Decimal("25.00"),
+        )
+
+        url = reverse("api_compras_orden_estatus", args=[orden.id])
+        resp = self.client.post(url, {"estatus": OrdenCompra.STATUS_ENVIADA}, content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload["updated"])
+        self.assertEqual(payload["from"], OrdenCompra.STATUS_BORRADOR)
+        self.assertEqual(payload["to"], OrdenCompra.STATUS_ENVIADA)
+        orden.refresh_from_db()
+        self.assertEqual(orden.estatus, OrdenCompra.STATUS_ENVIADA)
+
+    def test_endpoint_compras_orden_estatus_no_cierra_sin_recepcion(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor no cerrar", activo=True)
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            estatus=OrdenCompra.STATUS_CONFIRMADA,
+            monto_estimado=Decimal("25.00"),
+        )
+        url = reverse("api_compras_orden_estatus", args=[orden.id])
+        resp = self.client.post(url, {"estatus": OrdenCompra.STATUS_CERRADA}, content_type="application/json")
+        self.assertEqual(resp.status_code, 400)
+        orden.refresh_from_db()
+        self.assertEqual(orden.estatus, OrdenCompra.STATUS_CONFIRMADA)
+
+    def test_endpoint_compras_orden_create_recepcion_cerrada_cierra_orden(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor recepcion close", activo=True)
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            estatus=OrdenCompra.STATUS_ENVIADA,
+            monto_estimado=Decimal("25.00"),
+        )
+        url = reverse("api_compras_orden_recepciones", args=[orden.id])
+        resp = self.client.post(
+            url,
+            {"estatus": RecepcionCompra.STATUS_CERRADA, "conformidad_pct": "98.50"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertEqual(payload["estatus"], RecepcionCompra.STATUS_CERRADA)
+        orden.refresh_from_db()
+        self.assertEqual(orden.estatus, OrdenCompra.STATUS_CERRADA)
+
+    def test_endpoint_compras_recepcion_estatus_update_cierra_orden(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor recepcion update", activo=True)
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            estatus=OrdenCompra.STATUS_PARCIAL,
+            monto_estimado=Decimal("25.00"),
+        )
+        recepcion = RecepcionCompra.objects.create(
+            orden=orden,
+            estatus=RecepcionCompra.STATUS_PENDIENTE,
+            conformidad_pct=Decimal("90"),
+        )
+        url = reverse("api_compras_recepcion_estatus", args=[recepcion.id])
+        resp = self.client.post(url, {"estatus": RecepcionCompra.STATUS_CERRADA}, content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["to"], RecepcionCompra.STATUS_CERRADA)
+        recepcion.refresh_from_db()
+        self.assertEqual(recepcion.estatus, RecepcionCompra.STATUS_CERRADA)
+        orden.refresh_from_db()
+        self.assertEqual(orden.estatus, OrdenCompra.STATUS_CERRADA)
 
     def test_endpoint_presupuestos_consolidado_periodo(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Consolidado", lead_time_dias=4, activo=True)

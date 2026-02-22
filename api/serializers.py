@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from compras.models import OrdenCompra, SolicitudCompra
+from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from inventario.models import AjusteInventario
 from recetas.models import SolicitudVenta
 
@@ -162,6 +162,30 @@ class ComprasCrearOrdenSerializer(serializers.Serializer):
     )
     fecha_emision = serializers.DateField(required=False)
     fecha_entrega_estimada = serializers.DateField(required=False)
+
+
+class ComprasOrdenStatusSerializer(serializers.Serializer):
+    estatus = serializers.ChoiceField(choices=[choice[0] for choice in OrdenCompra.STATUS_CHOICES])
+
+
+class ComprasRecepcionCreateSerializer(serializers.Serializer):
+    fecha_recepcion = serializers.DateField(required=False)
+    conformidad_pct = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=100)
+    estatus = serializers.ChoiceField(
+        choices=[choice[0] for choice in RecepcionCompra.STATUS_CHOICES],
+        required=False,
+        default=RecepcionCompra.STATUS_PENDIENTE,
+    )
+    observaciones = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+    def validate_conformidad_pct(self, value):
+        if value < 0 or value > 100:
+            raise serializers.ValidationError("conformidad_pct debe estar entre 0 y 100.")
+        return value
+
+
+class ComprasRecepcionStatusSerializer(serializers.Serializer):
+    estatus = serializers.ChoiceField(choices=[choice[0] for choice in RecepcionCompra.STATUS_CHOICES])
 
 
 class ForecastEstadisticoRequestSerializer(serializers.Serializer):

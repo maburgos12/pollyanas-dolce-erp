@@ -21,6 +21,9 @@ Sprint 1 entrega:
 - API: POST /api/inventario/ajustes/{id}/decision/ (aprobar/aplicar/rechazar ajuste)
 - API: POST /api/compras/solicitud/{id}/estatus/ (cambio de estado con reglas de transición)
 - API: POST /api/compras/solicitud/{id}/crear-orden/ (genera OC desde solicitud aprobada, idempotente)
+- API: POST /api/compras/orden/{id}/estatus/ (cambio de estado de OC con validaciones)
+- API: POST /api/compras/orden/{id}/recepciones/ (registra recepción y puede cerrar OC)
+- API: POST /api/compras/recepcion/{id}/estatus/ (actualiza recepción y cierra OC automáticamente si aplica)
 
 ## Requisitos
 - Docker Desktop (Mac/Windows) **o** Python 3.12 + Postgres 16
