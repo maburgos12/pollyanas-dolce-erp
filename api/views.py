@@ -55,7 +55,7 @@ from compras.views import (
     _resolve_proveedor_name,
     _sanitize_consumo_ref_filter,
 )
-from integraciones.models import PublicApiAccessLog
+from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo
 from inventario.views import (
     _apply_ajuste,
@@ -3094,6 +3094,25 @@ class IntegracionPointResumenView(APIView):
         api_7d_requests = sum(int(row.get("requests") or 0) for row in api_daily_trend)
         api_7d_errors = sum(int(row.get("errors") or 0) for row in api_daily_trend)
         api_7d_error_rate = round((api_7d_errors * 100.0 / api_7d_requests), 2) if api_7d_requests else 0.0
+        since_30d = timezone.now() - timedelta(days=30)
+        api_clients_total = PublicApiClient.objects.count()
+        api_clients_active = PublicApiClient.objects.filter(activo=True).count()
+        api_clients_inactive = max(api_clients_total - api_clients_active, 0)
+        clients_with_activity_30d = set(
+            PublicApiAccessLog.objects.filter(created_at__gte=since_30d)
+            .values_list("client_id", flat=True)
+            .distinct()
+        )
+        api_clients_unused_30d = PublicApiClient.objects.filter(activo=True).exclude(id__in=clients_with_activity_30d).count()
+        api_clients_top_30d = list(
+            PublicApiAccessLog.objects.filter(created_at__gte=since_30d)
+            .values("client__nombre")
+            .annotate(
+                requests=Count("id"),
+                errors=Count("id", filter=Q(status_code__gte=400)),
+            )
+            .order_by("-requests", "client__nombre")[:10]
+        )
 
         stale_limit = timezone.now() - timedelta(hours=24)
         alertas_operativas = []
@@ -3165,6 +3184,13 @@ class IntegracionPointResumenView(APIView):
                     "errors": api_7d_errors,
                     "error_rate_pct": api_7d_error_rate,
                     "daily": api_daily_trend,
+                },
+                "api_clients": {
+                    "total": api_clients_total,
+                    "active": api_clients_active,
+                    "inactive": api_clients_inactive,
+                    "unused_30d": api_clients_unused_30d,
+                    "top_30d": api_clients_top_30d,
                 },
                 "alertas_operativas": alertas_operativas,
                 "insumos": {

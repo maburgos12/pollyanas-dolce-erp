@@ -235,6 +235,22 @@ class IntegracionesPanelTests(TestCase):
         self.assertIn("error_rate_pct", body)
         self.assertIn(str(timezone.localdate()), body)
 
+    def test_clients_csv_export(self):
+        client, _ = PublicApiClient.create_with_generated_key(nombre="ERP CLIENT CSV", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/clientes/",
+            method="GET",
+            status_code=200,
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url, {"export": "clients_csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        body = response.content.decode("utf-8")
+        self.assertIn("requests_30d", body)
+        self.assertIn("ERP CLIENT CSV", body)
+
     def test_homologacion_summary_blocks_render(self):
         unidad = UnidadMedida.objects.create(
             codigo="kg",

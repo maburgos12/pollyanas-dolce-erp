@@ -178,6 +178,47 @@ def _export_trend_csv(api_daily_trend: list[dict]) -> HttpResponse:
     return response
 
 
+def _build_client_usage_maps(client_ids: list[int]) -> dict[str, dict[int, int]]:
+    if not client_ids:
+        return {"24h": {}, "7d": {}, "30d": {}}
+    now = timezone.now()
+    windows = {
+        "24h": now - timedelta(hours=24),
+        "7d": now - timedelta(days=7),
+        "30d": now - timedelta(days=30),
+    }
+    result: dict[str, dict[int, int]] = {}
+    for key, since in windows.items():
+        rows = (
+            PublicApiAccessLog.objects.filter(client_id__in=client_ids, created_at__gte=since)
+            .values("client_id")
+            .annotate(total=Count("id"))
+        )
+        result[key] = {int(row["client_id"]): int(row["total"] or 0) for row in rows}
+    return result
+
+
+def _export_clients_csv(client_metrics: list[dict]) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="integraciones_clientes_api.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["cliente", "activo", "prefijo", "requests_24h", "requests_7d", "requests_30d", "last_used_at"])
+    for row in client_metrics:
+        client = row["client"]
+        writer.writerow(
+            [
+                client.nombre,
+                "1" if client.activo else "0",
+                client.clave_prefijo,
+                row.get("requests_24h", 0),
+                row.get("requests_7d", 0),
+                row.get("requests_30d", 0),
+                client.last_used_at.strftime("%Y-%m-%d %H:%M:%S") if client.last_used_at else "",
+            ]
+        )
+    return response
+
+
 def _to_float(raw, default=0.0) -> float:
     try:
         return float(raw)
@@ -379,11 +420,30 @@ def panel(request):
 
     last_generated_api_key = request.session.pop("integraciones_last_api_key", "")
     clients = list(PublicApiClient.objects.order_by("nombre", "id"))
+    client_ids = [int(client.id) for client in clients]
+    client_usage_maps = _build_client_usage_maps(client_ids)
+    client_metrics = []
+    for client in clients:
+        requests_24h_client = int(client_usage_maps["24h"].get(client.id, 0))
+        requests_7d_client = int(client_usage_maps["7d"].get(client.id, 0))
+        requests_30d_client = int(client_usage_maps["30d"].get(client.id, 0))
+        client_metrics.append(
+            {
+                "client": client,
+                "requests_24h": requests_24h_client,
+                "requests_7d": requests_7d_client,
+                "requests_30d": requests_30d_client,
+            }
+        )
+    clients_inactive = sum(1 for client in clients if not client.activo)
+    clients_unused_30d = sum(1 for row in client_metrics if row["requests_30d"] == 0)
 
     filter_client_id = (request.GET.get("client") or "").strip()
     filter_status = (request.GET.get("status") or "all").strip().lower()
     filter_q = (request.GET.get("q") or "").strip()
     export_mode = (request.GET.get("export") or "").strip().lower()
+    if export_mode == "clients_csv":
+        return _export_clients_csv(client_metrics)
 
     logs_qs = PublicApiAccessLog.objects.select_related("client")
     if filter_client_id.isdigit():
@@ -520,6 +580,26 @@ def panel(request):
                 "cta_url": reverse("maestros:point_pending_review"),
             }
         )
+    if clients_unused_30d:
+        alertas_operativas.append(
+            {
+                "nivel": "warning",
+                "titulo": "Clientes API sin uso (30 días)",
+                "detalle": f"{clients_unused_30d} cliente(s) no registran requests en 30 días.",
+                "cta_label": "Revisar clientes API",
+                "cta_url": "#clientes-api",
+            }
+        )
+    if clients_inactive:
+        alertas_operativas.append(
+            {
+                "nivel": "warning",
+                "titulo": "Clientes API inactivos",
+                "detalle": f"{clients_inactive} cliente(s) están desactivados.",
+                "cta_label": "Revisar clientes API",
+                "cta_url": "#clientes-api",
+            }
+        )
     if recetas_pending_total:
         alertas_operativas.append(
             {
@@ -564,6 +644,9 @@ def panel(request):
 
     context = {
         "clients": clients,
+        "client_metrics": client_metrics,
+        "clients_inactive": clients_inactive,
+        "clients_unused_30d": clients_unused_30d,
         "logs": logs,
         "last_generated_api_key": last_generated_api_key,
         "top_clients_24h": top_clients_24h,
