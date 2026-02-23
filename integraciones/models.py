@@ -50,8 +50,19 @@ class PublicApiClient(models.Model):
         return GeneratedApiKey(key=raw, prefix=raw[:12])
 
     @classmethod
+    def _generate_unique_key(cls, *, exclude_id: int | None = None) -> GeneratedApiKey:
+        for _ in range(20):
+            candidate = cls.generate_key()
+            existing = cls.objects.filter(clave_prefijo=candidate.prefix)
+            if exclude_id is not None:
+                existing = existing.exclude(id=exclude_id)
+            if not existing.exists():
+                return candidate
+        raise RuntimeError("No fue posible generar una API key única")
+
+    @classmethod
     def create_with_generated_key(cls, *, nombre: str, descripcion: str = "", created_by=None):
-        generated = cls.generate_key()
+        generated = cls._generate_unique_key()
         obj = cls.objects.create(
             nombre=nombre,
             descripcion=descripcion,
@@ -67,6 +78,13 @@ class PublicApiClient(models.Model):
     def mark_used(self):
         self.last_used_at = timezone.now()
         self.save(update_fields=["last_used_at", "updated_at"])
+
+    def rotate_key(self) -> str:
+        generated = self._generate_unique_key(exclude_id=self.id)
+        self.clave_prefijo = generated.prefix
+        self.clave_hash = _hash_key(generated.key)
+        self.save(update_fields=["clave_prefijo", "clave_hash", "updated_at"])
+        return generated.key
 
 
 class PublicApiAccessLog(models.Model):

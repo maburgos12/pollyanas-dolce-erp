@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Count, F
 from django.utils.dateparse import parse_date
 from django.utils import timezone
@@ -35,6 +37,32 @@ def _to_decimal(value, *, default: Decimal = Decimal("0")) -> Decimal:
         return default
 
 
+def _log_access(client: PublicApiClient, request, status_code: int):
+    PublicApiAccessLog.objects.create(
+        client=client,
+        endpoint=request.path,
+        method=request.method,
+        status_code=int(status_code),
+    )
+
+
+def _consume_rate_limit(client: PublicApiClient) -> tuple[bool, int]:
+    limit = int(getattr(settings, "PUBLIC_API_RATE_LIMIT_PER_MINUTE", 120))
+    if limit <= 0:
+        return True, 0
+
+    bucket = timezone.now().strftime("%Y%m%d%H%M")
+    cache_key = f"public_api_rate:{client.id}:{bucket}"
+    if cache.get(cache_key) is None:
+        cache.add(cache_key, 0, timeout=90)
+    try:
+        current = cache.incr(cache_key)
+    except ValueError:
+        cache.set(cache_key, 1, timeout=90)
+        current = 1
+    return current <= limit, current
+
+
 def _auth_public_client(request):
     raw_key = (request.headers.get("X-API-Key") or "").strip()
     if not raw_key:
@@ -45,17 +73,16 @@ def _auth_public_client(request):
     if not client or not client.validate(raw_key):
         return None, Response({"detail": "API key inválida"}, status=status.HTTP_401_UNAUTHORIZED)
 
+    allowed, current = _consume_rate_limit(client)
+    if not allowed:
+        _log_access(client, request, status.HTTP_429_TOO_MANY_REQUESTS)
+        return None, Response(
+            {"detail": "Límite por minuto excedido", "rate_limit_status": {"current": current}},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
     client.mark_used()
     return client, None
-
-
-def _log_access(client: PublicApiClient, request, status_code: int):
-    PublicApiAccessLog.objects.create(
-        client=client,
-        endpoint=request.path,
-        method=request.method,
-        status_code=int(status_code),
-    )
 
 
 class PublicHealthView(APIView):

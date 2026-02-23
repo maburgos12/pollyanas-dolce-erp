@@ -187,3 +187,7 @@ CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=not DEBUG)
 INVENTARIO_REORDER_FORMULA = os.getenv("INVENTARIO_REORDER_FORMULA", "excel_legacy").strip().lower()
 # Inventario: diferencia máxima permitida (%) para capturar manualmente el punto de reorden.
 INVENTARIO_REORDER_MAX_DIFF_PCT = float(os.getenv("INVENTARIO_REORDER_MAX_DIFF_PCT", "10"))
+
+# API pública: límite de requests por cliente por minuto.
+# 0 o negativo = sin límite.
+PUBLIC_API_RATE_LIMIT_PER_MINUTE = int(os.getenv("PUBLIC_API_RATE_LIMIT_PER_MINUTE", "120"))

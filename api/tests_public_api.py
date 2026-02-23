@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from uuid import uuid4
 
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -99,6 +100,16 @@ class PublicApiTests(APITestCase):
         url = reverse("api_public_insumos")
         response = self.client.get(url, HTTP_X_API_KEY="pk_invalid_key")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    @override_settings(PUBLIC_API_RATE_LIMIT_PER_MINUTE=1)
+    def test_insumos_rate_limit_returns_429(self):
+        url = reverse("api_public_insumos")
+        first = self.client.get(url, **self._auth_headers())
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+
+        second = self.client.get(url, **self._auth_headers())
+        self.assertEqual(second.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertIn("Límite", second.data["detail"])
 
     def test_recetas_returns_tipo_and_line_count(self):
         url = reverse("api_public_recetas")
