@@ -105,6 +105,39 @@ class IntegracionesPanelTests(TestCase):
             2,
         )
 
+    def test_deactivate_idle_clients_action(self):
+        active_idle, _ = PublicApiClient.create_with_generated_key(nombre="ERP IDLE", descripcion="")
+        active_recent, _ = PublicApiClient.create_with_generated_key(nombre="ERP ACTIVE", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=active_recent,
+            endpoint="/api/public/v1/ping/",
+            method="GET",
+            status_code=200,
+        )
+        PublicApiAccessLog.objects.filter(client=active_recent).update(created_at=timezone.now() - timedelta(days=2))
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            self.url,
+            {
+                "action": "deactivate_idle_clients",
+                "idle_days": "30",
+                "idle_limit": "100",
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        active_idle.refresh_from_db()
+        active_recent.refresh_from_db()
+        self.assertFalse(active_idle.activo)
+        self.assertTrue(active_recent.activo)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="DEACTIVATE_IDLE_API_CLIENTS",
+                model="integraciones.PublicApiClient",
+            ).exists()
+        )
+
     def test_recent_logs_are_rendered(self):
         client, _raw = PublicApiClient.create_with_generated_key(nombre="ERP Logs", descripcion="")
         PublicApiAccessLog.objects.create(

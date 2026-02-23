@@ -333,6 +333,36 @@ def _resolve_point_pending_insumos(min_score: float, limit: int, create_aliases:
     }
 
 
+def _deactivate_idle_api_clients(idle_days: int, limit: int) -> dict:
+    idle_days = max(1, min(int(idle_days or 30), 365))
+    limit = max(1, min(int(limit or 100), 500))
+    cutoff = timezone.now() - timedelta(days=idle_days)
+    recent_client_ids = set(
+        PublicApiAccessLog.objects.filter(created_at__gte=cutoff)
+        .values_list("client_id", flat=True)
+        .distinct()
+    )
+    candidates = list(
+        PublicApiClient.objects.filter(activo=True)
+        .exclude(id__in=recent_client_ids)
+        .order_by("id")[:limit]
+    )
+    candidate_ids = [int(client.id) for client in candidates]
+    updated = 0
+    if candidate_ids:
+        updated = PublicApiClient.objects.filter(id__in=candidate_ids, activo=True).update(
+            activo=False,
+            updated_at=timezone.now(),
+        )
+    return {
+        "idle_days": idle_days,
+        "limit": limit,
+        "candidates": len(candidates),
+        "deactivated": int(updated),
+        "cutoff": cutoff.isoformat(),
+    }
+
+
 @login_required
 def panel(request):
     if not can_view_audit(request.user):
@@ -444,6 +474,27 @@ def panel(request):
             )
             label = "activado" if client.activo else "desactivado"
             messages.success(request, f"Cliente {label}: {client.nombre}")
+            return redirect("integraciones:panel")
+
+        if action == "deactivate_idle_clients":
+            idle_days = max(1, min(365, _to_int(request.POST.get("idle_days"), 30)))
+            limit = max(1, min(500, _to_int(request.POST.get("idle_limit"), 100)))
+            summary = _deactivate_idle_api_clients(idle_days=idle_days, limit=limit)
+            log_event(
+                request.user,
+                "DEACTIVATE_IDLE_API_CLIENTS",
+                "integraciones.PublicApiClient",
+                "",
+                payload=summary,
+            )
+            messages.success(
+                request,
+                (
+                    "Limpieza API ejecutada: "
+                    f"{summary['deactivated']} cliente(s) desactivados "
+                    f"de {summary['candidates']} candidatos (ventana {summary['idle_days']} días)."
+                ),
+            )
             return redirect("integraciones:panel")
 
     last_generated_api_key = request.session.pop("integraciones_last_api_key", "")
