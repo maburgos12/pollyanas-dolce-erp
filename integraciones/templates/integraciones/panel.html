@@ -20,6 +20,144 @@
         </article>
     </section>
 
+    <section class="card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="card-header mb-0">Homologacion Point y Match Operativo</div>
+            <div class="recipe-actions">
+                <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}">Resolver pendientes Point</a>
+                <a class="btn btn-outline-primary" href="{% url 'inventario:aliases_catalog' %}">Corregir aliases de almacen</a>
+            </div>
+        </div>
+
+        <div class="integraciones-homologacion-grid mb-3">
+            <article class="kpi-card">
+                <div class="kpi-number">{{ integracion_point.insumos.cobertura_pct|floatformat:2 }}%</div>
+                <div class="kpi-label">Cobertura Point en insumos</div>
+                <div class="muted">{{ integracion_point.insumos.con_codigo_point }}/{{ integracion_point.insumos.activos }}</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number is-warning">{{ integracion_point.recetas.cobertura_pct|floatformat:2 }}%</div>
+                <div class="kpi-label">Cobertura Point en recetas</div>
+                <div class="muted">{{ integracion_point.recetas.homologadas }}/{{ integracion_point.recetas.total }}</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number {% if integracion_point.point_pending.total %}is-danger{% else %}is-success{% endif %}">
+                    {{ integracion_point.point_pending.total }}
+                </div>
+                <div class="kpi-label">Pendientes Point</div>
+                <div class="muted">
+                    Insumos {{ point_pending_insumo }} · Productos {{ point_pending_producto }} · Proveedores {{ point_pending_proveedor }}
+                </div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number {% if integracion_point.inventario.recetas_pending_match %}is-danger{% else %}is-success{% endif %}">
+                    {{ integracion_point.inventario.recetas_pending_match }}
+                </div>
+                <div class="kpi-label">Líneas receta sin match</div>
+                <div class="muted">Pendientes de homologación interna</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number {% if integracion_point.inventario.almacen_pending_preview %}is-warning{% else %}is-success{% endif %}">
+                    {{ integracion_point.inventario.almacen_pending_preview }}
+                </div>
+                <div class="kpi-label">Pendientes recientes almacén</div>
+                <div class="muted">
+                    {% if integracion_point.inventario.almacen_latest_run_at %}
+                    Run {{ integracion_point.inventario.almacen_latest_run_at|date:"Y-m-d H:i" }}
+                    {% else %}
+                    Sin run registrado
+                    {% endif %}
+                </div>
+            </article>
+        </div>
+
+        <div class="integraciones-columns">
+            <div>
+                <h3 class="integraciones-subtitle">Point pendientes (recientes)</h3>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Tipo</th>
+                                <th>Código</th>
+                                <th>Nombre</th>
+                                <th>Score</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for p in point_pending_recent %}
+                            <tr>
+                                <td>{{ p.tipo }}</td>
+                                <td><code>{{ p.point_codigo|default:"-" }}</code></td>
+                                <td>{{ p.point_nombre }}</td>
+                                <td>{{ p.fuzzy_score|floatformat:1 }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="4" class="muted">Sin pendientes Point.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div>
+                <h3 class="integraciones-subtitle">Recetas sin match (recientes)</h3>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Receta</th>
+                                <th>Ingrediente</th>
+                                <th>Método</th>
+                                <th>Score</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for l in recetas_pending_recent %}
+                            <tr>
+                                <td>{{ l.receta.nombre }}</td>
+                                <td>{{ l.insumo_texto }}</td>
+                                <td>{{ l.match_method }}</td>
+                                <td>{{ l.match_score|floatformat:1 }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="4" class="muted">Sin líneas pendientes de receta.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <h3 class="integraciones-subtitle">Almacén pendientes (último run)</h3>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Nombre origen</th>
+                            <th>Normalizado</th>
+                            <th>Sugerencia</th>
+                            <th>Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for r in almacen_pending_preview %}
+                        <tr>
+                            <td>{{ r.nombre_origen|default:"-" }}</td>
+                            <td>{{ r.nombre_normalizado|default:"-" }}</td>
+                            <td>{{ r.suggestion|default:"-" }}</td>
+                            <td>{{ r.score|default:"0" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="4" class="muted">Sin pendientes en el último run de almacén.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
     {% if last_generated_api_key %}
     <section class="card">
         <div class="card-header">API key generada</div>

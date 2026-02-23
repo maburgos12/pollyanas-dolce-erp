@@ -804,6 +804,28 @@ tr:hover,
   line-height: 1.1;
 }
 
+.integraciones-shell .kpi-card .kpi-number {
+  font-size: 36px;
+}
+
+.integraciones-homologacion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.integraciones-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.integraciones-subtitle {
+  font-size: 24px;
+  margin: 0 0 8px;
+  color: var(--texto);
+}
+
 .integraciones-key-box {
   border: 1px solid var(--rosa-deep);
   border-radius: 8px;
@@ -1007,6 +1029,10 @@ tr:hover,
   .plan-produccion-shell .card-header,
   .integraciones-shell .card-header {
     font-size: 32px;
+  }
+
+  .integraciones-columns {
+    grid-template-columns: 1fr;
   }
 
   .recipe-detail-shell .recipe-actions {

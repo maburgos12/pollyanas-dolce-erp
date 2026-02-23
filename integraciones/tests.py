@@ -5,6 +5,9 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.models import AuditLog
+from inventario.models import AlmacenSyncRun
+from maestros.models import Insumo, PointPendingMatch, UnidadMedida
+from recetas.models import LineaReceta, Receta
 
 from .models import PublicApiAccessLog, PublicApiClient
 
@@ -147,3 +150,51 @@ class IntegracionesPanelTests(TestCase):
         body = response.content.decode("utf-8")
         self.assertIn("endpoint", body)
         self.assertIn("/api/public/v1/resumen/", body)
+
+    def test_homologacion_summary_blocks_render(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=1000,
+        )
+        insumo = Insumo.objects.create(nombre="Azucar test", unidad_base=unidad, activo=True, codigo_point="")
+        receta = Receta.objects.create(nombre="Receta demo", hash_contenido="hash-integraciones-panel-001")
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-001",
+            point_nombre="Azucar point",
+            fuzzy_score=92,
+            fuzzy_sugerencia=insumo.nombre,
+        )
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Azucar point",
+            cantidad=1,
+            unidad=unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_score=80,
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[
+                {
+                    "nombre_origen": "Azucar point",
+                    "nombre_normalizado": "azucar point",
+                    "suggestion": "Azucar test",
+                    "score": 95,
+                }
+            ],
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Homologacion Point y Match Operativo")
+        self.assertContains(response, "Point pendientes")
+        self.assertContains(response, "Recetas sin match")

@@ -13,6 +13,9 @@ from django.utils import timezone
 
 from core.access import can_view_audit
 from core.audit import log_event
+from inventario.models import AlmacenSyncRun
+from maestros.models import Insumo, PointPendingMatch, Proveedor
+from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
 
 from .models import PublicApiAccessLog, PublicApiClient
 
@@ -142,6 +145,49 @@ def panel(request):
     requests_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h).count()
     errors_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400).count()
 
+    insumos_activos_qs = Insumo.objects.filter(activo=True)
+    insumos_activos = insumos_activos_qs.count()
+    insumos_con_codigo = insumos_activos_qs.exclude(Q(codigo_point="") | Q(codigo_point__isnull=True)).count()
+    insumos_sin_codigo = max(insumos_activos - insumos_con_codigo, 0)
+    insumos_cobertura = round((insumos_con_codigo * 100.0 / insumos_activos), 2) if insumos_activos else 100.0
+
+    recetas_total = Receta.objects.count()
+    receta_ids_primary = set(
+        Receta.objects.exclude(Q(codigo_point="") | Q(codigo_point__isnull=True)).values_list("id", flat=True)
+    )
+    receta_ids_alias = set(RecetaCodigoPointAlias.objects.filter(activo=True).values_list("receta_id", flat=True))
+    recetas_homologadas = len(receta_ids_primary.union(receta_ids_alias))
+    recetas_sin_homologar = max(recetas_total - recetas_homologadas, 0)
+    recetas_cobertura = round((recetas_homologadas * 100.0 / recetas_total), 2) if recetas_total else 100.0
+
+    point_pending_by_tipo = {
+        row["tipo"]: row["count"]
+        for row in (
+            PointPendingMatch.objects.values("tipo")
+            .annotate(count=Count("id"))
+            .order_by("tipo")
+        )
+    }
+    point_pending_total = sum(point_pending_by_tipo.values())
+    point_pending_recent = list(
+        PointPendingMatch.objects.order_by("-actualizado_en", "-id")[:12]
+    )
+
+    recetas_pending_qs = (
+        LineaReceta.objects.filter(insumo__isnull=True)
+        .filter(match_status__in=[LineaReceta.STATUS_NEEDS_REVIEW, LineaReceta.STATUS_REJECTED])
+        .select_related("receta")
+        .order_by("-match_score", "receta__nombre", "posicion")
+    )
+    recetas_pending_total = recetas_pending_qs.count()
+    recetas_pending_recent = list(recetas_pending_qs[:12])
+
+    proveedores_activos = Proveedor.objects.filter(activo=True).count()
+
+    latest_run = AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at").first()
+    almacen_pending_count = len((latest_run.pending_preview or [])) if latest_run else 0
+    almacen_pending_preview = (latest_run.pending_preview or [])[:12] if latest_run else []
+
     context = {
         "clients": clients,
         "logs": logs,
@@ -152,5 +198,36 @@ def panel(request):
         "filter_client_id": filter_client_id,
         "filter_status": filter_status,
         "filter_q": filter_q,
+        "integracion_point": {
+            "insumos": {
+                "activos": insumos_activos,
+                "con_codigo_point": insumos_con_codigo,
+                "sin_codigo_point": insumos_sin_codigo,
+                "cobertura_pct": insumos_cobertura,
+            },
+            "recetas": {
+                "total": recetas_total,
+                "homologadas": recetas_homologadas,
+                "sin_homologar": recetas_sin_homologar,
+                "cobertura_pct": recetas_cobertura,
+            },
+            "proveedores": {"activos": proveedores_activos},
+            "point_pending": {
+                "total": point_pending_total,
+                "por_tipo": point_pending_by_tipo,
+            },
+            "inventario": {
+                "almacen_pending_preview": almacen_pending_count,
+                "almacen_latest_run_id": latest_run.id if latest_run else None,
+                "almacen_latest_run_at": latest_run.started_at if latest_run else None,
+                "recetas_pending_match": recetas_pending_total,
+            },
+        },
+        "point_pending_recent": point_pending_recent,
+        "recetas_pending_recent": recetas_pending_recent,
+        "almacen_pending_preview": almacen_pending_preview,
+        "point_pending_insumo": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_INSUMO, 0)),
+        "point_pending_producto": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PRODUCTO, 0)),
+        "point_pending_proveedor": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0)),
     }
     return render(request, "integraciones/panel.html", context)
