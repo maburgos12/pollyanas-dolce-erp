@@ -815,6 +815,32 @@ tr:hover,
   font-size: 36px;
 }
 
+.integraciones-alertas {
+  display: grid;
+  gap: 8px;
+}
+
+.integraciones-alerta {
+  border: 1px solid var(--rosa);
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.integraciones-alerta-title {
+  font-weight: 700;
+  color: var(--texto);
+}
+
+.integraciones-alerta--ok { border-left-color: #2E7D32; }
+.integraciones-alerta--warning { border-left-color: #F57F17; }
+.integraciones-alerta--danger { border-left-color: #C62828; }
+
 .integraciones-homologacion-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

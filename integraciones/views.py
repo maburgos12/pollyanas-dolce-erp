@@ -316,6 +316,75 @@ def panel(request):
     latest_run = AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at").first()
     almacen_pending_count = len((latest_run.pending_preview or [])) if latest_run else 0
     almacen_pending_preview = (latest_run.pending_preview or [])[:12] if latest_run else []
+    stale_limit = timezone.now() - timedelta(hours=24)
+
+    alertas_operativas = []
+    if errors_24h:
+        alertas_operativas.append(
+            {
+                "nivel": "danger",
+                "titulo": "Errores API en últimas 24h",
+                "detalle": f"{errors_24h} requests con status >= 400.",
+                "cta_label": "Ver log API",
+                "cta_url": "#log-api",
+            }
+        )
+    if point_pending_total:
+        alertas_operativas.append(
+            {
+                "nivel": "warning",
+                "titulo": "Pendientes Point abiertos",
+                "detalle": (
+                    f"Total {point_pending_total}. "
+                    f"Insumos {point_pending_by_tipo.get(PointPendingMatch.TIPO_INSUMO, 0)}, "
+                    f"productos {point_pending_by_tipo.get(PointPendingMatch.TIPO_PRODUCTO, 0)}, "
+                    f"proveedores {point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0)}."
+                ),
+                "cta_label": "Resolver en Maestros",
+                "cta_url": "/maestros/point-pendientes/",
+            }
+        )
+    if recetas_pending_total:
+        alertas_operativas.append(
+            {
+                "nivel": "warning",
+                "titulo": "Líneas receta sin match",
+                "detalle": f"{recetas_pending_total} líneas requieren homologación interna.",
+                "cta_label": "Revisar matching",
+                "cta_url": "/recetas/revisar-matching/",
+            }
+        )
+    if not latest_run:
+        alertas_operativas.append(
+            {
+                "nivel": "warning",
+                "titulo": "Sync de almacén no ejecutado",
+                "detalle": "No hay corridas de sincronización registradas.",
+                "cta_label": "Ir a Carga Almacén",
+                "cta_url": "/inventario/carga/",
+            }
+        )
+    elif latest_run.started_at and latest_run.started_at < stale_limit:
+        alertas_operativas.append(
+            {
+                "nivel": "warning",
+                "titulo": "Sync de almacén desactualizado",
+                "detalle": f"Último sync: {latest_run.started_at:%Y-%m-%d %H:%M}.",
+                "cta_label": "Ir a Carga Almacén",
+                "cta_url": "/inventario/carga/",
+            }
+        )
+
+    if not alertas_operativas:
+        alertas_operativas.append(
+            {
+                "nivel": "ok",
+                "titulo": "Operación estable",
+                "detalle": "Sin alertas críticas en integración, match y sincronización.",
+                "cta_label": "",
+                "cta_url": "",
+            }
+        )
 
     context = {
         "clients": clients,
@@ -358,5 +427,6 @@ def panel(request):
         "point_pending_insumo": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_INSUMO, 0)),
         "point_pending_producto": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PRODUCTO, 0)),
         "point_pending_proveedor": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0)),
+        "alertas_operativas": alertas_operativas,
     }
     return render(request, "integraciones/panel.html", context)

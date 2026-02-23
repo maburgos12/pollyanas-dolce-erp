@@ -253,3 +253,17 @@ class IntegracionesPanelTests(TestCase):
                 model="maestros.PointPendingMatch",
             ).exists()
         )
+
+    def test_operational_alerts_render_when_point_pending_exists(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-ALERTA-1",
+            point_nombre="Insumo alerta",
+            fuzzy_score=80.0,
+            fuzzy_sugerencia="Insumo alerta",
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Alertas operativas")
+        self.assertContains(response, "Pendientes Point abiertos")
