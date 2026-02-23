@@ -2586,12 +2586,63 @@ class RecetasCosteoApiTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload["scope"]["status"], "DESVIADAS")
         self.assertEqual(payload["scope"]["delta_min"], 5.0)
+        self.assertEqual(payload["scope"]["top_sucursales"], 120)
         self.assertGreaterEqual(payload["totales"]["rows_filtered"], 0)
         self.assertGreaterEqual(payload["totales"]["by_sucursal_filtered"], 1)
+        self.assertIn("rows_status", payload["totales"])
+        self.assertIn("by_sucursal_status", payload["totales"])
         for row in payload["rows"]:
             self.assertIn(row["status"], {"SOBRE", "BAJO"})
         for row in payload["by_sucursal"]:
             self.assertIn(row["status"], {"SOBRE", "BAJO"})
+
+    def test_endpoint_ventas_pipeline_resumen_top_sucursales(self):
+        sucursal_a = Sucursal.objects.create(codigo="TPA", nombre="Top A", activa=True)
+        sucursal_b = Sucursal.objects.create(codigo="TPB", nombre="Top B", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_a,
+            fecha=date(2026, 3, 5),
+            cantidad=Decimal("30"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_b,
+            fecha=date(2026, 3, 6),
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_a,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_b,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("9"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_pipeline_resumen"),
+            {"periodo": "2026-03", "top_sucursales": 1, "incluir_preparaciones": "1"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["top_sucursales"], 1)
+        self.assertEqual(len(payload["by_sucursal"]), 1)
+        self.assertEqual(payload["by_sucursal"][0]["sucursal_codigo"], "TPA")
 
     def test_endpoint_ventas_pipeline_resumen_filter_status_invalido(self):
         resp = self.client.get(

@@ -414,6 +414,8 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
     totals = payload.get("totales") or {}
     by_alcance = payload.get("solicitud_by_alcance") or {}
     by_sucursal = payload.get("by_sucursal") or []
+    by_sucursal_status = totals.get("by_sucursal_status") or {}
+    rows_status = totals.get("rows_status") or {}
     rows = payload.get("rows") or []
     periodo = str(scope.get("periodo") or _normalize_periodo_mes(None)).replace("-", "")
     filename = f"ventas_pipeline_{periodo}.{export_format}"
@@ -426,6 +428,7 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
         ws_resumen.append(["Sucursal", scope.get("sucursal") or "Todas"])
         ws_resumen.append(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
         ws_resumen.append(["Top", int(scope.get("top") or 0)])
+        ws_resumen.append(["Top sucursales", int(scope.get("top_sucursales") or 0)])
         ws_resumen.append(["Historial total", float(totals.get("historial_qty") or 0)])
         ws_resumen.append(["Pronostico total", float(totals.get("pronostico_qty") or 0)])
         ws_resumen.append(["Solicitud total", float(totals.get("solicitud_qty") or 0)])
@@ -436,6 +439,16 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
         ws_resumen.append(["Solicitudes MES", float(by_alcance.get("MES") or 0)])
         ws_resumen.append(["Solicitudes SEMANA", float(by_alcance.get("SEMANA") or 0)])
         ws_resumen.append(["Solicitudes FIN_SEMANA", float(by_alcance.get("FIN_SEMANA") or 0)])
+        ws_resumen.append(["Rows status SOBRE", int(rows_status.get("SOBRE") or 0)])
+        ws_resumen.append(["Rows status BAJO", int(rows_status.get("BAJO") or 0)])
+        ws_resumen.append(["Rows status OK", int(rows_status.get("OK") or 0)])
+        ws_resumen.append(["Rows status SIN_SOLICITUD", int(rows_status.get("SIN_SOLICITUD") or 0)])
+        ws_resumen.append(["Rows status SIN_MOV", int(rows_status.get("SIN_MOV") or 0)])
+        ws_resumen.append(["Sucursales status SOBRE", int(by_sucursal_status.get("SOBRE") or 0)])
+        ws_resumen.append(["Sucursales status BAJO", int(by_sucursal_status.get("BAJO") or 0)])
+        ws_resumen.append(["Sucursales status OK", int(by_sucursal_status.get("OK") or 0)])
+        ws_resumen.append(["Sucursales status SIN_SOLICITUD", int(by_sucursal_status.get("SIN_SOLICITUD") or 0)])
+        ws_resumen.append(["Sucursales status SIN_MOV", int(by_sucursal_status.get("SIN_MOV") or 0)])
 
         ws_sucursal = wb.create_sheet("BySucursal")
         ws_sucursal.append(
@@ -512,6 +525,7 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
     writer.writerow(["Sucursal", scope.get("sucursal") or "Todas"])
     writer.writerow(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
     writer.writerow(["Top", int(scope.get("top") or 0)])
+    writer.writerow(["Top sucursales", int(scope.get("top_sucursales") or 0)])
     writer.writerow(["Historial total", f"{Decimal(str(totals.get('historial_qty') or 0)):.3f}"])
     writer.writerow(["Pronostico total", f"{Decimal(str(totals.get('pronostico_qty') or 0)):.3f}"])
     writer.writerow(["Solicitud total", f"{Decimal(str(totals.get('solicitud_qty') or 0)):.3f}"])
@@ -532,6 +546,16 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
     writer.writerow(["Solicitudes MES", f"{Decimal(str(by_alcance.get('MES') or 0)):.3f}"])
     writer.writerow(["Solicitudes SEMANA", f"{Decimal(str(by_alcance.get('SEMANA') or 0)):.3f}"])
     writer.writerow(["Solicitudes FIN_SEMANA", f"{Decimal(str(by_alcance.get('FIN_SEMANA') or 0)):.3f}"])
+    writer.writerow(["Rows status SOBRE", int(rows_status.get("SOBRE") or 0)])
+    writer.writerow(["Rows status BAJO", int(rows_status.get("BAJO") or 0)])
+    writer.writerow(["Rows status OK", int(rows_status.get("OK") or 0)])
+    writer.writerow(["Rows status SIN_SOLICITUD", int(rows_status.get("SIN_SOLICITUD") or 0)])
+    writer.writerow(["Rows status SIN_MOV", int(rows_status.get("SIN_MOV") or 0)])
+    writer.writerow(["Sucursales status SOBRE", int(by_sucursal_status.get("SOBRE") or 0)])
+    writer.writerow(["Sucursales status BAJO", int(by_sucursal_status.get("BAJO") or 0)])
+    writer.writerow(["Sucursales status OK", int(by_sucursal_status.get("OK") or 0)])
+    writer.writerow(["Sucursales status SIN_SOLICITUD", int(by_sucursal_status.get("SIN_SOLICITUD") or 0)])
+    writer.writerow(["Sucursales status SIN_MOV", int(by_sucursal_status.get("SIN_MOV") or 0)])
     writer.writerow([])
     writer.writerow(["BY_SUCURSAL"])
     writer.writerow(
@@ -6028,6 +6052,7 @@ class VentasPipelineResumenView(APIView):
             )
         periodo = (request.GET.get("periodo") or "").strip()
         top = _parse_bounded_int(request.GET.get("top", 120), default=120, min_value=1, max_value=500)
+        top_sucursales = _parse_bounded_int(request.GET.get("top_sucursales", 120), default=120, min_value=1, max_value=500)
         status_filter = (request.GET.get("status") or "").strip().upper()
         allowed_status = {"", "SOBRE", "BAJO", "OK", "SIN_SOLICITUD", "SIN_MOV", "DESVIADAS"}
         if status_filter not in allowed_status:
@@ -6154,9 +6179,16 @@ class VentasPipelineResumenView(APIView):
         ]
         by_sucursal_rows_tmp.sort(key=lambda row: row["_sort"], reverse=True)
         by_sucursal_rows = []
-        for row in by_sucursal_rows_tmp[:120]:
+        for row in by_sucursal_rows_tmp[:top_sucursales]:
             row.pop("_sort", None)
             by_sucursal_rows.append(row)
+        by_sucursal_status_counts = {
+            "SOBRE": sum(1 for row in by_sucursal_rows_tmp if row.get("status") == "SOBRE"),
+            "BAJO": sum(1 for row in by_sucursal_rows_tmp if row.get("status") == "BAJO"),
+            "OK": sum(1 for row in by_sucursal_rows_tmp if row.get("status") == "OK"),
+            "SIN_SOLICITUD": sum(1 for row in by_sucursal_rows_tmp if row.get("status") == "SIN_SOLICITUD"),
+            "SIN_MOV": sum(1 for row in by_sucursal_rows_tmp if row.get("status") == "SIN_MOV"),
+        }
 
         cobertura_solicitud_pct = None
         if pronostico_total > 0:
@@ -6243,6 +6275,13 @@ class VentasPipelineResumenView(APIView):
         for row in rows_tmp[:top]:
             row.pop("_sort", None)
             rows.append(row)
+        rows_status_counts = {
+            "SOBRE": sum(1 for row in rows_tmp if row.get("status") == "SOBRE"),
+            "BAJO": sum(1 for row in rows_tmp if row.get("status") == "BAJO"),
+            "OK": sum(1 for row in rows_tmp if row.get("status") == "OK"),
+            "SIN_SOLICITUD": sum(1 for row in rows_tmp if row.get("status") == "SIN_SOLICITUD"),
+            "SIN_MOV": sum(1 for row in rows_tmp if row.get("status") == "SIN_MOV"),
+        }
 
         payload = {
             "scope": {
@@ -6251,6 +6290,7 @@ class VentasPipelineResumenView(APIView):
                 "sucursal": sucursal.nombre if sucursal else "Todas",
                 "incluir_preparaciones": incluir_preparaciones,
                 "top": top,
+                "top_sucursales": top_sucursales,
                 "status": status_filter or "",
                 "delta_min": _to_float(delta_min),
             },
@@ -6268,6 +6308,8 @@ class VentasPipelineResumenView(APIView):
                 "rows_count": len(receta_ids),
                 "rows_filtered": len(rows_tmp),
                 "by_sucursal_filtered": len(by_sucursal_rows_tmp),
+                "rows_status": rows_status_counts,
+                "by_sucursal_status": by_sucursal_status_counts,
             },
             "solicitud_by_alcance": {
                 "MES": _to_float(by_alcance[SolicitudVenta.ALCANCE_MES]),
