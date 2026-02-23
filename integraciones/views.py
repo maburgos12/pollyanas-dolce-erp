@@ -46,6 +46,10 @@ def _export_logs_csv(logs_qs) -> HttpResponse:
 def _export_health_csv(
     requests_24h: int,
     errors_24h: int,
+    requests_prev_24h: int,
+    errors_prev_24h: int,
+    requests_delta_pct: float,
+    errors_delta_pct: float,
     integracion_point: dict,
     alertas_operativas: list[dict],
 ) -> HttpResponse:
@@ -55,6 +59,10 @@ def _export_health_csv(
     writer.writerow(["kpi", "value"])
     writer.writerow(["requests_24h", requests_24h])
     writer.writerow(["errors_24h", errors_24h])
+    writer.writerow(["requests_prev_24h", requests_prev_24h])
+    writer.writerow(["errors_prev_24h", errors_prev_24h])
+    writer.writerow(["requests_delta_pct", requests_delta_pct])
+    writer.writerow(["errors_delta_pct", errors_delta_pct])
     writer.writerow(["insumos_activos", integracion_point["insumos"]["activos"]])
     writer.writerow(["insumos_con_codigo_point", integracion_point["insumos"]["con_codigo_point"]])
     writer.writerow(["insumos_sin_codigo_point", integracion_point["insumos"]["sin_codigo_point"]])
@@ -231,6 +239,14 @@ def _to_int(raw, default=0) -> int:
         return int(raw)
     except (TypeError, ValueError):
         return int(default)
+
+
+def _pct_change(current: int, previous: int) -> float:
+    current_i = int(current or 0)
+    previous_i = int(previous or 0)
+    if previous_i <= 0:
+        return 100.0 if current_i > 0 else 0.0
+    return round(((current_i - previous_i) * 100.0 / previous_i), 2)
 
 
 def _resolve_point_pending_insumos(min_score: float, limit: int, create_aliases: bool) -> dict:
@@ -473,7 +489,9 @@ def panel(request):
         return _export_audit_csv(audit_qs[:5000])
     audit_rows = list(audit_qs[:60])
 
-    since_24h = timezone.now() - timedelta(hours=24)
+    now_dt = timezone.now()
+    since_24h = now_dt - timedelta(hours=24)
+    since_48h = now_dt - timedelta(hours=48)
     top_clients_24h = list(
         PublicApiAccessLog.objects.filter(created_at__gte=since_24h)
         .values("client__nombre")
@@ -484,8 +502,14 @@ def panel(request):
         .order_by("-total", "client__nombre")[:10]
     )
 
-    requests_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h).count()
-    errors_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400).count()
+    current_window_qs = PublicApiAccessLog.objects.filter(created_at__gte=since_24h)
+    previous_window_qs = PublicApiAccessLog.objects.filter(created_at__gte=since_48h, created_at__lt=since_24h)
+    requests_24h = current_window_qs.count()
+    errors_24h = current_window_qs.filter(status_code__gte=400).count()
+    requests_prev_24h = previous_window_qs.count()
+    errors_prev_24h = previous_window_qs.filter(status_code__gte=400).count()
+    requests_delta_pct = _pct_change(requests_24h, requests_prev_24h)
+    errors_delta_pct = _pct_change(errors_24h, errors_prev_24h)
     errors_by_endpoint_24h = list(
         PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400)
         .values("endpoint")
@@ -561,6 +585,19 @@ def panel(request):
                 "nivel": "danger",
                 "titulo": "Errores API en últimas 24h",
                 "detalle": f"{errors_24h} requests con status >= 400.",
+                "cta_label": "Ver log API",
+                "cta_url": "#log-api",
+            }
+        )
+    if errors_24h >= 5 and errors_delta_pct >= 50:
+        alertas_operativas.append(
+            {
+                "nivel": "danger",
+                "titulo": "Spike de errores API (24h)",
+                "detalle": (
+                    f"Errores 24h: {errors_24h} vs {errors_prev_24h} previos "
+                    f"({errors_delta_pct:+.2f}%)."
+                ),
                 "cta_label": "Ver log API",
                 "cta_url": "#log-api",
             }
@@ -652,6 +689,10 @@ def panel(request):
         "top_clients_24h": top_clients_24h,
         "requests_24h": requests_24h,
         "errors_24h": errors_24h,
+        "requests_prev_24h": requests_prev_24h,
+        "errors_prev_24h": errors_prev_24h,
+        "requests_delta_pct": requests_delta_pct,
+        "errors_delta_pct": errors_delta_pct,
         "filter_client_id": filter_client_id,
         "filter_status": filter_status,
         "filter_q": filter_q,
@@ -699,6 +740,10 @@ def panel(request):
         return _export_health_csv(
             requests_24h=requests_24h,
             errors_24h=errors_24h,
+            requests_prev_24h=requests_prev_24h,
+            errors_prev_24h=errors_prev_24h,
+            requests_delta_pct=requests_delta_pct,
+            errors_delta_pct=errors_delta_pct,
             integracion_point=context["integracion_point"],
             alertas_operativas=alertas_operativas,
         )

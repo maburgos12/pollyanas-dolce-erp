@@ -198,6 +198,14 @@ def _to_float(value, default: float = 0.0) -> float:
         return default
 
 
+def _pct_change(current: int, previous: int) -> float:
+    current_i = int(current or 0)
+    previous_i = int(previous or 0)
+    if previous_i <= 0:
+        return 100.0 if current_i > 0 else 0.0
+    return round(((current_i - previous_i) * 100.0 / previous_i), 2)
+
+
 def _build_public_api_daily_trend(days: int = 7) -> list[dict[str, Any]]:
     days = max(1, min(int(days or 7), 31))
     today = timezone.localdate()
@@ -3068,9 +3076,17 @@ class IntegracionPointResumenView(APIView):
 
         proveedores_activos = Proveedor.objects.filter(activo=True).count()
         proveedores_pending_point = int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0))
-        since_24h = timezone.now() - timedelta(hours=24)
-        requests_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h).count()
-        errors_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400).count()
+        now_dt = timezone.now()
+        since_24h = now_dt - timedelta(hours=24)
+        since_48h = now_dt - timedelta(hours=48)
+        current_window_qs = PublicApiAccessLog.objects.filter(created_at__gte=since_24h)
+        previous_window_qs = PublicApiAccessLog.objects.filter(created_at__gte=since_48h, created_at__lt=since_24h)
+        requests_24h = current_window_qs.count()
+        errors_24h = current_window_qs.filter(status_code__gte=400).count()
+        requests_prev_24h = previous_window_qs.count()
+        errors_prev_24h = previous_window_qs.filter(status_code__gte=400).count()
+        requests_delta_pct = _pct_change(requests_24h, requests_prev_24h)
+        errors_delta_pct = _pct_change(errors_24h, errors_prev_24h)
         errors_by_endpoint_24h = list(
             PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400)
             .values("endpoint")
@@ -3122,6 +3138,17 @@ class IntegracionPointResumenView(APIView):
                     "nivel": "danger",
                     "titulo": "Errores API en últimas 24h",
                     "detalle": f"{errors_24h} requests con status >= 400.",
+                }
+            )
+        if errors_24h >= 5 and errors_delta_pct >= 50:
+            alertas_operativas.append(
+                {
+                    "nivel": "danger",
+                    "titulo": "Spike de errores API (24h)",
+                    "detalle": (
+                        f"Errores 24h: {errors_24h} vs {errors_prev_24h} previos "
+                        f"({errors_delta_pct:+.2f}%)."
+                    ),
                 }
             )
         if point_pending_total:
@@ -3178,6 +3205,12 @@ class IntegracionPointResumenView(APIView):
                     "errors": errors_24h,
                     "errors_by_endpoint": errors_by_endpoint_24h,
                     "errors_by_client": errors_by_client_24h,
+                },
+                "api_24h_comparativo": {
+                    "requests_prev_24h": requests_prev_24h,
+                    "errors_prev_24h": errors_prev_24h,
+                    "requests_delta_pct": requests_delta_pct,
+                    "errors_delta_pct": errors_delta_pct,
                 },
                 "api_7d": {
                     "requests": api_7d_requests,

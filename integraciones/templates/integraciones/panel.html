@@ -19,6 +19,20 @@
             <div class="kpi-label">Errores 24h</div>
         </article>
         <article class="kpi-card">
+            <div class="kpi-number {% if errors_delta_pct > 0 %}is-danger{% elif errors_delta_pct < 0 %}is-success{% else %}is-warning{% endif %}">
+                {{ errors_delta_pct|floatformat:2 }}%
+            </div>
+            <div class="kpi-label">Delta errores vs 24h previas</div>
+            <div class="muted">Previo: {{ errors_prev_24h }}</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number {% if requests_delta_pct > 0 %}is-warning{% elif requests_delta_pct < 0 %}is-success{% else %}is-warning{% endif %}">
+                {{ requests_delta_pct|floatformat:2 }}%
+            </div>
+            <div class="kpi-label">Delta requests vs 24h previas</div>
+            <div class="muted">Previo: {{ requests_prev_24h }}</div>
+        </article>
+        <article class="kpi-card">
             <div class="kpi-number {% if clients_unused_30d %}is-warning{% else %}is-success{% endif %}">{{ clients_unused_30d }}</div>
             <div class="kpi-label">Clientes sin uso 30d</div>
         </article>

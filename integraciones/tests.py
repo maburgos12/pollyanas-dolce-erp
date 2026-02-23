@@ -182,6 +182,7 @@ class IntegracionesPanelTests(TestCase):
         body = response.content.decode("utf-8")
         self.assertIn("point_pending_total", body)
         self.assertIn("alerta_nivel", body)
+        self.assertIn("errors_prev_24h", body)
 
     def test_errors_csv_export(self):
         client_a, _ = PublicApiClient.create_with_generated_key(nombre="ERP A", descripcion="")
