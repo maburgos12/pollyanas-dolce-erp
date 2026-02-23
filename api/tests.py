@@ -2700,7 +2700,11 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["scope"]["months"], 6)
+        self.assertEqual(payload["scope"]["top"], 20)
+        self.assertEqual(payload["scope"]["offset_top"], 0)
         self.assertEqual(payload["totales"]["recetas"], 1)
+        self.assertEqual(payload["totales"]["top_recetas_total"], 1)
+        self.assertEqual(payload["totales"]["top_recetas_returned"], 1)
         self.assertGreater(payload["totales"]["cantidad_total"], 0)
         self.assertGreaterEqual(len(payload["seasonality"]["by_month"]), 1)
         self.assertEqual(len(payload["seasonality"]["by_weekday"]), 7)
@@ -2742,6 +2746,7 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("ESTACIONALIDAD_MES", body_csv)
         self.assertIn("ESTACIONALIDAD_DIA", body_csv)
         self.assertIn("TOP_RECETAS", body_csv)
+        self.assertIn("Offset top,0", body_csv)
         self.assertIn("Receta API", body_csv)
 
         resp_xlsx = self.client.get(
@@ -2760,6 +2765,50 @@ class RecetasCosteoApiTests(TestCase):
             resp_xlsx["Content-Type"],
         )
         self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_pronostico_insights_offset_top(self):
+        receta_b = Receta.objects.create(
+            nombre="Receta API Insight B",
+            sheet_name="Insumos API Insight B",
+            hash_contenido="hash-api-insight-b",
+            rendimiento_cantidad=Decimal("4"),
+            rendimiento_unidad=self.unidad,
+        )
+        sucursal = Sucursal.objects.create(codigo="INSO", nombre="Sucursal Insights Offset", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 2, 2),
+            cantidad=Decimal("30"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=receta_b,
+            sucursal=sucursal,
+            fecha=date(2026, 2, 2),
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_pronostico_insights"),
+            {
+                "months": 6,
+                "sucursal_id": sucursal.id,
+                "fecha_hasta": "2026-02-28",
+                "incluir_preparaciones": "1",
+                "top": 1,
+                "offset_top": 1,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["top"], 1)
+        self.assertEqual(payload["scope"]["offset_top"], 1)
+        self.assertEqual(payload["totales"]["top_recetas_total"], 2)
+        self.assertEqual(payload["totales"]["top_recetas_returned"], 1)
+        self.assertEqual(len(payload["top_recetas"]), 1)
+        self.assertEqual(payload["top_recetas"][0]["receta_id"], receta_b.id)
 
     def test_endpoint_ventas_pronostico_insights_export_formato_invalido(self):
         resp = self.client.get(reverse("api_ventas_pronostico_insights"), {"export": "pdf"})

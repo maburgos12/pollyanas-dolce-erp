@@ -1185,9 +1185,13 @@ def _forecast_insights_export_response(payload: dict[str, Any], export_format: s
         ws_resumen.append(["Fecha hasta", scope.get("fecha_hasta") or ""])
         ws_resumen.append(["Sucursal", scope.get("sucursal") or "Todas"])
         ws_resumen.append(["Receta", scope.get("receta") or "Todas"])
+        ws_resumen.append(["Top", int(scope.get("top") or 0)])
+        ws_resumen.append(["Offset top", int(scope.get("offset_top") or 0)])
         ws_resumen.append(["Filas", int(totals.get("filas") or 0)])
         ws_resumen.append(["Dias con venta", int(totals.get("dias_con_venta") or 0)])
         ws_resumen.append(["Recetas", int(totals.get("recetas") or 0)])
+        ws_resumen.append(["Top recetas total", int(totals.get("top_recetas_total") or 0)])
+        ws_resumen.append(["Top recetas returned", int(totals.get("top_recetas_returned") or 0)])
         ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
         ws_resumen.append(["Promedio diario", float(totals.get("promedio_diario") or 0)])
 
@@ -1249,9 +1253,13 @@ def _forecast_insights_export_response(payload: dict[str, Any], export_format: s
     writer.writerow(["Fecha hasta", scope.get("fecha_hasta") or ""])
     writer.writerow(["Sucursal", scope.get("sucursal") or "Todas"])
     writer.writerow(["Receta", scope.get("receta") or "Todas"])
+    writer.writerow(["Top", int(scope.get("top") or 0)])
+    writer.writerow(["Offset top", int(scope.get("offset_top") or 0)])
     writer.writerow(["Filas", int(totals.get("filas") or 0)])
     writer.writerow(["Dias con venta", int(totals.get("dias_con_venta") or 0)])
     writer.writerow(["Recetas", int(totals.get("recetas") or 0)])
+    writer.writerow(["Top recetas total", int(totals.get("top_recetas_total") or 0)])
+    writer.writerow(["Top recetas returned", int(totals.get("top_recetas_returned") or 0)])
     writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
     writer.writerow(["Promedio diario", f"{Decimal(str(totals.get('promedio_diario') or 0)):.3f}"])
 
@@ -5625,6 +5633,7 @@ class ForecastInsightsView(APIView):
 
         months = _parse_bounded_int(request.GET.get("months", 12), default=12, min_value=1, max_value=36)
         top = _parse_bounded_int(request.GET.get("top", 20), default=20, min_value=1, max_value=100)
+        offset_top = _parse_bounded_int(request.GET.get("offset_top", 0), default=0, min_value=0, max_value=5000)
         incluir_preparaciones = _parse_bool(request.GET.get("incluir_preparaciones"), default=False)
         export_format = (request.GET.get("export") or "").strip().lower()
         if export_format and export_format not in {"csv", "xlsx"}:
@@ -5697,11 +5706,15 @@ class ForecastInsightsView(APIView):
                     "sucursal": sucursal.nombre if sucursal else "Todas",
                     "receta_id": receta.id if receta else None,
                     "receta": receta.nombre if receta else "Todas",
+                    "top": top,
+                    "offset_top": offset_top,
                 },
                 "totales": {
                     "filas": 0,
                     "dias_con_venta": 0,
                     "recetas": 0,
+                    "top_recetas_total": 0,
+                    "top_recetas_returned": 0,
                     "cantidad_total": 0.0,
                     "promedio_diario": 0.0,
                 },
@@ -5789,14 +5802,14 @@ class ForecastInsightsView(APIView):
                 }
             )
 
-        top_recetas = []
-        for receta_id, qty_total in sorted(recipe_totals.items(), key=lambda item: item[1], reverse=True)[:top]:
+        top_recetas_all = []
+        for receta_id, qty_total in sorted(recipe_totals.items(), key=lambda item: item[1], reverse=True):
             days_count = len(recipe_days.get(receta_id, set())) or 1
             avg_day = qty_total / Decimal(str(days_count))
             share = Decimal("0")
             if total_qty > 0:
                 share = (qty_total / total_qty) * Decimal("100")
-            top_recetas.append(
+            top_recetas_all.append(
                 {
                     "receta_id": receta_id,
                     "receta": recipe_names.get(receta_id) or f"Receta {receta_id}",
@@ -5806,6 +5819,7 @@ class ForecastInsightsView(APIView):
                     "participacion_pct": _to_float(share.quantize(Decimal("0.1"))),
                 }
             )
+        top_recetas = top_recetas_all[offset_top : offset_top + top]
 
         payload = {
             "scope": {
@@ -5816,11 +5830,15 @@ class ForecastInsightsView(APIView):
                 "sucursal": sucursal.nombre if sucursal else "Todas",
                 "receta_id": receta.id if receta else None,
                 "receta": receta.nombre if receta else "Todas",
+                "top": top,
+                "offset_top": offset_top,
             },
             "totales": {
                 "filas": len(rows),
                 "dias_con_venta": len(date_totals),
                 "recetas": len(recipe_totals),
+                "top_recetas_total": len(top_recetas_all),
+                "top_recetas_returned": len(top_recetas),
                 "cantidad_total": _to_float(total_qty),
                 "promedio_diario": _to_float(global_avg.quantize(Decimal("0.001"))),
             },
