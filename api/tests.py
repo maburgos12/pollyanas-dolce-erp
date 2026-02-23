@@ -1922,6 +1922,62 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(len(payload["windows"]), 1)
         self.assertIn("mape_promedio", payload["totals"])
 
+    def test_endpoint_ventas_pronostico_backtest_escenarios(self):
+        sucursal = Sucursal.objects.create(codigo="BT2", nombre="Backtest 2", activa=True)
+        monthly_data = [
+            (2025, 9, "20"),
+            (2025, 10, "24"),
+            (2025, 11, "28"),
+            (2025, 12, "30"),
+            (2026, 1, "33"),
+            (2026, 2, "36"),
+        ]
+        for year, month, qty in monthly_data:
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=date(year, month, 15),
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+
+        url = reverse("api_ventas_pronostico_backtest")
+        resp_low = self.client.post(
+            url,
+            {
+                "alcance": "mes",
+                "fecha_base": "2026-03-15",
+                "periods": 3,
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "escenario": "bajo",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_low.status_code, 200)
+        low = resp_low.json()
+        self.assertEqual(low["scope"]["escenario"], "bajo")
+
+        resp_high = self.client.post(
+            url,
+            {
+                "alcance": "mes",
+                "fecha_base": "2026-03-15",
+                "periods": 3,
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "escenario": "alto",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_high.status_code, 200)
+        high = resp_high.json()
+        self.assertEqual(high["scope"]["escenario"], "alto")
+        self.assertGreaterEqual(
+            Decimal(str(high["totals"]["forecast_total"])),
+            Decimal(str(low["totals"]["forecast_total"])),
+        )
+
     def test_endpoint_ventas_historial_list_filters_and_totals(self):
         sucursal = Sucursal.objects.create(codigo="MAT", nombre="Matriz API", activa=True)
         VentaHistorica.objects.create(

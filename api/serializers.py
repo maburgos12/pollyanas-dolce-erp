@@ -465,12 +465,19 @@ class ForecastBacktestRequestSerializer(serializers.Serializer):
     sucursal_id = serializers.IntegerField(required=False, allow_null=True)
     incluir_preparaciones = serializers.BooleanField(required=False, default=False)
     safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
+    min_confianza_pct = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
+    escenario = serializers.ChoiceField(choices=["base", "bajo", "alto"], required=False, default="base")
     periods = serializers.IntegerField(required=False, min_value=1, max_value=12, default=3)
     top = serializers.IntegerField(required=False, min_value=1, max_value=50, default=10)
 
     def validate_safety_pct(self, value):
         if value < -30 or value > 100:
             raise serializers.ValidationError("safety_pct debe estar entre -30 y 100.")
+        return value
+
+    def validate_min_confianza_pct(self, value):
+        if value < 0 or value > 100:
+            raise serializers.ValidationError("min_confianza_pct debe estar entre 0 y 100.")
         return value
 
 

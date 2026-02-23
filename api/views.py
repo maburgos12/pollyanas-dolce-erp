@@ -3964,6 +3964,8 @@ class ForecastBacktestView(APIView):
         fecha_base = data.get("fecha_base") or timezone.localdate()
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
+        min_confianza_pct = _to_decimal(data.get("min_confianza_pct"), default=Decimal("0"))
+        escenario = str(data.get("escenario") or "base").lower()
         periods = int(data.get("periods") or 3)
         top = int(data.get("top") or 10)
 
@@ -4001,8 +4003,14 @@ class ForecastBacktestView(APIView):
                 incluir_preparaciones=incluir_preparaciones,
                 safety_pct=safety_pct,
             )
+            forecast_result, _ = _filter_forecast_result_by_confianza(forecast_result, min_confianza_pct)
+            qty_key = "forecast_qty"
+            if escenario == "bajo":
+                qty_key = "forecast_low"
+            elif escenario == "alto":
+                qty_key = "forecast_high"
             forecast_map = {
-                int(row["receta_id"]): _to_decimal(row["forecast_qty"])
+                int(row["receta_id"]): _to_decimal(row.get(qty_key))
                 for row in (forecast_result.get("rows") or [])
             }
 
@@ -4016,7 +4024,10 @@ class ForecastBacktestView(APIView):
                 for row in actual_qs.values("receta_id").annotate(total=Sum("cantidad"))
             }
 
-            union_ids = sorted(set(forecast_map.keys()) | set(actual_map.keys()))
+            if min_confianza_pct > 0:
+                union_ids = sorted(set(forecast_map.keys()))
+            else:
+                union_ids = sorted(set(forecast_map.keys()) | set(actual_map.keys()))
             if not union_ids:
                 continue
 
@@ -4109,6 +4120,8 @@ class ForecastBacktestView(APIView):
                     "alcance": alcance,
                     "fecha_base": str(fecha_base),
                     "periods": periods,
+                    "escenario": escenario,
+                    "min_confianza_pct": _to_float(min_confianza_pct),
                     "sucursal_id": sucursal.id if sucursal else None,
                     "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
                 },

@@ -717,6 +717,7 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
                 "fecha_base": "2026-04-15",
                 "sucursal_id": str(self.sucursal.id),
                 "run_mode": "backtest",
+                "escenario": "alto",
                 "backtest_periods": "4",
                 "backtest_top": "5",
                 "safety_pct": "0",
@@ -726,6 +727,7 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
         preview = self.client.session.get("pronostico_backtest_preview")
         self.assertIsNotNone(preview)
         self.assertGreaterEqual(preview["totals"]["windows_evaluated"], 1)
+        self.assertEqual(preview["scope"]["escenario"], "alto")
         self.assertIn("mape_promedio", preview["totals"])
         self.assertGreaterEqual(len(preview["windows"]), 1)
 

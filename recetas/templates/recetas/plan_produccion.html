@@ -370,6 +370,8 @@
     <div class="card-header">Backtest estadístico · {{ forecast_backtest.scope.alcance|upper }} · {{ forecast_backtest.scope.sucursal_nombre }}</div>
     <p class="muted mb-2">
       Ventanas: {{ forecast_backtest.totals.windows_evaluated }} ·
+      Escenario: {{ forecast_backtest.scope.escenario|default:'base'|upper }} ·
+      Confianza mínima: {{ forecast_backtest.scope.min_confianza_pct|default:0|floatformat:1 }}% ·
       Forecast total: {{ forecast_backtest.totals.forecast_total|floatformat:2 }} ·
       Real total: {{ forecast_backtest.totals.actual_total|floatformat:2 }} ·
       Bias: {{ forecast_backtest.totals.bias_total|floatformat:2 }} ·

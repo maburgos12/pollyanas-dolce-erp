@@ -2520,6 +2520,7 @@ def _build_forecast_backtest_preview(
     incluir_preparaciones: bool,
     safety_pct: Decimal,
     min_confianza_pct: Decimal,
+    escenario: str,
     top: int,
 ) -> dict[str, Any] | None:
     windows = _forecast_backtest_windows(alcance, fecha_base, periods)
@@ -2544,8 +2545,13 @@ def _build_forecast_backtest_preview(
             safety_pct=safety_pct,
         )
         forecast_result, _ = _filter_forecast_result_by_confianza(forecast_result, min_confianza_pct)
+        qty_key = "forecast_qty"
+        if escenario == "bajo":
+            qty_key = "forecast_low"
+        elif escenario == "alto":
+            qty_key = "forecast_high"
         forecast_map = {
-            int(row["receta_id"]): Decimal(str(row["forecast_qty"] or 0))
+            int(row["receta_id"]): Decimal(str(row.get(qty_key) or 0))
             for row in (forecast_result.get("rows") or [])
         }
 
@@ -2649,6 +2655,7 @@ def _build_forecast_backtest_preview(
             "fecha_base": str(fecha_base),
             "periods": periods,
             "min_confianza_pct": float(min_confianza_pct),
+            "escenario": escenario,
             "sucursal_id": sucursal.id if sucursal else None,
             "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
         },
@@ -3313,6 +3320,7 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
             incluir_preparaciones=incluir_preparaciones,
             safety_pct=safety_pct,
             min_confianza_pct=min_confianza_pct,
+            escenario=escenario,
             top=backtest_top,
         )
         if backtest_payload is None:
