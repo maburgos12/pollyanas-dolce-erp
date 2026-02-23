@@ -56,6 +56,7 @@ from compras.views import (
     _sanitize_consumo_ref_filter,
 )
 from integraciones.models import PublicApiAccessLog, PublicApiClient
+from integraciones.views import _deactivate_idle_api_clients, _purge_api_logs
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo
 from inventario.views import (
     _apply_ajuste,
@@ -106,6 +107,8 @@ from .serializers import (
     ForecastBacktestRequestSerializer,
     ForecastEstadisticoGuardarSerializer,
     ForecastEstadisticoRequestSerializer,
+    IntegracionesDeactivateIdleClientsSerializer,
+    IntegracionesPurgeApiLogsSerializer,
     InventarioAjusteCreateSerializer,
     InventarioAjusteDecisionSerializer,
     InventarioAliasCreateSerializer,
@@ -3022,6 +3025,70 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
                     "recetas_resueltas": recetas_resolved_total,
                 },
                 "items": preview_actions,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class IntegracionesDeactivateIdleClientsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not can_view_audit(request.user):
+            return Response(
+                {"detail": "No tienes permisos para ejecutar operaciones de integración."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = IntegracionesDeactivateIdleClientsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        summary = _deactivate_idle_api_clients(
+            idle_days=serializer.validated_data["idle_days"],
+            limit=serializer.validated_data["limit"],
+        )
+        log_event(
+            request.user,
+            "DEACTIVATE_IDLE_API_CLIENTS",
+            "integraciones.PublicApiClient",
+            "",
+            payload=summary,
+        )
+        return Response(
+            {
+                "action": "deactivate_idle_clients",
+                "summary": summary,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class IntegracionesPurgeApiLogsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not can_view_audit(request.user):
+            return Response(
+                {"detail": "No tienes permisos para ejecutar operaciones de integración."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = IntegracionesPurgeApiLogsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        summary = _purge_api_logs(
+            retain_days=serializer.validated_data["retain_days"],
+            max_delete=serializer.validated_data["max_delete"],
+        )
+        log_event(
+            request.user,
+            "PURGE_API_LOGS",
+            "integraciones.PublicApiAccessLog",
+            "",
+            payload=summary,
+        )
+        return Response(
+            {
+                "action": "purge_api_logs",
+                "summary": summary,
             },
             status=status.HTTP_200_OK,
         )

@@ -816,6 +816,96 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(payload["inventario"]["almacen_pending_preview"], 1)
         self.assertGreaterEqual(payload["inventario"]["recetas_pending_match"], 1)
 
+    def test_endpoint_integraciones_deactivate_idle_clients(self):
+        idle_client, _ = PublicApiClient.create_with_generated_key(nombre="API Idle", descripcion="")
+        recent_client, _ = PublicApiClient.create_with_generated_key(nombre="API Recent", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=recent_client,
+            endpoint="/api/public/v1/health/",
+            method="GET",
+            status_code=200,
+        )
+        PublicApiAccessLog.objects.filter(client=recent_client).update(created_at=timezone.now() - timedelta(days=2))
+
+        url = reverse("api_integraciones_deactivate_idle_clients")
+        resp = self.client.post(url, {"idle_days": 30, "limit": 100})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["action"], "deactivate_idle_clients")
+        self.assertIn("summary", payload)
+        self.assertGreaterEqual(payload["summary"]["deactivated"], 1)
+        idle_client.refresh_from_db()
+        recent_client.refresh_from_db()
+        self.assertFalse(idle_client.activo)
+        self.assertTrue(recent_client.activo)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="DEACTIVATE_IDLE_API_CLIENTS",
+                model="integraciones.PublicApiClient",
+            ).exists()
+        )
+
+    def test_endpoint_integraciones_purge_api_logs(self):
+        api_client, _ = PublicApiClient.create_with_generated_key(nombre="API Purge", descripcion="")
+        recent_log = PublicApiAccessLog.objects.create(
+            client=api_client,
+            endpoint="/api/public/v1/recent/",
+            method="GET",
+            status_code=200,
+        )
+        old_1 = PublicApiAccessLog.objects.create(
+            client=api_client,
+            endpoint="/api/public/v1/old-1/",
+            method="GET",
+            status_code=200,
+        )
+        old_2 = PublicApiAccessLog.objects.create(
+            client=api_client,
+            endpoint="/api/public/v1/old-2/",
+            method="GET",
+            status_code=500,
+        )
+        PublicApiAccessLog.objects.filter(id=recent_log.id).update(created_at=timezone.now() - timedelta(days=5))
+        PublicApiAccessLog.objects.filter(id__in=[old_1.id, old_2.id]).update(created_at=timezone.now() - timedelta(days=120))
+
+        url = reverse("api_integraciones_purge_api_logs")
+        resp = self.client.post(url, {"retain_days": 90, "max_delete": 1})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["action"], "purge_api_logs")
+        self.assertIn("summary", payload)
+        self.assertEqual(payload["summary"]["deleted"], 1)
+        self.assertEqual(
+            PublicApiAccessLog.objects.filter(created_at__lt=timezone.now() - timedelta(days=90)).count(),
+            1,
+        )
+        self.assertTrue(PublicApiAccessLog.objects.filter(id=recent_log.id).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="PURGE_API_LOGS",
+                model="integraciones.PublicApiAccessLog",
+            ).exists()
+        )
+
+    def test_endpoint_integraciones_operaciones_forbidden_without_role(self):
+        user_model = get_user_model()
+        no_role_user = user_model.objects.create_user(
+            username="api_no_role_user",
+            email="api_no_role@example.com",
+            password="test12345",
+        )
+        self.client.force_login(no_role_user)
+        resp_deactivate = self.client.post(
+            reverse("api_integraciones_deactivate_idle_clients"),
+            {"idle_days": 30, "limit": 10},
+        )
+        resp_purge = self.client.post(
+            reverse("api_integraciones_purge_api_logs"),
+            {"retain_days": 90, "max_delete": 10},
+        )
+        self.assertEqual(resp_deactivate.status_code, 403)
+        self.assertEqual(resp_purge.status_code, 403)
+
     def test_endpoint_inventario_aliases_pendientes_unificados_resolver_dry_run_and_apply(self):
         target = Insumo.objects.create(nombre="Harina API Target", unidad_base=self.unidad, activo=True)
         nombre_cross = "Harina pastelera premium"

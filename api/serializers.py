@@ -286,6 +286,17 @@ class InventarioCrossPendientesResolveSerializer(serializers.Serializer):
             return 100.0
         return float(value)
 
+
+class IntegracionesDeactivateIdleClientsSerializer(serializers.Serializer):
+    idle_days = serializers.IntegerField(required=False, min_value=1, max_value=365, default=30)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=500, default=100)
+
+
+class IntegracionesPurgeApiLogsSerializer(serializers.Serializer):
+    retain_days = serializers.IntegerField(required=False, min_value=1, max_value=3650, default=90)
+    max_delete = serializers.IntegerField(required=False, min_value=1, max_value=50000, default=5000)
+
+
 class ComprasSolicitudCreateSerializer(serializers.Serializer):
     area = serializers.CharField(max_length=120)
     solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True)
