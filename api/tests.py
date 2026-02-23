@@ -2327,6 +2327,66 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(item["forecast_ref"]["forecast_qty"], 20.0)
         self.assertEqual(item["forecast_ref"]["delta_solicitud_vs_forecast"], 10.0)
 
+    def test_endpoint_ventas_solicitudes_list_forecast_status_filter(self):
+        receta_b = Receta.objects.create(
+            nombre="Receta API Filtro Forecast",
+            sheet_name="Insumos API FF",
+            hash_contenido="hash-api-ff",
+            rendimiento_cantidad=Decimal("3"),
+            rendimiento_unidad=self.unidad,
+        )
+        sucursal = Sucursal.objects.create(codigo="SFF", nombre="Sucursal Forecast Filter", activa=True)
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("30"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=receta_b,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("19"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=receta_b,
+            periodo="2026-03",
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_solicitudes"),
+            {"periodo": "2026-03", "forecast_status": "DESVIADAS", "forecast_delta_min": "5"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload["filters"]["include_forecast_ref"])
+        self.assertEqual(payload["filters"]["forecast_status"], "DESVIADAS")
+        self.assertEqual(payload["filters"]["forecast_delta_min"], 5.0)
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(payload["items"][0]["receta_id"], self.receta.id)
+        self.assertEqual(payload["items"][0]["forecast_ref"]["status"], "SOBRE")
+
+    def test_endpoint_ventas_solicitudes_list_forecast_status_invalido(self):
+        resp = self.client.get(reverse("api_ventas_solicitudes"), {"forecast_status": "RUIDO"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("forecast_status", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_solicitudes_export_csv_y_xlsx(self):
         sucursal = Sucursal.objects.create(codigo="SURX", nombre="Sucursal Sur Export", activa=True)
         SolicitudVenta.objects.create(

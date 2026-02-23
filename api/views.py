@@ -1523,6 +1523,8 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
         ws_resumen.append(["Desde", filters.get("fecha_desde") or ""])
         ws_resumen.append(["Hasta", filters.get("fecha_hasta") or ""])
         ws_resumen.append(["Include forecast ref", "SI" if filters.get("include_forecast_ref") else "NO"])
+        ws_resumen.append(["Forecast status", filters.get("forecast_status") or ""])
+        ws_resumen.append(["Forecast delta min", float(filters.get("forecast_delta_min") or 0)])
         ws_resumen.append(["Rows", int(totals.get("rows") or 0)])
         ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
         ws_resumen.append(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
@@ -1597,6 +1599,8 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
     writer.writerow(["Desde", filters.get("fecha_desde") or ""])
     writer.writerow(["Hasta", filters.get("fecha_hasta") or ""])
     writer.writerow(["Include forecast ref", "SI" if filters.get("include_forecast_ref") else "NO"])
+    writer.writerow(["Forecast status", filters.get("forecast_status") or ""])
+    writer.writerow(["Forecast delta min", f"{Decimal(str(filters.get('forecast_delta_min') or 0)):.3f}"])
     writer.writerow(["Rows", int(totals.get("rows") or 0)])
     writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
     writer.writerow(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
@@ -6469,6 +6473,18 @@ class SolicitudVentaListView(APIView):
         fecha_hasta_raw = (request.GET.get("fecha_hasta") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 150), default=150, min_value=1, max_value=1000)
         include_forecast_ref = _parse_bool(request.GET.get("include_forecast_ref"), default=False)
+        forecast_status_filter = (request.GET.get("forecast_status") or "").strip().upper()
+        forecast_delta_min = _to_decimal(request.GET.get("forecast_delta_min"), default=Decimal("0"))
+        if forecast_delta_min < 0:
+            forecast_delta_min = Decimal("0")
+        allowed_forecast_status = {"", "SOBRE", "BAJO", "OK", "SIN_FORECAST", "DESVIADAS"}
+        if forecast_status_filter not in allowed_forecast_status:
+            return Response(
+                {"detail": "forecast_status inválido. Usa SOBRE, BAJO, OK, SIN_FORECAST o DESVIADAS."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if forecast_status_filter or forecast_delta_min > 0:
+            include_forecast_ref = True
 
         if periodo:
             parsed_period = _parse_period(periodo)
@@ -6560,10 +6576,20 @@ class SolicitudVentaListView(APIView):
         cantidad_total = Decimal("0")
         by_alcance = {k: 0 for k in allowed_alcance}
         forecast_status_counts = {"SOBRE": 0, "BAJO": 0, "OK": 0, "SIN_FORECAST": 0}
+
+        def _forecast_match(status_value: str, delta_value: Decimal) -> bool:
+            if forecast_status_filter:
+                if forecast_status_filter == "DESVIADAS":
+                    if status_value not in {"SOBRE", "BAJO"}:
+                        return False
+                elif status_value != forecast_status_filter:
+                    return False
+            if forecast_delta_min > 0 and abs(delta_value) < forecast_delta_min:
+                return False
+            return True
+
         for r in rows:
             qty = _to_decimal(r.cantidad)
-            cantidad_total += qty
-            by_alcance[r.alcance] = by_alcance.get(r.alcance, 0) + 1
             item = {
                 "id": r.id,
                 "receta_id": r.receta_id,
@@ -6595,13 +6621,17 @@ class SolicitudVentaListView(APIView):
                     delta_forecast = qty
                     forecast_status = "SIN_FORECAST"
 
-                forecast_status_counts[forecast_status] = forecast_status_counts.get(forecast_status, 0) + 1
                 item["forecast_ref"] = {
                     "status": forecast_status,
                     "forecast_qty": _to_float(forecast_qty),
                     "solicitud_qty": _to_float(qty),
                     "delta_solicitud_vs_forecast": _to_float(delta_forecast.quantize(Decimal("0.001"))),
                 }
+                if not _forecast_match(forecast_status, delta_forecast):
+                    continue
+                forecast_status_counts[forecast_status] = forecast_status_counts.get(forecast_status, 0) + 1
+            cantidad_total += qty
+            by_alcance[r.alcance] = by_alcance.get(r.alcance, 0) + 1
             items.append(item)
 
         payload = {
@@ -6615,6 +6645,8 @@ class SolicitudVentaListView(APIView):
                 "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
                 "limit": limit,
                 "include_forecast_ref": include_forecast_ref,
+                "forecast_status": forecast_status_filter or "",
+                "forecast_delta_min": _to_float(forecast_delta_min),
             },
             "totales": {
                 "rows": len(items),
