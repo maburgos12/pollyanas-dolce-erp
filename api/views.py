@@ -3558,6 +3558,38 @@ class PresupuestosConsolidadoView(APIView):
             periodo_mes,
         )
         consumo_ref_filter = _sanitize_consumo_ref_filter(request.GET.get("consumo_ref"))
+        consumo_limit = _parse_bounded_int(request.GET.get("limit", 30), default=30, min_value=1, max_value=1000)
+        consumo_offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
+        consumo_sort_by = (request.GET.get("sort_by") or "variacion_cost_abs").strip().lower()
+        consumo_sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
+        consumo_allowed_sort = {
+            "variacion_cost_abs",
+            "variacion_cost",
+            "costo_real",
+            "costo_plan",
+            "cantidad_real",
+            "cantidad_plan",
+            "consumo_pct",
+            "insumo",
+            "categoria",
+            "estado",
+            "semaforo",
+        }
+        if consumo_sort_by not in consumo_allowed_sort:
+            return Response(
+                {
+                    "detail": (
+                        "sort_by inválido. Usa variacion_cost_abs, variacion_cost, costo_real, costo_plan, "
+                        "cantidad_real, cantidad_plan, consumo_pct, insumo, categoria, estado o semaforo."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if consumo_sort_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_dir inválido. Usa asc o desc."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         budget_ctx = _build_budget_context(
             solicitudes,
@@ -3588,6 +3620,10 @@ class PresupuestosConsolidadoView(APIView):
             plan_filter,
             categoria_filter,
             consumo_ref_filter,
+            limit=consumo_limit,
+            offset=consumo_offset,
+            sort_by=consumo_sort_by,
+            sort_dir=consumo_sort_dir,
         )
         historial = _build_budget_history(_periodo_mes, source_filter, plan_filter, categoria_filter)
 
@@ -3604,6 +3640,10 @@ class PresupuestosConsolidadoView(APIView):
                 "categoria": categoria_filter or "",
                 "reabasto": reabasto_filter,
                 "consumo_ref": consumo_ref_filter,
+                "limit": consumo_limit,
+                "offset": consumo_offset,
+                "sort_by": consumo_sort_by,
+                "sort_dir": consumo_sort_dir,
             },
             "totals": {
                 "solicitudes_count": len(solicitudes),
@@ -3689,6 +3729,14 @@ class PresupuestosConsolidadoView(APIView):
                 ],
             },
             "consumo_vs_plan": {
+                "meta": {
+                    "rows_total": int(consumo_dashboard.get("meta", {}).get("rows_total") or 0),
+                    "rows_returned": int(consumo_dashboard.get("meta", {}).get("rows_returned") or 0),
+                    "limit": int(consumo_dashboard.get("meta", {}).get("limit") or consumo_limit),
+                    "offset": int(consumo_dashboard.get("meta", {}).get("offset") or consumo_offset),
+                    "sort_by": consumo_dashboard.get("meta", {}).get("sort_by") or consumo_sort_by,
+                    "sort_dir": consumo_dashboard.get("meta", {}).get("sort_dir") or consumo_sort_dir,
+                },
                 "totals": {
                     "plan_qty_total": _to_float(consumo_dashboard["totals"]["plan_qty_total"]),
                     "consumo_real_qty_total": _to_float(consumo_dashboard["totals"]["consumo_real_qty_total"]),

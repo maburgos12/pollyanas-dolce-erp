@@ -49,6 +49,7 @@ Sprint 1 entrega:
 - API: POST /api/compras/solicitudes/import-confirm/ (confirmación de carga masiva usando filas de preview)
 - API: GET /api/compras/ordenes/ (listado de órdenes con filtros y monto total estimado; soporta `limit`/`offset`, `sort_by`/`sort_dir` y totales filtrados)
 - API: GET /api/compras/recepciones/ (listado de recepciones con filtros y totales por estatus; soporta `limit`/`offset` y `sort_by`/`sort_dir`)
+- API: GET /api/presupuestos/consolidado/{YYYY-MM}/ (consolidado de presupuesto/ejecución con tablero `consumo_vs_plan`; soporta `periodo_tipo=mes|q1|q2`, `source`, `plan_id`, `categoria`, `reabasto`, `consumo_ref`, y paginación/ordenamiento en consumo con `limit`/`offset` + `sort_by`/`sort_dir`)
 - API: POST /api/compras/solicitud/{id}/estatus/ (cambio de estado con reglas de transición)
 - API: POST /api/compras/solicitud/{id}/crear-orden/ (genera OC desde solicitud aprobada, idempotente)
 - API: POST /api/compras/orden/{id}/estatus/ (cambio de estado de OC con validaciones)

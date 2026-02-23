@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -7,6 +7,7 @@ from django.contrib.auth.models import Group
 from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.authtoken.models import Token
 
 from core.models import AuditLog, Sucursal
@@ -1992,6 +1993,100 @@ class RecetasCosteoApiTests(TestCase):
         self.assertAlmostEqual(payload["totals"]["presupuesto_ejecutado_total"], 80.0, places=2)
         self.assertAlmostEqual(payload["totals"]["presupuesto_objetivo"], 120.0, places=2)
         self.assertIn("consumo_vs_plan", payload)
+
+    def test_endpoint_presupuestos_consolidado_consumo_vs_plan_offset_sort(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Consolidado Sort", lead_time_dias=5, activo=True)
+        self.insumo.proveedor_principal = proveedor
+        self.insumo.categoria = "Masa"
+        self.insumo.save(update_fields=["proveedor_principal", "categoria"])
+
+        insumo_2 = Insumo.objects.create(
+            nombre="Harina API 2",
+            unidad_base=self.unidad,
+            proveedor_principal=proveedor,
+            categoria="Masa",
+            activo=True,
+        )
+        receta_2 = Receta.objects.create(
+            nombre="Receta API 2",
+            sheet_name="Insumos API 2",
+            hash_contenido="hash-api-consolidado-sort-2",
+        )
+        LineaReceta.objects.create(
+            receta=receta_2,
+            posicion=1,
+            insumo=insumo_2,
+            insumo_texto="Harina API 2",
+            cantidad=Decimal("1"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("20"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("50"),
+            source_hash="api-presupuesto-sort-1",
+        )
+        CostoInsumo.objects.create(
+            insumo=insumo_2,
+            proveedor=proveedor,
+            costo_unitario=Decimal("20"),
+            source_hash="api-presupuesto-sort-2",
+        )
+
+        plan = PlanProduccion.objects.create(nombre="Plan Consolidado Sort", fecha_produccion=date(2026, 2, 14))
+        PlanProduccionItem.objects.create(plan=plan, receta=self.receta, cantidad=Decimal("1"))
+        PlanProduccionItem.objects.create(plan=plan, receta=receta_2, cantidad=Decimal("1"))
+
+        MovimientoInventario.objects.create(
+            fecha=timezone.make_aware(datetime(2026, 2, 15, 10, 0, 0)),
+            tipo=MovimientoInventario.TIPO_CONSUMO,
+            insumo=self.insumo,
+            cantidad=Decimal("5"),
+            referencia=f"PLAN:{plan.id}:A",
+        )
+        MovimientoInventario.objects.create(
+            fecha=timezone.make_aware(datetime(2026, 2, 15, 11, 0, 0)),
+            tipo=MovimientoInventario.TIPO_CONSUMO,
+            insumo=insumo_2,
+            cantidad=Decimal("1"),
+            referencia=f"PLAN:{plan.id}:B",
+        )
+
+        url = reverse("api_presupuestos_consolidado", args=["2026-02"])
+        resp = self.client.get(
+            url,
+            {
+                "limit": 1,
+                "offset": 1,
+                "sort_by": "variacion_cost_abs",
+                "sort_dir": "desc",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["limit"], 1)
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["filters"]["sort_by"], "variacion_cost_abs")
+        self.assertEqual(payload["filters"]["sort_dir"], "desc")
+        self.assertEqual(payload["consumo_vs_plan"]["meta"]["rows_total"], 2)
+        self.assertEqual(payload["consumo_vs_plan"]["meta"]["rows_returned"], 1)
+        self.assertEqual(payload["consumo_vs_plan"]["rows"][0]["insumo"], "Harina API 2")
+
+    def test_endpoint_presupuestos_consolidado_consumo_vs_plan_sort_invalido(self):
+        url = reverse("api_presupuestos_consolidado", args=["2026-02"])
+        resp = self.client.get(url, {"sort_by": "ruido"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("sort_by", resp.json()["detail"].lower())
+
+        resp_dir = self.client.get(url, {"sort_dir": "up"})
+        self.assertEqual(resp_dir.status_code, 400)
+        self.assertIn("sort_dir", resp_dir.json()["detail"].lower())
 
     def test_endpoint_presupuestos_consolidado_periodo_invalido(self):
         url = reverse("api_presupuestos_consolidado", args=["2026-99"])

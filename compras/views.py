@@ -1079,6 +1079,11 @@ def _build_consumo_vs_plan_dashboard(
     plan_filter: str,
     categoria_filter: str,
     consumo_ref_filter: str = "all",
+    *,
+    limit: int = 30,
+    offset: int = 0,
+    sort_by: str = "variacion_cost_abs",
+    sort_dir: str = "desc",
 ) -> dict:
     start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
     consumo_ref_filter = _sanitize_consumo_ref_filter(consumo_ref_filter)
@@ -1240,17 +1245,76 @@ def _build_consumo_vs_plan_dashboard(
         totals["consumo_real_cost_total"] += real_cost
         totals["variacion_cost_total"] += variacion_cost
 
-    rows = sorted(rows, key=lambda x: abs(x["variacion_cost"]), reverse=True)
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 30
+    limit = max(1, min(limit, 1000))
+
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        offset = 0
+    offset = max(0, min(offset, 200000))
+
+    allowed_sort = {
+        "variacion_cost_abs",
+        "variacion_cost",
+        "costo_real",
+        "costo_plan",
+        "cantidad_real",
+        "cantidad_plan",
+        "consumo_pct",
+        "insumo",
+        "categoria",
+        "estado",
+        "semaforo",
+    }
+    sort_by = (sort_by or "variacion_cost_abs").strip().lower()
+    if sort_by not in allowed_sort:
+        sort_by = "variacion_cost_abs"
+    sort_dir = (sort_dir or "desc").strip().lower()
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "desc"
+
+    def _safe_text(value: str | None) -> str:
+        return (value or "").strip().lower()
+
+    sort_map = {
+        "variacion_cost_abs": lambda row: abs(row.get("variacion_cost") or Decimal("0")),
+        "variacion_cost": lambda row: row.get("variacion_cost") or Decimal("0"),
+        "costo_real": lambda row: row.get("costo_real") or Decimal("0"),
+        "costo_plan": lambda row: row.get("costo_plan") or Decimal("0"),
+        "cantidad_real": lambda row: row.get("cantidad_real") or Decimal("0"),
+        "cantidad_plan": lambda row: row.get("cantidad_plan") or Decimal("0"),
+        "consumo_pct": lambda row: row.get("consumo_pct") if row.get("consumo_pct") is not None else Decimal("-1"),
+        "insumo": lambda row: _safe_text(row.get("insumo")),
+        "categoria": lambda row: _safe_text(row.get("categoria")),
+        "estado": lambda row: _safe_text(row.get("estado")),
+        "semaforo": lambda row: _safe_text(row.get("semaforo")),
+    }
+    rows_sorted = sorted(rows, key=sort_map[sort_by], reverse=(sort_dir == "desc"))
+    rows_total = len(rows_sorted)
+    rows_paginated = rows_sorted[offset : offset + limit]
+
     totals["cobertura_pct"] = (
         (totals["consumo_real_qty_total"] * Decimal("100")) / totals["plan_qty_total"]
         if totals["plan_qty_total"] > 0
         else None
     )
     return {
-        "rows": rows[:30],
+        "rows": rows_paginated,
         "totals": totals,
         "period_start": start_date,
         "period_end": end_date,
+        "meta": {
+            "rows_total": rows_total,
+            "rows_returned": len(rows_paginated),
+            "limit": limit,
+            "offset": offset,
+            "sort_by": sort_by,
+            "sort_dir": sort_dir,
+        },
     }
 
 
