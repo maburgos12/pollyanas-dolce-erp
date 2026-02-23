@@ -2218,6 +2218,63 @@ class RecetasCosteoApiTests(TestCase):
         weekday = {row["label"]: row["avg_qty"] for row in payload["seasonality"]["by_weekday"]}
         self.assertGreater(weekday["Lun"], weekday["Mar"])
 
+    def test_endpoint_ventas_pronostico_insights_export_csv_y_xlsx(self):
+        sucursal = Sucursal.objects.create(codigo="INSX", nombre="Sucursal Insights Export", activa=True)
+        for fecha, cantidad in [
+            (date(2026, 1, 5), Decimal("10")),
+            (date(2026, 1, 6), Decimal("5")),
+            (date(2026, 2, 2), Decimal("12")),
+            (date(2026, 2, 3), Decimal("6")),
+            (date(2026, 2, 9), Decimal("11")),
+        ]:
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=fecha,
+                cantidad=cantidad,
+                fuente="API_TEST",
+            )
+
+        resp_csv = self.client.get(
+            reverse("api_ventas_pronostico_insights"),
+            {
+                "months": 6,
+                "sucursal_id": sucursal.id,
+                "fecha_hasta": "2026-02-28",
+                "incluir_preparaciones": "1",
+                "export": "csv",
+            },
+        )
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("ESTACIONALIDAD_MES", body_csv)
+        self.assertIn("ESTACIONALIDAD_DIA", body_csv)
+        self.assertIn("TOP_RECETAS", body_csv)
+        self.assertIn("Receta API", body_csv)
+
+        resp_xlsx = self.client.get(
+            reverse("api_ventas_pronostico_insights"),
+            {
+                "months": 6,
+                "sucursal_id": sucursal.id,
+                "fecha_hasta": "2026-02-28",
+                "incluir_preparaciones": "1",
+                "export": "xlsx",
+            },
+        )
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_pronostico_insights_export_formato_invalido(self):
+        resp = self.client.get(reverse("api_ventas_pronostico_insights"), {"export": "pdf"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_pipeline_resumen(self):
         sucursal = Sucursal.objects.create(codigo="PIPE", nombre="Sucursal Pipeline", activa=True)
         VentaHistorica.objects.create(

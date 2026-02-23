@@ -892,6 +892,146 @@ def _forecast_backtest_export_response(payload: dict[str, Any], export_format: s
     return response
 
 
+def _forecast_insights_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
+    scope = payload.get("scope") or {}
+    totals = payload.get("totales") or {}
+    seasonality = payload.get("seasonality") or {}
+    month_rows = seasonality.get("by_month") or []
+    weekday_rows = seasonality.get("by_weekday") or []
+    top_rows = payload.get("top_recetas") or []
+
+    start_txt = str(scope.get("fecha_desde") or "").replace("-", "")
+    end_txt = str(scope.get("fecha_hasta") or "").replace("-", "")
+    if not start_txt or not end_txt:
+        today_txt = timezone.localdate().strftime("%Y%m%d")
+        start_txt = start_txt or today_txt
+        end_txt = end_txt or today_txt
+    filename = f"api_forecast_insights_{start_txt}_{end_txt}.{export_format}"
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Meses", int(scope.get("months") or 0)])
+        ws_resumen.append(["Fecha desde", scope.get("fecha_desde") or ""])
+        ws_resumen.append(["Fecha hasta", scope.get("fecha_hasta") or ""])
+        ws_resumen.append(["Sucursal", scope.get("sucursal") or "Todas"])
+        ws_resumen.append(["Receta", scope.get("receta") or "Todas"])
+        ws_resumen.append(["Filas", int(totals.get("filas") or 0)])
+        ws_resumen.append(["Dias con venta", int(totals.get("dias_con_venta") or 0)])
+        ws_resumen.append(["Recetas", int(totals.get("recetas") or 0)])
+        ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
+        ws_resumen.append(["Promedio diario", float(totals.get("promedio_diario") or 0)])
+
+        ws_mes = wb.create_sheet("EstacionalidadMes")
+        ws_mes.append(["Mes", "Etiqueta", "Muestras", "Promedio", "Indice %"])
+        for row in month_rows:
+            ws_mes.append(
+                [
+                    int(row.get("month") or 0),
+                    row.get("label") or "",
+                    int(row.get("samples") or 0),
+                    float(row.get("avg_qty") or 0),
+                    float(row.get("index_pct") or 0),
+                ]
+            )
+
+        ws_dia = wb.create_sheet("EstacionalidadDia")
+        ws_dia.append(["Dia semana", "Etiqueta", "Muestras", "Promedio", "Indice %"])
+        for row in weekday_rows:
+            ws_dia.append(
+                [
+                    int(row.get("weekday") or 0),
+                    row.get("label") or "",
+                    int(row.get("samples") or 0),
+                    float(row.get("avg_qty") or 0),
+                    float(row.get("index_pct") or 0),
+                ]
+            )
+
+        ws_top = wb.create_sheet("TopRecetas")
+        ws_top.append(["Receta ID", "Receta", "Cantidad total", "Promedio dia activo", "Dias con venta", "Participacion %"])
+        for row in top_rows:
+            ws_top.append(
+                [
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    float(row.get("cantidad_total") or 0),
+                    float(row.get("promedio_dia_activo") or 0),
+                    int(row.get("dias_con_venta") or 0),
+                    float(row.get("participacion_pct") or 0),
+                ]
+            )
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Meses", int(scope.get("months") or 0)])
+    writer.writerow(["Fecha desde", scope.get("fecha_desde") or ""])
+    writer.writerow(["Fecha hasta", scope.get("fecha_hasta") or ""])
+    writer.writerow(["Sucursal", scope.get("sucursal") or "Todas"])
+    writer.writerow(["Receta", scope.get("receta") or "Todas"])
+    writer.writerow(["Filas", int(totals.get("filas") or 0)])
+    writer.writerow(["Dias con venta", int(totals.get("dias_con_venta") or 0)])
+    writer.writerow(["Recetas", int(totals.get("recetas") or 0)])
+    writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
+    writer.writerow(["Promedio diario", f"{Decimal(str(totals.get('promedio_diario') or 0)):.3f}"])
+
+    writer.writerow([])
+    writer.writerow(["ESTACIONALIDAD_MES"])
+    writer.writerow(["month", "label", "samples", "avg_qty", "index_pct"])
+    for row in month_rows:
+        writer.writerow(
+            [
+                int(row.get("month") or 0),
+                row.get("label") or "",
+                int(row.get("samples") or 0),
+                f"{Decimal(str(row.get('avg_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('index_pct') or 0)):.1f}",
+            ]
+        )
+
+    writer.writerow([])
+    writer.writerow(["ESTACIONALIDAD_DIA"])
+    writer.writerow(["weekday", "label", "samples", "avg_qty", "index_pct"])
+    for row in weekday_rows:
+        writer.writerow(
+            [
+                int(row.get("weekday") or 0),
+                row.get("label") or "",
+                int(row.get("samples") or 0),
+                f"{Decimal(str(row.get('avg_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('index_pct') or 0)):.1f}",
+            ]
+        )
+
+    writer.writerow([])
+    writer.writerow(["TOP_RECETAS"])
+    writer.writerow(["receta_id", "receta", "cantidad_total", "promedio_dia_activo", "dias_con_venta", "participacion_pct"])
+    for row in top_rows:
+        writer.writerow(
+            [
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                f"{Decimal(str(row.get('cantidad_total') or 0)):.3f}",
+                f"{Decimal(str(row.get('promedio_dia_activo') or 0)):.3f}",
+                int(row.get("dias_con_venta") or 0),
+                f"{Decimal(str(row.get('participacion_pct') or 0)):.1f}",
+            ]
+        )
+    return response
+
+
 def _resolve_receta_bulk_ref(
     *,
     receta_id: int | None,
@@ -4645,6 +4785,12 @@ class ForecastInsightsView(APIView):
         months = _parse_bounded_int(request.GET.get("months", 12), default=12, min_value=1, max_value=36)
         top = _parse_bounded_int(request.GET.get("top", 20), default=20, min_value=1, max_value=100)
         incluir_preparaciones = _parse_bool(request.GET.get("incluir_preparaciones"), default=False)
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format and export_format not in {"csv", "xlsx"}:
+            return Response(
+                {"detail": "Parámetro export inválido. Usa 'csv' o 'xlsx'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         fecha_hasta_raw = (request.GET.get("fecha_hasta") or "").strip()
         fecha_hasta = _parse_iso_date(fecha_hasta_raw)
@@ -4701,29 +4847,29 @@ class ForecastInsightsView(APIView):
             .order_by("fecha", "receta_id")
         )
         if not rows:
-            return Response(
-                {
-                    "scope": {
-                        "months": months,
-                        "fecha_desde": str(fecha_desde),
-                        "fecha_hasta": str(fecha_hasta),
-                        "sucursal_id": sucursal.id if sucursal else None,
-                        "sucursal": sucursal.nombre if sucursal else "Todas",
-                        "receta_id": receta.id if receta else None,
-                        "receta": receta.nombre if receta else "Todas",
-                    },
-                    "totales": {
-                        "filas": 0,
-                        "dias_con_venta": 0,
-                        "recetas": 0,
-                        "cantidad_total": 0.0,
-                        "promedio_diario": 0.0,
-                    },
-                    "seasonality": {"by_month": [], "by_weekday": []},
-                    "top_recetas": [],
+            payload = {
+                "scope": {
+                    "months": months,
+                    "fecha_desde": str(fecha_desde),
+                    "fecha_hasta": str(fecha_hasta),
+                    "sucursal_id": sucursal.id if sucursal else None,
+                    "sucursal": sucursal.nombre if sucursal else "Todas",
+                    "receta_id": receta.id if receta else None,
+                    "receta": receta.nombre if receta else "Todas",
                 },
-                status=status.HTTP_200_OK,
-            )
+                "totales": {
+                    "filas": 0,
+                    "dias_con_venta": 0,
+                    "recetas": 0,
+                    "cantidad_total": 0.0,
+                    "promedio_diario": 0.0,
+                },
+                "seasonality": {"by_month": [], "by_weekday": []},
+                "top_recetas": [],
+            }
+            if export_format:
+                return _forecast_insights_export_response(payload, export_format)
+            return Response(payload, status=status.HTTP_200_OK)
 
         date_totals: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
         recipe_totals: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
@@ -4820,32 +4966,32 @@ class ForecastInsightsView(APIView):
                 }
             )
 
-        return Response(
-            {
-                "scope": {
-                    "months": months,
-                    "fecha_desde": str(fecha_desde),
-                    "fecha_hasta": str(fecha_hasta),
-                    "sucursal_id": sucursal.id if sucursal else None,
-                    "sucursal": sucursal.nombre if sucursal else "Todas",
-                    "receta_id": receta.id if receta else None,
-                    "receta": receta.nombre if receta else "Todas",
-                },
-                "totales": {
-                    "filas": len(rows),
-                    "dias_con_venta": len(date_totals),
-                    "recetas": len(recipe_totals),
-                    "cantidad_total": _to_float(total_qty),
-                    "promedio_diario": _to_float(global_avg.quantize(Decimal("0.001"))),
-                },
-                "seasonality": {
-                    "by_month": month_rows,
-                    "by_weekday": weekday_rows,
-                },
-                "top_recetas": top_recetas,
+        payload = {
+            "scope": {
+                "months": months,
+                "fecha_desde": str(fecha_desde),
+                "fecha_hasta": str(fecha_hasta),
+                "sucursal_id": sucursal.id if sucursal else None,
+                "sucursal": sucursal.nombre if sucursal else "Todas",
+                "receta_id": receta.id if receta else None,
+                "receta": receta.nombre if receta else "Todas",
             },
-            status=status.HTTP_200_OK,
-        )
+            "totales": {
+                "filas": len(rows),
+                "dias_con_venta": len(date_totals),
+                "recetas": len(recipe_totals),
+                "cantidad_total": _to_float(total_qty),
+                "promedio_diario": _to_float(global_avg.quantize(Decimal("0.001"))),
+            },
+            "seasonality": {
+                "by_month": month_rows,
+                "by_weekday": weekday_rows,
+            },
+            "top_recetas": top_recetas,
+        }
+        if export_format:
+            return _forecast_insights_export_response(payload, export_format)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class VentaHistoricaListView(APIView):
