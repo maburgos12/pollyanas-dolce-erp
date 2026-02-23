@@ -4051,6 +4051,7 @@ class ComprasSolicitudesListView(APIView):
         q = (request.GET.get("q") or "").strip()
         periodo = (request.GET.get("mes") or request.GET.get("periodo") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=500)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
 
         qs = (
             SolicitudCompra.objects.select_related("insumo", "insumo__unidad_base", "proveedor_sugerido")
@@ -4079,22 +4080,36 @@ class ComprasSolicitudesListView(APIView):
                 | Q(proveedor_sugerido__nombre__icontains=q)
             )
 
-        rows = list(qs[:limit])
+        rows_total = qs.count()
+        by_status = {k: 0 for k in valid_status}
+        for row in qs.order_by().values("estatus").annotate(rows=Count("id")):
+            key = row.get("estatus")
+            if key in by_status:
+                by_status[key] = int(row.get("rows") or 0)
+
+        insumo_totals = list(qs.order_by().values("insumo_id").annotate(total_qty=Sum("cantidad")))
+        rows = list(qs[offset : offset + limit])
         insumo_ids = [r.insumo_id for r in rows]
+        insumo_ids_totales = [int(x["insumo_id"]) for x in insumo_totals if x.get("insumo_id")]
+        costo_ids = sorted(set(insumo_ids) | set(insumo_ids_totales))
         latest_cost_by_insumo: dict[int, Decimal] = {}
-        if insumo_ids:
-            for c in CostoInsumo.objects.filter(insumo_id__in=insumo_ids).order_by("insumo_id", "-fecha", "-id"):
+        if costo_ids:
+            for c in CostoInsumo.objects.filter(insumo_id__in=costo_ids).order_by("insumo_id", "-fecha", "-id"):
                 if c.insumo_id not in latest_cost_by_insumo:
                     latest_cost_by_insumo[c.insumo_id] = _to_decimal(c.costo_unitario)
 
         items = []
         presupuesto_total = Decimal("0")
-        by_status = {k: 0 for k in valid_status}
+        presupuesto_total_filtered = Decimal("0")
+        for row in insumo_totals:
+            insumo_id = int(row.get("insumo_id") or 0)
+            qty = _to_decimal(row.get("total_qty"))
+            costo_unitario = _to_decimal(latest_cost_by_insumo.get(insumo_id, 0))
+            presupuesto_total_filtered += (qty * costo_unitario).quantize(Decimal("0.01"))
         for r in rows:
             costo_unitario = _to_decimal(latest_cost_by_insumo.get(r.insumo_id, 0))
             presupuesto = (_to_decimal(r.cantidad) * costo_unitario).quantize(Decimal("0.01"))
             presupuesto_total += presupuesto
-            by_status[r.estatus] = by_status.get(r.estatus, 0) + 1
             items.append(
                 {
                     "id": r.id,
@@ -4122,10 +4137,14 @@ class ComprasSolicitudesListView(APIView):
                     "q": q,
                     "periodo": periodo,
                     "limit": limit,
+                    "offset": offset,
                 },
                 "totales": {
                     "rows": len(items),
+                    "rows_total": rows_total,
+                    "rows_returned": len(items),
                     "presupuesto_estimado_total": str(presupuesto_total),
+                    "presupuesto_estimado_total_filtered": str(presupuesto_total_filtered),
                     "by_status": by_status,
                 },
                 "items": items,
@@ -4149,6 +4168,7 @@ class ComprasOrdenesListView(APIView):
         periodo = (request.GET.get("mes") or request.GET.get("periodo") or "").strip()
         proveedor_id_raw = (request.GET.get("proveedor_id") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=500)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
 
         qs = OrdenCompra.objects.select_related("proveedor", "solicitud", "solicitud__insumo").order_by("-creado_en")
         valid_status = {choice[0] for choice in OrdenCompra.STATUS_CHOICES}
@@ -4178,14 +4198,20 @@ class ComprasOrdenesListView(APIView):
                 | Q(solicitud__folio__icontains=q)
             )
 
-        rows = list(qs[:limit])
+        rows_total = qs.count()
+        monto_total_filtered = _to_decimal(qs.aggregate(total=Sum("monto_estimado"))["total"])
+        by_status = {k: 0 for k in valid_status}
+        for row in qs.order_by().values("estatus").annotate(rows=Count("id")):
+            key = row.get("estatus")
+            if key in by_status:
+                by_status[key] = int(row.get("rows") or 0)
+
+        rows = list(qs[offset : offset + limit])
         items = []
         monto_total = Decimal("0")
-        by_status = {k: 0 for k in valid_status}
         for r in rows:
             monto = _to_decimal(r.monto_estimado)
             monto_total += monto
-            by_status[r.estatus] = by_status.get(r.estatus, 0) + 1
             items.append(
                 {
                     "id": r.id,
@@ -4216,10 +4242,14 @@ class ComprasOrdenesListView(APIView):
                     "periodo": periodo,
                     "proveedor_id": proveedor_id_raw,
                     "limit": limit,
+                    "offset": offset,
                 },
                 "totales": {
                     "rows": len(items),
+                    "rows_total": rows_total,
+                    "rows_returned": len(items),
                     "monto_estimado_total": str(monto_total),
+                    "monto_estimado_total_filtered": str(monto_total_filtered),
                     "by_status": by_status,
                 },
                 "items": items,
@@ -4243,6 +4273,7 @@ class ComprasRecepcionesListView(APIView):
         periodo = (request.GET.get("mes") or request.GET.get("periodo") or "").strip()
         proveedor_id_raw = (request.GET.get("proveedor_id") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=500)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
 
         qs = RecepcionCompra.objects.select_related("orden", "orden__proveedor").order_by("-creado_en")
         valid_status = {choice[0] for choice in RecepcionCompra.STATUS_CHOICES}
@@ -4272,11 +4303,16 @@ class ComprasRecepcionesListView(APIView):
                 | Q(observaciones__icontains=q)
             )
 
-        rows = list(qs[:limit])
-        items = []
+        rows_total = qs.count()
         by_status = {k: 0 for k in valid_status}
+        for row in qs.order_by().values("estatus").annotate(rows=Count("id")):
+            key = row.get("estatus")
+            if key in by_status:
+                by_status[key] = int(row.get("rows") or 0)
+
+        rows = list(qs[offset : offset + limit])
+        items = []
         for r in rows:
-            by_status[r.estatus] = by_status.get(r.estatus, 0) + 1
             items.append(
                 {
                     "id": r.id,
@@ -4306,8 +4342,14 @@ class ComprasRecepcionesListView(APIView):
                     "periodo": periodo,
                     "proveedor_id": proveedor_id_raw,
                     "limit": limit,
+                    "offset": offset,
                 },
-                "totales": {"rows": len(items), "by_status": by_status},
+                "totales": {
+                    "rows": len(items),
+                    "rows_total": rows_total,
+                    "rows_returned": len(items),
+                    "by_status": by_status,
+                },
                 "items": items,
             },
             status=status.HTTP_200_OK,
