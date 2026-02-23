@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.models import AuditLog
 from inventario.models import AlmacenSyncRun
@@ -37,6 +38,7 @@ class IntegracionesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Integraciones")
         self.assertContains(response, "Clientes API registrados")
+        self.assertContains(response, "Tendencia API (7 días)")
 
     def test_create_client_shows_generated_key_once(self):
         self.client.force_login(self.admin)
@@ -210,6 +212,28 @@ class IntegracionesPanelTests(TestCase):
         self.assertIn("total_errores_24h", body)
         self.assertIn("/api/public/v1/insumos/", body)
         self.assertIn("ERP B", body)
+
+    def test_trend_csv_export(self):
+        client, _ = PublicApiClient.create_with_generated_key(nombre="ERP TREND", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/tendencia/",
+            method="GET",
+            status_code=200,
+        )
+        PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/tendencia/",
+            method="GET",
+            status_code=500,
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url, {"export": "trend_csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        body = response.content.decode("utf-8")
+        self.assertIn("error_rate_pct", body)
+        self.assertIn(str(timezone.localdate()), body)
 
     def test_homologacion_summary_blocks_render(self):
         unidad = UnidadMedida.objects.create(

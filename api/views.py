@@ -7,6 +7,7 @@ from io import BytesIO
 from typing import Any
 from django.db import transaction, OperationalError, ProgrammingError
 from django.db.models import Count, Max, Q, Sum
+from django.db.models.functions import TruncDate
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -195,6 +196,38 @@ def _to_float(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError, InvalidOperation):
         return default
+
+
+def _build_public_api_daily_trend(days: int = 7) -> list[dict[str, Any]]:
+    days = max(1, min(int(days or 7), 31))
+    today = timezone.localdate()
+    start_date = today - timedelta(days=days - 1)
+    raw_rows = list(
+        PublicApiAccessLog.objects.filter(created_at__date__gte=start_date)
+        .annotate(day=TruncDate("created_at"))
+        .values("day")
+        .annotate(
+            total=Count("id"),
+            errors=Count("id", filter=Q(status_code__gte=400)),
+        )
+        .order_by("day")
+    )
+    by_day = {row["day"]: row for row in raw_rows}
+    trend = []
+    for index in range(days):
+        day = start_date + timedelta(days=index)
+        row = by_day.get(day, {})
+        total = int(row.get("total") or 0)
+        errors = int(row.get("errors") or 0)
+        trend.append(
+            {
+                "day": day,
+                "requests": total,
+                "errors": errors,
+                "error_rate_pct": round((errors * 100.0 / total), 2) if total else 0.0,
+            }
+        )
+    return trend
 
 
 class ApiTokenAuthView(ObtainAuthToken):
@@ -3057,6 +3090,10 @@ class IntegracionPointResumenView(APIView):
             )
             .order_by("-total", "client__nombre")[:12]
         )
+        api_daily_trend = _build_public_api_daily_trend(days=7)
+        api_7d_requests = sum(int(row.get("requests") or 0) for row in api_daily_trend)
+        api_7d_errors = sum(int(row.get("errors") or 0) for row in api_daily_trend)
+        api_7d_error_rate = round((api_7d_errors * 100.0 / api_7d_requests), 2) if api_7d_requests else 0.0
 
         stale_limit = timezone.now() - timedelta(hours=24)
         alertas_operativas = []
@@ -3122,6 +3159,12 @@ class IntegracionPointResumenView(APIView):
                     "errors": errors_24h,
                     "errors_by_endpoint": errors_by_endpoint_24h,
                     "errors_by_client": errors_by_client_24h,
+                },
+                "api_7d": {
+                    "requests": api_7d_requests,
+                    "errors": api_7d_errors,
+                    "error_rate_pct": api_7d_error_rate,
+                    "daily": api_daily_trend,
                 },
                 "alertas_operativas": alertas_operativas,
                 "insumos": {

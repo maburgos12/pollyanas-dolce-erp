@@ -362,6 +362,57 @@
 
     <section class="card">
         <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="card-header mb-0">Tendencia API (7 días)</div>
+            <a class="btn btn-outline-primary" href="?export=trend_csv">Exportar tendencia CSV</a>
+        </div>
+        <div class="integraciones-homologacion-grid mb-3">
+            <article class="kpi-card">
+                <div class="kpi-number is-warning">{{ api_7d_requests }}</div>
+                <div class="kpi-label">Requests 7 días</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number {% if api_7d_errors %}is-danger{% else %}is-success{% endif %}">{{ api_7d_errors }}</div>
+                <div class="kpi-label">Errores 7 días</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number {% if api_7d_error_rate > 5 %}is-danger{% elif api_7d_error_rate > 0 %}is-warning{% else %}is-success{% endif %}">
+                    {{ api_7d_error_rate|floatformat:2 }}%
+                </div>
+                <div class="kpi-label">Tasa error 7 días</div>
+            </article>
+        </div>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Requests</th>
+                        <th>Errores</th>
+                        <th>Tasa error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in api_daily_trend %}
+                    <tr>
+                        <td>{{ row.day|date:"Y-m-d" }}</td>
+                        <td>{{ row.total }}</td>
+                        <td>
+                            {% if row.errors %}
+                            <span class="badge-rojo">{{ row.errors }}</span>
+                            {% else %}
+                            <span class="badge-verde">0</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.error_rate_pct|floatformat:2 }}%</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
             <div class="card-header mb-0">Errores API (ultimas 24h)</div>
             <a class="btn btn-outline-primary" href="?export=errors_csv">Exportar errores CSV</a>
         </div>

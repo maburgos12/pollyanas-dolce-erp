@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Max, Q
+from django.db.models.functions import TruncDate
 from django.http import HttpResponse
 from django.urls import reverse
 from django.shortcuts import redirect, render
@@ -123,6 +124,55 @@ def _export_audit_csv(audit_rows) -> HttpResponse:
                 row.model,
                 row.object_id,
                 json.dumps(row.payload or {}, ensure_ascii=False),
+            ]
+        )
+    return response
+
+
+def _build_api_daily_trend(days: int = 7) -> list[dict]:
+    days = max(1, min(int(days or 7), 31))
+    today = timezone.localdate()
+    start_date = today - timedelta(days=days - 1)
+    raw_rows = list(
+        PublicApiAccessLog.objects.filter(created_at__date__gte=start_date)
+        .annotate(day=TruncDate("created_at"))
+        .values("day")
+        .annotate(
+            total=Count("id"),
+            errors=Count("id", filter=Q(status_code__gte=400)),
+        )
+        .order_by("day")
+    )
+    by_day = {row["day"]: row for row in raw_rows}
+    trend = []
+    for day_index in range(days):
+        day = start_date + timedelta(days=day_index)
+        row = by_day.get(day, {})
+        total = int(row.get("total") or 0)
+        errors = int(row.get("errors") or 0)
+        trend.append(
+            {
+                "day": day,
+                "total": total,
+                "errors": errors,
+                "error_rate_pct": round((errors * 100.0 / total), 2) if total else 0.0,
+            }
+        )
+    return trend
+
+
+def _export_trend_csv(api_daily_trend: list[dict]) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="integraciones_api_tendencia_7d.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["fecha", "requests", "errors", "error_rate_pct"])
+    for row in api_daily_trend:
+        writer.writerow(
+            [
+                row.get("day"),
+                row.get("total", 0),
+                row.get("errors", 0),
+                row.get("error_rate_pct", 0),
             ]
         )
     return response
@@ -395,6 +445,10 @@ def panel(request):
         )
         .order_by("-total", "client__nombre")[:12]
     )
+    api_daily_trend = _build_api_daily_trend(days=7)
+    api_7d_requests = sum(int(row.get("total") or 0) for row in api_daily_trend)
+    api_7d_errors = sum(int(row.get("errors") or 0) for row in api_daily_trend)
+    api_7d_error_rate = round((api_7d_errors * 100.0 / api_7d_requests), 2) if api_7d_requests else 0.0
 
     insumos_activos_qs = Insumo.objects.filter(activo=True)
     insumos_activos = insumos_activos_qs.count()
@@ -552,6 +606,10 @@ def panel(request):
         "alertas_operativas": alertas_operativas,
         "errors_by_endpoint_24h": errors_by_endpoint_24h,
         "errors_by_client_24h": errors_by_client_24h,
+        "api_daily_trend": api_daily_trend,
+        "api_7d_requests": api_7d_requests,
+        "api_7d_errors": api_7d_errors,
+        "api_7d_error_rate": api_7d_error_rate,
         "audit_rows": audit_rows,
     }
     if export_mode == "health_csv":
@@ -566,4 +624,6 @@ def panel(request):
             errors_by_endpoint_24h=errors_by_endpoint_24h,
             errors_by_client_24h=errors_by_client_24h,
         )
+    if export_mode == "trend_csv":
+        return _export_trend_csv(api_daily_trend=api_daily_trend)
     return render(request, "integraciones/panel.html", context)
