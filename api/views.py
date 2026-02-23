@@ -1303,7 +1303,10 @@ def _ventas_historial_export_response(payload: dict[str, Any], export_format: st
         ws_resumen.append(["Periodo", filters.get("periodo") or ""])
         ws_resumen.append(["Desde", filters.get("fecha_desde") or ""])
         ws_resumen.append(["Hasta", filters.get("fecha_hasta") or ""])
+        ws_resumen.append(["Offset", int(filters.get("offset") or 0)])
         ws_resumen.append(["Rows", int(totals.get("rows") or 0)])
+        ws_resumen.append(["Rows total", int(totals.get("rows_total") or totals.get("rows") or 0)])
+        ws_resumen.append(["Rows returned", int(totals.get("rows_returned") or totals.get("rows") or 0)])
         ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
         ws_resumen.append(["Tickets total", int(totals.get("tickets_total") or 0)])
         ws_resumen.append(["Monto total", float(totals.get("monto_total") or 0)])
@@ -1366,7 +1369,10 @@ def _ventas_historial_export_response(payload: dict[str, Any], export_format: st
     writer.writerow(["Periodo", filters.get("periodo") or ""])
     writer.writerow(["Desde", filters.get("fecha_desde") or ""])
     writer.writerow(["Hasta", filters.get("fecha_hasta") or ""])
+    writer.writerow(["Offset", int(filters.get("offset") or 0)])
     writer.writerow(["Rows", int(totals.get("rows") or 0)])
+    writer.writerow(["Rows total", int(totals.get("rows_total") or totals.get("rows") or 0)])
+    writer.writerow(["Rows returned", int(totals.get("rows_returned") or totals.get("rows") or 0)])
     writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
     writer.writerow(["Tickets total", int(totals.get("tickets_total") or 0)])
     writer.writerow(["Monto total", f"{Decimal(str(totals.get('monto_total') or 0)):.3f}"])
@@ -1436,7 +1442,10 @@ def _ventas_pronostico_export_response(payload: dict[str, Any], export_format: s
         ws_resumen.append(["Periodo", filters.get("periodo") or ""])
         ws_resumen.append(["Periodo desde", filters.get("periodo_desde") or ""])
         ws_resumen.append(["Periodo hasta", filters.get("periodo_hasta") or ""])
+        ws_resumen.append(["Offset", int(filters.get("offset") or 0)])
         ws_resumen.append(["Rows", int(totals.get("rows") or 0)])
+        ws_resumen.append(["Rows total", int(totals.get("rows_total") or totals.get("rows") or 0)])
+        ws_resumen.append(["Rows returned", int(totals.get("rows_returned") or totals.get("rows") or 0)])
         ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
         ws_resumen.append(["Periodos", int(totals.get("periodos_count") or 0)])
 
@@ -1483,7 +1492,10 @@ def _ventas_pronostico_export_response(payload: dict[str, Any], export_format: s
     writer.writerow(["Periodo", filters.get("periodo") or ""])
     writer.writerow(["Periodo desde", filters.get("periodo_desde") or ""])
     writer.writerow(["Periodo hasta", filters.get("periodo_hasta") or ""])
+    writer.writerow(["Offset", int(filters.get("offset") or 0)])
     writer.writerow(["Rows", int(totals.get("rows") or 0)])
+    writer.writerow(["Rows total", int(totals.get("rows_total") or totals.get("rows") or 0)])
+    writer.writerow(["Rows returned", int(totals.get("rows_returned") or totals.get("rows") or 0)])
     writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
     writer.writerow(["Periodos", int(totals.get("periodos_count") or 0)])
     writer.writerow([])
@@ -1525,9 +1537,12 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
         ws_resumen.append(["Include forecast ref", "SI" if filters.get("include_forecast_ref") else "NO"])
         ws_resumen.append(["Forecast status", filters.get("forecast_status") or ""])
         ws_resumen.append(["Forecast delta min", float(filters.get("forecast_delta_min") or 0)])
+        ws_resumen.append(["Offset", int(filters.get("offset") or 0)])
         ws_resumen.append(["Sort by", filters.get("sort_by") or ""])
         ws_resumen.append(["Sort dir", filters.get("sort_dir") or ""])
         ws_resumen.append(["Rows", int(totals.get("rows") or 0)])
+        ws_resumen.append(["Rows total", int(totals.get("rows_total") or totals.get("rows") or 0)])
+        ws_resumen.append(["Rows returned", int(totals.get("rows_returned") or totals.get("rows") or 0)])
         ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
         ws_resumen.append(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
         ws_resumen.append(["SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_SEMANA) or 0)])
@@ -1603,9 +1618,12 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
     writer.writerow(["Include forecast ref", "SI" if filters.get("include_forecast_ref") else "NO"])
     writer.writerow(["Forecast status", filters.get("forecast_status") or ""])
     writer.writerow(["Forecast delta min", f"{Decimal(str(filters.get('forecast_delta_min') or 0)):.3f}"])
+    writer.writerow(["Offset", int(filters.get("offset") or 0)])
     writer.writerow(["Sort by", filters.get("sort_by") or ""])
     writer.writerow(["Sort dir", filters.get("sort_dir") or ""])
     writer.writerow(["Rows", int(totals.get("rows") or 0)])
+    writer.writerow(["Rows total", int(totals.get("rows_total") or totals.get("rows") or 0)])
+    writer.writerow(["Rows returned", int(totals.get("rows_returned") or totals.get("rows") or 0)])
     writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
     writer.writerow(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
     writer.writerow(["SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_SEMANA) or 0)])
@@ -5828,6 +5846,7 @@ class VentaHistoricaListView(APIView):
         fecha_desde_raw = (request.GET.get("fecha_desde") or "").strip()
         fecha_hasta_raw = (request.GET.get("fecha_hasta") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 150), default=150, min_value=1, max_value=1000)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
 
         fecha_desde = _parse_iso_date(fecha_desde_raw)
         if fecha_desde_raw and fecha_desde is None:
@@ -5891,21 +5910,26 @@ class VentaHistoricaListView(APIView):
                 | Q(fuente__icontains=q)
             )
 
-        rows = list(qs[:limit])
-        items = []
-        cantidad_total = Decimal("0")
-        tickets_total = 0
-        monto_total = Decimal("0")
+        total_rows = qs.count()
+        agg = qs.aggregate(
+            cantidad_total=Sum("cantidad"),
+            tickets_total=Sum("tickets"),
+            monto_total=Sum("monto_total"),
+        )
+        cantidad_total = _to_decimal(agg.get("cantidad_total"))
+        tickets_total = int(agg.get("tickets_total") or 0)
+        monto_total = _to_decimal(agg.get("monto_total"))
         by_sucursal: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        for row in qs.values("sucursal__codigo").annotate(total=Sum("cantidad")):
+            sucursal_key = str(row.get("sucursal__codigo") or "GLOBAL")
+            by_sucursal[sucursal_key] += _to_decimal(row.get("total"))
+
+        rows = list(qs[offset : offset + limit])
+        items = []
 
         for r in rows:
             cantidad = _to_decimal(r.cantidad)
-            cantidad_total += cantidad
-            tickets_total += int(r.tickets or 0)
             monto = _to_decimal(r.monto_total)
-            monto_total += monto
-            sucursal_key = r.sucursal.codigo if r.sucursal_id and r.sucursal else "GLOBAL"
-            by_sucursal[sucursal_key] += cantidad
             items.append(
                 {
                     "id": r.id,
@@ -5938,9 +5962,12 @@ class VentaHistoricaListView(APIView):
                 "fecha_desde": str(fecha_desde) if fecha_desde else "",
                 "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
                 "limit": limit,
+                "offset": offset,
             },
             "totales": {
                 "rows": len(items),
+                "rows_total": int(total_rows),
+                "rows_returned": len(items),
                 "cantidad_total": str(cantidad_total),
                 "tickets_total": tickets_total,
                 "monto_total": str(monto_total),
@@ -5975,6 +6002,7 @@ class PronosticoVentaListView(APIView):
         periodo_hasta = (request.GET.get("periodo_hasta") or "").strip()
         receta_id_raw = (request.GET.get("receta_id") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 150), default=150, min_value=1, max_value=1000)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
 
         if periodo:
             parsed_period = _parse_period(periodo)
@@ -6033,14 +6061,13 @@ class PronosticoVentaListView(APIView):
                 | Q(fuente__icontains=q)
             )
 
-        rows = list(qs[:limit])
+        total_rows = qs.count()
+        cantidad_total = _to_decimal(qs.aggregate(total=Sum("cantidad")).get("total"))
+        periodos_count = qs.values("periodo").distinct().count()
+        rows = list(qs[offset : offset + limit])
         items = []
-        cantidad_total = Decimal("0")
-        periodos = set()
         for r in rows:
             qty = _to_decimal(r.cantidad)
-            cantidad_total += qty
-            periodos.add(r.periodo)
             items.append(
                 {
                     "id": r.id,
@@ -6062,11 +6089,14 @@ class PronosticoVentaListView(APIView):
                 "periodo_hasta": periodo_hasta,
                 "receta_id": receta_id_raw,
                 "limit": limit,
+                "offset": offset,
             },
             "totales": {
                 "rows": len(items),
+                "rows_total": int(total_rows),
+                "rows_returned": len(items),
                 "cantidad_total": str(cantidad_total),
-                "periodos_count": len(periodos),
+                "periodos_count": int(periodos_count),
             },
             "items": items,
         }
@@ -6476,6 +6506,7 @@ class SolicitudVentaListView(APIView):
         fecha_desde_raw = (request.GET.get("fecha_desde") or "").strip()
         fecha_hasta_raw = (request.GET.get("fecha_hasta") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 150), default=150, min_value=1, max_value=1000)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
         include_forecast_ref = _parse_bool(request.GET.get("include_forecast_ref"), default=False)
         forecast_status_filter = (request.GET.get("forecast_status") or "").strip().upper()
         forecast_delta_min = _to_decimal(request.GET.get("forecast_delta_min"), default=Decimal("0"))
@@ -6593,7 +6624,7 @@ class SolicitudVentaListView(APIView):
                 | Q(fuente__icontains=q)
             )
 
-        rows = list(qs[:limit])
+        rows = list(qs)
         pronostico_map: dict[tuple[int, str], Decimal] = {}
         if include_forecast_ref and rows:
             receta_ids = {int(r.receta_id) for r in rows}
@@ -6691,6 +6722,8 @@ class SolicitudVentaListView(APIView):
             return str(item.get("fecha_inicio") or "")
 
         items.sort(key=_sort_value, reverse=(sort_dir == "desc"))
+        rows_total = len(items)
+        items = items[offset : offset + limit]
 
         payload = {
             "filters": {
@@ -6702,6 +6735,7 @@ class SolicitudVentaListView(APIView):
                 "fecha_desde": str(fecha_desde) if fecha_desde else "",
                 "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
                 "limit": limit,
+                "offset": offset,
                 "include_forecast_ref": include_forecast_ref,
                 "forecast_status": forecast_status_filter or "",
                 "forecast_delta_min": _to_float(forecast_delta_min),
@@ -6710,6 +6744,8 @@ class SolicitudVentaListView(APIView):
             },
             "totales": {
                 "rows": len(items),
+                "rows_total": rows_total,
+                "rows_returned": len(items),
                 "cantidad_total": str(cantidad_total),
                 "by_alcance": by_alcance,
                 "forecast_ref_status": forecast_status_counts if include_forecast_ref else {},

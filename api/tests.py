@@ -2174,10 +2174,55 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(payload["totales"]["rows_total"], 1)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
         self.assertEqual(Decimal(payload["totales"]["cantidad_total"]), Decimal("10"))
         self.assertEqual(payload["totales"]["tickets_total"], 5)
         self.assertEqual(Decimal(payload["totales"]["monto_total"]), Decimal("320"))
         self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_ventas_historial_list_offset(self):
+        sucursal = Sucursal.objects.create(codigo="MATO", nombre="Matriz Offset", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 2, 10),
+            cantidad=Decimal("10"),
+            tickets=5,
+            monto_total=Decimal("320"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 2, 11),
+            cantidad=Decimal("9"),
+            tickets=4,
+            monto_total=Decimal("280"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 2, 12),
+            cantidad=Decimal("8"),
+            tickets=3,
+            monto_total=Decimal("250"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_historial"),
+            {"periodo": "2026-02", "sucursal_id": sucursal.id, "limit": 1, "offset": 1},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["totales"]["rows_total"], 3)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["fecha"], "2026-02-11")
 
     def test_endpoint_ventas_historial_export_csv_y_xlsx(self):
         sucursal = Sucursal.objects.create(codigo="MATX", nombre="Matriz API Export", activa=True)
@@ -2231,9 +2276,44 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(payload["totales"]["rows_total"], 1)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
         self.assertEqual(Decimal(payload["totales"]["cantidad_total"]), Decimal("18"))
         self.assertEqual(payload["totales"]["periodos_count"], 1)
         self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_ventas_pronostico_list_offset(self):
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("18"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-04",
+            cantidad=Decimal("22"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-05",
+            cantidad=Decimal("26"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_pronostico"),
+            {"periodo_desde": "2026-03", "periodo_hasta": "2026-05", "limit": 1, "offset": 1},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["totales"]["rows_total"], 3)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["periodo"], "2026-04")
 
     def test_endpoint_ventas_pronostico_export_csv_y_xlsx(self):
         PronosticoVenta.objects.create(
@@ -2292,9 +2372,64 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(payload["totales"]["rows_total"], 1)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
         self.assertEqual(Decimal(payload["totales"]["cantidad_total"]), Decimal("30"))
         self.assertEqual(payload["totales"]["by_alcance"][SolicitudVenta.ALCANCE_MES], 1)
         self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_ventas_solicitudes_list_offset(self):
+        receta_b = Receta.objects.create(
+            nombre="Receta API Offset Solicitudes",
+            sheet_name="Insumos API Offset Solicitudes",
+            hash_contenido="hash-api-offset-solicitudes",
+            rendimiento_cantidad=Decimal("3"),
+            rendimiento_unidad=self.unidad,
+        )
+        sucursal = Sucursal.objects.create(codigo="SURO", nombre="Sucursal Sur Offset", activa=True)
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("5"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=receta_b,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_SEMANA,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 15),
+            fecha_fin=date(2026, 3, 21),
+            cantidad=Decimal("15"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_solicitudes"),
+            {"periodo": "2026-03", "sort_by": "cantidad", "sort_dir": "asc", "limit": 1, "offset": 1},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["totales"]["rows_total"], 3)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
+        self.assertEqual(payload["totales"]["rows"], 1)
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["cantidad"], "10.000")
 
     def test_endpoint_ventas_solicitudes_list_include_forecast_ref(self):
         sucursal = Sucursal.objects.create(codigo="SFR", nombre="Sucursal Forecast Ref", activa=True)
