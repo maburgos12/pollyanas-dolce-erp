@@ -2387,6 +2387,112 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("forecast_status", resp.json()["detail"].lower())
 
+    def test_endpoint_ventas_solicitudes_list_sort_by_cantidad(self):
+        receta_b = Receta.objects.create(
+            nombre="Receta API Sort Cantidad",
+            sheet_name="Insumos API Sort Cantidad",
+            hash_contenido="hash-api-sort-cantidad",
+            rendimiento_cantidad=Decimal("3"),
+            rendimiento_unidad=self.unidad,
+        )
+        sucursal = Sucursal.objects.create(codigo="SSC", nombre="Sucursal Sort Cantidad", activa=True)
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("30"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=receta_b,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("8"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_solicitudes"),
+            {"periodo": "2026-03", "sort_by": "cantidad", "sort_dir": "asc"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["sort_by"], "cantidad")
+        self.assertEqual(payload["filters"]["sort_dir"], "asc")
+        self.assertEqual(len(payload["items"]), 2)
+        self.assertEqual(payload["items"][0]["receta_id"], receta_b.id)
+        self.assertEqual(payload["items"][1]["receta_id"], self.receta.id)
+
+    def test_endpoint_ventas_solicitudes_list_sort_by_forecast_delta(self):
+        receta_b = Receta.objects.create(
+            nombre="Receta API Sort Forecast Delta",
+            sheet_name="Insumos API Sort Forecast Delta",
+            hash_contenido="hash-api-sort-forecast-delta",
+            rendimiento_cantidad=Decimal("3"),
+            rendimiento_unidad=self.unidad,
+        )
+        sucursal = Sucursal.objects.create(codigo="SFDL", nombre="Sucursal Sort Forecast Delta", activa=True)
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("30"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=receta_b,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("19"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=receta_b,
+            periodo="2026-03",
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_solicitudes"),
+            {"periodo": "2026-03", "sort_by": "forecast_delta", "sort_dir": "desc"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload["filters"]["include_forecast_ref"])
+        self.assertEqual(payload["filters"]["sort_by"], "forecast_delta")
+        self.assertEqual(payload["filters"]["sort_dir"], "desc")
+        self.assertEqual(len(payload["items"]), 2)
+        self.assertEqual(payload["items"][0]["receta_id"], self.receta.id)
+        self.assertEqual(payload["items"][0]["forecast_ref"]["delta_solicitud_vs_forecast"], 10.0)
+
+    def test_endpoint_ventas_solicitudes_list_sort_invalido(self):
+        resp = self.client.get(reverse("api_ventas_solicitudes"), {"sort_by": "ruido"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("sort_by", resp.json()["detail"].lower())
+
+        resp_dir = self.client.get(reverse("api_ventas_solicitudes"), {"sort_dir": "up"})
+        self.assertEqual(resp_dir.status_code, 400)
+        self.assertIn("sort_dir", resp_dir.json()["detail"].lower())
+
     def test_endpoint_ventas_solicitudes_export_csv_y_xlsx(self):
         sucursal = Sucursal.objects.create(codigo="SURX", nombre="Sucursal Sur Export", activa=True)
         SolicitudVenta.objects.create(

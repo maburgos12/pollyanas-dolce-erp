@@ -1525,6 +1525,8 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
         ws_resumen.append(["Include forecast ref", "SI" if filters.get("include_forecast_ref") else "NO"])
         ws_resumen.append(["Forecast status", filters.get("forecast_status") or ""])
         ws_resumen.append(["Forecast delta min", float(filters.get("forecast_delta_min") or 0)])
+        ws_resumen.append(["Sort by", filters.get("sort_by") or ""])
+        ws_resumen.append(["Sort dir", filters.get("sort_dir") or ""])
         ws_resumen.append(["Rows", int(totals.get("rows") or 0)])
         ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
         ws_resumen.append(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
@@ -1601,6 +1603,8 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
     writer.writerow(["Include forecast ref", "SI" if filters.get("include_forecast_ref") else "NO"])
     writer.writerow(["Forecast status", filters.get("forecast_status") or ""])
     writer.writerow(["Forecast delta min", f"{Decimal(str(filters.get('forecast_delta_min') or 0)):.3f}"])
+    writer.writerow(["Sort by", filters.get("sort_by") or ""])
+    writer.writerow(["Sort dir", filters.get("sort_dir") or ""])
     writer.writerow(["Rows", int(totals.get("rows") or 0)])
     writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
     writer.writerow(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
@@ -6475,6 +6479,8 @@ class SolicitudVentaListView(APIView):
         include_forecast_ref = _parse_bool(request.GET.get("include_forecast_ref"), default=False)
         forecast_status_filter = (request.GET.get("forecast_status") or "").strip().upper()
         forecast_delta_min = _to_decimal(request.GET.get("forecast_delta_min"), default=Decimal("0"))
+        sort_by = (request.GET.get("sort_by") or "fecha_inicio").strip().lower()
+        sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
         if forecast_delta_min < 0:
             forecast_delta_min = Decimal("0")
         allowed_forecast_status = {"", "SOBRE", "BAJO", "OK", "SIN_FORECAST", "DESVIADAS"}
@@ -6483,7 +6489,35 @@ class SolicitudVentaListView(APIView):
                 {"detail": "forecast_status inválido. Usa SOBRE, BAJO, OK, SIN_FORECAST o DESVIADAS."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        allowed_sort_by = {
+            "fecha_inicio",
+            "fecha_fin",
+            "cantidad",
+            "receta",
+            "sucursal",
+            "alcance",
+            "periodo",
+            "forecast_delta",
+            "forecast_status",
+        }
+        if sort_by not in allowed_sort_by:
+            return Response(
+                {
+                    "detail": (
+                        "sort_by inválido. Usa fecha_inicio, fecha_fin, cantidad, receta, sucursal, alcance, periodo, "
+                        "forecast_delta o forecast_status."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_dir inválido. Usa asc o desc."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if forecast_status_filter or forecast_delta_min > 0:
+            include_forecast_ref = True
+        if sort_by in {"forecast_delta", "forecast_status"}:
             include_forecast_ref = True
 
         if periodo:
@@ -6634,6 +6668,30 @@ class SolicitudVentaListView(APIView):
             by_alcance[r.alcance] = by_alcance.get(r.alcance, 0) + 1
             items.append(item)
 
+        def _sort_value(item: dict[str, Any]) -> Any:
+            if sort_by == "cantidad":
+                return _to_float(_to_decimal(item.get("cantidad"), default=Decimal("0")))
+            if sort_by == "fecha_inicio":
+                return _parse_iso_date(str(item.get("fecha_inicio") or "")) or date.min
+            if sort_by == "fecha_fin":
+                return _parse_iso_date(str(item.get("fecha_fin") or "")) or date.min
+            if sort_by == "receta":
+                return str(item.get("receta") or "").lower()
+            if sort_by == "sucursal":
+                return str(item.get("sucursal") or "").lower()
+            if sort_by == "alcance":
+                return str(item.get("alcance") or "")
+            if sort_by == "periodo":
+                return str(item.get("periodo") or "")
+            if sort_by == "forecast_delta":
+                return _to_float((item.get("forecast_ref") or {}).get("delta_solicitud_vs_forecast") or 0)
+            if sort_by == "forecast_status":
+                status_rank = {"SOBRE": 4, "BAJO": 3, "OK": 2, "SIN_FORECAST": 1}
+                return int(status_rank.get(str((item.get("forecast_ref") or {}).get("status") or ""), 0))
+            return str(item.get("fecha_inicio") or "")
+
+        items.sort(key=_sort_value, reverse=(sort_dir == "desc"))
+
         payload = {
             "filters": {
                 "q": q,
@@ -6647,6 +6705,8 @@ class SolicitudVentaListView(APIView):
                 "include_forecast_ref": include_forecast_ref,
                 "forecast_status": forecast_status_filter or "",
                 "forecast_delta_min": _to_float(forecast_delta_min),
+                "sort_by": sort_by,
+                "sort_dir": sort_dir,
             },
             "totales": {
                 "rows": len(items),
