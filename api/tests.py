@@ -2933,18 +2933,99 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["scope"]["status"], "DESVIADAS")
         self.assertEqual(payload["scope"]["delta_min"], 5.0)
         self.assertEqual(payload["scope"]["top_sucursales"], 120)
+        self.assertEqual(payload["scope"]["offset"], 0)
+        self.assertEqual(payload["scope"]["offset_sucursales"], 0)
         self.assertEqual(payload["scope"]["sort_by"], "delta_abs")
         self.assertEqual(payload["scope"]["sort_dir"], "desc")
         self.assertEqual(payload["scope"]["sort_sucursales_by"], "delta_abs")
         self.assertEqual(payload["scope"]["sort_sucursales_dir"], "desc")
         self.assertGreaterEqual(payload["totales"]["rows_filtered"], 0)
+        self.assertGreaterEqual(payload["totales"]["rows_returned"], 0)
         self.assertGreaterEqual(payload["totales"]["by_sucursal_filtered"], 1)
+        self.assertGreaterEqual(payload["totales"]["by_sucursal_returned"], 0)
         self.assertIn("rows_status", payload["totales"])
         self.assertIn("by_sucursal_status", payload["totales"])
         for row in payload["rows"]:
             self.assertIn(row["status"], {"SOBRE", "BAJO"})
         for row in payload["by_sucursal"]:
             self.assertIn(row["status"], {"SOBRE", "BAJO"})
+
+    def test_endpoint_ventas_pipeline_resumen_offsets_rows_y_sucursales(self):
+        receta_b = Receta.objects.create(
+            nombre="Receta API Offset B",
+            sheet_name="Insumos API Offset B",
+            hash_contenido="hash-api-offset-b",
+            rendimiento_cantidad=Decimal("4"),
+            rendimiento_unidad=self.unidad,
+        )
+        sucursal_a = Sucursal.objects.create(codigo="OFA", nombre="Sucursal Offset A", activa=True)
+        sucursal_b = Sucursal.objects.create(codigo="OFB", nombre="Sucursal Offset B", activa=True)
+
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_a,
+            fecha=date(2026, 3, 5),
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=receta_b,
+            sucursal=sucursal_b,
+            fecha=date(2026, 3, 6),
+            cantidad=Decimal("5"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_a,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=receta_b,
+            sucursal=sucursal_b,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("4"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_pipeline_resumen"),
+            {
+                "periodo": "2026-03",
+                "incluir_preparaciones": "1",
+                "top": 1,
+                "offset": 1,
+                "top_sucursales": 1,
+                "offset_sucursales": 1,
+                "sort_by": "historial",
+                "sort_dir": "asc",
+                "sort_sucursales_by": "historial",
+                "sort_sucursales_dir": "asc",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+
+        self.assertEqual(payload["scope"]["offset"], 1)
+        self.assertEqual(payload["scope"]["offset_sucursales"], 1)
+        self.assertEqual(payload["scope"]["top"], 1)
+        self.assertEqual(payload["scope"]["top_sucursales"], 1)
+        self.assertEqual(payload["totales"]["rows_filtered"], 2)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
+        self.assertEqual(payload["totales"]["by_sucursal_filtered"], 2)
+        self.assertEqual(payload["totales"]["by_sucursal_returned"], 1)
+        self.assertEqual(len(payload["rows"]), 1)
+        self.assertEqual(len(payload["by_sucursal"]), 1)
+        self.assertEqual(payload["rows"][0]["receta_id"], self.receta.id)
+        self.assertEqual(payload["by_sucursal"][0]["sucursal_codigo"], "OFA")
 
     def test_endpoint_ventas_pipeline_resumen_top_sucursales(self):
         sucursal_a = Sucursal.objects.create(codigo="TPA", nombre="Top A", activa=True)
@@ -3135,6 +3216,8 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("text/csv", resp_csv["Content-Type"])
         body_csv = resp_csv.content.decode("utf-8")
         self.assertIn("BY_SUCURSAL", body_csv)
+        self.assertIn("Offset,0", body_csv)
+        self.assertIn("Offset sucursales,0", body_csv)
         self.assertIn("receta_id,receta,historial_qty,pronostico_qty,solicitud_qty", body_csv)
         self.assertIn("Receta API", body_csv)
 

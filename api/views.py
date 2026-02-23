@@ -428,11 +428,17 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
         ws_resumen.append(["Sucursal", scope.get("sucursal") or "Todas"])
         ws_resumen.append(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
         ws_resumen.append(["Top", int(scope.get("top") or 0)])
+        ws_resumen.append(["Offset", int(scope.get("offset") or 0)])
         ws_resumen.append(["Top sucursales", int(scope.get("top_sucursales") or 0)])
+        ws_resumen.append(["Offset sucursales", int(scope.get("offset_sucursales") or 0)])
         ws_resumen.append(["Sort rows", str(scope.get("sort_by") or "delta_abs").upper()])
         ws_resumen.append(["Sort rows dir", str(scope.get("sort_dir") or "desc").upper()])
         ws_resumen.append(["Sort sucursales", str(scope.get("sort_sucursales_by") or "delta_abs").upper()])
         ws_resumen.append(["Sort sucursales dir", str(scope.get("sort_sucursales_dir") or "desc").upper()])
+        ws_resumen.append(["Rows filtered", int(totals.get("rows_filtered") or 0)])
+        ws_resumen.append(["Rows returned", int(totals.get("rows_returned") or 0)])
+        ws_resumen.append(["Sucursales filtered", int(totals.get("by_sucursal_filtered") or 0)])
+        ws_resumen.append(["Sucursales returned", int(totals.get("by_sucursal_returned") or 0)])
         ws_resumen.append(["Historial total", float(totals.get("historial_qty") or 0)])
         ws_resumen.append(["Pronostico total", float(totals.get("pronostico_qty") or 0)])
         ws_resumen.append(["Solicitud total", float(totals.get("solicitud_qty") or 0)])
@@ -529,11 +535,17 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
     writer.writerow(["Sucursal", scope.get("sucursal") or "Todas"])
     writer.writerow(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
     writer.writerow(["Top", int(scope.get("top") or 0)])
+    writer.writerow(["Offset", int(scope.get("offset") or 0)])
     writer.writerow(["Top sucursales", int(scope.get("top_sucursales") or 0)])
+    writer.writerow(["Offset sucursales", int(scope.get("offset_sucursales") or 0)])
     writer.writerow(["Sort rows", str(scope.get("sort_by") or "delta_abs").upper()])
     writer.writerow(["Sort rows dir", str(scope.get("sort_dir") or "desc").upper()])
     writer.writerow(["Sort sucursales", str(scope.get("sort_sucursales_by") or "delta_abs").upper()])
     writer.writerow(["Sort sucursales dir", str(scope.get("sort_sucursales_dir") or "desc").upper()])
+    writer.writerow(["Rows filtered", int(totals.get("rows_filtered") or 0)])
+    writer.writerow(["Rows returned", int(totals.get("rows_returned") or 0)])
+    writer.writerow(["Sucursales filtered", int(totals.get("by_sucursal_filtered") or 0)])
+    writer.writerow(["Sucursales returned", int(totals.get("by_sucursal_returned") or 0)])
     writer.writerow(["Historial total", f"{Decimal(str(totals.get('historial_qty') or 0)):.3f}"])
     writer.writerow(["Pronostico total", f"{Decimal(str(totals.get('pronostico_qty') or 0)):.3f}"])
     writer.writerow(["Solicitud total", f"{Decimal(str(totals.get('solicitud_qty') or 0)):.3f}"])
@@ -6123,7 +6135,14 @@ class VentasPipelineResumenView(APIView):
             )
         periodo = (request.GET.get("periodo") or "").strip()
         top = _parse_bounded_int(request.GET.get("top", 120), default=120, min_value=1, max_value=500)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=5000)
         top_sucursales = _parse_bounded_int(request.GET.get("top_sucursales", 120), default=120, min_value=1, max_value=500)
+        offset_sucursales = _parse_bounded_int(
+            request.GET.get("offset_sucursales", 0),
+            default=0,
+            min_value=0,
+            max_value=5000,
+        )
         status_filter = (request.GET.get("status") or "").strip().upper()
         allowed_status = {"", "SOBRE", "BAJO", "OK", "SIN_SOLICITUD", "SIN_MOV", "DESVIADAS"}
         if status_filter not in allowed_status:
@@ -6307,8 +6326,9 @@ class VentasPipelineResumenView(APIView):
             else:
                 row["_sort"] = _to_float(sort_value)
         by_sucursal_rows_tmp.sort(key=lambda row: row["_sort"], reverse=(sort_sucursales_dir == "desc"))
+        by_sucursal_filtered = len(by_sucursal_rows_tmp)
         by_sucursal_rows = []
-        for row in by_sucursal_rows_tmp[:top_sucursales]:
+        for row in by_sucursal_rows_tmp[offset_sucursales : offset_sucursales + top_sucursales]:
             row.pop("_sort", None)
             row.pop("_delta_abs", None)
             by_sucursal_rows.append(row)
@@ -6419,8 +6439,9 @@ class VentasPipelineResumenView(APIView):
             else:
                 row["_sort"] = _to_float(sort_value)
         rows_tmp.sort(key=lambda row: row["_sort"], reverse=(sort_dir == "desc"))
+        rows_filtered = len(rows_tmp)
         rows = []
-        for row in rows_tmp[:top]:
+        for row in rows_tmp[offset : offset + top]:
             row.pop("_sort", None)
             row.pop("_delta_abs", None)
             rows.append(row)
@@ -6439,7 +6460,9 @@ class VentasPipelineResumenView(APIView):
                 "sucursal": sucursal.nombre if sucursal else "Todas",
                 "incluir_preparaciones": incluir_preparaciones,
                 "top": top,
+                "offset": offset,
                 "top_sucursales": top_sucursales,
+                "offset_sucursales": offset_sucursales,
                 "sort_by": sort_by,
                 "sort_dir": sort_dir,
                 "sort_sucursales_by": sort_sucursales_by,
@@ -6459,8 +6482,10 @@ class VentasPipelineResumenView(APIView):
                 "pronostico_recetas": pronostico_qs.values("receta_id").distinct().count(),
                 "solicitud_recetas": solicitudes_qs.values("receta_id").distinct().count(),
                 "rows_count": len(receta_ids),
-                "rows_filtered": len(rows_tmp),
-                "by_sucursal_filtered": len(by_sucursal_rows_tmp),
+                "rows_filtered": rows_filtered,
+                "rows_returned": len(rows),
+                "by_sucursal_filtered": by_sucursal_filtered,
+                "by_sucursal_returned": len(by_sucursal_rows),
                 "rows_status": rows_status_counts,
                 "by_sucursal_status": by_sucursal_status_counts,
             },
