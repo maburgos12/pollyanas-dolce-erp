@@ -79,6 +79,12 @@ from .rrhh_views import (
     RRHHNominaLineasView,
     RRHHNominasView,
 )
+from .logistica_views import (
+    LogisticaDashboardView,
+    LogisticaRutasView,
+    LogisticaRutaEntregasView,
+    LogisticaRutaStatusView,
+)
 
 urlpatterns = [
     path("auth/token/", ApiTokenAuthView.as_view(), name="api_auth_token"),
@@ -141,6 +147,10 @@ urlpatterns = [
     path("rrhh/empleados/", RRHHEmpleadosView.as_view(), name="api_rrhh_empleados"),
     path("rrhh/nominas/", RRHHNominasView.as_view(), name="api_rrhh_nominas"),
     path("rrhh/nominas/<int:nomina_id>/lineas/", RRHHNominaLineasView.as_view(), name="api_rrhh_nomina_lineas"),
+    path("logistica/dashboard/", LogisticaDashboardView.as_view(), name="api_logistica_dashboard"),
+    path("logistica/rutas/", LogisticaRutasView.as_view(), name="api_logistica_rutas"),
+    path("logistica/rutas/<int:ruta_id>/estatus/", LogisticaRutaStatusView.as_view(), name="api_logistica_ruta_estatus"),
+    path("logistica/rutas/<int:ruta_id>/entregas/", LogisticaRutaEntregasView.as_view(), name="api_logistica_ruta_entregas"),
     path("compras/solicitudes/", ComprasSolicitudesListView.as_view(), name="api_compras_solicitudes"),
     path("compras/solicitudes/import-preview/", ComprasSolicitudesImportPreviewView.as_view(), name="api_compras_solicitudes_import_preview"),
     path("compras/solicitudes/import-confirm/", ComprasSolicitudesImportConfirmView.as_view(), name="api_compras_solicitudes_import_confirm"),

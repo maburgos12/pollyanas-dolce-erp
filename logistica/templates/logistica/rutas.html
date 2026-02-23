@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Logística · Rutas{% endblock %}
+{% block page_title %}Logística · Rutas{% endblock %}
+
+{% block content %}
+<section class="module-tabs" aria-label="Submódulos Logística">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-number">{{ totales.rutas }}</div>
+    <div class="kpi-label">Rutas registradas</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ totales.hoy }}</div>
+    <div class="kpi-label">Rutas de hoy</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-success">{{ totales.en_ruta }}</div>
+    <div class="kpi-label">En ruta</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-danger">{{ totales.pendientes }}</div>
+    <div class="kpi-label">Entregas pendientes</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-danger">{{ totales.incidencias }}</div>
+    <div class="kpi-label">Con incidencia</div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-header">Nueva ruta de entrega</div>
+  {% if can_manage_logistica %}
+  <form method="post" class="filters" style="margin-bottom:0;">
+    {% csrf_token %}
+    <input class="input-field" type="text" name="nombre" placeholder="Ej. Ruta Norte" required>
+    <input class="input-field" type="date" name="fecha_ruta" value="{% now 'Y-m-d' %}">
+    <input class="input-field" type="text" name="chofer" placeholder="Chofer">
+    <input class="input-field" type="text" name="unidad" placeholder="Unidad">
+    <select class="input-field" name="estatus">
+      {% for value,label in estatus_choices %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="number" min="0" step="0.01" name="km_estimado" placeholder="KM estimado">
+    <button class="btn btn-primary" type="submit">Crear ruta</button>
+  </form>
+  {% else %}
+  <p class="muted">Tu rol es de consulta. No puedes crear rutas.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Rutas de entrega</div>
+  <form method="get" class="filters" style="margin-bottom:14px;">
+    <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por folio, ruta, chofer o unidad">
+    <select class="input-field" name="estatus">
+      <option value="">Todos</option>
+      {% for value,label in estatus_choices %}
+      <option value="{{ value }}" {% if estatus == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Aplicar</button>
+    <a class="btn btn-secondary" href="{% url 'logistica:rutas' %}">Limpiar</a>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Ruta</th>
+          <th>Fecha</th>
+          <th>Chofer</th>
+          <th>Unidad</th>
+          <th class="text-end">Entregas</th>
+          <th class="text-end">Completadas</th>
+          <th class="text-end">Incidencias</th>
+          <th class="text-end">Monto estimado</th>
+          <th>Estatus</th>
+          <th>Detalle</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rutas %}
+        <tr>
+          <td>{{ r.folio }}</td>
+          <td>{{ r.nombre }}</td>
+          <td>{{ r.fecha_ruta|date:"Y-m-d" }}</td>
+          <td>{{ r.chofer|default:"-" }}</td>
+          <td>{{ r.unidad|default:"-" }}</td>
+          <td class="text-end">{{ r.total_entregas }}</td>
+          <td class="text-end">{{ r.entregas_completadas }}</td>
+          <td class="text-end">{{ r.entregas_incidencia }}</td>
+          <td class="text-end">${{ r.monto_estimado_total|floatformat:2 }}</td>
+          <td>
+            {% if r.estatus == 'COMPLETADA' %}
+            <span class="badge bg-success">{{ r.get_estatus_display }}</span>
+            {% elif r.estatus == 'EN_RUTA' %}
+            <span class="badge bg-warning">{{ r.get_estatus_display }}</span>
+            {% elif r.estatus == 'CANCELADA' %}
+            <span class="badge bg-danger">{{ r.get_estatus_display }}</span>
+            {% else %}
+            <span class="badge bg-primary">{{ r.get_estatus_display }}</span>
+            {% endif %}
+          </td>
+          <td><a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' r.id %}">Abrir</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="11" class="muted">No hay rutas para este filtro.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

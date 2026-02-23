@@ -246,6 +246,9 @@
             {% if can_view_crm %}
                 <a href="{% url 'crm:pedidos' %}" class="btn btn-secondary">🤝 CRM pedidos</a>
             {% endif %}
+            {% if can_view_logistica %}
+                <a href="{% url 'logistica:rutas' %}" class="btn btn-secondary">🚚 Logística entregas</a>
+            {% endif %}
             {% if can_view_rrhh %}
                 <a href="{% url 'rrhh:empleados' %}" class="btn btn-secondary">👥 RRHH nómina</a>
             {% endif %}

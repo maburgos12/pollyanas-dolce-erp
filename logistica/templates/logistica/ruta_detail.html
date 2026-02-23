@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Logística · {{ ruta.folio }}{% endblock %}
+{% block page_title %}Logística · {{ ruta.folio }}{% endblock %}
+
+{% block content %}
+<section class="module-tabs" aria-label="Submódulos Logística">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="card" style="margin-bottom:14px;">
+  <div class="card-header">Detalle de ruta</div>
+  <div class="table-responsive">
+    <table class="table">
+      <tbody>
+        <tr><th>Folio</th><td>{{ ruta.folio }}</td><th>Fecha</th><td>{{ ruta.fecha_ruta|date:"Y-m-d" }}</td></tr>
+        <tr><th>Ruta</th><td>{{ ruta.nombre }}</td><th>Chofer</th><td>{{ ruta.chofer|default:"-" }}</td></tr>
+        <tr><th>Unidad</th><td>{{ ruta.unidad|default:"-" }}</td><th>Estatus</th><td>{{ ruta.get_estatus_display }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% if can_manage_logistica %}
+  <form method="post" class="filters" style="margin-top:10px;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="ruta_status">
+    <select class="input-field" name="estatus">
+      {% for value,label in estatus_ruta_choices %}
+      <option value="{{ value }}" {% if ruta.estatus == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Actualizar estatus ruta</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="kpi-grid">
+  <article class="kpi-card"><div class="kpi-number">{{ ruta.total_entregas }}</div><div class="kpi-label">Entregas</div></article>
+  <article class="kpi-card"><div class="kpi-number is-success">{{ ruta.entregas_completadas }}</div><div class="kpi-label">Completadas</div></article>
+  <article class="kpi-card"><div class="kpi-number is-danger">{{ ruta.entregas_incidencia }}</div><div class="kpi-label">Incidencias</div></article>
+  <article class="kpi-card"><div class="kpi-number is-warning">${{ ruta.monto_estimado_total|floatformat:2 }}</div><div class="kpi-label">Monto estimado</div></article>
+</section>
+
+<section class="card">
+  <div class="card-header">Agregar entrega</div>
+  {% if can_manage_logistica %}
+  <form method="post" class="filters" style="margin-bottom:0;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="add_entrega">
+    <input class="input-field" type="number" min="1" name="secuencia" value="{{ ruta.total_entregas|add:1 }}" placeholder="#">
+    <select class="input-field" name="pedido_id">
+      <option value="">Pedido opcional...</option>
+      {% for p in pedidos %}
+      <option value="{{ p.id }}">{{ p.folio }} · {{ p.cliente.nombre }} · {{ p.descripcion|truncatechars:50 }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="text" name="cliente_nombre" placeholder="Cliente (si no eliges pedido)">
+    <input class="input-field" type="text" name="direccion" placeholder="Dirección de entrega">
+    <input class="input-field" type="text" name="contacto" placeholder="Contacto">
+    <input class="input-field" type="text" name="telefono" placeholder="Teléfono">
+    <input class="input-field" type="datetime-local" name="ventana_inicio">
+    <input class="input-field" type="datetime-local" name="ventana_fin">
+    <select class="input-field" name="estatus">
+      {% for value,label in estatus_entrega_choices %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="number" min="0" step="0.01" name="monto_estimado" placeholder="Monto estimado">
+    <input class="input-field" type="text" name="comentario" placeholder="Comentario opcional">
+    <button class="btn btn-primary" type="submit">Guardar entrega</button>
+  </form>
+  {% else %}
+  <p class="muted">Tu rol es de consulta. No puedes editar entregas.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Entregas de ruta</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Pedido</th>
+          <th>Cliente</th>
+          <th>Dirección</th>
+          <th>Ventana</th>
+          <th class="text-end">Monto</th>
+          <th>Estatus</th>
+          <th>Comentario</th>
+          {% if can_manage_logistica %}<th>Acciones</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entregas %}
+        <tr>
+          <td>{{ e.secuencia }}</td>
+          <td>{% if e.pedido %}{{ e.pedido.folio }}{% else %}-{% endif %}</td>
+          <td>{{ e.cliente_nombre|default:"-" }}</td>
+          <td>{{ e.direccion|default:"-" }}</td>
+          <td>
+            {% if e.ventana_inicio %}{{ e.ventana_inicio|date:"Y-m-d H:i" }}{% else %}-{% endif %}
+            {% if e.ventana_fin %} → {{ e.ventana_fin|date:"Y-m-d H:i" }}{% endif %}
+          </td>
+          <td class="text-end">${{ e.monto_estimado|floatformat:2 }}</td>
+          <td>
+            {% if e.estatus == 'ENTREGADA' %}
+            <span class="badge bg-success">{{ e.get_estatus_display }}</span>
+            {% elif e.estatus == 'INCIDENCIA' %}
+            <span class="badge bg-danger">{{ e.get_estatus_display }}</span>
+            {% elif e.estatus == 'EN_CAMINO' %}
+            <span class="badge bg-warning">{{ e.get_estatus_display }}</span>
+            {% else %}
+            <span class="badge bg-primary">{{ e.get_estatus_display }}</span>
+            {% endif %}
+          </td>
+          <td>{{ e.comentario|default:"-" }}</td>
+          {% if can_manage_logistica %}
+          <td>
+            <form method="post" style="display:inline-flex; gap:6px; align-items:center;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="entrega_status">
+              <input type="hidden" name="entrega_id" value="{{ e.id }}">
+              <select class="input-field" name="estatus" style="min-width:130px;">
+                {% for value,label in estatus_entrega_choices %}
+                <option value="{{ value }}" {% if e.estatus == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-secondary btn-small" type="submit">Actualizar</button>
+            </form>
+            <form method="post" style="display:inline-flex;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="delete_entrega">
+              <input type="hidden" name="entrega_id" value="{{ e.id }}">
+              <button class="btn btn-danger btn-small" type="submit" onclick="return confirm('¿Eliminar entrega?')">Eliminar</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% empty %}
+        <tr><td colspan="9" class="muted">Sin entregas en esta ruta.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

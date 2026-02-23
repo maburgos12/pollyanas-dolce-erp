@@ -6,6 +6,7 @@ ROLE_COMPRAS = "COMPRAS"
 ROLE_ALMACEN = "ALMACEN"
 ROLE_PRODUCCION = "PRODUCCION"
 ROLE_VENTAS = "VENTAS"
+ROLE_LOGISTICA = "LOGISTICA"
 ROLE_RRHH = "RRHH"
 ROLE_LECTURA = "LECTURA"
 
@@ -49,6 +50,7 @@ def can_view_reportes(user: AbstractBaseUser) -> bool:
         ROLE_ALMACEN,
         ROLE_PRODUCCION,
         ROLE_VENTAS,
+        ROLE_LOGISTICA,
         ROLE_RRHH,
         ROLE_LECTURA,
     )
@@ -81,6 +83,14 @@ def can_view_crm(user: AbstractBaseUser) -> bool:
 
 def can_manage_crm(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_ADMIN, ROLE_VENTAS)
+
+
+def can_view_logistica(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_LOGISTICA, ROLE_LECTURA)
+
+
+def can_manage_logistica(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_ADMIN, ROLE_LOGISTICA)
 
 
 def can_view_rrhh(user: AbstractBaseUser) -> bool:
