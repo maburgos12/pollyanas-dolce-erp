@@ -2296,6 +2296,37 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["totales"]["by_alcance"][SolicitudVenta.ALCANCE_MES], 1)
         self.assertEqual(len(payload["items"]), 1)
 
+    def test_endpoint_ventas_solicitudes_list_include_forecast_ref(self):
+        sucursal = Sucursal.objects.create(codigo="SFR", nombre="Sucursal Forecast Ref", activa=True)
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("30"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(reverse("api_ventas_solicitudes"), {"periodo": "2026-03", "include_forecast_ref": "1"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload["filters"]["include_forecast_ref"])
+        self.assertEqual(payload["totales"]["forecast_ref_status"]["SOBRE"], 1)
+        self.assertGreaterEqual(len(payload["items"]), 1)
+        item = payload["items"][0]
+        self.assertIn("forecast_ref", item)
+        self.assertEqual(item["forecast_ref"]["status"], "SOBRE")
+        self.assertEqual(item["forecast_ref"]["forecast_qty"], 20.0)
+        self.assertEqual(item["forecast_ref"]["delta_solicitud_vs_forecast"], 10.0)
+
     def test_endpoint_ventas_solicitudes_export_csv_y_xlsx(self):
         sucursal = Sucursal.objects.create(codigo="SURX", nombre="Sucursal Sur Export", activa=True)
         SolicitudVenta.objects.create(
@@ -2308,16 +2339,30 @@ class RecetasCosteoApiTests(TestCase):
             cantidad=Decimal("30"),
             fuente="API_TEST",
         )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
 
         url = reverse("api_ventas_solicitudes")
-        resp_csv = self.client.get(url, {"periodo": "2026-03", "alcance": "MES", "export": "csv"})
+        resp_csv = self.client.get(
+            url,
+            {"periodo": "2026-03", "alcance": "MES", "include_forecast_ref": "1", "export": "csv"},
+        )
         self.assertEqual(resp_csv.status_code, 200)
         self.assertIn("text/csv", resp_csv["Content-Type"])
         body_csv = resp_csv.content.decode("utf-8")
         self.assertIn("DETALLE", body_csv)
         self.assertIn("Receta API", body_csv)
+        self.assertIn("forecast_status,forecast_qty,delta_solicitud_vs_forecast", body_csv)
+        self.assertIn("SOBRE", body_csv)
 
-        resp_xlsx = self.client.get(url, {"periodo": "2026-03", "alcance": "MES", "export": "xlsx"})
+        resp_xlsx = self.client.get(
+            url,
+            {"periodo": "2026-03", "alcance": "MES", "include_forecast_ref": "1", "export": "xlsx"},
+        )
         self.assertEqual(resp_xlsx.status_code, 200)
         self.assertIn(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

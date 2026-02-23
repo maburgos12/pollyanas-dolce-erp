@@ -1509,6 +1509,7 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
     filters = payload.get("filters") or {}
     totals = payload.get("totales") or {}
     by_alcance = totals.get("by_alcance") or {}
+    forecast_counts = totals.get("forecast_ref_status") or {}
     items = payload.get("items") or []
     stamp = str(filters.get("periodo") or timezone.localdate().strftime("%Y-%m")).replace("-", "")
     filename = f"ventas_solicitudes_{stamp}.{export_format}"
@@ -1521,11 +1522,16 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
         ws_resumen.append(["Alcance", filters.get("alcance") or ""])
         ws_resumen.append(["Desde", filters.get("fecha_desde") or ""])
         ws_resumen.append(["Hasta", filters.get("fecha_hasta") or ""])
+        ws_resumen.append(["Include forecast ref", "SI" if filters.get("include_forecast_ref") else "NO"])
         ws_resumen.append(["Rows", int(totals.get("rows") or 0)])
         ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
         ws_resumen.append(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
         ws_resumen.append(["SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_SEMANA) or 0)])
         ws_resumen.append(["FIN_SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_FIN_SEMANA) or 0)])
+        ws_resumen.append(["Forecast status SOBRE", int(forecast_counts.get("SOBRE") or 0)])
+        ws_resumen.append(["Forecast status BAJO", int(forecast_counts.get("BAJO") or 0)])
+        ws_resumen.append(["Forecast status OK", int(forecast_counts.get("OK") or 0)])
+        ws_resumen.append(["Forecast status SIN_FORECAST", int(forecast_counts.get("SIN_FORECAST") or 0)])
 
         ws_detalle = wb.create_sheet("Detalle")
         ws_detalle.append(
@@ -1542,11 +1548,15 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
                 "Fecha inicio",
                 "Fecha fin",
                 "Cantidad",
+                "Forecast status",
+                "Forecast qty",
+                "Delta solicitud vs forecast",
                 "Fuente",
                 "Actualizado en",
             ]
         )
         for row in items:
+            forecast_ref = row.get("forecast_ref") or {}
             ws_detalle.append(
                 [
                     int(row.get("id") or 0),
@@ -1561,6 +1571,9 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
                     row.get("fecha_inicio") or "",
                     row.get("fecha_fin") or "",
                     float(row.get("cantidad") or 0),
+                    forecast_ref.get("status") or "",
+                    float(forecast_ref.get("forecast_qty") or 0),
+                    float(forecast_ref.get("delta_solicitud_vs_forecast") or 0),
                     row.get("fuente") or "",
                     str(row.get("actualizado_en") or ""),
                 ]
@@ -1583,11 +1596,16 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
     writer.writerow(["Alcance", filters.get("alcance") or ""])
     writer.writerow(["Desde", filters.get("fecha_desde") or ""])
     writer.writerow(["Hasta", filters.get("fecha_hasta") or ""])
+    writer.writerow(["Include forecast ref", "SI" if filters.get("include_forecast_ref") else "NO"])
     writer.writerow(["Rows", int(totals.get("rows") or 0)])
     writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
     writer.writerow(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
     writer.writerow(["SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_SEMANA) or 0)])
     writer.writerow(["FIN_SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_FIN_SEMANA) or 0)])
+    writer.writerow(["Forecast status SOBRE", int(forecast_counts.get("SOBRE") or 0)])
+    writer.writerow(["Forecast status BAJO", int(forecast_counts.get("BAJO") or 0)])
+    writer.writerow(["Forecast status OK", int(forecast_counts.get("OK") or 0)])
+    writer.writerow(["Forecast status SIN_FORECAST", int(forecast_counts.get("SIN_FORECAST") or 0)])
     writer.writerow([])
     writer.writerow(["DETALLE"])
     writer.writerow(
@@ -1604,11 +1622,15 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
             "fecha_inicio",
             "fecha_fin",
             "cantidad",
+            "forecast_status",
+            "forecast_qty",
+            "delta_solicitud_vs_forecast",
             "fuente",
             "actualizado_en",
         ]
     )
     for row in items:
+        forecast_ref = row.get("forecast_ref") or {}
         writer.writerow(
             [
                 int(row.get("id") or 0),
@@ -1623,6 +1645,9 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
                 row.get("fecha_inicio") or "",
                 row.get("fecha_fin") or "",
                 f"{Decimal(str(row.get('cantidad') or 0)):.3f}",
+                forecast_ref.get("status") or "",
+                f"{Decimal(str(forecast_ref.get('forecast_qty') or 0)):.3f}",
+                f"{Decimal(str(forecast_ref.get('delta_solicitud_vs_forecast') or 0)):.3f}",
                 row.get("fuente") or "",
                 str(row.get("actualizado_en") or ""),
             ]
@@ -6443,6 +6468,7 @@ class SolicitudVentaListView(APIView):
         fecha_desde_raw = (request.GET.get("fecha_desde") or "").strip()
         fecha_hasta_raw = (request.GET.get("fecha_hasta") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 150), default=150, min_value=1, max_value=1000)
+        include_forecast_ref = _parse_bool(request.GET.get("include_forecast_ref"), default=False)
 
         if periodo:
             parsed_period = _parse_period(periodo)
@@ -6518,31 +6544,65 @@ class SolicitudVentaListView(APIView):
             )
 
         rows = list(qs[:limit])
+        pronostico_map: dict[tuple[int, str], Decimal] = {}
+        if include_forecast_ref and rows:
+            receta_ids = {int(r.receta_id) for r in rows}
+            periodos = {str(r.periodo) for r in rows if r.periodo}
+            if receta_ids and periodos:
+                for p in (
+                    PronosticoVenta.objects.filter(receta_id__in=receta_ids, periodo__in=periodos)
+                    .values("receta_id", "periodo")
+                    .annotate(total=Sum("cantidad"))
+                ):
+                    pronostico_map[(int(p["receta_id"]), str(p["periodo"]))] = _to_decimal(p["total"])
+
         items = []
         cantidad_total = Decimal("0")
         by_alcance = {k: 0 for k in allowed_alcance}
+        forecast_status_counts = {"SOBRE": 0, "BAJO": 0, "OK": 0, "SIN_FORECAST": 0}
         for r in rows:
             qty = _to_decimal(r.cantidad)
             cantidad_total += qty
             by_alcance[r.alcance] = by_alcance.get(r.alcance, 0) + 1
-            items.append(
-                {
-                    "id": r.id,
-                    "receta_id": r.receta_id,
-                    "receta": r.receta.nombre,
-                    "codigo_point": r.receta.codigo_point,
-                    "sucursal_id": r.sucursal_id,
-                    "sucursal": r.sucursal.nombre if r.sucursal_id and r.sucursal else "",
-                    "sucursal_codigo": r.sucursal.codigo if r.sucursal_id and r.sucursal else "",
-                    "alcance": r.alcance,
-                    "periodo": r.periodo,
-                    "fecha_inicio": str(r.fecha_inicio),
-                    "fecha_fin": str(r.fecha_fin),
-                    "cantidad": str(qty),
-                    "fuente": r.fuente,
-                    "actualizado_en": r.actualizado_en,
+            item = {
+                "id": r.id,
+                "receta_id": r.receta_id,
+                "receta": r.receta.nombre,
+                "codigo_point": r.receta.codigo_point,
+                "sucursal_id": r.sucursal_id,
+                "sucursal": r.sucursal.nombre if r.sucursal_id and r.sucursal else "",
+                "sucursal_codigo": r.sucursal.codigo if r.sucursal_id and r.sucursal else "",
+                "alcance": r.alcance,
+                "periodo": r.periodo,
+                "fecha_inicio": str(r.fecha_inicio),
+                "fecha_fin": str(r.fecha_fin),
+                "cantidad": str(qty),
+                "fuente": r.fuente,
+                "actualizado_en": r.actualizado_en,
+            }
+            if include_forecast_ref:
+                forecast_qty = _to_decimal(pronostico_map.get((int(r.receta_id), str(r.periodo))), default=Decimal("0"))
+                if forecast_qty > 0:
+                    delta_forecast = qty - forecast_qty
+                    threshold = max(Decimal("1"), forecast_qty * Decimal("0.10"))
+                    if delta_forecast > threshold:
+                        forecast_status = "SOBRE"
+                    elif delta_forecast < (threshold * Decimal("-1")):
+                        forecast_status = "BAJO"
+                    else:
+                        forecast_status = "OK"
+                else:
+                    delta_forecast = qty
+                    forecast_status = "SIN_FORECAST"
+
+                forecast_status_counts[forecast_status] = forecast_status_counts.get(forecast_status, 0) + 1
+                item["forecast_ref"] = {
+                    "status": forecast_status,
+                    "forecast_qty": _to_float(forecast_qty),
+                    "solicitud_qty": _to_float(qty),
+                    "delta_solicitud_vs_forecast": _to_float(delta_forecast.quantize(Decimal("0.001"))),
                 }
-            )
+            items.append(item)
 
         payload = {
             "filters": {
@@ -6554,11 +6614,13 @@ class SolicitudVentaListView(APIView):
                 "fecha_desde": str(fecha_desde) if fecha_desde else "",
                 "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
                 "limit": limit,
+                "include_forecast_ref": include_forecast_ref,
             },
             "totales": {
                 "rows": len(items),
                 "cantidad_total": str(cantidad_total),
                 "by_alcance": by_alcance,
+                "forecast_ref_status": forecast_status_counts if include_forecast_ref else {},
             },
             "items": items,
         }
