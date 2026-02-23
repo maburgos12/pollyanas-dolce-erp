@@ -5,6 +5,21 @@
 
 {% block content %}
 <div class="module-shell integraciones-shell">
+    <section class="kpi-mini">
+        <article class="kpi-card">
+            <div class="kpi-number">{{ clients|length }}</div>
+            <div class="kpi-label">Clientes API</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number is-warning">{{ requests_24h }}</div>
+            <div class="kpi-label">Requests 24h</div>
+        </article>
+        <article class="kpi-card">
+            <div class="kpi-number {% if errors_24h %}is-danger{% else %}is-success{% endif %}">{{ errors_24h }}</div>
+            <div class="kpi-label">Errores 24h</div>
+        </article>
+    </section>
+
     {% if last_generated_api_key %}
     <section class="card">
         <div class="card-header">API key generada</div>
@@ -116,6 +131,7 @@
                     <tr>
                         <th>Cliente</th>
                         <th>Requests</th>
+                        <th>Errores</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -123,6 +139,13 @@
                     <tr>
                         <td>{{ row.client__nombre }}</td>
                         <td>{{ row.total }}</td>
+                        <td>
+                            {% if row.errores %}
+                            <span class="badge-rojo">{{ row.errores }}</span>
+                            {% else %}
+                            <span class="badge-verde">0</span>
+                            {% endif %}
+                        </td>
                     </tr>
                 {% endfor %}
                 </tbody>
@@ -134,7 +157,43 @@
     </section>
 
     <section class="card">
-        <div class="card-header">Log de accesos recientes</div>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="card-header mb-0">Log de accesos recientes</div>
+            <a
+                class="btn btn-outline-primary"
+                href="?client={{ filter_client_id }}&status={{ filter_status }}&q={{ filter_q|urlencode }}&export=csv"
+            >
+                Exportar CSV
+            </a>
+        </div>
+        <form method="get" class="form-grid-auto mb-3">
+            <div class="form-group">
+                <label class="form-label" for="id_client">Cliente</label>
+                <select id="id_client" name="client" class="form-select">
+                    <option value="">Todos</option>
+                    {% for c in clients %}
+                    <option value="{{ c.id }}" {% if filter_client_id == c.id|stringformat:"s" %}selected{% endif %}>
+                        {{ c.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="id_status">Status</label>
+                <select id="id_status" name="status" class="form-select">
+                    <option value="all" {% if filter_status == "all" %}selected{% endif %}>Todos</option>
+                    <option value="ok" {% if filter_status == "ok" %}selected{% endif %}>Solo OK (&lt;400)</option>
+                    <option value="error" {% if filter_status == "error" %}selected{% endif %}>Solo error (&gt;=400)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="id_q">Endpoint contiene</label>
+                <input id="id_q" name="q" class="input-field" type="text" value="{{ filter_q }}">
+            </div>
+            <div class="form-group" style="display:flex;align-items:flex-end;">
+                <button class="btn btn-primary w-100" type="submit">Aplicar filtros</button>
+            </div>
+        </form>
         <div class="table-responsive">
             <table class="table">
                 <thead>

@@ -89,3 +89,40 @@ class IntegracionesPanelTests(TestCase):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "/api/public/v1/insumos/")
+
+    def test_logs_filters_by_status_and_client(self):
+        client_ok, _ = PublicApiClient.create_with_generated_key(nombre="ERP OK", descripcion="")
+        client_err, _ = PublicApiClient.create_with_generated_key(nombre="ERP ERR", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=client_ok,
+            endpoint="/api/public/v1/insumos/",
+            method="GET",
+            status_code=200,
+        )
+        PublicApiAccessLog.objects.create(
+            client=client_err,
+            endpoint="/api/public/v1/pedidos/",
+            method="POST",
+            status_code=500,
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url, {"client": str(client_err.id), "status": "error"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/api/public/v1/pedidos/")
+        self.assertNotContains(response, "/api/public/v1/insumos/")
+
+    def test_logs_csv_export(self):
+        client, _ = PublicApiClient.create_with_generated_key(nombre="ERP CSV", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/resumen/",
+            method="GET",
+            status_code=200,
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url, {"export": "csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        body = response.content.decode("utf-8")
+        self.assertIn("endpoint", body)
+        self.assertIn("/api/public/v1/resumen/", body)
