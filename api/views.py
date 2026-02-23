@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Any
 from django.db import transaction, OperationalError, ProgrammingError
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -54,6 +54,7 @@ from compras.views import (
     _resolve_proveedor_name,
     _sanitize_consumo_ref_filter,
 )
+from integraciones.models import PublicApiAccessLog
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo
 from inventario.views import (
     _apply_ajuste,
@@ -3034,10 +3035,95 @@ class IntegracionPointResumenView(APIView):
 
         proveedores_activos = Proveedor.objects.filter(activo=True).count()
         proveedores_pending_point = int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0))
+        since_24h = timezone.now() - timedelta(hours=24)
+        requests_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h).count()
+        errors_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400).count()
+        errors_by_endpoint_24h = list(
+            PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400)
+            .values("endpoint")
+            .annotate(
+                total=Count("id"),
+                clientes=Count("client_id", distinct=True),
+                last_at=Max("created_at"),
+            )
+            .order_by("-total", "endpoint")[:12]
+        )
+        errors_by_client_24h = list(
+            PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400)
+            .values("client__nombre")
+            .annotate(
+                total=Count("id"),
+                last_at=Max("created_at"),
+            )
+            .order_by("-total", "client__nombre")[:12]
+        )
+
+        stale_limit = timezone.now() - timedelta(hours=24)
+        alertas_operativas = []
+        if errors_24h:
+            alertas_operativas.append(
+                {
+                    "nivel": "danger",
+                    "titulo": "Errores API en últimas 24h",
+                    "detalle": f"{errors_24h} requests con status >= 400.",
+                }
+            )
+        if point_pending_total:
+            alertas_operativas.append(
+                {
+                    "nivel": "warning",
+                    "titulo": "Pendientes Point abiertos",
+                    "detalle": (
+                        f"Total {point_pending_total}. "
+                        f"Insumos {point_pending_by_tipo.get(PointPendingMatch.TIPO_INSUMO, 0)}, "
+                        f"productos {point_pending_by_tipo.get(PointPendingMatch.TIPO_PRODUCTO, 0)}, "
+                        f"proveedores {point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0)}."
+                    ),
+                }
+            )
+        if recetas_pending_lines:
+            alertas_operativas.append(
+                {
+                    "nivel": "warning",
+                    "titulo": "Líneas receta sin match",
+                    "detalle": f"{recetas_pending_lines} líneas requieren homologación interna.",
+                }
+            )
+        if not latest_run:
+            alertas_operativas.append(
+                {
+                    "nivel": "warning",
+                    "titulo": "Sync de almacén no ejecutado",
+                    "detalle": "No hay corridas de sincronización registradas.",
+                }
+            )
+        elif latest_run.started_at and latest_run.started_at < stale_limit:
+            alertas_operativas.append(
+                {
+                    "nivel": "warning",
+                    "titulo": "Sync de almacén desactualizado",
+                    "detalle": f"Último sync: {latest_run.started_at:%Y-%m-%d %H:%M}.",
+                }
+            )
+        if not alertas_operativas:
+            alertas_operativas.append(
+                {
+                    "nivel": "ok",
+                    "titulo": "Operación estable",
+                    "detalle": "Sin alertas críticas en integración, match y sincronización.",
+                }
+            )
 
         return Response(
             {
                 "generated_at": timezone.now(),
+                "api_24h": {
+                    "requests": requests_24h,
+                    "errors": errors_24h,
+                    "errors_by_endpoint": errors_by_endpoint_24h,
+                    "errors_by_client": errors_by_client_24h,
+                },
+                "alertas_operativas": alertas_operativas,
                 "insumos": {
                     "activos": insumos_activos,
                     "con_codigo_point": insumos_con_codigo,

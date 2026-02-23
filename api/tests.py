@@ -12,6 +12,7 @@ from rest_framework.authtoken.models import Token
 
 from core.models import AuditLog, Sucursal
 from compras.models import OrdenCompra, PresupuestoCompraPeriodo, RecepcionCompra, SolicitudCompra
+from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 from recetas.models import (
@@ -718,6 +719,13 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(row["nombre_normalizado"], "harina pastelera premium")
 
     def test_endpoint_integraciones_point_resumen(self):
+        api_client, _raw = PublicApiClient.create_with_generated_key(nombre="API Integraciones Test", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=api_client,
+            endpoint="/api/public/v1/insumos/",
+            method="GET",
+            status_code=500,
+        )
         self.insumo.codigo_point = "PT-INS-01"
         self.insumo.save(update_fields=["codigo_point"])
         receta_homologada = Receta.objects.create(
@@ -781,10 +789,16 @@ class RecetasCosteoApiTests(TestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
+        self.assertIn("api_24h", payload)
+        self.assertIn("alertas_operativas", payload)
         self.assertIn("insumos", payload)
         self.assertIn("recetas", payload)
         self.assertIn("point_pending", payload)
         self.assertIn("inventario", payload)
+        self.assertGreaterEqual(payload["api_24h"]["requests"], 1)
+        self.assertGreaterEqual(payload["api_24h"]["errors"], 1)
+        self.assertGreaterEqual(len(payload["api_24h"]["errors_by_endpoint"]), 1)
+        self.assertGreaterEqual(len(payload["alertas_operativas"]), 1)
         self.assertGreaterEqual(payload["insumos"]["con_codigo_point"], 1)
         self.assertGreaterEqual(payload["recetas"]["homologadas"], 2)
         self.assertGreaterEqual(payload["point_pending"]["total"], 3)
