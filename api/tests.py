@@ -2884,6 +2884,65 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("confianza", resp.json()["detail"].lower())
 
+    def test_endpoint_ventas_solicitud_aplicar_forecast_export_csv_y_xlsx(self):
+        sucursal = Sucursal.objects.create(codigo="EXPAF", nombre="Sucursal Export AF", activa=True)
+        for month_idx, qty in [(10, "30"), (11, "36"), (12, "40"), (1, "44"), (2, "48")]:
+            year = 2025 if month_idx >= 10 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("100"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_solicitud_aplicar_forecast")
+        payload = {
+            "alcance": "mes",
+            "periodo": "2026-03",
+            "sucursal_id": sucursal.id,
+            "incluir_preparaciones": True,
+            "modo": "receta",
+            "receta_id": self.receta.id,
+            "escenario": "alto",
+        }
+
+        resp_csv = self.client.post(f"{url}?export=csv", payload, content_type="application/json")
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("AJUSTES", body_csv)
+        self.assertIn("COMPARE_SOLICITUD", body_csv)
+        self.assertIn("receta_id,receta,anterior,nueva,variacion_pct,accion,status_before", body_csv)
+
+        resp_xlsx = self.client.post(f"{url}?export=xlsx", payload, content_type="application/json")
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_solicitud_aplicar_forecast_export_invalido(self):
+        url = reverse("api_ventas_solicitud_aplicar_forecast")
+        resp = self.client.post(
+            f"{url}?export=pdf",
+            {"alcance": "mes", "periodo": "2026-03"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_historial_bulk_dry_run_y_apply(self):
         sucursal = Sucursal.objects.create(codigo="CENTRO", nombre="Sucursal Centro", activa=True)
         url = reverse("api_ventas_historial_bulk")

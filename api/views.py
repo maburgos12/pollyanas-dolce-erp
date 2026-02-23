@@ -1429,6 +1429,186 @@ def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: 
     return response
 
 
+def _ventas_solicitud_aplicar_forecast_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
+    scope = payload.get("scope") or {}
+    updated = payload.get("updated") or {}
+    adjusted_rows = payload.get("adjusted_rows") or []
+    compare = payload.get("compare_solicitud") or {}
+    compare_totals = compare.get("totals") or {}
+    compare_rows = compare.get("rows") or []
+    periodo = str(scope.get("periodo") or _normalize_periodo_mes(None)).replace("-", "")
+    sucursal_id = int(scope.get("sucursal_id") or 0)
+    filename = f"ventas_solicitud_aplicar_forecast_{periodo}_{sucursal_id}.{export_format}"
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Alcance", scope.get("alcance") or ""])
+        ws_resumen.append(["Periodo", scope.get("periodo") or ""])
+        ws_resumen.append(["Inicio", scope.get("target_start") or ""])
+        ws_resumen.append(["Fin", scope.get("target_end") or ""])
+        ws_resumen.append(["Sucursal ID", sucursal_id if sucursal_id > 0 else None])
+        ws_resumen.append(["Sucursal", scope.get("sucursal_nombre") or ""])
+        ws_resumen.append(["Modo", scope.get("modo") or ""])
+        ws_resumen.append(["Escenario", scope.get("escenario") or "base"])
+        ws_resumen.append(["Confianza minima %", float(scope.get("min_confianza_pct") or 0)])
+        ws_resumen.append(["Dry run", "SI" if updated.get("dry_run") else "NO"])
+        ws_resumen.append(["Created", int(updated.get("created") or 0)])
+        ws_resumen.append(["Updated", int(updated.get("updated") or 0)])
+        ws_resumen.append(["Skipped", int(updated.get("skipped") or 0)])
+        ws_resumen.append(["Skipped cap", int(updated.get("skipped_cap") or 0)])
+        ws_resumen.append(["Applied", int(updated.get("applied") or 0)])
+        ws_resumen.append(["Compare forecast total", float(compare_totals.get("forecast_total") or 0)])
+        ws_resumen.append(["Compare solicitud total", float(compare_totals.get("solicitud_total") or 0)])
+        ws_resumen.append(["Compare delta total", float(compare_totals.get("delta_total") or 0)])
+        ws_resumen.append(["Compare en rango", int(compare_totals.get("en_rango_count") or 0)])
+        ws_resumen.append(["Compare sobre rango", int(compare_totals.get("sobre_rango_count") or 0)])
+        ws_resumen.append(["Compare bajo rango", int(compare_totals.get("bajo_rango_count") or 0)])
+
+        ws_ajustes = wb.create_sheet("Ajustes")
+        ws_ajustes.append(
+            [
+                "Receta ID",
+                "Receta",
+                "Cantidad anterior",
+                "Cantidad nueva",
+                "Variacion %",
+                "Accion",
+                "Status previo",
+            ]
+        )
+        for row in adjusted_rows:
+            ws_ajustes.append(
+                [
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    float(row.get("anterior") or 0),
+                    float(row.get("nueva") or 0),
+                    float(row.get("variacion_pct")) if row.get("variacion_pct") is not None else None,
+                    row.get("accion") or "",
+                    row.get("status_before") or "",
+                ]
+            )
+
+        ws_compare = wb.create_sheet("Compare")
+        ws_compare.append(
+            [
+                "Receta ID",
+                "Receta",
+                "Forecast",
+                "Forecast base",
+                "Forecast bajo",
+                "Forecast alto",
+                "Solicitud",
+                "Delta",
+                "Variacion %",
+                "Status",
+                "Status rango",
+            ]
+        )
+        for row in compare_rows:
+            ws_compare.append(
+                [
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    float(row.get("forecast_qty") or 0),
+                    float(row.get("forecast_base") or 0),
+                    float(row.get("forecast_low") or 0),
+                    float(row.get("forecast_high") or 0),
+                    float(row.get("solicitud_qty") or 0),
+                    float(row.get("delta_qty") or 0),
+                    float(row.get("variacion_pct")) if row.get("variacion_pct") is not None else None,
+                    row.get("status") or "",
+                    row.get("status_rango") or "",
+                ]
+            )
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Alcance", scope.get("alcance") or ""])
+    writer.writerow(["Periodo", scope.get("periodo") or ""])
+    writer.writerow(["Inicio", scope.get("target_start") or ""])
+    writer.writerow(["Fin", scope.get("target_end") or ""])
+    writer.writerow(["Sucursal ID", sucursal_id if sucursal_id > 0 else ""])
+    writer.writerow(["Sucursal", scope.get("sucursal_nombre") or ""])
+    writer.writerow(["Modo", scope.get("modo") or ""])
+    writer.writerow(["Escenario", scope.get("escenario") or "base"])
+    writer.writerow(["Confianza minima %", f"{Decimal(str(scope.get('min_confianza_pct') or 0)):.1f}"])
+    writer.writerow(["Dry run", "SI" if updated.get("dry_run") else "NO"])
+    writer.writerow(["Created", int(updated.get("created") or 0)])
+    writer.writerow(["Updated", int(updated.get("updated") or 0)])
+    writer.writerow(["Skipped", int(updated.get("skipped") or 0)])
+    writer.writerow(["Skipped cap", int(updated.get("skipped_cap") or 0)])
+    writer.writerow(["Applied", int(updated.get("applied") or 0)])
+    writer.writerow(["Compare forecast total", f"{Decimal(str(compare_totals.get('forecast_total') or 0)):.3f}"])
+    writer.writerow(["Compare solicitud total", f"{Decimal(str(compare_totals.get('solicitud_total') or 0)):.3f}"])
+    writer.writerow(["Compare delta total", f"{Decimal(str(compare_totals.get('delta_total') or 0)):.3f}"])
+    writer.writerow(["Compare en rango", int(compare_totals.get("en_rango_count") or 0)])
+    writer.writerow(["Compare sobre rango", int(compare_totals.get("sobre_rango_count") or 0)])
+    writer.writerow(["Compare bajo rango", int(compare_totals.get("bajo_rango_count") or 0)])
+    writer.writerow([])
+    writer.writerow(["AJUSTES"])
+    writer.writerow(["receta_id", "receta", "anterior", "nueva", "variacion_pct", "accion", "status_before"])
+    for row in adjusted_rows:
+        writer.writerow(
+            [
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                f"{Decimal(str(row.get('anterior') or 0)):.3f}",
+                f"{Decimal(str(row.get('nueva') or 0)):.3f}",
+                f"{Decimal(str(row.get('variacion_pct'))):.1f}" if row.get("variacion_pct") is not None else "",
+                row.get("accion") or "",
+                row.get("status_before") or "",
+            ]
+        )
+    writer.writerow([])
+    writer.writerow(["COMPARE_SOLICITUD"])
+    writer.writerow(
+        [
+            "receta_id",
+            "receta",
+            "forecast",
+            "forecast_base",
+            "forecast_bajo",
+            "forecast_alto",
+            "solicitud",
+            "delta",
+            "variacion_pct",
+            "status",
+            "status_rango",
+        ]
+    )
+    for row in compare_rows:
+        writer.writerow(
+            [
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                f"{Decimal(str(row.get('forecast_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('forecast_base') or 0)):.3f}",
+                f"{Decimal(str(row.get('forecast_low') or 0)):.3f}",
+                f"{Decimal(str(row.get('forecast_high') or 0)):.3f}",
+                f"{Decimal(str(row.get('solicitud_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('delta_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('variacion_pct'))):.1f}" if row.get("variacion_pct") is not None else "",
+                row.get("status") or "",
+                row.get("status_rango") or "",
+            ]
+        )
+    return response
+
+
 def _resolve_receta_bulk_ref(
     *,
     receta_id: int | None,
@@ -7002,6 +7182,12 @@ class SolicitudVentaAplicarForecastView(APIView):
                 {"detail": "No tienes permisos para ajustar solicitudes de ventas."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format and export_format not in {"csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         ser = SolicitudVentaAplicarForecastSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -7150,29 +7336,29 @@ class SolicitudVentaAplicarForecastView(APIView):
                 )
 
         compare_payload = _serialize_forecast_compare(compare_raw, top=top)
-        return Response(
-            {
-                "scope": {
-                    "alcance": alcance,
-                    "periodo": result_periodo,
-                    "target_start": str(target_start),
-                    "target_end": str(target_end),
-                    "sucursal_id": sucursal.id,
-                    "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}",
-                    "modo": modo,
-                    "escenario": escenario,
-                    "min_confianza_pct": _to_float(min_confianza_pct),
-                },
-                "updated": {
-                    "dry_run": dry_run,
-                    "created": created,
-                    "updated": updated,
-                    "skipped": skipped,
-                    "skipped_cap": skipped_cap,
-                    "applied": applied,
-                },
-                "adjusted_rows": adjusted_rows[:top],
-                "compare_solicitud": compare_payload,
+        response_payload = {
+            "scope": {
+                "alcance": alcance,
+                "periodo": result_periodo,
+                "target_start": str(target_start),
+                "target_end": str(target_end),
+                "sucursal_id": sucursal.id,
+                "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}",
+                "modo": modo,
+                "escenario": escenario,
+                "min_confianza_pct": _to_float(min_confianza_pct),
             },
-            status=status.HTTP_200_OK,
-        )
+            "updated": {
+                "dry_run": dry_run,
+                "created": created,
+                "updated": updated,
+                "skipped": skipped,
+                "skipped_cap": skipped_cap,
+                "applied": applied,
+            },
+            "adjusted_rows": adjusted_rows[:top],
+            "compare_solicitud": compare_payload,
+        }
+        if export_format:
+            return _ventas_solicitud_aplicar_forecast_export_response(response_payload, export_format)
+        return Response(response_payload, status=status.HTTP_200_OK)

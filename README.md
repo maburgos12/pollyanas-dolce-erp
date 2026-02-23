@@ -34,7 +34,7 @@ Sprint 1 entrega:
 - API: POST /api/ventas/solicitud/bulk/ (carga masiva de solicitudes de ventas con dry_run)
 - API: POST /api/ventas/solicitud/import-preview/ (previsualiza carga de solicitudes de venta sin aplicar cambios)
 - API: POST /api/ventas/solicitud/import-confirm/ (confirma y aplica carga de solicitudes de venta)
-- API: POST /api/ventas/solicitud/aplicar-forecast/ (ajuste automático desde escenario `base/bajo/alto`, con `dry_run`, tope opcional `max_variacion_pct` y filtro opcional `min_confianza_pct`)
+- API: POST /api/ventas/solicitud/aplicar-forecast/ (ajuste automático desde escenario `base/bajo/alto`, con `dry_run`, tope opcional `max_variacion_pct`, filtro opcional `min_confianza_pct` y soporte `?export=csv|xlsx`)
 - API: GET/POST /api/inventario/ajustes/ (consulta y alta de ajustes en pendiente / aplicado)
 - API: POST /api/inventario/ajustes/{id}/decision/ (aprobar/aplicar/rechazar ajuste)
 - API: GET/POST /api/inventario/aliases/ (catálogo de alias y alta/actualización)
