@@ -1528,6 +1528,8 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["filters"]["sort_by"], "creado_en")
+        self.assertEqual(payload["filters"]["sort_dir"], "desc")
         self.assertEqual(payload["totales"]["rows_total"], 3)
         self.assertEqual(payload["totales"]["rows_returned"], 1)
         self.assertEqual(payload["totales"]["rows"], 1)
@@ -1535,6 +1537,45 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["totales"]["by_status"][SolicitudCompra.STATUS_APROBADA], 1)
         self.assertEqual(Decimal(payload["totales"]["presupuesto_estimado_total_filtered"]), Decimal("60.00"))
         self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_compras_solicitudes_list_sort_by_cantidad(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor lista solicitudes sort", activo=True)
+        SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="uno",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("5"),
+            fecha_requerida=date(2026, 2, 10),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="dos",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("2"),
+            fecha_requerida=date(2026, 2, 11),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        resp = self.client.get(
+            reverse("api_compras_solicitudes"),
+            {"mes": "2026-02", "sort_by": "cantidad", "sort_dir": "asc", "limit": 2},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["sort_by"], "cantidad")
+        self.assertEqual(payload["filters"]["sort_dir"], "asc")
+        self.assertEqual(payload["items"][0]["cantidad"], "2.000")
+        self.assertEqual(payload["items"][1]["cantidad"], "5.000")
+
+    def test_endpoint_compras_solicitudes_list_sort_invalido(self):
+        resp = self.client.get(reverse("api_compras_solicitudes"), {"sort_by": "ruido"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("sort_by", resp.json()["detail"].lower())
+        resp_dir = self.client.get(reverse("api_compras_solicitudes"), {"sort_dir": "up"})
+        self.assertEqual(resp_dir.status_code, 400)
+        self.assertIn("sort_dir", resp_dir.json()["detail"].lower())
 
     def test_endpoint_compras_ordenes_list_filters_and_totals(self):
         proveedor_a = Proveedor.objects.create(nombre="Proveedor orden A", activo=True)
@@ -1651,6 +1692,8 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["filters"]["sort_by"], "creado_en")
+        self.assertEqual(payload["filters"]["sort_dir"], "desc")
         self.assertEqual(payload["totales"]["rows_total"], 3)
         self.assertEqual(payload["totales"]["rows_returned"], 1)
         self.assertEqual(payload["totales"]["rows"], 1)
@@ -1658,6 +1701,57 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["totales"]["by_status"][OrdenCompra.STATUS_ENVIADA], 1)
         self.assertEqual(Decimal(payload["totales"]["monto_estimado_total_filtered"]), Decimal("230.00"))
         self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_compras_ordenes_list_sort_by_monto(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor orden sort", activo=True)
+        solicitud_a = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("1"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        solicitud_b = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("1"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        OrdenCompra.objects.create(
+            solicitud=solicitud_a,
+            proveedor=proveedor,
+            fecha_emision=date(2026, 2, 12),
+            monto_estimado=Decimal("90"),
+            estatus=OrdenCompra.STATUS_BORRADOR,
+        )
+        OrdenCompra.objects.create(
+            solicitud=solicitud_b,
+            proveedor=proveedor,
+            fecha_emision=date(2026, 2, 13),
+            monto_estimado=Decimal("120"),
+            estatus=OrdenCompra.STATUS_BORRADOR,
+        )
+        resp = self.client.get(
+            reverse("api_compras_ordenes"),
+            {"mes": "2026-02", "sort_by": "monto_estimado", "sort_dir": "asc", "limit": 2},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["sort_by"], "monto_estimado")
+        self.assertEqual(payload["filters"]["sort_dir"], "asc")
+        self.assertEqual(payload["items"][0]["monto_estimado"], "90.00")
+        self.assertEqual(payload["items"][1]["monto_estimado"], "120.00")
+
+    def test_endpoint_compras_ordenes_list_sort_invalido(self):
+        resp = self.client.get(reverse("api_compras_ordenes"), {"sort_by": "ruido"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("sort_by", resp.json()["detail"].lower())
+        resp_dir = self.client.get(reverse("api_compras_ordenes"), {"sort_dir": "up"})
+        self.assertEqual(resp_dir.status_code, 400)
+        self.assertIn("sort_dir", resp_dir.json()["detail"].lower())
 
     def test_endpoint_compras_recepciones_list_filters(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor recepciones list", activo=True)
@@ -1745,12 +1839,63 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["filters"]["sort_by"], "creado_en")
+        self.assertEqual(payload["filters"]["sort_dir"], "desc")
         self.assertEqual(payload["totales"]["rows_total"], 3)
         self.assertEqual(payload["totales"]["rows_returned"], 1)
         self.assertEqual(payload["totales"]["rows"], 1)
         self.assertEqual(payload["totales"]["by_status"][RecepcionCompra.STATUS_CERRADA], 2)
         self.assertEqual(payload["totales"]["by_status"][RecepcionCompra.STATUS_PENDIENTE], 1)
         self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_compras_recepciones_list_sort_by_fecha(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor recepciones sort", activo=True)
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=self.insumo,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            referencia="REC-SORT",
+            fecha_emision=date(2026, 2, 11),
+            monto_estimado=Decimal("55"),
+            estatus=OrdenCompra.STATUS_PARCIAL,
+        )
+        RecepcionCompra.objects.create(
+            orden=orden,
+            fecha_recepcion=date(2026, 2, 22),
+            estatus=RecepcionCompra.STATUS_CERRADA,
+            observaciones="R22",
+        )
+        RecepcionCompra.objects.create(
+            orden=orden,
+            fecha_recepcion=date(2026, 2, 20),
+            estatus=RecepcionCompra.STATUS_PENDIENTE,
+            observaciones="R20",
+        )
+        resp = self.client.get(
+            reverse("api_compras_recepciones"),
+            {"mes": "2026-02", "sort_by": "fecha_recepcion", "sort_dir": "asc", "limit": 2},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["sort_by"], "fecha_recepcion")
+        self.assertEqual(payload["filters"]["sort_dir"], "asc")
+        self.assertEqual(payload["items"][0]["fecha_recepcion"], "2026-02-20")
+        self.assertEqual(payload["items"][1]["fecha_recepcion"], "2026-02-22")
+
+    def test_endpoint_compras_recepciones_list_sort_invalido(self):
+        resp = self.client.get(reverse("api_compras_recepciones"), {"sort_by": "ruido"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("sort_by", resp.json()["detail"].lower())
+        resp_dir = self.client.get(reverse("api_compras_recepciones"), {"sort_dir": "up"})
+        self.assertEqual(resp_dir.status_code, 400)
+        self.assertIn("sort_dir", resp_dir.json()["detail"].lower())
 
     def test_endpoint_compras_listados_requiere_permiso_view(self):
         user_model = get_user_model()

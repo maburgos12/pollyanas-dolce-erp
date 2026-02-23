@@ -4052,6 +4052,34 @@ class ComprasSolicitudesListView(APIView):
         periodo = (request.GET.get("mes") or request.GET.get("periodo") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=500)
         offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
+        sort_by = (request.GET.get("sort_by") or "creado_en").strip().lower()
+        sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
+        allowed_sort = {
+            "creado_en": "creado_en",
+            "folio": "folio",
+            "fecha_requerida": "fecha_requerida",
+            "cantidad": "cantidad",
+            "estatus": "estatus",
+            "area": "area",
+            "solicitante": "solicitante",
+            "insumo": "insumo__nombre",
+            "proveedor": "proveedor_sugerido__nombre",
+        }
+        if sort_by not in allowed_sort:
+            return Response(
+                {
+                    "detail": (
+                        "sort_by inválido. Usa creado_en, folio, fecha_requerida, cantidad, estatus, "
+                        "area, solicitante, insumo o proveedor."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_dir inválido. Usa asc o desc."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         qs = (
             SolicitudCompra.objects.select_related("insumo", "insumo__unidad_base", "proveedor_sugerido")
@@ -4079,6 +4107,9 @@ class ComprasSolicitudesListView(APIView):
                 | Q(insumo__nombre__icontains=q)
                 | Q(proveedor_sugerido__nombre__icontains=q)
             )
+        sort_field = allowed_sort[sort_by]
+        order_expr = sort_field if sort_dir == "asc" else f"-{sort_field}"
+        qs = qs.order_by(order_expr, "-id")
 
         rows_total = qs.count()
         by_status = {k: 0 for k in valid_status}
@@ -4138,6 +4169,8 @@ class ComprasSolicitudesListView(APIView):
                     "periodo": periodo,
                     "limit": limit,
                     "offset": offset,
+                    "sort_by": sort_by,
+                    "sort_dir": sort_dir,
                 },
                 "totales": {
                     "rows": len(items),
@@ -4169,6 +4202,33 @@ class ComprasOrdenesListView(APIView):
         proveedor_id_raw = (request.GET.get("proveedor_id") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=500)
         offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
+        sort_by = (request.GET.get("sort_by") or "creado_en").strip().lower()
+        sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
+        allowed_sort = {
+            "creado_en": "creado_en",
+            "folio": "folio",
+            "fecha_emision": "fecha_emision",
+            "fecha_entrega_estimada": "fecha_entrega_estimada",
+            "monto_estimado": "monto_estimado",
+            "estatus": "estatus",
+            "proveedor": "proveedor__nombre",
+            "referencia": "referencia",
+        }
+        if sort_by not in allowed_sort:
+            return Response(
+                {
+                    "detail": (
+                        "sort_by inválido. Usa creado_en, folio, fecha_emision, fecha_entrega_estimada, "
+                        "monto_estimado, estatus, proveedor o referencia."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_dir inválido. Usa asc o desc."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         qs = OrdenCompra.objects.select_related("proveedor", "solicitud", "solicitud__insumo").order_by("-creado_en")
         valid_status = {choice[0] for choice in OrdenCompra.STATUS_CHOICES}
@@ -4197,6 +4257,9 @@ class ComprasOrdenesListView(APIView):
                 | Q(proveedor__nombre__icontains=q)
                 | Q(solicitud__folio__icontains=q)
             )
+        sort_field = allowed_sort[sort_by]
+        order_expr = sort_field if sort_dir == "asc" else f"-{sort_field}"
+        qs = qs.order_by(order_expr, "-id")
 
         rows_total = qs.count()
         monto_total_filtered = _to_decimal(qs.aggregate(total=Sum("monto_estimado"))["total"])
@@ -4243,6 +4306,8 @@ class ComprasOrdenesListView(APIView):
                     "proveedor_id": proveedor_id_raw,
                     "limit": limit,
                     "offset": offset,
+                    "sort_by": sort_by,
+                    "sort_dir": sort_dir,
                 },
                 "totales": {
                     "rows": len(items),
@@ -4274,6 +4339,32 @@ class ComprasRecepcionesListView(APIView):
         proveedor_id_raw = (request.GET.get("proveedor_id") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=500)
         offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
+        sort_by = (request.GET.get("sort_by") or "creado_en").strip().lower()
+        sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
+        allowed_sort = {
+            "creado_en": "creado_en",
+            "folio": "folio",
+            "fecha_recepcion": "fecha_recepcion",
+            "conformidad_pct": "conformidad_pct",
+            "estatus": "estatus",
+            "proveedor": "orden__proveedor__nombre",
+            "orden_folio": "orden__folio",
+        }
+        if sort_by not in allowed_sort:
+            return Response(
+                {
+                    "detail": (
+                        "sort_by inválido. Usa creado_en, folio, fecha_recepcion, conformidad_pct, "
+                        "estatus, proveedor u orden_folio."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_dir inválido. Usa asc o desc."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         qs = RecepcionCompra.objects.select_related("orden", "orden__proveedor").order_by("-creado_en")
         valid_status = {choice[0] for choice in RecepcionCompra.STATUS_CHOICES}
@@ -4302,6 +4393,9 @@ class ComprasRecepcionesListView(APIView):
                 | Q(orden__proveedor__nombre__icontains=q)
                 | Q(observaciones__icontains=q)
             )
+        sort_field = allowed_sort[sort_by]
+        order_expr = sort_field if sort_dir == "asc" else f"-{sort_field}"
+        qs = qs.order_by(order_expr, "-id")
 
         rows_total = qs.count()
         by_status = {k: 0 for k in valid_status}
@@ -4343,6 +4437,8 @@ class ComprasRecepcionesListView(APIView):
                     "proveedor_id": proveedor_id_raw,
                     "limit": limit,
                     "offset": offset,
+                    "sort_by": sort_by,
+                    "sort_dir": sort_dir,
                 },
                 "totales": {
                     "rows": len(items),
