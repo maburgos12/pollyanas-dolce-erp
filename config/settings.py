@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "compras",
     "inventario",
     "activos",
+    "control",
     "reportes",
     "api",
 ]

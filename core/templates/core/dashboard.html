@@ -250,6 +250,7 @@
             {% endif %}
             {% if can_view_reportes %}
                 <a href="{% url 'reportes:costo_receta' %}" class="btn btn-secondary">📈 Reportes ejecutivos</a>
+                <a href="{% url 'control:discrepancias' %}" class="btn btn-secondary">🧭 Control discrepancias</a>
             {% endif %}
             {% if can_view_recetas %}
                 <a href="{% url 'recetas:recetas_list' %}" class="btn btn-secondary">🧁 Recetas y costeo</a>

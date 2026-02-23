@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Control · Discrepancias{% endblock %}
+{% block page_title %}Control · Discrepancias{% endblock %}
+
+{% block content %}
+<div class="module-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+<section class="card">
+  <div class="card-header">Filtro de corte</div>
+  <form method="get">
+    <div class="grid-filters" style="display:grid;grid-template-columns:1.1fr 1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;">
+      <div>
+        <label>Periodo (YYYY-MM)</label>
+        <input type="text" name="periodo" placeholder="2026-02" value="{{ periodo }}">
+      </div>
+      <div>
+        <label>Desde</label>
+        <input type="date" name="from" value="{{ date_from|date:'Y-m-d' }}">
+      </div>
+      <div>
+        <label>Hasta</label>
+        <input type="date" name="to" value="{{ date_to|date:'Y-m-d' }}">
+      </div>
+      <div>
+        <label>Sucursal</label>
+        <select name="sucursal_id">
+          <option value="">Todas</option>
+          {% for s in sucursales %}
+          <option value="{{ s.id }}" {% if sucursal_id == s.id %}selected{% endif %}>{{ s.codigo }} - {{ s.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Umbral alerta (%)</label>
+        <input type="number" step="0.1" min="0" name="threshold_pct" value="{{ threshold_pct }}">
+      </div>
+      <div>
+        <button type="submit" class="btn btn-primary">Aplicar</button>
+      </div>
+    </div>
+  </form>
+</section>
+
+<div class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-number">{{ report.totals.insumos }}</div>
+    <div class="kpi-label">Insumos evaluados</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-danger">{{ report.totals.alertas }}</div>
+    <div class="kpi-label">Alertas</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ report.totals.observar }}</div>
+    <div class="kpi-label">Observar</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-success">{{ report.totals.ok }}</div>
+    <div class="kpi-label">OK</div>
+  </article>
+</div>
+
+<section class="card">
+  <div class="card-header">Semáforo global: {{ report.semaforo_global }}</div>
+  <div class="muted" style="margin-bottom:12px;">
+    Producción equivalente: {{ report.totals.produccion|floatformat:2 }} · Ventas POS equivalente: {{ report.totals.ventas_pos|floatformat:2 }} · Mermas POS equivalente: {{ report.totals.mermas_pos|floatformat:2 }}
+  </div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Insumo</th>
+          <th>Unidad</th>
+          <th>Producción</th>
+          <th>Ventas POS</th>
+          <th>Mermas POS</th>
+          <th>Teórico</th>
+          <th>Real</th>
+          <th>Discrepancia</th>
+          <th>% variación</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in report.rows %}
+        <tr>
+          <td>{{ row.insumo }}</td>
+          <td>{{ row.unidad|default:'-' }}</td>
+          <td>{{ row.produccion|floatformat:2 }}</td>
+          <td>{{ row.ventas_pos|floatformat:2 }}</td>
+          <td>{{ row.mermas_pos|floatformat:2 }}</td>
+          <td>{{ row.inventario_teorico|floatformat:2 }}</td>
+          <td>{{ row.inventario_real|floatformat:2 }}</td>
+          <td>{{ row.discrepancia|floatformat:2 }}</td>
+          <td>{{ row.variacion_pct|floatformat:1 }}%</td>
+          <td>
+            {% if row.semaforo == 'ROJO' %}
+              <span class="badge badge-danger">ALERTA</span>
+            {% elif row.semaforo == 'AMARILLO' %}
+              <span class="badge badge-warning">OBSERVAR</span>
+            {% else %}
+              <span class="badge badge-success">OK</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="10" class="text-muted">Sin datos para el rango seleccionado.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

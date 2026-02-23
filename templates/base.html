@@ -106,6 +106,14 @@
                             <span>Reportes</span>
                         </a>
                     </li>
+                    <li>
+                        <a href="{% url 'control:discrepancias' %}" class="{% if '/control/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20V9"/><path d="M12 20V4"/><path d="M17 20v-7"/><path d="m6 11 5-5 6 3"/></svg>
+                            </span>
+                            <span>Control</span>
+                        </a>
+                    </li>
                     {% endif %}
                     {% if ui_access.can_view_audit %}
                     <li>

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from activos.models import OrdenMantenimiento
+from control.models import MermaPOS, VentaPOS
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from inventario.models import AjusteInventario
 from recetas.models import SolicitudVenta
@@ -376,6 +377,77 @@ class ActivosOrdenCreateSerializer(serializers.Serializer):
 
 class ActivosOrdenStatusSerializer(serializers.Serializer):
     estatus = serializers.ChoiceField(choices=[choice[0] for choice in OrdenMantenimiento.ESTATUS_CHOICES])
+
+
+class ControlVentaPosRowSerializer(serializers.Serializer):
+    receta_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    receta = serializers.CharField(required=False, allow_blank=True, default="")
+    codigo_point = serializers.CharField(required=False, allow_blank=True, default="")
+    producto = serializers.CharField(required=False, allow_blank=True, default="")
+    sucursal_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    sucursal = serializers.CharField(required=False, allow_blank=True, default="")
+    sucursal_codigo = serializers.CharField(required=False, allow_blank=True, default="")
+    fecha = serializers.DateField()
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=3)
+    tickets = serializers.IntegerField(required=False, min_value=0, default=0)
+    monto_total = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, allow_null=True)
+
+    def validate_cantidad(self, value):
+        if value < 0:
+            raise serializers.ValidationError("La cantidad no puede ser negativa.")
+        return value
+
+
+class ControlMermaPosRowSerializer(serializers.Serializer):
+    receta_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    receta = serializers.CharField(required=False, allow_blank=True, default="")
+    codigo_point = serializers.CharField(required=False, allow_blank=True, default="")
+    producto = serializers.CharField(required=False, allow_blank=True, default="")
+    sucursal_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    sucursal = serializers.CharField(required=False, allow_blank=True, default="")
+    sucursal_codigo = serializers.CharField(required=False, allow_blank=True, default="")
+    fecha = serializers.DateField()
+    cantidad = serializers.DecimalField(max_digits=18, decimal_places=3)
+    motivo = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_cantidad(self, value):
+        if value < 0:
+            raise serializers.ValidationError("La cantidad no puede ser negativa.")
+        return value
+
+
+class ControlVentaPosBulkSerializer(serializers.Serializer):
+    rows = ControlVentaPosRowSerializer(many=True)
+    modo = serializers.ChoiceField(choices=["replace", "accumulate"], required=False, default="replace")
+    fuente = serializers.CharField(max_length=40, required=False, allow_blank=True, default="API_POS_VENTAS")
+    dry_run = serializers.BooleanField(required=False, default=True)
+    stop_on_error = serializers.BooleanField(required=False, default=False)
+    top = serializers.IntegerField(required=False, min_value=1, max_value=1000, default=120)
+    sucursal_default_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+
+    def validate_rows(self, value):
+        if not value:
+            raise serializers.ValidationError("Debes enviar al menos una fila.")
+        if len(value) > 10000:
+            raise serializers.ValidationError("Máximo 10000 filas por request.")
+        return value
+
+
+class ControlMermaPosBulkSerializer(serializers.Serializer):
+    rows = ControlMermaPosRowSerializer(many=True)
+    modo = serializers.ChoiceField(choices=["replace", "accumulate"], required=False, default="replace")
+    fuente = serializers.CharField(max_length=40, required=False, allow_blank=True, default="API_POS_MERMAS")
+    dry_run = serializers.BooleanField(required=False, default=True)
+    stop_on_error = serializers.BooleanField(required=False, default=False)
+    top = serializers.IntegerField(required=False, min_value=1, max_value=1000, default=120)
+    sucursal_default_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+
+    def validate_rows(self, value):
+        if not value:
+            raise serializers.ValidationError("Debes enviar al menos una fila.")
+        if len(value) > 10000:
+            raise serializers.ValidationError("Máximo 10000 filas por request.")
+        return value
 
 
 class ComprasSolicitudImportPreviewRowSerializer(serializers.Serializer):

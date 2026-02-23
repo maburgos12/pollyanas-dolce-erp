@@ -19,6 +19,8 @@ from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
+from control.models import MermaPOS, VentaPOS
+from control.services import build_discrepancias_report, resolve_period_range
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from core.access import (
     ROLE_ADMIN,
@@ -30,6 +32,7 @@ from core.access import (
     can_view_compras,
     can_view_inventario,
     can_view_maestros,
+    can_view_reportes,
     has_any_role,
 )
 from core.audit import log_event
@@ -94,6 +97,8 @@ from .serializers import (
     ComprasRecepcionStatusSerializer,
     ComprasSolicitudCreateSerializer,
     ComprasSolicitudStatusSerializer,
+    ControlMermaPosBulkSerializer,
+    ControlVentaPosBulkSerializer,
     ActivosOrdenCreateSerializer,
     ActivosOrdenStatusSerializer,
     ForecastBacktestRequestSerializer,
@@ -8539,3 +8544,489 @@ class ActivosOrdenStatusUpdateView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+def _resolve_recipe_for_pos_row(*, row: dict[str, Any], receta_cache: dict[tuple[int, str, str], Receta | None]) -> Receta | None:
+    receta_id = row.get("receta_id")
+    receta_name = str(row.get("receta") or row.get("producto") or "").strip()
+    codigo_point = str(row.get("codigo_point") or "").strip()
+    return _resolve_receta_bulk_ref(
+        receta_id=receta_id,
+        receta_name=receta_name,
+        codigo_point=codigo_point,
+        cache=receta_cache,
+    )
+
+
+def _resolve_sucursal_for_pos_row(
+    *,
+    row: dict[str, Any],
+    default_sucursal: Sucursal | None,
+    sucursal_cache: dict[tuple[int, str, str, int], Sucursal | None],
+) -> Sucursal | None:
+    return _resolve_sucursal_bulk_ref(
+        sucursal_id=row.get("sucursal_id"),
+        sucursal_name=str(row.get("sucursal") or "").strip(),
+        sucursal_codigo=str(row.get("sucursal_codigo") or "").strip(),
+        default_sucursal=default_sucursal,
+        cache=sucursal_cache,
+    )
+
+
+def _process_control_venta_pos_bulk(
+    data: dict[str, Any],
+    *,
+    dry_run_override: bool | None = None,
+) -> dict[str, Any]:
+    rows = data["rows"]
+    modo = data.get("modo") or "replace"
+    fuente = (data.get("fuente") or "API_POS_VENTAS").strip()[:40] or "API_POS_VENTAS"
+    dry_run = bool(data.get("dry_run", True) if dry_run_override is None else dry_run_override)
+    stop_on_error = bool(data.get("stop_on_error", False))
+    top = int(data.get("top") or 120)
+
+    default_sucursal = None
+    default_sucursal_id = data.get("sucursal_default_id")
+    if default_sucursal_id is not None:
+        default_sucursal = Sucursal.objects.filter(pk=default_sucursal_id, activa=True).first()
+        if default_sucursal is None:
+            raise ValueError("Sucursal default no encontrada o inactiva.")
+
+    receta_cache: dict[tuple[int, str, str], Receta | None] = {}
+    sucursal_cache: dict[tuple[int, str, str, int], Sucursal | None] = {}
+    created = 0
+    updated = 0
+    skipped = 0
+    terminated_early = False
+    result_rows: list[dict[str, Any]] = []
+
+    tx_cm = nullcontext() if dry_run else transaction.atomic()
+    with tx_cm:
+        for index, row in enumerate(rows, start=1):
+            receta = _resolve_recipe_for_pos_row(row=row, receta_cache=receta_cache)
+            producto_texto = str(row.get("producto") or row.get("receta") or "").strip()
+            codigo_point = str(row.get("codigo_point") or "").strip()
+            if receta is None and not (producto_texto or codigo_point):
+                skipped += 1
+                result_rows.append(
+                    {
+                        "row": index,
+                        "status": "ERROR",
+                        "reason": "producto_not_found",
+                        "producto_input": producto_texto or codigo_point,
+                    }
+                )
+                if stop_on_error:
+                    terminated_early = True
+                    break
+                continue
+
+            sucursal = _resolve_sucursal_for_pos_row(
+                row=row,
+                default_sucursal=default_sucursal,
+                sucursal_cache=sucursal_cache,
+            )
+            has_sucursal_ref = bool(row.get("sucursal_id")) or bool(row.get("sucursal")) or bool(row.get("sucursal_codigo"))
+            if has_sucursal_ref and sucursal is None:
+                skipped += 1
+                result_rows.append(
+                    {
+                        "row": index,
+                        "status": "ERROR",
+                        "reason": "sucursal_not_found",
+                        "sucursal_input": row.get("sucursal_codigo") or row.get("sucursal") or row.get("sucursal_id"),
+                    }
+                )
+                if stop_on_error:
+                    terminated_early = True
+                    break
+                continue
+
+            fecha = row["fecha"]
+            cantidad = _to_decimal(row.get("cantidad"), default=Decimal("0"))
+            tickets = int(row.get("tickets") or 0)
+            monto_total_raw = row.get("monto_total")
+            monto_total = _to_decimal(monto_total_raw) if monto_total_raw is not None else None
+
+            existing_qs = VentaPOS.objects.filter(
+                receta=receta,
+                sucursal=sucursal,
+                fecha=fecha,
+                codigo_point=codigo_point,
+                producto_texto=producto_texto,
+            )
+            existing = existing_qs.order_by("id").first()
+
+            previous_qty = _to_decimal(existing.cantidad, default=Decimal("0")) if existing else Decimal("0")
+            previous_tickets = int(existing.tickets or 0) if existing else 0
+            if existing:
+                if modo == "accumulate":
+                    new_qty = previous_qty + cantidad
+                    new_tickets = previous_tickets + tickets
+                    new_monto = (_to_decimal(existing.monto_total, default=Decimal("0")) + _to_decimal(monto_total, default=Decimal("0")))
+                else:
+                    new_qty = cantidad
+                    new_tickets = tickets
+                    new_monto = monto_total
+                action = "UPDATED"
+                updated += 1
+            else:
+                new_qty = cantidad
+                new_tickets = tickets
+                new_monto = monto_total
+                action = "CREATED"
+                created += 1
+
+            if not dry_run:
+                if existing:
+                    existing.cantidad = new_qty
+                    existing.tickets = new_tickets
+                    existing.monto_total = new_monto
+                    existing.fuente = fuente
+                    existing.save(update_fields=["cantidad", "tickets", "monto_total", "fuente", "actualizado_en"])
+                else:
+                    VentaPOS.objects.create(
+                        receta=receta,
+                        sucursal=sucursal,
+                        fecha=fecha,
+                        codigo_point=codigo_point,
+                        producto_texto=producto_texto,
+                        cantidad=new_qty,
+                        tickets=new_tickets,
+                        monto_total=new_monto,
+                        fuente=fuente,
+                    )
+
+            result_rows.append(
+                {
+                    "row": index,
+                    "status": action,
+                    "receta_id": receta.id if receta else None,
+                    "receta": receta.nombre if receta else "",
+                    "producto": producto_texto,
+                    "codigo_point": codigo_point,
+                    "sucursal_id": sucursal.id if sucursal else None,
+                    "sucursal": sucursal.nombre if sucursal else "",
+                    "fecha": str(fecha),
+                    "cantidad_prev": float(previous_qty),
+                    "cantidad_nueva": float(new_qty),
+                    "tickets_prev": previous_tickets,
+                    "tickets_nuevos": new_tickets,
+                }
+            )
+
+    error_count = sum(1 for row in result_rows if row.get("status") == "ERROR")
+    return {
+        "dry_run": dry_run,
+        "mode": modo,
+        "fuente": fuente,
+        "terminated_early": terminated_early,
+        "summary": {
+            "total_rows": len(rows),
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "errors": error_count,
+            "applied": 0 if dry_run else (created + updated),
+        },
+        "rows": result_rows[:top],
+    }
+
+
+def _process_control_merma_pos_bulk(
+    data: dict[str, Any],
+    *,
+    dry_run_override: bool | None = None,
+) -> dict[str, Any]:
+    rows = data["rows"]
+    modo = data.get("modo") or "replace"
+    fuente = (data.get("fuente") or "API_POS_MERMAS").strip()[:40] or "API_POS_MERMAS"
+    dry_run = bool(data.get("dry_run", True) if dry_run_override is None else dry_run_override)
+    stop_on_error = bool(data.get("stop_on_error", False))
+    top = int(data.get("top") or 120)
+
+    default_sucursal = None
+    default_sucursal_id = data.get("sucursal_default_id")
+    if default_sucursal_id is not None:
+        default_sucursal = Sucursal.objects.filter(pk=default_sucursal_id, activa=True).first()
+        if default_sucursal is None:
+            raise ValueError("Sucursal default no encontrada o inactiva.")
+
+    receta_cache: dict[tuple[int, str, str], Receta | None] = {}
+    sucursal_cache: dict[tuple[int, str, str, int], Sucursal | None] = {}
+    created = 0
+    updated = 0
+    skipped = 0
+    terminated_early = False
+    result_rows: list[dict[str, Any]] = []
+
+    tx_cm = nullcontext() if dry_run else transaction.atomic()
+    with tx_cm:
+        for index, row in enumerate(rows, start=1):
+            receta = _resolve_recipe_for_pos_row(row=row, receta_cache=receta_cache)
+            producto_texto = str(row.get("producto") or row.get("receta") or "").strip()
+            codigo_point = str(row.get("codigo_point") or "").strip()
+            if receta is None and not (producto_texto or codigo_point):
+                skipped += 1
+                result_rows.append(
+                    {
+                        "row": index,
+                        "status": "ERROR",
+                        "reason": "producto_not_found",
+                        "producto_input": producto_texto or codigo_point,
+                    }
+                )
+                if stop_on_error:
+                    terminated_early = True
+                    break
+                continue
+
+            sucursal = _resolve_sucursal_for_pos_row(
+                row=row,
+                default_sucursal=default_sucursal,
+                sucursal_cache=sucursal_cache,
+            )
+            has_sucursal_ref = bool(row.get("sucursal_id")) or bool(row.get("sucursal")) or bool(row.get("sucursal_codigo"))
+            if has_sucursal_ref and sucursal is None:
+                skipped += 1
+                result_rows.append(
+                    {
+                        "row": index,
+                        "status": "ERROR",
+                        "reason": "sucursal_not_found",
+                        "sucursal_input": row.get("sucursal_codigo") or row.get("sucursal") or row.get("sucursal_id"),
+                    }
+                )
+                if stop_on_error:
+                    terminated_early = True
+                    break
+                continue
+
+            fecha = row["fecha"]
+            cantidad = _to_decimal(row.get("cantidad"), default=Decimal("0"))
+            motivo = str(row.get("motivo") or "").strip()[:160]
+
+            existing_qs = MermaPOS.objects.filter(
+                receta=receta,
+                sucursal=sucursal,
+                fecha=fecha,
+                codigo_point=codigo_point,
+                producto_texto=producto_texto,
+                motivo=motivo,
+            )
+            existing = existing_qs.order_by("id").first()
+
+            previous_qty = _to_decimal(existing.cantidad, default=Decimal("0")) if existing else Decimal("0")
+            if existing:
+                new_qty = previous_qty + cantidad if modo == "accumulate" else cantidad
+                action = "UPDATED"
+                updated += 1
+            else:
+                new_qty = cantidad
+                action = "CREATED"
+                created += 1
+
+            if not dry_run:
+                if existing:
+                    existing.cantidad = new_qty
+                    existing.fuente = fuente
+                    existing.save(update_fields=["cantidad", "fuente", "actualizado_en"])
+                else:
+                    MermaPOS.objects.create(
+                        receta=receta,
+                        sucursal=sucursal,
+                        fecha=fecha,
+                        codigo_point=codigo_point,
+                        producto_texto=producto_texto,
+                        cantidad=new_qty,
+                        motivo=motivo,
+                        fuente=fuente,
+                    )
+
+            result_rows.append(
+                {
+                    "row": index,
+                    "status": action,
+                    "receta_id": receta.id if receta else None,
+                    "receta": receta.nombre if receta else "",
+                    "producto": producto_texto,
+                    "codigo_point": codigo_point,
+                    "sucursal_id": sucursal.id if sucursal else None,
+                    "sucursal": sucursal.nombre if sucursal else "",
+                    "fecha": str(fecha),
+                    "cantidad_prev": float(previous_qty),
+                    "cantidad_nueva": float(new_qty),
+                }
+            )
+
+    error_count = sum(1 for row in result_rows if row.get("status") == "ERROR")
+    return {
+        "dry_run": dry_run,
+        "mode": modo,
+        "fuente": fuente,
+        "terminated_early": terminated_early,
+        "summary": {
+            "total_rows": len(rows),
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "errors": error_count,
+            "applied": 0 if dry_run else (created + updated),
+        },
+        "rows": result_rows[:top],
+    }
+
+
+class ControlVentasPosImportPreviewView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not (can_manage_inventario(request.user) or can_manage_compras(request.user)):
+            return Response(
+                {"detail": "No tienes permisos para previsualizar importación POS."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ControlVentaPosBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        try:
+            payload = _process_control_venta_pos_bulk(ser.validated_data, dry_run_override=True)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        payload["preview"] = True
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ControlVentasPosImportConfirmView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not (can_manage_inventario(request.user) or can_manage_compras(request.user)):
+            return Response(
+                {"detail": "No tienes permisos para confirmar importación POS."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ControlVentaPosBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        try:
+            payload = _process_control_venta_pos_bulk(ser.validated_data, dry_run_override=False)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        payload["preview"] = False
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ControlVentasPosBulkUpsertView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not (can_manage_inventario(request.user) or can_manage_compras(request.user)):
+            return Response(
+                {"detail": "No tienes permisos para importar ventas POS."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ControlVentaPosBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        try:
+            payload = _process_control_venta_pos_bulk(ser.validated_data)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ControlMermasPosImportPreviewView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not (can_manage_inventario(request.user) or can_manage_compras(request.user)):
+            return Response(
+                {"detail": "No tienes permisos para previsualizar importación de mermas POS."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ControlMermaPosBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        try:
+            payload = _process_control_merma_pos_bulk(ser.validated_data, dry_run_override=True)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        payload["preview"] = True
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ControlMermasPosImportConfirmView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not (can_manage_inventario(request.user) or can_manage_compras(request.user)):
+            return Response(
+                {"detail": "No tienes permisos para confirmar importación de mermas POS."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ControlMermaPosBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        try:
+            payload = _process_control_merma_pos_bulk(ser.validated_data, dry_run_override=False)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        payload["preview"] = False
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ControlMermasPosBulkUpsertView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not (can_manage_inventario(request.user) or can_manage_compras(request.user)):
+            return Response(
+                {"detail": "No tienes permisos para importar mermas POS."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ControlMermaPosBulkSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        try:
+            payload = _process_control_merma_pos_bulk(ser.validated_data)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ControlDiscrepanciasView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_reportes(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar discrepancias."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        date_from, date_to, period_resolved = resolve_period_range(
+            period_raw=request.GET.get("periodo"),
+            date_from_raw=request.GET.get("from"),
+            date_to_raw=request.GET.get("to"),
+        )
+        sucursal_id = None
+        sucursal_id_raw = (request.GET.get("sucursal_id") or "").strip()
+        if sucursal_id_raw.isdigit():
+            sucursal_id = int(sucursal_id_raw)
+        threshold = _to_decimal(request.GET.get("threshold_pct"), default=Decimal("10"))
+        top = _parse_bounded_int(request.GET.get("top"), default=300, min_value=1, max_value=1000)
+
+        report = build_discrepancias_report(
+            date_from=date_from,
+            date_to=date_to,
+            sucursal_id=sucursal_id,
+            threshold_pct=threshold,
+            top=top,
+        )
+        report["scope"] = {
+            "periodo": period_resolved,
+            "sucursal_id": sucursal_id,
+            "top": top,
+        }
+        return Response(report, status=status.HTTP_200_OK)
