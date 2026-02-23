@@ -1934,6 +1934,55 @@ class RecetasCosteoApiTests(TestCase):
         first.refresh_from_db()
         self.assertGreaterEqual(first.cantidad, qty_base)
 
+    def test_endpoint_ventas_pronostico_estadistico_guardar_export_csv_y_xlsx(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ2EXP", nombre="Matriz 2 Export", activa=True)
+        for week, qty in [(1, "10"), (2, "13"), (3, "11"), (4, "16"), (5, "12"), (6, "17")]:
+            week_start = date(2026, 3, 22) - timedelta(days=(7 * week))
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=week_start,
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+
+        url = reverse("api_ventas_pronostico_estadistico_guardar")
+        payload = {
+            "alcance": "semana",
+            "fecha_base": "2026-03-22",
+            "sucursal_id": sucursal.id,
+            "incluir_preparaciones": True,
+            "escenario": "base",
+            "replace_existing": True,
+            "fuente": "API_FORECAST_TEST",
+        }
+
+        resp_csv = self.client.post(f"{url}?export=csv", payload, content_type="application/json")
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("FORECAST", body_csv)
+        self.assertIn("APPLIED", body_csv)
+        self.assertIn("receta_id,receta,escenario,cantidad_anterior,cantidad_nueva,accion", body_csv)
+
+        resp_xlsx = self.client.post(f"{url}?export=xlsx", payload, content_type="application/json")
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_pronostico_estadistico_guardar_export_invalido(self):
+        url = reverse("api_ventas_pronostico_estadistico_guardar")
+        resp = self.client.post(
+            f"{url}?export=zip",
+            {"alcance": "mes", "periodo": "2026-03"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_pronostico_estadistico_guardar_requires_perm(self):
         user_model = get_user_model()
         user = user_model.objects.create_user(

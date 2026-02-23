@@ -26,7 +26,7 @@ Sprint 1 entrega:
 - API: POST /api/ventas/pronostico/import-preview/ (previsualiza carga de pronóstico sin aplicar cambios)
 - API: POST /api/ventas/pronostico/import-confirm/ (confirma y aplica carga de pronóstico)
 - API: POST /api/ventas/pronostico-estadistico/ (forecast por sucursal con banda inferior/superior + comparativo contra solicitud en escenario `base/bajo/alto` y filtro opcional `min_confianza_pct`; soporta `?export=csv|xlsx`)
-- API: POST /api/ventas/pronostico-estadistico/guardar/ (persiste forecast estadístico en Pronóstico de venta por escenario base/bajo/alto, con filtro opcional `min_confianza_pct`)
+- API: POST /api/ventas/pronostico-estadistico/guardar/ (persiste forecast estadístico en Pronóstico de venta por escenario base/bajo/alto, con filtro opcional `min_confianza_pct` y soporte `?export=csv|xlsx`)
 - API: POST /api/ventas/historial/bulk/ (carga masiva de historial de ventas con dry_run)
 - API: POST /api/ventas/historial/import-preview/ (previsualiza carga de historial de ventas sin aplicar cambios)
 - API: POST /api/ventas/historial/import-confirm/ (confirma y aplica carga de historial de ventas)

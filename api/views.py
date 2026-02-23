@@ -788,6 +788,175 @@ def _forecast_estadistico_export_response(payload: dict[str, Any], export_format
     return response
 
 
+def _forecast_estadistico_guardar_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
+    scope = payload.get("scope") or {}
+    totals = payload.get("totals") or {}
+    persisted = payload.get("persisted") or {}
+    rows = payload.get("rows") or []
+    applied_rows = payload.get("applied_rows") or []
+    start_txt = str(scope.get("target_start") or "").replace("-", "")
+    end_txt = str(scope.get("target_end") or "").replace("-", "")
+    if not start_txt or not end_txt:
+        today_txt = timezone.localdate().strftime("%Y%m%d")
+        start_txt = start_txt or today_txt
+        end_txt = end_txt or today_txt
+    filename = f"api_forecast_estadistico_guardar_{start_txt}_{end_txt}.{export_format}"
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Alcance", str(scope.get("alcance") or "").upper()])
+        ws_resumen.append(["Periodo", scope.get("periodo") or ""])
+        ws_resumen.append(["Rango inicio", scope.get("target_start") or ""])
+        ws_resumen.append(["Rango fin", scope.get("target_end") or ""])
+        ws_resumen.append(["Sucursal", scope.get("sucursal_nombre") or "Todas"])
+        ws_resumen.append(["Escenario", str(scope.get("escenario") or "base").upper()])
+        ws_resumen.append(["Confianza minima %", float(scope.get("min_confianza_pct") or 0)])
+        ws_resumen.append(["Filtradas por confianza", int(scope.get("filtered_conf") or 0)])
+        ws_resumen.append(["Forecast total", float(totals.get("forecast_total") or 0)])
+        ws_resumen.append(["Banda baja total", float(totals.get("forecast_low_total") or 0)])
+        ws_resumen.append(["Banda alta total", float(totals.get("forecast_high_total") or 0)])
+        ws_resumen.append(["Pronostico total", float(totals.get("pronostico_total") or 0)])
+        ws_resumen.append(["Delta total", float(totals.get("delta_total") or 0)])
+        ws_resumen.append(["Created", int(persisted.get("created") or 0)])
+        ws_resumen.append(["Updated", int(persisted.get("updated") or 0)])
+        ws_resumen.append(["Skipped existing", int(persisted.get("skipped_existing") or 0)])
+        ws_resumen.append(["Skipped invalid", int(persisted.get("skipped_invalid") or 0)])
+        ws_resumen.append(["Applied", int(persisted.get("applied") or 0)])
+
+        ws_forecast = wb.create_sheet("Forecast")
+        ws_forecast.append(
+            [
+                "Receta ID",
+                "Receta",
+                "Forecast",
+                "Banda baja",
+                "Banda alta",
+                "Pronostico actual",
+                "Delta",
+                "Recomendacion",
+                "Confianza %",
+                "Desviacion",
+                "Muestras",
+                "Observaciones",
+            ]
+        )
+        for row in rows:
+            ws_forecast.append(
+                [
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    float(row.get("forecast_qty") or 0),
+                    float(row.get("forecast_low") or 0),
+                    float(row.get("forecast_high") or 0),
+                    float(row.get("pronostico_actual") or 0),
+                    float(row.get("delta") or 0),
+                    row.get("recomendacion") or "",
+                    float(row.get("confianza") or 0),
+                    float(row.get("desviacion") or 0),
+                    int(row.get("muestras") or 0),
+                    row.get("observaciones") or "",
+                ]
+            )
+
+        ws_applied = wb.create_sheet("Applied")
+        ws_applied.append(["Receta ID", "Receta", "Escenario", "Cantidad anterior", "Cantidad nueva", "Accion"])
+        for row in applied_rows:
+            ws_applied.append(
+                [
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    row.get("escenario") or "",
+                    float(row.get("cantidad_anterior") or 0),
+                    float(row.get("cantidad_nueva") or 0),
+                    row.get("accion") or "",
+                ]
+            )
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Alcance", str(scope.get("alcance") or "").upper()])
+    writer.writerow(["Periodo", scope.get("periodo") or ""])
+    writer.writerow(["Rango inicio", scope.get("target_start") or ""])
+    writer.writerow(["Rango fin", scope.get("target_end") or ""])
+    writer.writerow(["Sucursal", scope.get("sucursal_nombre") or "Todas"])
+    writer.writerow(["Escenario", str(scope.get("escenario") or "base").upper()])
+    writer.writerow(["Confianza minima %", f"{Decimal(str(scope.get('min_confianza_pct') or 0)):.1f}"])
+    writer.writerow(["Filtradas por confianza", int(scope.get("filtered_conf") or 0)])
+    writer.writerow(["Forecast total", f"{Decimal(str(totals.get('forecast_total') or 0)):.3f}"])
+    writer.writerow(["Banda baja total", f"{Decimal(str(totals.get('forecast_low_total') or 0)):.3f}"])
+    writer.writerow(["Banda alta total", f"{Decimal(str(totals.get('forecast_high_total') or 0)):.3f}"])
+    writer.writerow(["Pronostico total", f"{Decimal(str(totals.get('pronostico_total') or 0)):.3f}"])
+    writer.writerow(["Delta total", f"{Decimal(str(totals.get('delta_total') or 0)):.3f}"])
+    writer.writerow(["Created", int(persisted.get("created") or 0)])
+    writer.writerow(["Updated", int(persisted.get("updated") or 0)])
+    writer.writerow(["Skipped existing", int(persisted.get("skipped_existing") or 0)])
+    writer.writerow(["Skipped invalid", int(persisted.get("skipped_invalid") or 0)])
+    writer.writerow(["Applied", int(persisted.get("applied") or 0)])
+    writer.writerow([])
+    writer.writerow(["FORECAST"])
+    writer.writerow(
+        [
+            "receta_id",
+            "receta",
+            "forecast",
+            "banda_baja",
+            "banda_alta",
+            "pronostico_actual",
+            "delta",
+            "recomendacion",
+            "confianza_pct",
+            "desviacion",
+            "muestras",
+            "observaciones",
+        ]
+    )
+    for row in rows:
+        writer.writerow(
+            [
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                f"{Decimal(str(row.get('forecast_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('forecast_low') or 0)):.3f}",
+                f"{Decimal(str(row.get('forecast_high') or 0)):.3f}",
+                f"{Decimal(str(row.get('pronostico_actual') or 0)):.3f}",
+                f"{Decimal(str(row.get('delta') or 0)):.3f}",
+                row.get("recomendacion") or "",
+                f"{Decimal(str(row.get('confianza') or 0)):.1f}",
+                f"{Decimal(str(row.get('desviacion') or 0)):.3f}",
+                int(row.get("muestras") or 0),
+                row.get("observaciones") or "",
+            ]
+        )
+    writer.writerow([])
+    writer.writerow(["APPLIED"])
+    writer.writerow(["receta_id", "receta", "escenario", "cantidad_anterior", "cantidad_nueva", "accion"])
+    for row in applied_rows:
+        writer.writerow(
+            [
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                row.get("escenario") or "",
+                f"{Decimal(str(row.get('cantidad_anterior') or 0)):.3f}",
+                f"{Decimal(str(row.get('cantidad_nueva') or 0)):.3f}",
+                row.get("accion") or "",
+            ]
+        )
+    return response
+
+
 def _forecast_backtest_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
     scope = payload.get("scope") or {}
     totals = payload.get("totals") or {}
@@ -6968,6 +7137,12 @@ class ForecastEstadisticoGuardarView(APIView):
                 {"detail": "No tienes permisos para guardar pronóstico estadístico."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format and export_format not in {"csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         ser = ForecastEstadisticoGuardarSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -7067,33 +7242,33 @@ class ForecastEstadisticoGuardarView(APIView):
                         }
                     )
 
-        return Response(
-            {
-                "scope": {
-                    "alcance": payload["alcance"],
-                    "periodo": payload["periodo"],
-                    "target_start": payload["target_start"],
-                    "target_end": payload["target_end"],
-                    "sucursal_nombre": payload["sucursal_nombre"],
-                    "sucursal_id": payload.get("sucursal_id"),
-                    "escenario": escenario,
-                    "qty_key": qty_key,
-                    "min_confianza_pct": _to_float(min_confianza_pct),
-                    "filtered_conf": filtered_conf,
-                },
-                "totals": payload["totals"],
-                "persisted": {
-                    "created": created,
-                    "updated": updated,
-                    "skipped_existing": skipped_existing,
-                    "skipped_invalid": skipped_invalid,
-                    "applied": created + updated,
-                },
-                "rows": payload["rows"],
-                "applied_rows": applied_rows,
+        response_payload = {
+            "scope": {
+                "alcance": payload["alcance"],
+                "periodo": payload["periodo"],
+                "target_start": payload["target_start"],
+                "target_end": payload["target_end"],
+                "sucursal_nombre": payload["sucursal_nombre"],
+                "sucursal_id": payload.get("sucursal_id"),
+                "escenario": escenario,
+                "qty_key": qty_key,
+                "min_confianza_pct": _to_float(min_confianza_pct),
+                "filtered_conf": filtered_conf,
             },
-            status=status.HTTP_200_OK,
-        )
+            "totals": payload["totals"],
+            "persisted": {
+                "created": created,
+                "updated": updated,
+                "skipped_existing": skipped_existing,
+                "skipped_invalid": skipped_invalid,
+                "applied": created + updated,
+            },
+            "rows": payload["rows"],
+            "applied_rows": applied_rows,
+        }
+        if export_format:
+            return _forecast_estadistico_guardar_export_response(response_payload, export_format)
+        return Response(response_payload, status=status.HTTP_200_OK)
 
 
 class SolicitudVentaUpsertView(APIView):
