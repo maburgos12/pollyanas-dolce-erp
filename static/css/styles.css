@@ -790,6 +790,73 @@ tr:hover,
   background: #fff;
 }
 
+.module-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.module-shell > .card {
+  margin-bottom: 0;
+}
+
+.compras-solicitudes .card,
+.plan-produccion-shell .card,
+.recipe-detail-shell .card {
+  border-radius: 12px;
+}
+
+.compras-solicitudes .card-header,
+.plan-produccion-shell .card-header {
+  font-size: 38px;
+  line-height: 1.08;
+}
+
+.compras-solicitudes .form-grid-auto {
+  grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+  gap: 9px;
+}
+
+.compras-solicitudes .toolbar,
+.plan-produccion-shell .toolbar {
+  overflow-x: auto;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+  padding-bottom: 4px;
+}
+
+.compras-solicitudes .toolbar .btn,
+.plan-produccion-shell .toolbar .btn {
+  flex-shrink: 0;
+}
+
+.compras-solicitudes .table-responsive,
+.plan-produccion-shell .table-responsive,
+.recipe-detail-shell .table-responsive {
+  border: 1px solid var(--rosa);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.compras-solicitudes .table-responsive table {
+  min-width: 1180px;
+}
+
+.recipe-detail-shell .recipe-actions {
+  gap: 6px;
+}
+
+.recipe-detail-shell .kpi-number {
+  font-size: 44px;
+}
+
+.recipe-detail-shell .recipe-lines-table {
+  min-width: 1180px;
+}
+
+.plan-produccion-shell .form-grid-auto {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
 .mobile-capture-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -908,6 +975,32 @@ tr:hover,
   .recipe-actions-compact .btn {
     min-width: 78px;
     padding: 7px 10px;
+  }
+
+  .module-shell {
+    gap: 12px;
+  }
+
+  .compras-solicitudes .form-grid-auto,
+  .plan-produccion-shell .form-grid-auto {
+    grid-template-columns: 1fr;
+  }
+
+  .compras-solicitudes .card-header,
+  .plan-produccion-shell .card-header {
+    font-size: 32px;
+  }
+
+  .recipe-detail-shell .recipe-actions {
+    width: 100%;
+  }
+
+  .recipe-detail-shell .recipe-actions .btn {
+    flex: 1;
+  }
+
+  .recipe-detail-shell .kpi-number {
+    font-size: 36px;
   }
 
   .mobile-capture-grid {

@@ -3,6 +3,7 @@
 {% block page_title %}Compras · Solicitudes{% endblock %}
 
 {% block content %}
+<div class="module-shell compras-solicitudes">
 <nav class="module-tabs">
   <a class="module-tab active" href="{% url 'compras:solicitudes' %}">Solicitudes</a>
   <a class="module-tab" href="{% url 'compras:ordenes' %}">Órdenes</a>
@@ -1020,6 +1021,7 @@
 {% endblock %}
 
 {% block extra_js %}
+</div>
 <script>
   (function () {
     const insumoSelect = document.getElementById("insumo_id");
