@@ -429,6 +429,10 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
         ws_resumen.append(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
         ws_resumen.append(["Top", int(scope.get("top") or 0)])
         ws_resumen.append(["Top sucursales", int(scope.get("top_sucursales") or 0)])
+        ws_resumen.append(["Sort rows", str(scope.get("sort_by") or "delta_abs").upper()])
+        ws_resumen.append(["Sort rows dir", str(scope.get("sort_dir") or "desc").upper()])
+        ws_resumen.append(["Sort sucursales", str(scope.get("sort_sucursales_by") or "delta_abs").upper()])
+        ws_resumen.append(["Sort sucursales dir", str(scope.get("sort_sucursales_dir") or "desc").upper()])
         ws_resumen.append(["Historial total", float(totals.get("historial_qty") or 0)])
         ws_resumen.append(["Pronostico total", float(totals.get("pronostico_qty") or 0)])
         ws_resumen.append(["Solicitud total", float(totals.get("solicitud_qty") or 0)])
@@ -526,6 +530,10 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
     writer.writerow(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
     writer.writerow(["Top", int(scope.get("top") or 0)])
     writer.writerow(["Top sucursales", int(scope.get("top_sucursales") or 0)])
+    writer.writerow(["Sort rows", str(scope.get("sort_by") or "delta_abs").upper()])
+    writer.writerow(["Sort rows dir", str(scope.get("sort_dir") or "desc").upper()])
+    writer.writerow(["Sort sucursales", str(scope.get("sort_sucursales_by") or "delta_abs").upper()])
+    writer.writerow(["Sort sucursales dir", str(scope.get("sort_sucursales_dir") or "desc").upper()])
     writer.writerow(["Historial total", f"{Decimal(str(totals.get('historial_qty') or 0)):.3f}"])
     writer.writerow(["Pronostico total", f"{Decimal(str(totals.get('pronostico_qty') or 0)):.3f}"])
     writer.writerow(["Solicitud total", f"{Decimal(str(totals.get('solicitud_qty') or 0)):.3f}"])
@@ -6063,6 +6071,47 @@ class VentasPipelineResumenView(APIView):
         delta_min = _to_decimal(request.GET.get("delta_min"), default=Decimal("0"))
         if delta_min < 0:
             delta_min = Decimal("0")
+        sort_by = (request.GET.get("sort_by") or "delta_abs").strip().lower()
+        sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
+        sort_sucursales_by = (request.GET.get("sort_sucursales_by") or "delta_abs").strip().lower()
+        sort_sucursales_dir = (request.GET.get("sort_sucursales_dir") or "desc").strip().lower()
+
+        allowed_sort_rows = {
+            "delta_abs",
+            "delta",
+            "historial",
+            "solicitud",
+            "pronostico",
+            "cobertura_pct",
+            "cumplimiento_pct",
+            "receta",
+        }
+        allowed_sort_sucursales = {"delta_abs", "delta", "historial", "solicitud", "cumplimiento_pct", "sucursal"}
+        if sort_by not in allowed_sort_rows:
+            return Response(
+                {
+                    "detail": (
+                        "sort_by inválido. Usa delta_abs, delta, historial, solicitud, pronostico, cobertura_pct, "
+                        "cumplimiento_pct o receta."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_sucursales_by not in allowed_sort_sucursales:
+            return Response(
+                {"detail": "sort_sucursales_by inválido. Usa delta_abs, delta, historial, solicitud, cumplimiento_pct o sucursal."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_dir inválido. Usa asc o desc."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_sucursales_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_sucursales_dir inválido. Usa asc o desc."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         def _status_match(tag: str) -> bool:
             if not status_filter:
@@ -6159,9 +6208,10 @@ class VentasPipelineResumenView(APIView):
                 status_tag = "SIN_MOV"
 
             suc_codigo, suc_nombre = sucursal_map.get(sid, ("", f"Sucursal {sid}"))
+            delta_abs = abs(delta)
             by_sucursal_rows_tmp.append(
                 {
-                    "_sort": abs(delta),
+                    "_delta_abs": _to_float(delta_abs),
                     "sucursal_id": sid,
                     "sucursal_codigo": suc_codigo,
                     "sucursal": suc_nombre,
@@ -6175,12 +6225,29 @@ class VentasPipelineResumenView(APIView):
         by_sucursal_rows_tmp = [
             row
             for row in by_sucursal_rows_tmp
-            if _status_match(str(row.get("status") or "")) and row["_sort"] >= delta_min
+            if _status_match(str(row.get("status") or "")) and Decimal(str(row["_delta_abs"])) >= delta_min
         ]
-        by_sucursal_rows_tmp.sort(key=lambda row: row["_sort"], reverse=True)
+        by_sucursal_sort_field = {
+            "delta_abs": "_delta_abs",
+            "delta": "delta_historial_vs_solicitud",
+            "historial": "historial_qty",
+            "solicitud": "solicitud_qty",
+            "cumplimiento_pct": "cumplimiento_pct",
+            "sucursal": "sucursal",
+        }[sort_sucursales_by]
+        for row in by_sucursal_rows_tmp:
+            sort_value = row.get(by_sucursal_sort_field)
+            if isinstance(sort_value, str):
+                row["_sort"] = sort_value.lower()
+            elif sort_value is None:
+                row["_sort"] = float("-inf")
+            else:
+                row["_sort"] = _to_float(sort_value)
+        by_sucursal_rows_tmp.sort(key=lambda row: row["_sort"], reverse=(sort_sucursales_dir == "desc"))
         by_sucursal_rows = []
         for row in by_sucursal_rows_tmp[:top_sucursales]:
             row.pop("_sort", None)
+            row.pop("_delta_abs", None)
             by_sucursal_rows.append(row)
         by_sucursal_status_counts = {
             "SOBRE": sum(1 for row in by_sucursal_rows_tmp if row.get("status") == "SOBRE"),
@@ -6252,7 +6319,7 @@ class VentasPipelineResumenView(APIView):
 
             rows_tmp.append(
                 {
-                    "_sort": abs(delta_historial_vs_solicitud),
+                    "_delta_abs": _to_float(abs(delta_historial_vs_solicitud)),
                     "receta_id": receta_id,
                     "receta": receta_names.get(receta_id) or f"Receta {receta_id}",
                     "historial_qty": _to_float(historial_qty),
@@ -6268,12 +6335,31 @@ class VentasPipelineResumenView(APIView):
         rows_tmp = [
             row
             for row in rows_tmp
-            if _status_match(str(row.get("status") or "")) and row["_sort"] >= delta_min
+            if _status_match(str(row.get("status") or "")) and Decimal(str(row["_delta_abs"])) >= delta_min
         ]
-        rows_tmp.sort(key=lambda row: row["_sort"], reverse=True)
+        row_sort_field = {
+            "delta_abs": "_delta_abs",
+            "delta": "delta_historial_vs_solicitud",
+            "historial": "historial_qty",
+            "solicitud": "solicitud_qty",
+            "pronostico": "pronostico_qty",
+            "cobertura_pct": "cobertura_pct",
+            "cumplimiento_pct": "cumplimiento_pct",
+            "receta": "receta",
+        }[sort_by]
+        for row in rows_tmp:
+            sort_value = row.get(row_sort_field)
+            if isinstance(sort_value, str):
+                row["_sort"] = sort_value.lower()
+            elif sort_value is None:
+                row["_sort"] = float("-inf")
+            else:
+                row["_sort"] = _to_float(sort_value)
+        rows_tmp.sort(key=lambda row: row["_sort"], reverse=(sort_dir == "desc"))
         rows = []
         for row in rows_tmp[:top]:
             row.pop("_sort", None)
+            row.pop("_delta_abs", None)
             rows.append(row)
         rows_status_counts = {
             "SOBRE": sum(1 for row in rows_tmp if row.get("status") == "SOBRE"),
@@ -6291,6 +6377,10 @@ class VentasPipelineResumenView(APIView):
                 "incluir_preparaciones": incluir_preparaciones,
                 "top": top,
                 "top_sucursales": top_sucursales,
+                "sort_by": sort_by,
+                "sort_dir": sort_dir,
+                "sort_sucursales_by": sort_sucursales_by,
+                "sort_sucursales_dir": sort_sucursales_dir,
                 "status": status_filter or "",
                 "delta_min": _to_float(delta_min),
             },
