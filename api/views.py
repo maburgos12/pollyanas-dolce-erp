@@ -7329,6 +7329,70 @@ class SolicitudVentaUpsertView(APIView):
                 record.fuente = fuente
                 record.save(update_fields=["periodo", "cantidad", "fuente", "actualizado_en"])
 
+        forecast_ref = None
+        validate_forecast = _parse_bool(request.GET.get("validate_forecast"), default=True)
+        if validate_forecast:
+            forecast_alcance = {
+                SolicitudVenta.ALCANCE_MES: "mes",
+                SolicitudVenta.ALCANCE_SEMANA: "semana",
+                SolicitudVenta.ALCANCE_FIN_SEMANA: "fin_semana",
+            }.get(alcance, "mes")
+            forecast_incluir_preparaciones = _parse_bool(request.GET.get("incluir_preparaciones"), default=True)
+            forecast_safety_pct = _to_decimal(request.GET.get("safety_pct"), default=Decimal("0"))
+            forecast_min_confianza_pct = _to_decimal(request.GET.get("min_confianza_pct"), default=Decimal("0"))
+            threshold_pct = _to_decimal(request.GET.get("umbral_desviacion_pct"), default=Decimal("20"))
+            if threshold_pct < 0:
+                threshold_pct = Decimal("20")
+
+            try:
+                forecast_result = _build_forecast_from_history(
+                    alcance=forecast_alcance,
+                    periodo=periodo,
+                    fecha_base=fecha_inicio,
+                    sucursal=sucursal,
+                    incluir_preparaciones=forecast_incluir_preparaciones,
+                    safety_pct=forecast_safety_pct,
+                )
+                forecast_result, _ = _filter_forecast_result_by_confianza(forecast_result, forecast_min_confianza_pct)
+                row = next(
+                    (r for r in (forecast_result.get("rows") or []) if int(r.get("receta_id") or 0) == receta.id),
+                    None,
+                )
+                if row:
+                    forecast_qty = _to_decimal(row.get("forecast_qty"))
+                    delta_qty = (cantidad - forecast_qty).quantize(Decimal("0.001"))
+                    variacion_pct = None
+                    if forecast_qty > 0:
+                        variacion_pct = ((delta_qty / forecast_qty) * Decimal("100")).quantize(Decimal("0.1"))
+
+                    if forecast_qty <= 0 and cantidad > 0:
+                        status_forecast = "SIN_BASE"
+                    elif variacion_pct is None:
+                        status_forecast = "OK"
+                    elif variacion_pct > threshold_pct:
+                        status_forecast = "SOBRE"
+                    elif variacion_pct < (-threshold_pct):
+                        status_forecast = "BAJO"
+                    else:
+                        status_forecast = "OK"
+
+                    forecast_ref = {
+                        "status": status_forecast,
+                        "threshold_pct": _to_float(threshold_pct),
+                        "forecast_qty": _to_float(forecast_qty),
+                        "forecast_low": _to_float(row.get("forecast_low")),
+                        "forecast_high": _to_float(row.get("forecast_high")),
+                        "solicitud_qty": _to_float(cantidad),
+                        "delta_qty": _to_float(delta_qty),
+                        "variacion_pct": _to_float(variacion_pct) if variacion_pct is not None else None,
+                        "confianza_pct": _to_float(row.get("confianza")),
+                        "recomendacion": row.get("recomendacion") or "",
+                    }
+                else:
+                    forecast_ref = {"status": "SIN_FORECAST"}
+            except Exception:
+                forecast_ref = {"status": "FORECAST_ERROR"}
+
         return Response(
             {
                 "created": created,
@@ -7343,6 +7407,7 @@ class SolicitudVentaUpsertView(APIView):
                 "fecha_fin": str(record.fecha_fin),
                 "cantidad": str(record.cantidad),
                 "fuente": record.fuente,
+                "forecast_ref": forecast_ref,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )

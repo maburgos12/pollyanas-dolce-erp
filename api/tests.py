@@ -2749,6 +2749,56 @@ class RecetasCosteoApiTests(TestCase):
         self.assertFalse(payload["created"])
         self.assertEqual(Decimal(payload["cantidad"]), Decimal("52"))
 
+    def test_endpoint_ventas_solicitud_upsert_incluye_forecast_ref(self):
+        sucursal = Sucursal.objects.create(codigo="NORTEF", nombre="Sucursal Norte Forecast", activa=True)
+        for month_idx, qty in [(10, "30"), (11, "36"), (12, "40"), (1, "44"), (2, "48")]:
+            year = 2025 if month_idx >= 10 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+
+        url = reverse("api_ventas_solicitud")
+        resp = self.client.post(
+            url,
+            {
+                "receta_id": self.receta.id,
+                "sucursal_id": sucursal.id,
+                "alcance": "mes",
+                "periodo": "2026-03",
+                "cantidad": "120",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertIn("forecast_ref", payload)
+        self.assertIsInstance(payload["forecast_ref"], dict)
+        self.assertIn(payload["forecast_ref"].get("status"), {"SOBRE", "BAJO", "OK", "SIN_BASE"})
+        self.assertIn("forecast_qty", payload["forecast_ref"])
+        self.assertIn("solicitud_qty", payload["forecast_ref"])
+
+    def test_endpoint_ventas_solicitud_upsert_forecast_ref_disable(self):
+        sucursal = Sucursal.objects.create(codigo="NORTENF", nombre="Sucursal Norte No Forecast", activa=True)
+        url = reverse("api_ventas_solicitud")
+        resp = self.client.post(
+            f"{url}?validate_forecast=0",
+            {
+                "receta_id": self.receta.id,
+                "sucursal_id": sucursal.id,
+                "alcance": "mes",
+                "periodo": "2026-03",
+                "cantidad": "40",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertIsNone(payload.get("forecast_ref"))
+
     def test_endpoint_ventas_solicitud_aplicar_forecast(self):
         sucursal = Sucursal.objects.create(codigo="SUR", nombre="Sucursal Sur", activa=True)
         for month_idx, qty in [(10, "30"), (11, "36"), (12, "40"), (1, "44"), (2, "48")]:

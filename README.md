@@ -30,7 +30,7 @@ Sprint 1 entrega:
 - API: POST /api/ventas/historial/bulk/ (carga masiva de historial de ventas con dry_run)
 - API: POST /api/ventas/historial/import-preview/ (previsualiza carga de historial de ventas sin aplicar cambios)
 - API: POST /api/ventas/historial/import-confirm/ (confirma y aplica carga de historial de ventas)
-- API: POST /api/ventas/solicitud/ (alta/actualización de solicitud de ventas)
+- API: POST /api/ventas/solicitud/ (alta/actualización de solicitud de ventas; incluye `forecast_ref` opcional y permite desactivar validación con `?validate_forecast=0`)
 - API: POST /api/ventas/solicitud/bulk/ (carga masiva de solicitudes de ventas con dry_run)
 - API: POST /api/ventas/solicitud/import-preview/ (previsualiza carga de solicitudes de venta sin aplicar cambios)
 - API: POST /api/ventas/solicitud/import-confirm/ (confirma y aplica carga de solicitudes de venta)
