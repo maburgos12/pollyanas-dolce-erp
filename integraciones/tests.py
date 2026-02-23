@@ -151,6 +151,22 @@ class IntegracionesPanelTests(TestCase):
         self.assertIn("endpoint", body)
         self.assertIn("/api/public/v1/resumen/", body)
 
+    def test_health_csv_export(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CSV-01",
+            point_nombre="Insumo CSV",
+            fuzzy_score=88.0,
+            fuzzy_sugerencia="Insumo CSV",
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url, {"export": "health_csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        body = response.content.decode("utf-8")
+        self.assertIn("point_pending_total", body)
+        self.assertIn("alerta_nivel", body)
+
     def test_homologacion_summary_blocks_render(self):
         unidad = UnidadMedida.objects.create(
             codigo="kg",

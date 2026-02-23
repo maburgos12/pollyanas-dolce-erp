@@ -39,6 +39,41 @@ def _export_logs_csv(logs_qs) -> HttpResponse:
     return response
 
 
+def _export_health_csv(
+    requests_24h: int,
+    errors_24h: int,
+    integracion_point: dict,
+    alertas_operativas: list[dict],
+) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="integraciones_estado_operativo.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["kpi", "value"])
+    writer.writerow(["requests_24h", requests_24h])
+    writer.writerow(["errors_24h", errors_24h])
+    writer.writerow(["insumos_activos", integracion_point["insumos"]["activos"]])
+    writer.writerow(["insumos_con_codigo_point", integracion_point["insumos"]["con_codigo_point"]])
+    writer.writerow(["insumos_sin_codigo_point", integracion_point["insumos"]["sin_codigo_point"]])
+    writer.writerow(["insumos_cobertura_pct", integracion_point["insumos"]["cobertura_pct"]])
+    writer.writerow(["recetas_total", integracion_point["recetas"]["total"]])
+    writer.writerow(["recetas_homologadas", integracion_point["recetas"]["homologadas"]])
+    writer.writerow(["recetas_sin_homologar", integracion_point["recetas"]["sin_homologar"]])
+    writer.writerow(["recetas_cobertura_pct", integracion_point["recetas"]["cobertura_pct"]])
+    writer.writerow(["point_pending_total", integracion_point["point_pending"]["total"]])
+    writer.writerow(["point_pending_insumo", integracion_point["point_pending"]["por_tipo"].get(PointPendingMatch.TIPO_INSUMO, 0)])
+    writer.writerow(["point_pending_producto", integracion_point["point_pending"]["por_tipo"].get(PointPendingMatch.TIPO_PRODUCTO, 0)])
+    writer.writerow(
+        ["point_pending_proveedor", integracion_point["point_pending"]["por_tipo"].get(PointPendingMatch.TIPO_PROVEEDOR, 0)]
+    )
+    writer.writerow(["recetas_pending_match", integracion_point["inventario"]["recetas_pending_match"]])
+    writer.writerow(["almacen_pending_preview", integracion_point["inventario"]["almacen_pending_preview"]])
+    writer.writerow([])
+    writer.writerow(["alerta_nivel", "alerta_titulo", "alerta_detalle"])
+    for alerta in alertas_operativas:
+        writer.writerow([alerta.get("nivel", ""), alerta.get("titulo", ""), alerta.get("detalle", "")])
+    return response
+
+
 def _to_float(raw, default=0.0) -> float:
     try:
         return float(raw)
@@ -244,6 +279,7 @@ def panel(request):
     filter_client_id = (request.GET.get("client") or "").strip()
     filter_status = (request.GET.get("status") or "all").strip().lower()
     filter_q = (request.GET.get("q") or "").strip()
+    export_mode = (request.GET.get("export") or "").strip().lower()
 
     logs_qs = PublicApiAccessLog.objects.select_related("client")
     if filter_client_id.isdigit():
@@ -256,7 +292,7 @@ def panel(request):
         logs_qs = logs_qs.filter(endpoint__icontains=filter_q)
 
     logs_qs = logs_qs.order_by("-created_at", "-id")
-    if (request.GET.get("export") or "").strip().lower() == "csv":
+    if export_mode == "csv":
         return _export_logs_csv(logs_qs[:5000])
     logs = list(logs_qs[:120])
 
@@ -429,4 +465,11 @@ def panel(request):
         "point_pending_proveedor": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0)),
         "alertas_operativas": alertas_operativas,
     }
+    if export_mode == "health_csv":
+        return _export_health_csv(
+            requests_24h=requests_24h,
+            errors_24h=errors_24h,
+            integracion_point=context["integracion_point"],
+            alertas_operativas=alertas_operativas,
+        )
     return render(request, "integraciones/panel.html", context)

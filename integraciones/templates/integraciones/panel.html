@@ -21,7 +21,10 @@
     </section>
 
     <section class="card">
-        <div class="card-header">Alertas operativas</div>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="card-header mb-0">Alertas operativas</div>
+            <a class="btn btn-outline-primary" href="?export=health_csv">Exportar estado CSV</a>
+        </div>
         <div class="integraciones-alertas">
             {% for alerta in alertas_operativas %}
             <article class="integraciones-alerta integraciones-alerta--{{ alerta.nivel }}">
