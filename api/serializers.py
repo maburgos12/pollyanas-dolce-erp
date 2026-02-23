@@ -290,11 +290,21 @@ class InventarioCrossPendientesResolveSerializer(serializers.Serializer):
 class IntegracionesDeactivateIdleClientsSerializer(serializers.Serializer):
     idle_days = serializers.IntegerField(required=False, min_value=1, max_value=365, default=30)
     limit = serializers.IntegerField(required=False, min_value=1, max_value=500, default=100)
+    dry_run = serializers.BooleanField(required=False, default=False)
 
 
 class IntegracionesPurgeApiLogsSerializer(serializers.Serializer):
     retain_days = serializers.IntegerField(required=False, min_value=1, max_value=3650, default=90)
     max_delete = serializers.IntegerField(required=False, min_value=1, max_value=50000, default=5000)
+    dry_run = serializers.BooleanField(required=False, default=False)
+
+
+class IntegracionesMaintenanceRunSerializer(serializers.Serializer):
+    idle_days = serializers.IntegerField(required=False, min_value=1, max_value=365, default=30)
+    idle_limit = serializers.IntegerField(required=False, min_value=1, max_value=500, default=100)
+    retain_days = serializers.IntegerField(required=False, min_value=1, max_value=3650, default=90)
+    max_delete = serializers.IntegerField(required=False, min_value=1, max_value=50000, default=5000)
+    dry_run = serializers.BooleanField(required=False, default=False)
 
 
 class ComprasSolicitudCreateSerializer(serializers.Serializer):

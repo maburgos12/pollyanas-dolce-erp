@@ -845,6 +845,22 @@ class RecetasCosteoApiTests(TestCase):
             ).exists()
         )
 
+    def test_endpoint_integraciones_deactivate_idle_clients_dry_run(self):
+        idle_client, _ = PublicApiClient.create_with_generated_key(nombre="API Idle Dry", descripcion="")
+        url = reverse("api_integraciones_deactivate_idle_clients")
+        resp = self.client.post(url, {"idle_days": 30, "limit": 100, "dry_run": True})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["summary"]["dry_run"], True)
+        idle_client.refresh_from_db()
+        self.assertTrue(idle_client.activo)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="PREVIEW_DEACTIVATE_IDLE_API_CLIENTS",
+                model="integraciones.PublicApiClient",
+            ).exists()
+        )
+
     def test_endpoint_integraciones_purge_api_logs(self):
         api_client, _ = PublicApiClient.create_with_generated_key(nombre="API Purge", descripcion="")
         recent_log = PublicApiAccessLog.objects.create(
@@ -887,6 +903,67 @@ class RecetasCosteoApiTests(TestCase):
             ).exists()
         )
 
+    def test_endpoint_integraciones_purge_api_logs_dry_run(self):
+        api_client, _ = PublicApiClient.create_with_generated_key(nombre="API Purge Dry", descripcion="")
+        old_log = PublicApiAccessLog.objects.create(
+            client=api_client,
+            endpoint="/api/public/v1/old-dry/",
+            method="GET",
+            status_code=200,
+        )
+        PublicApiAccessLog.objects.filter(id=old_log.id).update(created_at=timezone.now() - timedelta(days=120))
+
+        url = reverse("api_integraciones_purge_api_logs")
+        resp = self.client.post(url, {"retain_days": 90, "max_delete": 100, "dry_run": True})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["summary"]["dry_run"], True)
+        self.assertGreaterEqual(payload["summary"]["would_delete"], 1)
+        self.assertTrue(PublicApiAccessLog.objects.filter(id=old_log.id).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="PREVIEW_PURGE_API_LOGS",
+                model="integraciones.PublicApiAccessLog",
+            ).exists()
+        )
+
+    def test_endpoint_integraciones_run_maintenance(self):
+        idle_client, _ = PublicApiClient.create_with_generated_key(nombre="API Idle Mnt", descripcion="")
+        api_client, _ = PublicApiClient.create_with_generated_key(nombre="API Purge Mnt", descripcion="")
+        old_log = PublicApiAccessLog.objects.create(
+            client=api_client,
+            endpoint="/api/public/v1/old-mnt/",
+            method="GET",
+            status_code=500,
+        )
+        PublicApiAccessLog.objects.filter(id=old_log.id).update(created_at=timezone.now() - timedelta(days=120))
+
+        url = reverse("api_integraciones_run_maintenance")
+        resp = self.client.post(
+            url,
+            {
+                "idle_days": 30,
+                "idle_limit": 100,
+                "retain_days": 90,
+                "max_delete": 1,
+                "dry_run": False,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["dry_run"], False)
+        self.assertIn("deactivate_idle_clients", payload)
+        self.assertIn("purge_api_logs", payload)
+        idle_client.refresh_from_db()
+        self.assertFalse(idle_client.activo)
+        self.assertFalse(PublicApiAccessLog.objects.filter(id=old_log.id).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="RUN_API_MAINTENANCE",
+                model="integraciones.Operaciones",
+            ).exists()
+        )
+
     def test_endpoint_integraciones_operaciones_forbidden_without_role(self):
         user_model = get_user_model()
         no_role_user = user_model.objects.create_user(
@@ -903,8 +980,13 @@ class RecetasCosteoApiTests(TestCase):
             reverse("api_integraciones_purge_api_logs"),
             {"retain_days": 90, "max_delete": 10},
         )
+        resp_maintenance = self.client.post(
+            reverse("api_integraciones_run_maintenance"),
+            {"idle_days": 30, "idle_limit": 10, "retain_days": 90, "max_delete": 10},
+        )
         self.assertEqual(resp_deactivate.status_code, 403)
         self.assertEqual(resp_purge.status_code, 403)
+        self.assertEqual(resp_maintenance.status_code, 403)
 
     def test_endpoint_inventario_aliases_pendientes_unificados_resolver_dry_run_and_apply(self):
         target = Insumo.objects.create(nombre="Harina API Target", unidad_base=self.unidad, activo=True)

@@ -108,6 +108,7 @@ from .serializers import (
     ForecastEstadisticoGuardarSerializer,
     ForecastEstadisticoRequestSerializer,
     IntegracionesDeactivateIdleClientsSerializer,
+    IntegracionesMaintenanceRunSerializer,
     IntegracionesPurgeApiLogsSerializer,
     InventarioAjusteCreateSerializer,
     InventarioAjusteDecisionSerializer,
@@ -239,6 +240,49 @@ def _build_public_api_daily_trend(days: int = 7) -> list[dict[str, Any]]:
             }
         )
     return trend
+
+
+def _preview_deactivate_idle_api_clients(idle_days: int, limit: int) -> dict[str, Any]:
+    idle_days = max(1, min(int(idle_days or 30), 365))
+    limit = max(1, min(int(limit or 100), 500))
+    cutoff = timezone.now() - timedelta(days=idle_days)
+    recent_client_ids = set(
+        PublicApiAccessLog.objects.filter(created_at__gte=cutoff)
+        .values_list("client_id", flat=True)
+        .distinct()
+    )
+    candidates = list(
+        PublicApiClient.objects.filter(activo=True)
+        .exclude(id__in=recent_client_ids)
+        .order_by("id")
+        .values("id", "nombre")[:limit]
+    )
+    return {
+        "idle_days": idle_days,
+        "limit": limit,
+        "candidates": len(candidates),
+        "deactivated": 0,
+        "cutoff": cutoff.isoformat(),
+        "candidate_clients": candidates,
+        "dry_run": True,
+    }
+
+
+def _preview_purge_api_logs(retain_days: int, max_delete: int) -> dict[str, Any]:
+    retain_days = max(1, min(int(retain_days or 90), 3650))
+    max_delete = max(1, min(int(max_delete or 5000), 50000))
+    cutoff = timezone.now() - timedelta(days=retain_days)
+    total_candidates = PublicApiAccessLog.objects.filter(created_at__lt=cutoff).count()
+    return {
+        "retain_days": retain_days,
+        "max_delete": max_delete,
+        "cutoff": cutoff.isoformat(),
+        "candidates": int(total_candidates),
+        "deleted": 0,
+        "remaining_candidates": int(total_candidates),
+        "would_delete": min(int(total_candidates), max_delete),
+        "dry_run": True,
+    }
 
 
 class ApiTokenAuthView(ObtainAuthToken):
@@ -3042,13 +3086,19 @@ class IntegracionesDeactivateIdleClientsView(APIView):
 
         serializer = IntegracionesDeactivateIdleClientsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        summary = _deactivate_idle_api_clients(
-            idle_days=serializer.validated_data["idle_days"],
-            limit=serializer.validated_data["limit"],
+        idle_days = serializer.validated_data["idle_days"]
+        limit = serializer.validated_data["limit"]
+        dry_run = bool(serializer.validated_data.get("dry_run"))
+        summary = (
+            _preview_deactivate_idle_api_clients(idle_days=idle_days, limit=limit)
+            if dry_run
+            else _deactivate_idle_api_clients(idle_days=idle_days, limit=limit)
         )
+        if "dry_run" not in summary:
+            summary["dry_run"] = dry_run
         log_event(
             request.user,
-            "DEACTIVATE_IDLE_API_CLIENTS",
+            "PREVIEW_DEACTIVATE_IDLE_API_CLIENTS" if dry_run else "DEACTIVATE_IDLE_API_CLIENTS",
             "integraciones.PublicApiClient",
             "",
             payload=summary,
@@ -3074,13 +3124,19 @@ class IntegracionesPurgeApiLogsView(APIView):
 
         serializer = IntegracionesPurgeApiLogsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        summary = _purge_api_logs(
-            retain_days=serializer.validated_data["retain_days"],
-            max_delete=serializer.validated_data["max_delete"],
+        retain_days = serializer.validated_data["retain_days"]
+        max_delete = serializer.validated_data["max_delete"]
+        dry_run = bool(serializer.validated_data.get("dry_run"))
+        summary = (
+            _preview_purge_api_logs(retain_days=retain_days, max_delete=max_delete)
+            if dry_run
+            else _purge_api_logs(retain_days=retain_days, max_delete=max_delete)
         )
+        if "dry_run" not in summary:
+            summary["dry_run"] = dry_run
         log_event(
             request.user,
-            "PURGE_API_LOGS",
+            "PREVIEW_PURGE_API_LOGS" if dry_run else "PURGE_API_LOGS",
             "integraciones.PublicApiAccessLog",
             "",
             payload=summary,
@@ -3092,6 +3148,46 @@ class IntegracionesPurgeApiLogsView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class IntegracionesMaintenanceRunView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not can_view_audit(request.user):
+            return Response(
+                {"detail": "No tienes permisos para ejecutar operaciones de integración."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = IntegracionesMaintenanceRunSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        dry_run = bool(data.get("dry_run"))
+
+        deactivate_summary = (
+            _preview_deactivate_idle_api_clients(idle_days=data["idle_days"], limit=data["idle_limit"])
+            if dry_run
+            else _deactivate_idle_api_clients(idle_days=data["idle_days"], limit=data["idle_limit"])
+        )
+        purge_summary = (
+            _preview_purge_api_logs(retain_days=data["retain_days"], max_delete=data["max_delete"])
+            if dry_run
+            else _purge_api_logs(retain_days=data["retain_days"], max_delete=data["max_delete"])
+        )
+        payload = {
+            "dry_run": dry_run,
+            "deactivate_idle_clients": deactivate_summary,
+            "purge_api_logs": purge_summary,
+        }
+        log_event(
+            request.user,
+            "PREVIEW_RUN_API_MAINTENANCE" if dry_run else "RUN_API_MAINTENANCE",
+            "integraciones.Operaciones",
+            "",
+            payload=payload,
+        )
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class IntegracionPointResumenView(APIView):
