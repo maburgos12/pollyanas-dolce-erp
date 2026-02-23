@@ -1,12 +1,16 @@
+import csv
 from collections import defaultdict
 from contextlib import nullcontext
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
 from typing import Any
 from django.db import transaction, OperationalError, ProgrammingError
 from django.db.models import Count, Q, Sum
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from openpyxl import Workbook
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -403,6 +407,134 @@ def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict
             "bajo_rango_count": int(totals.get("bajo_rango_count") or 0),
         },
     }
+
+
+def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
+    scope = payload.get("scope") or {}
+    totals = payload.get("totales") or {}
+    by_alcance = payload.get("solicitud_by_alcance") or {}
+    rows = payload.get("rows") or []
+    periodo = str(scope.get("periodo") or _normalize_periodo_mes(None)).replace("-", "")
+    filename = f"ventas_pipeline_{periodo}.{export_format}"
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Periodo", scope.get("periodo") or ""])
+        ws_resumen.append(["Sucursal", scope.get("sucursal") or "Todas"])
+        ws_resumen.append(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
+        ws_resumen.append(["Top", int(scope.get("top") or 0)])
+        ws_resumen.append(["Historial total", float(totals.get("historial_qty") or 0)])
+        ws_resumen.append(["Pronostico total", float(totals.get("pronostico_qty") or 0)])
+        ws_resumen.append(["Solicitud total", float(totals.get("solicitud_qty") or 0)])
+        ws_resumen.append(["Delta solicitud vs pronostico", float(totals.get("delta_solicitud_vs_pronostico") or 0)])
+        ws_resumen.append(["Delta historial vs solicitud", float(totals.get("delta_historial_vs_solicitud") or 0)])
+        ws_resumen.append(["Cobertura solicitud %", float(totals.get("cobertura_solicitud_pct")) if totals.get("cobertura_solicitud_pct") is not None else None])
+        ws_resumen.append(["Cumplimiento historial %", float(totals.get("cumplimiento_historial_pct")) if totals.get("cumplimiento_historial_pct") is not None else None])
+        ws_resumen.append(["Solicitudes MES", float(by_alcance.get("MES") or 0)])
+        ws_resumen.append(["Solicitudes SEMANA", float(by_alcance.get("SEMANA") or 0)])
+        ws_resumen.append(["Solicitudes FIN_SEMANA", float(by_alcance.get("FIN_SEMANA") or 0)])
+
+        ws_detalle = wb.create_sheet("Detalle")
+        ws_detalle.append(
+            [
+                "Receta ID",
+                "Receta",
+                "Historial",
+                "Pronostico",
+                "Solicitud",
+                "Delta Solicitud vs Pronostico",
+                "Delta Historial vs Solicitud",
+                "Cobertura %",
+                "Cumplimiento %",
+                "Status",
+            ]
+        )
+        for row in rows:
+            ws_detalle.append(
+                [
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    float(row.get("historial_qty") or 0),
+                    float(row.get("pronostico_qty") or 0),
+                    float(row.get("solicitud_qty") or 0),
+                    float(row.get("delta_solicitud_vs_pronostico") or 0),
+                    float(row.get("delta_historial_vs_solicitud") or 0),
+                    float(row.get("cobertura_pct")) if row.get("cobertura_pct") is not None else None,
+                    float(row.get("cumplimiento_pct")) if row.get("cumplimiento_pct") is not None else None,
+                    row.get("status") or "",
+                ]
+            )
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Periodo", scope.get("periodo") or ""])
+    writer.writerow(["Sucursal", scope.get("sucursal") or "Todas"])
+    writer.writerow(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
+    writer.writerow(["Top", int(scope.get("top") or 0)])
+    writer.writerow(["Historial total", f"{Decimal(str(totals.get('historial_qty') or 0)):.3f}"])
+    writer.writerow(["Pronostico total", f"{Decimal(str(totals.get('pronostico_qty') or 0)):.3f}"])
+    writer.writerow(["Solicitud total", f"{Decimal(str(totals.get('solicitud_qty') or 0)):.3f}"])
+    writer.writerow(["Delta solicitud vs pronostico", f"{Decimal(str(totals.get('delta_solicitud_vs_pronostico') or 0)):.3f}"])
+    writer.writerow(["Delta historial vs solicitud", f"{Decimal(str(totals.get('delta_historial_vs_solicitud') or 0)):.3f}"])
+    writer.writerow(
+        [
+            "Cobertura solicitud %",
+            f"{Decimal(str(totals.get('cobertura_solicitud_pct'))):.1f}" if totals.get("cobertura_solicitud_pct") is not None else "",
+        ]
+    )
+    writer.writerow(
+        [
+            "Cumplimiento historial %",
+            f"{Decimal(str(totals.get('cumplimiento_historial_pct'))):.1f}" if totals.get("cumplimiento_historial_pct") is not None else "",
+        ]
+    )
+    writer.writerow(["Solicitudes MES", f"{Decimal(str(by_alcance.get('MES') or 0)):.3f}"])
+    writer.writerow(["Solicitudes SEMANA", f"{Decimal(str(by_alcance.get('SEMANA') or 0)):.3f}"])
+    writer.writerow(["Solicitudes FIN_SEMANA", f"{Decimal(str(by_alcance.get('FIN_SEMANA') or 0)):.3f}"])
+    writer.writerow([])
+    writer.writerow(
+        [
+            "receta_id",
+            "receta",
+            "historial_qty",
+            "pronostico_qty",
+            "solicitud_qty",
+            "delta_solicitud_vs_pronostico",
+            "delta_historial_vs_solicitud",
+            "cobertura_pct",
+            "cumplimiento_pct",
+            "status",
+        ]
+    )
+    for row in rows:
+        writer.writerow(
+            [
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                f"{Decimal(str(row.get('historial_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('pronostico_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('solicitud_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('delta_solicitud_vs_pronostico') or 0)):.3f}",
+                f"{Decimal(str(row.get('delta_historial_vs_solicitud') or 0)):.3f}",
+                f"{Decimal(str(row.get('cobertura_pct'))):.1f}" if row.get("cobertura_pct") is not None else "",
+                f"{Decimal(str(row.get('cumplimiento_pct'))):.1f}" if row.get("cumplimiento_pct") is not None else "",
+                row.get("status") or "",
+            ]
+        )
+    return response
 
 
 def _resolve_receta_bulk_ref(
@@ -4623,6 +4755,12 @@ class VentasPipelineResumenView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format and export_format not in {"csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         periodo = (request.GET.get("periodo") or "").strip()
         top = _parse_bounded_int(request.GET.get("top", 120), default=120, min_value=1, max_value=500)
         if periodo:
@@ -4757,42 +4895,42 @@ class VentasPipelineResumenView(APIView):
             row.pop("_sort", None)
             rows.append(row)
 
-        return Response(
-            {
-                "scope": {
-                    "periodo": periodo,
-                    "sucursal_id": sucursal.id if sucursal else None,
-                    "sucursal": sucursal.nombre if sucursal else "Todas",
-                    "incluir_preparaciones": incluir_preparaciones,
-                    "top": top,
-                },
-                "totales": {
-                    "historial_qty": _to_float(historial_total),
-                    "pronostico_qty": _to_float(pronostico_total),
-                    "solicitud_qty": _to_float(solicitud_total),
-                    "delta_solicitud_vs_pronostico": _to_float((solicitud_total - pronostico_total).quantize(Decimal("0.001"))),
-                    "delta_historial_vs_solicitud": _to_float((historial_total - solicitud_total).quantize(Decimal("0.001"))),
-                    "cobertura_solicitud_pct": _to_float(cobertura_solicitud_pct) if cobertura_solicitud_pct is not None else None,
-                    "cumplimiento_historial_pct": _to_float(cumplimiento_historial_pct) if cumplimiento_historial_pct is not None else None,
-                    "historial_recetas": historial_qs.values("receta_id").distinct().count(),
-                    "pronostico_recetas": pronostico_qs.values("receta_id").distinct().count(),
-                    "solicitud_recetas": solicitudes_qs.values("receta_id").distinct().count(),
-                    "rows_count": len(receta_ids),
-                },
-                "solicitud_by_alcance": {
-                    "MES": _to_float(by_alcance[SolicitudVenta.ALCANCE_MES]),
-                    "SEMANA": _to_float(by_alcance[SolicitudVenta.ALCANCE_SEMANA]),
-                    "FIN_SEMANA": _to_float(by_alcance[SolicitudVenta.ALCANCE_FIN_SEMANA]),
-                },
-                "latest_updates": {
-                    "historial": latest_historial,
-                    "pronostico": latest_pronostico,
-                    "solicitud": latest_solicitud,
-                },
-                "rows": rows,
+        payload = {
+            "scope": {
+                "periodo": periodo,
+                "sucursal_id": sucursal.id if sucursal else None,
+                "sucursal": sucursal.nombre if sucursal else "Todas",
+                "incluir_preparaciones": incluir_preparaciones,
+                "top": top,
             },
-            status=status.HTTP_200_OK,
-        )
+            "totales": {
+                "historial_qty": _to_float(historial_total),
+                "pronostico_qty": _to_float(pronostico_total),
+                "solicitud_qty": _to_float(solicitud_total),
+                "delta_solicitud_vs_pronostico": _to_float((solicitud_total - pronostico_total).quantize(Decimal("0.001"))),
+                "delta_historial_vs_solicitud": _to_float((historial_total - solicitud_total).quantize(Decimal("0.001"))),
+                "cobertura_solicitud_pct": _to_float(cobertura_solicitud_pct) if cobertura_solicitud_pct is not None else None,
+                "cumplimiento_historial_pct": _to_float(cumplimiento_historial_pct) if cumplimiento_historial_pct is not None else None,
+                "historial_recetas": historial_qs.values("receta_id").distinct().count(),
+                "pronostico_recetas": pronostico_qs.values("receta_id").distinct().count(),
+                "solicitud_recetas": solicitudes_qs.values("receta_id").distinct().count(),
+                "rows_count": len(receta_ids),
+            },
+            "solicitud_by_alcance": {
+                "MES": _to_float(by_alcance[SolicitudVenta.ALCANCE_MES]),
+                "SEMANA": _to_float(by_alcance[SolicitudVenta.ALCANCE_SEMANA]),
+                "FIN_SEMANA": _to_float(by_alcance[SolicitudVenta.ALCANCE_FIN_SEMANA]),
+            },
+            "latest_updates": {
+                "historial": latest_historial,
+                "pronostico": latest_pronostico,
+                "solicitud": latest_solicitud,
+            },
+            "rows": rows,
+        }
+        if export_format:
+            return _ventas_pipeline_export_response(payload, export_format)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class SolicitudVentaListView(APIView):

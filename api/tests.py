@@ -2157,6 +2157,58 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["rows"][0]["receta_id"], self.receta.id)
         self.assertEqual(payload["rows"][0]["status"], "BAJO")
 
+    def test_endpoint_ventas_pipeline_resumen_export_csv_y_xlsx(self):
+        sucursal = Sucursal.objects.create(codigo="PIPEX", nombre="Sucursal Pipeline Export", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 3, 5),
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("50"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("40"),
+            fuente="API_TEST",
+        )
+
+        resp_csv = self.client.get(
+            reverse("api_ventas_pipeline_resumen"),
+            {"periodo": "2026-03", "sucursal_id": sucursal.id, "incluir_preparaciones": "1", "export": "csv"},
+        )
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("receta_id,receta,historial_qty,pronostico_qty,solicitud_qty", body_csv)
+        self.assertIn("Receta API", body_csv)
+
+        resp_xlsx = self.client.get(
+            reverse("api_ventas_pipeline_resumen"),
+            {"periodo": "2026-03", "sucursal_id": sucursal.id, "incluir_preparaciones": "1", "export": "xlsx"},
+        )
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_pipeline_resumen_export_formato_invalido(self):
+        resp = self.client.get(reverse("api_ventas_pipeline_resumen"), {"periodo": "2026-03", "export": "pdf"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_listados_requires_perm(self):
         user_model = get_user_model()
         user = user_model.objects.create_user(
