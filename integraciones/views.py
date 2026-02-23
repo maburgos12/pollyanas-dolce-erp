@@ -9,6 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Max, Q
 from django.http import HttpResponse
+from django.urls import reverse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
@@ -462,7 +463,7 @@ def panel(request):
                     f"proveedores {point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0)}."
                 ),
                 "cta_label": "Resolver en Maestros",
-                "cta_url": "/maestros/point-pendientes/",
+                "cta_url": reverse("maestros:point_pending_review"),
             }
         )
     if recetas_pending_total:
@@ -472,7 +473,7 @@ def panel(request):
                 "titulo": "Líneas receta sin match",
                 "detalle": f"{recetas_pending_total} líneas requieren homologación interna.",
                 "cta_label": "Revisar matching",
-                "cta_url": "/recetas/revisar-matching/",
+                "cta_url": reverse("recetas:matching_pendientes"),
             }
         )
     if not latest_run:
@@ -482,7 +483,7 @@ def panel(request):
                 "titulo": "Sync de almacén no ejecutado",
                 "detalle": "No hay corridas de sincronización registradas.",
                 "cta_label": "Ir a Carga Almacén",
-                "cta_url": "/inventario/carga/",
+                "cta_url": reverse("inventario:carga_almacen"),
             }
         )
     elif latest_run.started_at and latest_run.started_at < stale_limit:
@@ -492,7 +493,7 @@ def panel(request):
                 "titulo": "Sync de almacén desactualizado",
                 "detalle": f"Último sync: {latest_run.started_at:%Y-%m-%d %H:%M}.",
                 "cta_label": "Ir a Carga Almacén",
-                "cta_url": "/inventario/carga/",
+                "cta_url": reverse("inventario:carga_almacen"),
             }
         )
 
