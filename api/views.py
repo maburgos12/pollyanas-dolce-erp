@@ -413,6 +413,7 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
     scope = payload.get("scope") or {}
     totals = payload.get("totales") or {}
     by_alcance = payload.get("solicitud_by_alcance") or {}
+    by_sucursal = payload.get("by_sucursal") or []
     rows = payload.get("rows") or []
     periodo = str(scope.get("periodo") or _normalize_periodo_mes(None)).replace("-", "")
     filename = f"ventas_pipeline_{periodo}.{export_format}"
@@ -435,6 +436,33 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
         ws_resumen.append(["Solicitudes MES", float(by_alcance.get("MES") or 0)])
         ws_resumen.append(["Solicitudes SEMANA", float(by_alcance.get("SEMANA") or 0)])
         ws_resumen.append(["Solicitudes FIN_SEMANA", float(by_alcance.get("FIN_SEMANA") or 0)])
+
+        ws_sucursal = wb.create_sheet("BySucursal")
+        ws_sucursal.append(
+            [
+                "Sucursal ID",
+                "Sucursal codigo",
+                "Sucursal",
+                "Historial",
+                "Solicitud",
+                "Delta Historial vs Solicitud",
+                "Cumplimiento %",
+                "Status",
+            ]
+        )
+        for row in by_sucursal:
+            ws_sucursal.append(
+                [
+                    int(row.get("sucursal_id") or 0),
+                    row.get("sucursal_codigo") or "",
+                    row.get("sucursal") or "",
+                    float(row.get("historial_qty") or 0),
+                    float(row.get("solicitud_qty") or 0),
+                    float(row.get("delta_historial_vs_solicitud") or 0),
+                    float(row.get("cumplimiento_pct")) if row.get("cumplimiento_pct") is not None else None,
+                    row.get("status") or "",
+                ]
+            )
 
         ws_detalle = wb.create_sheet("Detalle")
         ws_detalle.append(
@@ -504,6 +532,33 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
     writer.writerow(["Solicitudes MES", f"{Decimal(str(by_alcance.get('MES') or 0)):.3f}"])
     writer.writerow(["Solicitudes SEMANA", f"{Decimal(str(by_alcance.get('SEMANA') or 0)):.3f}"])
     writer.writerow(["Solicitudes FIN_SEMANA", f"{Decimal(str(by_alcance.get('FIN_SEMANA') or 0)):.3f}"])
+    writer.writerow([])
+    writer.writerow(["BY_SUCURSAL"])
+    writer.writerow(
+        [
+            "sucursal_id",
+            "sucursal_codigo",
+            "sucursal",
+            "historial_qty",
+            "solicitud_qty",
+            "delta_historial_vs_solicitud",
+            "cumplimiento_pct",
+            "status",
+        ]
+    )
+    for row in by_sucursal:
+        writer.writerow(
+            [
+                int(row.get("sucursal_id") or 0),
+                row.get("sucursal_codigo") or "",
+                row.get("sucursal") or "",
+                f"{Decimal(str(row.get('historial_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('solicitud_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('delta_historial_vs_solicitud') or 0)):.3f}",
+                f"{Decimal(str(row.get('cumplimiento_pct'))):.1f}" if row.get("cumplimiento_pct") is not None else "",
+                row.get("status") or "",
+            ]
+        )
     writer.writerow([])
     writer.writerow(
         [
@@ -5675,6 +5730,62 @@ class VentasPipelineResumenView(APIView):
         for row in solicitudes_qs.values("alcance").annotate(total=Sum("cantidad")):
             by_alcance[row["alcance"]] = _to_decimal(row["total"])
 
+        historial_sucursal_map = {
+            int(row["sucursal_id"]): _to_decimal(row["total"])
+            for row in historial_qs.values("sucursal_id").annotate(total=Sum("cantidad"))
+            if row.get("sucursal_id") is not None
+        }
+        solicitud_sucursal_map = {
+            int(row["sucursal_id"]): _to_decimal(row["total"])
+            for row in solicitudes_qs.values("sucursal_id").annotate(total=Sum("cantidad"))
+            if row.get("sucursal_id") is not None
+        }
+        sucursal_ids = sorted(set(historial_sucursal_map.keys()) | set(solicitud_sucursal_map.keys()))
+        sucursal_map = {
+            int(sid): (codigo, nombre)
+            for sid, codigo, nombre in Sucursal.objects.filter(id__in=sucursal_ids).values_list("id", "codigo", "nombre")
+        }
+        by_sucursal_rows_tmp: list[dict[str, Any]] = []
+        for sid in sucursal_ids:
+            hist_qty = historial_sucursal_map.get(sid, Decimal("0"))
+            sol_qty = solicitud_sucursal_map.get(sid, Decimal("0"))
+            delta = hist_qty - sol_qty
+            cumplimiento_pct = None
+            if sol_qty > 0:
+                cumplimiento_pct = ((hist_qty / sol_qty) * Decimal("100")).quantize(Decimal("0.1"))
+            if sol_qty > 0:
+                threshold = max(Decimal("1"), sol_qty * Decimal("0.10"))
+                if delta > threshold:
+                    status_tag = "SOBRE"
+                elif delta < (threshold * Decimal("-1")):
+                    status_tag = "BAJO"
+                else:
+                    status_tag = "OK"
+            elif hist_qty > 0:
+                status_tag = "SIN_SOLICITUD"
+            else:
+                status_tag = "SIN_MOV"
+
+            suc_codigo, suc_nombre = sucursal_map.get(sid, ("", f"Sucursal {sid}"))
+            by_sucursal_rows_tmp.append(
+                {
+                    "_sort": abs(delta),
+                    "sucursal_id": sid,
+                    "sucursal_codigo": suc_codigo,
+                    "sucursal": suc_nombre,
+                    "historial_qty": _to_float(hist_qty),
+                    "solicitud_qty": _to_float(sol_qty),
+                    "delta_historial_vs_solicitud": _to_float(delta.quantize(Decimal("0.001"))),
+                    "cumplimiento_pct": _to_float(cumplimiento_pct) if cumplimiento_pct is not None else None,
+                    "status": status_tag,
+                }
+            )
+        by_sucursal_rows_tmp.sort(key=lambda row: row["_sort"], reverse=True)
+        by_sucursal_rows = []
+        for row in by_sucursal_rows_tmp[:120]:
+            row.pop("_sort", None)
+            by_sucursal_rows.append(row)
+
         cobertura_solicitud_pct = None
         if pronostico_total > 0:
             cobertura_solicitud_pct = ((solicitud_total / pronostico_total) * Decimal("100")).quantize(Decimal("0.1"))
@@ -5782,6 +5893,7 @@ class VentasPipelineResumenView(APIView):
                 "SEMANA": _to_float(by_alcance[SolicitudVenta.ALCANCE_SEMANA]),
                 "FIN_SEMANA": _to_float(by_alcance[SolicitudVenta.ALCANCE_FIN_SEMANA]),
             },
+            "by_sucursal": by_sucursal_rows,
             "latest_updates": {
                 "historial": latest_historial,
                 "pronostico": latest_pronostico,

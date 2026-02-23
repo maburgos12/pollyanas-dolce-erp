@@ -2428,8 +2428,68 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["solicitud_by_alcance"]["SEMANA"], 10.0)
         self.assertGreaterEqual(payload["totales"]["rows_count"], 1)
         self.assertGreaterEqual(len(payload["rows"]), 1)
+        self.assertGreaterEqual(len(payload["by_sucursal"]), 1)
         self.assertEqual(payload["rows"][0]["receta_id"], self.receta.id)
         self.assertEqual(payload["rows"][0]["status"], "BAJO")
+        sucursal_row = next((r for r in payload["by_sucursal"] if r["sucursal_id"] == sucursal.id), None)
+        self.assertIsNotNone(sucursal_row)
+        self.assertEqual(sucursal_row["sucursal_codigo"], "PIPE")
+        self.assertEqual(sucursal_row["historial_qty"], 35.0)
+        self.assertEqual(sucursal_row["solicitud_qty"], 50.0)
+        self.assertEqual(sucursal_row["status"], "BAJO")
+
+    def test_endpoint_ventas_pipeline_resumen_by_sucursal_multi(self):
+        sucursal_norte = Sucursal.objects.create(codigo="NOR", nombre="Sucursal Norte", activa=True)
+        sucursal_sur = Sucursal.objects.create(codigo="SUR", nombre="Sucursal Sur", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_norte,
+            fecha=date(2026, 3, 5),
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_sur,
+            fecha=date(2026, 3, 6),
+            cantidad=Decimal("9"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_norte,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_sur,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("15"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_pipeline_resumen"),
+            {"periodo": "2026-03", "incluir_preparaciones": "1"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertGreaterEqual(len(payload["by_sucursal"]), 2)
+        by_id = {int(row["sucursal_id"]): row for row in payload["by_sucursal"]}
+        self.assertEqual(by_id[sucursal_norte.id]["status"], "SOBRE")
+        self.assertEqual(by_id[sucursal_sur.id]["status"], "BAJO")
+        self.assertEqual(by_id[sucursal_norte.id]["historial_qty"], 20.0)
+        self.assertEqual(by_id[sucursal_norte.id]["solicitud_qty"], 10.0)
+        self.assertEqual(by_id[sucursal_sur.id]["historial_qty"], 9.0)
+        self.assertEqual(by_id[sucursal_sur.id]["solicitud_qty"], 15.0)
 
     def test_endpoint_ventas_pipeline_resumen_export_csv_y_xlsx(self):
         sucursal = Sucursal.objects.create(codigo="PIPEX", nombre="Sucursal Pipeline Export", activa=True)
@@ -2464,6 +2524,7 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp_csv.status_code, 200)
         self.assertIn("text/csv", resp_csv["Content-Type"])
         body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("BY_SUCURSAL", body_csv)
         self.assertIn("receta_id,receta,historial_qty,pronostico_qty,solicitud_qty", body_csv)
         self.assertIn("Receta API", body_csv)
 
