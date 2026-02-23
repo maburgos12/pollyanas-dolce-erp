@@ -736,6 +736,52 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
         self.assertIn("forecast_backtest", response.context)
         self.assertIsNotNone(response.context["forecast_backtest"])
 
+    def test_pronostico_estadistico_backtest_export_csv_y_xlsx(self):
+        for month_idx, qty in [(9, "30"), (10, "35"), (11, "40"), (12, "46"), (1, "50"), (2, "55"), (3, "60")]:
+            year = 2025 if month_idx >= 9 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=self.sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="TEST_BACKTEST_EXPORT",
+            )
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "mes",
+                "periodo": "2026-04",
+                "fecha_base": "2026-04-15",
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "backtest",
+                "escenario": "alto",
+                "backtest_periods": "4",
+                "backtest_top": "5",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response_csv = self.client.get(reverse("recetas:forecast_backtest_export"), {"format": "csv", "periodo": "2026-04"})
+        self.assertEqual(response_csv.status_code, 200)
+        self.assertIn("text/csv", response_csv["Content-Type"])
+        body_csv = response_csv.content.decode("utf-8")
+        self.assertIn("VENTANAS", body_csv)
+        self.assertIn("TOP_ERRORES", body_csv)
+        self.assertIn("Pastel Forecast", body_csv)
+
+        response_xlsx = self.client.get(reverse("recetas:forecast_backtest_export"), {"format": "xlsx", "periodo": "2026-04"})
+        self.assertEqual(response_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response_xlsx["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(response_xlsx.content), data_only=True)
+        self.assertIn("Resumen", wb.sheetnames)
+        self.assertIn("Ventanas", wb.sheetnames)
+        self.assertIn("TopErrores", wb.sheetnames)
+
     def test_pronostico_estadistico_min_confianza_filtra_resultados(self):
         for month_idx, qty in [(10, "40"), (11, "50"), (12, "60"), (1, "65"), (2, "70")]:
             year = 2025 if month_idx >= 10 else 2026
@@ -914,6 +960,64 @@ class SolicitudVentasForecastTests(TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(compare["escenario"], "bajo")
         self.assertEqual(row["forecast_qty"], row["forecast_low"])
+
+    def test_export_pronostico_vs_solicitud_csv_y_xlsx(self):
+        for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
+            year = 2025 if month_idx >= 11 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=self.sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="TEST_HIST_SOL_EXPORT",
+            )
+
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=self.sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-04",
+            fecha_inicio=date(2026, 4, 1),
+            fecha_fin=date(2026, 4, 30),
+            cantidad=Decimal("110"),
+            fuente="TEST_SOL_EXPORT",
+        )
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "mes",
+                "periodo": "2026-04",
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "preview",
+                "escenario": "base",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response_csv = self.client.get(
+            reverse("recetas:forecast_vs_solicitud_export"),
+            {"format": "csv", "escenario": "bajo", "periodo": "2026-04"},
+        )
+        self.assertEqual(response_csv.status_code, 200)
+        self.assertIn("text/csv", response_csv["Content-Type"])
+        body_csv = response_csv.content.decode("utf-8")
+        self.assertIn("receta_id,receta,forecast,forecast_base,forecast_baja,forecast_alta", body_csv)
+        self.assertIn("Pastel Solicitud", body_csv)
+
+        response_xlsx = self.client.get(
+            reverse("recetas:forecast_vs_solicitud_export"),
+            {"format": "xlsx", "escenario": "alto", "periodo": "2026-04"},
+        )
+        self.assertEqual(response_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response_xlsx["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(response_xlsx.content), data_only=True)
+        self.assertIn("Resumen", wb.sheetnames)
+        self.assertIn("Detalle", wb.sheetnames)
 
     def test_aplicar_ajuste_desde_forecast_actualiza_solicitud(self):
         for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:

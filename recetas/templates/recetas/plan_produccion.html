@@ -378,6 +378,16 @@
       MAE: {{ forecast_backtest.totals.mae_promedio|floatformat:2 }} ·
       MAPE: {% if forecast_backtest.totals.mape_promedio is not None %}{{ forecast_backtest.totals.mape_promedio|floatformat:1 }}%{% else %}-{% endif %}
     </p>
+    <div class="toolbar mb-2">
+      <a
+        class="btn btn-secondary"
+        href="{% url 'recetas:forecast_backtest_export' %}?format=csv&periodo={{ periodo_pronostico_default }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}"
+      >Exportar backtest CSV</a>
+      <a
+        class="btn btn-secondary"
+        href="{% url 'recetas:forecast_backtest_export' %}?format=xlsx&periodo={{ periodo_pronostico_default }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}"
+      >Exportar backtest XLSX</a>
+    </div>
     <div class="table-responsive">
       <table class="table align-middle">
         <thead>
@@ -420,6 +430,16 @@
       Solicitud total: {{ forecast_vs_solicitud.totals.solicitud_total|floatformat:2 }} ·
       Delta: {{ forecast_vs_solicitud.totals.delta_total|floatformat:2 }}
     </p>
+    <div class="toolbar mb-2">
+      <a
+        class="btn btn-secondary"
+        href="{% url 'recetas:forecast_vs_solicitud_export' %}?format=csv&escenario={{ forecast_compare_escenario }}&periodo={{ periodo_pronostico_default }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}"
+      >Exportar comparativo CSV</a>
+      <a
+        class="btn btn-secondary"
+        href="{% url 'recetas:forecast_vs_solicitud_export' %}?format=xlsx&escenario={{ forecast_compare_escenario }}&periodo={{ periodo_pronostico_default }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}"
+      >Exportar comparativo XLSX</a>
+    </div>
     <form class="form-grid-auto mb-2" method="get" action="{% url 'recetas:plan_produccion' %}">
       {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
       <input type="hidden" name="periodo" value="{{ periodo_pronostico_default }}">
