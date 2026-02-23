@@ -423,6 +423,39 @@
 
     <section class="card">
         <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="card-header mb-0">Bitácora de acciones (Integraciones)</div>
+            <a class="btn btn-outline-primary" href="?export=audit_csv">Exportar bitácora CSV</a>
+        </div>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Usuario</th>
+                        <th>Acción</th>
+                        <th>Modelo</th>
+                        <th>Object ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in audit_rows %}
+                    <tr>
+                        <td>{{ row.timestamp|date:"Y-m-d H:i:s" }}</td>
+                        <td>{{ row.user.username|default:"-" }}</td>
+                        <td><code>{{ row.action }}</code></td>
+                        <td>{{ row.model }}</td>
+                        <td>{{ row.object_id|default:"-" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="5" class="muted">Sin acciones registradas en la bitácora.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
             <div class="card-header mb-0">Log de accesos recientes</div>
             <a
                 class="btn btn-outline-primary"

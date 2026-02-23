@@ -151,6 +151,20 @@ class IntegracionesPanelTests(TestCase):
         self.assertIn("endpoint", body)
         self.assertIn("/api/public/v1/resumen/", body)
 
+    def test_audit_csv_export(self):
+        self.client.force_login(self.admin)
+        self.client.post(
+            self.url,
+            {"action": "create", "nombre": "ERP Audit CSV", "descripcion": "Integracion"},
+            follow=True,
+        )
+        response = self.client.get(self.url, {"export": "audit_csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        body = response.content.decode("utf-8")
+        self.assertIn("accion", body)
+        self.assertIn("integraciones.PublicApiClient", body)
+
     def test_health_csv_export(self):
         PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,
@@ -244,6 +258,7 @@ class IntegracionesPanelTests(TestCase):
         self.assertContains(response, "Homologacion Point y Match Operativo")
         self.assertContains(response, "Point pendientes")
         self.assertContains(response, "Recetas sin match")
+        self.assertContains(response, "Bitácora de acciones (Integraciones)")
 
     def test_mass_resolve_point_pending_insumos_from_panel(self):
         unidad = UnidadMedida.objects.create(

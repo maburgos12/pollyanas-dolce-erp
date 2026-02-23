@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from datetime import timedelta
 
 from django.contrib import messages
@@ -13,6 +14,7 @@ from django.utils import timezone
 
 from core.access import can_view_audit
 from core.audit import log_event
+from core.models import AuditLog
 from inventario.models import AlmacenSyncRun
 from maestros.models import Insumo, InsumoAlias, PointPendingMatch, Proveedor
 from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
@@ -101,6 +103,25 @@ def _export_errors_csv(
                 row.get("total", 0),
                 "",
                 row.get("last_at").strftime("%Y-%m-%d %H:%M:%S") if row.get("last_at") else "",
+            ]
+        )
+    return response
+
+
+def _export_audit_csv(audit_rows) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="integraciones_audit_acciones.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["fecha", "usuario", "accion", "modelo", "object_id", "payload"])
+    for row in audit_rows:
+        writer.writerow(
+            [
+                row.timestamp.strftime("%Y-%m-%d %H:%M:%S") if row.timestamp else "",
+                row.user.username if getattr(row, "user", None) else "",
+                row.action,
+                row.model,
+                row.object_id,
+                json.dumps(row.payload or {}, ensure_ascii=False),
             ]
         )
     return response
@@ -328,6 +349,19 @@ def panel(request):
         return _export_logs_csv(logs_qs[:5000])
     logs = list(logs_qs[:120])
 
+    audit_qs = (
+        AuditLog.objects.select_related("user")
+        .filter(
+            Q(model="integraciones.PublicApiClient")
+            | Q(action="AUTO_RESOLVE_POINT_INSUMOS")
+            | Q(model="maestros.PointPendingMatch")
+        )
+        .order_by("-timestamp", "-id")
+    )
+    if export_mode == "audit_csv":
+        return _export_audit_csv(audit_qs[:5000])
+    audit_rows = list(audit_qs[:60])
+
     since_24h = timezone.now() - timedelta(hours=24)
     top_clients_24h = list(
         PublicApiAccessLog.objects.filter(created_at__gte=since_24h)
@@ -517,6 +551,7 @@ def panel(request):
         "alertas_operativas": alertas_operativas,
         "errors_by_endpoint_24h": errors_by_endpoint_24h,
         "errors_by_client_24h": errors_by_client_24h,
+        "audit_rows": audit_rows,
     }
     if export_mode == "health_csv":
         return _export_health_csv(
