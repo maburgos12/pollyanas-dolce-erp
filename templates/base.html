@@ -88,6 +88,14 @@
                             <span>Carga Almacén</span>
                         </a>
                     </li>
+                    <li>
+                        <a href="{% url 'activos:dashboard' %}" class="{% if '/activos/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/><path d="M8 14h3M13 14h3"/></svg>
+                            </span>
+                            <span>Activos</span>
+                        </a>
+                    </li>
                     {% endif %}
                     {% if ui_access.can_view_reportes %}
                     <li>

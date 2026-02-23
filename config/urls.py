@@ -23,6 +23,7 @@ urlpatterns = [
     path("recetas/", include(("recetas.urls", "recetas"), namespace="recetas")),
     path("compras/", include(("compras.urls", "compras"), namespace="compras")),
     path("inventario/", include(("inventario.urls", "inventario"), namespace="inventario")),
+    path("activos/", include(("activos.urls", "activos"), namespace="activos")),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("api/", include("api.urls")),
 ]

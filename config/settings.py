@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "recetas",
     "compras",
     "inventario",
+    "activos",
     "reportes",
     "api",
 ]

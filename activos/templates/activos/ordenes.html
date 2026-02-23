@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Activos - Órdenes{% endblock %}
+{% block page_title %}Activos · Órdenes{% endblock %}
+
+{% block content %}
+<div class="module-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+{% if can_manage_activos %}
+<section class="card">
+  <div class="card-header">Nueva orden de mantenimiento</div>
+  <form method="post">
+    {% csrf_token %}
+    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;">
+      <div>
+        <label>Activo</label>
+        <select name="activo_id" required>
+          <option value="">Selecciona...</option>
+          {% for a in activos %}
+            <option value="{{ a.id }}">{{ a.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Plan (opcional)</label>
+        <select name="plan_id">
+          <option value="">Sin plan</option>
+          {% for p in planes %}
+            <option value="{{ p.id }}">{{ p.activo_ref.nombre }} · {{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Tipo</label>
+        <select name="tipo">
+          <option value="PREVENTIVO">Preventivo</option>
+          <option value="CORRECTIVO">Correctivo</option>
+        </select>
+      </div>
+      <div>
+        <label>Prioridad</label>
+        <select name="prioridad">
+          <option value="MEDIA">Media</option>
+          <option value="ALTA">Alta</option>
+          <option value="CRITICA">Crítica</option>
+          <option value="BAJA">Baja</option>
+        </select>
+      </div>
+      <div>
+        <label>Fecha programada</label>
+        <input type="date" name="fecha_programada">
+      </div>
+      <div>
+        <label>Responsable</label>
+        <input type="text" name="responsable" maxlength="120" placeholder="Nombre responsable">
+      </div>
+      <div style="grid-column: span 2;">
+        <label>Descripción</label>
+        <input type="text" name="descripcion" maxlength="255" placeholder="Detalle del mantenimiento">
+      </div>
+    </div>
+    <div style="margin-top: 12px;">
+      <button type="submit" class="btn btn-primary">Crear orden</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Órdenes registradas</div>
+  <div class="quick-actions" style="margin-bottom:10px;">
+    <a href="?estatus=abiertas" class="btn btn-secondary">Abiertas</a>
+    <a href="?estatus=PENDIENTE" class="btn btn-secondary">Pendientes</a>
+    <a href="?estatus=EN_PROCESO" class="btn btn-secondary">En proceso</a>
+    <a href="?estatus=CERRADA" class="btn btn-secondary">Cerradas</a>
+    <a href="?estatus=CANCELADA" class="btn btn-secondary">Canceladas</a>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Activo</th>
+          <th>Tipo</th>
+          <th>Prioridad</th>
+          <th>Programada</th>
+          <th>Estatus</th>
+          <th>Costo</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in ordenes %}
+          <tr>
+            <td>{{ o.folio }}</td>
+            <td>{{ o.activo_ref.nombre }}</td>
+            <td>{{ o.get_tipo_display }}</td>
+            <td>{{ o.get_prioridad_display }}</td>
+            <td>{{ o.fecha_programada|date:"Y-m-d" }}</td>
+            <td><span class="badge badge-primary">{{ o.estatus }}</span></td>
+            <td>${{ o.costo_total|floatformat:2 }}</td>
+            <td>
+              {% if can_manage_activos %}
+                <div class="quick-actions" style="gap:6px;">
+                  <form method="post" action="{% url 'activos:orden_estatus' o.id 'EN_PROCESO' %}">
+                    {% csrf_token %}
+                    <button class="btn btn-secondary" type="submit">En proceso</button>
+                  </form>
+                  <form method="post" action="{% url 'activos:orden_estatus' o.id 'CERRADA' %}">
+                    {% csrf_token %}
+                    <button class="btn btn-primary" type="submit">Cerrar</button>
+                  </form>
+                  <form method="post" action="{% url 'activos:orden_estatus' o.id 'CANCELADA' %}">
+                    {% csrf_token %}
+                    <button class="btn btn-danger" type="submit">Cancelar</button>
+                  </form>
+                </div>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="8" class="text-muted">Sin órdenes para el filtro actual.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

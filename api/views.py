@@ -18,6 +18,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
 
+from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from core.access import (
     ROLE_ADMIN,
@@ -93,6 +94,8 @@ from .serializers import (
     ComprasRecepcionStatusSerializer,
     ComprasSolicitudCreateSerializer,
     ComprasSolicitudStatusSerializer,
+    ActivosOrdenCreateSerializer,
+    ActivosOrdenStatusSerializer,
     ForecastBacktestRequestSerializer,
     ForecastEstadisticoGuardarSerializer,
     ForecastEstadisticoRequestSerializer,
@@ -8235,3 +8238,304 @@ class SolicitudVentaAplicarForecastView(APIView):
         if export_format:
             return _ventas_solicitud_aplicar_forecast_export_response(response_payload, export_format)
         return Response(response_payload, status=status.HTTP_200_OK)
+
+
+class ActivosCalendarioMantenimientoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar calendario de mantenimiento."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        today = timezone.localdate()
+        date_from = _parse_iso_date(request.GET.get("from")) or today
+        date_to = _parse_iso_date(request.GET.get("to")) or (date_from + timedelta(days=45))
+        if date_to < date_from:
+            date_to = date_from + timedelta(days=45)
+
+        planes = list(
+            PlanMantenimiento.objects.select_related("activo_ref")
+            .filter(
+                activo=True,
+                estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+                proxima_ejecucion__isnull=False,
+                proxima_ejecucion__gte=date_from,
+                proxima_ejecucion__lte=date_to,
+            )
+            .order_by("proxima_ejecucion", "id")
+        )
+        ordenes = list(
+            OrdenMantenimiento.objects.select_related("activo_ref", "plan_ref")
+            .filter(
+                fecha_programada__gte=date_from,
+                fecha_programada__lte=date_to,
+            )
+            .order_by("fecha_programada", "id")
+        )
+
+        events = []
+        for plan in planes:
+            events.append(
+                {
+                    "fecha": str(plan.proxima_ejecucion),
+                    "tipo": "PLAN",
+                    "referencia": f"PLAN-{plan.id}",
+                    "activo_id": plan.activo_ref_id,
+                    "activo": plan.activo_ref.nombre,
+                    "detalle": plan.nombre,
+                    "estado": plan.estatus,
+                    "responsable": plan.responsable or "",
+                }
+            )
+        for orden in ordenes:
+            events.append(
+                {
+                    "fecha": str(orden.fecha_programada),
+                    "tipo": "ORDEN",
+                    "referencia": orden.folio,
+                    "activo_id": orden.activo_ref_id,
+                    "activo": orden.activo_ref.nombre,
+                    "detalle": orden.descripcion or orden.get_tipo_display(),
+                    "estado": orden.estatus,
+                    "responsable": orden.responsable or "",
+                }
+            )
+        events.sort(key=lambda row: (row["fecha"], row["tipo"], row["referencia"]))
+
+        return Response(
+            {
+                "range": {
+                    "from": str(date_from),
+                    "to": str(date_to),
+                    "days": (date_to - date_from).days + 1,
+                },
+                "totales": {
+                    "planes": len(planes),
+                    "ordenes": len(ordenes),
+                    "eventos": len(events),
+                },
+                "events": events,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ActivosDisponibilidadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar disponibilidad de activos."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        activos_qs = Activo.objects.filter(activo=True)
+        total = activos_qs.count()
+        operativos = activos_qs.filter(estado=Activo.ESTADO_OPERATIVO).count()
+        en_mantenimiento = activos_qs.filter(estado=Activo.ESTADO_MANTENIMIENTO).count()
+        fuera_servicio = activos_qs.filter(estado=Activo.ESTADO_FUERA_SERVICIO).count()
+        disponibilidad_pct = round((operativos * 100.0 / total), 2) if total else 100.0
+
+        criticidad_rows = (
+            activos_qs.values("criticidad")
+            .annotate(total=Count("id"))
+            .order_by("criticidad")
+        )
+        criticidad = {row["criticidad"]: int(row["total"] or 0) for row in criticidad_rows}
+
+        hoy = timezone.localdate()
+        ordenes_abiertas = OrdenMantenimiento.objects.filter(
+            estatus__in=[OrdenMantenimiento.ESTATUS_PENDIENTE, OrdenMantenimiento.ESTATUS_EN_PROCESO]
+        )
+        planes_vencidos = PlanMantenimiento.objects.filter(
+            activo=True,
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            proxima_ejecucion__isnull=False,
+            proxima_ejecucion__lt=hoy,
+        ).count()
+
+        return Response(
+            {
+                "totales": {
+                    "activos": total,
+                    "operativos": operativos,
+                    "en_mantenimiento": en_mantenimiento,
+                    "fuera_servicio": fuera_servicio,
+                    "disponibilidad_pct": disponibilidad_pct,
+                    "ordenes_abiertas": ordenes_abiertas.count(),
+                    "ordenes_en_proceso": ordenes_abiertas.filter(estatus=OrdenMantenimiento.ESTATUS_EN_PROCESO).count(),
+                    "planes_vencidos": planes_vencidos,
+                },
+                "criticidad": {
+                    "ALTA": criticidad.get(Activo.CRITICIDAD_ALTA, 0),
+                    "MEDIA": criticidad.get(Activo.CRITICIDAD_MEDIA, 0),
+                    "BAJA": criticidad.get(Activo.CRITICIDAD_BAJA, 0),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ActivosOrdenesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not can_manage_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para crear órdenes de mantenimiento."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ser = ActivosOrdenCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        activo = get_object_or_404(Activo, pk=data["activo_id"], activo=True)
+        plan = None
+        plan_id = data.get("plan_id")
+        if plan_id:
+            plan = get_object_or_404(PlanMantenimiento, pk=plan_id, activo_ref=activo)
+
+        fecha_programada = data.get("fecha_programada") or timezone.localdate()
+        orden = OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            plan_ref=plan,
+            tipo=data.get("tipo") or OrdenMantenimiento.TIPO_PREVENTIVO,
+            prioridad=data.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA,
+            fecha_programada=fecha_programada,
+            responsable=(data.get("responsable") or "").strip(),
+            descripcion=(data.get("descripcion") or "").strip(),
+            creado_por=request.user,
+        )
+        BitacoraMantenimiento.objects.create(
+            orden=orden,
+            accion="CREADA",
+            comentario="Orden creada desde API",
+            usuario=request.user,
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "activos.OrdenMantenimiento",
+            orden.id,
+            {
+                "folio": orden.folio,
+                "activo_id": orden.activo_ref_id,
+                "plan_id": orden.plan_ref_id,
+                "tipo": orden.tipo,
+                "prioridad": orden.prioridad,
+                "estatus": orden.estatus,
+                "source": "api",
+            },
+        )
+
+        return Response(
+            {
+                "id": orden.id,
+                "folio": orden.folio,
+                "activo_id": orden.activo_ref_id,
+                "activo": orden.activo_ref.nombre,
+                "plan_id": orden.plan_ref_id,
+                "tipo": orden.tipo,
+                "prioridad": orden.prioridad,
+                "estatus": orden.estatus,
+                "fecha_programada": str(orden.fecha_programada),
+                "responsable": orden.responsable,
+                "descripcion": orden.descripcion,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ActivosOrdenStatusUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, orden_id: int):
+        if not can_manage_inventario(request.user):
+            return Response(
+                {"detail": "No tienes permisos para actualizar estatus de órdenes de mantenimiento."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        orden = get_object_or_404(OrdenMantenimiento.objects.select_related("plan_ref"), pk=orden_id)
+        ser = ActivosOrdenStatusSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        estatus_new = ser.validated_data["estatus"]
+        estatus_prev = orden.estatus
+        if estatus_prev == estatus_new:
+            return Response(
+                {
+                    "id": orden.id,
+                    "folio": orden.folio,
+                    "from": estatus_prev,
+                    "to": estatus_new,
+                    "updated": False,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        allowed_transitions = {
+            OrdenMantenimiento.ESTATUS_PENDIENTE: {
+                OrdenMantenimiento.ESTATUS_EN_PROCESO,
+                OrdenMantenimiento.ESTATUS_CERRADA,
+                OrdenMantenimiento.ESTATUS_CANCELADA,
+            },
+            OrdenMantenimiento.ESTATUS_EN_PROCESO: {
+                OrdenMantenimiento.ESTATUS_CERRADA,
+                OrdenMantenimiento.ESTATUS_CANCELADA,
+            },
+            OrdenMantenimiento.ESTATUS_CERRADA: set(),
+            OrdenMantenimiento.ESTATUS_CANCELADA: set(),
+        }
+        if estatus_new not in allowed_transitions.get(estatus_prev, set()):
+            return Response(
+                {"detail": f"Transición inválida: {estatus_prev} -> {estatus_new}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        today = timezone.localdate()
+        orden.estatus = estatus_new
+        update_fields = ["estatus", "actualizado_en"]
+        if estatus_new == OrdenMantenimiento.ESTATUS_EN_PROCESO and not orden.fecha_inicio:
+            orden.fecha_inicio = today
+            update_fields.append("fecha_inicio")
+        if estatus_new == OrdenMantenimiento.ESTATUS_CERRADA:
+            orden.fecha_cierre = today
+            update_fields.append("fecha_cierre")
+            if orden.plan_ref_id:
+                plan = orden.plan_ref
+                plan.ultima_ejecucion = today
+                plan.recompute_next_date()
+                plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
+        orden.save(update_fields=update_fields)
+
+        BitacoraMantenimiento.objects.create(
+            orden=orden,
+            accion="ESTATUS",
+            comentario=f"{estatus_prev} -> {estatus_new}",
+            usuario=request.user,
+        )
+        log_event(
+            request.user,
+            "UPDATE",
+            "activos.OrdenMantenimiento",
+            orden.id,
+            {"from": estatus_prev, "to": estatus_new, "folio": orden.folio, "source": "api"},
+        )
+
+        return Response(
+            {
+                "id": orden.id,
+                "folio": orden.folio,
+                "from": estatus_prev,
+                "to": estatus_new,
+                "updated": True,
+                "fecha_inicio": str(orden.fecha_inicio) if orden.fecha_inicio else None,
+                "fecha_cierre": str(orden.fecha_cierre) if orden.fecha_cierre else None,
+            },
+            status=status.HTTP_200_OK,
+        )

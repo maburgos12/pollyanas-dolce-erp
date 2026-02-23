@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Activos - Calendario{% endblock %}
+{% block page_title %}Activos · Calendario{% endblock %}
+
+{% block content %}
+<div class="module-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+<section class="card">
+  <div class="card-header">Rango calendario</div>
+  <form method="get">
+    <div class="row" style="display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:10px;align-items:end;">
+      <div>
+        <label>Desde</label>
+        <input type="date" name="from" value="{{ date_from|date:'Y-m-d' }}">
+      </div>
+      <div>
+        <label>Hasta</label>
+        <input type="date" name="to" value="{{ date_to|date:'Y-m-d' }}">
+      </div>
+      <div>
+        <button type="submit" class="btn btn-primary">Filtrar</button>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Eventos programados</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Tipo</th>
+          <th>Referencia</th>
+          <th>Activo</th>
+          <th>Detalle</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in events %}
+          <tr>
+            <td>{{ e.fecha|date:"Y-m-d" }}</td>
+            <td>{{ e.tipo }}</td>
+            <td>{{ e.referencia }}</td>
+            <td>{{ e.activo }}</td>
+            <td>{{ e.detalle }}</td>
+            <td><span class="badge badge-primary">{{ e.estado }}</span></td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="6" class="text-muted">No hay eventos en el rango.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

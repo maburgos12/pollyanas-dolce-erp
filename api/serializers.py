@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from activos.models import OrdenMantenimiento
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from inventario.models import AjusteInventario
 from recetas.models import SolicitudVenta
@@ -353,6 +354,28 @@ class ComprasRecepcionCreateSerializer(serializers.Serializer):
 
 class ComprasRecepcionStatusSerializer(serializers.Serializer):
     estatus = serializers.ChoiceField(choices=[choice[0] for choice in RecepcionCompra.STATUS_CHOICES])
+
+
+class ActivosOrdenCreateSerializer(serializers.Serializer):
+    activo_id = serializers.IntegerField(min_value=1)
+    plan_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    tipo = serializers.ChoiceField(
+        choices=[choice[0] for choice in OrdenMantenimiento.TIPO_CHOICES],
+        required=False,
+        default=OrdenMantenimiento.TIPO_PREVENTIVO,
+    )
+    prioridad = serializers.ChoiceField(
+        choices=[choice[0] for choice in OrdenMantenimiento.PRIORIDAD_CHOICES],
+        required=False,
+        default=OrdenMantenimiento.PRIORIDAD_MEDIA,
+    )
+    fecha_programada = serializers.DateField(required=False)
+    responsable = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    descripcion = serializers.CharField(max_length=4000, required=False, allow_blank=True, default="")
+
+
+class ActivosOrdenStatusSerializer(serializers.Serializer):
+    estatus = serializers.ChoiceField(choices=[choice[0] for choice in OrdenMantenimiento.ESTATUS_CHOICES])
 
 
 class ComprasSolicitudImportPreviewRowSerializer(serializers.Serializer):

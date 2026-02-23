@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Activos - Dashboard{% endblock %}
+{% block page_title %}Activos · Dashboard{% endblock %}
+
+{% block content %}
+<div class="module-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+<div class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-number">{{ activos_total }}</div>
+    <div class="kpi-label">Activos</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-success">{{ activos_operativos }}</div>
+    <div class="kpi-label">Operativos</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ activos_mantenimiento }}</div>
+    <div class="kpi-label">En mantenimiento</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-danger">{{ activos_fuera_servicio }}</div>
+    <div class="kpi-label">Fuera de servicio</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-danger">{{ planes_vencidos }}</div>
+    <div class="kpi-label">Planes vencidos</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ planes_proxima_semana }}</div>
+    <div class="kpi-label">Próx. 7 días</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number">{{ ordenes_abiertas }}</div>
+    <div class="kpi-label">Órdenes abiertas</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ ordenes_en_proceso }}</div>
+    <div class="kpi-label">Órdenes en proceso</div>
+  </article>
+</div>
+
+<div class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-label">Costo mantenimiento mes</div>
+    <div class="kpi-number is-warning" style="font-size: 40px;">${{ costo_mes_total|floatformat:2 }}</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-label">Criticidad alta</div>
+    <div class="kpi-number is-danger" style="font-size: 40px;">{{ criticidad.ALTA|default:0 }}</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-label">Criticidad media</div>
+    <div class="kpi-number is-warning" style="font-size: 40px;">{{ criticidad.MEDIA|default:0 }}</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-label">Criticidad baja</div>
+    <div class="kpi-number is-success" style="font-size: 40px;">{{ criticidad.BAJA|default:0 }}</div>
+  </article>
+</div>
+
+<section class="card">
+  <div class="card-header">Próximos mantenimientos (45 días)</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Activo</th>
+          <th>Plan</th>
+          <th>Tipo</th>
+          <th>Responsable</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in proximos %}
+          <tr>
+            <td>{{ p.proxima_ejecucion|date:"Y-m-d" }}</td>
+            <td>{{ p.activo_ref.nombre }}</td>
+            <td>{{ p.nombre }}</td>
+            <td>{{ p.get_tipo_display }}</td>
+            <td>{{ p.responsable|default:"-" }}</td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="5" class="text-muted">Sin planes próximos.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Órdenes recientes</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Activo</th>
+          <th>Tipo</th>
+          <th>Programada</th>
+          <th>Estatus</th>
+          <th>Costo total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in ordenes_recientes %}
+          <tr>
+            <td>{{ o.folio }}</td>
+            <td>{{ o.activo_ref.nombre }}</td>
+            <td>{{ o.get_tipo_display }}</td>
+            <td>{{ o.fecha_programada|date:"Y-m-d" }}</td>
+            <td><span class="badge badge-primary">{{ o.estatus }}</span></td>
+            <td>${{ o.costo_total|floatformat:2 }}</td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="6" class="text-muted">Sin órdenes registradas.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
