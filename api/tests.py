@@ -1750,6 +1750,33 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("sobre_rango_count", payload["compare_solicitud"]["totals"])
         self.assertIn("bajo_rango_count", payload["compare_solicitud"]["totals"])
 
+    def test_endpoint_ventas_pronostico_estadistico_min_confianza_sin_resultados(self):
+        sucursal = Sucursal.objects.create(codigo="MCONF", nombre="Confianza", activa=True)
+        for week in range(1, 7):
+            week_start = date(2026, 3, 20) - timedelta(days=(7 * week))
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=week_start,
+                cantidad=Decimal("10"),
+                fuente="API_TEST",
+            )
+
+        url = reverse("api_ventas_pronostico_estadistico")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "semana",
+                "fecha_base": "2026-03-20",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "min_confianza_pct": "95",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("confianza", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_pronostico_estadistico_guardar(self):
         sucursal = Sucursal.objects.create(codigo="MATRIZ2", nombre="Matriz 2", activa=True)
         for week, qty in [(1, "10"), (2, "13"), (3, "11"), (4, "16"), (5, "12"), (6, "17")]:
@@ -2349,6 +2376,35 @@ class RecetasCosteoApiTests(TestCase):
             fecha_fin=date(2026, 3, 31),
         )
         self.assertEqual(unchanged.cantidad, Decimal("10"))
+
+    def test_endpoint_ventas_solicitud_aplicar_forecast_min_confianza(self):
+        sucursal = Sucursal.objects.create(codigo="CONFAP", nombre="Sucursal Conf", activa=True)
+        for month_idx, qty in [(10, "20"), (11, "24"), (12, "28"), (1, "30"), (2, "35")]:
+            year = 2025 if month_idx >= 10 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+
+        url = reverse("api_ventas_solicitud_aplicar_forecast")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "mes",
+                "periodo": "2026-03",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "modo": "receta",
+                "receta_id": self.receta.id,
+                "min_confianza_pct": "90",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("confianza", resp.json()["detail"].lower())
 
     def test_endpoint_ventas_historial_bulk_dry_run_y_apply(self):
         sucursal = Sucursal.objects.create(codigo="CENTRO", nombre="Sucursal Centro", activa=True)

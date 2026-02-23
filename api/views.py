@@ -68,6 +68,7 @@ from recetas.models import (
 )
 from recetas.views import (
     _build_forecast_from_history,
+    _filter_forecast_result_by_confianza,
     _forecast_session_payload,
     _forecast_vs_solicitud_preview,
     _normalize_periodo_mes,
@@ -5573,6 +5574,7 @@ class ForecastEstadisticoView(APIView):
         alcance = data.get("alcance") or "mes"
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
+        min_confianza_pct = _to_decimal(data.get("min_confianza_pct"), default=Decimal("0"))
         top = int(data.get("top") or 120)
 
         sucursal = None
@@ -5593,6 +5595,13 @@ class ForecastEstadisticoView(APIView):
             incluir_preparaciones=incluir_preparaciones,
             safety_pct=safety_pct,
         )
+        result, filtered_conf = _filter_forecast_result_by_confianza(result, min_confianza_pct)
+        result["min_confianza_pct"] = min_confianza_pct
+        if not result.get("rows"):
+            return Response(
+                {"detail": "No hay forecast tras aplicar el filtro de confianza mínima."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         payload = _forecast_session_payload(result, top_rows=top)
 
         compare_payload = None
@@ -5612,6 +5621,8 @@ class ForecastEstadisticoView(APIView):
                     "target_end": payload["target_end"],
                     "sucursal_nombre": payload["sucursal_nombre"],
                     "sucursal_id": payload.get("sucursal_id"),
+                    "min_confianza_pct": _to_float(min_confianza_pct),
+                    "filtered_conf": filtered_conf,
                 },
                 "totals": payload["totals"],
                 "rows": payload["rows"],
@@ -5646,6 +5657,7 @@ class ForecastEstadisticoGuardarView(APIView):
         alcance = data.get("alcance") or "mes"
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
+        min_confianza_pct = _to_decimal(data.get("min_confianza_pct"), default=Decimal("0"))
         top = int(data.get("top") or 120)
         escenario = str(data.get("escenario") or "base").lower()
         qty_key = self._ESCENARIO_TO_KEY.get(escenario, "forecast_qty")
@@ -5670,6 +5682,8 @@ class ForecastEstadisticoGuardarView(APIView):
             incluir_preparaciones=incluir_preparaciones,
             safety_pct=safety_pct,
         )
+        result, filtered_conf = _filter_forecast_result_by_confianza(result, min_confianza_pct)
+        result["min_confianza_pct"] = min_confianza_pct
         if not result.get("rows"):
             return Response(
                 {"detail": "No hay historial suficiente para generar forecast en ese alcance/filtro."},
@@ -5743,6 +5757,8 @@ class ForecastEstadisticoGuardarView(APIView):
                     "sucursal_id": payload.get("sucursal_id"),
                     "escenario": escenario,
                     "qty_key": qty_key,
+                    "min_confianza_pct": _to_float(min_confianza_pct),
+                    "filtered_conf": filtered_conf,
                 },
                 "totals": payload["totals"],
                 "persisted": {
@@ -5862,6 +5878,7 @@ class SolicitudVentaAplicarForecastView(APIView):
         fecha_base = data.get("fecha_base") or timezone.localdate()
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
+        min_confianza_pct = _to_decimal(data.get("min_confianza_pct"), default=Decimal("0"))
         dry_run = bool(data.get("dry_run", False))
         max_variacion_pct = _to_decimal(data.get("max_variacion_pct"), default=Decimal("-1"))
         if max_variacion_pct < 0:
@@ -5876,9 +5893,10 @@ class SolicitudVentaAplicarForecastView(APIView):
             incluir_preparaciones=incluir_preparaciones,
             safety_pct=safety_pct,
         )
+        result, _ = _filter_forecast_result_by_confianza(result, min_confianza_pct)
         if not result.get("rows"):
             return Response(
-                {"detail": "No hay historial suficiente para generar forecast en ese alcance/filtro."},
+                {"detail": "No hay forecast tras aplicar el filtro de confianza mínima."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -6000,6 +6018,7 @@ class SolicitudVentaAplicarForecastView(APIView):
                     "sucursal_id": sucursal.id,
                     "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}",
                     "modo": modo,
+                    "min_confianza_pct": _to_float(min_confianza_pct),
                 },
                 "updated": {
                     "dry_run": dry_run,

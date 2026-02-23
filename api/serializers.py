@@ -427,12 +427,18 @@ class ForecastEstadisticoRequestSerializer(serializers.Serializer):
     sucursal_id = serializers.IntegerField(required=False, allow_null=True)
     incluir_preparaciones = serializers.BooleanField(required=False, default=False)
     safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
+    min_confianza_pct = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
     include_solicitud_compare = serializers.BooleanField(required=False, default=True)
     top = serializers.IntegerField(required=False, min_value=1, max_value=500, default=120)
 
     def validate_safety_pct(self, value):
         if value < -30 or value > 100:
             raise serializers.ValidationError("safety_pct debe estar entre -30 y 100.")
+        return value
+
+    def validate_min_confianza_pct(self, value):
+        if value < 0 or value > 100:
+            raise serializers.ValidationError("min_confianza_pct debe estar entre 0 y 100.")
         return value
 
     def validate_periodo(self, value):
@@ -565,6 +571,7 @@ class SolicitudVentaAplicarForecastSerializer(serializers.Serializer):
     sucursal_id = serializers.IntegerField(required=True)
     incluir_preparaciones = serializers.BooleanField(required=False, default=False)
     safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
+    min_confianza_pct = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
     modo = serializers.ChoiceField(
         choices=["desviadas", "sobre", "bajo", "receta", "todas"],
         required=False,
@@ -579,6 +586,11 @@ class SolicitudVentaAplicarForecastSerializer(serializers.Serializer):
     def validate_safety_pct(self, value):
         if value < -30 or value > 100:
             raise serializers.ValidationError("safety_pct debe estar entre -30 y 100.")
+        return value
+
+    def validate_min_confianza_pct(self, value):
+        if value < 0 or value > 100:
+            raise serializers.ValidationError("min_confianza_pct debe estar entre 0 y 100.")
         return value
 
     def validate_max_variacion_pct(self, value):

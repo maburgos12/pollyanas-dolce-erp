@@ -2161,6 +2161,36 @@ def _forecast_range_qty(
     return pred_total, len(day_rows), confidence, dispersion, len(variance_samples)
 
 
+def _forecast_totals_from_rows(rows: list[dict[str, Any]]) -> dict[str, Decimal | int]:
+    return {
+        "recetas_count": len(rows),
+        "forecast_total": sum((r["forecast_qty"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+        "forecast_low_total": sum((r["forecast_low"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+        "forecast_high_total": sum((r["forecast_high"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+        "pronostico_total": sum((r["pronostico_actual"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+        "delta_total": sum((r["delta"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
+    }
+
+
+def _filter_forecast_result_by_confianza(
+    result: dict[str, Any], min_confianza_pct: Decimal
+) -> tuple[dict[str, Any], int]:
+    if min_confianza_pct <= 0:
+        return result, 0
+
+    threshold = Decimal(str(min_confianza_pct))
+    original_rows = list(result.get("rows") or [])
+    kept_rows = [r for r in original_rows if Decimal(str(r.get("confianza") or 0)) >= threshold]
+    filtered = len(original_rows) - len(kept_rows)
+    if filtered <= 0:
+        return result, 0
+
+    updated = dict(result)
+    updated["rows"] = kept_rows
+    updated["totals"] = _forecast_totals_from_rows(kept_rows)
+    return updated, filtered
+
+
 def _build_forecast_from_history(
     *,
     alcance: str,
@@ -2256,14 +2286,7 @@ def _build_forecast_from_history(
         "sucursal_id": sucursal.id if sucursal else None,
         "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
         "rows": rows,
-        "totals": {
-            "recetas_count": len(rows),
-            "forecast_total": sum((r["forecast_qty"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
-            "forecast_low_total": sum((r["forecast_low"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
-            "forecast_high_total": sum((r["forecast_high"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
-            "pronostico_total": sum((r["pronostico_actual"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
-            "delta_total": sum((r["delta"] for r in rows), Decimal("0")).quantize(Decimal("0.001")),
-        },
+        "totals": _forecast_totals_from_rows(rows),
     }
 
 
@@ -2286,7 +2309,7 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
                 "confianza": float(row["confianza"]),
             }
         )
-    return {
+    payload = {
         "alcance": result["alcance"],
         "periodo": result["periodo"],
         "target_start": str(result["target_start"]),
@@ -2303,6 +2326,9 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
             "delta_total": float(result["totals"]["delta_total"]),
         },
     }
+    if result.get("min_confianza_pct") is not None:
+        payload["min_confianza_pct"] = float(result.get("min_confianza_pct") or 0)
+    return payload
 
 
 def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -2481,6 +2507,7 @@ def _build_forecast_backtest_preview(
     sucursal: Sucursal | None,
     incluir_preparaciones: bool,
     safety_pct: Decimal,
+    min_confianza_pct: Decimal,
     top: int,
 ) -> dict[str, Any] | None:
     windows = _forecast_backtest_windows(alcance, fecha_base, periods)
@@ -2504,6 +2531,7 @@ def _build_forecast_backtest_preview(
             incluir_preparaciones=incluir_preparaciones,
             safety_pct=safety_pct,
         )
+        forecast_result, _ = _filter_forecast_result_by_confianza(forecast_result, min_confianza_pct)
         forecast_map = {
             int(row["receta_id"]): Decimal(str(row["forecast_qty"] or 0))
             for row in (forecast_result.get("rows") or [])
@@ -2519,7 +2547,10 @@ def _build_forecast_backtest_preview(
             for row in actual_qs.values("receta_id").annotate(total=Sum("cantidad"))
         }
 
-        union_ids = sorted(set(forecast_map.keys()) | set(actual_map.keys()))
+        if min_confianza_pct > 0:
+            union_ids = sorted(set(forecast_map.keys()))
+        else:
+            union_ids = sorted(set(forecast_map.keys()) | set(actual_map.keys()))
         if not union_ids:
             continue
 
@@ -2605,6 +2636,7 @@ def _build_forecast_backtest_preview(
             "alcance": alcance,
             "fecha_base": str(fecha_base),
             "periods": periods,
+            "min_confianza_pct": float(min_confianza_pct),
             "sucursal_id": sucursal.id if sucursal else None,
             "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
         },
@@ -3228,6 +3260,11 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
         safety_pct = Decimal("-30")
     if safety_pct > Decimal("100"):
         safety_pct = Decimal("100")
+    min_confianza_pct = _to_decimal_safe(request.POST.get("min_confianza_pct"))
+    if min_confianza_pct < Decimal("0"):
+        min_confianza_pct = Decimal("0")
+    if min_confianza_pct > Decimal("100"):
+        min_confianza_pct = Decimal("100")
 
     sucursal = Sucursal.objects.filter(pk=request.POST.get("sucursal_id")).first()
 
@@ -3239,7 +3276,14 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
         incluir_preparaciones=incluir_preparaciones,
         safety_pct=safety_pct,
     )
+    resultado, filtered_conf = _filter_forecast_result_by_confianza(resultado, min_confianza_pct)
+    resultado["min_confianza_pct"] = min_confianza_pct
     request.session["pronostico_estadistico_preview"] = _forecast_session_payload(resultado, top_rows=120)
+    if filtered_conf > 0:
+        messages.info(
+            request,
+            f"Filtro de confianza >= {min_confianza_pct}% aplicado: {filtered_conf} recetas omitidas.",
+        )
     if run_mode == "backtest":
         backtest_payload = _build_forecast_backtest_preview(
             alcance=alcance,
@@ -3248,6 +3292,7 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
             sucursal=sucursal,
             incluir_preparaciones=incluir_preparaciones,
             safety_pct=safety_pct,
+            min_confianza_pct=min_confianza_pct,
             top=backtest_top,
         )
         if backtest_payload is None:
@@ -3569,6 +3614,9 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
         solicitudes_venta_unavailable = True
     forecast_preview = request.session.get("pronostico_estadistico_preview")
     forecast_backtest = request.session.get("pronostico_backtest_preview")
+    min_confianza_default = request.GET.get("min_confianza_pct")
+    if not min_confianza_default:
+        min_confianza_default = str((forecast_preview or {}).get("min_confianza_pct") or "0")
     try:
         forecast_vs_solicitud = _forecast_vs_solicitud_preview(forecast_preview)
     except (OperationalError, ProgrammingError):
@@ -3607,6 +3655,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "fecha_base_estadistica": fecha_base_estadistica,
             "backtest_periods": backtest_periods,
             "backtest_top": backtest_top,
+            "min_confianza_default": min_confianza_default,
         },
     )
 

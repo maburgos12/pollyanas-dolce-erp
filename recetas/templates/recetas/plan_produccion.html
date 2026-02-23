@@ -272,6 +272,10 @@
       <input class="form-control" type="number" step="0.1" name="safety_pct" value="0">
     </div>
     <div class="form-group">
+      <label class="form-label">Confianza mínima %</label>
+      <input class="form-control" type="number" step="0.1" min="0" max="100" name="min_confianza_pct" value="{{ min_confianza_default|default:'0' }}">
+    </div>
+    <div class="form-group">
       <label class="form-label">Escenario</label>
       <select class="form-select" name="escenario">
         <option value="base">Base (forecast)</option>
@@ -310,6 +314,7 @@
     <p class="muted mb-2">
       Rango: {{ forecast_preview.target_start }} a {{ forecast_preview.target_end }} ·
       Recetas: {{ forecast_preview.totals.recetas_count }} ·
+      Confianza mínima: {{ forecast_preview.min_confianza_pct|default:0|floatformat:1 }}% ·
       Forecast total: {{ forecast_preview.totals.forecast_total|floatformat:2 }} ·
       Banda baja: {{ forecast_preview.totals.forecast_low_total|floatformat:2 }} ·
       Banda alta: {{ forecast_preview.totals.forecast_high_total|floatformat:2 }} ·
