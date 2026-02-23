@@ -12,6 +12,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from core.access import can_view_audit
+from core.audit import log_event
 
 from .models import PublicApiAccessLog, PublicApiClient
 
@@ -52,6 +53,17 @@ def panel(request):
                 descripcion=descripcion,
                 created_by=request.user,
             )
+            log_event(
+                request.user,
+                "CREATE",
+                "integraciones.PublicApiClient",
+                str(client.id),
+                payload={
+                    "nombre": client.nombre,
+                    "clave_prefijo": client.clave_prefijo,
+                    "activo": client.activo,
+                },
+            )
             request.session["integraciones_last_api_key"] = raw_key
             messages.success(request, f"Cliente creado: {client.nombre}")
             return redirect("integraciones:panel")
@@ -63,6 +75,13 @@ def panel(request):
                 messages.error(request, "Cliente no encontrado para rotación.")
                 return redirect("integraciones:panel")
             raw_key = client.rotate_key()
+            log_event(
+                request.user,
+                "ROTATE_KEY",
+                "integraciones.PublicApiClient",
+                str(client.id),
+                payload={"nombre": client.nombre, "clave_prefijo": client.clave_prefijo},
+            )
             request.session["integraciones_last_api_key"] = raw_key
             messages.success(request, f"API key rotada para: {client.nombre}")
             return redirect("integraciones:panel")
@@ -73,8 +92,16 @@ def panel(request):
             if not client:
                 messages.error(request, "Cliente no encontrado.")
                 return redirect("integraciones:panel")
+            old_status = client.activo
             client.activo = not client.activo
             client.save(update_fields=["activo", "updated_at"])
+            log_event(
+                request.user,
+                "TOGGLE_ACTIVE",
+                "integraciones.PublicApiClient",
+                str(client.id),
+                payload={"nombre": client.nombre, "old_activo": old_status, "new_activo": client.activo},
+            )
             label = "activado" if client.activo else "desactivado"
             messages.success(request, f"Cliente {label}: {client.nombre}")
             return redirect("integraciones:panel")

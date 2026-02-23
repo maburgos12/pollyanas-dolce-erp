@@ -4,6 +4,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from core.models import AuditLog
+
 from .models import PublicApiAccessLog, PublicApiClient
 
 
@@ -43,6 +45,10 @@ class IntegracionesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(PublicApiClient.objects.count(), 1)
         self.assertTrue(response.context["last_generated_api_key"])
+        audit = AuditLog.objects.filter(action="CREATE", model="integraciones.PublicApiClient").first()
+        self.assertIsNotNone(audit)
+        self.assertEqual(audit.user, self.admin)
+        self.assertEqual(audit.payload.get("nombre"), "ERP Point")
 
         second = self.client.get(self.url)
         self.assertEqual(second.context["last_generated_api_key"], "")
@@ -63,6 +69,13 @@ class IntegracionesPanelTests(TestCase):
         self.assertNotEqual(client.clave_hash, old_hash)
         self.assertNotEqual(client.clave_prefijo, old_prefix)
         self.assertTrue(response.context["last_generated_api_key"])
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="ROTATE_KEY",
+                model="integraciones.PublicApiClient",
+                object_id=str(client.id),
+            ).exists()
+        )
 
     def test_toggle_client_active_flag(self):
         client, _raw = PublicApiClient.create_with_generated_key(nombre="ERP Sucursal", descripcion="")
@@ -76,6 +89,14 @@ class IntegracionesPanelTests(TestCase):
         self.client.post(self.url, {"action": "toggle", "client_id": str(client.id)})
         client.refresh_from_db()
         self.assertTrue(client.activo)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action="TOGGLE_ACTIVE",
+                model="integraciones.PublicApiClient",
+                object_id=str(client.id),
+            ).count(),
+            2,
+        )
 
     def test_recent_logs_are_rendered(self):
         client, _raw = PublicApiClient.create_with_generated_key(nombre="ERP Logs", descripcion="")
