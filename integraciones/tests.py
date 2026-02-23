@@ -138,6 +138,52 @@ class IntegracionesPanelTests(TestCase):
             ).exists()
         )
 
+    def test_purge_api_logs_action_respects_retention_and_limit(self):
+        client, _ = PublicApiClient.create_with_generated_key(nombre="ERP PURGE", descripcion="")
+        recent = PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/recent-purge/",
+            method="GET",
+            status_code=200,
+        )
+        old_1 = PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/old-purge-1/",
+            method="GET",
+            status_code=200,
+        )
+        old_2 = PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/old-purge-2/",
+            method="GET",
+            status_code=500,
+        )
+        PublicApiAccessLog.objects.filter(id=recent.id).update(created_at=timezone.now() - timedelta(days=5))
+        PublicApiAccessLog.objects.filter(id__in=[old_1.id, old_2.id]).update(created_at=timezone.now() - timedelta(days=120))
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            self.url,
+            {
+                "action": "purge_api_logs",
+                "retain_days": "90",
+                "max_delete": "1",
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            PublicApiAccessLog.objects.filter(created_at__lt=timezone.now() - timedelta(days=90)).count(),
+            1,
+        )
+        self.assertTrue(PublicApiAccessLog.objects.filter(id=recent.id).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="PURGE_API_LOGS",
+                model="integraciones.PublicApiAccessLog",
+            ).exists()
+        )
+
     def test_recent_logs_are_rendered(self):
         client, _raw = PublicApiClient.create_with_generated_key(nombre="ERP Logs", descripcion="")
         PublicApiAccessLog.objects.create(

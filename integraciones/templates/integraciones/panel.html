@@ -571,6 +571,31 @@
                 Exportar CSV
             </a>
         </div>
+        <div class="card-subtle mb-3">
+            <form method="post" class="form-grid-auto">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="purge_api_logs">
+                <div class="form-group">
+                    <label class="form-label" for="id_retain_days">Retener últimos (días)</label>
+                    <input id="id_retain_days" name="retain_days" class="input-field" type="number" min="1" max="3650" value="90">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="id_max_delete">Máximo borrar por corrida</label>
+                    <input id="id_max_delete" name="max_delete" class="input-field" type="number" min="1" max="50000" value="5000">
+                </div>
+                <div class="form-group" style="display:flex;align-items:flex-end;">
+                    <button class="btn btn-danger w-100" type="submit">Limpiar logs antiguos</button>
+                </div>
+            </form>
+            <p class="muted mb-0">
+                Total logs: {{ total_api_logs }} ·
+                {% if oldest_api_log %}
+                Primer registro: {{ oldest_api_log|date:"Y-m-d H:i" }}
+                {% else %}
+                Sin registros
+                {% endif %}
+            </p>
+        </div>
         <form method="get" class="form-grid-auto mb-3">
             <div class="form-group">
                 <label class="form-label" for="id_client">Cliente</label>

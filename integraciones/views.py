@@ -363,6 +363,26 @@ def _deactivate_idle_api_clients(idle_days: int, limit: int) -> dict:
     }
 
 
+def _purge_api_logs(retain_days: int, max_delete: int) -> dict:
+    retain_days = max(1, min(int(retain_days or 90), 3650))
+    max_delete = max(1, min(int(max_delete or 5000), 50000))
+    cutoff = timezone.now() - timedelta(days=retain_days)
+    candidates_qs = PublicApiAccessLog.objects.filter(created_at__lt=cutoff).order_by("id")
+    total_candidates = candidates_qs.count()
+    delete_ids = list(candidates_qs.values_list("id", flat=True)[:max_delete])
+    deleted = 0
+    if delete_ids:
+        deleted, _detail = PublicApiAccessLog.objects.filter(id__in=delete_ids).delete()
+    return {
+        "retain_days": retain_days,
+        "max_delete": max_delete,
+        "cutoff": cutoff.isoformat(),
+        "candidates": int(total_candidates),
+        "deleted": int(deleted),
+        "remaining_candidates": max(int(total_candidates) - int(deleted), 0),
+    }
+
+
 @login_required
 def panel(request):
     if not can_view_audit(request.user):
@@ -497,6 +517,32 @@ def panel(request):
             )
             return redirect("integraciones:panel")
 
+        if action == "purge_api_logs":
+            retain_days = max(1, min(3650, _to_int(request.POST.get("retain_days"), 90)))
+            max_delete = max(1, min(50000, _to_int(request.POST.get("max_delete"), 5000)))
+            summary = _purge_api_logs(retain_days=retain_days, max_delete=max_delete)
+            log_event(
+                request.user,
+                "PURGE_API_LOGS",
+                "integraciones.PublicApiAccessLog",
+                "",
+                payload=summary,
+            )
+            messages.success(
+                request,
+                (
+                    "Limpieza de logs API completada: "
+                    f"{summary['deleted']} eliminados de {summary['candidates']} candidatos "
+                    f"(retención {summary['retain_days']} días)."
+                ),
+            )
+            if summary["remaining_candidates"] > 0:
+                messages.warning(
+                    request,
+                    f"Quedaron {summary['remaining_candidates']} logs por encima del límite de borrado."
+                )
+            return redirect("integraciones:panel")
+
     last_generated_api_key = request.session.pop("integraciones_last_api_key", "")
     clients = list(PublicApiClient.objects.order_by("nombre", "id"))
     client_ids = [int(client.id) for client in clients]
@@ -516,6 +562,8 @@ def panel(request):
         )
     clients_inactive = sum(1 for client in clients if not client.activo)
     clients_unused_30d = sum(1 for row in client_metrics if row["requests_30d"] == 0)
+    total_api_logs = PublicApiAccessLog.objects.count()
+    oldest_api_log = PublicApiAccessLog.objects.order_by("created_at").values_list("created_at", flat=True).first()
 
     filter_client_id = (request.GET.get("client") or "").strip()
     filter_status = (request.GET.get("status") or "all").strip().lower()
@@ -753,6 +801,8 @@ def panel(request):
         "client_metrics": client_metrics,
         "clients_inactive": clients_inactive,
         "clients_unused_30d": clients_unused_30d,
+        "total_api_logs": total_api_logs,
+        "oldest_api_log": oldest_api_log,
         "logs": logs,
         "last_generated_api_key": last_generated_api_key,
         "top_clients_24h": top_clients_24h,
