@@ -784,6 +784,13 @@ class RecetasCosteoApiTests(TestCase):
             status=AlmacenSyncRun.STATUS_OK,
             pending_preview=[{"nombre_origen": "Insumo pendiente point"}],
         )
+        AuditLog.objects.create(
+            user=self.user,
+            action="RUN_API_MAINTENANCE",
+            model="integraciones.Operaciones",
+            object_id="",
+            payload={"dry_run": False},
+        )
 
         url = reverse("api_integraciones_point_resumen")
         resp = self.client.get(url)
@@ -793,6 +800,7 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("api_24h_comparativo", payload)
         self.assertIn("api_7d", payload)
         self.assertIn("api_clients", payload)
+        self.assertIn("api_operations", payload)
         self.assertIn("alertas_operativas", payload)
         self.assertIn("insumos", payload)
         self.assertIn("recetas", payload)
@@ -809,6 +817,8 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(payload["api_clients"]["total"], 1)
         self.assertGreaterEqual(payload["api_clients"]["active"], 1)
         self.assertIn("top_30d", payload["api_clients"])
+        self.assertEqual(payload["api_operations"]["last_maintenance"]["action"], "RUN_API_MAINTENANCE")
+        self.assertIsNotNone(payload["api_operations"]["last_any"])
         self.assertGreaterEqual(len(payload["alertas_operativas"]), 1)
         self.assertGreaterEqual(payload["insumos"]["con_codigo_point"], 1)
         self.assertGreaterEqual(payload["recetas"]["homologadas"], 2)

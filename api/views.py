@@ -3437,6 +3437,32 @@ class IntegracionPointResumenView(APIView):
                 }
             )
 
+        operations_actions = {
+            "DEACTIVATE_IDLE_API_CLIENTS",
+            "PREVIEW_DEACTIVATE_IDLE_API_CLIENTS",
+            "PURGE_API_LOGS",
+            "PREVIEW_PURGE_API_LOGS",
+            "RUN_API_MAINTENANCE",
+            "PREVIEW_RUN_API_MAINTENANCE",
+        }
+        latest_operations = list(
+            AuditLog.objects.filter(action__in=operations_actions)
+            .select_related("user")
+            .order_by("-timestamp")[:60]
+        )
+
+        def _latest_action(*action_names):
+            action_set = set(action_names)
+            for row in latest_operations:
+                if row.action in action_set:
+                    return {
+                        "timestamp": row.timestamp,
+                        "user": row.user.username if row.user_id else "",
+                        "action": row.action,
+                        "payload": row.payload or {},
+                    }
+            return None
+
         return Response(
             {
                 "generated_at": timezone.now(),
@@ -3464,6 +3490,15 @@ class IntegracionPointResumenView(APIView):
                     "inactive": api_clients_inactive,
                     "unused_30d": api_clients_unused_30d,
                     "top_30d": api_clients_top_30d,
+                },
+                "api_operations": {
+                    "last_any": _latest_action(*operations_actions),
+                    "last_maintenance": _latest_action("RUN_API_MAINTENANCE", "PREVIEW_RUN_API_MAINTENANCE"),
+                    "last_purge": _latest_action("PURGE_API_LOGS", "PREVIEW_PURGE_API_LOGS"),
+                    "last_deactivate": _latest_action(
+                        "DEACTIVATE_IDLE_API_CLIENTS",
+                        "PREVIEW_DEACTIVATE_IDLE_API_CLIENTS",
+                    ),
                 },
                 "alertas_operativas": alertas_operativas,
                 "insumos": {
