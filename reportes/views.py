@@ -16,6 +16,8 @@ from inventario.models import ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo
 from recetas.models import Receta, LineaReceta
 
+from .bi_utils import compute_bi_snapshot
+
 
 def _to_decimal(value, default: str = "0") -> Decimal:
     try:
@@ -321,3 +323,78 @@ def faltantes(request: HttpRequest) -> HttpResponse:
         "alertas_count": criticos_count + bajo_count,
     }
     return render(request, "reportes/faltantes.html", context)
+
+
+def _export_bi_csv(snapshot: dict) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="reporte_bi_mensual.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["Periodo", "Compras", "Ventas", "Nomina", "Margen", "Entregas"])
+    for row in snapshot["series_mensual"]:
+        writer.writerow(
+            [
+                row["periodo"],
+                row["compras"],
+                row["ventas"],
+                row["nomina"],
+                row["margen"],
+                row["entregas"],
+            ]
+        )
+    return response
+
+
+def _export_bi_xlsx(snapshot: dict) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "BI"
+    ws.append(["Periodo", "Compras", "Ventas", "Nomina", "Margen", "Entregas"])
+    for row in snapshot["series_mensual"]:
+        ws.append(
+            [
+                row["periodo"],
+                float(row["compras"] or 0),
+                float(row["ventas"] or 0),
+                float(row["nomina"] or 0),
+                float(row["margen"] or 0),
+                int(row["entregas"] or 0),
+            ]
+        )
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="reporte_bi_mensual.xlsx"'
+    return response
+
+
+@login_required
+def bi(request: HttpRequest) -> HttpResponse:
+    if not can_view_reportes(request.user):
+        raise PermissionDenied("No tienes permisos para ver Reportes.")
+
+    try:
+        period_days = int(request.GET.get("period_days") or "90")
+    except (TypeError, ValueError):
+        period_days = 90
+    try:
+        months_window = int(request.GET.get("months") or "6")
+    except (TypeError, ValueError):
+        months_window = 6
+    snapshot = compute_bi_snapshot(period_days=period_days, months_window=months_window)
+
+    export_format = (request.GET.get("export") or "").lower()
+    if export_format == "csv":
+        return _export_bi_csv(snapshot)
+    if export_format == "xlsx":
+        return _export_bi_xlsx(snapshot)
+
+    context = {
+        "snapshot": snapshot,
+        "period_days": snapshot["range"]["days"],
+        "months_window": snapshot["range"]["months_window"],
+    }
+    return render(request, "reportes/bi.html", context)

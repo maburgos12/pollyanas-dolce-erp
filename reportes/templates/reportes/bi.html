@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Reportes - BI Ejecutivo{% endblock %}
+{% block page_title %}Reportes · BI Ejecutivo{% endblock %}
+
+{% block content %}
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'reportes:costo_receta' %}">Costo receta</a>
+  <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
+  <a class="module-tab" href="{% url 'reportes:faltantes' %}">Faltantes</a>
+  <a class="module-tab active" href="{% url 'reportes:bi' %}">BI</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">BI Ejecutivo (Compras · Ventas · Nómina · Logística)</div>
+  <form method="get" class="form-grid-auto mb-3">
+    <div>
+      <label for="period_days">Rango (días)</label>
+      <input class="input-field" id="period_days" type="number" min="7" max="365" name="period_days" value="{{ period_days }}">
+    </div>
+    <div>
+      <label for="months">Serie mensual</label>
+      <input class="input-field" id="months" type="number" min="3" max="24" name="months" value="{{ months_window }}">
+    </div>
+    <div class="align-items-end d-flex">
+      <button class="btn btn-primary" type="submit">Actualizar tablero</button>
+    </div>
+  </form>
+
+  <div class="kpi-mini">
+    <div class="kpi-card"><div class="kpi-number">${{ snapshot.kpis.compras_total|floatformat:0 }}</div><div class="kpi-label">Compras</div></div>
+    <div class="kpi-card"><div class="kpi-number is-success">${{ snapshot.kpis.ventas_total|floatformat:0 }}</div><div class="kpi-label">Ventas</div></div>
+    <div class="kpi-card"><div class="kpi-number is-warning">${{ snapshot.kpis.nomina_total|floatformat:0 }}</div><div class="kpi-label">Nómina</div></div>
+    <div class="kpi-card"><div class="kpi-number {% if snapshot.kpis.margen_operativo >= 0 %}is-success{% else %}is-danger{% endif %}">${{ snapshot.kpis.margen_operativo|floatformat:0 }}</div><div class="kpi-label">Margen operativo</div></div>
+    <div class="kpi-card"><div class="kpi-number is-danger">{{ snapshot.kpis.alertas_stock }}</div><div class="kpi-label">Alertas stock</div></div>
+  </div>
+
+  <div class="toolbar">
+    <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&export=csv">Descargar CSV</a>
+    <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&export=xlsx">Descargar Excel</a>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Periodo</th>
+          <th class="text-end">Compras</th>
+          <th class="text-end">Ventas</th>
+          <th class="text-end">Nómina</th>
+          <th class="text-end">Margen</th>
+          <th class="text-end">Entregas</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in snapshot.series_mensual %}
+        <tr>
+          <td>{{ row.periodo }}</td>
+          <td class="text-end">${{ row.compras|floatformat:2 }}</td>
+          <td class="text-end">${{ row.ventas|floatformat:2 }}</td>
+          <td class="text-end">${{ row.nomina|floatformat:2 }}</td>
+          <td class="text-end {% if row.margen < 0 %}text-danger{% else %}text-success{% endif %}">${{ row.margen|floatformat:2 }}</td>
+          <td class="text-end">{{ row.entregas }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="text-muted">Sin datos del periodo.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="dashboard-grid">
+  <section class="card">
+    <div class="card-header">Top proveedores (monto comprado)</div>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Proveedor</th>
+            <th class="text-end">Órdenes</th>
+            <th class="text-end">Monto</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in snapshot.top_proveedores %}
+          <tr>
+            <td>{{ row.proveedor__nombre|default:"-" }}</td>
+            <td class="text-end">{{ row.ordenes }}</td>
+            <td class="text-end">${{ row.total|floatformat:2 }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="3" class="text-muted">Sin órdenes para el rango.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Top insumos (consumo/salida)</div>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Insumo</th>
+            <th class="text-end">Movimientos</th>
+            <th class="text-end">Cantidad</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in snapshot.top_insumos_consumo %}
+          <tr>
+            <td>{{ row.insumo__nombre }}</td>
+            <td class="text-end">{{ row.movimientos }}</td>
+            <td class="text-end">{{ row.total|floatformat:3 }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="3" class="text-muted">Sin consumo en el rango.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
