@@ -427,6 +427,7 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
         ws_resumen.append(["Periodo", scope.get("periodo") or ""])
         ws_resumen.append(["Sucursal", scope.get("sucursal") or "Todas"])
         ws_resumen.append(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
+        ws_resumen.append(["Filtro q", scope.get("q") or ""])
         ws_resumen.append(["Top", int(scope.get("top") or 0)])
         ws_resumen.append(["Offset", int(scope.get("offset") or 0)])
         ws_resumen.append(["Top sucursales", int(scope.get("top_sucursales") or 0)])
@@ -534,6 +535,7 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
     writer.writerow(["Periodo", scope.get("periodo") or ""])
     writer.writerow(["Sucursal", scope.get("sucursal") or "Todas"])
     writer.writerow(["Incluir preparaciones", "SI" if scope.get("incluir_preparaciones") else "NO"])
+    writer.writerow(["Filtro q", scope.get("q") or ""])
     writer.writerow(["Top", int(scope.get("top") or 0)])
     writer.writerow(["Offset", int(scope.get("offset") or 0)])
     writer.writerow(["Top sucursales", int(scope.get("top_sucursales") or 0)])
@@ -6175,6 +6177,7 @@ class VentasPipelineResumenView(APIView):
         sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
         sort_sucursales_by = (request.GET.get("sort_sucursales_by") or "delta_abs").strip().lower()
         sort_sucursales_dir = (request.GET.get("sort_sucursales_dir") or "desc").strip().lower()
+        q = (request.GET.get("q") or "").strip()
 
         allowed_sort_rows = {
             "delta_abs",
@@ -6253,6 +6256,20 @@ class VentasPipelineResumenView(APIView):
         historial_qs = VentaHistorica.objects.filter(fecha__year=year, fecha__month=month)
         solicitudes_qs = SolicitudVenta.objects.filter(periodo=periodo)
         pronostico_qs = PronosticoVenta.objects.filter(periodo=periodo)
+
+        if q:
+            historial_qs = historial_qs.filter(
+                Q(receta__nombre__icontains=q)
+                | Q(receta__codigo_point__icontains=q)
+            )
+            solicitudes_qs = solicitudes_qs.filter(
+                Q(receta__nombre__icontains=q)
+                | Q(receta__codigo_point__icontains=q)
+            )
+            pronostico_qs = pronostico_qs.filter(
+                Q(receta__nombre__icontains=q)
+                | Q(receta__codigo_point__icontains=q)
+            )
 
         if sucursal:
             historial_qs = historial_qs.filter(sucursal=sucursal)
@@ -6487,6 +6504,7 @@ class VentasPipelineResumenView(APIView):
                 "sort_sucursales_dir": sort_sucursales_dir,
                 "status": status_filter or "",
                 "delta_min": _to_float(delta_min),
+                "q": q,
             },
             "totales": {
                 "historial_qty": _to_float(historial_total),

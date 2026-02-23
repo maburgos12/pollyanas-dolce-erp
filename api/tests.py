@@ -3076,6 +3076,75 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["rows"][0]["receta_id"], self.receta.id)
         self.assertEqual(payload["by_sucursal"][0]["sucursal_codigo"], "OFA")
 
+    def test_endpoint_ventas_pipeline_resumen_q_filter(self):
+        receta_b = Receta.objects.create(
+            nombre="Receta API Filtro B",
+            codigo_point="FILTRO-B",
+            sheet_name="Insumos API Filtro B",
+            hash_contenido="hash-api-filtro-b",
+            rendimiento_cantidad=Decimal("4"),
+            rendimiento_unidad=self.unidad,
+        )
+        sucursal = Sucursal.objects.create(codigo="QPI", nombre="Sucursal Q Pipeline", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 3, 5),
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=receta_b,
+            sucursal=sucursal,
+            fecha=date(2026, 3, 5),
+            cantidad=Decimal("9"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("25"),
+            fuente="API_TEST",
+        )
+        PronosticoVenta.objects.create(
+            receta=receta_b,
+            periodo="2026-03",
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("8"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=receta_b,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("6"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_pipeline_resumen"),
+            {"periodo": "2026-03", "incluir_preparaciones": "1", "q": "FILTRO-B"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["q"], "FILTRO-B")
+        self.assertEqual(payload["totales"]["rows_filtered"], 1)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
+        self.assertEqual(len(payload["rows"]), 1)
+        self.assertEqual(payload["rows"][0]["receta_id"], receta_b.id)
+
     def test_endpoint_ventas_pipeline_resumen_top_sucursales(self):
         sucursal_a = Sucursal.objects.create(codigo="TPA", nombre="Top A", activa=True)
         sucursal_b = Sucursal.objects.create(codigo="TPB", nombre="Top B", activa=True)
@@ -3265,6 +3334,7 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("text/csv", resp_csv["Content-Type"])
         body_csv = resp_csv.content.decode("utf-8")
         self.assertIn("BY_SUCURSAL", body_csv)
+        self.assertIn("Filtro q,", body_csv)
         self.assertIn("Offset,0", body_csv)
         self.assertIn("Offset sucursales,0", body_csv)
         self.assertIn("receta_id,receta,historial_qty,pronostico_qty,solicitud_qty", body_csv)
