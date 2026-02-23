@@ -7,4 +7,5 @@ app_name = "control"
 urlpatterns = [
     path("", views.discrepancias, name="home"),
     path("discrepancias/", views.discrepancias, name="discrepancias"),
+    path("captura-movil/", views.captura_movil, name="captura_movil"),
 ]

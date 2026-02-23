@@ -145,6 +145,16 @@
                         </a>
                     </li>
                     {% endif %}
+                    {% if ui_access.can_capture_piso %}
+                    <li>
+                        <a href="{% url 'control:captura_movil' %}" class="{% if '/control/captura-movil/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10 6.5h4"/><circle cx="12" cy="18" r="1"/></svg>
+                            </span>
+                            <span>Captura Piso</span>
+                        </a>
+                    </li>
+                    {% endif %}
                     {% if ui_access.can_view_audit %}
                     <li>
                         <a href="{% url 'audit_log' %}" class="{% if '/auditoria/' in request.path %}active{% endif %}">

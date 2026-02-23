@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Control · Captura móvil{% endblock %}
+{% block page_title %}Control · Captura móvil{% endblock %}
+
+{% block content %}
+<div class="module-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+<section class="card">
+  <div class="card-header">Captura rápida en piso</div>
+  <p class="muted">
+    Diseñado para teléfono o tablet. Registra ventas y mermas en segundos para alimentar control operativo.
+  </p>
+
+  <div class="mobile-capture-grid">
+    <form method="post" class="mobile-capture-form">
+      {% csrf_token %}
+      <input type="hidden" name="capture_type" value="venta">
+      <h3>Registrar venta</h3>
+      <div class="mobile-form-grid">
+        <div>
+          <label>Fecha</label>
+          <input type="date" name="fecha" value="{{ hoy }}" required>
+        </div>
+        <div>
+          <label>Sucursal</label>
+          <select name="sucursal_id">
+            <option value="">Global</option>
+            {% for s in sucursales %}
+            <option value="{{ s.id }}">{{ s.codigo }} - {{ s.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="full-width">
+          <label>Receta (opcional)</label>
+          <select name="receta_id">
+            <option value="">Selecciona receta...</option>
+            {% for r in recetas %}
+            <option value="{{ r.id }}">{{ r.nombre }}{% if r.codigo_point %} · {{ r.codigo_point }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Código Point (opcional)</label>
+          <input type="text" name="codigo_point" placeholder="COD-POINT">
+        </div>
+        <div>
+          <label>Producto texto (opcional)</label>
+          <input type="text" name="producto_texto" placeholder="Ej. Pastel Fresa Chico">
+        </div>
+        <div>
+          <label>Cantidad</label>
+          <input type="number" step="0.01" min="0.01" name="cantidad" required>
+        </div>
+        <div>
+          <label>Tickets</label>
+          <input type="number" step="1" min="0" name="tickets" value="0">
+        </div>
+        <div class="full-width">
+          <label>Monto total</label>
+          <input type="number" step="0.01" min="0" name="monto_total" value="0">
+        </div>
+      </div>
+      <button class="btn btn-primary mobile-submit-btn" type="submit">Guardar venta</button>
+    </form>
+
+    <form method="post" class="mobile-capture-form">
+      {% csrf_token %}
+      <input type="hidden" name="capture_type" value="merma">
+      <h3>Registrar merma</h3>
+      <div class="mobile-form-grid">
+        <div>
+          <label>Fecha</label>
+          <input type="date" name="fecha" value="{{ hoy }}" required>
+        </div>
+        <div>
+          <label>Sucursal</label>
+          <select name="sucursal_id">
+            <option value="">Global</option>
+            {% for s in sucursales %}
+            <option value="{{ s.id }}">{{ s.codigo }} - {{ s.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="full-width">
+          <label>Receta (opcional)</label>
+          <select name="receta_id">
+            <option value="">Selecciona receta...</option>
+            {% for r in recetas %}
+            <option value="{{ r.id }}">{{ r.nombre }}{% if r.codigo_point %} · {{ r.codigo_point }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Código Point (opcional)</label>
+          <input type="text" name="codigo_point" placeholder="COD-POINT">
+        </div>
+        <div>
+          <label>Producto texto (opcional)</label>
+          <input type="text" name="producto_texto" placeholder="Ej. Cheesecake Lotus">
+        </div>
+        <div>
+          <label>Cantidad</label>
+          <input type="number" step="0.01" min="0.01" name="cantidad" required>
+        </div>
+        <div class="full-width">
+          <label>Motivo</label>
+          <input type="text" name="motivo" placeholder="Golpe, sobrante, daño de empaque...">
+        </div>
+      </div>
+      <button class="btn btn-danger mobile-submit-btn" type="submit">Guardar merma</button>
+    </form>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Capturas recientes</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tipo</th>
+          <th>Fecha</th>
+          <th>Sucursal</th>
+          <th>Producto</th>
+          <th>Cantidad</th>
+          <th>Detalle</th>
+          <th>Fuente</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in recientes %}
+        <tr>
+          <td>
+            {% if row.tipo == "VENTA" %}
+              <span class="badge badge-success">VENTA</span>
+            {% else %}
+              <span class="badge badge-warning">MERMA</span>
+            {% endif %}
+          </td>
+          <td>{{ row.fecha|date:"Y-m-d" }}</td>
+          <td>{% if row.sucursal %}{{ row.sucursal.codigo }}{% else %}-{% endif %}</td>
+          <td>{{ row.producto|default:"-" }}</td>
+          <td>{{ row.cantidad|floatformat:2 }}</td>
+          <td>{{ row.extra }}</td>
+          <td>{{ row.fuente }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7" class="text-muted">Sin capturas registradas.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

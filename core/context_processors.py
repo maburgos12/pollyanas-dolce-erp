@@ -1,4 +1,5 @@
 from core.access import (
+    can_capture_piso,
     can_view_audit,
     can_manage_crm,
     can_manage_compras,
@@ -34,5 +35,6 @@ def ui_access(request):
             "can_manage_logistica": can_manage_logistica(user),
             "can_view_rrhh": can_view_rrhh(user),
             "can_manage_rrhh": can_manage_rrhh(user),
+            "can_capture_piso": can_capture_piso(user),
         }
     }

@@ -99,3 +99,15 @@ def can_view_rrhh(user: AbstractBaseUser) -> bool:
 
 def can_manage_rrhh(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_ADMIN, ROLE_RRHH)
+
+
+def can_capture_piso(user: AbstractBaseUser) -> bool:
+    return has_any_role(
+        user,
+        ROLE_DG,
+        ROLE_ADMIN,
+        ROLE_ALMACEN,
+        ROLE_PRODUCCION,
+        ROLE_VENTAS,
+        ROLE_LOGISTICA,
+    )

@@ -790,6 +790,48 @@ tr:hover,
   background: #fff;
 }
 
+.mobile-capture-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mobile-capture-form {
+  border: 1px solid var(--rosa);
+  border-radius: 10px;
+  background: #fff;
+  padding: 14px;
+}
+
+.mobile-capture-form h3 {
+  margin: 0 0 10px;
+  color: var(--vino);
+  font-size: 21px;
+}
+
+.mobile-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mobile-form-grid .full-width {
+  grid-column: 1 / -1;
+}
+
+.mobile-form-grid input,
+.mobile-form-grid select {
+  font-size: 15px;
+  padding: 11px 12px;
+}
+
+.mobile-submit-btn {
+  width: 100%;
+  margin-top: 10px;
+  min-height: 42px;
+  font-size: 14px;
+}
+
 @media (max-width: 900px) {
   .sidebar {
     width: 84px;
@@ -866,5 +908,13 @@ tr:hover,
   .recipe-actions-compact .btn {
     min-width: 78px;
     padding: 7px 10px;
+  }
+
+  .mobile-capture-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-form-grid {
+    grid-template-columns: 1fr;
   }
 }
