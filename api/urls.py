@@ -86,6 +86,13 @@ from .logistica_views import (
     LogisticaRutaStatusView,
 )
 from .reportes_bi_views import ReportesBIDashboardView
+from .public_views import (
+    PublicHealthView,
+    PublicInsumosView,
+    PublicRecetasView,
+    PublicResumenView,
+    PublicPedidosCreateView,
+)
 
 urlpatterns = [
     path("auth/token/", ApiTokenAuthView.as_view(), name="api_auth_token"),
@@ -153,6 +160,11 @@ urlpatterns = [
     path("logistica/rutas/<int:ruta_id>/estatus/", LogisticaRutaStatusView.as_view(), name="api_logistica_ruta_estatus"),
     path("logistica/rutas/<int:ruta_id>/entregas/", LogisticaRutaEntregasView.as_view(), name="api_logistica_ruta_entregas"),
     path("reportes/bi/dashboard/", ReportesBIDashboardView.as_view(), name="api_reportes_bi_dashboard"),
+    path("public/v1/health/", PublicHealthView.as_view(), name="api_public_health"),
+    path("public/v1/insumos/", PublicInsumosView.as_view(), name="api_public_insumos"),
+    path("public/v1/recetas/", PublicRecetasView.as_view(), name="api_public_recetas"),
+    path("public/v1/resumen/", PublicResumenView.as_view(), name="api_public_resumen"),
+    path("public/v1/pedidos/", PublicPedidosCreateView.as_view(), name="api_public_pedidos_create"),
     path("compras/solicitudes/", ComprasSolicitudesListView.as_view(), name="api_compras_solicitudes"),
     path("compras/solicitudes/import-preview/", ComprasSolicitudesImportPreviewView.as_view(), name="api_compras_solicitudes_import_preview"),
     path("compras/solicitudes/import-confirm/", ComprasSolicitudesImportConfirmView.as_view(), name="api_compras_solicitudes_import_confirm"),

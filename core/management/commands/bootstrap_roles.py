@@ -20,6 +20,8 @@ ROLE_PERMS = {
         "rrhh.view_empleado",
         "rrhh.view_nominaperiodo",
         "rrhh.view_nominalinea",
+        "integraciones.view_publicapiclient",
+        "integraciones.view_publicapiaccesslog",
     ],
     "ADMIN": [
         "core.view_auditlog",
@@ -78,6 +80,11 @@ ROLE_PERMS = {
         "rrhh.view_nominalinea",
         "rrhh.add_nominalinea",
         "rrhh.change_nominalinea",
+        "integraciones.view_publicapiclient",
+        "integraciones.add_publicapiclient",
+        "integraciones.change_publicapiclient",
+        "integraciones.delete_publicapiclient",
+        "integraciones.view_publicapiaccesslog",
     ],
     "COMPRAS": [
         "recetas.view_receta",
@@ -174,6 +181,8 @@ ROLE_PERMS = {
         "rrhh.view_empleado",
         "rrhh.view_nominaperiodo",
         "rrhh.view_nominalinea",
+        "integraciones.view_publicapiclient",
+        "integraciones.view_publicapiaccesslog",
     ],
 }
 

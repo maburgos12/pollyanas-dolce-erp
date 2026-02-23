@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     "crm",
     "rrhh",
     "logistica",
+    "integraciones",
     "reportes",
     "api",
 ]
