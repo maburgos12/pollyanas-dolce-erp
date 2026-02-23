@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}CRM · Pedidos{% endblock %}
+{% block page_title %}CRM · Pedidos{% endblock %}
+
+{% block content %}
+<section class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ pedidos_abiertos }}</div>
+    <div class="kpi-label">Pedidos abiertos</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number">{{ conteos_estatus.NUEVO|default:0 }}</div>
+    <div class="kpi-label">Nuevos</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number">{{ conteos_estatus.EN_PRODUCCION|default:0 }}</div>
+    <div class="kpi-label">En producción</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-success">{{ conteos_estatus.ENTREGADO|default:0 }}</div>
+    <div class="kpi-label">Entregados</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-danger">{{ conteos_estatus.CANCELADO|default:0 }}</div>
+    <div class="kpi-label">Cancelados</div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-header">Nuevo pedido</div>
+  {% if can_manage_crm %}
+  <form method="post" class="filters" style="margin-bottom:0;">
+    {% csrf_token %}
+    <select class="input-field" name="cliente_id" required>
+      <option value="">Cliente...</option>
+      {% for c in clientes %}
+      <option value="{{ c.id }}">{{ c.nombre }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="text" name="descripcion" placeholder="Descripción del pedido" required>
+    <select class="input-field" name="canal">
+      {% for value,label in canal_choices %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <select class="input-field" name="prioridad">
+      {% for value,label in prioridad_choices %}
+      <option value="{{ value }}" {% if value == "MEDIA" %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="date" name="fecha_compromiso">
+    <input class="input-field" type="text" name="sucursal" placeholder="Sucursal">
+    <input class="input-field" type="number" step="0.01" min="0" name="monto_estimado" placeholder="Monto estimado">
+    <select class="input-field" name="estatus">
+      {% for value,label in estatus_choices %}
+      <option value="{{ value }}" {% if value == "NUEVO" %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Guardar pedido</button>
+  </form>
+  {% else %}
+  <div class="muted">Tu rol es de consulta. No puedes crear pedidos.</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Seguimiento de pedidos</div>
+  <form method="get" class="filters" style="margin-bottom:14px;">
+    <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por folio, cliente, descripción o sucursal">
+    <select class="input-field" name="estatus">
+      <option value="">Todos los estatus</option>
+      {% for value,label in estatus_choices %}
+      <option value="{{ value }}" {% if estatus == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <select class="input-field" name="prioridad">
+      <option value="">Todas prioridades</option>
+      {% for value,label in prioridad_choices %}
+      <option value="{{ value }}" {% if prioridad == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+    <a class="btn btn-secondary" href="{% url 'crm:pedidos' %}">Limpiar</a>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Cliente</th>
+          <th>Descripción</th>
+          <th>Compromiso</th>
+          <th>Canal</th>
+          <th>Prioridad</th>
+          <th>Estatus</th>
+          <th class="text-end">Monto</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in pedidos %}
+        <tr>
+          <td>{{ p.folio }}</td>
+          <td>{{ p.cliente.nombre }}</td>
+          <td>{{ p.descripcion }}</td>
+          <td>{{ p.fecha_compromiso|date:"Y-m-d"|default:"-" }}</td>
+          <td>{{ p.get_canal_display }}</td>
+          <td>{{ p.get_prioridad_display }}</td>
+          <td>
+            {% if p.estatus == "ENTREGADO" %}
+            <span class="badge bg-success">{{ p.get_estatus_display }}</span>
+            {% elif p.estatus == "CANCELADO" %}
+            <span class="badge bg-danger">{{ p.get_estatus_display }}</span>
+            {% elif p.estatus == "EN_PRODUCCION" %}
+            <span class="badge bg-warning">{{ p.get_estatus_display }}</span>
+            {% else %}
+            <span class="badge bg-primary">{{ p.get_estatus_display }}</span>
+            {% endif %}
+          </td>
+          <td class="text-end">${{ p.monto_estimado|floatformat:2 }}</td>
+          <td>
+            <a class="btn btn-secondary" href="{% url 'crm:pedido_detail' p.id %}">Ver</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9" class="muted">Sin pedidos para el filtro actual.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

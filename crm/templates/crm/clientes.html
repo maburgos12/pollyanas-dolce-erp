@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}CRM · Clientes{% endblock %}
+{% block page_title %}CRM · Clientes{% endblock %}
+
+{% block content %}
+<section class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-number">{{ total_clientes }}</div>
+    <div class="kpi-label">Clientes totales</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-success">{{ total_clientes_activos }}</div>
+    <div class="kpi-label">Clientes activos</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ total_pedidos_abiertos }}</div>
+    <div class="kpi-label">Pedidos abiertos</div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-header">Nuevo cliente</div>
+  {% if can_manage_crm %}
+  <form method="post" class="filters" style="margin-bottom:0;">
+    {% csrf_token %}
+    <input class="input-field" type="text" name="nombre" placeholder="Nombre cliente" required>
+    <input class="input-field" type="text" name="telefono" placeholder="Teléfono">
+    <input class="input-field" type="email" name="email" placeholder="Correo">
+    <input class="input-field" type="text" name="tipo_cliente" placeholder="Tipo (Mostrador, Mayoreo, etc)">
+    <input class="input-field" type="text" name="sucursal_referencia" placeholder="Sucursal referencia">
+    <button class="btn btn-primary" type="submit">Guardar cliente</button>
+    <textarea class="input-field" name="notas" placeholder="Notas" rows="2" style="grid-column: 1 / -1;"></textarea>
+  </form>
+  {% else %}
+  <div class="muted">Tu rol es de consulta. No puedes crear clientes.</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Clientes registrados</div>
+  <form method="get" class="filters" style="margin-bottom:14px;">
+    <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por nombre, código, teléfono o correo">
+    <select class="input-field" name="estado">
+      <option value="activos" {% if estado == "activos" %}selected{% endif %}>Activos</option>
+      <option value="todos" {% if estado == "todos" %}selected{% endif %}>Todos</option>
+      <option value="inactivos" {% if estado == "inactivos" %}selected{% endif %}>Inactivos</option>
+    </select>
+    <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+    <a class="btn btn-secondary" href="{% url 'crm:clientes' %}">Limpiar</a>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Cliente</th>
+          <th>Tipo</th>
+          <th>Contacto</th>
+          <th>Sucursal</th>
+          <th class="text-end">Pedidos</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in clientes %}
+        <tr>
+          <td>{{ c.codigo }}</td>
+          <td>{{ c.nombre }}</td>
+          <td>{{ c.tipo_cliente|default:"-" }}</td>
+          <td>
+            {{ c.telefono|default:"-" }}<br>
+            <span class="muted">{{ c.email|default:"" }}</span>
+          </td>
+          <td>{{ c.sucursal_referencia|default:"-" }}</td>
+          <td class="text-end">{{ c.total_pedidos }}</td>
+          <td>
+            {% if c.activo %}
+            <span class="badge bg-success">Activo</span>
+            {% else %}
+            <span class="badge bg-danger">Inactivo</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="muted">Sin clientes para el filtro actual.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

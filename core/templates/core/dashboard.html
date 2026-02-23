@@ -243,6 +243,9 @@
             {% if can_view_compras %}
                 <a href="{% url 'compras:solicitudes' %}" class="btn btn-primary">🛒 Flujo de compras</a>
             {% endif %}
+            {% if can_view_crm %}
+                <a href="{% url 'crm:pedidos' %}" class="btn btn-secondary">🤝 CRM pedidos</a>
+            {% endif %}
             {% if can_view_inventario %}
                 <a href="{% url 'inventario:existencias' %}" class="btn btn-primary">📚 Control de inventario</a>
                 <a href="{% url 'inventario:importar_archivos' %}" class="btn btn-secondary">📤 Cargar archivos almacén</a>

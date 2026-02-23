@@ -1,7 +1,9 @@
 from core.access import (
     can_view_audit,
+    can_manage_crm,
     can_manage_compras,
     can_manage_inventario,
+    can_view_crm,
     can_view_compras,
     can_view_inventario,
     can_view_maestros,
@@ -22,5 +24,7 @@ def ui_access(request):
             "can_manage_inventario": can_manage_inventario(user),
             "can_view_reportes": can_view_reportes(user),
             "can_view_audit": can_view_audit(user),
+            "can_view_crm": can_view_crm(user),
+            "can_manage_crm": can_manage_crm(user),
         }
     }

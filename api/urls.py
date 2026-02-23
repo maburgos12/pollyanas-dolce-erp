@@ -67,6 +67,12 @@ from .views import (
     VentaHistoricaImportPreviewView,
     VentaHistoricaImportConfirmView,
 )
+from .crm_views import (
+    CRMClientesView,
+    CRMDashboardView,
+    CRMPedidoSeguimientoView,
+    CRMPedidosView,
+)
 
 urlpatterns = [
     path("auth/token/", ApiTokenAuthView.as_view(), name="api_auth_token"),
@@ -121,6 +127,10 @@ urlpatterns = [
     path("control/mermas-pos/import-preview/", ControlMermasPosImportPreviewView.as_view(), name="api_control_mermas_pos_import_preview"),
     path("control/mermas-pos/import-confirm/", ControlMermasPosImportConfirmView.as_view(), name="api_control_mermas_pos_import_confirm"),
     path("control/mermas-pos/bulk/", ControlMermasPosBulkUpsertView.as_view(), name="api_control_mermas_pos_bulk"),
+    path("crm/dashboard/", CRMDashboardView.as_view(), name="api_crm_dashboard"),
+    path("crm/clientes/", CRMClientesView.as_view(), name="api_crm_clientes"),
+    path("crm/pedidos/", CRMPedidosView.as_view(), name="api_crm_pedidos"),
+    path("crm/pedidos/<int:pedido_id>/seguimiento/", CRMPedidoSeguimientoView.as_view(), name="api_crm_pedido_seguimiento"),
     path("compras/solicitudes/", ComprasSolicitudesListView.as_view(), name="api_compras_solicitudes"),
     path("compras/solicitudes/import-preview/", ComprasSolicitudesImportPreviewView.as_view(), name="api_compras_solicitudes_import_preview"),
     path("compras/solicitudes/import-confirm/", ComprasSolicitudesImportConfirmView.as_view(), name="api_compras_solicitudes_import_confirm"),

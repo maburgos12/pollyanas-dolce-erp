@@ -12,6 +12,9 @@ ROLE_PERMS = {
         "recetas.view_planproduccionitem",
         "maestros.view_insumo",
         "maestros.view_costoinsumo",
+        "crm.view_cliente",
+        "crm.view_pedidocliente",
+        "crm.view_seguimientopedido",
     ],
     "ADMIN": [
         "core.view_auditlog",
@@ -46,6 +49,15 @@ ROLE_PERMS = {
         "inventario.view_ajusteinventario",
         "inventario.add_ajusteinventario",
         "inventario.change_ajusteinventario",
+        "crm.view_cliente",
+        "crm.add_cliente",
+        "crm.change_cliente",
+        "crm.view_pedidocliente",
+        "crm.add_pedidocliente",
+        "crm.change_pedidocliente",
+        "crm.view_seguimientopedido",
+        "crm.add_seguimientopedido",
+        "crm.change_seguimientopedido",
     ],
     "COMPRAS": [
         "recetas.view_receta",
@@ -96,6 +108,15 @@ ROLE_PERMS = {
     "VENTAS": [
         "recetas.view_receta",
         "recetas.view_lineareceta",
+        "crm.view_cliente",
+        "crm.add_cliente",
+        "crm.change_cliente",
+        "crm.view_pedidocliente",
+        "crm.add_pedidocliente",
+        "crm.change_pedidocliente",
+        "crm.view_seguimientopedido",
+        "crm.add_seguimientopedido",
+        "crm.change_seguimientopedido",
     ],
     "LOGISTICA": [
         "recetas.view_receta",
@@ -112,6 +133,9 @@ ROLE_PERMS = {
         "recetas.view_planproduccionitem",
         "maestros.view_insumo",
         "maestros.view_costoinsumo",
+        "crm.view_cliente",
+        "crm.view_pedidocliente",
+        "crm.view_seguimientopedido",
     ],
 }
 

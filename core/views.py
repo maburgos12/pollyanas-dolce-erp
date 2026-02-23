@@ -15,9 +15,11 @@ from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.utils import timezone
 from core.access import (
+    can_manage_crm,
     can_view_audit,
     can_manage_compras,
     can_manage_inventario,
+    can_view_crm,
     can_view_compras,
     can_view_inventario,
     can_view_maestros,
@@ -298,6 +300,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "can_view_recetas": False,
         "can_import": False,
         "can_review_matching": False,
+        "can_view_crm": False,
+        "can_manage_crm": False,
         "insumos_count": 0,
         "recetas_count": 0,
         "proveedores_count": 0,
@@ -371,6 +375,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "can_view_recetas": can_view_recetas(u),
                 "can_view_compras": can_view_compras(u),
                 "can_manage_compras": can_manage_compras(u),
+                "can_view_crm": can_view_crm(u),
+                "can_manage_crm": can_manage_crm(u),
                 "can_view_inventario": can_view_inventario(u),
                 "can_manage_inventario": can_manage_inventario(u),
                 "can_view_reportes": can_view_reportes(u),

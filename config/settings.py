@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "inventario",
     "activos",
     "control",
+    "crm",
     "reportes",
     "api",
 ]

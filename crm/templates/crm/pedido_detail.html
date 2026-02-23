@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}CRM · {{ pedido.folio }}{% endblock %}
+{% block page_title %}CRM · {{ pedido.folio }}{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">Detalle de pedido</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <tbody>
+        <tr><th>Folio</th><td>{{ pedido.folio }}</td></tr>
+        <tr><th>Cliente</th><td>{{ pedido.cliente.nombre }}</td></tr>
+        <tr><th>Descripción</th><td>{{ pedido.descripcion }}</td></tr>
+        <tr><th>Sucursal</th><td>{{ pedido.sucursal|default:"-" }}</td></tr>
+        <tr><th>Canal</th><td>{{ pedido.get_canal_display }}</td></tr>
+        <tr><th>Prioridad</th><td>{{ pedido.get_prioridad_display }}</td></tr>
+        <tr><th>Compromiso</th><td>{{ pedido.fecha_compromiso|date:"Y-m-d"|default:"-" }}</td></tr>
+        <tr><th>Estatus</th><td>{{ pedido.get_estatus_display }}</td></tr>
+        <tr><th>Monto estimado</th><td>${{ pedido.monto_estimado|floatformat:2 }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Agregar seguimiento</div>
+  {% if can_manage_crm %}
+  <form method="post" class="filters" style="margin-bottom:0;">
+    {% csrf_token %}
+    <select class="input-field" name="estatus_nuevo">
+      <option value="">Sin cambio de estatus</option>
+      {% for value,label in estatus_choices %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="text" name="comentario" placeholder="Comentario o acción siguiente">
+    <button class="btn btn-primary" type="submit">Guardar seguimiento</button>
+    <a class="btn btn-secondary" href="{% url 'crm:pedidos' %}">Volver a pedidos</a>
+  </form>
+  {% else %}
+  <div class="muted">Tu rol es de consulta. No puedes registrar seguimiento.</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Bitácora del pedido</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Estatus anterior</th>
+          <th>Estatus nuevo</th>
+          <th>Comentario</th>
+          <th>Usuario</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in seguimientos %}
+        <tr>
+          <td>{{ s.fecha_evento|date:"Y-m-d H:i" }}</td>
+          <td>{{ s.estatus_anterior|default:"-" }}</td>
+          <td>{{ s.get_estatus_nuevo_display|default:"-" }}</td>
+          <td>{{ s.comentario|default:"-" }}</td>
+          <td>{{ s.created_by.username|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="muted">Sin eventos de seguimiento.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
