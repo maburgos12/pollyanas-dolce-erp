@@ -799,6 +799,13 @@ tr:hover,
   margin-bottom: 0;
 }
 
+.card-subtle {
+  border: 1px solid var(--rosa);
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px;
+}
+
 .integraciones-shell .card-header {
   font-size: 32px;
   line-height: 1.1;

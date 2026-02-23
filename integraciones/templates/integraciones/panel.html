@@ -71,6 +71,52 @@
             </article>
         </div>
 
+        <div class="card-subtle mb-3">
+            <h3 class="integraciones-subtitle">Resolución masiva Point (insumos)</h3>
+            <form method="post" class="form-grid-auto">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="resolve_point_sugerencias_insumos">
+                <div class="form-group">
+                    <label class="form-label" for="id_auto_score_min">Score mínimo</label>
+                    <input
+                        id="id_auto_score_min"
+                        name="auto_score_min"
+                        class="input-field"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value="90"
+                    >
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="id_auto_limit">Máximo registros</label>
+                    <input
+                        id="id_auto_limit"
+                        name="auto_limit"
+                        class="input-field"
+                        type="number"
+                        min="1"
+                        max="2000"
+                        step="1"
+                        value="250"
+                    >
+                </div>
+                <div class="form-group" style="display:flex;align-items:flex-end;">
+                    <label class="form-label" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                        <input type="checkbox" name="create_aliases" checked>
+                        Crear alias automáticamente
+                    </label>
+                </div>
+                <div class="form-group" style="display:flex;align-items:flex-end;">
+                    <button type="submit" class="btn btn-primary w-100">Auto-resolver pendientes de insumos</button>
+                </div>
+            </form>
+            <p class="muted mb-0">
+                Aplica sugerencias de nombre con score mínimo, actualiza código/nombre Point del insumo y opcionalmente crea alias.
+            </p>
+        </div>
+
         <div class="integraciones-columns">
             <div>
                 <h3 class="integraciones-subtitle">Point pendientes (recientes)</h3>

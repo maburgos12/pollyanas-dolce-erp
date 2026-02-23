@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from core.models import AuditLog
 from inventario.models import AlmacenSyncRun
-from maestros.models import Insumo, PointPendingMatch, UnidadMedida
+from maestros.models import Insumo, InsumoAlias, PointPendingMatch, UnidadMedida
 from recetas.models import LineaReceta, Receta
 
 from .models import PublicApiAccessLog, PublicApiClient
@@ -198,3 +198,58 @@ class IntegracionesPanelTests(TestCase):
         self.assertContains(response, "Homologacion Point y Match Operativo")
         self.assertContains(response, "Point pendientes")
         self.assertContains(response, "Recetas sin match")
+
+    def test_mass_resolve_point_pending_insumos_from_panel(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=1000,
+        )
+        insumo = Insumo.objects.create(nombre="Harina Trigo", unidad_base=unidad, activo=True)
+        pending_ok = PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-INS-500",
+            point_nombre="Harina Trigo Point",
+            fuzzy_score=95.0,
+            fuzzy_sugerencia=insumo.nombre,
+        )
+        pending_low_score = PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-INS-501",
+            point_nombre="Harina Trigo Secundaria",
+            fuzzy_score=40.0,
+            fuzzy_sugerencia=insumo.nombre,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            self.url,
+            {
+                "action": "resolve_point_sugerencias_insumos",
+                "auto_score_min": "90",
+                "auto_limit": "100",
+                "create_aliases": "on",
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Auto-resolución de pendientes Point (insumos)")
+
+        insumo.refresh_from_db()
+        self.assertEqual(insumo.codigo_point, "PT-INS-500")
+        self.assertEqual(insumo.nombre_point, "Harina Trigo Point")
+        self.assertFalse(PointPendingMatch.objects.filter(id=pending_ok.id).exists())
+        self.assertTrue(PointPendingMatch.objects.filter(id=pending_low_score.id).exists())
+        self.assertTrue(
+            InsumoAlias.objects.filter(
+                insumo=insumo,
+                nombre_normalizado="harina trigo point",
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="AUTO_RESOLVE_POINT_INSUMOS",
+                model="maestros.PointPendingMatch",
+            ).exists()
+        )

@@ -14,8 +14,9 @@ from django.utils import timezone
 from core.access import can_view_audit
 from core.audit import log_event
 from inventario.models import AlmacenSyncRun
-from maestros.models import Insumo, PointPendingMatch, Proveedor
+from maestros.models import Insumo, InsumoAlias, PointPendingMatch, Proveedor
 from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
+from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import PublicApiAccessLog, PublicApiClient
 
@@ -38,6 +39,92 @@ def _export_logs_csv(logs_qs) -> HttpResponse:
     return response
 
 
+def _to_float(raw, default=0.0) -> float:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _to_int(raw, default=0) -> int:
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _resolve_point_pending_insumos(min_score: float, limit: int, create_aliases: bool) -> dict:
+    queryset = PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).order_by("-fuzzy_score", "point_nombre", "id")
+    selected = list(queryset[:limit])
+
+    resolved = 0
+    conflicts = 0
+    skipped_low_score = 0
+    skipped_no_suggestion = 0
+    skipped_no_target = 0
+    aliases_created = 0
+
+    for pending in selected:
+        if float(pending.fuzzy_score or 0.0) < min_score:
+            skipped_low_score += 1
+            continue
+
+        sugerencia_norm = normalizar_nombre(pending.fuzzy_sugerencia or "")
+        if not sugerencia_norm:
+            skipped_no_suggestion += 1
+            continue
+
+        target = Insumo.objects.filter(
+            activo=True,
+            nombre_normalizado=sugerencia_norm,
+        ).only("id", "codigo_point", "nombre_point", "nombre_normalizado").first()
+        if not target:
+            skipped_no_target += 1
+            continue
+
+        point_code = (pending.point_codigo or "").strip()
+        if point_code and target.codigo_point and target.codigo_point != point_code:
+            conflicts += 1
+            continue
+
+        changed_fields = []
+        if point_code and target.codigo_point != point_code:
+            target.codigo_point = point_code
+            changed_fields.append("codigo_point")
+        if target.nombre_point != pending.point_nombre:
+            target.nombre_point = pending.point_nombre
+            changed_fields.append("nombre_point")
+        if changed_fields:
+            target.save(update_fields=changed_fields)
+
+        if create_aliases:
+            alias_norm = normalizar_nombre(pending.point_nombre or "")
+            if alias_norm and alias_norm != target.nombre_normalizado:
+                alias, was_created = InsumoAlias.objects.get_or_create(
+                    nombre_normalizado=alias_norm,
+                    defaults={"nombre": (pending.point_nombre or "")[:250], "insumo": target},
+                )
+                if not was_created and alias.insumo_id != target.id:
+                    alias.insumo = target
+                    alias.save(update_fields=["insumo"])
+                if was_created:
+                    aliases_created += 1
+
+        pending.delete()
+        resolved += 1
+
+    return {
+        "seleccionados": len(selected),
+        "resueltos": resolved,
+        "conflictos": conflicts,
+        "score_bajo": skipped_low_score,
+        "sin_sugerencia": skipped_no_suggestion,
+        "sin_objetivo": skipped_no_target,
+        "aliases_creados": aliases_created,
+        "pendientes_restantes": PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).count(),
+    }
+
+
 @login_required
 def panel(request):
     if not can_view_audit(request.user):
@@ -45,6 +132,48 @@ def panel(request):
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
+        if action == "resolve_point_sugerencias_insumos":
+            min_score = max(0.0, min(100.0, _to_float(request.POST.get("auto_score_min"), 90.0)))
+            limit = max(1, min(2000, _to_int(request.POST.get("auto_limit"), 250)))
+            create_aliases = request.POST.get("create_aliases") == "on"
+            summary = _resolve_point_pending_insumos(
+                min_score=min_score,
+                limit=limit,
+                create_aliases=create_aliases,
+            )
+            log_event(
+                request.user,
+                "AUTO_RESOLVE_POINT_INSUMOS",
+                "maestros.PointPendingMatch",
+                "",
+                payload={
+                    "score_min": min_score,
+                    "limit": limit,
+                    "create_aliases": create_aliases,
+                    **summary,
+                },
+            )
+            messages.success(
+                request,
+                (
+                    "Auto-resolución de pendientes Point (insumos): "
+                    f"{summary['resueltos']} resueltos de {summary['seleccionados']} evaluados. "
+                    f"Aliases creados: {summary['aliases_creados']}."
+                ),
+            )
+            if summary["conflictos"] or summary["score_bajo"] or summary["sin_sugerencia"] or summary["sin_objetivo"]:
+                messages.warning(
+                    request,
+                    (
+                        "No procesados: "
+                        f"conflicto código Point {summary['conflictos']}, "
+                        f"score bajo {summary['score_bajo']}, "
+                        f"sin sugerencia {summary['sin_sugerencia']}, "
+                        f"sugerencia sin insumo activo {summary['sin_objetivo']}."
+                    ),
+                )
+            return redirect("integraciones:panel")
+
         if action == "create":
             nombre = (request.POST.get("nombre") or "").strip()
             descripcion = (request.POST.get("descripcion") or "").strip()
