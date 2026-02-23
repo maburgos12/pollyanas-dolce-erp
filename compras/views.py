@@ -3900,6 +3900,41 @@ def solicitudes_consumo_vs_plan_api(request: HttpRequest) -> JsonResponse:
     plan_filter = (request.GET.get("plan_id") or "").strip()
     categoria_filter = _sanitize_categoria_filter(request.GET.get("categoria"))
     consumo_ref_filter = _sanitize_consumo_ref_filter(request.GET.get("consumo_ref"))
+    try:
+        limit = int(request.GET.get("limit", 30))
+    except (TypeError, ValueError):
+        limit = 30
+    limit = max(1, min(limit, 1000))
+    try:
+        offset = int(request.GET.get("offset", 0))
+    except (TypeError, ValueError):
+        offset = 0
+    offset = max(0, min(offset, 200000))
+    sort_by = (request.GET.get("sort_by") or "variacion_cost_abs").strip().lower()
+    sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
+    allowed_sort = {
+        "variacion_cost_abs",
+        "variacion_cost",
+        "costo_real",
+        "costo_plan",
+        "cantidad_real",
+        "cantidad_plan",
+        "consumo_pct",
+        "insumo",
+        "categoria",
+        "estado",
+        "semaforo",
+    }
+    if sort_by not in allowed_sort:
+        return JsonResponse(
+            {"detail": "sort_by inválido."},
+            status=400,
+        )
+    if sort_dir not in {"asc", "desc"}:
+        return JsonResponse(
+            {"detail": "sort_dir inválido."},
+            status=400,
+        )
 
     dashboard = _build_consumo_vs_plan_dashboard(
         periodo_tipo=periodo_tipo,
@@ -3908,6 +3943,10 @@ def solicitudes_consumo_vs_plan_api(request: HttpRequest) -> JsonResponse:
         plan_filter=plan_filter,
         categoria_filter=categoria_filter,
         consumo_ref_filter=consumo_ref_filter,
+        limit=limit,
+        offset=offset,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
     data = {
         "filters": {
@@ -3918,9 +3957,21 @@ def solicitudes_consumo_vs_plan_api(request: HttpRequest) -> JsonResponse:
             "periodo_tipo": periodo_tipo,
             "periodo_mes": periodo_mes,
             "periodo_label": periodo_label,
+            "limit": limit,
+            "offset": offset,
+            "sort_by": sort_by,
+            "sort_dir": sort_dir,
         },
         "period_start": str(dashboard["period_start"]),
         "period_end": str(dashboard["period_end"]),
+        "meta": {
+            "rows_total": int(dashboard.get("meta", {}).get("rows_total") or 0),
+            "rows_returned": int(dashboard.get("meta", {}).get("rows_returned") or 0),
+            "limit": int(dashboard.get("meta", {}).get("limit") or limit),
+            "offset": int(dashboard.get("meta", {}).get("offset") or offset),
+            "sort_by": dashboard.get("meta", {}).get("sort_by") or sort_by,
+            "sort_dir": dashboard.get("meta", {}).get("sort_dir") or sort_dir,
+        },
         "totals": {
             "plan_qty_total": float(dashboard["totals"]["plan_qty_total"] or 0),
             "consumo_real_qty_total": float(dashboard["totals"]["consumo_real_qty_total"] or 0),

@@ -311,6 +311,82 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertEqual(payload["rows"][0]["semaforo"], "ROJO")
         self.assertFalse(payload["rows"][0]["sin_costo"])
 
+    def test_consumo_vs_plan_api_soporta_offset_y_sort(self):
+        insumo_extra = Insumo.objects.create(
+            nombre="Masa extra API",
+            categoria="Masa",
+            unidad_base=self.unidad_kg,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=insumo_extra,
+            proveedor=self.proveedor,
+            costo_unitario=Decimal("4"),
+            source_hash="cost-masa-extra-1",
+        )
+        receta_extra = Receta.objects.create(
+            nombre="Receta extra consumo API",
+            hash_contenido="hash-consumo-api-extra",
+        )
+        LineaReceta.objects.create(
+            receta=receta_extra,
+            posicion=1,
+            insumo=insumo_extra,
+            insumo_texto="Masa extra API",
+            cantidad=Decimal("1"),
+            unidad=self.unidad_kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("4"),
+            match_method=LineaReceta.MATCH_EXACT,
+            match_score=100,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        plan_extra = PlanProduccion.objects.create(
+            nombre="Plan extra consumo",
+            fecha_produccion=self.fecha_base,
+        )
+        PlanProduccionItem.objects.create(
+            plan=plan_extra,
+            receta=receta_extra,
+            cantidad=Decimal("1"),
+        )
+
+        url = reverse("compras:solicitudes_consumo_vs_plan_api")
+        response = self.client.get(
+            url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": self.periodo_mes,
+                "categoria": "Masa",
+                "source": "all",
+                "consumo_ref": "all",
+                "limit": 1,
+                "offset": 1,
+                "sort_by": "variacion_cost_abs",
+                "sort_dir": "desc",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["filters"]["limit"], 1)
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["filters"]["sort_by"], "variacion_cost_abs")
+        self.assertEqual(payload["filters"]["sort_dir"], "desc")
+        self.assertEqual(payload["meta"]["rows_total"], 2)
+        self.assertEqual(payload["meta"]["rows_returned"], 1)
+        self.assertEqual(payload["rows"][0]["insumo"], "Masa extra API")
+
+    def test_consumo_vs_plan_api_sort_invalido(self):
+        url = reverse("compras:solicitudes_consumo_vs_plan_api")
+        bad_sort = self.client.get(url, {"sort_by": "ruido"})
+        self.assertEqual(bad_sort.status_code, 400)
+        self.assertIn("sort_by", bad_sort.json()["detail"].lower())
+
+        bad_dir = self.client.get(url, {"sort_dir": "up"})
+        self.assertEqual(bad_dir.status_code, 400)
+        self.assertIn("sort_dir", bad_dir.json()["detail"].lower())
+
     def test_consumo_vs_plan_api_filtra_movimientos_solo_con_referencia_plan(self):
         MovimientoInventario.objects.create(
             fecha=timezone.make_aware(datetime(2026, 2, 10, 12, 0, 0)),
