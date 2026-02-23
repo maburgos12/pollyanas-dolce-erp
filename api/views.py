@@ -1032,6 +1032,348 @@ def _forecast_insights_export_response(payload: dict[str, Any], export_format: s
     return response
 
 
+def _ventas_historial_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
+    filters = payload.get("filters") or {}
+    totals = payload.get("totales") or {}
+    items = payload.get("items") or []
+    by_sucursal = totals.get("by_sucursal") or []
+    stamp = str(filters.get("periodo") or timezone.localdate().strftime("%Y-%m")).replace("-", "")
+    filename = f"ventas_historial_{stamp}.{export_format}"
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Periodo", filters.get("periodo") or ""])
+        ws_resumen.append(["Desde", filters.get("fecha_desde") or ""])
+        ws_resumen.append(["Hasta", filters.get("fecha_hasta") or ""])
+        ws_resumen.append(["Rows", int(totals.get("rows") or 0)])
+        ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
+        ws_resumen.append(["Tickets total", int(totals.get("tickets_total") or 0)])
+        ws_resumen.append(["Monto total", float(totals.get("monto_total") or 0)])
+
+        ws_detalle = wb.create_sheet("Detalle")
+        ws_detalle.append(
+            [
+                "ID",
+                "Fecha",
+                "Receta ID",
+                "Receta",
+                "Codigo point",
+                "Sucursal ID",
+                "Sucursal",
+                "Sucursal codigo",
+                "Cantidad",
+                "Tickets",
+                "Monto total",
+                "Fuente",
+                "Actualizado en",
+            ]
+        )
+        for row in items:
+            ws_detalle.append(
+                [
+                    int(row.get("id") or 0),
+                    row.get("fecha") or "",
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    row.get("codigo_point") or "",
+                    int(row.get("sucursal_id") or 0) if row.get("sucursal_id") else None,
+                    row.get("sucursal") or "",
+                    row.get("sucursal_codigo") or "",
+                    float(row.get("cantidad") or 0),
+                    int(row.get("tickets") or 0),
+                    float(row.get("monto_total") or 0),
+                    row.get("fuente") or "",
+                    str(row.get("actualizado_en") or ""),
+                ]
+            )
+
+        ws_sucursal = wb.create_sheet("BySucursal")
+        ws_sucursal.append(["Sucursal", "Cantidad total"])
+        for row in by_sucursal:
+            ws_sucursal.append([row.get("sucursal") or "", float(row.get("cantidad_total") or 0)])
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Periodo", filters.get("periodo") or ""])
+    writer.writerow(["Desde", filters.get("fecha_desde") or ""])
+    writer.writerow(["Hasta", filters.get("fecha_hasta") or ""])
+    writer.writerow(["Rows", int(totals.get("rows") or 0)])
+    writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
+    writer.writerow(["Tickets total", int(totals.get("tickets_total") or 0)])
+    writer.writerow(["Monto total", f"{Decimal(str(totals.get('monto_total') or 0)):.3f}"])
+
+    writer.writerow([])
+    writer.writerow(["BY_SUCURSAL"])
+    writer.writerow(["sucursal", "cantidad_total"])
+    for row in by_sucursal:
+        writer.writerow(
+            [
+                row.get("sucursal") or "",
+                f"{Decimal(str(row.get('cantidad_total') or 0)):.3f}",
+            ]
+        )
+
+    writer.writerow([])
+    writer.writerow(["DETALLE"])
+    writer.writerow(
+        [
+            "id",
+            "fecha",
+            "receta_id",
+            "receta",
+            "codigo_point",
+            "sucursal_id",
+            "sucursal",
+            "sucursal_codigo",
+            "cantidad",
+            "tickets",
+            "monto_total",
+            "fuente",
+            "actualizado_en",
+        ]
+    )
+    for row in items:
+        writer.writerow(
+            [
+                int(row.get("id") or 0),
+                row.get("fecha") or "",
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                row.get("codigo_point") or "",
+                int(row.get("sucursal_id") or 0) if row.get("sucursal_id") else "",
+                row.get("sucursal") or "",
+                row.get("sucursal_codigo") or "",
+                f"{Decimal(str(row.get('cantidad') or 0)):.3f}",
+                int(row.get("tickets") or 0),
+                f"{Decimal(str(row.get('monto_total') or 0)):.3f}",
+                row.get("fuente") or "",
+                str(row.get("actualizado_en") or ""),
+            ]
+        )
+    return response
+
+
+def _ventas_pronostico_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
+    filters = payload.get("filters") or {}
+    totals = payload.get("totales") or {}
+    items = payload.get("items") or []
+    stamp = str(filters.get("periodo") or timezone.localdate().strftime("%Y-%m")).replace("-", "")
+    filename = f"ventas_pronostico_{stamp}.{export_format}"
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Periodo", filters.get("periodo") or ""])
+        ws_resumen.append(["Periodo desde", filters.get("periodo_desde") or ""])
+        ws_resumen.append(["Periodo hasta", filters.get("periodo_hasta") or ""])
+        ws_resumen.append(["Rows", int(totals.get("rows") or 0)])
+        ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
+        ws_resumen.append(["Periodos", int(totals.get("periodos_count") or 0)])
+
+        ws_detalle = wb.create_sheet("Detalle")
+        ws_detalle.append(
+            [
+                "ID",
+                "Receta ID",
+                "Receta",
+                "Codigo point",
+                "Periodo",
+                "Cantidad",
+                "Fuente",
+                "Actualizado en",
+            ]
+        )
+        for row in items:
+            ws_detalle.append(
+                [
+                    int(row.get("id") or 0),
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    row.get("codigo_point") or "",
+                    row.get("periodo") or "",
+                    float(row.get("cantidad") or 0),
+                    row.get("fuente") or "",
+                    str(row.get("actualizado_en") or ""),
+                ]
+            )
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Periodo", filters.get("periodo") or ""])
+    writer.writerow(["Periodo desde", filters.get("periodo_desde") or ""])
+    writer.writerow(["Periodo hasta", filters.get("periodo_hasta") or ""])
+    writer.writerow(["Rows", int(totals.get("rows") or 0)])
+    writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
+    writer.writerow(["Periodos", int(totals.get("periodos_count") or 0)])
+    writer.writerow([])
+    writer.writerow(["DETALLE"])
+    writer.writerow(["id", "receta_id", "receta", "codigo_point", "periodo", "cantidad", "fuente", "actualizado_en"])
+    for row in items:
+        writer.writerow(
+            [
+                int(row.get("id") or 0),
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                row.get("codigo_point") or "",
+                row.get("periodo") or "",
+                f"{Decimal(str(row.get('cantidad') or 0)):.3f}",
+                row.get("fuente") or "",
+                str(row.get("actualizado_en") or ""),
+            ]
+        )
+    return response
+
+
+def _ventas_solicitudes_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
+    filters = payload.get("filters") or {}
+    totals = payload.get("totales") or {}
+    by_alcance = totals.get("by_alcance") or {}
+    items = payload.get("items") or []
+    stamp = str(filters.get("periodo") or timezone.localdate().strftime("%Y-%m")).replace("-", "")
+    filename = f"ventas_solicitudes_{stamp}.{export_format}"
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Periodo", filters.get("periodo") or ""])
+        ws_resumen.append(["Alcance", filters.get("alcance") or ""])
+        ws_resumen.append(["Desde", filters.get("fecha_desde") or ""])
+        ws_resumen.append(["Hasta", filters.get("fecha_hasta") or ""])
+        ws_resumen.append(["Rows", int(totals.get("rows") or 0)])
+        ws_resumen.append(["Cantidad total", float(totals.get("cantidad_total") or 0)])
+        ws_resumen.append(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
+        ws_resumen.append(["SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_SEMANA) or 0)])
+        ws_resumen.append(["FIN_SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_FIN_SEMANA) or 0)])
+
+        ws_detalle = wb.create_sheet("Detalle")
+        ws_detalle.append(
+            [
+                "ID",
+                "Receta ID",
+                "Receta",
+                "Codigo point",
+                "Sucursal ID",
+                "Sucursal",
+                "Sucursal codigo",
+                "Alcance",
+                "Periodo",
+                "Fecha inicio",
+                "Fecha fin",
+                "Cantidad",
+                "Fuente",
+                "Actualizado en",
+            ]
+        )
+        for row in items:
+            ws_detalle.append(
+                [
+                    int(row.get("id") or 0),
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    row.get("codigo_point") or "",
+                    int(row.get("sucursal_id") or 0) if row.get("sucursal_id") else None,
+                    row.get("sucursal") or "",
+                    row.get("sucursal_codigo") or "",
+                    row.get("alcance") or "",
+                    row.get("periodo") or "",
+                    row.get("fecha_inicio") or "",
+                    row.get("fecha_fin") or "",
+                    float(row.get("cantidad") or 0),
+                    row.get("fuente") or "",
+                    str(row.get("actualizado_en") or ""),
+                ]
+            )
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Periodo", filters.get("periodo") or ""])
+    writer.writerow(["Alcance", filters.get("alcance") or ""])
+    writer.writerow(["Desde", filters.get("fecha_desde") or ""])
+    writer.writerow(["Hasta", filters.get("fecha_hasta") or ""])
+    writer.writerow(["Rows", int(totals.get("rows") or 0)])
+    writer.writerow(["Cantidad total", f"{Decimal(str(totals.get('cantidad_total') or 0)):.3f}"])
+    writer.writerow(["MES", int(by_alcance.get(SolicitudVenta.ALCANCE_MES) or 0)])
+    writer.writerow(["SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_SEMANA) or 0)])
+    writer.writerow(["FIN_SEMANA", int(by_alcance.get(SolicitudVenta.ALCANCE_FIN_SEMANA) or 0)])
+    writer.writerow([])
+    writer.writerow(["DETALLE"])
+    writer.writerow(
+        [
+            "id",
+            "receta_id",
+            "receta",
+            "codigo_point",
+            "sucursal_id",
+            "sucursal",
+            "sucursal_codigo",
+            "alcance",
+            "periodo",
+            "fecha_inicio",
+            "fecha_fin",
+            "cantidad",
+            "fuente",
+            "actualizado_en",
+        ]
+    )
+    for row in items:
+        writer.writerow(
+            [
+                int(row.get("id") or 0),
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                row.get("codigo_point") or "",
+                int(row.get("sucursal_id") or 0) if row.get("sucursal_id") else "",
+                row.get("sucursal") or "",
+                row.get("sucursal_codigo") or "",
+                row.get("alcance") or "",
+                row.get("periodo") or "",
+                row.get("fecha_inicio") or "",
+                row.get("fecha_fin") or "",
+                f"{Decimal(str(row.get('cantidad') or 0)):.3f}",
+                row.get("fuente") or "",
+                str(row.get("actualizado_en") or ""),
+            ]
+        )
+    return response
+
+
 def _resolve_receta_bulk_ref(
     *,
     receta_id: int | None,
@@ -5003,6 +5345,12 @@ class VentaHistoricaListView(APIView):
                 {"detail": "No tienes permisos para consultar historial de ventas."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format and export_format not in {"csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         q = (request.GET.get("q") or "").strip()
         periodo = (request.GET.get("periodo") or request.GET.get("mes") or "").strip()
@@ -5112,28 +5460,28 @@ class VentaHistoricaListView(APIView):
             for k, v in sorted(by_sucursal.items(), key=lambda entry: entry[1], reverse=True)
         ]
 
-        return Response(
-            {
-                "filters": {
-                    "q": q,
-                    "periodo": periodo,
-                    "sucursal_id": sucursal_id_raw,
-                    "receta_id": receta_id_raw,
-                    "fecha_desde": str(fecha_desde) if fecha_desde else "",
-                    "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
-                    "limit": limit,
-                },
-                "totales": {
-                    "rows": len(items),
-                    "cantidad_total": str(cantidad_total),
-                    "tickets_total": tickets_total,
-                    "monto_total": str(monto_total),
-                    "by_sucursal": sucursales_payload,
-                },
-                "items": items,
+        payload = {
+            "filters": {
+                "q": q,
+                "periodo": periodo,
+                "sucursal_id": sucursal_id_raw,
+                "receta_id": receta_id_raw,
+                "fecha_desde": str(fecha_desde) if fecha_desde else "",
+                "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
+                "limit": limit,
             },
-            status=status.HTTP_200_OK,
-        )
+            "totales": {
+                "rows": len(items),
+                "cantidad_total": str(cantidad_total),
+                "tickets_total": tickets_total,
+                "monto_total": str(monto_total),
+                "by_sucursal": sucursales_payload,
+            },
+            "items": items,
+        }
+        if export_format:
+            return _ventas_historial_export_response(payload, export_format)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class PronosticoVentaListView(APIView):
@@ -5144,6 +5492,12 @@ class PronosticoVentaListView(APIView):
             return Response(
                 {"detail": "No tienes permisos para consultar pronósticos de venta."},
                 status=status.HTTP_403_FORBIDDEN,
+            )
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format and export_format not in {"csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         q = (request.GET.get("q") or "").strip()
@@ -5231,25 +5585,25 @@ class PronosticoVentaListView(APIView):
                 }
             )
 
-        return Response(
-            {
-                "filters": {
-                    "q": q,
-                    "periodo": periodo,
-                    "periodo_desde": periodo_desde,
-                    "periodo_hasta": periodo_hasta,
-                    "receta_id": receta_id_raw,
-                    "limit": limit,
-                },
-                "totales": {
-                    "rows": len(items),
-                    "cantidad_total": str(cantidad_total),
-                    "periodos_count": len(periodos),
-                },
-                "items": items,
+        payload = {
+            "filters": {
+                "q": q,
+                "periodo": periodo,
+                "periodo_desde": periodo_desde,
+                "periodo_hasta": periodo_hasta,
+                "receta_id": receta_id_raw,
+                "limit": limit,
             },
-            status=status.HTTP_200_OK,
-        )
+            "totales": {
+                "rows": len(items),
+                "cantidad_total": str(cantidad_total),
+                "periodos_count": len(periodos),
+            },
+            "items": items,
+        }
+        if export_format:
+            return _ventas_pronostico_export_response(payload, export_format)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class VentasPipelineResumenView(APIView):
@@ -5449,6 +5803,12 @@ class SolicitudVentaListView(APIView):
                 {"detail": "No tienes permisos para consultar solicitudes de venta."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format and export_format not in {"csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         q = (request.GET.get("q") or "").strip()
         periodo = (request.GET.get("periodo") or "").strip()
@@ -5559,27 +5919,27 @@ class SolicitudVentaListView(APIView):
                 }
             )
 
-        return Response(
-            {
-                "filters": {
-                    "q": q,
-                    "periodo": periodo,
-                    "alcance": alcance,
-                    "sucursal_id": sucursal_id_raw,
-                    "receta_id": receta_id_raw,
-                    "fecha_desde": str(fecha_desde) if fecha_desde else "",
-                    "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
-                    "limit": limit,
-                },
-                "totales": {
-                    "rows": len(items),
-                    "cantidad_total": str(cantidad_total),
-                    "by_alcance": by_alcance,
-                },
-                "items": items,
+        payload = {
+            "filters": {
+                "q": q,
+                "periodo": periodo,
+                "alcance": alcance,
+                "sucursal_id": sucursal_id_raw,
+                "receta_id": receta_id_raw,
+                "fecha_desde": str(fecha_desde) if fecha_desde else "",
+                "fecha_hasta": str(fecha_hasta) if fecha_hasta else "",
+                "limit": limit,
             },
-            status=status.HTTP_200_OK,
-        )
+            "totales": {
+                "rows": len(items),
+                "cantidad_total": str(cantidad_total),
+                "by_alcance": by_alcance,
+            },
+            "items": items,
+        }
+        if export_format:
+            return _ventas_solicitudes_export_response(payload, export_format)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 def _process_pronostico_venta_bulk(

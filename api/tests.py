@@ -2130,6 +2130,39 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(Decimal(payload["totales"]["monto_total"]), Decimal("320"))
         self.assertEqual(len(payload["items"]), 1)
 
+    def test_endpoint_ventas_historial_export_csv_y_xlsx(self):
+        sucursal = Sucursal.objects.create(codigo="MATX", nombre="Matriz API Export", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            fecha=date(2026, 2, 10),
+            cantidad=Decimal("10"),
+            tickets=5,
+            monto_total=Decimal("320"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_historial")
+        resp_csv = self.client.get(url, {"periodo": "2026-02", "sucursal_id": sucursal.id, "export": "csv"})
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("DETALLE", body_csv)
+        self.assertIn("Receta API", body_csv)
+
+        resp_xlsx = self.client.get(url, {"periodo": "2026-02", "sucursal_id": sucursal.id, "export": "xlsx"})
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_historial_export_formato_invalido(self):
+        resp = self.client.get(reverse("api_ventas_historial"), {"export": "pdf"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_pronostico_list_filters_and_totals(self):
         PronosticoVenta.objects.create(
             receta=self.receta,
@@ -2152,6 +2185,35 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(Decimal(payload["totales"]["cantidad_total"]), Decimal("18"))
         self.assertEqual(payload["totales"]["periodos_count"], 1)
         self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_ventas_pronostico_export_csv_y_xlsx(self):
+        PronosticoVenta.objects.create(
+            receta=self.receta,
+            periodo="2026-03",
+            cantidad=Decimal("18"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_pronostico")
+        resp_csv = self.client.get(url, {"periodo": "2026-03", "export": "csv"})
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("DETALLE", body_csv)
+        self.assertIn("Receta API", body_csv)
+
+        resp_xlsx = self.client.get(url, {"periodo": "2026-03", "export": "xlsx"})
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_pronostico_export_formato_invalido(self):
+        resp = self.client.get(reverse("api_ventas_pronostico"), {"export": "zip"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
 
     def test_endpoint_ventas_solicitudes_list_filters_and_totals(self):
         sucursal = Sucursal.objects.create(codigo="SUR", nombre="Sucursal Sur API", activa=True)
@@ -2184,6 +2246,40 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(Decimal(payload["totales"]["cantidad_total"]), Decimal("30"))
         self.assertEqual(payload["totales"]["by_alcance"][SolicitudVenta.ALCANCE_MES], 1)
         self.assertEqual(len(payload["items"]), 1)
+
+    def test_endpoint_ventas_solicitudes_export_csv_y_xlsx(self):
+        sucursal = Sucursal.objects.create(codigo="SURX", nombre="Sucursal Sur Export", activa=True)
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("30"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_solicitudes")
+        resp_csv = self.client.get(url, {"periodo": "2026-03", "alcance": "MES", "export": "csv"})
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("DETALLE", body_csv)
+        self.assertIn("Receta API", body_csv)
+
+        resp_xlsx = self.client.get(url, {"periodo": "2026-03", "alcance": "MES", "export": "xlsx"})
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_solicitudes_export_formato_invalido(self):
+        resp = self.client.get(reverse("api_ventas_solicitudes"), {"export": "pdf"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
 
     def test_endpoint_ventas_pronostico_insights(self):
         sucursal = Sucursal.objects.create(codigo="INS", nombre="Sucursal Insights", activa=True)
