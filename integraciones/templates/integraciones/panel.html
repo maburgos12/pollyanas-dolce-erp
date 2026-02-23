@@ -362,6 +362,67 @@
 
     <section class="card">
         <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="card-header mb-0">Errores API (ultimas 24h)</div>
+            <a class="btn btn-outline-primary" href="?export=errors_csv">Exportar errores CSV</a>
+        </div>
+        <div class="integraciones-columns">
+            <div>
+                <h3 class="integraciones-subtitle">Por endpoint</h3>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Endpoint</th>
+                                <th>Errores</th>
+                                <th>Clientes</th>
+                                <th>Último</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in errors_by_endpoint_24h %}
+                            <tr>
+                                <td><code>{{ row.endpoint|default:"-" }}</code></td>
+                                <td><span class="badge-rojo">{{ row.total }}</span></td>
+                                <td>{{ row.clientes }}</td>
+                                <td>{{ row.last_at|date:"Y-m-d H:i" }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="4" class="muted">Sin errores por endpoint en 24h.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div>
+                <h3 class="integraciones-subtitle">Por cliente</h3>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Cliente</th>
+                                <th>Errores</th>
+                                <th>Último</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in errors_by_client_24h %}
+                            <tr>
+                                <td>{{ row.client__nombre|default:"-" }}</td>
+                                <td><span class="badge-rojo">{{ row.total }}</span></td>
+                                <td>{{ row.last_at|date:"Y-m-d H:i" }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="3" class="muted">Sin errores por cliente en 24h.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
             <div class="card-header mb-0">Log de accesos recientes</div>
             <a
                 class="btn btn-outline-primary"

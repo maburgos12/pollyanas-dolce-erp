@@ -167,6 +167,36 @@ class IntegracionesPanelTests(TestCase):
         self.assertIn("point_pending_total", body)
         self.assertIn("alerta_nivel", body)
 
+    def test_errors_csv_export(self):
+        client_a, _ = PublicApiClient.create_with_generated_key(nombre="ERP A", descripcion="")
+        client_b, _ = PublicApiClient.create_with_generated_key(nombre="ERP B", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=client_a,
+            endpoint="/api/public/v1/insumos/",
+            method="GET",
+            status_code=500,
+        )
+        PublicApiAccessLog.objects.create(
+            client=client_b,
+            endpoint="/api/public/v1/insumos/",
+            method="GET",
+            status_code=429,
+        )
+        PublicApiAccessLog.objects.create(
+            client=client_b,
+            endpoint="/api/public/v1/pedidos/",
+            method="POST",
+            status_code=503,
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url, {"export": "errors_csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        body = response.content.decode("utf-8")
+        self.assertIn("total_errores_24h", body)
+        self.assertIn("/api/public/v1/insumos/", body)
+        self.assertIn("ERP B", body)
+
     def test_homologacion_summary_blocks_render(self):
         unidad = UnidadMedida.objects.create(
             codigo="kg",

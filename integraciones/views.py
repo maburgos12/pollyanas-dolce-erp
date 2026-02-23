@@ -6,7 +6,7 @@ from datetime import timedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -71,6 +71,38 @@ def _export_health_csv(
     writer.writerow(["alerta_nivel", "alerta_titulo", "alerta_detalle"])
     for alerta in alertas_operativas:
         writer.writerow([alerta.get("nivel", ""), alerta.get("titulo", ""), alerta.get("detalle", "")])
+    return response
+
+
+def _export_errors_csv(
+    errors_by_endpoint_24h: list[dict],
+    errors_by_client_24h: list[dict],
+) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="integraciones_errors_24h.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["tipo", "clave", "total_errores_24h", "clientes_distintos", "ultimo_error"])
+    for row in errors_by_endpoint_24h:
+        writer.writerow(
+            [
+                "endpoint",
+                row.get("endpoint", "") or "-",
+                row.get("total", 0),
+                row.get("clientes", 0),
+                row.get("last_at").strftime("%Y-%m-%d %H:%M:%S") if row.get("last_at") else "",
+            ]
+        )
+    writer.writerow([])
+    for row in errors_by_client_24h:
+        writer.writerow(
+            [
+                "cliente",
+                row.get("client__nombre", "") or "-",
+                row.get("total", 0),
+                "",
+                row.get("last_at").strftime("%Y-%m-%d %H:%M:%S") if row.get("last_at") else "",
+            ]
+        )
     return response
 
 
@@ -309,6 +341,25 @@ def panel(request):
 
     requests_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h).count()
     errors_24h = PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400).count()
+    errors_by_endpoint_24h = list(
+        PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400)
+        .values("endpoint")
+        .annotate(
+            total=Count("id"),
+            clientes=Count("client_id", distinct=True),
+            last_at=Max("created_at"),
+        )
+        .order_by("-total", "endpoint")[:12]
+    )
+    errors_by_client_24h = list(
+        PublicApiAccessLog.objects.filter(created_at__gte=since_24h, status_code__gte=400)
+        .values("client__nombre")
+        .annotate(
+            total=Count("id"),
+            last_at=Max("created_at"),
+        )
+        .order_by("-total", "client__nombre")[:12]
+    )
 
     insumos_activos_qs = Insumo.objects.filter(activo=True)
     insumos_activos = insumos_activos_qs.count()
@@ -464,6 +515,8 @@ def panel(request):
         "point_pending_producto": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PRODUCTO, 0)),
         "point_pending_proveedor": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0)),
         "alertas_operativas": alertas_operativas,
+        "errors_by_endpoint_24h": errors_by_endpoint_24h,
+        "errors_by_client_24h": errors_by_client_24h,
     }
     if export_mode == "health_csv":
         return _export_health_csv(
@@ -471,5 +524,10 @@ def panel(request):
             errors_24h=errors_24h,
             integracion_point=context["integracion_point"],
             alertas_operativas=alertas_operativas,
+        )
+    if export_mode == "errors_csv":
+        return _export_errors_csv(
+            errors_by_endpoint_24h=errors_by_endpoint_24h,
+            errors_by_client_24h=errors_by_client_24h,
         )
     return render(request, "integraciones/panel.html", context)
