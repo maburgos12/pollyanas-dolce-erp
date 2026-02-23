@@ -2700,6 +2700,138 @@ def _forecast_backtest_filename(payload: dict[str, Any], export_format: str) -> 
 
 @login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
+def forecast_preview_export(request: HttpRequest) -> HttpResponse:
+    payload = request.session.get("pronostico_estadistico_preview")
+    if not payload:
+        messages.warning(request, "No hay preview de pronóstico para exportar.")
+        return _redirect_plan_produccion_with_request_params(request)
+
+    export_format = (request.GET.get("format") or "csv").strip().lower()
+    start_txt = str(payload.get("target_start") or timezone.localdate().isoformat()).replace("-", "")
+    end_txt = str(payload.get("target_end") or timezone.localdate().isoformat()).replace("-", "")
+    alcance = str(payload.get("alcance") or "mes").lower()
+    filename = f"forecast_preview_{alcance}_{start_txt}_{end_txt}.{'xlsx' if export_format == 'xlsx' else 'csv'}"
+    rows = payload.get("rows") or []
+    totals = payload.get("totals") or {}
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Alcance", str(payload.get("alcance") or "").upper()])
+        ws_resumen.append(["Sucursal", payload.get("sucursal_nombre") or "Todas"])
+        ws_resumen.append(["Periodo", payload.get("periodo") or ""])
+        ws_resumen.append(["Rango inicio", payload.get("target_start") or ""])
+        ws_resumen.append(["Rango fin", payload.get("target_end") or ""])
+        ws_resumen.append(["Escenario", str(payload.get("escenario") or "base").upper()])
+        ws_resumen.append(["Confianza minima %", float(payload.get("min_confianza_pct") or 0)])
+        ws_resumen.append(["Recetas", int(totals.get("recetas_count") or 0)])
+        ws_resumen.append(["Forecast total", float(totals.get("forecast_total") or 0)])
+        ws_resumen.append(["Banda baja total", float(totals.get("forecast_low_total") or 0)])
+        ws_resumen.append(["Banda alta total", float(totals.get("forecast_high_total") or 0)])
+        ws_resumen.append(["Pronostico actual total", float(totals.get("pronostico_total") or 0)])
+        ws_resumen.append(["Delta total", float(totals.get("delta_total") or 0)])
+
+        ws_detalle = wb.create_sheet("Detalle")
+        ws_detalle.append(
+            [
+                "Receta ID",
+                "Receta",
+                "Forecast",
+                "Banda baja",
+                "Banda alta",
+                "Pronostico actual",
+                "Delta",
+                "Recomendacion",
+                "Confianza %",
+                "Desviacion",
+                "Observaciones",
+                "Muestras",
+            ]
+        )
+        for row in rows:
+            ws_detalle.append(
+                [
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    float(row.get("forecast_qty") or 0),
+                    float(row.get("forecast_low") or row.get("forecast_qty") or 0),
+                    float(row.get("forecast_high") or row.get("forecast_qty") or 0),
+                    float(row.get("pronostico_actual") or 0),
+                    float(row.get("delta") or 0),
+                    row.get("recomendacion") or "",
+                    float(row.get("confianza") or 0),
+                    float(row.get("desviacion") or 0),
+                    row.get("observaciones") or "",
+                    int(row.get("muestras") or 0),
+                ]
+            )
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Alcance", str(payload.get("alcance") or "").upper()])
+    writer.writerow(["Sucursal", payload.get("sucursal_nombre") or "Todas"])
+    writer.writerow(["Periodo", payload.get("periodo") or ""])
+    writer.writerow(["Rango inicio", payload.get("target_start") or ""])
+    writer.writerow(["Rango fin", payload.get("target_end") or ""])
+    writer.writerow(["Escenario", str(payload.get("escenario") or "base").upper()])
+    writer.writerow(["Confianza minima %", f"{Decimal(str(payload.get('min_confianza_pct') or 0)):.1f}"])
+    writer.writerow(["Recetas", int(totals.get("recetas_count") or 0)])
+    writer.writerow(["Forecast total", f"{Decimal(str(totals.get('forecast_total') or 0)):.3f}"])
+    writer.writerow(["Banda baja total", f"{Decimal(str(totals.get('forecast_low_total') or 0)):.3f}"])
+    writer.writerow(["Banda alta total", f"{Decimal(str(totals.get('forecast_high_total') or 0)):.3f}"])
+    writer.writerow(["Pronostico actual total", f"{Decimal(str(totals.get('pronostico_total') or 0)):.3f}"])
+    writer.writerow(["Delta total", f"{Decimal(str(totals.get('delta_total') or 0)):.3f}"])
+    writer.writerow([])
+    writer.writerow(
+        [
+            "receta_id",
+            "receta",
+            "forecast",
+            "banda_baja",
+            "banda_alta",
+            "pronostico_actual",
+            "delta",
+            "recomendacion",
+            "confianza_pct",
+            "desviacion",
+            "observaciones",
+            "muestras",
+        ]
+    )
+    for row in rows:
+        writer.writerow(
+            [
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                f"{Decimal(str(row.get('forecast_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('forecast_low') or row.get('forecast_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('forecast_high') or row.get('forecast_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('pronostico_actual') or 0)):.3f}",
+                f"{Decimal(str(row.get('delta') or 0)):.3f}",
+                row.get("recomendacion") or "",
+                f"{Decimal(str(row.get('confianza') or 0)):.1f}",
+                f"{Decimal(str(row.get('desviacion') or 0)):.3f}",
+                row.get("observaciones") or "",
+                int(row.get("muestras") or 0),
+            ]
+        )
+    return response
+
+
+@login_required
+@permission_required("recetas.view_planproduccion", raise_exception=True)
 def forecast_vs_solicitud_export(request: HttpRequest) -> HttpResponse:
     payload = request.session.get("pronostico_estadistico_preview")
     escenario = (request.GET.get("escenario") or "base").strip().lower()

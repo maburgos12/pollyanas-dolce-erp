@@ -72,6 +72,11 @@ urlpatterns = [
         name="pronostico_estadistico_desde_historial",
     ),
     path(
+        "plan-produccion/pronosticos/preview/export/",
+        views.forecast_preview_export,
+        name="forecast_preview_export",
+    ),
+    path(
         "plan-produccion/pronosticos/vs-solicitud/export/",
         views.forecast_vs_solicitud_export,
         name="forecast_vs_solicitud_export",

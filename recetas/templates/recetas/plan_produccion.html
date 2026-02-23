@@ -321,6 +321,16 @@
       Pronóstico actual: {{ forecast_preview.totals.pronostico_total|floatformat:2 }} ·
       Delta: {{ forecast_preview.totals.delta_total|floatformat:2 }}
     </p>
+    <div class="toolbar mb-2">
+      <a
+        class="btn btn-secondary"
+        href="{% url 'recetas:forecast_preview_export' %}?format=csv&periodo={{ periodo_pronostico_default }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}"
+      >Exportar preview CSV</a>
+      <a
+        class="btn btn-secondary"
+        href="{% url 'recetas:forecast_preview_export' %}?format=xlsx&periodo={{ periodo_pronostico_default }}{% if plan_actual %}&plan_id={{ plan_actual.id }}{% endif %}"
+      >Exportar preview XLSX</a>
+    </div>
     <div class="table-responsive">
       <table class="table align-middle">
         <thead>

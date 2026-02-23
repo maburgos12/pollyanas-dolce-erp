@@ -810,6 +810,46 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
         self.assertEqual(preview["totals"]["recetas_count"], 0)
         self.assertEqual(len(preview["rows"]), 0)
 
+    def test_pronostico_estadistico_preview_export_csv_y_xlsx(self):
+        for month_idx, qty in [(10, "40"), (11, "50"), (12, "60"), (1, "65"), (2, "70")]:
+            year = 2025 if month_idx >= 10 else 2026
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=self.sucursal,
+                fecha=date(year, month_idx, 15),
+                cantidad=Decimal(qty),
+                fuente="TEST_PREVIEW_EXPORT",
+            )
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "mes",
+                "periodo": "2026-03",
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "preview",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response_csv = self.client.get(reverse("recetas:forecast_preview_export"), {"format": "csv", "periodo": "2026-03"})
+        self.assertEqual(response_csv.status_code, 200)
+        self.assertIn("text/csv", response_csv["Content-Type"])
+        body_csv = response_csv.content.decode("utf-8")
+        self.assertIn("receta_id,receta,forecast,banda_baja,banda_alta,pronostico_actual", body_csv)
+        self.assertIn("Pastel Forecast", body_csv)
+
+        response_xlsx = self.client.get(reverse("recetas:forecast_preview_export"), {"format": "xlsx", "periodo": "2026-03"})
+        self.assertEqual(response_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response_xlsx["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(response_xlsx.content), data_only=True)
+        self.assertIn("Resumen", wb.sheetnames)
+        self.assertIn("Detalle", wb.sheetnames)
+
 
 class SolicitudVentasForecastTests(TestCase):
     def setUp(self):
