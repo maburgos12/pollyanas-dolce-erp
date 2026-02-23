@@ -307,6 +307,21 @@ class IntegracionesMaintenanceRunSerializer(serializers.Serializer):
     dry_run = serializers.BooleanField(required=False, default=False)
 
 
+class IntegracionesOperationHistoryQuerySerializer(serializers.Serializer):
+    action = serializers.CharField(required=False, allow_blank=True, max_length=80)
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=1000, default=100)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        date_from = attrs.get("date_from")
+        date_to = attrs.get("date_to")
+        if date_from and date_to and date_from > date_to:
+            raise serializers.ValidationError({"date_to": "Debe ser mayor o igual a date_from."})
+        return attrs
+
+
 class ComprasSolicitudCreateSerializer(serializers.Serializer):
     area = serializers.CharField(max_length=120)
     solicitante = serializers.CharField(max_length=120, required=False, allow_blank=True)

@@ -964,6 +964,44 @@ class RecetasCosteoApiTests(TestCase):
             ).exists()
         )
 
+    def test_endpoint_integraciones_operations_history(self):
+        AuditLog.objects.create(
+            user=self.user,
+            action="DEACTIVATE_IDLE_API_CLIENTS",
+            model="integraciones.PublicApiClient",
+            object_id="",
+            payload={"deactivated": 2},
+        )
+        AuditLog.objects.create(
+            user=self.user,
+            action="RUN_API_MAINTENANCE",
+            model="integraciones.Operaciones",
+            object_id="",
+            payload={"dry_run": False},
+        )
+        AuditLog.objects.create(
+            user=self.user,
+            action="UNRELATED_ACTION",
+            model="x.Model",
+            object_id="1",
+            payload={},
+        )
+        url = reverse("api_integraciones_operations_history")
+        resp = self.client.get(url, {"limit": 50})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("totales", payload)
+        self.assertIn("items", payload)
+        self.assertGreaterEqual(payload["totales"]["rows_total"], 2)
+        self.assertGreaterEqual(len(payload["items"]), 2)
+        self.assertIn("DEACTIVATE_IDLE_API_CLIENTS", payload["totales"]["by_action"])
+        self.assertNotIn("UNRELATED_ACTION", payload["totales"]["by_action"])
+
+    def test_endpoint_integraciones_operations_history_invalid_action(self):
+        url = reverse("api_integraciones_operations_history")
+        resp = self.client.get(url, {"action": "NO_EXISTE"})
+        self.assertEqual(resp.status_code, 400)
+
     def test_endpoint_integraciones_operaciones_forbidden_without_role(self):
         user_model = get_user_model()
         no_role_user = user_model.objects.create_user(
@@ -984,9 +1022,11 @@ class RecetasCosteoApiTests(TestCase):
             reverse("api_integraciones_run_maintenance"),
             {"idle_days": 30, "idle_limit": 10, "retain_days": 90, "max_delete": 10},
         )
+        resp_history = self.client.get(reverse("api_integraciones_operations_history"))
         self.assertEqual(resp_deactivate.status_code, 403)
         self.assertEqual(resp_purge.status_code, 403)
         self.assertEqual(resp_maintenance.status_code, 403)
+        self.assertEqual(resp_history.status_code, 403)
 
     def test_endpoint_inventario_aliases_pendientes_unificados_resolver_dry_run_and_apply(self):
         target = Insumo.objects.create(nombre="Harina API Target", unidad_base=self.unidad, activo=True)

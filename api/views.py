@@ -109,6 +109,7 @@ from .serializers import (
     ForecastEstadisticoRequestSerializer,
     IntegracionesDeactivateIdleClientsSerializer,
     IntegracionesMaintenanceRunSerializer,
+    IntegracionesOperationHistoryQuerySerializer,
     IntegracionesPurgeApiLogsSerializer,
     InventarioAjusteCreateSerializer,
     InventarioAjusteDecisionSerializer,
@@ -3188,6 +3189,82 @@ class IntegracionesMaintenanceRunView(APIView):
             payload=payload,
         )
         return Response(payload, status=status.HTTP_200_OK)
+
+
+class IntegracionesOperationsHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    ACTIONS = {
+        "DEACTIVATE_IDLE_API_CLIENTS",
+        "PREVIEW_DEACTIVATE_IDLE_API_CLIENTS",
+        "PURGE_API_LOGS",
+        "PREVIEW_PURGE_API_LOGS",
+        "RUN_API_MAINTENANCE",
+        "PREVIEW_RUN_API_MAINTENANCE",
+    }
+
+    def get(self, request):
+        if not can_view_audit(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar historial operativo de integraciones."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = IntegracionesOperationHistoryQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        action = (data.get("action") or "").strip().upper()
+        if action and action not in self.ACTIONS:
+            return Response(
+                {"detail": "action inválida para historial de integraciones."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = AuditLog.objects.filter(action__in=self.ACTIONS).select_related("user").order_by("-timestamp")
+        if action:
+            qs = qs.filter(action=action)
+        if data.get("date_from"):
+            qs = qs.filter(timestamp__date__gte=data["date_from"])
+        if data.get("date_to"):
+            qs = qs.filter(timestamp__date__lte=data["date_to"])
+
+        limit = int(data.get("limit") or 100)
+        rows_total = qs.count()
+        rows = list(qs[:limit])
+        by_action = {
+            row["action"]: int(row["total"] or 0)
+            for row in qs.values("action").annotate(total=Count("id")).order_by("-total", "action")
+        }
+
+        return Response(
+            {
+                "filters": {
+                    "action": action or "",
+                    "date_from": data.get("date_from"),
+                    "date_to": data.get("date_to"),
+                    "limit": limit,
+                },
+                "totales": {
+                    "rows_total": rows_total,
+                    "rows_returned": len(rows),
+                    "by_action": by_action,
+                },
+                "items": [
+                    {
+                        "id": row.id,
+                        "timestamp": row.timestamp,
+                        "user": row.user.username if row.user_id else "",
+                        "action": row.action,
+                        "model": row.model,
+                        "object_id": row.object_id,
+                        "payload": row.payload or {},
+                    }
+                    for row in rows
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class IntegracionPointResumenView(APIView):
