@@ -73,6 +73,12 @@ from .crm_views import (
     CRMPedidoSeguimientoView,
     CRMPedidosView,
 )
+from .rrhh_views import (
+    RRHHDashboardView,
+    RRHHEmpleadosView,
+    RRHHNominaLineasView,
+    RRHHNominasView,
+)
 
 urlpatterns = [
     path("auth/token/", ApiTokenAuthView.as_view(), name="api_auth_token"),
@@ -131,6 +137,10 @@ urlpatterns = [
     path("crm/clientes/", CRMClientesView.as_view(), name="api_crm_clientes"),
     path("crm/pedidos/", CRMPedidosView.as_view(), name="api_crm_pedidos"),
     path("crm/pedidos/<int:pedido_id>/seguimiento/", CRMPedidoSeguimientoView.as_view(), name="api_crm_pedido_seguimiento"),
+    path("rrhh/dashboard/", RRHHDashboardView.as_view(), name="api_rrhh_dashboard"),
+    path("rrhh/empleados/", RRHHEmpleadosView.as_view(), name="api_rrhh_empleados"),
+    path("rrhh/nominas/", RRHHNominasView.as_view(), name="api_rrhh_nominas"),
+    path("rrhh/nominas/<int:nomina_id>/lineas/", RRHHNominaLineasView.as_view(), name="api_rrhh_nomina_lineas"),
     path("compras/solicitudes/", ComprasSolicitudesListView.as_view(), name="api_compras_solicitudes"),
     path("compras/solicitudes/import-preview/", ComprasSolicitudesImportPreviewView.as_view(), name="api_compras_solicitudes_import_preview"),
     path("compras/solicitudes/import-confirm/", ComprasSolicitudesImportConfirmView.as_view(), name="api_compras_solicitudes_import_confirm"),

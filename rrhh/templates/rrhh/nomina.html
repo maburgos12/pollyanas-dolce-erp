@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Nómina{% endblock %}
+{% block page_title %}RRHH · Nómina{% endblock %}
+
+{% block content %}
+<section class="module-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-number">{{ total_nominas }}</div>
+    <div class="kpi-label">Nóminas totales</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ nominas_borrador }}</div>
+    <div class="kpi-label">Borrador</div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-header">Crear periodo de nómina</div>
+  {% if can_manage_rrhh %}
+  <form method="post" class="filters" style="margin-bottom:0;">
+    {% csrf_token %}
+    <select class="input-field" name="tipo_periodo">
+      {% for value,label in tipo_choices %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="date" name="fecha_inicio" required>
+    <input class="input-field" type="date" name="fecha_fin" required>
+    <select class="input-field" name="estatus">
+      {% for value,label in estatus_choices %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="text" name="notas" placeholder="Notas del periodo">
+    <button class="btn btn-primary" type="submit">Crear nómina</button>
+  </form>
+  {% else %}
+  <p class="muted">Tu rol es de consulta. No puedes crear nóminas.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Periodos registrados</div>
+  <form method="get" class="filters" style="margin-bottom:14px;">
+    <select class="input-field" name="tipo">
+      <option value="">Todos los tipos</option>
+      {% for value,label in tipo_choices %}
+      <option value="{{ value }}" {% if tipo == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <select class="input-field" name="estatus">
+      <option value="">Todos los estatus</option>
+      {% for value,label in estatus_choices %}
+      <option value="{{ value }}" {% if estatus == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Aplicar</button>
+    <a class="btn btn-secondary" href="{% url 'rrhh:nomina' %}">Limpiar</a>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Tipo</th>
+          <th>Inicio</th>
+          <th>Fin</th>
+          <th>Estatus</th>
+          <th class="text-end">Bruto</th>
+          <th class="text-end">Descuentos</th>
+          <th class="text-end">Neto</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for n in nominas %}
+        <tr>
+          <td>{{ n.folio }}</td>
+          <td>{{ n.get_tipo_periodo_display }}</td>
+          <td>{{ n.fecha_inicio|date:"Y-m-d" }}</td>
+          <td>{{ n.fecha_fin|date:"Y-m-d" }}</td>
+          <td><span class="badge bg-primary">{{ n.get_estatus_display }}</span></td>
+          <td class="text-end">${{ n.total_bruto|floatformat:2 }}</td>
+          <td class="text-end">${{ n.total_descuentos|floatformat:2 }}</td>
+          <td class="text-end">${{ n.total_neto|floatformat:2 }}</td>
+          <td><a class="btn btn-secondary" href="{% url 'rrhh:nomina_detail' n.id %}">Abrir</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9" class="muted">Sin nóminas para este filtro.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

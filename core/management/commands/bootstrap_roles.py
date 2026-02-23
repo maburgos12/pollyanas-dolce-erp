@@ -15,6 +15,9 @@ ROLE_PERMS = {
         "crm.view_cliente",
         "crm.view_pedidocliente",
         "crm.view_seguimientopedido",
+        "rrhh.view_empleado",
+        "rrhh.view_nominaperiodo",
+        "rrhh.view_nominalinea",
     ],
     "ADMIN": [
         "core.view_auditlog",
@@ -58,6 +61,15 @@ ROLE_PERMS = {
         "crm.view_seguimientopedido",
         "crm.add_seguimientopedido",
         "crm.change_seguimientopedido",
+        "rrhh.view_empleado",
+        "rrhh.add_empleado",
+        "rrhh.change_empleado",
+        "rrhh.view_nominaperiodo",
+        "rrhh.add_nominaperiodo",
+        "rrhh.change_nominaperiodo",
+        "rrhh.view_nominalinea",
+        "rrhh.add_nominalinea",
+        "rrhh.change_nominalinea",
     ],
     "COMPRAS": [
         "recetas.view_receta",
@@ -123,8 +135,15 @@ ROLE_PERMS = {
         "recetas.view_lineareceta",
     ],
     "RRHH": [
-        "recetas.view_receta",
-        "recetas.view_lineareceta",
+        "rrhh.view_empleado",
+        "rrhh.add_empleado",
+        "rrhh.change_empleado",
+        "rrhh.view_nominaperiodo",
+        "rrhh.add_nominaperiodo",
+        "rrhh.change_nominaperiodo",
+        "rrhh.view_nominalinea",
+        "rrhh.add_nominalinea",
+        "rrhh.change_nominalinea",
     ],
     "LECTURA": [
         "recetas.view_receta",
@@ -136,6 +155,9 @@ ROLE_PERMS = {
         "crm.view_cliente",
         "crm.view_pedidocliente",
         "crm.view_seguimientopedido",
+        "rrhh.view_empleado",
+        "rrhh.view_nominaperiodo",
+        "rrhh.view_nominalinea",
     ],
 }
 

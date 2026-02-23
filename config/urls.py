@@ -26,6 +26,7 @@ urlpatterns = [
     path("activos/", include(("activos.urls", "activos"), namespace="activos")),
     path("control/", include(("control.urls", "control"), namespace="control")),
     path("crm/", include(("crm.urls", "crm"), namespace="crm")),
+    path("rrhh/", include(("rrhh.urls", "rrhh"), namespace="rrhh")),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("api/", include("api.urls")),
 ]

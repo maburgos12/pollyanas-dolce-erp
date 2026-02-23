@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Empleados{% endblock %}
+{% block page_title %}RRHH · Empleados{% endblock %}
+
+{% block content %}
+<section class="module-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-number">{{ total_empleados }}</div>
+    <div class="kpi-label">Empleados totales</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-success">{{ total_activos }}</div>
+    <div class="kpi-label">Activos</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ total_nominas }}</div>
+    <div class="kpi-label">Nóminas capturadas</div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-header">Alta de empleado</div>
+  {% if can_manage_rrhh %}
+  <form method="post" class="filters" style="margin-bottom:0;">
+    {% csrf_token %}
+    <input class="input-field" type="text" name="nombre" placeholder="Nombre completo" required>
+    <input class="input-field" type="text" name="area" placeholder="Área">
+    <input class="input-field" type="text" name="puesto" placeholder="Puesto">
+    <select class="input-field" name="tipo_contrato">
+      {% for value,label in contrato_choices %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input class="input-field" type="date" name="fecha_ingreso">
+    <input class="input-field" type="number" min="0" step="0.01" name="salario_diario" placeholder="Salario diario">
+    <input class="input-field" type="text" name="telefono" placeholder="Teléfono">
+    <input class="input-field" type="email" name="email" placeholder="Correo">
+    <input class="input-field" type="text" name="sucursal" placeholder="Sucursal">
+    <button class="btn btn-primary" type="submit">Guardar empleado</button>
+  </form>
+  {% else %}
+  <p class="muted">Tu rol es de consulta. No puedes crear empleados.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Catálogo de empleados</div>
+  <form method="get" class="filters" style="margin-bottom:14px;">
+    <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por nombre, código, área o puesto">
+    <select class="input-field" name="estado">
+      <option value="activos" {% if estado == "activos" %}selected{% endif %}>Activos</option>
+      <option value="todos" {% if estado == "todos" %}selected{% endif %}>Todos</option>
+      <option value="inactivos" {% if estado == "inactivos" %}selected{% endif %}>Inactivos</option>
+    </select>
+    <button class="btn btn-primary" type="submit">Aplicar</button>
+    <a class="btn btn-secondary" href="{% url 'rrhh:empleados' %}">Limpiar</a>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Empleado</th>
+          <th>Área</th>
+          <th>Puesto</th>
+          <th>Contrato</th>
+          <th>Ingreso</th>
+          <th class="text-end">Salario diario</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in empleados %}
+        <tr>
+          <td>{{ e.codigo }}</td>
+          <td>{{ e.nombre }}</td>
+          <td>{{ e.area|default:"-" }}</td>
+          <td>{{ e.puesto|default:"-" }}</td>
+          <td>{{ e.get_tipo_contrato_display }}</td>
+          <td>{{ e.fecha_ingreso|date:"Y-m-d" }}</td>
+          <td class="text-end">${{ e.salario_diario|floatformat:2 }}</td>
+          <td>
+            {% if e.activo %}
+            <span class="badge bg-success">Activo</span>
+            {% else %}
+            <span class="badge bg-danger">Inactivo</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" class="muted">Sin empleados para este filtro.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
