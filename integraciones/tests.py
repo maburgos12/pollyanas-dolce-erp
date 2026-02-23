@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -136,6 +138,30 @@ class IntegracionesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "/api/public/v1/pedidos/")
         self.assertNotContains(response, "/api/public/v1/insumos/")
+
+    def test_logs_filters_by_date_range(self):
+        client, _ = PublicApiClient.create_with_generated_key(nombre="ERP FECHA", descripcion="")
+        recent = PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/recent/",
+            method="GET",
+            status_code=200,
+        )
+        old = PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/old/",
+            method="GET",
+            status_code=200,
+        )
+        PublicApiAccessLog.objects.filter(id=recent.id).update(created_at=timezone.now() - timedelta(hours=1))
+        PublicApiAccessLog.objects.filter(id=old.id).update(created_at=timezone.now() - timedelta(days=10))
+
+        self.client.force_login(self.admin)
+        from_date = (timezone.localdate() - timedelta(days=1)).isoformat()
+        response = self.client.get(self.url, {"from": from_date})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/api/public/v1/recent/")
+        self.assertNotContains(response, "/api/public/v1/old/")
 
     def test_logs_csv_export(self):
         client, _ = PublicApiClient.create_with_generated_key(nombre="ERP CSV", descripcion="")

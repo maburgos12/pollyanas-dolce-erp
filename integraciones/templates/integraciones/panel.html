@@ -549,7 +549,7 @@
             <div class="card-header mb-0">Log de accesos recientes</div>
             <a
                 class="btn btn-outline-primary"
-                href="?client={{ filter_client_id }}&status={{ filter_status }}&q={{ filter_q|urlencode }}&export=csv"
+                href="?client={{ filter_client_id }}&status={{ filter_status }}&q={{ filter_q|urlencode }}&from={{ filter_from }}&to={{ filter_to }}&export=csv"
             >
                 Exportar CSV
             </a>
@@ -577,6 +577,14 @@
             <div class="form-group">
                 <label class="form-label" for="id_q">Endpoint contiene</label>
                 <input id="id_q" name="q" class="input-field" type="text" value="{{ filter_q }}">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="id_from">Desde</label>
+                <input id="id_from" name="from" class="input-field" type="date" value="{{ filter_from }}">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="id_to">Hasta</label>
+                <input id="id_to" name="to" class="input-field" type="date" value="{{ filter_to }}">
             </div>
             <div class="form-group" style="display:flex;align-items:flex-end;">
                 <button class="btn btn-primary w-100" type="submit">Aplicar filtros</button>

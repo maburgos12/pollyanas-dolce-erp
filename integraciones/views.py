@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -249,6 +249,18 @@ def _pct_change(current: int, previous: int) -> float:
     return round(((current_i - previous_i) * 100.0 / previous_i), 2)
 
 
+def _parse_iso_date(raw: str | None) -> date | None:
+    if not raw:
+        return None
+    value = str(raw).strip()
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _resolve_point_pending_insumos(min_score: float, limit: int, create_aliases: bool) -> dict:
     queryset = PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).order_by("-fuzzy_score", "point_nombre", "id")
     selected = list(queryset[:limit])
@@ -457,6 +469,8 @@ def panel(request):
     filter_client_id = (request.GET.get("client") or "").strip()
     filter_status = (request.GET.get("status") or "all").strip().lower()
     filter_q = (request.GET.get("q") or "").strip()
+    filter_from = _parse_iso_date(request.GET.get("from"))
+    filter_to = _parse_iso_date(request.GET.get("to"))
     export_mode = (request.GET.get("export") or "").strip().lower()
     if export_mode == "clients_csv":
         return _export_clients_csv(client_metrics)
@@ -470,6 +484,10 @@ def panel(request):
         logs_qs = logs_qs.filter(status_code__gte=400)
     if filter_q:
         logs_qs = logs_qs.filter(endpoint__icontains=filter_q)
+    if filter_from:
+        logs_qs = logs_qs.filter(created_at__date__gte=filter_from)
+    if filter_to:
+        logs_qs = logs_qs.filter(created_at__date__lte=filter_to)
 
     logs_qs = logs_qs.order_by("-created_at", "-id")
     if export_mode == "csv":
@@ -696,6 +714,8 @@ def panel(request):
         "filter_client_id": filter_client_id,
         "filter_status": filter_status,
         "filter_q": filter_q,
+        "filter_from": filter_from.isoformat() if filter_from else "",
+        "filter_to": filter_to.isoformat() if filter_to else "",
         "integracion_point": {
             "insumos": {
                 "activos": insumos_activos,
