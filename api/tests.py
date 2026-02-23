@@ -1751,6 +1751,74 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("bajo_rango_count", payload["compare_solicitud"]["totals"])
         self.assertEqual(payload["scope"]["escenario_compare"], "base")
 
+    def test_endpoint_ventas_pronostico_estadistico_export_csv_y_xlsx(self):
+        sucursal = Sucursal.objects.create(codigo="MEX", nombre="Matriz Export", activa=True)
+        for week in range(1, 7):
+            week_start = date(2026, 3, 20) - timedelta(days=(7 * week))
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=week_start,
+                cantidad=Decimal("10"),
+                fuente="API_TEST",
+            )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal,
+            alcance=SolicitudVenta.ALCANCE_SEMANA,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 16),
+            fecha_fin=date(2026, 3, 22),
+            cantidad=Decimal("8"),
+            fuente="API_TEST",
+        )
+
+        url = reverse("api_ventas_pronostico_estadistico")
+        resp_csv = self.client.post(
+            f"{url}?export=csv",
+            {
+                "alcance": "semana",
+                "fecha_base": "2026-03-20",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "include_solicitud_compare": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("receta_id,receta,forecast,banda_baja,banda_alta,pronostico_actual", body_csv)
+        self.assertIn("COMPARE_SOLICITUD", body_csv)
+
+        resp_xlsx = self.client.post(
+            f"{url}?export=xlsx",
+            {
+                "alcance": "semana",
+                "fecha_base": "2026-03-20",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "include_solicitud_compare": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_pronostico_estadistico_export_invalido(self):
+        url = reverse("api_ventas_pronostico_estadistico")
+        resp = self.client.post(
+            f"{url}?export=pdf",
+            {"alcance": "mes", "periodo": "2026-03"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_pronostico_estadistico_compare_escenario_bajo(self):
         sucursal = Sucursal.objects.create(codigo="MATRIZ_BAJO", nombre="Matriz Bajo", activa=True)
         for week in range(1, 7):
@@ -1977,6 +2045,59 @@ class RecetasCosteoApiTests(TestCase):
             Decimal(str(high["totals"]["forecast_total"])),
             Decimal(str(low["totals"]["forecast_total"])),
         )
+
+    def test_endpoint_ventas_pronostico_backtest_export_csv_y_xlsx(self):
+        sucursal = Sucursal.objects.create(codigo="BTX", nombre="Backtest Export", activa=True)
+        monthly_data = [
+            (2025, 9, "20"),
+            (2025, 10, "24"),
+            (2025, 11, "28"),
+            (2025, 12, "30"),
+            (2026, 1, "33"),
+            (2026, 2, "36"),
+        ]
+        for year, month, qty in monthly_data:
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=date(year, month, 15),
+                cantidad=Decimal(qty),
+                fuente="API_TEST",
+            )
+
+        url = reverse("api_ventas_pronostico_backtest")
+        payload = {
+            "alcance": "mes",
+            "fecha_base": "2026-03-15",
+            "periods": 3,
+            "sucursal_id": sucursal.id,
+            "incluir_preparaciones": True,
+        }
+
+        resp_csv = self.client.post(f"{url}?export=csv", payload, content_type="application/json")
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        body_csv = resp_csv.content.decode("utf-8")
+        self.assertIn("VENTANAS", body_csv)
+        self.assertIn("TOP_ERRORES", body_csv)
+
+        resp_xlsx = self.client.post(f"{url}?export=xlsx", payload, content_type="application/json")
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_ventas_pronostico_backtest_export_invalido(self):
+        url = reverse("api_ventas_pronostico_backtest")
+        resp = self.client.post(
+            f"{url}?export=zip",
+            {"alcance": "mes", "fecha_base": "2026-03-15"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
 
     def test_endpoint_ventas_historial_list_filters_and_totals(self):
         sucursal = Sucursal.objects.create(codigo="MAT", nombre="Matriz API", activa=True)

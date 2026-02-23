@@ -537,6 +537,361 @@ def _ventas_pipeline_export_response(payload: dict[str, Any], export_format: str
     return response
 
 
+def _forecast_estadistico_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
+    scope = payload.get("scope") or {}
+    totals = payload.get("totals") or {}
+    rows = payload.get("rows") or []
+    compare = payload.get("compare_solicitud") or {}
+    include_compare = bool(compare.get("rows"))
+    start_txt = str(scope.get("target_start") or "").replace("-", "")
+    end_txt = str(scope.get("target_end") or "").replace("-", "")
+    if not start_txt or not end_txt:
+        today_txt = timezone.localdate().strftime("%Y%m%d")
+        start_txt = start_txt or today_txt
+        end_txt = end_txt or today_txt
+    filename = f"api_forecast_estadistico_{start_txt}_{end_txt}.{export_format}"
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Alcance", str(scope.get("alcance") or "").upper()])
+        ws_resumen.append(["Periodo", scope.get("periodo") or ""])
+        ws_resumen.append(["Rango inicio", scope.get("target_start") or ""])
+        ws_resumen.append(["Rango fin", scope.get("target_end") or ""])
+        ws_resumen.append(["Sucursal", scope.get("sucursal_nombre") or "Todas"])
+        ws_resumen.append(["Escenario compare", str(scope.get("escenario_compare") or "base").upper()])
+        ws_resumen.append(["Confianza minima %", float(scope.get("min_confianza_pct") or 0)])
+        ws_resumen.append(["Forecast total", float(totals.get("forecast_total") or 0)])
+        ws_resumen.append(["Banda baja total", float(totals.get("forecast_low_total") or 0)])
+        ws_resumen.append(["Banda alta total", float(totals.get("forecast_high_total") or 0)])
+        ws_resumen.append(["Pronostico total", float(totals.get("pronostico_total") or 0)])
+        ws_resumen.append(["Delta total", float(totals.get("delta_total") or 0)])
+
+        ws_forecast = wb.create_sheet("Forecast")
+        ws_forecast.append(
+            [
+                "Receta ID",
+                "Receta",
+                "Forecast",
+                "Banda baja",
+                "Banda alta",
+                "Pronostico actual",
+                "Delta",
+                "Recomendacion",
+                "Confianza %",
+                "Desviacion",
+                "Muestras",
+                "Observaciones",
+            ]
+        )
+        for row in rows:
+            ws_forecast.append(
+                [
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    float(row.get("forecast_qty") or 0),
+                    float(row.get("forecast_low") or 0),
+                    float(row.get("forecast_high") or 0),
+                    float(row.get("pronostico_actual") or 0),
+                    float(row.get("delta") or 0),
+                    row.get("recomendacion") or "",
+                    float(row.get("confianza") or 0),
+                    float(row.get("desviacion") or 0),
+                    int(row.get("muestras") or 0),
+                    row.get("observaciones") or "",
+                ]
+            )
+
+        if include_compare:
+            ws_compare = wb.create_sheet("CompareSolicitud")
+            ws_compare.append(
+                [
+                    "Receta ID",
+                    "Receta",
+                    "Forecast",
+                    "Forecast base",
+                    "Forecast baja",
+                    "Forecast alta",
+                    "Solicitud",
+                    "Delta",
+                    "Variacion %",
+                    "Status",
+                    "Status rango",
+                ]
+            )
+            for row in compare.get("rows") or []:
+                ws_compare.append(
+                    [
+                        int(row.get("receta_id") or 0),
+                        row.get("receta") or "",
+                        float(row.get("forecast_qty") or 0),
+                        float(row.get("forecast_base") or 0),
+                        float(row.get("forecast_low") or 0),
+                        float(row.get("forecast_high") or 0),
+                        float(row.get("solicitud_qty") or 0),
+                        float(row.get("delta_qty") or 0),
+                        float(row.get("variacion_pct")) if row.get("variacion_pct") is not None else None,
+                        row.get("status") or "",
+                        row.get("status_rango") or "",
+                    ]
+                )
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Alcance", str(scope.get("alcance") or "").upper()])
+    writer.writerow(["Periodo", scope.get("periodo") or ""])
+    writer.writerow(["Rango inicio", scope.get("target_start") or ""])
+    writer.writerow(["Rango fin", scope.get("target_end") or ""])
+    writer.writerow(["Sucursal", scope.get("sucursal_nombre") or "Todas"])
+    writer.writerow(["Escenario compare", str(scope.get("escenario_compare") or "base").upper()])
+    writer.writerow(["Confianza minima %", f"{Decimal(str(scope.get('min_confianza_pct') or 0)):.1f}"])
+    writer.writerow(["Forecast total", f"{Decimal(str(totals.get('forecast_total') or 0)):.3f}"])
+    writer.writerow(["Banda baja total", f"{Decimal(str(totals.get('forecast_low_total') or 0)):.3f}"])
+    writer.writerow(["Banda alta total", f"{Decimal(str(totals.get('forecast_high_total') or 0)):.3f}"])
+    writer.writerow(["Pronostico total", f"{Decimal(str(totals.get('pronostico_total') or 0)):.3f}"])
+    writer.writerow(["Delta total", f"{Decimal(str(totals.get('delta_total') or 0)):.3f}"])
+    writer.writerow([])
+    writer.writerow(
+        [
+            "receta_id",
+            "receta",
+            "forecast",
+            "banda_baja",
+            "banda_alta",
+            "pronostico_actual",
+            "delta",
+            "recomendacion",
+            "confianza_pct",
+            "desviacion",
+            "muestras",
+            "observaciones",
+        ]
+    )
+    for row in rows:
+        writer.writerow(
+            [
+                int(row.get("receta_id") or 0),
+                row.get("receta") or "",
+                f"{Decimal(str(row.get('forecast_qty') or 0)):.3f}",
+                f"{Decimal(str(row.get('forecast_low') or 0)):.3f}",
+                f"{Decimal(str(row.get('forecast_high') or 0)):.3f}",
+                f"{Decimal(str(row.get('pronostico_actual') or 0)):.3f}",
+                f"{Decimal(str(row.get('delta') or 0)):.3f}",
+                row.get("recomendacion") or "",
+                f"{Decimal(str(row.get('confianza') or 0)):.1f}",
+                f"{Decimal(str(row.get('desviacion') or 0)):.3f}",
+                int(row.get("muestras") or 0),
+                row.get("observaciones") or "",
+            ]
+        )
+    if include_compare:
+        writer.writerow([])
+        writer.writerow(["COMPARE_SOLICITUD"])
+        writer.writerow(
+            [
+                "receta_id",
+                "receta",
+                "forecast",
+                "forecast_base",
+                "forecast_baja",
+                "forecast_alta",
+                "solicitud",
+                "delta",
+                "variacion_pct",
+                "status",
+                "status_rango",
+            ]
+        )
+        for row in compare.get("rows") or []:
+            writer.writerow(
+                [
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    f"{Decimal(str(row.get('forecast_qty') or 0)):.3f}",
+                    f"{Decimal(str(row.get('forecast_base') or 0)):.3f}",
+                    f"{Decimal(str(row.get('forecast_low') or 0)):.3f}",
+                    f"{Decimal(str(row.get('forecast_high') or 0)):.3f}",
+                    f"{Decimal(str(row.get('solicitud_qty') or 0)):.3f}",
+                    f"{Decimal(str(row.get('delta_qty') or 0)):.3f}",
+                    f"{Decimal(str(row.get('variacion_pct'))):.1f}" if row.get("variacion_pct") is not None else "",
+                    row.get("status") or "",
+                    row.get("status_rango") or "",
+                ]
+            )
+    return response
+
+
+def _forecast_backtest_export_response(payload: dict[str, Any], export_format: str) -> HttpResponse:
+    scope = payload.get("scope") or {}
+    totals = payload.get("totals") or {}
+    windows = payload.get("windows") or []
+    alcance = str(scope.get("alcance") or "mes").lower()
+    fecha_base = str(scope.get("fecha_base") or timezone.localdate().isoformat()).replace("-", "")
+    scenario = str(scope.get("escenario") or "base").lower()
+    filename = f"api_forecast_backtest_{alcance}_{fecha_base}_{scenario}.{export_format}"
+
+    if export_format == "xlsx":
+        wb = Workbook()
+        ws_resumen = wb.active
+        ws_resumen.title = "Resumen"
+        ws_resumen.append(["Alcance", str(scope.get("alcance") or "").upper()])
+        ws_resumen.append(["Fecha base", str(scope.get("fecha_base") or "")])
+        ws_resumen.append(["Escenario", str(scope.get("escenario") or "base").upper()])
+        ws_resumen.append(["Sucursal", scope.get("sucursal_nombre") or "Todas"])
+        ws_resumen.append(["Confianza minima %", float(scope.get("min_confianza_pct") or 0)])
+        ws_resumen.append(["Ventanas evaluadas", int(totals.get("windows_evaluated") or 0)])
+        ws_resumen.append(["Forecast total", float(totals.get("forecast_total") or 0)])
+        ws_resumen.append(["Real total", float(totals.get("actual_total") or 0)])
+        ws_resumen.append(["Bias total", float(totals.get("bias_total") or 0)])
+        ws_resumen.append(["MAE promedio", float(totals.get("mae_promedio") or 0)])
+        ws_resumen.append(["MAPE promedio", float(totals.get("mape_promedio")) if totals.get("mape_promedio") is not None else None])
+
+        ws_windows = wb.create_sheet("Ventanas")
+        ws_windows.append(["Inicio", "Fin", "Periodo", "Recetas", "Forecast", "Real", "Bias", "MAE", "MAPE"])
+        for w in windows:
+            ws_windows.append(
+                [
+                    w.get("window_start") or "",
+                    w.get("window_end") or "",
+                    w.get("periodo") or "",
+                    int(w.get("recetas_count") or 0),
+                    float(w.get("forecast_total") or 0),
+                    float(w.get("actual_total") or 0),
+                    float(w.get("bias_total") or 0),
+                    float(w.get("mae") or 0),
+                    float(w.get("mape")) if w.get("mape") is not None else None,
+                ]
+            )
+
+        ws_top = wb.create_sheet("TopErrores")
+        ws_top.append(
+            [
+                "Inicio",
+                "Fin",
+                "Periodo",
+                "Receta ID",
+                "Receta",
+                "Forecast",
+                "Real",
+                "Delta",
+                "Abs Error",
+                "Variacion %",
+                "Status",
+            ]
+        )
+        for w in windows:
+            for row in w.get("top_errors") or []:
+                ws_top.append(
+                    [
+                        w.get("window_start") or "",
+                        w.get("window_end") or "",
+                        w.get("periodo") or "",
+                        int(row.get("receta_id") or 0),
+                        row.get("receta") or "",
+                        float(row.get("forecast_qty") or 0),
+                        float(row.get("actual_qty") or 0),
+                        float(row.get("delta_qty") or 0),
+                        float(row.get("abs_error") or 0),
+                        float(row.get("variacion_pct")) if row.get("variacion_pct") is not None else None,
+                        row.get("status") or "",
+                    ]
+                )
+
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(["Alcance", str(scope.get("alcance") or "").upper()])
+    writer.writerow(["Fecha base", str(scope.get("fecha_base") or "")])
+    writer.writerow(["Escenario", str(scope.get("escenario") or "base").upper()])
+    writer.writerow(["Sucursal", scope.get("sucursal_nombre") or "Todas"])
+    writer.writerow(["Confianza minima %", f"{Decimal(str(scope.get('min_confianza_pct') or 0)):.1f}"])
+    writer.writerow(["Ventanas evaluadas", int(totals.get("windows_evaluated") or 0)])
+    writer.writerow(["Forecast total", f"{Decimal(str(totals.get('forecast_total') or 0)):.3f}"])
+    writer.writerow(["Real total", f"{Decimal(str(totals.get('actual_total') or 0)):.3f}"])
+    writer.writerow(["Bias total", f"{Decimal(str(totals.get('bias_total') or 0)):.3f}"])
+    writer.writerow(["MAE promedio", f"{Decimal(str(totals.get('mae_promedio') or 0)):.3f}"])
+    writer.writerow(
+        [
+            "MAPE promedio",
+            f"{Decimal(str(totals.get('mape_promedio'))):.1f}" if totals.get("mape_promedio") is not None else "",
+        ]
+    )
+    writer.writerow([])
+    writer.writerow(["VENTANAS"])
+    writer.writerow(["inicio", "fin", "periodo", "recetas", "forecast", "real", "bias", "mae", "mape"])
+    for w in windows:
+        writer.writerow(
+            [
+                w.get("window_start") or "",
+                w.get("window_end") or "",
+                w.get("periodo") or "",
+                int(w.get("recetas_count") or 0),
+                f"{Decimal(str(w.get('forecast_total') or 0)):.3f}",
+                f"{Decimal(str(w.get('actual_total') or 0)):.3f}",
+                f"{Decimal(str(w.get('bias_total') or 0)):.3f}",
+                f"{Decimal(str(w.get('mae') or 0)):.3f}",
+                f"{Decimal(str(w.get('mape'))):.1f}" if w.get("mape") is not None else "",
+            ]
+        )
+    writer.writerow([])
+    writer.writerow(["TOP_ERRORES"])
+    writer.writerow(
+        [
+            "inicio",
+            "fin",
+            "periodo",
+            "receta_id",
+            "receta",
+            "forecast",
+            "real",
+            "delta",
+            "abs_error",
+            "variacion_pct",
+            "status",
+        ]
+    )
+    for w in windows:
+        for row in w.get("top_errors") or []:
+            writer.writerow(
+                [
+                    w.get("window_start") or "",
+                    w.get("window_end") or "",
+                    w.get("periodo") or "",
+                    int(row.get("receta_id") or 0),
+                    row.get("receta") or "",
+                    f"{Decimal(str(row.get('forecast_qty') or 0)):.3f}",
+                    f"{Decimal(str(row.get('actual_qty') or 0)):.3f}",
+                    f"{Decimal(str(row.get('delta_qty') or 0)):.3f}",
+                    f"{Decimal(str(row.get('abs_error') or 0)):.3f}",
+                    f"{Decimal(str(row.get('variacion_pct'))):.1f}" if row.get("variacion_pct") is not None else "",
+                    row.get("status") or "",
+                ]
+            )
+    return response
+
+
 def _resolve_receta_bulk_ref(
     *,
     receta_id: int | None,
@@ -4087,6 +4442,12 @@ class ForecastBacktestView(APIView):
                 {"detail": "No tienes permisos para consultar backtest de pronóstico."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format and export_format not in {"csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         ser = ForecastBacktestRequestSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -4246,29 +4607,29 @@ class ForecastBacktestView(APIView):
             overall_mape = (ape_sum / Decimal(str(ape_count))).quantize(Decimal("0.1"))
         overall_mae = (sum_abs_error / Decimal(str(max(1, len(windows_payload))))).quantize(Decimal("0.001"))
 
-        return Response(
-            {
-                "scope": {
-                    "alcance": alcance,
-                    "fecha_base": str(fecha_base),
-                    "periods": periods,
-                    "escenario": escenario,
-                    "min_confianza_pct": _to_float(min_confianza_pct),
-                    "sucursal_id": sucursal.id if sucursal else None,
-                    "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
-                },
-                "totals": {
-                    "windows_evaluated": len(windows_payload),
-                    "forecast_total": float(sum_forecast_total),
-                    "actual_total": float(sum_actual_total),
-                    "bias_total": float((sum_forecast_total - sum_actual_total).quantize(Decimal("0.001"))),
-                    "mae_promedio": float(overall_mae),
-                    "mape_promedio": float(overall_mape) if overall_mape is not None else None,
-                },
-                "windows": windows_payload,
+        payload = {
+            "scope": {
+                "alcance": alcance,
+                "fecha_base": str(fecha_base),
+                "periods": periods,
+                "escenario": escenario,
+                "min_confianza_pct": _to_float(min_confianza_pct),
+                "sucursal_id": sucursal.id if sucursal else None,
+                "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
             },
-            status=status.HTTP_200_OK,
-        )
+            "totals": {
+                "windows_evaluated": len(windows_payload),
+                "forecast_total": float(sum_forecast_total),
+                "actual_total": float(sum_actual_total),
+                "bias_total": float((sum_forecast_total - sum_actual_total).quantize(Decimal("0.001"))),
+                "mae_promedio": float(overall_mae),
+                "mape_promedio": float(overall_mape) if overall_mape is not None else None,
+            },
+            "windows": windows_payload,
+        }
+        if export_format:
+            return _forecast_backtest_export_response(payload, export_format)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class ForecastInsightsView(APIView):
@@ -5718,6 +6079,12 @@ class ForecastEstadisticoView(APIView):
                 {"detail": "No tienes permisos para consultar pronóstico estadístico."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format and export_format not in {"csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         ser = ForecastEstadisticoRequestSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -5767,25 +6134,25 @@ class ForecastEstadisticoView(APIView):
                 top=top,
             )
 
-        return Response(
-            {
-                "scope": {
-                    "alcance": payload["alcance"],
-                    "periodo": payload["periodo"],
-                    "target_start": payload["target_start"],
-                    "target_end": payload["target_end"],
-                    "sucursal_nombre": payload["sucursal_nombre"],
-                    "sucursal_id": payload.get("sucursal_id"),
-                    "escenario_compare": escenario_compare,
-                    "min_confianza_pct": _to_float(min_confianza_pct),
-                    "filtered_conf": filtered_conf,
-                },
-                "totals": payload["totals"],
-                "rows": payload["rows"],
-                "compare_solicitud": compare_payload,
+        result_payload = {
+            "scope": {
+                "alcance": payload["alcance"],
+                "periodo": payload["periodo"],
+                "target_start": payload["target_start"],
+                "target_end": payload["target_end"],
+                "sucursal_nombre": payload["sucursal_nombre"],
+                "sucursal_id": payload.get("sucursal_id"),
+                "escenario_compare": escenario_compare,
+                "min_confianza_pct": _to_float(min_confianza_pct),
+                "filtered_conf": filtered_conf,
             },
-            status=status.HTTP_200_OK,
-        )
+            "totals": payload["totals"],
+            "rows": payload["rows"],
+            "compare_solicitud": compare_payload,
+        }
+        if export_format:
+            return _forecast_estadistico_export_response(result_payload, export_format)
+        return Response(result_payload, status=status.HTTP_200_OK)
 
 
 class ForecastEstadisticoGuardarView(APIView):
