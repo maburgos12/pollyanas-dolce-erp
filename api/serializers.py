@@ -429,6 +429,7 @@ class ForecastEstadisticoRequestSerializer(serializers.Serializer):
     safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
     min_confianza_pct = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
     include_solicitud_compare = serializers.BooleanField(required=False, default=True)
+    escenario_compare = serializers.ChoiceField(choices=["base", "bajo", "alto"], required=False, default="base")
     top = serializers.IntegerField(required=False, min_value=1, max_value=500, default=120)
 
     def validate_safety_pct(self, value):
@@ -572,6 +573,7 @@ class SolicitudVentaAplicarForecastSerializer(serializers.Serializer):
     incluir_preparaciones = serializers.BooleanField(required=False, default=False)
     safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
     min_confianza_pct = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
+    escenario = serializers.ChoiceField(choices=["base", "bajo", "alto"], required=False, default="base")
     modo = serializers.ChoiceField(
         choices=["desviadas", "sobre", "bajo", "receta", "todas"],
         required=False,

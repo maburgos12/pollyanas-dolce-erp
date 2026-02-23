@@ -278,9 +278,9 @@
     <div class="form-group">
       <label class="form-label">Escenario</label>
       <select class="form-select" name="escenario">
-        <option value="base">Base (forecast)</option>
-        <option value="bajo">Conservador (banda baja)</option>
-        <option value="alto">Agresivo (banda alta)</option>
+        <option value="base" {% if forecast_run_escenario_default == "base" %}selected{% endif %}>Base (forecast)</option>
+        <option value="bajo" {% if forecast_run_escenario_default == "bajo" %}selected{% endif %}>Conservador (banda baja)</option>
+        <option value="alto" {% if forecast_run_escenario_default == "alto" %}selected{% endif %}>Agresivo (banda alta)</option>
       </select>
     </div>
     <div class="form-group">
@@ -413,10 +413,26 @@
     <div class="card-header">Pronóstico vs Solicitud de Ventas · {{ forecast_vs_solicitud.sucursal_nombre }}</div>
     <p class="muted mb-2">
       Rango: {{ forecast_vs_solicitud.target_start }} a {{ forecast_vs_solicitud.target_end }} ·
+      Escenario comparado: {{ forecast_compare_escenario|upper }} ·
       Forecast total: {{ forecast_vs_solicitud.totals.forecast_total|floatformat:2 }} ·
       Solicitud total: {{ forecast_vs_solicitud.totals.solicitud_total|floatformat:2 }} ·
       Delta: {{ forecast_vs_solicitud.totals.delta_total|floatformat:2 }}
     </p>
+    <form class="form-grid-auto mb-2" method="get" action="{% url 'recetas:plan_produccion' %}">
+      {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
+      <input type="hidden" name="periodo" value="{{ periodo_pronostico_default }}">
+      <div class="form-group">
+        <label class="form-label">Escenario para comparar/aplicar</label>
+        <select class="form-select" name="forecast_compare_escenario">
+          <option value="base" {% if forecast_compare_escenario == "base" %}selected{% endif %}>Base</option>
+          <option value="bajo" {% if forecast_compare_escenario == "bajo" %}selected{% endif %}>Bajo</option>
+          <option value="alto" {% if forecast_compare_escenario == "alto" %}selected{% endif %}>Alto</option>
+        </select>
+      </div>
+      <div class="form-group" style="align-self:end;">
+        <button class="btn btn-secondary" type="submit">Aplicar escenario</button>
+      </div>
+    </form>
     <div class="kpi-mini">
       <div class="kpi-card">
         <div class="kpi-number is-success">{{ forecast_vs_solicitud.totals.ok_count }}</div>
@@ -453,6 +469,7 @@
         {% csrf_token %}
         {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
         <input type="hidden" name="modo" value="desviadas">
+        <input type="hidden" name="escenario" value="{{ forecast_compare_escenario }}">
         <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)" style="max-width:130px;">
         <button class="btn btn-secondary" type="submit">Ajustar desviadas (sobre+bajo)</button>
       </form>
@@ -460,6 +477,7 @@
         {% csrf_token %}
         {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
         <input type="hidden" name="modo" value="sobre">
+        <input type="hidden" name="escenario" value="{{ forecast_compare_escenario }}">
         <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)" style="max-width:130px;">
         <button class="btn btn-secondary" type="submit">Ajustar solo sobre-solicitud</button>
       </form>
@@ -467,6 +485,7 @@
         {% csrf_token %}
         {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
         <input type="hidden" name="modo" value="bajo">
+        <input type="hidden" name="escenario" value="{{ forecast_compare_escenario }}">
         <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope % (opc)" style="max-width:130px;">
         <button class="btn btn-secondary" type="submit">Ajustar solo bajo-solicitud</button>
       </form>
@@ -537,6 +556,7 @@
                 {% if plan_actual %}<input type="hidden" name="plan_id" value="{{ plan_actual.id }}">{% endif %}
                 <input type="hidden" name="modo" value="receta">
                 <input type="hidden" name="receta_id" value="{{ row.receta_id }}">
+                <input type="hidden" name="escenario" value="{{ forecast_compare_escenario }}">
                 <input class="form-control" type="number" step="0.1" min="0" name="max_variacion_pct" placeholder="Tope %" style="max-width:95px;">
                 <button class="btn btn-primary" type="submit">Ajustar a forecast</button>
               </form>

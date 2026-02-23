@@ -348,6 +348,7 @@ def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict
             "target_end": "",
             "sucursal_id": None,
             "sucursal_nombre": "",
+            "escenario": "base",
             "rows": [],
             "totals": {
                 "forecast_total": 0.0,
@@ -371,6 +372,7 @@ def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict
                 "receta_id": int(row.get("receta_id") or 0),
                 "receta": row.get("receta") or "",
                 "forecast_qty": _to_float(row.get("forecast_qty")),
+                "forecast_base": _to_float(row.get("forecast_base")),
                 "forecast_low": _to_float(row.get("forecast_low")),
                 "forecast_high": _to_float(row.get("forecast_high")),
                 "solicitud_qty": _to_float(row.get("solicitud_qty")),
@@ -386,6 +388,7 @@ def _serialize_forecast_compare(compare: dict | None, *, top: int = 120) -> dict
         "target_end": str(compare.get("target_end") or ""),
         "sucursal_id": compare.get("sucursal_id"),
         "sucursal_nombre": compare.get("sucursal_nombre") or "",
+        "escenario": compare.get("escenario") or "base",
         "rows": rows,
         "totals": {
             "forecast_total": _to_float(totals.get("forecast_total")),
@@ -5575,6 +5578,7 @@ class ForecastEstadisticoView(APIView):
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
         min_confianza_pct = _to_decimal(data.get("min_confianza_pct"), default=Decimal("0"))
+        escenario_compare = str(data.get("escenario_compare") or "base").lower()
         top = int(data.get("top") or 120)
 
         sucursal = None
@@ -5608,7 +5612,7 @@ class ForecastEstadisticoView(APIView):
         if bool(data.get("include_solicitud_compare", True)):
             full_payload = _forecast_session_payload(result, top_rows=max(len(result.get("rows") or []), 1))
             compare_payload = _serialize_forecast_compare(
-                _forecast_vs_solicitud_preview(full_payload),
+                _forecast_vs_solicitud_preview(full_payload, escenario=escenario_compare),
                 top=top,
             )
 
@@ -5621,6 +5625,7 @@ class ForecastEstadisticoView(APIView):
                     "target_end": payload["target_end"],
                     "sucursal_nombre": payload["sucursal_nombre"],
                     "sucursal_id": payload.get("sucursal_id"),
+                    "escenario_compare": escenario_compare,
                     "min_confianza_pct": _to_float(min_confianza_pct),
                     "filtered_conf": filtered_conf,
                 },
@@ -5879,6 +5884,7 @@ class SolicitudVentaAplicarForecastView(APIView):
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
         min_confianza_pct = _to_decimal(data.get("min_confianza_pct"), default=Decimal("0"))
+        escenario = str(data.get("escenario") or "base").lower()
         dry_run = bool(data.get("dry_run", False))
         max_variacion_pct = _to_decimal(data.get("max_variacion_pct"), default=Decimal("-1"))
         if max_variacion_pct < 0:
@@ -5901,7 +5907,7 @@ class SolicitudVentaAplicarForecastView(APIView):
             )
 
         full_payload = _forecast_session_payload(result, top_rows=max(len(result.get("rows") or []), 1))
-        compare_raw = _forecast_vs_solicitud_preview(full_payload)
+        compare_raw = _forecast_vs_solicitud_preview(full_payload, escenario=escenario)
         if not compare_raw or not compare_raw.get("rows"):
             return Response(
                 {"detail": "No hay filas de comparación forecast vs solicitud para aplicar ajuste."},
@@ -6018,6 +6024,7 @@ class SolicitudVentaAplicarForecastView(APIView):
                     "sucursal_id": sucursal.id,
                     "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}",
                     "modo": modo,
+                    "escenario": escenario,
                     "min_confianza_pct": _to_float(min_confianza_pct),
                 },
                 "updated": {

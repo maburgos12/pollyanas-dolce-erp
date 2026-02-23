@@ -1749,6 +1749,39 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("en_rango_count", payload["compare_solicitud"]["totals"])
         self.assertIn("sobre_rango_count", payload["compare_solicitud"]["totals"])
         self.assertIn("bajo_rango_count", payload["compare_solicitud"]["totals"])
+        self.assertEqual(payload["scope"]["escenario_compare"], "base")
+
+    def test_endpoint_ventas_pronostico_estadistico_compare_escenario_bajo(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ_BAJO", nombre="Matriz Bajo", activa=True)
+        for week in range(1, 7):
+            week_start = date(2026, 3, 20) - timedelta(days=(7 * week))
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=week_start,
+                cantidad=Decimal("10"),
+                fuente="API_TEST",
+            )
+
+        url = reverse("api_ventas_pronostico_estadistico")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "semana",
+                "fecha_base": "2026-03-20",
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "escenario_compare": "bajo",
+                "include_solicitud_compare": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["escenario_compare"], "bajo")
+        self.assertGreaterEqual(len(payload["compare_solicitud"]["rows"]), 1)
+        row = payload["compare_solicitud"]["rows"][0]
+        self.assertAlmostEqual(row["forecast_qty"], row["forecast_low"], places=6)
 
     def test_endpoint_ventas_pronostico_estadistico_min_confianza_sin_resultados(self):
         sucursal = Sucursal.objects.create(codigo="MCONF", nombre="Confianza", activa=True)
@@ -2256,11 +2289,13 @@ class RecetasCosteoApiTests(TestCase):
                 "incluir_preparaciones": True,
                 "modo": "receta",
                 "receta_id": self.receta.id,
+                "escenario": "alto",
             },
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
+        self.assertEqual(payload["scope"]["escenario"], "alto")
         self.assertFalse(payload["updated"]["dry_run"])
         self.assertEqual(payload["updated"]["created"], 0)
         self.assertGreaterEqual(payload["updated"]["updated"], 1)

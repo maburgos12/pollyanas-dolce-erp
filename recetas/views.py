@@ -2328,10 +2328,12 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
     }
     if result.get("min_confianza_pct") is not None:
         payload["min_confianza_pct"] = float(result.get("min_confianza_pct") or 0)
+    if result.get("escenario"):
+        payload["escenario"] = str(result.get("escenario"))
     return payload
 
 
-def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None, escenario: str = "base") -> dict[str, Any] | None:
     if not payload:
         return None
     rows_payload = payload.get("rows") or []
@@ -2344,9 +2346,12 @@ def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, 
     except Exception:
         return None
 
+    escenario = (escenario or "base").strip().lower()
+    if escenario not in {"base", "bajo", "alto"}:
+        escenario = "base"
+
     sucursal_id = payload.get("sucursal_id")
     forecast_map: dict[int, dict[str, Any]] = {}
-    receta_ids: list[int] = []
     for row in rows_payload:
         try:
             rid = int(row.get("receta_id") or 0)
@@ -2354,7 +2359,6 @@ def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, 
             rid = 0
         if rid <= 0:
             continue
-        receta_ids.append(rid)
         forecast_map[rid] = {
             "receta_id": rid,
             "receta": str(row.get("receta") or ""),
@@ -2391,9 +2395,15 @@ def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, 
 
     rows: list[dict[str, Any]] = []
     for rid, base in forecast_map.items():
-        forecast_qty = Decimal(str(base["forecast_qty"] or 0))
-        forecast_low = Decimal(str(base.get("forecast_low") or forecast_qty or 0))
-        forecast_high = Decimal(str(base.get("forecast_high") or forecast_qty or 0))
+        forecast_qty_base = Decimal(str(base["forecast_qty"] or 0))
+        forecast_low = Decimal(str(base.get("forecast_low") or forecast_qty_base or 0))
+        forecast_high = Decimal(str(base.get("forecast_high") or forecast_qty_base or 0))
+        if escenario == "bajo":
+            forecast_qty = forecast_low
+        elif escenario == "alto":
+            forecast_qty = forecast_high
+        else:
+            forecast_qty = forecast_qty_base
         solicitud_qty = solicitud_map.get(rid, Decimal("0"))
         delta = solicitud_qty - forecast_qty
         tolerance = max(Decimal("1"), forecast_qty * Decimal("0.05"))
@@ -2436,6 +2446,7 @@ def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, 
                 "receta_id": rid,
                 "receta": base["receta"],
                 "forecast_qty": forecast_qty,
+                "forecast_base": forecast_qty_base,
                 "forecast_low": forecast_low,
                 "forecast_high": forecast_high,
                 "solicitud_qty": solicitud_qty,
@@ -2454,6 +2465,7 @@ def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None) -> dict[str, 
         "target_end": target_end,
         "sucursal_id": sucursal_id,
         "sucursal_nombre": payload.get("sucursal_nombre") or "Todas",
+        "escenario": escenario,
         "rows": rows,
         "totals": {
             "forecast_total": total_forecast,
@@ -2999,7 +3011,11 @@ def solicitud_ventas_aplicar_desde_forecast(request: HttpRequest) -> HttpRespons
             return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
         return redirect(reverse("recetas:plan_produccion"))
 
-    compare = _forecast_vs_solicitud_preview(payload)
+    escenario = (request.POST.get("escenario") or payload.get("escenario") or "base").strip().lower()
+    if escenario not in {"base", "bajo", "alto"}:
+        escenario = "base"
+    next_params["forecast_compare_escenario"] = escenario
+    compare = _forecast_vs_solicitud_preview(payload, escenario=escenario)
     if not compare or not compare.get("rows"):
         messages.warning(request, "No hay filas disponibles para aplicar ajustes.")
         if next_params:
@@ -3088,13 +3104,16 @@ def solicitud_ventas_aplicar_desde_forecast(request: HttpRequest) -> HttpRespons
     if max_variacion_pct is None:
         messages.success(
             request,
-            f"Ajuste aplicado desde forecast. Creadas: {created}. Actualizadas: {updated}. Omitidas: {skipped}.",
+            (
+                f"Ajuste aplicado desde forecast ({escenario}). "
+                f"Creadas: {created}. Actualizadas: {updated}. Omitidas: {skipped}."
+            ),
         )
     else:
         messages.success(
             request,
             (
-                f"Ajuste aplicado con tope {max_variacion_pct}%."
+                f"Ajuste aplicado con tope {max_variacion_pct}% ({escenario})."
                 f" Creadas: {created}. Actualizadas: {updated}. Omitidas: {skipped}."
                 f" Omitidas por tope: {skipped_cap}."
             ),
@@ -3278,6 +3297,7 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
     )
     resultado, filtered_conf = _filter_forecast_result_by_confianza(resultado, min_confianza_pct)
     resultado["min_confianza_pct"] = min_confianza_pct
+    resultado["escenario"] = escenario
     request.session["pronostico_estadistico_preview"] = _forecast_session_payload(resultado, top_rows=120)
     if filtered_conf > 0:
         messages.info(
@@ -3307,6 +3327,8 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
                     f"MAPE promedio: {backtest_payload['totals']['mape_promedio'] if backtest_payload['totals']['mape_promedio'] is not None else '-'}%"
                 ),
             )
+        next_params["periodo"] = resultado["periodo"]
+        next_params["forecast_compare_escenario"] = escenario
         if next_params:
             return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
         return redirect(reverse("recetas:plan_produccion"))
@@ -3393,6 +3415,7 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
         messages.info(request, "Se generó la vista previa estadística, pero no se creó plan.")
 
     next_params["periodo"] = resultado["periodo"]
+    next_params["forecast_compare_escenario"] = escenario
     if next_params:
         return redirect(f"{reverse('recetas:plan_produccion')}?{urlencode(next_params)}")
     return redirect(reverse("recetas:plan_produccion"))
@@ -3617,8 +3640,19 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     min_confianza_default = request.GET.get("min_confianza_pct")
     if not min_confianza_default:
         min_confianza_default = str((forecast_preview or {}).get("min_confianza_pct") or "0")
+    forecast_run_escenario_default = str((forecast_preview or {}).get("escenario") or "base").strip().lower()
+    if forecast_run_escenario_default not in {"base", "bajo", "alto"}:
+        forecast_run_escenario_default = "base"
+    forecast_compare_escenario = (request.GET.get("forecast_compare_escenario") or "").strip().lower()
+    if forecast_compare_escenario not in {"base", "bajo", "alto"}:
+        forecast_compare_escenario = str((forecast_preview or {}).get("escenario") or "base").strip().lower()
+    if forecast_compare_escenario not in {"base", "bajo", "alto"}:
+        forecast_compare_escenario = "base"
     try:
-        forecast_vs_solicitud = _forecast_vs_solicitud_preview(forecast_preview)
+        forecast_vs_solicitud = _forecast_vs_solicitud_preview(
+            forecast_preview,
+            escenario=forecast_compare_escenario,
+        )
     except (OperationalError, ProgrammingError):
         forecast_vs_solicitud = None
         solicitudes_venta_unavailable = True
@@ -3650,6 +3684,8 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
             "forecast_preview": forecast_preview,
             "forecast_backtest": forecast_backtest,
             "forecast_vs_solicitud": forecast_vs_solicitud,
+            "forecast_compare_escenario": forecast_compare_escenario,
+            "forecast_run_escenario_default": forecast_run_escenario_default,
             "sucursales": sucursales,
             "alcance_estadistico": alcance_estadistico,
             "fecha_base_estadistica": fecha_base_estadistica,
