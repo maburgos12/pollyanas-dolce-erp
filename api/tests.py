@@ -164,9 +164,46 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertGreaterEqual(payload["totales"]["rows"], 1)
+        self.assertGreaterEqual(payload["totales"]["rows_total"], 1)
+        self.assertGreaterEqual(payload["totales"]["rows_returned"], 1)
         self.assertGreaterEqual(payload["totales"]["returned"], 1)
         self.assertEqual(payload["items"][0]["action"], "UPDATE")
         self.assertIn("x.Model", payload["items"][0]["model"])
+
+    def test_endpoint_audit_logs_offset_and_sort(self):
+        AuditLog.objects.create(user=self.user, action="CREATE", model="z.SortModel", object_id="1", payload={"k": "v1"})
+        AuditLog.objects.create(user=self.user, action="UPDATE", model="z.SortModel", object_id="2", payload={"k": "v2"})
+        AuditLog.objects.create(user=self.user, action="DELETE", model="z.SortModel", object_id="3", payload={"k": "v3"})
+
+        url = reverse("api_audit_logs")
+        resp = self.client.get(
+            url,
+            {
+                "q": "SortModel",
+                "sort_by": "action",
+                "sort_dir": "asc",
+                "limit": 1,
+                "offset": 1,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["sort_by"], "action")
+        self.assertEqual(payload["filters"]["sort_dir"], "asc")
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["totales"]["rows_total"], 3)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
+        self.assertEqual(payload["totales"]["returned"], 1)
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["action"], "DELETE")
+
+    def test_endpoint_audit_logs_sort_invalido(self):
+        resp = self.client.get(reverse("api_audit_logs"), {"sort_by": "ruido"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("sort_by", resp.json()["detail"].lower())
+        resp_dir = self.client.get(reverse("api_audit_logs"), {"sort_dir": "up"})
+        self.assertEqual(resp_dir.status_code, 400)
+        self.assertIn("sort_dir", resp_dir.json()["detail"].lower())
 
     def test_endpoint_audit_logs_requires_permission(self):
         user_model = get_user_model()

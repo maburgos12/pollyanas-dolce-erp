@@ -269,6 +269,27 @@ class AuditLogListView(APIView):
         model_name = (request.GET.get("model") or "").strip()
         user_id_raw = (request.GET.get("user_id") or "").strip()
         limit = _parse_bounded_int(request.GET.get("limit", 200), default=200, min_value=1, max_value=1000)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=200000)
+        sort_by = (request.GET.get("sort_by") or "timestamp").strip().lower()
+        sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
+        allowed_sort = {
+            "timestamp": "timestamp",
+            "action": "action",
+            "model": "model",
+            "object_id": "object_id",
+            "user": "user__username",
+            "id": "id",
+        }
+        if sort_by not in allowed_sort:
+            return Response(
+                {"detail": "sort_by inválido. Usa timestamp, action, model, object_id, user o id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_dir inválido. Usa asc o desc."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         qs = AuditLog.objects.select_related("user").order_by("-timestamp", "-id")
         if q:
@@ -289,10 +310,13 @@ class AuditLogListView(APIView):
             except ValueError:
                 return Response({"detail": "user_id inválido."}, status=status.HTTP_400_BAD_REQUEST)
             qs = qs.filter(user_id=user_id)
+        sort_field = allowed_sort[sort_by]
+        order_expr = sort_field if sort_dir == "asc" else f"-{sort_field}"
+        qs = qs.order_by(order_expr, "-id")
 
         total = qs.count()
         rows = []
-        for log in qs[:limit]:
+        for log in qs[offset : offset + limit]:
             rows.append(
                 {
                     "id": log.id,
@@ -313,8 +337,16 @@ class AuditLogListView(APIView):
                     "model": model_name,
                     "user_id": user_id_raw,
                     "limit": limit,
+                    "offset": offset,
+                    "sort_by": sort_by,
+                    "sort_dir": sort_dir,
                 },
-                "totales": {"rows": total, "returned": len(rows)},
+                "totales": {
+                    "rows": total,
+                    "rows_total": total,
+                    "rows_returned": len(rows),
+                    "returned": len(rows),
+                },
                 "items": rows,
             },
             status=status.HTTP_200_OK,
