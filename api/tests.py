@@ -2540,6 +2540,67 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(by_id[sucursal_sur.id]["historial_qty"], 9.0)
         self.assertEqual(by_id[sucursal_sur.id]["solicitud_qty"], 15.0)
 
+    def test_endpoint_ventas_pipeline_resumen_filter_status_y_delta(self):
+        sucursal_norte = Sucursal.objects.create(codigo="NFD", nombre="Sucursal Norte Filtro", activa=True)
+        sucursal_sur = Sucursal.objects.create(codigo="SFD", nombre="Sucursal Sur Filtro", activa=True)
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_norte,
+            fecha=date(2026, 3, 5),
+            cantidad=Decimal("20"),
+            fuente="API_TEST",
+        )
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_sur,
+            fecha=date(2026, 3, 6),
+            cantidad=Decimal("9"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_norte,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("10"),
+            fuente="API_TEST",
+        )
+        SolicitudVenta.objects.create(
+            receta=self.receta,
+            sucursal=sucursal_sur,
+            alcance=SolicitudVenta.ALCANCE_MES,
+            periodo="2026-03",
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 3, 31),
+            cantidad=Decimal("15"),
+            fuente="API_TEST",
+        )
+
+        resp = self.client.get(
+            reverse("api_ventas_pipeline_resumen"),
+            {"periodo": "2026-03", "status": "DESVIADAS", "delta_min": "5", "incluir_preparaciones": "1"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["status"], "DESVIADAS")
+        self.assertEqual(payload["scope"]["delta_min"], 5.0)
+        self.assertGreaterEqual(payload["totales"]["rows_filtered"], 0)
+        self.assertGreaterEqual(payload["totales"]["by_sucursal_filtered"], 1)
+        for row in payload["rows"]:
+            self.assertIn(row["status"], {"SOBRE", "BAJO"})
+        for row in payload["by_sucursal"]:
+            self.assertIn(row["status"], {"SOBRE", "BAJO"})
+
+    def test_endpoint_ventas_pipeline_resumen_filter_status_invalido(self):
+        resp = self.client.get(
+            reverse("api_ventas_pipeline_resumen"),
+            {"periodo": "2026-03", "status": "RUIDO"},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("status", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_pipeline_resumen_export_csv_y_xlsx(self):
         sucursal = Sucursal.objects.create(codigo="PIPEX", nombre="Sucursal Pipeline Export", activa=True)
         VentaHistorica.objects.create(

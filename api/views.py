@@ -6028,6 +6028,24 @@ class VentasPipelineResumenView(APIView):
             )
         periodo = (request.GET.get("periodo") or "").strip()
         top = _parse_bounded_int(request.GET.get("top", 120), default=120, min_value=1, max_value=500)
+        status_filter = (request.GET.get("status") or "").strip().upper()
+        allowed_status = {"", "SOBRE", "BAJO", "OK", "SIN_SOLICITUD", "SIN_MOV", "DESVIADAS"}
+        if status_filter not in allowed_status:
+            return Response(
+                {"detail": "status inválido. Usa SOBRE, BAJO, OK, SIN_SOLICITUD, SIN_MOV o DESVIADAS."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        delta_min = _to_decimal(request.GET.get("delta_min"), default=Decimal("0"))
+        if delta_min < 0:
+            delta_min = Decimal("0")
+
+        def _status_match(tag: str) -> bool:
+            if not status_filter:
+                return True
+            if status_filter == "DESVIADAS":
+                return tag in {"SOBRE", "BAJO"}
+            return tag == status_filter
+
         if periodo:
             parsed_period = _parse_period(periodo)
             if not parsed_period:
@@ -6129,6 +6147,11 @@ class VentasPipelineResumenView(APIView):
                     "status": status_tag,
                 }
             )
+        by_sucursal_rows_tmp = [
+            row
+            for row in by_sucursal_rows_tmp
+            if _status_match(str(row.get("status") or "")) and row["_sort"] >= delta_min
+        ]
         by_sucursal_rows_tmp.sort(key=lambda row: row["_sort"], reverse=True)
         by_sucursal_rows = []
         for row in by_sucursal_rows_tmp[:120]:
@@ -6210,6 +6233,11 @@ class VentasPipelineResumenView(APIView):
                     "status": status_tag,
                 }
             )
+        rows_tmp = [
+            row
+            for row in rows_tmp
+            if _status_match(str(row.get("status") or "")) and row["_sort"] >= delta_min
+        ]
         rows_tmp.sort(key=lambda row: row["_sort"], reverse=True)
         rows = []
         for row in rows_tmp[:top]:
@@ -6223,6 +6251,8 @@ class VentasPipelineResumenView(APIView):
                 "sucursal": sucursal.nombre if sucursal else "Todas",
                 "incluir_preparaciones": incluir_preparaciones,
                 "top": top,
+                "status": status_filter or "",
+                "delta_min": _to_float(delta_min),
             },
             "totales": {
                 "historial_qty": _to_float(historial_total),
@@ -6236,6 +6266,8 @@ class VentasPipelineResumenView(APIView):
                 "pronostico_recetas": pronostico_qs.values("receta_id").distinct().count(),
                 "solicitud_recetas": solicitudes_qs.values("receta_id").distinct().count(),
                 "rows_count": len(receta_ids),
+                "rows_filtered": len(rows_tmp),
+                "by_sucursal_filtered": len(by_sucursal_rows_tmp),
             },
             "solicitud_by_alcance": {
                 "MES": _to_float(by_alcance[SolicitudVenta.ALCANCE_MES]),
