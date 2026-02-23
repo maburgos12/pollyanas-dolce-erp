@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block title %}Integraciones - API publica{% endblock %}
+{% block page_title %}Integraciones · API publica{% endblock %}
+
+{% block content %}
+<div class="module-shell integraciones-shell">
+    {% if last_generated_api_key %}
+    <section class="card">
+        <div class="card-header">API key generada</div>
+        <p class="muted">
+            Copia esta llave ahora. Por seguridad se muestra una sola vez.
+        </p>
+        <div class="integraciones-key-box">{{ last_generated_api_key }}</div>
+    </section>
+    {% endif %}
+
+    <section class="card">
+        <div class="card-header">Nuevo cliente de API</div>
+        <form method="post" class="form-grid-auto">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create">
+            <div class="form-group">
+                <label class="form-label" for="id_nombre">Nombre</label>
+                <input id="id_nombre" name="nombre" type="text" class="input-field" maxlength="120" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="id_descripcion">Descripcion</label>
+                <input id="id_descripcion" name="descripcion" type="text" class="input-field" maxlength="255">
+            </div>
+            <div class="form-group" style="display:flex;align-items:flex-end;">
+                <button type="submit" class="btn btn-primary w-100">Crear cliente</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="card-header mb-0">Clientes API registrados</div>
+            <span class="badge-amarillo">{{ clients|length }} cliente{{ clients|length|pluralize }}</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Cliente</th>
+                        <th>Prefijo</th>
+                        <th>Estado</th>
+                        <th>Ultimo uso</th>
+                        <th>Creado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for client in clients %}
+                    <tr>
+                        <td>
+                            <strong>{{ client.nombre }}</strong>
+                            {% if client.descripcion %}
+                            <div class="muted">{{ client.descripcion }}</div>
+                            {% endif %}
+                        </td>
+                        <td><code>{{ client.clave_prefijo }}</code></td>
+                        <td>
+                            {% if client.activo %}
+                            <span class="badge-verde">Activo</span>
+                            {% else %}
+                            <span class="badge-rojo">Inactivo</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if client.last_used_at %}
+                                {{ client.last_used_at|date:"Y-m-d H:i" }}
+                            {% else %}
+                                <span class="muted">Sin uso</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ client.created_at|date:"Y-m-d H:i" }}</td>
+                        <td>
+                            <div class="recipe-actions">
+                                <form method="post" class="inline-form">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="rotate">
+                                    <input type="hidden" name="client_id" value="{{ client.id }}">
+                                    <button type="submit" class="btn btn-secondary">Rotar key</button>
+                                </form>
+                                <form method="post" class="inline-form">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="toggle">
+                                    <input type="hidden" name="client_id" value="{{ client.id }}">
+                                    {% if client.activo %}
+                                    <button type="submit" class="btn btn-danger">Desactivar</button>
+                                    {% else %}
+                                    <button type="submit" class="btn btn-success">Activar</button>
+                                    {% endif %}
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" class="muted">Sin clientes API registrados.</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Top consumo API (ultimas 24h)</div>
+        {% if top_clients_24h %}
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Cliente</th>
+                        <th>Requests</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in top_clients_24h %}
+                    <tr>
+                        <td>{{ row.client__nombre }}</td>
+                        <td>{{ row.total }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="muted">No hay requests en las ultimas 24 horas.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <div class="card-header">Log de accesos recientes</div>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Cliente</th>
+                        <th>Metodo</th>
+                        <th>Endpoint</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in logs %}
+                    <tr>
+                        <td>{{ row.created_at|date:"Y-m-d H:i:s" }}</td>
+                        <td>{{ row.client.nombre }}</td>
+                        <td><code>{{ row.method }}</code></td>
+                        <td><code>{{ row.endpoint }}</code></td>
+                        <td>
+                            {% if row.status_code >= 400 %}
+                            <span class="badge-rojo">{{ row.status_code }}</span>
+                            {% else %}
+                            <span class="badge-verde">{{ row.status_code }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="muted">Sin logs por el momento.</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

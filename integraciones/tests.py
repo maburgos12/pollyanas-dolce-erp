@@ -1,0 +1,91 @@
+from __future__ import annotations
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from django.urls import reverse
+
+from .models import PublicApiAccessLog, PublicApiClient
+
+
+User = get_user_model()
+
+
+class IntegracionesPanelTests(TestCase):
+    def setUp(self):
+        self.url = reverse("integraciones:panel")
+        self.user = User.objects.create_user(username="operador", password="x")
+        self.admin = User.objects.create_superuser(username="admin_integraciones", email="admin@test.local", password="x")
+
+    def test_requires_authentication(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response.url)
+
+    def test_requires_audit_permission(self):
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_panel_get_ok_for_admin(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Integraciones")
+        self.assertContains(response, "Clientes API registrados")
+
+    def test_create_client_shows_generated_key_once(self):
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            self.url,
+            {"action": "create", "nombre": "ERP Point", "descripcion": "Integracion POS"},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(PublicApiClient.objects.count(), 1)
+        self.assertTrue(response.context["last_generated_api_key"])
+
+        second = self.client.get(self.url)
+        self.assertEqual(second.context["last_generated_api_key"], "")
+
+    def test_rotate_client_key_changes_hash_and_prefix(self):
+        client, _raw = PublicApiClient.create_with_generated_key(nombre="ERP Mobile", descripcion="")
+        old_hash = client.clave_hash
+        old_prefix = client.clave_prefijo
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            self.url,
+            {"action": "rotate", "client_id": str(client.id)},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        client.refresh_from_db()
+        self.assertNotEqual(client.clave_hash, old_hash)
+        self.assertNotEqual(client.clave_prefijo, old_prefix)
+        self.assertTrue(response.context["last_generated_api_key"])
+
+    def test_toggle_client_active_flag(self):
+        client, _raw = PublicApiClient.create_with_generated_key(nombre="ERP Sucursal", descripcion="")
+        self.assertTrue(client.activo)
+
+        self.client.force_login(self.admin)
+        self.client.post(self.url, {"action": "toggle", "client_id": str(client.id)})
+        client.refresh_from_db()
+        self.assertFalse(client.activo)
+
+        self.client.post(self.url, {"action": "toggle", "client_id": str(client.id)})
+        client.refresh_from_db()
+        self.assertTrue(client.activo)
+
+    def test_recent_logs_are_rendered(self):
+        client, _raw = PublicApiClient.create_with_generated_key(nombre="ERP Logs", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=client,
+            endpoint="/api/public/v1/insumos/",
+            method="GET",
+            status_code=200,
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/api/public/v1/insumos/")

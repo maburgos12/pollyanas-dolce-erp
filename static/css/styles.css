@@ -799,6 +799,23 @@ tr:hover,
   margin-bottom: 0;
 }
 
+.integraciones-shell .card-header {
+  font-size: 32px;
+  line-height: 1.1;
+}
+
+.integraciones-key-box {
+  border: 1px solid var(--rosa-deep);
+  border-radius: 8px;
+  background: #fff7fa;
+  padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  color: var(--vino);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
 .compras-solicitudes .card,
 .plan-produccion-shell .card,
 .recipe-detail-shell .card {
@@ -987,7 +1004,8 @@ tr:hover,
   }
 
   .compras-solicitudes .card-header,
-  .plan-produccion-shell .card-header {
+  .plan-produccion-shell .card-header,
+  .integraciones-shell .card-header {
     font-size: 32px;
   }
 
