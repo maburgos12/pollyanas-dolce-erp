@@ -2855,6 +2855,8 @@ class InventarioAliasesPendientesView(APIView):
 
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=400)
         runs_to_scan = _parse_bounded_int(request.GET.get("runs", 5), default=5, min_value=1, max_value=30)
+        runs_detail = _parse_bounded_int(request.GET.get("runs_detail", 5), default=5, min_value=1, max_value=20)
+        include_runs = _parse_bool(request.GET.get("include_runs"), default=True)
         q = (request.GET.get("q") or "").strip()
         q_norm = normalizar_nombre(q)
         source = (request.GET.get("source") or "TODOS").strip().upper()
@@ -2885,7 +2887,31 @@ class InventarioAliasesPendientesView(APIView):
             )
 
         almacen_rows: list[dict] = []
-        sync_runs = list(AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at")[:runs_to_scan])
+        recent_runs: list[dict] = []
+        sync_runs = list(
+            AlmacenSyncRun.objects.only(
+                "id",
+                "started_at",
+                "source",
+                "status",
+                "matched",
+                "unmatched",
+                "pending_preview",
+            ).order_by("-started_at")[:runs_to_scan]
+        )
+        if include_runs:
+            for run in sync_runs[:runs_detail]:
+                recent_runs.append(
+                    {
+                        "id": run.id,
+                        "started_at": run.started_at,
+                        "source": run.source,
+                        "status": run.status,
+                        "matched": int(run.matched or 0),
+                        "unmatched": int(run.unmatched or 0),
+                        "has_preview": bool(run.pending_preview),
+                    }
+                )
         for run in sync_runs:
             for row in run.pending_preview or []:
                 nombre_origen = str((row or {}).get("nombre_origen") or "").strip()
@@ -3000,11 +3026,14 @@ class InventarioAliasesPendientesView(APIView):
                 "filters": {
                     "limit": limit,
                     "runs": runs_to_scan,
+                    "runs_detail": runs_detail,
+                    "include_runs": include_runs,
                     "q": q,
                     "source": source,
                     "point_tipo": point_tipo,
                     "export": export,
                 },
+                "recent_runs": recent_runs,
                 "totales": {
                     "almacen": len(almacen_rows),
                     "point": point_total,

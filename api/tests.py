@@ -728,6 +728,61 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("source", resp.json()["detail"].lower())
 
+    def test_endpoint_inventario_aliases_pendientes_recent_runs_included(self):
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            matched=11,
+            unmatched=2,
+            pending_preview=[
+                {
+                    "nombre_origen": "Harina run",
+                    "nombre_normalizado": "harina run",
+                    "suggestion": "Harina API",
+                    "score": 90,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                }
+            ],
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_SCHEDULED,
+            status=AlmacenSyncRun.STATUS_OK,
+            matched=7,
+            unmatched=0,
+            pending_preview=[],
+        )
+
+        url = reverse("api_inventario_aliases_pendientes")
+        resp = self.client.get(url, {"runs": 5, "runs_detail": 2})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("recent_runs", payload)
+        self.assertGreaterEqual(len(payload["recent_runs"]), 2)
+        self.assertTrue(payload["filters"]["include_runs"])
+        first = payload["recent_runs"][0]
+        self.assertIn("id", first)
+        self.assertIn("source", first)
+        self.assertIn("status", first)
+        self.assertIn("matched", first)
+        self.assertIn("unmatched", first)
+        self.assertIn("has_preview", first)
+
+    def test_endpoint_inventario_aliases_pendientes_recent_runs_disabled(self):
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            matched=1,
+            unmatched=1,
+            pending_preview=[],
+        )
+        url = reverse("api_inventario_aliases_pendientes")
+        resp = self.client.get(url, {"include_runs": "0"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["recent_runs"], [])
+        self.assertFalse(payload["filters"]["include_runs"])
+
     def test_endpoint_inventario_aliases_pendientes_export_csv_xlsx(self):
         PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,
