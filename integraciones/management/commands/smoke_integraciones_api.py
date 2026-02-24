@@ -182,13 +182,42 @@ class Command(BaseCommand):
             url=self._build_url(
                 base_url,
                 "/api/integraciones/point/operaciones/historial/",
-                query={"limit": 10},
+                query={"limit": 10, "offset": 0, "sort_by": "timestamp", "sort_dir": "desc"},
             ),
             token=token,
             timeout=timeout,
             insecure=insecure,
         )
         self._assert_ok("Historial operaciones", historial, expected=200)
+        filters = historial.data.get("filters") or {}
+        pagination = historial.data.get("pagination") or {}
+        if filters.get("offset") != 0:
+            raise CommandError("Historial operaciones no devolvió offset=0 en filters.")
+        if str(filters.get("sort_by") or "") != "timestamp":
+            raise CommandError("Historial operaciones no devolvió sort_by=timestamp en filters.")
+        if str(filters.get("sort_dir") or "") != "desc":
+            raise CommandError("Historial operaciones no devolvió sort_dir=desc en filters.")
+        for key in ("has_next", "next_offset", "has_prev", "prev_offset", "limit", "offset"):
+            if key not in pagination:
+                raise CommandError(f"Historial operaciones sin campo pagination.{key}.")
+
+        historial_sorted = _http_json(
+            method="GET",
+            url=self._build_url(
+                base_url,
+                "/api/integraciones/point/operaciones/historial/",
+                query={"limit": 3, "offset": 0, "sort_by": "action", "sort_dir": "asc"},
+            ),
+            token=token,
+            timeout=timeout,
+            insecure=insecure,
+        )
+        self._assert_ok("Historial operaciones sort", historial_sorted, expected=200)
+        sorted_filters = historial_sorted.data.get("filters") or {}
+        if str(sorted_filters.get("sort_by") or "") != "action":
+            raise CommandError("Historial operaciones sort no devolvió sort_by=action en filters.")
+        if str(sorted_filters.get("sort_dir") or "") != "asc":
+            raise CommandError("Historial operaciones sort no devolvió sort_dir=asc en filters.")
         historial_csv = _http_json(
             method="GET",
             url=self._build_url(
@@ -291,6 +320,11 @@ class Command(BaseCommand):
                 "historial": {
                     "status": historial.status,
                     "rows_returned": int(historial.data.get("totales", {}).get("rows_returned", 0)),
+                    "pagination_ok": True,
+                },
+                "historial_sort": {
+                    "status": historial_sorted.status,
+                    "sort_ok": True,
                 },
                 "historial_csv": {
                     "status": historial_csv.status,

@@ -65,7 +65,7 @@ Alternativa equivalente sin token pre-generado:
 El smoke valida:
 - `health`
 - `resumen`
-- `historial`
+- `historial` (incluye validación de `limit`/`offset`, `sort_by`/`sort_dir` y bloque `pagination`)
 - exportables de historial (`csv` y `xlsx`)
 - operaciones `dry_run` (desactivación, purga, mantenimiento combinado)
 
