@@ -424,6 +424,21 @@ def _read_cross_filters(params) -> tuple[str, str, bool, int, float]:
     return cross_q, cross_q_norm, cross_only_suggested, cross_min_sources, cross_score_min
 
 
+def _read_cross_point_tipo(params) -> tuple[str, list[str] | None]:
+    point_tipo = (params.get("cross_point_tipo") or PointPendingMatch.TIPO_INSUMO).strip().upper()
+    valid_point_tipos = {
+        PointPendingMatch.TIPO_INSUMO,
+        PointPendingMatch.TIPO_PROVEEDOR,
+        PointPendingMatch.TIPO_PRODUCTO,
+        "TODOS",
+        "ALL",
+    }
+    if point_tipo not in valid_point_tipos:
+        point_tipo = PointPendingMatch.TIPO_INSUMO
+    point_tipos_filter = None if point_tipo in {"TODOS", "ALL"} else [point_tipo]
+    return point_tipo, point_tipos_filter
+
+
 def _apply_cross_filters(
     unified_rows: list[dict],
     cross_q_norm: str,
@@ -1316,10 +1331,14 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             _, cross_q_norm_post, cross_only_suggested_post, cross_min_sources_post, cross_score_min_post = (
                 _read_cross_filters(request.POST)
             )
+            cross_point_tipo_post, point_tipos_filter_post = _read_cross_point_tipo(request.POST)
 
             pending_preview = _load_visible_pending_preview(request, max_rows=500, max_runs=20)
             pending_grouped = _build_pending_grouped(pending_preview)
-            cross_unified_rows, _, _ = _build_cross_unified_rows(pending_grouped)
+            cross_unified_rows, _, _ = _build_cross_unified_rows(
+                pending_grouped,
+                point_tipos=point_tipos_filter_post,
+            )
             cross_unified_rows = _apply_cross_filters(
                 cross_unified_rows,
                 cross_q_norm=cross_q_norm_post,
@@ -1439,12 +1458,15 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         cross_q_post, _, cross_only_suggested_post, cross_min_sources_post, cross_score_min_post = _read_cross_filters(
             request.POST
         )
+        cross_point_tipo_post, _ = _read_cross_point_tipo(request.POST)
         if cross_q_post:
             redirect_params["cross_q"] = cross_q_post
         if "cross_min_sources" in request.POST:
             redirect_params["cross_min_sources"] = cross_min_sources_post
         if "cross_score_min" in request.POST:
             redirect_params["cross_score_min"] = cross_score_min_post
+        if "cross_point_tipo" in request.POST:
+            redirect_params["cross_point_tipo"] = cross_point_tipo_post
         if cross_only_suggested_post:
             redirect_params["cross_only_suggested"] = "1"
         if redirect_params:
@@ -1518,7 +1540,11 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     pending_grouped = _build_pending_grouped(pending_preview)
     auto_default_score = 90.0
     auto_default_min_sources = 2
-    unified_rows, point_unmatched_count, receta_pending_lines = _build_cross_unified_rows(pending_grouped)
+    cross_point_tipo, point_tipos_filter = _read_cross_point_tipo(request.GET)
+    unified_rows, point_unmatched_count, receta_pending_lines = _build_cross_unified_rows(
+        pending_grouped,
+        point_tipos=point_tipos_filter,
+    )
     overlaps = sum(1 for row in unified_rows if int(row.get("sources_active") or 0) >= 2)
     insumo_norm_set = set(
         Insumo.objects.filter(activo=True).values_list("nombre_normalizado", flat=True)
@@ -1593,6 +1619,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "cross_q": cross_q,
         "cross_min_sources": cross_min_sources,
         "cross_score_min": cross_score_min,
+        "cross_point_tipo": cross_point_tipo,
         "cross_only_suggested": cross_only_suggested,
         "cross_filtered_count": len(cross_filtered_rows),
         "cross_total_count": len(unified_rows),

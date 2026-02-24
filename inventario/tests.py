@@ -233,6 +233,35 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn("Mantequilla Barra", body)
         self.assertNotIn("Azucar Morena", body)
 
+    def test_export_cross_pending_csv_with_point_tipo_filter(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="P-TIPO-INS-001",
+            point_nombre="Insumo only row",
+            fuzzy_score=80.0,
+            fuzzy_sugerencia="Harina",
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_PRODUCTO,
+            point_codigo="P-TIPO-PROD-001",
+            point_nombre="Producto only row",
+            fuzzy_score=86.0,
+            fuzzy_sugerencia="Receta sugerida",
+        )
+
+        response = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {
+                "export": "cross_pending_csv",
+                "cross_point_tipo": "PRODUCTO",
+                "cross_min_sources": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("Producto only row", body)
+        self.assertNotIn("Insumo only row", body)
+
     def test_auto_apply_suggestions_creates_alias_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
         insumo = Insumo.objects.create(nombre="Harina Pastelera", unidad_base=unidad)
@@ -408,6 +437,7 @@ class InventarioAliasesPendingTests(TestCase):
                 "cross_q": "mantequilla",
                 "cross_min_sources": "2",
                 "cross_score_min": "90",
+                "cross_point_tipo": "PRODUCTO",
                 "cross_only_suggested": "1",
             },
         )
@@ -417,6 +447,7 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn("cross_q=mantequilla", location)
         self.assertIn("cross_min_sources=2", location)
         self.assertIn("cross_score_min=90.0", location)
+        self.assertIn("cross_point_tipo=PRODUCTO", location)
         self.assertIn("cross_only_suggested=1", location)
 
     def test_bulk_reassign_resolves_and_cleans_pending(self):

@@ -53,7 +53,7 @@
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-number {% if cross_summary.point_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ cross_summary.point_unmatched }}</div>
-      <div class="kpi-label">Pendientes Point (insumos)</div>
+      <div class="kpi-label">Pendientes Point ({{ cross_point_tipo|lower }})</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if cross_summary.almacen_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ cross_summary.almacen_unmatched }}</div>
@@ -72,8 +72,8 @@
   <div class="toolbar" style="margin-top:10px;">
     <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}?tipo=INSUMO">Revisar pendientes Point</a>
     <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Revisar pendientes Recetas</a>
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_csv&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes CSV</a>
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_xlsx&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_csv&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes CSV</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_xlsx&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes XLSX</a>
     {% if can_manage_inventario %}
     <form method="post" class="inline-form">
       {% csrf_token %}
@@ -91,6 +91,7 @@
     <input type="hidden" name="cross_q" value="{{ cross_q }}">
     <input type="hidden" name="cross_min_sources" value="{{ cross_min_sources }}">
     <input type="hidden" name="cross_score_min" value="{{ cross_score_min }}">
+    <input type="hidden" name="cross_point_tipo" value="{{ cross_point_tipo }}">
     {% if cross_only_suggested %}
     <input type="hidden" name="cross_only_suggested" value="1">
     {% endif %}
@@ -109,6 +110,12 @@
     <input class="input-field" type="text" name="cross_q" value="{{ cross_q }}" placeholder="Buscar nombre/sugerencia...">
     <input class="input-field" type="number" name="cross_min_sources" min="1" max="3" step="1" value="{{ cross_min_sources }}">
     <input class="input-field" type="number" name="cross_score_min" min="0" max="100" step="0.1" value="{{ cross_score_min }}">
+    <select class="input-field" name="cross_point_tipo">
+      <option value="INSUMO" {% if cross_point_tipo == "INSUMO" %}selected{% endif %}>Point · Insumos</option>
+      <option value="PROVEEDOR" {% if cross_point_tipo == "PROVEEDOR" %}selected{% endif %}>Point · Proveedores</option>
+      <option value="PRODUCTO" {% if cross_point_tipo == "PRODUCTO" %}selected{% endif %}>Point · Productos</option>
+      <option value="TODOS" {% if cross_point_tipo == "TODOS" or cross_point_tipo == "ALL" %}selected{% endif %}>Point · Todos</option>
+    </select>
     <label class="inline-check"><input type="checkbox" name="cross_only_suggested" {% if cross_only_suggested %}checked{% endif %}>Solo con sugerencia</label>
     <button class="btn btn-secondary" type="submit">Filtrar homologación</button>
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Limpiar filtros</a>
@@ -154,6 +161,7 @@
                 <input type="hidden" name="cross_q" value="{{ cross_q }}">
                 <input type="hidden" name="cross_min_sources" value="{{ cross_min_sources }}">
                 <input type="hidden" name="cross_score_min" value="{{ cross_score_min }}">
+                <input type="hidden" name="cross_point_tipo" value="{{ cross_point_tipo }}">
                 {% if cross_only_suggested %}
                 <input type="hidden" name="cross_only_suggested" value="1">
                 {% endif %}
@@ -470,6 +478,7 @@
                 <input type="hidden" name="cross_q" value="{{ cross_q }}">
                 <input type="hidden" name="cross_min_sources" value="{{ cross_min_sources }}">
                 <input type="hidden" name="cross_score_min" value="{{ cross_score_min }}">
+                <input type="hidden" name="cross_point_tipo" value="{{ cross_point_tipo }}">
                 {% if cross_only_suggested %}
                 <input type="hidden" name="cross_only_suggested" value="1">
                 {% endif %}
