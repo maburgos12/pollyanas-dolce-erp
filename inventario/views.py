@@ -439,6 +439,14 @@ def _read_cross_point_tipo(params) -> tuple[str, list[str] | None]:
     return point_tipo, point_tipos_filter
 
 
+def _read_cross_source(params) -> str:
+    cross_source = (params.get("cross_source") or "TODOS").strip().upper()
+    valid_sources = {"TODOS", "ALL", "ALMACEN", "POINT", "RECETAS"}
+    if cross_source not in valid_sources:
+        cross_source = "TODOS"
+    return cross_source
+
+
 def _read_cross_table_controls(params) -> tuple[int, int, str, str]:
     cross_limit = int(_to_decimal(params.get("cross_limit"), "120"))
     cross_limit = max(1, min(500, cross_limit))
@@ -1506,6 +1514,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             request.POST
         )
         cross_point_tipo_post, _ = _read_cross_point_tipo(request.POST)
+        cross_source_post = _read_cross_source(request.POST)
         cross_limit_post, cross_offset_post, cross_sort_by_post, cross_sort_dir_post = _read_cross_table_controls(
             request.POST
         )
@@ -1525,6 +1534,8 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             redirect_params["cross_sort_dir"] = cross_sort_dir_post
         if "cross_point_tipo" in request.POST:
             redirect_params["cross_point_tipo"] = cross_point_tipo_post
+        if "cross_source" in request.POST:
+            redirect_params["cross_source"] = cross_source_post
         if cross_only_suggested_post:
             redirect_params["cross_only_suggested"] = "1"
         if redirect_params:
@@ -1617,6 +1628,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
     )
 
     cross_q, cross_q_norm, cross_only_suggested, cross_min_sources, cross_score_min = _read_cross_filters(request.GET)
+    cross_source = _read_cross_source(request.GET)
     cross_filtered_rows = _apply_cross_filters(
         unified_rows,
         cross_q_norm=cross_q_norm,
@@ -1624,6 +1636,12 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         cross_min_sources=cross_min_sources,
         cross_score_min=cross_score_min,
     )
+    if cross_source == "ALMACEN":
+        cross_filtered_rows = [row for row in cross_filtered_rows if int(row.get("almacen_count") or 0) > 0]
+    elif cross_source == "POINT":
+        cross_filtered_rows = [row for row in cross_filtered_rows if int(row.get("point_count") or 0) > 0]
+    elif cross_source == "RECETAS":
+        cross_filtered_rows = [row for row in cross_filtered_rows if int(row.get("receta_count") or 0) > 0]
     cross_limit, cross_offset, cross_sort_by, cross_sort_dir = _read_cross_table_controls(request.GET)
     cross_filtered_sorted_rows = _sort_cross_rows(
         cross_filtered_rows,
@@ -1665,6 +1683,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             "cross_min_sources": cross_min_sources,
             "cross_score_min": cross_score_min,
             "cross_point_tipo": cross_point_tipo,
+            "cross_source": cross_source,
             "cross_sort_by": cross_sort_by,
             "cross_sort_dir": cross_sort_dir,
             "cross_limit": cross_limit,
@@ -1702,6 +1721,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "cross_min_sources": cross_min_sources,
         "cross_score_min": cross_score_min,
         "cross_point_tipo": cross_point_tipo,
+        "cross_source": cross_source,
         "cross_only_suggested": cross_only_suggested,
         "cross_filtered_count": len(cross_filtered_sorted_rows),
         "cross_total_count": len(unified_rows),

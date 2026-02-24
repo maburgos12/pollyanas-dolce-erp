@@ -435,6 +435,7 @@ class InventarioAliasesPendingTests(TestCase):
                 "auto_max_rows": "50",
                 "next_q": "harina",
                 "cross_q": "mantequilla",
+                "cross_source": "POINT",
                 "cross_min_sources": "2",
                 "cross_score_min": "90",
                 "cross_point_tipo": "PRODUCTO",
@@ -449,6 +450,7 @@ class InventarioAliasesPendingTests(TestCase):
         location = response["Location"]
         self.assertIn("q=harina", location)
         self.assertIn("cross_q=mantequilla", location)
+        self.assertIn("cross_source=POINT", location)
         self.assertIn("cross_min_sources=2", location)
         self.assertIn("cross_score_min=90.0", location)
         self.assertIn("cross_point_tipo=PRODUCTO", location)
@@ -503,6 +505,55 @@ class InventarioAliasesPendingTests(TestCase):
         rows = response.context["cross_unified_rows"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["nombre_muestra"], "B Name")
+
+    def test_cross_unified_view_source_filter(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CROSS-SRC-01",
+            point_nombre="Solo Point",
+            fuzzy_score=90.0,
+            fuzzy_sugerencia="Sugerencia Point",
+        )
+        receta = Receta.objects.create(nombre="Receta Solo Source", hash_contenido="hash-cross-source-001")
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Solo Receta",
+            cantidad=1,
+            unidad=None,
+            unidad_texto="kg",
+            costo_unitario_snapshot=0,
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+
+        response_point = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {
+                "cross_source": "POINT",
+                "cross_point_tipo": "INSUMO",
+                "cross_min_sources": "1",
+                "cross_limit": "50",
+            },
+        )
+        self.assertEqual(response_point.status_code, 200)
+        rows_point = response_point.context["cross_unified_rows"]
+        self.assertGreaterEqual(len(rows_point), 1)
+        self.assertTrue(all(int(row.get("point_count") or 0) > 0 for row in rows_point))
+
+        response_recetas = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {
+                "cross_source": "RECETAS",
+                "cross_point_tipo": "INSUMO",
+                "cross_min_sources": "1",
+                "cross_limit": "50",
+            },
+        )
+        self.assertEqual(response_recetas.status_code, 200)
+        rows_recetas = response_recetas.context["cross_unified_rows"]
+        self.assertGreaterEqual(len(rows_recetas), 1)
+        self.assertTrue(all(int(row.get("receta_count") or 0) > 0 for row in rows_recetas))
 
     def test_bulk_reassign_resolves_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
