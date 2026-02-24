@@ -1007,6 +1007,34 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("DEACTIVATE_IDLE_API_CLIENTS", payload["totales"]["by_action"])
         self.assertNotIn("UNRELATED_ACTION", payload["totales"]["by_action"])
 
+    def test_endpoint_integraciones_operations_history_offset(self):
+        first = AuditLog.objects.create(
+            user=self.user,
+            action="DEACTIVATE_IDLE_API_CLIENTS",
+            model="integraciones.PublicApiClient",
+            object_id="",
+            payload={"n": 1},
+        )
+        second = AuditLog.objects.create(
+            user=self.user,
+            action="RUN_API_MAINTENANCE",
+            model="integraciones.Operaciones",
+            object_id="",
+            payload={"n": 2},
+        )
+        # Forzar orden temporal consistente (más reciente = second)
+        AuditLog.objects.filter(id=first.id).update(timestamp=timezone.now() - timedelta(minutes=2))
+        AuditLog.objects.filter(id=second.id).update(timestamp=timezone.now() - timedelta(minutes=1))
+
+        url = reverse("api_integraciones_operations_history")
+        resp = self.client.get(url, {"limit": 1, "offset": 1})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
+        self.assertGreaterEqual(payload["totales"]["rows_total"], 2)
+        self.assertEqual(payload["items"][0]["action"], "DEACTIVATE_IDLE_API_CLIENTS")
+
     def test_endpoint_integraciones_operations_history_export_csv(self):
         AuditLog.objects.create(
             user=self.user,

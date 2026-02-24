@@ -46,7 +46,7 @@ Sprint 1 entrega:
 - API: POST /api/integraciones/point/clientes/desactivar-inactivos/ (operación de clientes API inactivos; soporta `dry_run`)
 - API: POST /api/integraciones/point/logs/purgar/ (limpieza de logs API por retención; soporta `dry_run`)
 - API: POST /api/integraciones/point/mantenimiento/ejecutar/ (operación combinada: desactivación + purga; soporta `dry_run`)
-- API: GET /api/integraciones/point/operaciones/historial/ (bitácora operativa de integraciones con filtros `action`, `date_from`, `date_to`, `limit` y `export=csv|xlsx`)
+- API: GET /api/integraciones/point/operaciones/historial/ (bitácora operativa de integraciones con filtros `action`, `date_from`, `date_to`, paginación `limit`/`offset` y `export=csv|xlsx`)
 - API: POST /api/inventario/point-pendientes/resolver/ (resolver/descartar pendientes Point por insumo, producto o proveedor)
 - API: GET /api/compras/solicitudes/ (listado de solicitudes con filtros, estatus y presupuesto estimado; soporta `limit`/`offset`, `sort_by`/`sort_dir` y totales filtrados)
 - API: POST /api/compras/solicitudes/import-preview/ (vista previa de carga masiva de solicitudes en JSON)

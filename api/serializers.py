@@ -312,6 +312,7 @@ class IntegracionesOperationHistoryQuerySerializer(serializers.Serializer):
     date_from = serializers.DateField(required=False)
     date_to = serializers.DateField(required=False)
     limit = serializers.IntegerField(required=False, min_value=1, max_value=1000, default=100)
+    offset = serializers.IntegerField(required=False, min_value=0, max_value=50000, default=0)
     export = serializers.ChoiceField(
         required=False,
         allow_blank=True,

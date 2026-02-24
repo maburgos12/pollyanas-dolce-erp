@@ -3277,9 +3277,10 @@ class IntegracionesOperationsHistoryView(APIView):
             qs = qs.filter(timestamp__date__lte=data["date_to"])
 
         limit = int(data.get("limit") or 100)
+        offset = int(data.get("offset") or 0)
         export = str(data.get("export") or "").strip().lower()
         rows_total = qs.count()
-        rows = list(qs[:limit])
+        rows = list(qs[offset : offset + limit])
         by_action = {
             row["action"]: int(row["total"] or 0)
             for row in qs.values("action").annotate(total=Count("id")).order_by("-total", "action")
@@ -3296,6 +3297,7 @@ class IntegracionesOperationsHistoryView(APIView):
                     "date_from": data.get("date_from"),
                     "date_to": data.get("date_to"),
                     "limit": limit,
+                    "offset": offset,
                     "export": export,
                 },
                 "totales": {

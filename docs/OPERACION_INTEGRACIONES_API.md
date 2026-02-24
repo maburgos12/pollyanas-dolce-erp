@@ -13,7 +13,7 @@ Este runbook cubre operación diaria y smoke de endpoints de integraciones Point
 - `POST /api/integraciones/point/mantenimiento/ejecutar/`
   - Parámetros: `idle_days`, `idle_limit`, `retain_days`, `max_delete`, `dry_run`.
 - `GET /api/integraciones/point/operaciones/historial/`
-  - Filtros: `action`, `date_from`, `date_to`, `limit`, `export=csv|xlsx`.
+  - Filtros: `action`, `date_from`, `date_to`, `limit`, `offset`, `export=csv|xlsx`.
 
 Todos requieren autenticación `Token` y rol `ADMIN`/`DG` para operación.
 
@@ -89,7 +89,7 @@ Si `--confirm-live YES` no está presente, el comando corta con error.
 1. Consultar historial:
 ```bash
 curl -H "Authorization: Token <TOKEN_DRF>" \
-  "https://pollyanas-dolce-erp-production.up.railway.app/api/integraciones/point/operaciones/historial/?limit=20"
+  "https://pollyanas-dolce-erp-production.up.railway.app/api/integraciones/point/operaciones/historial/?limit=20&offset=0"
 ```
 
 2. Exportar historial CSV:
