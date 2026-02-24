@@ -1093,6 +1093,53 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(len(payload["items"]), 2)
         self.assertEqual(payload["items"][0]["action"], "DEACTIVATE_IDLE_API_CLIENTS")
 
+    def test_endpoint_integraciones_operations_history_filters_user_model_q(self):
+        user_model = get_user_model()
+        ops_user = user_model.objects.create_user(
+            username="ops_api_user",
+            email="ops_api_user@example.com",
+            password="test12345",
+        )
+        AuditLog.objects.create(
+            user=ops_user,
+            action="RUN_API_MAINTENANCE",
+            model="integraciones.Operaciones",
+            object_id="op-1",
+            payload={"scope": "ops"},
+        )
+        AuditLog.objects.create(
+            user=self.user,
+            action="RUN_API_MAINTENANCE",
+            model="integraciones.Operaciones",
+            object_id="admin-1",
+            payload={"scope": "admin"},
+        )
+        AuditLog.objects.create(
+            user=ops_user,
+            action="UNRELATED_ACTION",
+            model="x.Model",
+            object_id="x-1",
+            payload={},
+        )
+        url = reverse("api_integraciones_operations_history")
+        resp = self.client.get(
+            url,
+            {
+                "user": "ops_api",
+                "model": "integraciones.Oper",
+                "q": "op-1",
+                "limit": 20,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["user"], "ops_api")
+        self.assertEqual(payload["filters"]["model"], "integraciones.Oper")
+        self.assertEqual(payload["filters"]["q"], "op-1")
+        self.assertEqual(payload["totales"]["rows_total"], 1)
+        self.assertEqual(payload["totales"]["rows_returned"], 1)
+        self.assertEqual(payload["items"][0]["object_id"], "op-1")
+
     def test_endpoint_integraciones_operations_history_invalid_sort_dir(self):
         url = reverse("api_integraciones_operations_history")
         resp = self.client.get(url, {"sort_dir": "sideways"})

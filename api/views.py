@@ -3262,6 +3262,9 @@ class IntegracionesOperationsHistoryView(APIView):
         data = serializer.validated_data
 
         action = (data.get("action") or "").strip().upper()
+        user_filter = (data.get("user") or "").strip()
+        model_filter = (data.get("model") or "").strip()
+        q_filter = (data.get("q") or "").strip()
         if action and action not in self.ACTIONS:
             return Response(
                 {"detail": "action inválida para historial de integraciones."},
@@ -3298,6 +3301,17 @@ class IntegracionesOperationsHistoryView(APIView):
         )
         if action:
             qs = qs.filter(action=action)
+        if user_filter:
+            qs = qs.filter(user__username__icontains=user_filter)
+        if model_filter:
+            qs = qs.filter(model__icontains=model_filter)
+        if q_filter:
+            qs = qs.filter(
+                Q(action__icontains=q_filter)
+                | Q(model__icontains=q_filter)
+                | Q(object_id__icontains=q_filter)
+                | Q(user__username__icontains=q_filter)
+            )
         if data.get("date_from"):
             qs = qs.filter(timestamp__date__gte=data["date_from"])
         if data.get("date_to"):
@@ -3325,6 +3339,9 @@ class IntegracionesOperationsHistoryView(APIView):
             {
                 "filters": {
                     "action": action or "",
+                    "user": user_filter,
+                    "model": model_filter,
+                    "q": q_filter,
                     "date_from": data.get("date_from"),
                     "date_to": data.get("date_to"),
                     "limit": limit,

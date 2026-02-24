@@ -218,6 +218,26 @@ class Command(BaseCommand):
             raise CommandError("Historial operaciones sort no devolvió sort_by=action en filters.")
         if str(sorted_filters.get("sort_dir") or "") != "asc":
             raise CommandError("Historial operaciones sort no devolvió sort_dir=asc en filters.")
+
+        historial_search = _http_json(
+            method="GET",
+            url=self._build_url(
+                base_url,
+                "/api/integraciones/point/operaciones/historial/",
+                query={"limit": 3, "user": "admin", "model": "integraciones", "q": "API"},
+            ),
+            token=token,
+            timeout=timeout,
+            insecure=insecure,
+        )
+        self._assert_ok("Historial operaciones search", historial_search, expected=200)
+        search_filters = historial_search.data.get("filters") or {}
+        if str(search_filters.get("user") or "") != "admin":
+            raise CommandError("Historial operaciones search no devolvió user=admin en filters.")
+        if str(search_filters.get("model") or "") != "integraciones":
+            raise CommandError("Historial operaciones search no devolvió model=integraciones en filters.")
+        if str(search_filters.get("q") or "") != "API":
+            raise CommandError("Historial operaciones search no devolvió q=API en filters.")
         historial_csv = _http_json(
             method="GET",
             url=self._build_url(
@@ -325,6 +345,10 @@ class Command(BaseCommand):
                 "historial_sort": {
                     "status": historial_sorted.status,
                     "sort_ok": True,
+                },
+                "historial_search": {
+                    "status": historial_search.status,
+                    "search_ok": True,
                 },
                 "historial_csv": {
                     "status": historial_csv.status,

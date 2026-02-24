@@ -309,6 +309,9 @@ class IntegracionesMaintenanceRunSerializer(serializers.Serializer):
 
 class IntegracionesOperationHistoryQuerySerializer(serializers.Serializer):
     action = serializers.CharField(required=False, allow_blank=True, max_length=80)
+    user = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    model = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    q = serializers.CharField(required=False, allow_blank=True, max_length=200)
     date_from = serializers.DateField(required=False)
     date_to = serializers.DateField(required=False)
     limit = serializers.IntegerField(required=False, min_value=1, max_value=1000, default=100)

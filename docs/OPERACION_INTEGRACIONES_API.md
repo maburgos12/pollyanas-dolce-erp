@@ -13,7 +13,7 @@ Este runbook cubre operación diaria y smoke de endpoints de integraciones Point
 - `POST /api/integraciones/point/mantenimiento/ejecutar/`
   - Parámetros: `idle_days`, `idle_limit`, `retain_days`, `max_delete`, `dry_run`.
 - `GET /api/integraciones/point/operaciones/historial/`
-  - Filtros: `action`, `date_from`, `date_to`, `limit`, `offset`, `sort_by`, `sort_dir`, `export=csv|xlsx`.
+  - Filtros: `action`, `user`, `model`, `q`, `date_from`, `date_to`, `limit`, `offset`, `sort_by`, `sort_dir`, `export=csv|xlsx`.
   - `sort_by`: `timestamp|action|model|object_id|user|id`
   - `sort_dir`: `asc|desc`
   - Respuesta JSON incluye `pagination` (`has_next`, `next_offset`, `has_prev`, `prev_offset`).
@@ -66,6 +66,7 @@ El smoke valida:
 - `health`
 - `resumen`
 - `historial` (incluye validación de `limit`/`offset`, `sort_by`/`sort_dir` y bloque `pagination`)
+- `historial` search (validación de filtros `user`, `model`, `q`)
 - exportables de historial (`csv` y `xlsx`)
 - operaciones `dry_run` (desactivación, purga, mantenimiento combinado)
 
@@ -110,7 +111,7 @@ Si `--confirm-live YES` no está presente, el comando corta con error.
 1. Consultar historial:
 ```bash
 curl -H "Authorization: Token <TOKEN_DRF>" \
-  "https://pollyanas-dolce-erp-production.up.railway.app/api/integraciones/point/operaciones/historial/?limit=20&offset=0&sort_by=timestamp&sort_dir=desc"
+  "https://pollyanas-dolce-erp-production.up.railway.app/api/integraciones/point/operaciones/historial/?limit=20&offset=0&sort_by=timestamp&sort_dir=desc&user=admin&model=integraciones&q=RUN_API"
 ```
 
 2. Exportar historial CSV:
