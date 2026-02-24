@@ -3308,6 +3308,10 @@ class IntegracionesOperationsHistoryView(APIView):
         export = str(data.get("export") or "").strip().lower()
         rows_total = qs.count()
         rows = list(qs[offset : offset + limit])
+        has_next = (offset + len(rows)) < rows_total
+        has_prev = offset > 0
+        next_offset = offset + limit if has_next else None
+        prev_offset = max(offset - limit, 0) if has_prev else None
         by_action = {
             row["action"]: int(row["total"] or 0)
             for row in qs.values("action").annotate(total=Count("id")).order_by("-total", "action")
@@ -3333,6 +3337,14 @@ class IntegracionesOperationsHistoryView(APIView):
                     "rows_total": rows_total,
                     "rows_returned": len(rows),
                     "by_action": by_action,
+                },
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "has_next": has_next,
+                    "next_offset": next_offset,
+                    "has_prev": has_prev,
+                    "prev_offset": prev_offset,
                 },
                 "items": [
                     {

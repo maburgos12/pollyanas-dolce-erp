@@ -1034,6 +1034,40 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["totales"]["rows_returned"], 1)
         self.assertGreaterEqual(payload["totales"]["rows_total"], 2)
         self.assertEqual(payload["items"][0]["action"], "DEACTIVATE_IDLE_API_CLIENTS")
+        self.assertIn("pagination", payload)
+        self.assertEqual(payload["pagination"]["offset"], 1)
+        self.assertTrue(payload["pagination"]["has_prev"])
+        self.assertEqual(payload["pagination"]["prev_offset"], 0)
+
+    def test_endpoint_integraciones_operations_history_pagination_next_offset(self):
+        older = AuditLog.objects.create(
+            user=self.user,
+            action="DEACTIVATE_IDLE_API_CLIENTS",
+            model="integraciones.PublicApiClient",
+            object_id="",
+            payload={"n": 1},
+        )
+        newer = AuditLog.objects.create(
+            user=self.user,
+            action="RUN_API_MAINTENANCE",
+            model="integraciones.Operaciones",
+            object_id="",
+            payload={"n": 2},
+        )
+        AuditLog.objects.filter(id=older.id).update(timestamp=timezone.now() - timedelta(minutes=2))
+        AuditLog.objects.filter(id=newer.id).update(timestamp=timezone.now() - timedelta(minutes=1))
+
+        url = reverse("api_integraciones_operations_history")
+        resp = self.client.get(url, {"limit": 1, "offset": 0})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("pagination", payload)
+        self.assertEqual(payload["pagination"]["limit"], 1)
+        self.assertEqual(payload["pagination"]["offset"], 0)
+        self.assertTrue(payload["pagination"]["has_next"])
+        self.assertEqual(payload["pagination"]["next_offset"], 1)
+        self.assertFalse(payload["pagination"]["has_prev"])
+        self.assertIsNone(payload["pagination"]["prev_offset"])
 
     def test_endpoint_integraciones_operations_history_sort_action_asc(self):
         AuditLog.objects.create(

@@ -16,6 +16,7 @@ Este runbook cubre operación diaria y smoke de endpoints de integraciones Point
   - Filtros: `action`, `date_from`, `date_to`, `limit`, `offset`, `sort_by`, `sort_dir`, `export=csv|xlsx`.
   - `sort_by`: `timestamp|action|model|object_id|user|id`
   - `sort_dir`: `asc|desc`
+  - Respuesta JSON incluye `pagination` (`has_next`, `next_offset`, `has_prev`, `prev_offset`).
 
 Todos requieren autenticación `Token` y rol `ADMIN`/`DG` para operación.
 
