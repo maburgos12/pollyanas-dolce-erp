@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import zipfile
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -17,6 +19,7 @@ class HttpResult:
     status: int
     data: dict[str, Any]
     raw: str
+    body: bytes
     headers: dict[str, str]
 
 
@@ -42,7 +45,8 @@ def _http_json(
         ssl_ctx = ssl._create_unverified_context()
     try:
         with urlopen(req, timeout=timeout, context=ssl_ctx) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
+            body_bytes = resp.read()
+            raw = body_bytes.decode("utf-8", errors="replace")
             try:
                 data = json.loads(raw) if raw else {}
             except json.JSONDecodeError:
@@ -51,10 +55,12 @@ def _http_json(
                 status=int(resp.status),
                 data=data,
                 raw=raw,
+                body=body_bytes,
                 headers={k.lower(): v for k, v in dict(resp.headers).items()},
             )
     except HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
+        body_bytes = exc.read()
+        raw = body_bytes.decode("utf-8", errors="replace")
         data = {}
         try:
             data = json.loads(raw) if raw else {}
@@ -64,6 +70,7 @@ def _http_json(
             status=int(exc.code),
             data=data,
             raw=raw,
+            body=body_bytes,
             headers={k.lower(): v for k, v in dict(exc.headers or {}).items()},
         )
     except URLError as exc:
@@ -110,6 +117,22 @@ class Command(BaseCommand):
             raise CommandError(
                 f"{label} falló: status={result.status} esperado={expected}. detail={detail or result.raw[:200]}"
             )
+
+    def _assert_xlsx_payload(self, label: str, result: HttpResult):
+        xlsx_content_type = str(result.headers.get("content-type", "")).lower()
+        if "spreadsheetml" not in xlsx_content_type:
+            raise CommandError(f"{label} no devolvió content-type XLSX esperado.")
+        if not result.body or not result.body.startswith(b"PK"):
+            raise CommandError(f"{label} no parece un archivo XLSX válido (signature ZIP inválida).")
+        try:
+            with zipfile.ZipFile(BytesIO(result.body)) as zf:
+                names = set(zf.namelist())
+        except zipfile.BadZipFile as exc:
+            raise CommandError(f"{label} devolvió payload corrupto (ZIP inválido).") from exc
+        required = {"[Content_Types].xml", "xl/workbook.xml"}
+        missing = sorted(required - names)
+        if missing:
+            raise CommandError(f"{label} XLSX inválido; faltan entradas: {', '.join(missing)}.")
 
     def _get_token(self, base_url: str, username: str, password: str, timeout: int, insecure: bool) -> str:
         if not username or not password:
@@ -228,9 +251,7 @@ class Command(BaseCommand):
             insecure=insecure,
         )
         self._assert_ok("Aliases pendientes XLSX", pendientes_xlsx, expected=200)
-        xlsx_content_type = str(pendientes_xlsx.headers.get("content-type", "")).lower()
-        if "spreadsheetml" not in xlsx_content_type:
-            raise CommandError("Aliases pendientes XLSX no devolvió content-type esperado.")
+        self._assert_xlsx_payload("Aliases pendientes XLSX", pendientes_xlsx)
 
         unificados = _http_json(
             method="GET",
@@ -340,9 +361,7 @@ class Command(BaseCommand):
             insecure=insecure,
         )
         self._assert_ok("Unificados XLSX", unificados_xlsx, expected=200)
-        ux_content_type = str(unificados_xlsx.headers.get("content-type", "")).lower()
-        if "spreadsheetml" not in ux_content_type:
-            raise CommandError("Unificados XLSX no devolvió content-type esperado.")
+        self._assert_xlsx_payload("Unificados XLSX", unificados_xlsx)
 
         output = {
             "base_url": base_url,
