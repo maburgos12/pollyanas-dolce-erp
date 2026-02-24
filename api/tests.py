@@ -1007,6 +1007,23 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("DEACTIVATE_IDLE_API_CLIENTS", payload["totales"]["by_action"])
         self.assertNotIn("UNRELATED_ACTION", payload["totales"]["by_action"])
 
+    def test_endpoint_integraciones_operations_history_export_csv(self):
+        AuditLog.objects.create(
+            user=self.user,
+            action="RUN_API_MAINTENANCE",
+            model="integraciones.Operaciones",
+            object_id="",
+            payload={"dry_run": True},
+        )
+        url = reverse("api_integraciones_operations_history")
+        resp = self.client.get(url, {"limit": 10, "export": "csv"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/csv", resp["Content-Type"])
+        self.assertIn("integraciones_operaciones_historial.csv", resp["Content-Disposition"])
+        body = resp.content.decode("utf-8")
+        self.assertIn("timestamp,usuario,action,model,object_id,payload", body)
+        self.assertIn("RUN_API_MAINTENANCE", body)
+
     def test_endpoint_integraciones_operations_history_invalid_action(self):
         url = reverse("api_integraciones_operations_history")
         resp = self.client.get(url, {"action": "NO_EXISTE"})

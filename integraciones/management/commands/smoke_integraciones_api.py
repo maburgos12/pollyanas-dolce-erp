@@ -42,7 +42,10 @@ def _http_json(
     try:
         with urlopen(req, timeout=timeout, context=ssl_ctx) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
-            data = json.loads(raw) if raw else {}
+            try:
+                data = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                data = {}
             return HttpResult(status=int(resp.status), data=data, raw=raw)
     except HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
@@ -175,6 +178,20 @@ class Command(BaseCommand):
             insecure=insecure,
         )
         self._assert_ok("Historial operaciones", historial, expected=200)
+        historial_csv = _http_json(
+            method="GET",
+            url=self._build_url(
+                base_url,
+                "/api/integraciones/point/operaciones/historial/",
+                query={"limit": 10, "export": "csv"},
+            ),
+            token=token,
+            timeout=timeout,
+            insecure=insecure,
+        )
+        self._assert_ok("Historial operaciones CSV", historial_csv, expected=200)
+        if "timestamp,usuario,action,model,object_id,payload" not in historial_csv.raw:
+            raise CommandError("Historial operaciones CSV no devolvió cabecera esperada.")
 
         deactivate_dry = _http_json(
             method="POST",
@@ -248,6 +265,10 @@ class Command(BaseCommand):
                 "historial": {
                     "status": historial.status,
                     "rows_returned": int(historial.data.get("totales", {}).get("rows_returned", 0)),
+                },
+                "historial_csv": {
+                    "status": historial_csv.status,
+                    "header_ok": True,
                 },
                 "deactivate_dry_run": deactivate_dry.data,
                 "purge_dry_run": purge_dry.data,

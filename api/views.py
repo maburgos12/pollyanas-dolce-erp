@@ -1,4 +1,5 @@
 import csv
+import json
 from collections import defaultdict
 from contextlib import nullcontext
 from datetime import date, timedelta
@@ -3203,6 +3204,25 @@ class IntegracionesOperationsHistoryView(APIView):
         "PREVIEW_RUN_API_MAINTENANCE",
     }
 
+    @staticmethod
+    def _export_csv(rows: list[AuditLog]) -> HttpResponse:
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="integraciones_operaciones_historial.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["timestamp", "usuario", "action", "model", "object_id", "payload"])
+        for row in rows:
+            writer.writerow(
+                [
+                    row.timestamp.strftime("%Y-%m-%d %H:%M:%S") if row.timestamp else "",
+                    row.user.username if row.user_id else "",
+                    row.action,
+                    row.model,
+                    row.object_id,
+                    json.dumps(row.payload or {}, ensure_ascii=False),
+                ]
+            )
+        return response
+
     def get(self, request):
         if not can_view_audit(request.user):
             return Response(
@@ -3230,12 +3250,15 @@ class IntegracionesOperationsHistoryView(APIView):
             qs = qs.filter(timestamp__date__lte=data["date_to"])
 
         limit = int(data.get("limit") or 100)
+        export = str(data.get("export") or "").strip().lower()
         rows_total = qs.count()
         rows = list(qs[:limit])
         by_action = {
             row["action"]: int(row["total"] or 0)
             for row in qs.values("action").annotate(total=Count("id")).order_by("-total", "action")
         }
+        if export == "csv":
+            return self._export_csv(rows)
 
         return Response(
             {
@@ -3244,6 +3267,7 @@ class IntegracionesOperationsHistoryView(APIView):
                     "date_from": data.get("date_from"),
                     "date_to": data.get("date_to"),
                     "limit": limit,
+                    "export": export,
                 },
                 "totales": {
                     "rows_total": rows_total,
