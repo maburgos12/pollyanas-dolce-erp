@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Activos - Reportes de Servicio{% endblock %}
+{% block page_title %}Activos · Reportes de Servicio{% endblock %}
+
+{% block content %}
+<div class="module-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+<section class="card">
+  <div class="card-header">Levantar reporte de falla</div>
+  <form method="post">
+    {% csrf_token %}
+    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;">
+      <div>
+        <label>Activo</label>
+        <select name="activo_id" required>
+          <option value="">Selecciona...</option>
+          {% for a in activos %}
+            <option value="{{ a.id }}">{{ a.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Prioridad</label>
+        <select name="prioridad">
+          {% for v, l in prioridad_choices %}
+            <option value="{{ v }}">{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Responsable</label>
+        <input type="text" name="responsable" placeholder="Reporta o atiende">
+      </div>
+      <div>
+        <label>Fecha de atención sugerida</label>
+        <input type="date" name="fecha_programada" value="{{ today|date:'Y-m-d' }}">
+      </div>
+      <div style="grid-column: span 4;">
+        <label>Descripción del problema</label>
+        <textarea name="descripcion" rows="3" required placeholder="Detalle de falla, ruido, fuga, no enciende, etc."></textarea>
+      </div>
+    </div>
+    <div style="margin-top:12px;" class="quick-actions">
+      <button type="submit" class="btn btn-primary">Levantar reporte</button>
+      <a class="btn btn-secondary" href="{% url 'activos:ordenes' %}">Ver todas las órdenes</a>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Reportes correctivos</div>
+  <form method="get">
+    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;align-items:end;">
+      <div>
+        <label>Buscar</label>
+        <input type="text" name="q" value="{{ q }}" placeholder="Folio, activo, falla...">
+      </div>
+      <div>
+        <label>Estatus</label>
+        <select name="estatus">
+          <option value="ABIERTAS" {% if estado == 'ABIERTAS' %}selected{% endif %}>Abiertas</option>
+          <option value="PENDIENTE" {% if estado == 'PENDIENTE' %}selected{% endif %}>Pendiente</option>
+          <option value="EN_PROCESO" {% if estado == 'EN_PROCESO' %}selected{% endif %}>En proceso</option>
+          <option value="CERRADA" {% if estado == 'CERRADA' %}selected{% endif %}>Cerrada</option>
+          <option value="CANCELADA" {% if estado == 'CANCELADA' %}selected{% endif %}>Cancelada</option>
+        </select>
+      </div>
+      <div class="quick-actions">
+        <button class="btn btn-primary" type="submit">Filtrar</button>
+        <a href="{% url 'activos:reportes' %}" class="btn btn-secondary">Limpiar</a>
+      </div>
+    </div>
+  </form>
+
+  <div class="table-responsive" style="margin-top:12px;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Folio</th>
+          <th>Fecha</th>
+          <th>Activo</th>
+          <th>Prioridad</th>
+          <th>Estatus</th>
+          <th>Semáforo</th>
+          <th>Días</th>
+          <th>Descripción</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in reportes %}
+          <tr>
+            <td>{{ item.orden.folio }}</td>
+            <td>{{ item.orden.fecha_programada|date:"Y-m-d" }}</td>
+            <td>{{ item.orden.activo_ref.nombre }}</td>
+            <td>{{ item.orden.get_prioridad_display }}</td>
+            <td><span class="badge badge-primary">{{ item.orden.estatus }}</span></td>
+            <td><span class="badge {{ item.semaforo_class }}">{{ item.semaforo_label }}</span></td>
+            <td>{{ item.dias }}</td>
+            <td>{{ item.orden.descripcion|truncatechars:120 }}</td>
+            <td>
+              {% if can_manage_activos %}
+                <div class="quick-actions" style="gap:6px;flex-wrap:wrap;">
+                  <form method="post" action="{% url 'activos:orden_estatus' item.orden.id 'EN_PROCESO' %}">
+                    {% csrf_token %}
+                    <button class="btn btn-secondary" type="submit">En proceso</button>
+                  </form>
+                  <form method="post" action="{% url 'activos:orden_estatus' item.orden.id 'CERRADA' %}">
+                    {% csrf_token %}
+                    <button class="btn btn-primary" type="submit">Cerrar</button>
+                  </form>
+                </div>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9" class="text-muted">Sin reportes para el filtro actual.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block title %}Activos - Catálogo{% endblock %}
+{% block page_title %}Activos · Catálogo{% endblock %}
+
+{% block content %}
+<div class="module-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+{% if can_manage_activos %}
+<section class="card">
+  <div class="card-header">Alta de activo</div>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create_activo">
+    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;">
+      <div>
+        <label>Nombre</label>
+        <input type="text" name="nombre" required>
+      </div>
+      <div>
+        <label>Categoría</label>
+        <input type="text" name="categoria" placeholder="Refrigeración, AA, Horno...">
+      </div>
+      <div>
+        <label>Ubicación</label>
+        <input type="text" name="ubicacion" placeholder="Sucursal / Área">
+      </div>
+      <div>
+        <label>Proveedor mantenimiento</label>
+        <select name="proveedor_mantenimiento_id">
+          <option value="">Sin proveedor</option>
+          {% for p in proveedores %}
+            <option value="{{ p.id }}">{{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Estado</label>
+        <select name="estado">
+          {% for v, l in estado_choices %}
+            <option value="{{ v }}">{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Criticidad</label>
+        <select name="criticidad">
+          {% for v, l in criticidad_choices %}
+            <option value="{{ v }}">{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Fecha alta</label>
+        <input type="date" name="fecha_alta">
+      </div>
+      <div>
+        <label>Vida útil (meses)</label>
+        <input type="number" name="vida_util_meses" min="1" value="60">
+      </div>
+      <div>
+        <label>Valor reposición</label>
+        <input type="number" step="0.01" min="0" name="valor_reposicion" value="0">
+      </div>
+      <div>
+        <label>Horas uso promedio mes</label>
+        <input type="number" step="0.01" min="0" name="horas_uso_promedio_mes" value="0">
+      </div>
+      <div style="grid-column: span 2;">
+        <label>Notas</label>
+        <input type="text" name="notas" placeholder="Observaciones del equipo">
+      </div>
+      <div style="display:flex;align-items:end;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" name="activo" value="1" checked>
+          Activo habilitado
+        </label>
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="btn btn-primary" type="submit">Guardar activo</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Catálogo de activos</div>
+  <form method="get">
+    <div class="row" style="display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;">
+      <div>
+        <label>Buscar</label>
+        <input type="text" name="q" value="{{ filters.q }}" placeholder="Código, nombre, categoría...">
+      </div>
+      <div>
+        <label>Estado</label>
+        <select name="estado">
+          <option value="">Todos</option>
+          {% for v, l in estado_choices %}
+            <option value="{{ v }}" {% if filters.estado == v %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Criticidad</label>
+        <select name="criticidad">
+          <option value="">Todas</option>
+          {% for v, l in criticidad_choices %}
+            <option value="{{ v }}" {% if filters.criticidad == v %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Solo activos</label>
+        <select name="solo_activos">
+          <option value="1" {% if filters.solo_activos == '1' %}selected{% endif %}>Sí</option>
+          <option value="0" {% if filters.solo_activos == '0' %}selected{% endif %}>No</option>
+        </select>
+      </div>
+      <div class="quick-actions">
+        <button class="btn btn-primary" type="submit">Filtrar</button>
+        <a href="{% url 'activos:activos' %}" class="btn btn-secondary">Limpiar</a>
+      </div>
+    </div>
+  </form>
+
+  <div class="table-responsive" style="margin-top:12px;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Activo</th>
+          <th>Categoría</th>
+          <th>Ubicación</th>
+          <th>Estado</th>
+          <th>Criticidad</th>
+          <th>Proveedor</th>
+          <th>Habilitado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in activos %}
+          <tr>
+            <td>{{ a.codigo }}</td>
+            <td>{{ a.nombre }}</td>
+            <td>{{ a.categoria|default:'-' }}</td>
+            <td>{{ a.ubicacion|default:'-' }}</td>
+            <td><span class="badge badge-primary">{{ a.get_estado_display }}</span></td>
+            <td>{{ a.get_criticidad_display }}</td>
+            <td>{% if a.proveedor_mantenimiento %}{{ a.proveedor_mantenimiento.nombre }}{% else %}-{% endif %}</td>
+            <td>{% if a.activo %}<span class="badge badge-success">Sí</span>{% else %}<span class="badge badge-danger">No</span>{% endif %}</td>
+            <td>
+              {% if can_manage_activos %}
+                <div class="quick-actions" style="gap:6px;flex-wrap:wrap;">
+                  <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="set_estado">
+                    <input type="hidden" name="activo_id" value="{{ a.id }}">
+                    <select name="estado" style="min-width:150px;">
+                      {% for v, l in estado_choices %}
+                        <option value="{{ v }}" {% if a.estado == v %}selected{% endif %}>{{ l }}</option>
+                      {% endfor %}
+                    </select>
+                    <button class="btn btn-secondary" type="submit">Actualizar</button>
+                  </form>
+                  <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="toggle_activo">
+                    <input type="hidden" name="activo_id" value="{{ a.id }}">
+                    <button class="btn {% if a.activo %}btn-danger{% else %}btn-success{% endif %}" type="submit">
+                      {% if a.activo %}Deshabilitar{% else %}Habilitar{% endif %}
+                    </button>
+                  </form>
+                </div>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9" class="text-muted">Sin activos para el filtro actual.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

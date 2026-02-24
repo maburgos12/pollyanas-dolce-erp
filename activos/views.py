@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
+from maestros.models import Proveedor
 
 from .models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 
@@ -21,10 +22,30 @@ def _safe_decimal(value) -> Decimal:
         return Decimal("0")
 
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(str(value or "").strip())
+    except Exception:
+        return default
+
+
+def _parse_date(value):
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return timezone.datetime.fromisoformat(raw).date()
+    except Exception:
+        return None
+
+
 def _module_tabs(active: str) -> list[dict]:
     return [
         {"label": "Dashboard", "url_name": "activos:dashboard", "active": active == "dashboard"},
+        {"label": "Activos", "url_name": "activos:activos", "active": active == "activos"},
+        {"label": "Planes", "url_name": "activos:planes", "active": active == "planes"},
         {"label": "Órdenes", "url_name": "activos:ordenes", "active": active == "ordenes"},
+        {"label": "Reportes", "url_name": "activos:reportes", "active": active == "reportes"},
         {"label": "Calendario", "url_name": "activos:calendario", "active": active == "calendario"},
     ]
 
@@ -101,6 +122,221 @@ def dashboard(request):
         "ordenes_recientes": ordenes_recientes,
     }
     return render(request, "activos/dashboard.html", context)
+
+
+@login_required
+def activos_catalog(request):
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Activos.")
+
+    if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied("No tienes permisos para gestionar Activos.")
+        action = (request.POST.get("action") or "create_activo").strip().lower()
+        if action == "create_activo":
+            nombre = (request.POST.get("nombre") or "").strip()
+            if not nombre:
+                messages.error(request, "Nombre del activo es obligatorio.")
+                return redirect("activos:activos")
+            estado = (request.POST.get("estado") or Activo.ESTADO_OPERATIVO).strip().upper()
+            criticidad = (request.POST.get("criticidad") or Activo.CRITICIDAD_MEDIA).strip().upper()
+            proveedor_id = _safe_int(request.POST.get("proveedor_mantenimiento_id"))
+            activo = Activo.objects.create(
+                nombre=nombre,
+                categoria=(request.POST.get("categoria") or "").strip(),
+                ubicacion=(request.POST.get("ubicacion") or "").strip(),
+                estado=estado if estado in {x[0] for x in Activo.ESTADO_CHOICES} else Activo.ESTADO_OPERATIVO,
+                criticidad=(
+                    criticidad if criticidad in {x[0] for x in Activo.CRITICIDAD_CHOICES} else Activo.CRITICIDAD_MEDIA
+                ),
+                proveedor_mantenimiento_id=proveedor_id if proveedor_id > 0 else None,
+                fecha_alta=_parse_date(request.POST.get("fecha_alta")) or timezone.localdate(),
+                valor_reposicion=_safe_decimal(request.POST.get("valor_reposicion")),
+                vida_util_meses=max(1, _safe_int(request.POST.get("vida_util_meses"), default=60)),
+                horas_uso_promedio_mes=_safe_decimal(request.POST.get("horas_uso_promedio_mes")),
+                notas=(request.POST.get("notas") or "").strip(),
+                activo=(request.POST.get("activo") or "").strip().lower() in {"1", "on", "true", "yes"},
+            )
+            log_event(
+                request.user,
+                "CREATE",
+                "activos.Activo",
+                activo.id,
+                {"codigo": activo.codigo, "nombre": activo.nombre, "estado": activo.estado},
+            )
+            messages.success(request, f"Activo {activo.codigo} creado.")
+            return redirect("activos:activos")
+
+        if action == "set_estado":
+            activo_id = _safe_int(request.POST.get("activo_id"))
+            activo_obj = get_object_or_404(Activo, pk=activo_id)
+            estado = (request.POST.get("estado") or "").strip().upper()
+            if estado in {x[0] for x in Activo.ESTADO_CHOICES} and estado != activo_obj.estado:
+                from_estado = activo_obj.estado
+                activo_obj.estado = estado
+                activo_obj.save(update_fields=["estado", "actualizado_en"])
+                log_event(
+                    request.user,
+                    "UPDATE",
+                    "activos.Activo",
+                    activo_obj.id,
+                    {"from_estado": from_estado, "to_estado": estado},
+                )
+                messages.success(request, f"Estado actualizado: {activo_obj.codigo}.")
+            return redirect("activos:activos")
+
+        if action == "toggle_activo":
+            activo_id = _safe_int(request.POST.get("activo_id"))
+            activo_obj = get_object_or_404(Activo, pk=activo_id)
+            activo_obj.activo = not activo_obj.activo
+            activo_obj.save(update_fields=["activo", "actualizado_en"])
+            log_event(
+                request.user,
+                "UPDATE",
+                "activos.Activo",
+                activo_obj.id,
+                {"activo": activo_obj.activo},
+            )
+            messages.success(request, f"{activo_obj.codigo}: {'Activo' if activo_obj.activo else 'Inactivo'}.")
+            return redirect("activos:activos")
+
+        messages.error(request, "Acción no reconocida.")
+        return redirect("activos:activos")
+
+    q = (request.GET.get("q") or "").strip()
+    estado = (request.GET.get("estado") or "").strip().upper()
+    criticidad = (request.GET.get("criticidad") or "").strip().upper()
+    solo_activos = (request.GET.get("solo_activos") or "1").strip()
+
+    qs = Activo.objects.select_related("proveedor_mantenimiento").order_by("nombre", "id")
+    if q:
+        qs = qs.filter(Q(codigo__icontains=q) | Q(nombre__icontains=q) | Q(categoria__icontains=q) | Q(ubicacion__icontains=q))
+    if estado in {x[0] for x in Activo.ESTADO_CHOICES}:
+        qs = qs.filter(estado=estado)
+    if criticidad in {x[0] for x in Activo.CRITICIDAD_CHOICES}:
+        qs = qs.filter(criticidad=criticidad)
+    if solo_activos == "1":
+        qs = qs.filter(activo=True)
+
+    context = {
+        "module_tabs": _module_tabs("activos"),
+        "activos": list(qs[:300]),
+        "proveedores": list(Proveedor.objects.filter(activo=True).order_by("nombre")[:800]),
+        "estado_choices": Activo.ESTADO_CHOICES,
+        "criticidad_choices": Activo.CRITICIDAD_CHOICES,
+        "filters": {"q": q, "estado": estado, "criticidad": criticidad, "solo_activos": solo_activos},
+        "can_manage_activos": can_manage_inventario(request.user),
+    }
+    return render(request, "activos/activos.html", context)
+
+
+@login_required
+def planes(request):
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Activos.")
+
+    if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied("No tienes permisos para gestionar planes.")
+        action = (request.POST.get("action") or "create_plan").strip().lower()
+        if action == "create_plan":
+            activo_id = _safe_int(request.POST.get("activo_id"))
+            nombre = (request.POST.get("nombre") or "").strip()
+            if not activo_id or not nombre:
+                messages.error(request, "Activo y nombre del plan son obligatorios.")
+                return redirect("activos:planes")
+            activo_obj = get_object_or_404(Activo, pk=activo_id)
+            tipo = (request.POST.get("tipo") or PlanMantenimiento.TIPO_PREVENTIVO).strip().upper()
+            estatus = (request.POST.get("estatus") or PlanMantenimiento.ESTATUS_ACTIVO).strip().upper()
+            plan = PlanMantenimiento.objects.create(
+                activo_ref=activo_obj,
+                nombre=nombre,
+                tipo=tipo if tipo in {x[0] for x in PlanMantenimiento.TIPO_CHOICES} else PlanMantenimiento.TIPO_PREVENTIVO,
+                frecuencia_dias=max(1, _safe_int(request.POST.get("frecuencia_dias"), default=30)),
+                tolerancia_dias=max(0, _safe_int(request.POST.get("tolerancia_dias"), default=0)),
+                ultima_ejecucion=_parse_date(request.POST.get("ultima_ejecucion")),
+                proxima_ejecucion=_parse_date(request.POST.get("proxima_ejecucion")),
+                responsable=(request.POST.get("responsable") or "").strip(),
+                instrucciones=(request.POST.get("instrucciones") or "").strip(),
+                estatus=(
+                    estatus if estatus in {x[0] for x in PlanMantenimiento.ESTATUS_CHOICES} else PlanMantenimiento.ESTATUS_ACTIVO
+                ),
+                activo=(request.POST.get("activo") or "").strip().lower() in {"1", "on", "true", "yes"},
+            )
+            log_event(
+                request.user,
+                "CREATE",
+                "activos.PlanMantenimiento",
+                plan.id,
+                {"activo_id": plan.activo_ref_id, "nombre": plan.nombre, "proxima_ejecucion": str(plan.proxima_ejecucion or "")},
+            )
+            messages.success(request, f"Plan creado para {activo_obj.nombre}.")
+            return redirect("activos:planes")
+
+        if action == "toggle_plan":
+            plan_id = _safe_int(request.POST.get("plan_id"))
+            plan = get_object_or_404(PlanMantenimiento, pk=plan_id)
+            plan.estatus = (
+                PlanMantenimiento.ESTATUS_PAUSADO
+                if plan.estatus == PlanMantenimiento.ESTATUS_ACTIVO
+                else PlanMantenimiento.ESTATUS_ACTIVO
+            )
+            plan.save(update_fields=["estatus", "actualizado_en"])
+            log_event(request.user, "UPDATE", "activos.PlanMantenimiento", plan.id, {"estatus": plan.estatus})
+            messages.success(request, f"Plan {plan.nombre} actualizado.")
+            return redirect("activos:planes")
+
+        if action == "registrar_ejecucion":
+            plan_id = _safe_int(request.POST.get("plan_id"))
+            plan = get_object_or_404(PlanMantenimiento, pk=plan_id)
+            fecha = _parse_date(request.POST.get("fecha")) or timezone.localdate()
+            plan.ultima_ejecucion = fecha
+            plan.recompute_next_date()
+            plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
+            log_event(
+                request.user,
+                "UPDATE",
+                "activos.PlanMantenimiento",
+                plan.id,
+                {"ultima_ejecucion": str(fecha), "proxima_ejecucion": str(plan.proxima_ejecucion or "")},
+            )
+            messages.success(request, f"Ejecución registrada para {plan.nombre}.")
+            return redirect("activos:planes")
+
+        messages.error(request, "Acción no reconocida.")
+        return redirect("activos:planes")
+
+    q = (request.GET.get("q") or "").strip()
+    estatus = (request.GET.get("estatus") or "").strip().upper()
+    scope = (request.GET.get("scope") or "all").strip().lower()
+    today = timezone.localdate()
+
+    qs = PlanMantenimiento.objects.select_related("activo_ref").order_by("proxima_ejecucion", "id")
+    if q:
+        qs = qs.filter(Q(nombre__icontains=q) | Q(activo_ref__nombre__icontains=q) | Q(activo_ref__codigo__icontains=q))
+    if estatus in {x[0] for x in PlanMantenimiento.ESTATUS_CHOICES}:
+        qs = qs.filter(estatus=estatus)
+    if scope == "overdue":
+        qs = qs.filter(proxima_ejecucion__isnull=False, proxima_ejecucion__lt=today, estatus=PlanMantenimiento.ESTATUS_ACTIVO)
+    elif scope == "week":
+        qs = qs.filter(
+            proxima_ejecucion__isnull=False,
+            proxima_ejecucion__gte=today,
+            proxima_ejecucion__lte=today + timedelta(days=7),
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+        )
+
+    context = {
+        "module_tabs": _module_tabs("planes"),
+        "planes": list(qs[:300]),
+        "activos": list(Activo.objects.filter(activo=True).order_by("nombre")[:800]),
+        "tipo_choices": PlanMantenimiento.TIPO_CHOICES,
+        "estatus_choices": PlanMantenimiento.ESTATUS_CHOICES,
+        "filters": {"q": q, "estatus": estatus, "scope": scope},
+        "today": today,
+        "can_manage_activos": can_manage_inventario(request.user),
+    }
+    return render(request, "activos/planes.html", context)
 
 
 @login_required
@@ -238,6 +474,95 @@ def actualizar_orden_estatus(request, pk: int, estatus: str):
     )
     messages.success(request, f"Orden {orden.folio} actualizada a {estatus}.")
     return redirect("activos:ordenes")
+
+
+@login_required
+def reportes_servicio(request):
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Activos.")
+
+    if request.method == "POST":
+        activo_id = _safe_int(request.POST.get("activo_id"))
+        descripcion = (request.POST.get("descripcion") or "").strip()
+        if not activo_id or not descripcion:
+            messages.error(request, "Activo y descripción del reporte son obligatorios.")
+            return redirect("activos:reportes")
+        activo_obj = get_object_or_404(Activo, pk=activo_id)
+        prioridad = (request.POST.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA).strip().upper()
+        prioridad = (
+            prioridad if prioridad in {x[0] for x in OrdenMantenimiento.PRIORIDAD_CHOICES} else OrdenMantenimiento.PRIORIDAD_MEDIA
+        )
+        perfil = getattr(request.user, "userprofile", None)
+        area = perfil.departamento.nombre if perfil and perfil.departamento_id else ""
+        sucursal = perfil.sucursal.nombre if perfil and perfil.sucursal_id else ""
+        responsable = (request.POST.get("responsable") or "").strip() or request.user.get_full_name() or request.user.username
+        fecha_programada = _parse_date(request.POST.get("fecha_programada")) or timezone.localdate()
+        orden = OrdenMantenimiento.objects.create(
+            activo_ref=activo_obj,
+            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+            prioridad=prioridad,
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            fecha_programada=fecha_programada,
+            responsable=responsable,
+            descripcion=descripcion,
+            creado_por=request.user,
+        )
+        contexto = []
+        if area:
+            contexto.append(f"Área: {area}")
+        if sucursal:
+            contexto.append(f"Sucursal: {sucursal}")
+        BitacoraMantenimiento.objects.create(
+            orden=orden,
+            accion="REPORTE_FALLA",
+            comentario=" · ".join(contexto) if contexto else "Reporte desde módulo Activos",
+            usuario=request.user,
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "activos.OrdenMantenimiento",
+            orden.id,
+            {"folio": orden.folio, "tipo": "REPORTE_FALLA", "activo_id": activo_obj.id, "prioridad": prioridad},
+        )
+        messages.success(request, f"Reporte levantado. Orden generada: {orden.folio}.")
+        return redirect("activos:reportes")
+
+    estado = (request.GET.get("estatus") or "ABIERTAS").strip().upper()
+    q = (request.GET.get("q") or "").strip()
+    qs = OrdenMantenimiento.objects.select_related("activo_ref", "creado_por").filter(tipo=OrdenMantenimiento.TIPO_CORRECTIVO)
+    if estado == "ABIERTAS":
+        qs = qs.filter(estatus__in=[OrdenMantenimiento.ESTATUS_PENDIENTE, OrdenMantenimiento.ESTATUS_EN_PROCESO])
+    elif estado in {x[0] for x in OrdenMantenimiento.ESTATUS_CHOICES}:
+        qs = qs.filter(estatus=estado)
+    if q:
+        qs = qs.filter(Q(folio__icontains=q) | Q(activo_ref__nombre__icontains=q) | Q(descripcion__icontains=q))
+
+    today = timezone.localdate()
+    reportes = []
+    for orden in qs.order_by("-fecha_programada", "-id")[:240]:
+        dias = (today - orden.fecha_programada).days if orden.fecha_programada else 0
+        if orden.estatus == OrdenMantenimiento.ESTATUS_CERRADA:
+            semaforo = ("Verde", "badge-success")
+        elif dias <= 2:
+            semaforo = ("Verde", "badge-success")
+        elif dias <= 5:
+            semaforo = ("Amarillo", "badge-warning")
+        else:
+            semaforo = ("Rojo", "badge-danger")
+        reportes.append({"orden": orden, "dias": dias, "semaforo_label": semaforo[0], "semaforo_class": semaforo[1]})
+
+    context = {
+        "module_tabs": _module_tabs("reportes"),
+        "activos": list(Activo.objects.filter(activo=True).order_by("nombre")[:800]),
+        "reportes": reportes,
+        "estado": estado,
+        "q": q,
+        "today": today,
+        "prioridad_choices": OrdenMantenimiento.PRIORIDAD_CHOICES,
+        "can_manage_activos": can_manage_inventario(request.user),
+    }
+    return render(request, "activos/reportes.html", context)
 
 
 @login_required

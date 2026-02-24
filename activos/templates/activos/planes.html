@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block title %}Activos - Planes{% endblock %}
+{% block page_title %}Activos · Planes{% endblock %}
+
+{% block content %}
+<div class="module-tabs">
+  {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+{% if can_manage_activos %}
+<section class="card">
+  <div class="card-header">Nuevo plan de mantenimiento</div>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create_plan">
+    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;">
+      <div>
+        <label>Activo</label>
+        <select name="activo_id" required>
+          <option value="">Selecciona...</option>
+          {% for a in activos %}
+            <option value="{{ a.id }}">{{ a.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Nombre plan</label>
+        <input type="text" name="nombre" required>
+      </div>
+      <div>
+        <label>Tipo</label>
+        <select name="tipo">
+          {% for v, l in tipo_choices %}
+            <option value="{{ v }}">{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Estatus</label>
+        <select name="estatus">
+          {% for v, l in estatus_choices %}
+            <option value="{{ v }}">{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Frecuencia (días)</label>
+        <input type="number" name="frecuencia_dias" min="1" value="30">
+      </div>
+      <div>
+        <label>Tolerancia (días)</label>
+        <input type="number" name="tolerancia_dias" min="0" value="0">
+      </div>
+      <div>
+        <label>Última ejecución</label>
+        <input type="date" name="ultima_ejecucion">
+      </div>
+      <div>
+        <label>Próxima ejecución</label>
+        <input type="date" name="proxima_ejecucion">
+      </div>
+      <div>
+        <label>Responsable</label>
+        <input type="text" name="responsable" maxlength="120">
+      </div>
+      <div style="grid-column: span 3;">
+        <label>Instrucciones</label>
+        <input type="text" name="instrucciones" placeholder="Checklist o detalle de mantenimiento">
+      </div>
+      <div style="display:flex;align-items:end;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" name="activo" value="1" checked>
+          Plan habilitado
+        </label>
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="btn btn-primary" type="submit">Guardar plan</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Planes registrados</div>
+  <form method="get">
+    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;align-items:end;">
+      <div>
+        <label>Buscar</label>
+        <input type="text" name="q" value="{{ filters.q }}" placeholder="Activo o plan">
+      </div>
+      <div>
+        <label>Estatus</label>
+        <select name="estatus">
+          <option value="">Todos</option>
+          {% for v, l in estatus_choices %}
+            <option value="{{ v }}" {% if filters.estatus == v %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Alcance</label>
+        <select name="scope">
+          <option value="all" {% if filters.scope == 'all' %}selected{% endif %}>Todos</option>
+          <option value="overdue" {% if filters.scope == 'overdue' %}selected{% endif %}>Vencidos</option>
+          <option value="week" {% if filters.scope == 'week' %}selected{% endif %}>Próx. 7 días</option>
+        </select>
+      </div>
+      <div class="quick-actions">
+        <button class="btn btn-primary" type="submit">Filtrar</button>
+        <a href="{% url 'activos:planes' %}" class="btn btn-secondary">Limpiar</a>
+      </div>
+    </div>
+  </form>
+
+  <div class="table-responsive" style="margin-top:12px;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Activo</th>
+          <th>Plan</th>
+          <th>Tipo</th>
+          <th>Frecuencia</th>
+          <th>Última</th>
+          <th>Próxima</th>
+          <th>Estatus</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in planes %}
+          <tr>
+            <td>{{ p.activo_ref.nombre }}</td>
+            <td>{{ p.nombre }}</td>
+            <td>{{ p.get_tipo_display }}</td>
+            <td>{{ p.frecuencia_dias }} días</td>
+            <td>{% if p.ultima_ejecucion %}{{ p.ultima_ejecucion|date:"Y-m-d" }}{% else %}-{% endif %}</td>
+            <td>{% if p.proxima_ejecucion %}{{ p.proxima_ejecucion|date:"Y-m-d" }}{% else %}-{% endif %}</td>
+            <td><span class="badge badge-primary">{{ p.estatus }}</span></td>
+            <td>
+              {% if can_manage_activos %}
+                <div class="quick-actions" style="gap:6px;flex-wrap:wrap;">
+                  <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="registrar_ejecucion">
+                    <input type="hidden" name="plan_id" value="{{ p.id }}">
+                    <input type="hidden" name="fecha" value="{{ today|date:'Y-m-d' }}">
+                    <button class="btn btn-secondary" type="submit">Marcar ejecutado hoy</button>
+                  </form>
+                  <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="toggle_plan">
+                    <input type="hidden" name="plan_id" value="{{ p.id }}">
+                    <button class="btn {% if p.estatus == 'ACTIVO' %}btn-danger{% else %}btn-success{% endif %}" type="submit">
+                      {% if p.estatus == 'ACTIVO' %}Pausar{% else %}Activar{% endif %}
+                    </button>
+                  </form>
+                </div>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8" class="text-muted">Sin planes para el filtro actual.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
