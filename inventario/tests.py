@@ -262,6 +262,41 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn("Producto only row", body)
         self.assertNotIn("Insumo only row", body)
 
+    def test_export_cross_pending_csv_with_source_filter(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="P-SRC-POINT-001",
+            point_nombre="Solo Point Export",
+            fuzzy_score=91.0,
+            fuzzy_sugerencia="Harina",
+        )
+        receta = Receta.objects.create(nombre="Receta Solo Source Export", hash_contenido="hash-export-source-001")
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Solo Receta Export",
+            cantidad=1,
+            unidad=None,
+            unidad_texto="kg",
+            costo_unitario_snapshot=0,
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+
+        response = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {
+                "export": "cross_pending_csv",
+                "cross_source": "POINT",
+                "cross_point_tipo": "INSUMO",
+                "cross_min_sources": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("Solo Point Export", body)
+        self.assertNotIn("Solo Receta Export", body)
+
     def test_auto_apply_suggestions_creates_alias_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
         insumo = Insumo.objects.create(nombre="Harina Pastelera", unidad_base=unidad)
