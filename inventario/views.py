@@ -329,7 +329,11 @@ def _build_pending_grouped(pending_preview: list[dict]) -> list[dict]:
     )
 
 
-def _build_cross_unified_rows(pending_grouped: list[dict]) -> tuple[list[dict], int, int]:
+def _build_cross_unified_rows(
+    pending_grouped: list[dict],
+    *,
+    point_tipos: list[str] | None = None,
+) -> tuple[list[dict], int, int]:
     unified = defaultdict(
         lambda: {
             "nombre_muestra": "",
@@ -352,10 +356,13 @@ def _build_cross_unified_rows(pending_grouped: list[dict]) -> tuple[list[dict], 
             item["suggestion"] = row["sugerencia"]
         item["score_max"] = max(item["score_max"], float(row.get("score_max") or 0.0))
 
-    point_pending_insumos = list(
-        PointPendingMatch.objects.filter(tipo=PointPendingMatch.TIPO_INSUMO).only("point_nombre", "fuzzy_sugerencia", "fuzzy_score")
-    )
-    for pending in point_pending_insumos:
+    point_pending_qs = PointPendingMatch.objects.all()
+    if point_tipos is None:
+        point_pending_qs = point_pending_qs.filter(tipo=PointPendingMatch.TIPO_INSUMO)
+    else:
+        point_pending_qs = point_pending_qs.filter(tipo__in=point_tipos)
+    point_pending_matches = list(point_pending_qs.only("point_nombre", "fuzzy_sugerencia", "fuzzy_score"))
+    for pending in point_pending_matches:
         norm = normalizar_nombre(pending.point_nombre or "")
         if not norm:
             continue
@@ -403,7 +410,7 @@ def _build_cross_unified_rows(pending_grouped: list[dict]) -> tuple[list[dict], 
             }
         )
     unified_rows.sort(key=lambda x: (-x["sources_active"], -x["total_count"], x["nombre_muestra"]))
-    return unified_rows, len(point_pending_insumos), receta_pending_lines
+    return unified_rows, len(point_pending_matches), receta_pending_lines
 
 
 def _read_cross_filters(params) -> tuple[str, str, bool, int, float]:

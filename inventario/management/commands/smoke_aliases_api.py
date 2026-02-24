@@ -237,7 +237,7 @@ class Command(BaseCommand):
             url=self._build_url(
                 base_url,
                 "/api/inventario/aliases/pendientes-unificados/",
-                query={"limit": 10, "offset": 0, "sort_by": "score_max", "sort_dir": "desc"},
+                query={"limit": 10, "offset": 0, "sort_by": "score_max", "sort_dir": "desc", "point_tipo": "TODOS"},
             ),
             token=token,
             timeout=timeout,
@@ -246,7 +246,7 @@ class Command(BaseCommand):
         self._assert_ok("Aliases pendientes unificados", unificados, expected=200)
         p_filters = unificados.data.get("filters") or {}
         p_pag = unificados.data.get("pagination") or {}
-        for key in ("limit", "offset", "sort_by", "sort_dir"):
+        for key in ("limit", "offset", "sort_by", "sort_dir", "point_tipo"):
             if key not in p_filters:
                 raise CommandError(f"Unificados sin filters.{key}.")
         for key in ("has_next", "next_offset", "has_prev", "prev_offset", "limit", "offset"):
@@ -258,7 +258,7 @@ class Command(BaseCommand):
             url=self._build_url(
                 base_url,
                 "/api/inventario/aliases/pendientes-unificados/",
-                query={"limit": 10, "offset": 0, "source": "POINT", "min_sources": 1},
+                query={"limit": 10, "offset": 0, "source": "POINT", "point_tipo": "INSUMO", "min_sources": 1},
             ),
             token=token,
             timeout=timeout,
@@ -268,6 +268,8 @@ class Command(BaseCommand):
         source_filters = unificados_source.data.get("filters") or {}
         if str(source_filters.get("source") or "") != "POINT":
             raise CommandError("Unificados source no devolvió source=POINT en filters.")
+        if str(source_filters.get("point_tipo") or "") != "INSUMO":
+            raise CommandError("Unificados source no devolvió point_tipo=INSUMO en filters.")
 
         resolve_dry = _http_json(
             method="POST",
@@ -279,6 +281,7 @@ class Command(BaseCommand):
                 "score_min": 0,
                 "only_suggested": True,
                 "source": "POINT",
+                "point_tipo": "INSUMO",
                 "sort_by": "score_max",
                 "sort_dir": "desc",
                 "offset": 0,
@@ -293,6 +296,8 @@ class Command(BaseCommand):
         resolve_filters = resolve_dry.data.get("filters") or {}
         if str(resolve_filters.get("source") or "") != "POINT":
             raise CommandError("Resolver dry_run no devolvió source=POINT en filters.")
+        if str(resolve_filters.get("point_tipo") or "") != "INSUMO":
+            raise CommandError("Resolver dry_run no devolvió point_tipo=INSUMO en filters.")
         if str(resolve_filters.get("sort_by") or "") != "score_max":
             raise CommandError("Resolver dry_run no devolvió sort_by=score_max en filters.")
         if str(resolve_filters.get("sort_dir") or "") != "desc":

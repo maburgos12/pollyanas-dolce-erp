@@ -3162,6 +3162,7 @@ class InventarioAliasesPendientesUnificadosView(APIView):
         q = (request.GET.get("q") or "").strip()
         q_norm = normalizar_nombre(q)
         source = (request.GET.get("source") or "TODOS").strip().upper()
+        point_tipo = (request.GET.get("point_tipo") or PointPendingMatch.TIPO_INSUMO).strip().upper()
         only_suggested = _parse_bool(request.GET.get("only_suggested"), default=False)
         min_sources = _parse_bounded_int(request.GET.get("min_sources", 1), default=1, min_value=1, max_value=3)
         score_min = float(_to_decimal(request.GET.get("score_min"), Decimal("0")))
@@ -3169,6 +3170,13 @@ class InventarioAliasesPendientesUnificadosView(APIView):
         sort_by = (request.GET.get("sort_by") or "sources_active").strip().lower()
         sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
         export = (request.GET.get("export") or "").strip().lower()
+        valid_point_tipos = {
+            PointPendingMatch.TIPO_INSUMO,
+            PointPendingMatch.TIPO_PROVEEDOR,
+            PointPendingMatch.TIPO_PRODUCTO,
+            "TODOS",
+            "ALL",
+        }
         valid_sources = {"TODOS", "ALL", "ALMACEN", "POINT", "RECETAS"}
         if export not in {"", "csv", "xlsx"}:
             return Response(
@@ -3180,6 +3188,16 @@ class InventarioAliasesPendientesUnificadosView(APIView):
                 {"detail": "source inválido. Usa ALMACEN, POINT, RECETAS o TODOS."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if point_tipo not in valid_point_tipos:
+            return Response(
+                {"detail": "point_tipo inválido. Usa INSUMO, PROVEEDOR, PRODUCTO o TODOS."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        point_tipos_filter = (
+            None
+            if point_tipo in {"TODOS", "ALL"}
+            else [point_tipo]
+        )
         allowed_sort = {
             "sources_active": lambda row: int(row.get("sources_active") or 0),
             "total_count": lambda row: int(row.get("total_count") or 0),
@@ -3224,7 +3242,10 @@ class InventarioAliasesPendientesUnificadosView(APIView):
                 )
 
         pending_grouped = _build_pending_grouped(pending_rows)
-        unified_rows, point_unmatched_count, receta_pending_lines = _build_cross_unified_rows(pending_grouped)
+        unified_rows, point_unmatched_count, receta_pending_lines = _build_cross_unified_rows(
+            pending_grouped,
+            point_tipos=point_tipos_filter,
+        )
         filtered_rows = _apply_cross_filters(
             unified_rows,
             cross_q_norm=q_norm,
@@ -3266,6 +3287,7 @@ class InventarioAliasesPendientesUnificadosView(APIView):
                     "runs": runs_to_scan,
                     "q": q,
                     "source": source,
+                    "point_tipo": point_tipo,
                     "min_sources": min_sources,
                     "score_min": round(score_min, 2),
                     "only_suggested": only_suggested,
@@ -3318,6 +3340,7 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
         q = str(data.get("q") or "").strip()
         q_norm = normalizar_nombre(q)
         source = str(data.get("source") or "TODOS").strip().upper()
+        point_tipo = str(data.get("point_tipo") or PointPendingMatch.TIPO_INSUMO).strip().upper()
         sort_by = str(data.get("sort_by") or "sources_active").strip().lower()
         sort_dir = str(data.get("sort_dir") or "desc").strip().lower()
         min_sources = int(data.get("min_sources") or 2)
@@ -3327,6 +3350,11 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
         dry_run = bool(data.get("dry_run", True))
         nombres = [str(x or "").strip() for x in (data.get("nombres") or [])]
         selected_norms = {normalizar_nombre(x) for x in nombres if normalizar_nombre(x)}
+        point_tipos_filter = (
+            None
+            if point_tipo in {"TODOS", "ALL"}
+            else [point_tipo]
+        )
 
         pending_rows: list[dict] = []
         sync_runs = list(AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at")[:runs_to_scan])
@@ -3346,7 +3374,10 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
                 )
 
         pending_grouped = _build_pending_grouped(pending_rows)
-        unified_rows, _, _ = _build_cross_unified_rows(pending_grouped)
+        unified_rows, _, _ = _build_cross_unified_rows(
+            pending_grouped,
+            point_tipos=point_tipos_filter,
+        )
         filtered_rows = _apply_cross_filters(
             unified_rows,
             cross_q_norm=q_norm,
@@ -3500,6 +3531,7 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
                     "limit": limit,
                     "offset": offset,
                     "source": source,
+                    "point_tipo": point_tipo,
                     "min_sources": min_sources,
                     "score_min": round(score_min, 2),
                     "only_suggested": only_suggested,

@@ -4,6 +4,7 @@ from activos.models import OrdenMantenimiento
 from control.models import MermaPOS, VentaPOS
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from inventario.models import AjusteInventario
+from maestros.models import PointPendingMatch
 from recetas.models import SolicitudVenta
 
 
@@ -266,6 +267,13 @@ class InventarioPointPendingResolveSerializer(serializers.Serializer):
 
 class InventarioCrossPendientesResolveSerializer(serializers.Serializer):
     SOURCE_CHOICES = ("TODOS", "ALL", "ALMACEN", "POINT", "RECETAS")
+    POINT_TIPO_CHOICES = (
+        PointPendingMatch.TIPO_INSUMO,
+        PointPendingMatch.TIPO_PROVEEDOR,
+        PointPendingMatch.TIPO_PRODUCTO,
+        "TODOS",
+        "ALL",
+    )
     SORT_BY_CHOICES = (
         "sources_active",
         "total_count",
@@ -289,6 +297,7 @@ class InventarioCrossPendientesResolveSerializer(serializers.Serializer):
     offset = serializers.IntegerField(required=False, min_value=0, max_value=50000, default=0)
     min_sources = serializers.IntegerField(required=False, min_value=1, max_value=3, default=2)
     source = serializers.ChoiceField(required=False, choices=SOURCE_CHOICES, default="TODOS")
+    point_tipo = serializers.ChoiceField(required=False, choices=POINT_TIPO_CHOICES, default=PointPendingMatch.TIPO_INSUMO)
     sort_by = serializers.ChoiceField(required=False, choices=SORT_BY_CHOICES, default="sources_active")
     sort_dir = serializers.ChoiceField(required=False, choices=SORT_DIR_CHOICES, default="desc")
     score_min = serializers.FloatField(required=False, default=0)

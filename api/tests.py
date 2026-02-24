@@ -1164,11 +1164,61 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(payload_recetas["totales"]["filtered_total"], 1)
         self.assertTrue(all(int(row["receta_count"]) > 0 for row in payload_recetas["items"]))
 
+    def test_endpoint_inventario_aliases_pendientes_unificados_point_tipo_filter(self):
+        point_nombre_producto = "Producto point pendiente"
+        point_nombre_insumo = "Insumo point pendiente"
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_PRODUCTO,
+            point_codigo="PT-SRC-TIPO-PROD-01",
+            point_nombre=point_nombre_producto,
+            method="FUZZY",
+            fuzzy_score=84.0,
+            fuzzy_sugerencia="Receta sugerida",
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-SRC-TIPO-INS-01",
+            point_nombre=point_nombre_insumo,
+            method="FUZZY",
+            fuzzy_score=86.0,
+            fuzzy_sugerencia=self.insumo.nombre,
+        )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados")
+        resp_prod = self.client.get(
+            url,
+            {"source": "POINT", "point_tipo": "PRODUCTO", "min_sources": 1, "limit": 50},
+        )
+        self.assertEqual(resp_prod.status_code, 200)
+        payload_prod = resp_prod.json()
+        self.assertEqual(payload_prod["filters"]["source"], "POINT")
+        self.assertEqual(payload_prod["filters"]["point_tipo"], "PRODUCTO")
+        names_prod = {row["nombre_muestra"] for row in payload_prod["items"]}
+        self.assertIn(point_nombre_producto, names_prod)
+        self.assertNotIn(point_nombre_insumo, names_prod)
+
+        resp_ins = self.client.get(
+            url,
+            {"source": "POINT", "point_tipo": "INSUMO", "min_sources": 1, "limit": 50},
+        )
+        self.assertEqual(resp_ins.status_code, 200)
+        payload_ins = resp_ins.json()
+        self.assertEqual(payload_ins["filters"]["point_tipo"], "INSUMO")
+        names_ins = {row["nombre_muestra"] for row in payload_ins["items"]}
+        self.assertIn(point_nombre_insumo, names_ins)
+        self.assertNotIn(point_nombre_producto, names_ins)
+
     def test_endpoint_inventario_aliases_pendientes_unificados_source_invalid(self):
         url = reverse("api_inventario_aliases_pendientes_unificados")
         resp = self.client.get(url, {"source": "MIXTO"})
         self.assertEqual(resp.status_code, 400)
         self.assertIn("source", resp.json()["detail"].lower())
+
+    def test_endpoint_inventario_aliases_pendientes_unificados_point_tipo_invalid(self):
+        url = reverse("api_inventario_aliases_pendientes_unificados")
+        resp = self.client.get(url, {"point_tipo": "MIXTO"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("point_tipo", resp.json()["detail"].lower())
 
     def test_endpoint_integraciones_point_resumen(self):
         api_client, _raw = PublicApiClient.create_with_generated_key(nombre="API Integraciones Test", descripcion="")
@@ -1774,6 +1824,54 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload_recetas["filters"]["source"], "RECETAS")
         self.assertEqual(payload_recetas["totales"]["candidatos_filtrados"], 0)
 
+    def test_endpoint_inventario_aliases_pendientes_unificados_resolver_point_tipo_filter(self):
+        target = Insumo.objects.create(nombre="Azucar API Target Tipo", unidad_base=self.unidad, activo=True)
+        point_nombre_prod = "Producto resolver tipo"
+        point_nombre_ins = "Insumo resolver tipo"
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_PRODUCTO,
+            point_codigo="PT-CROSS-RSLV-TIPO-PROD-01",
+            point_nombre=point_nombre_prod,
+            method="FUZZY",
+            fuzzy_score=91.0,
+            fuzzy_sugerencia=target.nombre,
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CROSS-RSLV-TIPO-INS-01",
+            point_nombre=point_nombre_ins,
+            method="FUZZY",
+            fuzzy_score=93.0,
+            fuzzy_sugerencia=target.nombre,
+        )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados_resolver")
+        resp_prod = self.client.post(
+            url,
+            {"dry_run": True, "source": "POINT", "point_tipo": "PRODUCTO", "min_sources": 1, "score_min": 0},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_prod.status_code, 200)
+        payload_prod = resp_prod.json()
+        self.assertEqual(payload_prod["filters"]["point_tipo"], "PRODUCTO")
+        self.assertEqual(payload_prod["totales"]["candidatos_filtrados"], 1)
+        names_prod = {row.get("nombre_muestra") for row in payload_prod["items"]}
+        self.assertIn(point_nombre_prod, names_prod)
+        self.assertNotIn(point_nombre_ins, names_prod)
+
+        resp_ins = self.client.post(
+            url,
+            {"dry_run": True, "source": "POINT", "point_tipo": "INSUMO", "min_sources": 1, "score_min": 0},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_ins.status_code, 200)
+        payload_ins = resp_ins.json()
+        self.assertEqual(payload_ins["filters"]["point_tipo"], "INSUMO")
+        self.assertEqual(payload_ins["totales"]["candidatos_filtrados"], 1)
+        names_ins = {row.get("nombre_muestra") for row in payload_ins["items"]}
+        self.assertIn(point_nombre_ins, names_ins)
+        self.assertNotIn(point_nombre_prod, names_ins)
+
     def test_endpoint_inventario_aliases_pendientes_unificados_resolver_source_invalid(self):
         url = reverse("api_inventario_aliases_pendientes_unificados_resolver")
         resp = self.client.post(
@@ -1783,6 +1881,16 @@ class RecetasCosteoApiTests(TestCase):
         )
         self.assertEqual(resp.status_code, 400)
         self.assertIn("source", str(resp.json()).lower())
+
+    def test_endpoint_inventario_aliases_pendientes_unificados_resolver_point_tipo_invalid(self):
+        url = reverse("api_inventario_aliases_pendientes_unificados_resolver")
+        resp = self.client.post(
+            url,
+            {"dry_run": True, "point_tipo": "MIXTO"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("point_tipo", str(resp.json()).lower())
 
     def test_endpoint_inventario_aliases_pendientes_unificados_resolver_offset_sort(self):
         target = Insumo.objects.create(nombre="Azucar API Target", unidad_base=self.unidad, activo=True)
