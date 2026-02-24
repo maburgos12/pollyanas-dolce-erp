@@ -47,6 +47,27 @@ El smoke valida:
 - `historial`
 - operaciones `dry_run` (desactivación, purga, mantenimiento combinado)
 
+## 2.1) Comando de mantenimiento directo (cron-friendly)
+
+Preview (sin cambios):
+
+```bash
+.venv/bin/python manage.py run_integraciones_maintenance --dry-run
+```
+
+Live (con cambios):
+
+```bash
+.venv/bin/python manage.py run_integraciones_maintenance --confirm-live YES
+```
+
+Parámetros disponibles:
+- `--idle-days`
+- `--idle-limit`
+- `--retain-days`
+- `--max-delete`
+- `--actor-username` (opcional para bitácora con usuario explícito)
+
 ## 3) Ejecución live (controlada)
 
 Para ejecutar mantenimiento con efectos reales:
@@ -86,3 +107,19 @@ curl -L -H "Authorization: Token <TOKEN_DRF>" \
 - Smoke diario sin errores HTTP.
 - Historial con entradas de operación esperadas.
 - Sin alertas críticas inesperadas en `resumen`.
+
+## 6) Scheduler opcional en contenedor
+
+Si deseas ejecución automática periódica dentro del contenedor:
+
+- `ENABLE_AUTO_MAINT_INTEGRACIONES=1`
+- `AUTO_MAINT_INTEGRACIONES_INTERVAL_HOURS=24`
+- `AUTO_MAINT_INTEGRACIONES_DRY_RUN=1` (recomendado para arranque)
+- `AUTO_MAINT_INTEGRACIONES_IDLE_DAYS=30`
+- `AUTO_MAINT_INTEGRACIONES_IDLE_LIMIT=100`
+- `AUTO_MAINT_INTEGRACIONES_RETAIN_DAYS=90`
+- `AUTO_MAINT_INTEGRACIONES_MAX_DELETE=5000`
+
+Cuando pases a live automático:
+- `AUTO_MAINT_INTEGRACIONES_DRY_RUN=0`
+- `AUTO_MAINT_INTEGRACIONES_CONFIRM_LIVE=YES`

@@ -13,6 +13,7 @@ python manage.py collectstatic --noinput
 echo "DEBUG: CREATE_SUPERUSER=${CREATE_SUPERUSER}"
 echo "DEBUG: USERNAME=${DJANGO_SUPERUSER_USERNAME:-EMPTY}"
 echo "DEBUG: ENABLE_AUTO_SYNC_ALMACEN=${ENABLE_AUTO_SYNC_ALMACEN:-0}"
+echo "DEBUG: ENABLE_AUTO_MAINT_INTEGRACIONES=${ENABLE_AUTO_MAINT_INTEGRACIONES:-0}"
 
 if [ "${CREATE_SUPERUSER:-0}" = "1" ]; then
   echo "Creating superuser..."
@@ -53,6 +54,11 @@ fi
 if [ "${ENABLE_AUTO_SYNC_ALMACEN:-0}" = "1" ]; then
   echo "Starting auto sync worker..."
   ./scripts/auto_sync_almacen.sh &
+fi
+
+if [ "${ENABLE_AUTO_MAINT_INTEGRACIONES:-0}" = "1" ]; then
+  echo "Starting auto maintenance worker (integraciones)..."
+  ./scripts/auto_maintenance_integraciones.sh &
 fi
 
 echo "Starting Gunicorn..."

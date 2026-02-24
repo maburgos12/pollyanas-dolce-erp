@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from io import StringIO
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -474,3 +477,73 @@ class IntegracionesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Alertas operativas")
         self.assertContains(response, "Pendientes Point abiertos")
+
+
+class IntegracionesMaintenanceCommandTests(TestCase):
+    def _seed_idle_and_old(self):
+        idle_client, _ = PublicApiClient.create_with_generated_key(nombre="Cmd Idle", descripcion="")
+        recent_client, _ = PublicApiClient.create_with_generated_key(nombre="Cmd Recent", descripcion="")
+        PublicApiAccessLog.objects.create(
+            client=recent_client,
+            endpoint="/api/public/v1/cmd-recent/",
+            method="GET",
+            status_code=200,
+        )
+        PublicApiAccessLog.objects.filter(client=recent_client).update(created_at=timezone.now() - timedelta(days=2))
+        old_log = PublicApiAccessLog.objects.create(
+            client=idle_client,
+            endpoint="/api/public/v1/cmd-old/",
+            method="GET",
+            status_code=500,
+        )
+        PublicApiAccessLog.objects.filter(id=old_log.id).update(created_at=timezone.now() - timedelta(days=140))
+        return idle_client, recent_client, old_log
+
+    def test_run_integraciones_maintenance_dry_run(self):
+        idle_client, recent_client, old_log = self._seed_idle_and_old()
+        out = StringIO()
+        call_command(
+            "run_integraciones_maintenance",
+            dry_run=True,
+            idle_days=30,
+            idle_limit=100,
+            retain_days=90,
+            max_delete=5000,
+            stdout=out,
+        )
+        idle_client.refresh_from_db()
+        recent_client.refresh_from_db()
+        self.assertTrue(idle_client.activo)
+        self.assertTrue(recent_client.activo)
+        self.assertTrue(PublicApiAccessLog.objects.filter(id=old_log.id).exists())
+        audit = AuditLog.objects.filter(action="PREVIEW_RUN_API_MAINTENANCE", model="integraciones.Operaciones").first()
+        self.assertIsNotNone(audit)
+        self.assertEqual((audit.payload or {}).get("source"), "CLI")
+        self.assertIn('"dry_run": true', out.getvalue().lower())
+
+    def test_run_integraciones_maintenance_live_requires_confirm(self):
+        with self.assertRaises(CommandError):
+            call_command("run_integraciones_maintenance", dry_run=False)
+
+    def test_run_integraciones_maintenance_live(self):
+        admin = User.objects.create_superuser(username="cmd_admin", email="cmd_admin@test.local", password="x")
+        idle_client, recent_client, old_log = self._seed_idle_and_old()
+        call_command(
+            "run_integraciones_maintenance",
+            idle_days=30,
+            idle_limit=100,
+            retain_days=90,
+            max_delete=5000,
+            confirm_live="YES",
+            actor_username=admin.username,
+            stdout=StringIO(),
+        )
+        idle_client.refresh_from_db()
+        recent_client.refresh_from_db()
+        self.assertFalse(idle_client.activo)
+        self.assertTrue(recent_client.activo)
+        self.assertFalse(PublicApiAccessLog.objects.filter(id=old_log.id).exists())
+        audit = AuditLog.objects.filter(action="RUN_API_MAINTENANCE", model="integraciones.Operaciones").first()
+        self.assertIsNotNone(audit)
+        self.assertEqual(audit.user_id, admin.id)
+        self.assertEqual((audit.payload or {}).get("source"), "CLI")

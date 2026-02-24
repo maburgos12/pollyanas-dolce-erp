@@ -101,6 +101,14 @@ Sprint 1 entrega:
    TOKEN=<TOKEN_DRF> \
    ./scripts/smoke_integraciones_api.sh --live --confirm-live YES
    ```
+7) Mantenimiento operativo por comando (sin API, apto para cron):
+   ```bash
+   # Preview (sin cambios)
+   .venv/bin/python manage.py run_integraciones_maintenance --dry-run
+
+   # Live (con cambios)
+   .venv/bin/python manage.py run_integraciones_maintenance --confirm-live YES
+   ```
 
 ## Opción B: correr sin Docker (dev)
 - Configura un Postgres local y variables de entorno similares a `.env.example`
@@ -121,6 +129,8 @@ Sprint 1 entrega:
 - `logs/` (reportes CSV del import)
 - `scripts/smoke_integraciones_api.sh` (smoke operacional de endpoints de integraciones)
 - `integraciones/management/commands/smoke_integraciones_api.py` (comando smoke con salida JSON)
+- `integraciones/management/commands/run_integraciones_maintenance.py` (mantenimiento operativo CLI con bitácora)
+- `scripts/auto_maintenance_integraciones.sh` (scheduler opcional para mantenimiento periódico)
 
 ## Notas
 - El matching y captura operativa en UI ya incluyen búsqueda/autocomplete para insumos.
