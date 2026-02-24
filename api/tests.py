@@ -1046,6 +1046,54 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp_dir.status_code, 400)
         self.assertIn("sort_dir", resp_dir.json()["detail"].lower())
 
+    def test_endpoint_inventario_aliases_pendientes_unificados_source_filter(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-SRC-POINT-01",
+            point_nombre="Fresa point",
+            method="FUZZY",
+            fuzzy_score=92.0,
+            fuzzy_sugerencia=self.insumo.nombre,
+        )
+        receta_only = Receta.objects.create(
+            nombre="Receta source only",
+            sheet_name="Insumos source only",
+            hash_contenido="hash-api-cross-source-only-001",
+        )
+        LineaReceta.objects.create(
+            receta=receta_only,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Vainilla receta only",
+            cantidad=Decimal("1.0"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_score=80.0,
+        )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados")
+        resp_point = self.client.get(url, {"source": "POINT", "min_sources": 1, "limit": 50})
+        self.assertEqual(resp_point.status_code, 200)
+        payload_point = resp_point.json()
+        self.assertEqual(payload_point["filters"]["source"], "POINT")
+        self.assertGreaterEqual(payload_point["totales"]["filtered_total"], 1)
+        self.assertTrue(all(int(row["point_count"]) > 0 for row in payload_point["items"]))
+
+        resp_recetas = self.client.get(url, {"source": "RECETAS", "min_sources": 1, "limit": 50})
+        self.assertEqual(resp_recetas.status_code, 200)
+        payload_recetas = resp_recetas.json()
+        self.assertEqual(payload_recetas["filters"]["source"], "RECETAS")
+        self.assertGreaterEqual(payload_recetas["totales"]["filtered_total"], 1)
+        self.assertTrue(all(int(row["receta_count"]) > 0 for row in payload_recetas["items"]))
+
+    def test_endpoint_inventario_aliases_pendientes_unificados_source_invalid(self):
+        url = reverse("api_inventario_aliases_pendientes_unificados")
+        resp = self.client.get(url, {"source": "MIXTO"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("source", resp.json()["detail"].lower())
+
     def test_endpoint_integraciones_point_resumen(self):
         api_client, _raw = PublicApiClient.create_with_generated_key(nombre="API Integraciones Test", descripcion="")
         PublicApiAccessLog.objects.create(

@@ -3065,6 +3065,7 @@ class InventarioAliasesPendientesUnificadosView(APIView):
         runs_to_scan = _parse_bounded_int(request.GET.get("runs", 5), default=5, min_value=1, max_value=30)
         q = (request.GET.get("q") or "").strip()
         q_norm = normalizar_nombre(q)
+        source = (request.GET.get("source") or "TODOS").strip().upper()
         only_suggested = _parse_bool(request.GET.get("only_suggested"), default=False)
         min_sources = _parse_bounded_int(request.GET.get("min_sources", 1), default=1, min_value=1, max_value=3)
         score_min = float(_to_decimal(request.GET.get("score_min"), Decimal("0")))
@@ -3072,9 +3073,15 @@ class InventarioAliasesPendientesUnificadosView(APIView):
         sort_by = (request.GET.get("sort_by") or "sources_active").strip().lower()
         sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
         export = (request.GET.get("export") or "").strip().lower()
+        valid_sources = {"TODOS", "ALL", "ALMACEN", "POINT", "RECETAS"}
         if export not in {"", "csv", "xlsx"}:
             return Response(
                 {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if source not in valid_sources:
+            return Response(
+                {"detail": "source inválido. Usa ALMACEN, POINT, RECETAS o TODOS."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         allowed_sort = {
@@ -3129,6 +3136,13 @@ class InventarioAliasesPendientesUnificadosView(APIView):
             cross_min_sources=min_sources,
             cross_score_min=score_min,
         )
+        if source == "ALMACEN":
+            filtered_rows = [row for row in filtered_rows if int(row.get("almacen_count") or 0) > 0]
+        elif source == "POINT":
+            filtered_rows = [row for row in filtered_rows if int(row.get("point_count") or 0) > 0]
+        elif source == "RECETAS":
+            filtered_rows = [row for row in filtered_rows if int(row.get("receta_count") or 0) > 0]
+
         sort_key = allowed_sort[sort_by]
         reverse = sort_dir == "desc"
         filtered_rows = sorted(
@@ -3155,6 +3169,7 @@ class InventarioAliasesPendientesUnificadosView(APIView):
                     "offset": offset,
                     "runs": runs_to_scan,
                     "q": q,
+                    "source": source,
                     "min_sources": min_sources,
                     "score_min": round(score_min, 2),
                     "only_suggested": only_suggested,

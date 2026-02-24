@@ -247,6 +247,22 @@ class Command(BaseCommand):
             if key not in p_pag:
                 raise CommandError(f"Unificados sin pagination.{key}.")
 
+        unificados_source = _http_json(
+            method="GET",
+            url=self._build_url(
+                base_url,
+                "/api/inventario/aliases/pendientes-unificados/",
+                query={"limit": 10, "offset": 0, "source": "POINT", "min_sources": 1},
+            ),
+            token=token,
+            timeout=timeout,
+            insecure=insecure,
+        )
+        self._assert_ok("Unificados source", unificados_source, expected=200)
+        source_filters = unificados_source.data.get("filters") or {}
+        if str(source_filters.get("source") or "") != "POINT":
+            raise CommandError("Unificados source no devolvió source=POINT en filters.")
+
         resolve_dry = _http_json(
             method="POST",
             url=self._build_url(base_url, "/api/inventario/aliases/pendientes-unificados/resolver/"),
@@ -319,6 +335,10 @@ class Command(BaseCommand):
                     "status": unificados.status,
                     "summary": unificados.data.get("summary", {}),
                     "pagination": unificados.data.get("pagination", {}),
+                },
+                "unificados_source": {
+                    "status": unificados_source.status,
+                    "filters": source_filters,
                 },
                 "resolver_dry_run": {
                     "status": resolve_dry.status,
