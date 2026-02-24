@@ -8,6 +8,7 @@ from decimal import Decimal
 from openpyxl import load_workbook
 from io import BytesIO
 
+from core.models import AuditLog
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import Insumo, InsumoAlias, PointPendingMatch, UnidadMedida
 from recetas.models import LineaReceta, Receta
@@ -466,6 +467,110 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertFalse(
             InsumoAlias.objects.filter(nombre_normalizado="azucar morena premium", insumo=insumo_azucar).exists()
         )
+
+    def test_auto_apply_suggestions_respects_cross_source(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo_point = Insumo.objects.create(nombre="Insumo Point", unidad_base=unidad)
+        insumo_almacen = Insumo.objects.create(nombre="Insumo Almacen", unidad_base=unidad)
+
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=timezone.now(),
+            matched=20,
+            unmatched=1,
+            pending_preview=[
+                {
+                    "source": "inventario",
+                    "row": 4,
+                    "nombre_origen": "Solo almacen auto",
+                    "nombre_normalizado": "solo almacen auto",
+                    "sugerencia": "Insumo Almacen",
+                    "score": 98.0,
+                }
+            ],
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-AUTO-SRC-01",
+            point_nombre="Solo point auto",
+            fuzzy_score=98.0,
+            fuzzy_sugerencia="Insumo Point",
+        )
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "auto_apply_suggestions",
+                "auto_min_score": "90",
+                "auto_min_sources": "1",
+                "auto_max_rows": "50",
+                "cross_min_sources": "1",
+                "cross_score_min": "0",
+                "cross_point_tipo": "INSUMO",
+                "cross_source": "POINT",
+                "cross_limit": "50",
+                "cross_offset": "0",
+                "cross_sort_by": "score_max",
+                "cross_sort_dir": "desc",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(InsumoAlias.objects.filter(nombre_normalizado="solo point auto", insumo=insumo_point).exists())
+        self.assertFalse(
+            InsumoAlias.objects.filter(nombre_normalizado="solo almacen auto", insumo=insumo_almacen).exists()
+        )
+
+    def test_auto_apply_suggestions_logs_filters_payload(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo = Insumo.objects.create(nombre="Mantequilla", unidad_base=unidad)
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_DRIVE,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=timezone.now(),
+            matched=11,
+            unmatched=1,
+            pending_preview=[
+                {
+                    "source": "inventario",
+                    "row": 2,
+                    "nombre_origen": "Mantequilla test log",
+                    "nombre_normalizado": "mantequilla test log",
+                    "sugerencia": "Mantequilla",
+                    "score": 97.0,
+                }
+            ],
+        )
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "auto_apply_suggestions",
+                "auto_min_score": "90",
+                "auto_min_sources": "1",
+                "auto_max_rows": "50",
+                "cross_q": "mantequilla",
+                "cross_source": "TODOS",
+                "cross_point_tipo": "INSUMO",
+                "cross_min_sources": "1",
+                "cross_score_min": "0",
+                "cross_limit": "50",
+                "cross_offset": "0",
+                "cross_sort_by": "score_max",
+                "cross_sort_dir": "desc",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        log = AuditLog.objects.filter(action="AUTO_APPLY_SUGGESTIONS", model="inventario.InsumoAlias").first()
+        self.assertIsNotNone(log)
+        payload = log.payload
+        self.assertEqual(payload["filters"]["cross_source"], "TODOS")
+        self.assertEqual(payload["filters"]["cross_point_tipo"], "INSUMO")
+        self.assertEqual(payload["filters"]["cross_sort_by"], "score_max")
+        self.assertEqual(payload["filters"]["cross_sort_dir"], "desc")
+        self.assertEqual(payload["filters"]["cross_limit"], 50)
+        self.assertEqual(payload["filters"]["cross_offset"], 0)
+        self.assertGreaterEqual(int(payload["summary"]["processed"]), 1)
 
     def test_auto_apply_suggestions_redirect_keeps_cross_filters(self):
         response = self.client.post(

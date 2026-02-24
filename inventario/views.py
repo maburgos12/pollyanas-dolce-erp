@@ -1387,6 +1387,10 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                 _read_cross_filters(request.POST)
             )
             cross_point_tipo_post, point_tipos_filter_post = _read_cross_point_tipo(request.POST)
+            cross_source_post = _read_cross_source(request.POST)
+            cross_limit_post, cross_offset_post, cross_sort_by_post, cross_sort_dir_post = _read_cross_table_controls(
+                request.POST
+            )
 
             pending_preview = _load_visible_pending_preview(request, max_rows=500, max_runs=20)
             pending_grouped = _build_pending_grouped(pending_preview)
@@ -1401,7 +1405,29 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                 cross_min_sources=cross_min_sources_post,
                 cross_score_min=cross_score_min_post,
             )
+            if cross_source_post == "ALMACEN":
+                cross_unified_rows = [row for row in cross_unified_rows if int(row.get("almacen_count") or 0) > 0]
+            elif cross_source_post == "POINT":
+                cross_unified_rows = [row for row in cross_unified_rows if int(row.get("point_count") or 0) > 0]
+            elif cross_source_post == "RECETAS":
+                cross_unified_rows = [row for row in cross_unified_rows if int(row.get("receta_count") or 0) > 0]
+            cross_unified_rows = _sort_cross_rows(
+                cross_unified_rows,
+                sort_by=cross_sort_by_post,
+                sort_dir=cross_sort_dir_post,
+            )
+            cross_unified_rows = cross_unified_rows[cross_offset_post : cross_offset_post + cross_limit_post]
 
+            created = 0
+            updated = 0
+            skipped_no_suggestion = 0
+            skipped_low_score = 0
+            skipped_low_sources = 0
+            skipped_unresolved = 0
+            skipped_invalid = 0
+            point_resolved_total = 0
+            recetas_resolved_total = 0
+            processed = 0
             if not cross_unified_rows:
                 messages.info(request, "No hay pendientes visibles para auto-aplicar sugerencias.")
             else:
@@ -1409,16 +1435,6 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                     i.nombre_normalizado: i
                     for i in Insumo.objects.filter(activo=True).only("id", "nombre", "nombre_normalizado")
                 }
-                created = 0
-                updated = 0
-                skipped_no_suggestion = 0
-                skipped_low_score = 0
-                skipped_low_sources = 0
-                skipped_unresolved = 0
-                skipped_invalid = 0
-                point_resolved_total = 0
-                recetas_resolved_total = 0
-                processed = 0
                 cleaned_norms: set[str] = set()
 
                 for row in cross_unified_rows:
@@ -1488,6 +1504,43 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                         f"nombre inválido: {skipped_invalid}."
                     ),
                 )
+            log_event(
+                request.user,
+                "AUTO_APPLY_SUGGESTIONS",
+                "inventario.InsumoAlias",
+                "",
+                {
+                    "filters": {
+                        "cross_q_norm": cross_q_norm_post,
+                        "cross_only_suggested": cross_only_suggested_post,
+                        "cross_min_sources": cross_min_sources_post,
+                        "cross_score_min": float(cross_score_min_post),
+                        "cross_point_tipo": cross_point_tipo_post,
+                        "cross_source": cross_source_post,
+                        "cross_sort_by": cross_sort_by_post,
+                        "cross_sort_dir": cross_sort_dir_post,
+                        "cross_limit": cross_limit_post,
+                        "cross_offset": cross_offset_post,
+                    },
+                    "thresholds": {
+                        "min_score": float(min_score),
+                        "min_sources": min_sources,
+                        "max_rows": max_rows,
+                    },
+                    "summary": {
+                        "processed": processed,
+                        "created": created,
+                        "updated": updated,
+                        "point_resolved": point_resolved_total,
+                        "recetas_resolved": recetas_resolved_total,
+                        "skipped_low_sources": skipped_low_sources,
+                        "skipped_no_suggestion": skipped_no_suggestion,
+                        "skipped_low_score": skipped_low_score,
+                        "skipped_unresolved": skipped_unresolved,
+                        "skipped_invalid": skipped_invalid,
+                    },
+                },
+            )
         elif action == "reprocess_recetas_pending":
             result = _reprocess_recetas_pending_matching()
             messages.success(
