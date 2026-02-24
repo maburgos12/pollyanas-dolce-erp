@@ -3247,6 +3247,8 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
         resolved = 0
         created_aliases = 0
         updated_aliases = 0
+        preview_create_aliases = 0
+        preview_update_aliases = 0
         unchanged = 0
         skipped_no_suggestion = 0
         skipped_no_target = 0
@@ -3299,8 +3301,10 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
                     if dry_run:
                         if alias_obj is None:
                             action_name = "create_alias"
+                            preview_create_aliases += 1
                         elif alias_obj.insumo_id != insumo_target.id or alias_obj.nombre != alias_name[:250]:
                             action_name = "update_alias"
+                            preview_update_aliases += 1
                         else:
                             action_name = "noop_alias_exists"
                             unchanged += 1
@@ -3366,6 +3370,8 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
                     "resueltos": resolved,
                     "aliases_creados": created_aliases,
                     "aliases_actualizados": updated_aliases,
+                    "aliases_creados_preview": (preview_create_aliases if dry_run else created_aliases),
+                    "aliases_actualizados_preview": (preview_update_aliases if dry_run else updated_aliases),
                     "sin_cambio": unchanged,
                     "sin_sugerencia": skipped_no_suggestion,
                     "sin_insumo_objetivo": skipped_no_target,

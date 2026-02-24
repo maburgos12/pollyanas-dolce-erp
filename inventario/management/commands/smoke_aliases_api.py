@@ -247,6 +247,28 @@ class Command(BaseCommand):
             if key not in p_pag:
                 raise CommandError(f"Unificados sin pagination.{key}.")
 
+        resolve_dry = _http_json(
+            method="POST",
+            url=self._build_url(base_url, "/api/inventario/aliases/pendientes-unificados/resolver/"),
+            token=token,
+            payload={
+                "dry_run": True,
+                "min_sources": 2,
+                "score_min": 0,
+                "only_suggested": True,
+                "limit": 20,
+                "runs": 5,
+            },
+            timeout=timeout,
+            insecure=insecure,
+        )
+        self._assert_ok("Unificados resolver dry_run", resolve_dry, expected=200)
+        resolve_totals = resolve_dry.data.get("totales") or {}
+        if "aliases_creados_preview" not in resolve_totals:
+            raise CommandError("Resolver dry_run no devolvió totales.aliases_creados_preview.")
+        if "aliases_actualizados_preview" not in resolve_totals:
+            raise CommandError("Resolver dry_run no devolvió totales.aliases_actualizados_preview.")
+
         unificados_csv = _http_json(
             method="GET",
             url=self._build_url(
@@ -297,6 +319,10 @@ class Command(BaseCommand):
                     "status": unificados.status,
                     "summary": unificados.data.get("summary", {}),
                     "pagination": unificados.data.get("pagination", {}),
+                },
+                "resolver_dry_run": {
+                    "status": resolve_dry.status,
+                    "totales": resolve_totals,
                 },
                 "unificados_export_csv": {"status": unificados_csv.status},
                 "unificados_export_xlsx": {"status": unificados_xlsx.status},

@@ -1593,6 +1593,8 @@ class RecetasCosteoApiTests(TestCase):
         self.assertTrue(payload_dry["dry_run"])
         self.assertGreaterEqual(payload_dry["totales"]["resueltos"], 1)
         self.assertEqual(payload_dry["totales"]["aliases_creados"], 0)
+        self.assertGreaterEqual(payload_dry["totales"]["aliases_creados_preview"], 1)
+        self.assertGreaterEqual(payload_dry["totales"]["aliases_actualizados_preview"], 0)
         self.assertFalse(InsumoAlias.objects.filter(nombre_normalizado="harina pastelera premium").exists())
 
         resp_apply = self.client.post(
@@ -1605,6 +1607,10 @@ class RecetasCosteoApiTests(TestCase):
         self.assertFalse(payload_apply["dry_run"])
         self.assertGreaterEqual(payload_apply["totales"]["resueltos"], 1)
         self.assertGreaterEqual(payload_apply["totales"]["aliases_creados"], 1)
+        self.assertEqual(payload_apply["totales"]["aliases_creados_preview"], payload_apply["totales"]["aliases_creados"])
+        self.assertEqual(
+            payload_apply["totales"]["aliases_actualizados_preview"], payload_apply["totales"]["aliases_actualizados"]
+        )
         self.assertGreaterEqual(payload_apply["totales"]["point_resueltos"], 1)
         self.assertGreaterEqual(payload_apply["totales"]["recetas_resueltas"], 1)
         self.assertTrue(InsumoAlias.objects.filter(nombre_normalizado="harina pastelera premium", insumo=target).exists())
