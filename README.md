@@ -94,6 +94,7 @@ Sprint 1 entrega:
    TOKEN=<TOKEN_DRF> \
    ./scripts/smoke_integraciones_api.sh
    ```
+   Si tu Python local falla por certificados TLS en macOS, agrega `--insecure`.
    Opcional live (con efectos reales, requiere confirmación explícita):
    ```bash
    BASE_URL=https://pollyanas-dolce-erp-production.up.railway.app \

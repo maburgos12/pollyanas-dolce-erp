@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -25,6 +26,7 @@ def _http_json(
     token: str | None,
     payload: dict[str, Any] | None = None,
     timeout: int = 25,
+    insecure: bool = False,
 ) -> HttpResult:
     body = None
     headers = {"Accept": "application/json"}
@@ -34,8 +36,11 @@ def _http_json(
     if token:
         headers["Authorization"] = f"Token {token}"
     req = Request(url=url, data=body, method=method.upper(), headers=headers)
+    ssl_ctx = None
+    if insecure:
+        ssl_ctx = ssl._create_unverified_context()
     try:
-        with urlopen(req, timeout=timeout) as resp:
+        with urlopen(req, timeout=timeout, context=ssl_ctx) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             data = json.loads(raw) if raw else {}
             return HttpResult(status=int(resp.status), data=data, raw=raw)
@@ -72,6 +77,11 @@ class Command(BaseCommand):
             help="Contraseña para auth/token",
         )
         parser.add_argument("--timeout", type=int, default=25, help="Timeout HTTP por request en segundos")
+        parser.add_argument(
+            "--insecure",
+            action="store_true",
+            help="Desactiva validación TLS (solo diagnóstico/entornos controlados).",
+        )
         parser.add_argument("--live", action="store_true", help="Ejecuta también la corrida live (con efectos reales)")
         parser.add_argument(
             "--confirm-live",
@@ -97,7 +107,7 @@ class Command(BaseCommand):
                 f"{label} falló: status={result.status} esperado={expected}. detail={detail or result.raw[:200]}"
             )
 
-    def _get_token(self, base_url: str, username: str, password: str, timeout: int) -> str:
+    def _get_token(self, base_url: str, username: str, password: str, timeout: int, insecure: bool) -> str:
         if not username or not password:
             raise CommandError("Sin --token, debes enviar --username y --password.")
         auth_url = self._build_url(base_url, "/api/auth/token/")
@@ -107,6 +117,7 @@ class Command(BaseCommand):
             token=None,
             payload={"username": username, "password": password},
             timeout=timeout,
+            insecure=insecure,
         )
         self._assert_ok("Auth token", result, expected=200)
         token = str(result.data.get("token") or "").strip()
@@ -117,6 +128,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         base_url = str(options["base_url"]).strip()
         timeout = int(options["timeout"])
+        insecure = bool(options.get("insecure"))
         token = str(options["token"] or "").strip()
         username = str(options["username"] or "").strip()
         password = str(options["password"] or "").strip()
@@ -124,7 +136,13 @@ class Command(BaseCommand):
         confirm_live = str(options["confirm_live"] or "").strip().upper()
 
         if not token:
-            token = self._get_token(base_url=base_url, username=username, password=password, timeout=timeout)
+            token = self._get_token(
+                base_url=base_url,
+                username=username,
+                password=password,
+                timeout=timeout,
+                insecure=insecure,
+            )
             self.stdout.write(self.style.SUCCESS("Token obtenido por /api/auth/token/."))
 
         health = _http_json(
@@ -132,6 +150,7 @@ class Command(BaseCommand):
             url=self._build_url(base_url, "/health/"),
             token=None,
             timeout=timeout,
+            insecure=insecure,
         )
         self._assert_ok("Health", health, expected=200)
 
@@ -140,6 +159,7 @@ class Command(BaseCommand):
             url=self._build_url(base_url, "/api/integraciones/point/resumen/"),
             token=token,
             timeout=timeout,
+            insecure=insecure,
         )
         self._assert_ok("Resumen integraciones", resumen, expected=200)
 
@@ -152,6 +172,7 @@ class Command(BaseCommand):
             ),
             token=token,
             timeout=timeout,
+            insecure=insecure,
         )
         self._assert_ok("Historial operaciones", historial, expected=200)
 
@@ -165,6 +186,7 @@ class Command(BaseCommand):
                 "dry_run": True,
             },
             timeout=timeout,
+            insecure=insecure,
         )
         self._assert_ok("Deactivate dry_run", deactivate_dry, expected=200)
 
@@ -178,6 +200,7 @@ class Command(BaseCommand):
                 "dry_run": True,
             },
             timeout=timeout,
+            insecure=insecure,
         )
         self._assert_ok("Purge dry_run", purge_dry, expected=200)
 
@@ -193,6 +216,7 @@ class Command(BaseCommand):
                 "dry_run": True,
             },
             timeout=timeout,
+            insecure=insecure,
         )
         self._assert_ok("Maintenance dry_run", maintenance_dry, expected=200)
 
@@ -212,6 +236,7 @@ class Command(BaseCommand):
                     "dry_run": False,
                 },
                 timeout=timeout,
+                insecure=insecure,
             )
             self._assert_ok("Maintenance live", maintenance_live, expected=200)
 

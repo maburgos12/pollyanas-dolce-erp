@@ -27,6 +27,12 @@ TOKEN=<TOKEN_DRF> \
 ./scripts/smoke_integraciones_api.sh
 ```
 
+Si aparece error de certificados TLS en Python/macOS, ejecutar con:
+
+```bash
+./scripts/smoke_integraciones_api.sh --insecure
+```
+
 ### Opción comando Django
 
 ```bash
