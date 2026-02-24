@@ -439,6 +439,53 @@ def _read_cross_point_tipo(params) -> tuple[str, list[str] | None]:
     return point_tipo, point_tipos_filter
 
 
+def _read_cross_table_controls(params) -> tuple[int, int, str, str]:
+    cross_limit = int(_to_decimal(params.get("cross_limit"), "120"))
+    cross_limit = max(1, min(500, cross_limit))
+    cross_offset = int(_to_decimal(params.get("cross_offset"), "0"))
+    cross_offset = max(0, min(50000, cross_offset))
+
+    cross_sort_by = (params.get("cross_sort_by") or "sources_active").strip().lower()
+    allowed_sort = {
+        "sources_active",
+        "total_count",
+        "score_max",
+        "point_count",
+        "almacen_count",
+        "receta_count",
+        "nombre_muestra",
+        "nombre_normalizado",
+    }
+    if cross_sort_by not in allowed_sort:
+        cross_sort_by = "sources_active"
+
+    cross_sort_dir = (params.get("cross_sort_dir") or "desc").strip().lower()
+    if cross_sort_dir not in {"asc", "desc"}:
+        cross_sort_dir = "desc"
+
+    return cross_limit, cross_offset, cross_sort_by, cross_sort_dir
+
+
+def _sort_cross_rows(cross_rows: list[dict], *, sort_by: str, sort_dir: str) -> list[dict]:
+    allowed_sort = {
+        "sources_active": lambda row: int(row.get("sources_active") or 0),
+        "total_count": lambda row: int(row.get("total_count") or 0),
+        "score_max": lambda row: float(row.get("score_max") or 0.0),
+        "point_count": lambda row: int(row.get("point_count") or 0),
+        "almacen_count": lambda row: int(row.get("almacen_count") or 0),
+        "receta_count": lambda row: int(row.get("receta_count") or 0),
+        "nombre_muestra": lambda row: str(row.get("nombre_muestra") or "").lower(),
+        "nombre_normalizado": lambda row: str(row.get("nombre_normalizado") or "").lower(),
+    }
+    sort_key = allowed_sort.get(sort_by, allowed_sort["sources_active"])
+    reverse = sort_dir == "desc"
+    return sorted(
+        cross_rows,
+        key=lambda row: (sort_key(row), str(row.get("nombre_muestra") or "").lower()),
+        reverse=reverse,
+    )
+
+
 def _apply_cross_filters(
     unified_rows: list[dict],
     cross_q_norm: str,
@@ -1459,12 +1506,23 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             request.POST
         )
         cross_point_tipo_post, _ = _read_cross_point_tipo(request.POST)
+        cross_limit_post, cross_offset_post, cross_sort_by_post, cross_sort_dir_post = _read_cross_table_controls(
+            request.POST
+        )
         if cross_q_post:
             redirect_params["cross_q"] = cross_q_post
         if "cross_min_sources" in request.POST:
             redirect_params["cross_min_sources"] = cross_min_sources_post
         if "cross_score_min" in request.POST:
             redirect_params["cross_score_min"] = cross_score_min_post
+        if "cross_limit" in request.POST:
+            redirect_params["cross_limit"] = cross_limit_post
+        if "cross_offset" in request.POST:
+            redirect_params["cross_offset"] = cross_offset_post
+        if "cross_sort_by" in request.POST:
+            redirect_params["cross_sort_by"] = cross_sort_by_post
+        if "cross_sort_dir" in request.POST:
+            redirect_params["cross_sort_dir"] = cross_sort_dir_post
         if "cross_point_tipo" in request.POST:
             redirect_params["cross_point_tipo"] = cross_point_tipo_post
         if cross_only_suggested_post:
@@ -1566,12 +1624,18 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         cross_min_sources=cross_min_sources,
         cross_score_min=cross_score_min,
     )
+    cross_limit, cross_offset, cross_sort_by, cross_sort_dir = _read_cross_table_controls(request.GET)
+    cross_filtered_sorted_rows = _sort_cross_rows(
+        cross_filtered_rows,
+        sort_by=cross_sort_by,
+        sort_dir=cross_sort_dir,
+    )
 
     export_format = (request.GET.get("export") or "").strip().lower()
     if export_format == "cross_pending_csv":
-        return _export_cross_pending_csv(cross_filtered_rows)
+        return _export_cross_pending_csv(cross_filtered_sorted_rows)
     if export_format == "cross_pending_xlsx":
-        return _export_cross_pending_xlsx(cross_filtered_rows)
+        return _export_cross_pending_xlsx(cross_filtered_sorted_rows)
     if export_format in {"alias_template_csv", "alias_template_xlsx"}:
         return _export_alias_template(export_format)
     if export_format in {"alias_import_preview_csv", "alias_import_preview_xlsx"}:
@@ -1589,6 +1653,24 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
 
     import_preview = list(request.session.get("inventario_alias_import_preview", []))[:200]
     import_stats = request.session.get("inventario_alias_import_stats", {})
+    cross_rows_total = len(cross_filtered_sorted_rows)
+    cross_unified_rows = cross_filtered_sorted_rows[cross_offset : cross_offset + cross_limit]
+    cross_has_prev = cross_offset > 0
+    cross_has_next = (cross_offset + len(cross_unified_rows)) < cross_rows_total
+    cross_prev_offset = max(cross_offset - cross_limit, 0)
+    cross_next_offset = cross_offset + cross_limit if cross_has_next else cross_offset
+    cross_query_common = urlencode(
+        {
+            "cross_q": cross_q,
+            "cross_min_sources": cross_min_sources,
+            "cross_score_min": cross_score_min,
+            "cross_point_tipo": cross_point_tipo,
+            "cross_sort_by": cross_sort_by,
+            "cross_sort_dir": cross_sort_dir,
+            "cross_limit": cross_limit,
+            **({"cross_only_suggested": "1"} if cross_only_suggested else {}),
+        }
+    )
 
     context = {
         "q": q,
@@ -1621,15 +1703,25 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "cross_score_min": cross_score_min,
         "cross_point_tipo": cross_point_tipo,
         "cross_only_suggested": cross_only_suggested,
-        "cross_filtered_count": len(cross_filtered_rows),
+        "cross_filtered_count": len(cross_filtered_sorted_rows),
         "cross_total_count": len(unified_rows),
+        "cross_limit": cross_limit,
+        "cross_offset": cross_offset,
+        "cross_sort_by": cross_sort_by,
+        "cross_sort_dir": cross_sort_dir,
+        "cross_returned_count": len(cross_unified_rows),
+        "cross_has_prev": cross_has_prev,
+        "cross_has_next": cross_has_next,
+        "cross_prev_offset": cross_prev_offset,
+        "cross_next_offset": cross_next_offset,
+        "cross_query_common": cross_query_common,
         "cross_summary": {
             "point_unmatched": point_unmatched_count,
             "almacen_unmatched": len(pending_preview),
             "recetas_unmatched": receta_pending_lines,
             "overlaps": overlaps,
         },
-        "cross_unified_rows": cross_filtered_rows[:120],
+        "cross_unified_rows": cross_unified_rows,
         "alias_import_preview": import_preview,
         "alias_import_stats": import_stats,
     }

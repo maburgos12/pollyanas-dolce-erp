@@ -438,6 +438,10 @@ class InventarioAliasesPendingTests(TestCase):
                 "cross_min_sources": "2",
                 "cross_score_min": "90",
                 "cross_point_tipo": "PRODUCTO",
+                "cross_limit": "50",
+                "cross_offset": "100",
+                "cross_sort_by": "score_max",
+                "cross_sort_dir": "asc",
                 "cross_only_suggested": "1",
             },
         )
@@ -448,7 +452,57 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn("cross_min_sources=2", location)
         self.assertIn("cross_score_min=90.0", location)
         self.assertIn("cross_point_tipo=PRODUCTO", location)
+        self.assertIn("cross_limit=50", location)
+        self.assertIn("cross_offset=100", location)
+        self.assertIn("cross_sort_by=score_max", location)
+        self.assertIn("cross_sort_dir=asc", location)
         self.assertIn("cross_only_suggested=1", location)
+
+    def test_cross_unified_view_pagination_and_sort(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CROSS-PAG-01",
+            point_nombre="C Name",
+            fuzzy_score=85.0,
+            fuzzy_sugerencia="Sugerencia C",
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CROSS-PAG-02",
+            point_nombre="A Name",
+            fuzzy_score=85.0,
+            fuzzy_sugerencia="Sugerencia A",
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CROSS-PAG-03",
+            point_nombre="B Name",
+            fuzzy_score=85.0,
+            fuzzy_sugerencia="Sugerencia B",
+        )
+
+        response = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {
+                "cross_point_tipo": "INSUMO",
+                "cross_min_sources": "1",
+                "cross_limit": "1",
+                "cross_offset": "1",
+                "cross_sort_by": "nombre_muestra",
+                "cross_sort_dir": "asc",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["cross_limit"], 1)
+        self.assertEqual(response.context["cross_offset"], 1)
+        self.assertEqual(response.context["cross_sort_by"], "nombre_muestra")
+        self.assertEqual(response.context["cross_sort_dir"], "asc")
+        self.assertEqual(response.context["cross_returned_count"], 1)
+        self.assertTrue(response.context["cross_has_prev"])
+        self.assertTrue(response.context["cross_has_next"])
+        rows = response.context["cross_unified_rows"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["nombre_muestra"], "B Name")
 
     def test_bulk_reassign_resolves_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)

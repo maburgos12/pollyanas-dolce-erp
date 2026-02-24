@@ -72,8 +72,8 @@
   <div class="toolbar" style="margin-top:10px;">
     <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}?tipo=INSUMO">Revisar pendientes Point</a>
     <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Revisar pendientes Recetas</a>
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_csv&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes CSV</a>
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_xlsx&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_csv&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}&cross_sort_by={{ cross_sort_by }}&cross_sort_dir={{ cross_sort_dir }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes CSV</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_xlsx&cross_q={{ cross_q|urlencode }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}&cross_sort_by={{ cross_sort_by }}&cross_sort_dir={{ cross_sort_dir }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes XLSX</a>
     {% if can_manage_inventario %}
     <form method="post" class="inline-form">
       {% csrf_token %}
@@ -92,6 +92,10 @@
     <input type="hidden" name="cross_min_sources" value="{{ cross_min_sources }}">
     <input type="hidden" name="cross_score_min" value="{{ cross_score_min }}">
     <input type="hidden" name="cross_point_tipo" value="{{ cross_point_tipo }}">
+    <input type="hidden" name="cross_limit" value="{{ cross_limit }}">
+    <input type="hidden" name="cross_offset" value="{{ cross_offset }}">
+    <input type="hidden" name="cross_sort_by" value="{{ cross_sort_by }}">
+    <input type="hidden" name="cross_sort_dir" value="{{ cross_sort_dir }}">
     {% if cross_only_suggested %}
     <input type="hidden" name="cross_only_suggested" value="1">
     {% endif %}
@@ -107,6 +111,7 @@
   {% endif %}
 
   <form method="get" class="form-grid-auto" style="margin-top:6px; margin-bottom:10px;">
+    <input type="hidden" name="cross_offset" value="0">
     <input class="input-field" type="text" name="cross_q" value="{{ cross_q }}" placeholder="Buscar nombre/sugerencia...">
     <input class="input-field" type="number" name="cross_min_sources" min="1" max="3" step="1" value="{{ cross_min_sources }}">
     <input class="input-field" type="number" name="cross_score_min" min="0" max="100" step="0.1" value="{{ cross_score_min }}">
@@ -116,11 +121,39 @@
       <option value="PRODUCTO" {% if cross_point_tipo == "PRODUCTO" %}selected{% endif %}>Point · Productos</option>
       <option value="TODOS" {% if cross_point_tipo == "TODOS" or cross_point_tipo == "ALL" %}selected{% endif %}>Point · Todos</option>
     </select>
+    <select class="input-field" name="cross_sort_by">
+      <option value="sources_active" {% if cross_sort_by == "sources_active" %}selected{% endif %}>Orden · Fuentes activas</option>
+      <option value="score_max" {% if cross_sort_by == "score_max" %}selected{% endif %}>Orden · Score máximo</option>
+      <option value="total_count" {% if cross_sort_by == "total_count" %}selected{% endif %}>Orden · Repeticiones</option>
+      <option value="nombre_muestra" {% if cross_sort_by == "nombre_muestra" %}selected{% endif %}>Orden · Nombre</option>
+      <option value="point_count" {% if cross_sort_by == "point_count" %}selected{% endif %}>Orden · Point</option>
+      <option value="almacen_count" {% if cross_sort_by == "almacen_count" %}selected{% endif %}>Orden · Almacén</option>
+      <option value="receta_count" {% if cross_sort_by == "receta_count" %}selected{% endif %}>Orden · Recetas</option>
+    </select>
+    <select class="input-field" name="cross_sort_dir">
+      <option value="desc" {% if cross_sort_dir == "desc" %}selected{% endif %}>Descendente</option>
+      <option value="asc" {% if cross_sort_dir == "asc" %}selected{% endif %}>Ascendente</option>
+    </select>
+    <select class="input-field" name="cross_limit">
+      <option value="50" {% if cross_limit == 50 %}selected{% endif %}>50 filas</option>
+      <option value="120" {% if cross_limit == 120 %}selected{% endif %}>120 filas</option>
+      <option value="250" {% if cross_limit == 250 %}selected{% endif %}>250 filas</option>
+      <option value="500" {% if cross_limit == 500 %}selected{% endif %}>500 filas</option>
+    </select>
     <label class="inline-check"><input type="checkbox" name="cross_only_suggested" {% if cross_only_suggested %}checked{% endif %}>Solo con sugerencia</label>
     <button class="btn btn-secondary" type="submit">Filtrar homologación</button>
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Limpiar filtros</a>
   </form>
-  <p class="muted">Mostrando {{ cross_filtered_count }} de {{ cross_total_count }} registros cruzados.</p>
+  <p class="muted">Mostrando {{ cross_returned_count }} de {{ cross_filtered_count }} filtrados (total cruzado: {{ cross_total_count }}).</p>
+  <div class="toolbar" style="margin-top:6px; margin-bottom:10px;">
+    {% if cross_has_prev %}
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_common }}&cross_offset={{ cross_prev_offset }}">← Anterior</a>
+    {% endif %}
+    <span class="muted">Offset {{ cross_offset }} · Límite {{ cross_limit }}</span>
+    {% if cross_has_next %}
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_common }}&cross_offset={{ cross_next_offset }}">Siguiente →</a>
+    {% endif %}
+  </div>
 
   {% if cross_unified_rows %}
   <div class="table-responsive" style="margin-top:10px;">
@@ -162,6 +195,10 @@
                 <input type="hidden" name="cross_min_sources" value="{{ cross_min_sources }}">
                 <input type="hidden" name="cross_score_min" value="{{ cross_score_min }}">
                 <input type="hidden" name="cross_point_tipo" value="{{ cross_point_tipo }}">
+                <input type="hidden" name="cross_limit" value="{{ cross_limit }}">
+                <input type="hidden" name="cross_offset" value="{{ cross_offset }}">
+                <input type="hidden" name="cross_sort_by" value="{{ cross_sort_by }}">
+                <input type="hidden" name="cross_sort_dir" value="{{ cross_sort_dir }}">
                 {% if cross_only_suggested %}
                 <input type="hidden" name="cross_only_suggested" value="1">
                 {% endif %}
@@ -479,6 +516,10 @@
                 <input type="hidden" name="cross_min_sources" value="{{ cross_min_sources }}">
                 <input type="hidden" name="cross_score_min" value="{{ cross_score_min }}">
                 <input type="hidden" name="cross_point_tipo" value="{{ cross_point_tipo }}">
+                <input type="hidden" name="cross_limit" value="{{ cross_limit }}">
+                <input type="hidden" name="cross_offset" value="{{ cross_offset }}">
+                <input type="hidden" name="cross_sort_by" value="{{ cross_sort_by }}">
+                <input type="hidden" name="cross_sort_dir" value="{{ cross_sort_dir }}">
                 {% if cross_only_suggested %}
                 <input type="hidden" name="cross_only_suggested" value="1">
                 {% endif %}
