@@ -1696,6 +1696,62 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             **({"cross_only_suggested": "1"} if cross_only_suggested else {}),
         }
     )
+    cross_query_source_todos = urlencode(
+        {
+            "cross_q": cross_q,
+            "cross_source": "TODOS",
+            "cross_min_sources": cross_min_sources,
+            "cross_score_min": cross_score_min,
+            "cross_point_tipo": cross_point_tipo,
+            "cross_sort_by": cross_sort_by,
+            "cross_sort_dir": cross_sort_dir,
+            "cross_limit": cross_limit,
+            "cross_offset": 0,
+            **({"cross_only_suggested": "1"} if cross_only_suggested else {}),
+        }
+    )
+    cross_query_source_almacen = urlencode(
+        {
+            "cross_q": cross_q,
+            "cross_source": "ALMACEN",
+            "cross_min_sources": cross_min_sources,
+            "cross_score_min": cross_score_min,
+            "cross_point_tipo": cross_point_tipo,
+            "cross_sort_by": cross_sort_by,
+            "cross_sort_dir": cross_sort_dir,
+            "cross_limit": cross_limit,
+            "cross_offset": 0,
+            **({"cross_only_suggested": "1"} if cross_only_suggested else {}),
+        }
+    )
+    cross_query_source_point = urlencode(
+        {
+            "cross_q": cross_q,
+            "cross_source": "POINT",
+            "cross_min_sources": cross_min_sources,
+            "cross_score_min": cross_score_min,
+            "cross_point_tipo": cross_point_tipo,
+            "cross_sort_by": cross_sort_by,
+            "cross_sort_dir": cross_sort_dir,
+            "cross_limit": cross_limit,
+            "cross_offset": 0,
+            **({"cross_only_suggested": "1"} if cross_only_suggested else {}),
+        }
+    )
+    cross_query_source_recetas = urlencode(
+        {
+            "cross_q": cross_q,
+            "cross_source": "RECETAS",
+            "cross_min_sources": cross_min_sources,
+            "cross_score_min": cross_score_min,
+            "cross_point_tipo": cross_point_tipo,
+            "cross_sort_by": cross_sort_by,
+            "cross_sort_dir": cross_sort_dir,
+            "cross_limit": cross_limit,
+            "cross_offset": 0,
+            **({"cross_only_suggested": "1"} if cross_only_suggested else {}),
+        }
+    )
 
     context = {
         "q": q,
@@ -1742,6 +1798,10 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "cross_prev_offset": cross_prev_offset,
         "cross_next_offset": cross_next_offset,
         "cross_query_common": cross_query_common,
+        "cross_query_source_todos": cross_query_source_todos,
+        "cross_query_source_almacen": cross_query_source_almacen,
+        "cross_query_source_point": cross_query_source_point,
+        "cross_query_source_recetas": cross_query_source_recetas,
         "cross_summary": {
             "point_unmatched": point_unmatched_count,
             "almacen_unmatched": len(pending_preview),

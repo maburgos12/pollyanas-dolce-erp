@@ -604,6 +604,10 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(receta_stats["receta_rows"], len(rows_recetas))
         self.assertEqual(receta_stats["point_rows"], 0)
         self.assertEqual(receta_stats["almacen_rows"], 0)
+        self.assertIn("cross_source=POINT", response_point.context["cross_query_source_point"])
+        self.assertIn("cross_source=ALMACEN", response_point.context["cross_query_source_almacen"])
+        self.assertIn("cross_source=RECETAS", response_point.context["cross_query_source_recetas"])
+        self.assertIn("cross_source=TODOS", response_point.context["cross_query_source_todos"])
 
     def test_bulk_reassign_resolves_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)

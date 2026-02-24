@@ -158,6 +158,12 @@
     <span class="badge badge-primary">Recetas: {{ cross_source_stats.receta_rows }}</span>
     <span class="badge badge-warning">Multifuente: {{ cross_source_stats.multi_source_rows }}</span>
   </div>
+  <div class="toolbar" style="margin-top:4px; margin-bottom:8px;">
+    <a class="btn btn-small {% if cross_source == 'TODOS' or cross_source == 'ALL' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_todos }}">Origen: Todos</a>
+    <a class="btn btn-small {% if cross_source == 'ALMACEN' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_almacen }}">Origen: Almacén</a>
+    <a class="btn btn-small {% if cross_source == 'POINT' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_point }}">Origen: Point</a>
+    <a class="btn btn-small {% if cross_source == 'RECETAS' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_recetas }}">Origen: Recetas</a>
+  </div>
   <div class="toolbar" style="margin-top:6px; margin-bottom:10px;">
     {% if cross_has_prev %}
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_common }}&cross_offset={{ cross_prev_offset }}">← Anterior</a>
