@@ -665,6 +665,71 @@ class RecetasCosteoApiTests(TestCase):
         resp = self.client.get(url, {"point_tipo": "CUALQUIERA"})
         self.assertEqual(resp.status_code, 400)
 
+    def test_endpoint_inventario_aliases_pendientes_export_csv_xlsx(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-EXP-01",
+            point_nombre="Harina export",
+            method="FUZZY",
+            fuzzy_score=90.0,
+            fuzzy_sugerencia="Harina API",
+        )
+        receta_pending = Receta.objects.create(
+            nombre="Receta pending export",
+            sheet_name="Insumos pending export",
+            hash_contenido="hash-api-pending-export-001",
+        )
+        LineaReceta.objects.create(
+            receta=receta_pending,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Harina export",
+            cantidad=Decimal("1.0"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_score=88.0,
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[
+                {
+                    "nombre_origen": "Harina export",
+                    "nombre_normalizado": "harina export",
+                    "suggestion": "Harina API",
+                    "score": 90,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                }
+            ],
+        )
+
+        url = reverse("api_inventario_aliases_pendientes")
+        resp_csv = self.client.get(url, {"export": "csv", "limit": 50})
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        self.assertIn("inventario_aliases_pendientes.csv", resp_csv["Content-Disposition"])
+        csv_body = resp_csv.content.decode("utf-8")
+        self.assertIn("seccion,id,tipo,codigo,nombre", csv_body)
+        self.assertIn("Harina export", csv_body)
+
+        resp_xlsx = self.client.get(url, {"export": "xlsx", "limit": 50})
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertIn("inventario_aliases_pendientes.xlsx", resp_xlsx["Content-Disposition"])
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_inventario_aliases_pendientes_export_invalido(self):
+        url = reverse("api_inventario_aliases_pendientes")
+        resp = self.client.get(url, {"export": "pdf"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
+
     def test_endpoint_inventario_aliases_pendientes_unificados(self):
         nombre_cross = "Harina pastelera premium"
         PointPendingMatch.objects.create(

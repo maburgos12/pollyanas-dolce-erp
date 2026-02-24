@@ -2698,6 +2698,154 @@ class InventarioAliasesMassReassignView(APIView):
 class InventarioAliasesPendientesView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _fmt_datetime(value):
+        if not value:
+            return ""
+        try:
+            if timezone.is_aware(value):
+                value = timezone.localtime(value)
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return str(value)
+
+    def _export_csv(self, almacen_rows: list[dict], point_rows: list[dict], recetas_rows: list[dict]) -> HttpResponse:
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="inventario_aliases_pendientes.csv"'
+        writer = csv.writer(response)
+        writer.writerow(
+            [
+                "seccion",
+                "id",
+                "tipo",
+                "codigo",
+                "nombre",
+                "nombre_normalizado",
+                "sugerencia",
+                "score",
+                "metodo",
+                "extra",
+            ]
+        )
+        for row in almacen_rows:
+            writer.writerow(
+                [
+                    "almacen",
+                    row.get("run_id", ""),
+                    "",
+                    "",
+                    row.get("nombre_origen", ""),
+                    row.get("nombre_normalizado", ""),
+                    row.get("sugerencia", ""),
+                    row.get("score", ""),
+                    row.get("metodo", ""),
+                    row.get("fuente", ""),
+                ]
+            )
+        for row in point_rows:
+            writer.writerow(
+                [
+                    "point",
+                    row.get("id", ""),
+                    row.get("tipo", ""),
+                    row.get("point_codigo", ""),
+                    row.get("point_nombre", ""),
+                    "",
+                    row.get("sugerencia", ""),
+                    row.get("score", ""),
+                    row.get("metodo", ""),
+                    "",
+                ]
+            )
+        for row in recetas_rows:
+            writer.writerow(
+                [
+                    "recetas",
+                    row.get("id", ""),
+                    row.get("estatus", ""),
+                    "",
+                    row.get("insumo_texto", ""),
+                    row.get("nombre_normalizado", ""),
+                    "",
+                    row.get("score", ""),
+                    row.get("metodo", ""),
+                    row.get("receta", ""),
+                ]
+            )
+        return response
+
+    def _export_xlsx(self, almacen_rows: list[dict], point_rows: list[dict], recetas_rows: list[dict]) -> HttpResponse:
+        wb = Workbook()
+        ws_alm = wb.active
+        ws_alm.title = "almacen"
+        ws_alm.append(
+            [
+                "run_id",
+                "run_started_at",
+                "nombre_origen",
+                "nombre_normalizado",
+                "sugerencia",
+                "score",
+                "metodo",
+                "fuente",
+            ]
+        )
+        for row in almacen_rows:
+            ws_alm.append(
+                [
+                    row.get("run_id", ""),
+                    self._fmt_datetime(row.get("run_started_at")),
+                    row.get("nombre_origen", ""),
+                    row.get("nombre_normalizado", ""),
+                    row.get("sugerencia", ""),
+                    row.get("score", 0),
+                    row.get("metodo", ""),
+                    row.get("fuente", ""),
+                ]
+            )
+
+        ws_point = wb.create_sheet("point")
+        ws_point.append(["id", "tipo", "point_codigo", "point_nombre", "sugerencia", "score", "metodo", "actualizado_en"])
+        for row in point_rows:
+            ws_point.append(
+                [
+                    row.get("id", ""),
+                    row.get("tipo", ""),
+                    row.get("point_codigo", ""),
+                    row.get("point_nombre", ""),
+                    row.get("sugerencia", ""),
+                    row.get("score", 0),
+                    row.get("metodo", ""),
+                    self._fmt_datetime(row.get("actualizado_en")),
+                ]
+            )
+
+        ws_rec = wb.create_sheet("recetas")
+        ws_rec.append(["id", "receta_id", "receta", "insumo_texto", "nombre_normalizado", "score", "metodo", "estatus"])
+        for row in recetas_rows:
+            ws_rec.append(
+                [
+                    row.get("id", ""),
+                    row.get("receta_id", ""),
+                    row.get("receta", ""),
+                    row.get("insumo_texto", ""),
+                    row.get("nombre_normalizado", ""),
+                    row.get("score", 0),
+                    row.get("metodo", ""),
+                    row.get("estatus", ""),
+                ]
+            )
+
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="inventario_aliases_pendientes.xlsx"'
+        return response
+
     def get(self, request):
         if not can_view_inventario(request.user):
             return Response(
@@ -2707,6 +2855,7 @@ class InventarioAliasesPendientesView(APIView):
 
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=400)
         runs_to_scan = _parse_bounded_int(request.GET.get("runs", 5), default=5, min_value=1, max_value=30)
+        export = (request.GET.get("export") or "").strip().lower()
         point_tipo = (request.GET.get("point_tipo") or PointPendingMatch.TIPO_INSUMO).strip().upper()
         valid_point_tipos = {
             PointPendingMatch.TIPO_INSUMO,
@@ -2715,6 +2864,11 @@ class InventarioAliasesPendientesView(APIView):
             "TODOS",
             "ALL",
         }
+        if export not in {"", "csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if point_tipo not in valid_point_tipos:
             return Response(
                 {"detail": "point_tipo inválido. Usa INSUMO, PROVEEDOR, PRODUCTO o TODOS."},
@@ -2791,10 +2945,14 @@ class InventarioAliasesPendientesView(APIView):
             }
             for linea in recetas_qs[:limit]
         ]
+        if export == "csv":
+            return self._export_csv(almacen_rows, point_rows, recetas_rows)
+        if export == "xlsx":
+            return self._export_xlsx(almacen_rows, point_rows, recetas_rows)
 
         return Response(
             {
-                "filters": {"limit": limit, "runs": runs_to_scan, "point_tipo": point_tipo},
+                "filters": {"limit": limit, "runs": runs_to_scan, "point_tipo": point_tipo, "export": export},
                 "totales": {
                     "almacen": len(almacen_rows),
                     "point": point_total,
