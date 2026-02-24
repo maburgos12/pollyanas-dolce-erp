@@ -2854,6 +2854,7 @@ class InventarioAliasesPendientesView(APIView):
             )
 
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=400)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=50000)
         runs_to_scan = _parse_bounded_int(request.GET.get("runs", 5), default=5, min_value=1, max_value=30)
         runs_detail = _parse_bounded_int(request.GET.get("runs_detail", 5), default=5, min_value=1, max_value=20)
         include_runs = _parse_bool(request.GET.get("include_runs"), default=True)
@@ -2886,7 +2887,7 @@ class InventarioAliasesPendientesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        almacen_rows: list[dict] = []
+        almacen_rows_all: list[dict] = []
         recent_runs: list[dict] = []
         sync_runs = list(
             AlmacenSyncRun.objects.only(
@@ -2917,7 +2918,7 @@ class InventarioAliasesPendientesView(APIView):
                 nombre_origen = str((row or {}).get("nombre_origen") or "").strip()
                 if not nombre_origen:
                     continue
-                almacen_rows.append(
+                almacen_rows_all.append(
                     {
                         "run_id": run.id,
                         "run_started_at": run.started_at,
@@ -2929,18 +2930,15 @@ class InventarioAliasesPendientesView(APIView):
                         "fuente": str((row or {}).get("fuente") or "ALMACEN"),
                     }
                 )
-                if len(almacen_rows) >= limit:
-                    break
-            if len(almacen_rows) >= limit:
-                break
         if q_norm:
-            almacen_rows = [
+            almacen_rows_all = [
                 row
-                for row in almacen_rows
+                for row in almacen_rows_all
                 if q_norm in normalizar_nombre(row.get("nombre_origen") or "")
                 or q_norm in normalizar_nombre(row.get("nombre_normalizado") or "")
                 or q_norm in normalizar_nombre(row.get("sugerencia") or "")
             ]
+        almacen_total = len(almacen_rows_all)
 
         point_qs = PointPendingMatch.objects.order_by("-fuzzy_score", "point_nombre")
         if point_tipo not in {"TODOS", "ALL"}:
@@ -2961,6 +2959,7 @@ class InventarioAliasesPendientesView(APIView):
                 .order_by("tipo")
             )
         }
+        point_source_qs = point_qs if export else point_qs[offset : offset + limit]
         point_rows = [
             {
                 "id": p.id,
@@ -2972,7 +2971,7 @@ class InventarioAliasesPendientesView(APIView):
                 "metodo": p.method or "",
                 "actualizado_en": p.actualizado_en,
             }
-            for p in point_qs[:limit]
+            for p in point_source_qs
         ]
 
         recetas_qs = (
@@ -2987,6 +2986,7 @@ class InventarioAliasesPendientesView(APIView):
                 | Q(insumo_texto__icontains=q)
             )
         recetas_total = recetas_qs.count()
+        recetas_source_qs = recetas_qs if export else recetas_qs[offset : offset + limit]
         recetas_rows = [
             {
                 "id": linea.id,
@@ -2998,33 +2998,122 @@ class InventarioAliasesPendientesView(APIView):
                 "metodo": linea.match_method or "",
                 "estatus": linea.match_status,
             }
-            for linea in recetas_qs[:limit]
+            for linea in recetas_source_qs
         ]
+        almacen_rows = list(almacen_rows_all if export else almacen_rows_all[offset : offset + limit])
         if source == "ALMACEN":
             point_rows = []
             recetas_rows = []
             point_total = 0
             point_totals_by_tipo = {}
             recetas_total = 0
+            almacen_total = len(almacen_rows_all)
         elif source == "POINT":
             almacen_rows = []
             recetas_rows = []
+            almacen_total = 0
             recetas_total = 0
         elif source == "RECETAS":
             almacen_rows = []
             point_rows = []
+            almacen_total = 0
             point_total = 0
             point_totals_by_tipo = {}
 
         if export == "csv":
-            return self._export_csv(almacen_rows, point_rows, recetas_rows)
+            export_almacen = list(almacen_rows_all if source in {"TODOS", "ALL", "ALMACEN"} else [])
+            export_point = point_rows
+            export_recetas = recetas_rows
+            if source in {"TODOS", "ALL"}:
+                export_point = [
+                    {
+                        "id": p.id,
+                        "tipo": p.tipo,
+                        "point_codigo": p.point_codigo,
+                        "point_nombre": p.point_nombre,
+                        "sugerencia": p.fuzzy_sugerencia or "",
+                        "score": float(p.fuzzy_score or 0),
+                        "metodo": p.method or "",
+                        "actualizado_en": p.actualizado_en,
+                    }
+                    for p in point_qs
+                ]
+                export_recetas = [
+                    {
+                        "id": linea.id,
+                        "receta_id": linea.receta_id,
+                        "receta": linea.receta.nombre,
+                        "insumo_texto": linea.insumo_texto or "",
+                        "nombre_normalizado": normalizar_nombre(linea.insumo_texto or ""),
+                        "score": float(linea.match_score or 0),
+                        "metodo": linea.match_method or "",
+                        "estatus": linea.match_status,
+                    }
+                    for linea in recetas_qs
+                ]
+            if source == "POINT":
+                export_almacen = []
+                export_recetas = []
+            elif source == "RECETAS":
+                export_almacen = []
+                export_point = []
+            return self._export_csv(export_almacen, export_point, export_recetas)
         if export == "xlsx":
-            return self._export_xlsx(almacen_rows, point_rows, recetas_rows)
+            export_almacen = list(almacen_rows_all if source in {"TODOS", "ALL", "ALMACEN"} else [])
+            export_point = point_rows
+            export_recetas = recetas_rows
+            if source in {"TODOS", "ALL"}:
+                export_point = [
+                    {
+                        "id": p.id,
+                        "tipo": p.tipo,
+                        "point_codigo": p.point_codigo,
+                        "point_nombre": p.point_nombre,
+                        "sugerencia": p.fuzzy_sugerencia or "",
+                        "score": float(p.fuzzy_score or 0),
+                        "metodo": p.method or "",
+                        "actualizado_en": p.actualizado_en,
+                    }
+                    for p in point_qs
+                ]
+                export_recetas = [
+                    {
+                        "id": linea.id,
+                        "receta_id": linea.receta_id,
+                        "receta": linea.receta.nombre,
+                        "insumo_texto": linea.insumo_texto or "",
+                        "nombre_normalizado": normalizar_nombre(linea.insumo_texto or ""),
+                        "score": float(linea.match_score or 0),
+                        "metodo": linea.match_method or "",
+                        "estatus": linea.match_status,
+                    }
+                    for linea in recetas_qs
+                ]
+            if source == "POINT":
+                export_almacen = []
+                export_recetas = []
+            elif source == "RECETAS":
+                export_almacen = []
+                export_point = []
+            return self._export_xlsx(export_almacen, export_point, export_recetas)
+
+        def _section_pagination(total: int, returned: int) -> dict:
+            has_next = (offset + returned) < total
+            has_prev = offset > 0
+            return {
+                "total": total,
+                "returned": returned,
+                "has_next": has_next,
+                "next_offset": offset + limit if has_next else None,
+                "has_prev": has_prev,
+                "prev_offset": max(offset - limit, 0) if has_prev else None,
+            }
 
         return Response(
             {
                 "filters": {
                     "limit": limit,
+                    "offset": offset,
                     "runs": runs_to_scan,
                     "runs_detail": runs_detail,
                     "include_runs": include_runs,
@@ -3035,10 +3124,17 @@ class InventarioAliasesPendientesView(APIView):
                 },
                 "recent_runs": recent_runs,
                 "totales": {
-                    "almacen": len(almacen_rows),
+                    "almacen": almacen_total,
                     "point": point_total,
                     "point_by_tipo": point_totals_by_tipo,
                     "recetas": recetas_total,
+                },
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "almacen": _section_pagination(almacen_total, len(almacen_rows)),
+                    "point": _section_pagination(point_total, len(point_rows)),
+                    "recetas": _section_pagination(recetas_total, len(recetas_rows)),
                 },
                 "items": {
                     "almacen": almacen_rows,

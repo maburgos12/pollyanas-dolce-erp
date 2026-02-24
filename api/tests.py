@@ -783,6 +783,82 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["recent_runs"], [])
         self.assertFalse(payload["filters"]["include_runs"])
 
+    def test_endpoint_inventario_aliases_pendientes_offset_pagination(self):
+        for idx in range(1, 4):
+            PointPendingMatch.objects.create(
+                tipo=PointPendingMatch.TIPO_INSUMO,
+                point_codigo=f"PT-PAG-{idx}",
+                point_nombre=f"Insumo point {idx}",
+                method="FUZZY",
+                fuzzy_score=80.0 + idx,
+                fuzzy_sugerencia="Harina API",
+            )
+            receta_pending = Receta.objects.create(
+                nombre=f"Receta paginada {idx}",
+                sheet_name="Insumos paginados",
+                hash_contenido=f"hash-api-pag-{idx}",
+            )
+            LineaReceta.objects.create(
+                receta=receta_pending,
+                posicion=1,
+                insumo=None,
+                insumo_texto=f"Insumo receta {idx}",
+                cantidad=Decimal("1.0"),
+                unidad=self.unidad,
+                unidad_texto="kg",
+                match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+                match_method=LineaReceta.MATCH_FUZZY,
+                match_score=81.0 + idx,
+            )
+
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[
+                {
+                    "nombre_origen": "Insumo almacen 1",
+                    "nombre_normalizado": "insumo almacen 1",
+                    "suggestion": "Harina API",
+                    "score": 80,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                },
+                {
+                    "nombre_origen": "Insumo almacen 2",
+                    "nombre_normalizado": "insumo almacen 2",
+                    "suggestion": "Harina API",
+                    "score": 81,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                },
+                {
+                    "nombre_origen": "Insumo almacen 3",
+                    "nombre_normalizado": "insumo almacen 3",
+                    "suggestion": "Harina API",
+                    "score": 82,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                },
+            ],
+        )
+
+        url = reverse("api_inventario_aliases_pendientes")
+        resp = self.client.get(url, {"limit": 1, "offset": 1, "runs": 5, "point_tipo": "TODOS"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["pagination"]["offset"], 1)
+        self.assertEqual(payload["pagination"]["limit"], 1)
+        self.assertGreaterEqual(payload["totales"]["almacen"], 3)
+        self.assertGreaterEqual(payload["totales"]["point"], 3)
+        self.assertGreaterEqual(payload["totales"]["recetas"], 3)
+        self.assertLessEqual(len(payload["items"]["almacen"]), 1)
+        self.assertLessEqual(len(payload["items"]["point"]), 1)
+        self.assertLessEqual(len(payload["items"]["recetas"]), 1)
+        self.assertTrue(payload["pagination"]["almacen"]["has_prev"])
+        self.assertTrue(payload["pagination"]["point"]["has_prev"])
+        self.assertTrue(payload["pagination"]["recetas"]["has_prev"])
+
     def test_endpoint_inventario_aliases_pendientes_export_csv_xlsx(self):
         PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,

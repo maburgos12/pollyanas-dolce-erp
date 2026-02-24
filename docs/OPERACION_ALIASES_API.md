@@ -27,6 +27,7 @@ Si hay problema TLS/certificados en macOS:
 
 El smoke valida:
 - `GET /api/inventario/aliases/pendientes/` (estructura, filtros y `recent_runs`)
+- `GET /api/inventario/aliases/pendientes/?limit=...&offset=...` (paginación por sección)
 - `GET /api/inventario/aliases/pendientes/?q=...&source=POINT`
 - `GET /api/inventario/aliases/pendientes-unificados/?source=POINT&min_sources=1`
 - `GET /api/inventario/aliases/pendientes/?export=csv|xlsx`

@@ -161,7 +161,7 @@ class Command(BaseCommand):
             url=self._build_url(
                 base_url,
                 "/api/inventario/aliases/pendientes/",
-                query={"limit": 20, "runs": 5, "runs_detail": 3, "include_runs": 1, "point_tipo": "TODOS"},
+                query={"limit": 20, "offset": 0, "runs": 5, "runs_detail": 3, "include_runs": 1, "point_tipo": "TODOS"},
             ),
             token=token,
             timeout=timeout,
@@ -169,11 +169,17 @@ class Command(BaseCommand):
         )
         self._assert_ok("Aliases pendientes", pendientes, expected=200)
         filters = pendientes.data.get("filters") or {}
-        for key in ("limit", "runs", "runs_detail", "include_runs", "source", "point_tipo"):
+        for key in ("limit", "offset", "runs", "runs_detail", "include_runs", "source", "point_tipo"):
             if key not in filters:
                 raise CommandError(f"Aliases pendientes sin filters.{key}.")
         if "recent_runs" not in pendientes.data:
             raise CommandError("Aliases pendientes sin bloque recent_runs.")
+        if "pagination" not in pendientes.data:
+            raise CommandError("Aliases pendientes sin bloque pagination.")
+        pagination = pendientes.data.get("pagination") or {}
+        for key in ("limit", "offset", "almacen", "point", "recetas"):
+            if key not in pagination:
+                raise CommandError(f"Aliases pendientes sin pagination.{key}.")
         if "totales" not in pendientes.data or "items" not in pendientes.data:
             raise CommandError("Aliases pendientes no devolvió estructura base totales/items.")
 
