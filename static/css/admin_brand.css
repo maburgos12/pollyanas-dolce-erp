@@ -96,12 +96,28 @@ div.breadcrumbs a {
 .module h2,
 .module caption,
 .inline-group h2 {
-  background: var(--rosa);
-  color: var(--vino);
+  background: #f3dde6;
+  color: #5e1438;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.2px;
   border-bottom: 1px solid var(--rosa-deep);
+}
+
+#content-main .module caption a,
+#content-main .module h2 a,
+#content-main .module caption a.section,
+#content-main .module h2 a.section {
+  color: #5e1438 !important;
+  font-weight: 800;
+  text-shadow: none !important;
+}
+
+#content-main .module caption a:hover,
+#content-main .module h2 a:hover,
+#content-main .module caption a.section:hover,
+#content-main .module h2 a.section:hover {
+  color: #7d1e49 !important;
 }
 
 #content-main .module table,
