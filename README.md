@@ -43,6 +43,10 @@ Sprint 1 entrega:
 - API: GET /api/inventario/aliases/pendientes-unificados/ (tablero unificado de pendientes cross-fuente con filtros)
 - API: POST /api/inventario/aliases/pendientes-unificados/resolver/ (auto-resuelve alias cross-fuente con dry_run/commit)
 - API: GET /api/integraciones/point/resumen/ (KPI de homologación Point: insumos, recetas, proveedores y pendientes)
+- API: POST /api/integraciones/point/clientes/desactivar-inactivos/ (operación de clientes API inactivos; soporta `dry_run`)
+- API: POST /api/integraciones/point/logs/purgar/ (limpieza de logs API por retención; soporta `dry_run`)
+- API: POST /api/integraciones/point/mantenimiento/ejecutar/ (operación combinada: desactivación + purga; soporta `dry_run`)
+- API: GET /api/integraciones/point/operaciones/historial/ (bitácora operativa de integraciones con filtros `action`, `date_from`, `date_to`, `limit`)
 - API: POST /api/inventario/point-pendientes/resolver/ (resolver/descartar pendientes Point por insumo, producto o proveedor)
 - API: GET /api/compras/solicitudes/ (listado de solicitudes con filtros, estatus y presupuesto estimado; soporta `limit`/`offset`, `sort_by`/`sort_dir` y totales filtrados)
 - API: POST /api/compras/solicitudes/import-preview/ (vista previa de carga masiva de solicitudes en JSON)
@@ -84,6 +88,18 @@ Sprint 1 entrega:
    ```bash
    docker compose exec web python manage.py generar_token_api --username admin
    ```
+6) Smoke operativo de integraciones API:
+   ```bash
+   BASE_URL=https://pollyanas-dolce-erp-production.up.railway.app \
+   TOKEN=<TOKEN_DRF> \
+   ./scripts/smoke_integraciones_api.sh
+   ```
+   Opcional live (con efectos reales, requiere confirmación explícita):
+   ```bash
+   BASE_URL=https://pollyanas-dolce-erp-production.up.railway.app \
+   TOKEN=<TOKEN_DRF> \
+   ./scripts/smoke_integraciones_api.sh --live --confirm-live YES
+   ```
 
 ## Opción B: correr sin Docker (dev)
 - Configura un Postgres local y variables de entorno similares a `.env.example`
@@ -102,6 +118,8 @@ Sprint 1 entrega:
 - `recetas/utils/importador.py` (parser de Excel)
 - `recetas/utils/matching.py` (matching)
 - `logs/` (reportes CSV del import)
+- `scripts/smoke_integraciones_api.sh` (smoke operacional de endpoints de integraciones)
+- `integraciones/management/commands/smoke_integraciones_api.py` (comando smoke con salida JSON)
 
 ## Notas
 - El matching y captura operativa en UI ya incluyen búsqueda/autocomplete para insumos.
