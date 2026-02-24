@@ -1648,6 +1648,12 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         sort_by=cross_sort_by,
         sort_dir=cross_sort_dir,
     )
+    cross_source_stats = {
+        "point_rows": sum(1 for row in cross_filtered_sorted_rows if int(row.get("point_count") or 0) > 0),
+        "almacen_rows": sum(1 for row in cross_filtered_sorted_rows if int(row.get("almacen_count") or 0) > 0),
+        "receta_rows": sum(1 for row in cross_filtered_sorted_rows if int(row.get("receta_count") or 0) > 0),
+        "multi_source_rows": sum(1 for row in cross_filtered_sorted_rows if int(row.get("sources_active") or 0) >= 2),
+    }
 
     export_format = (request.GET.get("export") or "").strip().lower()
     if export_format == "cross_pending_csv":
@@ -1722,6 +1728,7 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "cross_score_min": cross_score_min,
         "cross_point_tipo": cross_point_tipo,
         "cross_source": cross_source,
+        "cross_source_stats": cross_source_stats,
         "cross_only_suggested": cross_only_suggested,
         "cross_filtered_count": len(cross_filtered_sorted_rows),
         "cross_total_count": len(unified_rows),

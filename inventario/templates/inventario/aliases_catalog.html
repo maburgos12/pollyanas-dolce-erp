@@ -152,6 +152,12 @@
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Limpiar filtros</a>
   </form>
   <p class="muted">Mostrando {{ cross_returned_count }} de {{ cross_filtered_count }} filtrados (total cruzado: {{ cross_total_count }}).</p>
+  <div class="toolbar" style="margin-top:6px; margin-bottom:4px;">
+    <span class="badge badge-primary">Point: {{ cross_source_stats.point_rows }}</span>
+    <span class="badge badge-primary">Almacén: {{ cross_source_stats.almacen_rows }}</span>
+    <span class="badge badge-primary">Recetas: {{ cross_source_stats.receta_rows }}</span>
+    <span class="badge badge-warning">Multifuente: {{ cross_source_stats.multi_source_rows }}</span>
+  </div>
   <div class="toolbar" style="margin-top:6px; margin-bottom:10px;">
     {% if cross_has_prev %}
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_common }}&cross_offset={{ cross_prev_offset }}">← Anterior</a>

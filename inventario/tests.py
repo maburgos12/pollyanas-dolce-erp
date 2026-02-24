@@ -582,6 +582,10 @@ class InventarioAliasesPendingTests(TestCase):
         rows_point = response_point.context["cross_unified_rows"]
         self.assertGreaterEqual(len(rows_point), 1)
         self.assertTrue(all(int(row.get("point_count") or 0) > 0 for row in rows_point))
+        point_stats = response_point.context["cross_source_stats"]
+        self.assertEqual(point_stats["point_rows"], len(rows_point))
+        self.assertEqual(point_stats["almacen_rows"], 0)
+        self.assertEqual(point_stats["receta_rows"], 0)
 
         response_recetas = self.client.get(
             reverse("inventario:aliases_catalog"),
@@ -596,6 +600,10 @@ class InventarioAliasesPendingTests(TestCase):
         rows_recetas = response_recetas.context["cross_unified_rows"]
         self.assertGreaterEqual(len(rows_recetas), 1)
         self.assertTrue(all(int(row.get("receta_count") or 0) > 0 for row in rows_recetas))
+        receta_stats = response_recetas.context["cross_source_stats"]
+        self.assertEqual(receta_stats["receta_rows"], len(rows_recetas))
+        self.assertEqual(receta_stats["point_rows"], 0)
+        self.assertEqual(receta_stats["almacen_rows"], 0)
 
     def test_bulk_reassign_resolves_and_cleans_pending(self):
         unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
