@@ -27,6 +27,15 @@ TOKEN=<TOKEN_DRF> \
 ./scripts/smoke_integraciones_api.sh
 ```
 
+Si no tienes token DRF, el mismo script acepta usuario/contraseña y obtiene token automáticamente:
+
+```bash
+BASE_URL=https://pollyanas-dolce-erp-production.up.railway.app \
+USERNAME=admin \
+PASSWORD='<TU_PASSWORD>' \
+./scripts/smoke_integraciones_api.sh
+```
+
 Si aparece error de certificados TLS en Python/macOS, ejecutar con:
 
 ```bash
@@ -39,6 +48,15 @@ Si aparece error de certificados TLS en Python/macOS, ejecutar con:
 .venv/bin/python manage.py smoke_integraciones_api \
   --base-url https://pollyanas-dolce-erp-production.up.railway.app \
   --token <TOKEN_DRF>
+```
+
+Alternativa equivalente sin token pre-generado:
+
+```bash
+.venv/bin/python manage.py smoke_integraciones_api \
+  --base-url https://pollyanas-dolce-erp-production.up.railway.app \
+  --username admin \
+  --password '<TU_PASSWORD>'
 ```
 
 El smoke valida:
