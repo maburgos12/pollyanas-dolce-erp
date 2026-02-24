@@ -2822,6 +2822,7 @@ class InventarioAliasesPendientesUnificadosView(APIView):
             )
 
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=600)
+        offset = _parse_bounded_int(request.GET.get("offset", 0), default=0, min_value=0, max_value=50000)
         runs_to_scan = _parse_bounded_int(request.GET.get("runs", 5), default=5, min_value=1, max_value=30)
         q = (request.GET.get("q") or "").strip()
         q_norm = normalizar_nombre(q)
@@ -2829,10 +2830,37 @@ class InventarioAliasesPendientesUnificadosView(APIView):
         min_sources = _parse_bounded_int(request.GET.get("min_sources", 1), default=1, min_value=1, max_value=3)
         score_min = float(_to_decimal(request.GET.get("score_min"), Decimal("0")))
         score_min = max(0.0, min(100.0, score_min))
+        sort_by = (request.GET.get("sort_by") or "sources_active").strip().lower()
+        sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
         export = (request.GET.get("export") or "").strip().lower()
         if export not in {"", "csv", "xlsx"}:
             return Response(
                 {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        allowed_sort = {
+            "sources_active": lambda row: int(row.get("sources_active") or 0),
+            "total_count": lambda row: int(row.get("total_count") or 0),
+            "score_max": lambda row: float(row.get("score_max") or 0.0),
+            "point_count": lambda row: int(row.get("point_count") or 0),
+            "almacen_count": lambda row: int(row.get("almacen_count") or 0),
+            "receta_count": lambda row: int(row.get("receta_count") or 0),
+            "nombre_muestra": lambda row: str(row.get("nombre_muestra") or "").lower(),
+            "nombre_normalizado": lambda row: str(row.get("nombre_normalizado") or "").lower(),
+        }
+        if sort_by not in allowed_sort:
+            return Response(
+                {
+                    "detail": (
+                        "sort_by inválido. Usa sources_active, total_count, score_max, point_count, "
+                        "almacen_count, receta_count, nombre_muestra o nombre_normalizado."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_dir inválido. Usa asc o desc."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -2862,23 +2890,37 @@ class InventarioAliasesPendientesUnificadosView(APIView):
             cross_min_sources=min_sources,
             cross_score_min=score_min,
         )
+        sort_key = allowed_sort[sort_by]
+        reverse = sort_dir == "desc"
+        filtered_rows = sorted(
+            filtered_rows,
+            key=lambda row: (sort_key(row), str(row.get("nombre_muestra") or "").lower()),
+            reverse=reverse,
+        )
         if export == "csv":
             return _export_cross_pending_csv(filtered_rows)
         if export == "xlsx":
             return _export_cross_pending_xlsx(filtered_rows)
 
         overlap_2_plus = sum(1 for row in unified_rows if int(row.get("sources_active") or 0) >= 2)
-        items = filtered_rows[:limit]
+        items = filtered_rows[offset : offset + limit]
+        has_next = (offset + len(items)) < len(filtered_rows)
+        has_prev = offset > 0
+        next_offset = offset + limit if has_next else None
+        prev_offset = max(offset - limit, 0) if has_prev else None
 
         return Response(
             {
                 "filters": {
                     "limit": limit,
+                    "offset": offset,
                     "runs": runs_to_scan,
                     "q": q,
                     "min_sources": min_sources,
                     "score_min": round(score_min, 2),
                     "only_suggested": only_suggested,
+                    "sort_by": sort_by,
+                    "sort_dir": sort_dir,
                     "export": export,
                 },
                 "totales": {
@@ -2891,6 +2933,14 @@ class InventarioAliasesPendientesUnificadosView(APIView):
                     "overlap_2_plus": overlap_2_plus,
                     "point_unmatched": point_unmatched_count,
                     "recetas_pending_lines": receta_pending_lines,
+                },
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "has_next": has_next,
+                    "next_offset": next_offset,
+                    "has_prev": has_prev,
+                    "prev_offset": prev_offset,
                 },
                 "items": items,
             },

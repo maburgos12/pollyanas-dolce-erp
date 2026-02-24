@@ -717,6 +717,8 @@ class RecetasCosteoApiTests(TestCase):
         row = payload["items"][0]
         self.assertGreaterEqual(int(row["sources_active"]), 2)
         self.assertEqual(row["nombre_normalizado"], "harina pastelera premium")
+        self.assertIn("pagination", payload)
+        self.assertEqual(payload["pagination"]["offset"], 0)
 
     def test_endpoint_inventario_aliases_pendientes_unificados_export_csv_xlsx(self):
         nombre_cross = "Harina pastelera premium"
@@ -778,11 +780,88 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("inventario_homologacion_pendientes_", resp_xlsx["Content-Disposition"])
         self.assertTrue(resp_xlsx.content.startswith(b"PK"))
 
+    def test_endpoint_inventario_aliases_pendientes_unificados_offset_sort(self):
+        rows = [
+            ("Nuez entera", "nuez entera"),
+            ("Azucar glass", "azucar glass"),
+            ("Mantequilla premium", "mantequilla premium"),
+        ]
+        for idx, (nombre, norm) in enumerate(rows, start=1):
+            PointPendingMatch.objects.create(
+                tipo=PointPendingMatch.TIPO_INSUMO,
+                point_codigo=f"PT-OFF-{idx}",
+                point_nombre=nombre,
+                method="FUZZY",
+                fuzzy_score=90.0,
+                fuzzy_sugerencia=self.insumo.nombre,
+            )
+            receta_cross = Receta.objects.create(
+                nombre=f"Receta offset {idx}",
+                sheet_name="Insumos Cross Offset",
+                hash_contenido=f"hash-api-cross-offset-{idx}",
+            )
+            LineaReceta.objects.create(
+                receta=receta_cross,
+                posicion=1,
+                insumo=None,
+                insumo_texto=nombre,
+                cantidad=Decimal("1.0"),
+                unidad=self.unidad,
+                unidad_texto="kg",
+                match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+                match_method=LineaReceta.MATCH_FUZZY,
+                match_score=85.0,
+            )
+            AlmacenSyncRun.objects.create(
+                source=AlmacenSyncRun.SOURCE_MANUAL,
+                status=AlmacenSyncRun.STATUS_OK,
+                pending_preview=[
+                    {
+                        "nombre_origen": nombre,
+                        "nombre_normalizado": norm,
+                        "suggestion": self.insumo.nombre,
+                        "score": 91,
+                        "method": "FUZZY",
+                        "fuente": "ALMACEN",
+                    }
+                ],
+            )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados")
+        resp = self.client.get(
+            url,
+            {
+                "min_sources": 2,
+                "sort_by": "nombre_muestra",
+                "sort_dir": "asc",
+                "limit": 1,
+                "offset": 1,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["sort_by"], "nombre_muestra")
+        self.assertEqual(payload["filters"]["sort_dir"], "asc")
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["totales"]["returned"], 1)
+        self.assertTrue(payload["pagination"]["has_prev"])
+        self.assertTrue(payload["pagination"]["has_next"])
+        self.assertEqual(payload["items"][0]["nombre_muestra"], "Mantequilla premium")
+
     def test_endpoint_inventario_aliases_pendientes_unificados_export_invalid(self):
         url = reverse("api_inventario_aliases_pendientes_unificados")
         resp = self.client.get(url, {"export": "pdf"})
         self.assertEqual(resp.status_code, 400)
         self.assertIn("export", resp.json()["detail"].lower())
+
+    def test_endpoint_inventario_aliases_pendientes_unificados_sort_invalid(self):
+        url = reverse("api_inventario_aliases_pendientes_unificados")
+        resp = self.client.get(url, {"sort_by": "ruido"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("sort_by", resp.json()["detail"].lower())
+        resp_dir = self.client.get(url, {"sort_dir": "up"})
+        self.assertEqual(resp_dir.status_code, 400)
+        self.assertIn("sort_dir", resp_dir.json()["detail"].lower())
 
     def test_endpoint_integraciones_point_resumen(self):
         api_client, _raw = PublicApiClient.create_with_generated_key(nombre="API Integraciones Test", descripcion="")
