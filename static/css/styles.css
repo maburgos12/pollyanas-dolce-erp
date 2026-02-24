@@ -45,6 +45,7 @@ h4 {
   left: 0;
   bottom: 0;
   width: 252px;
+  z-index: 1100;
   background: linear-gradient(180deg, var(--vino) 0%, #6B1740 100%);
   color: #fff;
   display: flex;
@@ -152,14 +153,18 @@ h4 {
 .main-content {
   margin-left: 252px;
   min-height: 100vh;
+  position: relative;
+  z-index: 1;
 }
 
 .header {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: 1200;
+  isolation: isolate;
   background: #fff;
   border-bottom: 1px solid var(--rosa);
+  box-shadow: 0 1px 0 rgba(139, 34, 82, 0.08);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -874,6 +879,8 @@ tr:hover,
 .compras-solicitudes .card,
 .plan-produccion-shell .card,
 .recipe-detail-shell .card {
+  position: relative;
+  z-index: 1;
   border-radius: 12px;
 }
 
@@ -904,6 +911,8 @@ tr:hover,
 .compras-solicitudes .table-responsive,
 .plan-produccion-shell .table-responsive,
 .recipe-detail-shell .table-responsive {
+  position: relative;
+  z-index: 1;
   border: 1px solid var(--rosa);
   border-radius: 10px;
   background: #fff;
