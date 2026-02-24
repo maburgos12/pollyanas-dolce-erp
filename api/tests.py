@@ -1784,6 +1784,53 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("source", str(resp.json()).lower())
 
+    def test_endpoint_inventario_aliases_pendientes_unificados_resolver_offset_sort(self):
+        target = Insumo.objects.create(nombre="Azucar API Target", unidad_base=self.unidad, activo=True)
+        for idx, nombre in enumerate(["Nuez Point", "Azucar Point", "Mantequilla Point"], start=1):
+            PointPendingMatch.objects.create(
+                tipo=PointPendingMatch.TIPO_INSUMO,
+                point_codigo=f"PT-CROSS-RSLV-SORT-{idx}",
+                point_nombre=nombre,
+                method="FUZZY",
+                fuzzy_score=90.0 + idx,
+                fuzzy_sugerencia=target.nombre,
+            )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados_resolver")
+        resp = self.client.post(
+            url,
+            {
+                "dry_run": True,
+                "source": "POINT",
+                "min_sources": 1,
+                "sort_by": "nombre_muestra",
+                "sort_dir": "asc",
+                "offset": 1,
+                "limit": 1,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["offset"], 1)
+        self.assertEqual(payload["filters"]["sort_by"], "nombre_muestra")
+        self.assertEqual(payload["filters"]["sort_dir"], "asc")
+        self.assertEqual(payload["totales"]["candidatos_filtrados"], 3)
+        self.assertEqual(payload["totales"]["candidatos_pagina"], 1)
+        self.assertEqual(payload["totales"]["procesados"], 1)
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["nombre_muestra"], "Mantequilla Point")
+
+    def test_endpoint_inventario_aliases_pendientes_unificados_resolver_sort_invalid(self):
+        url = reverse("api_inventario_aliases_pendientes_unificados_resolver")
+        resp = self.client.post(
+            url,
+            {"dry_run": True, "sort_by": "ruido"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("sort_by", str(resp.json()).lower())
+
     def test_endpoint_inventario_point_pendientes_resolver_insumos(self):
         pending = PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,

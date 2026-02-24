@@ -30,7 +30,7 @@ El smoke valida:
 - `GET /api/inventario/aliases/pendientes/?limit=...&offset=...` (paginación por sección)
 - `GET /api/inventario/aliases/pendientes/?q=...&source=POINT`
 - `GET /api/inventario/aliases/pendientes-unificados/?source=POINT&min_sources=1`
-- `POST /api/inventario/aliases/pendientes-unificados/resolver/` en `dry_run` con `source=POINT`
+- `POST /api/inventario/aliases/pendientes-unificados/resolver/` en `dry_run` con `source=POINT`, `sort_by`, `sort_dir`, `offset`, `limit`
 - `GET /api/inventario/aliases/pendientes/?export=csv|xlsx`
 - `GET /api/inventario/aliases/pendientes-unificados/` (filtros y paginación)
 - `GET /api/inventario/aliases/pendientes-unificados/?export=csv|xlsx`

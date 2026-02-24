@@ -266,6 +266,17 @@ class InventarioPointPendingResolveSerializer(serializers.Serializer):
 
 class InventarioCrossPendientesResolveSerializer(serializers.Serializer):
     SOURCE_CHOICES = ("TODOS", "ALL", "ALMACEN", "POINT", "RECETAS")
+    SORT_BY_CHOICES = (
+        "sources_active",
+        "total_count",
+        "score_max",
+        "point_count",
+        "almacen_count",
+        "receta_count",
+        "nombre_muestra",
+        "nombre_normalizado",
+    )
+    SORT_DIR_CHOICES = ("asc", "desc")
     nombres = serializers.ListField(
         child=serializers.CharField(max_length=250),
         required=False,
@@ -275,8 +286,11 @@ class InventarioCrossPendientesResolveSerializer(serializers.Serializer):
     q = serializers.CharField(required=False, allow_blank=True, default="")
     runs = serializers.IntegerField(required=False, min_value=1, max_value=30, default=5)
     limit = serializers.IntegerField(required=False, min_value=1, max_value=800, default=300)
+    offset = serializers.IntegerField(required=False, min_value=0, max_value=50000, default=0)
     min_sources = serializers.IntegerField(required=False, min_value=1, max_value=3, default=2)
     source = serializers.ChoiceField(required=False, choices=SOURCE_CHOICES, default="TODOS")
+    sort_by = serializers.ChoiceField(required=False, choices=SORT_BY_CHOICES, default="sources_active")
+    sort_dir = serializers.ChoiceField(required=False, choices=SORT_DIR_CHOICES, default="desc")
     score_min = serializers.FloatField(required=False, default=0)
     only_suggested = serializers.BooleanField(required=False, default=True)
     dry_run = serializers.BooleanField(required=False, default=True)

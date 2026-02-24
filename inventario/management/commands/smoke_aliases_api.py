@@ -279,6 +279,9 @@ class Command(BaseCommand):
                 "score_min": 0,
                 "only_suggested": True,
                 "source": "POINT",
+                "sort_by": "score_max",
+                "sort_dir": "desc",
+                "offset": 0,
                 "limit": 20,
                 "runs": 5,
             },
@@ -290,6 +293,12 @@ class Command(BaseCommand):
         resolve_filters = resolve_dry.data.get("filters") or {}
         if str(resolve_filters.get("source") or "") != "POINT":
             raise CommandError("Resolver dry_run no devolvió source=POINT en filters.")
+        if str(resolve_filters.get("sort_by") or "") != "score_max":
+            raise CommandError("Resolver dry_run no devolvió sort_by=score_max en filters.")
+        if str(resolve_filters.get("sort_dir") or "") != "desc":
+            raise CommandError("Resolver dry_run no devolvió sort_dir=desc en filters.")
+        if int(resolve_filters.get("offset") or -1) != 0:
+            raise CommandError("Resolver dry_run no devolvió offset=0 en filters.")
         if "aliases_creados_preview" not in resolve_totals:
             raise CommandError("Resolver dry_run no devolvió totales.aliases_creados_preview.")
         if "aliases_actualizados_preview" not in resolve_totals:

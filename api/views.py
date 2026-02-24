@@ -3313,10 +3313,13 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
         data = ser.validated_data
 
         limit = int(data.get("limit") or 300)
+        offset = int(data.get("offset") or 0)
         runs_to_scan = int(data.get("runs") or 5)
         q = str(data.get("q") or "").strip()
         q_norm = normalizar_nombre(q)
         source = str(data.get("source") or "TODOS").strip().upper()
+        sort_by = str(data.get("sort_by") or "sources_active").strip().lower()
+        sort_dir = str(data.get("sort_dir") or "desc").strip().lower()
         min_sources = int(data.get("min_sources") or 2)
         score_min = float(data.get("score_min") or 0)
         score_min = max(0.0, min(100.0, score_min))
@@ -3360,7 +3363,24 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
 
         if selected_norms:
             filtered_rows = [row for row in filtered_rows if (row.get("nombre_normalizado") or "") in selected_norms]
-        rows_to_process = filtered_rows[:limit]
+        allowed_sort = {
+            "sources_active": lambda row: int(row.get("sources_active") or 0),
+            "total_count": lambda row: int(row.get("total_count") or 0),
+            "score_max": lambda row: float(row.get("score_max") or 0.0),
+            "point_count": lambda row: int(row.get("point_count") or 0),
+            "almacen_count": lambda row: int(row.get("almacen_count") or 0),
+            "receta_count": lambda row: int(row.get("receta_count") or 0),
+            "nombre_muestra": lambda row: str(row.get("nombre_muestra") or "").lower(),
+            "nombre_normalizado": lambda row: str(row.get("nombre_normalizado") or "").lower(),
+        }
+        sort_key = allowed_sort[sort_by]
+        reverse = sort_dir == "desc"
+        filtered_rows = sorted(
+            filtered_rows,
+            key=lambda row: (sort_key(row), str(row.get("nombre_muestra") or "").lower()),
+            reverse=reverse,
+        )
+        rows_to_process = filtered_rows[offset : offset + limit]
 
         processed = 0
         resolved = 0
@@ -3478,14 +3498,18 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
                     "q": q,
                     "runs": runs_to_scan,
                     "limit": limit,
+                    "offset": offset,
                     "source": source,
                     "min_sources": min_sources,
                     "score_min": round(score_min, 2),
                     "only_suggested": only_suggested,
+                    "sort_by": sort_by,
+                    "sort_dir": sort_dir,
                     "selected_names_count": len(selected_norms),
                 },
                 "totales": {
                     "candidatos_filtrados": len(filtered_rows),
+                    "candidatos_pagina": len(rows_to_process),
                     "procesados": processed,
                     "resueltos": resolved,
                     "aliases_creados": created_aliases,
