@@ -40,7 +40,7 @@ Sprint 1 entrega:
 - API: GET/POST /api/inventario/aliases/ (catálogo de alias y alta/actualización)
 - API: POST /api/inventario/aliases/reasignar/ (reasignación masiva de alias a insumo oficial)
 - API: GET /api/inventario/aliases/pendientes/ (pendientes de homologación: almacén, Point y recetas)
-- API: GET /api/inventario/aliases/pendientes-unificados/ (tablero unificado de pendientes cross-fuente con filtros)
+- API: GET /api/inventario/aliases/pendientes-unificados/ (tablero unificado de pendientes cross-fuente con filtros y export `csv|xlsx`)
 - API: POST /api/inventario/aliases/pendientes-unificados/resolver/ (auto-resuelve alias cross-fuente con dry_run/commit)
 - API: GET /api/integraciones/point/resumen/ (KPI de homologación Point: insumos, recetas, proveedores y pendientes)
 - API: POST /api/integraciones/point/clientes/desactivar-inactivos/ (operación de clientes API inactivos; soporta `dry_run`)

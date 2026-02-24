@@ -63,6 +63,8 @@ from inventario.views import (
     _apply_ajuste,
     _apply_cross_filters,
     _build_cross_unified_rows,
+    _export_cross_pending_csv,
+    _export_cross_pending_xlsx,
     _build_pending_grouped,
     _resolve_cross_source_with_alias,
 )
@@ -2827,6 +2829,12 @@ class InventarioAliasesPendientesUnificadosView(APIView):
         min_sources = _parse_bounded_int(request.GET.get("min_sources", 1), default=1, min_value=1, max_value=3)
         score_min = float(_to_decimal(request.GET.get("score_min"), Decimal("0")))
         score_min = max(0.0, min(100.0, score_min))
+        export = (request.GET.get("export") or "").strip().lower()
+        if export not in {"", "csv", "xlsx"}:
+            return Response(
+                {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         pending_rows: list[dict] = []
         sync_runs = list(AlmacenSyncRun.objects.only("id", "started_at", "pending_preview").order_by("-started_at")[:runs_to_scan])
@@ -2854,6 +2862,10 @@ class InventarioAliasesPendientesUnificadosView(APIView):
             cross_min_sources=min_sources,
             cross_score_min=score_min,
         )
+        if export == "csv":
+            return _export_cross_pending_csv(filtered_rows)
+        if export == "xlsx":
+            return _export_cross_pending_xlsx(filtered_rows)
 
         overlap_2_plus = sum(1 for row in unified_rows if int(row.get("sources_active") or 0) >= 2)
         items = filtered_rows[:limit]
@@ -2867,6 +2879,7 @@ class InventarioAliasesPendientesUnificadosView(APIView):
                     "min_sources": min_sources,
                     "score_min": round(score_min, 2),
                     "only_suggested": only_suggested,
+                    "export": export,
                 },
                 "totales": {
                     "runs_scanned": len(sync_runs),

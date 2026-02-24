@@ -718,6 +718,72 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(int(row["sources_active"]), 2)
         self.assertEqual(row["nombre_normalizado"], "harina pastelera premium")
 
+    def test_endpoint_inventario_aliases_pendientes_unificados_export_csv_xlsx(self):
+        nombre_cross = "Harina pastelera premium"
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CROSS-EXP-01",
+            point_nombre=nombre_cross,
+            method="FUZZY",
+            fuzzy_score=92.0,
+            fuzzy_sugerencia=self.insumo.nombre,
+        )
+        receta_cross = Receta.objects.create(
+            nombre="Receta Cross Export",
+            sheet_name="Insumos Cross Export",
+            hash_contenido="hash-api-cross-export-001",
+        )
+        LineaReceta.objects.create(
+            receta=receta_cross,
+            posicion=1,
+            insumo=None,
+            insumo_texto=nombre_cross,
+            cantidad=Decimal("1.0"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_score=86.0,
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[
+                {
+                    "nombre_origen": nombre_cross,
+                    "nombre_normalizado": "harina pastelera premium",
+                    "suggestion": self.insumo.nombre,
+                    "score": 90,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                }
+            ],
+        )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados")
+        resp_csv = self.client.get(url, {"export": "csv", "min_sources": 2})
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv["Content-Type"])
+        self.assertIn("inventario_homologacion_pendientes_", resp_csv["Content-Disposition"])
+        csv_body = resp_csv.content.decode("utf-8")
+        self.assertIn("nombre_muestra,nombre_normalizado", csv_body)
+        self.assertIn("harina pastelera premium", csv_body.lower())
+
+        resp_xlsx = self.client.get(url, {"export": "xlsx", "min_sources": 2})
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp_xlsx["Content-Type"],
+        )
+        self.assertIn("inventario_homologacion_pendientes_", resp_xlsx["Content-Disposition"])
+        self.assertTrue(resp_xlsx.content.startswith(b"PK"))
+
+    def test_endpoint_inventario_aliases_pendientes_unificados_export_invalid(self):
+        url = reverse("api_inventario_aliases_pendientes_unificados")
+        resp = self.client.get(url, {"export": "pdf"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("export", resp.json()["detail"].lower())
+
     def test_endpoint_integraciones_point_resumen(self):
         api_client, _raw = PublicApiClient.create_with_generated_key(nombre="API Integraciones Test", descripcion="")
         PublicApiAccessLog.objects.create(
