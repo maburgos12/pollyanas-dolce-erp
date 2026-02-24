@@ -922,6 +922,14 @@ tr:hover,
   min-width: 1180px;
 }
 
+.page-compras-solicitudes .header {
+  position: static;
+}
+
+.page-compras-solicitudes .main-content {
+  overflow-x: clip;
+}
+
 .recipe-detail-shell .recipe-actions {
   gap: 6px;
 }
