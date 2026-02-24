@@ -2855,6 +2855,9 @@ class InventarioAliasesPendientesView(APIView):
 
         limit = _parse_bounded_int(request.GET.get("limit", 120), default=120, min_value=1, max_value=400)
         runs_to_scan = _parse_bounded_int(request.GET.get("runs", 5), default=5, min_value=1, max_value=30)
+        q = (request.GET.get("q") or "").strip()
+        q_norm = normalizar_nombre(q)
+        source = (request.GET.get("source") or "TODOS").strip().upper()
         export = (request.GET.get("export") or "").strip().lower()
         point_tipo = (request.GET.get("point_tipo") or PointPendingMatch.TIPO_INSUMO).strip().upper()
         valid_point_tipos = {
@@ -2864,9 +2867,15 @@ class InventarioAliasesPendientesView(APIView):
             "TODOS",
             "ALL",
         }
+        valid_sources = {"TODOS", "ALL", "ALMACEN", "POINT", "RECETAS"}
         if export not in {"", "csv", "xlsx"}:
             return Response(
                 {"detail": "export inválido. Usa csv o xlsx."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if source not in valid_sources:
+            return Response(
+                {"detail": "source inválido. Usa ALMACEN, POINT, RECETAS o TODOS."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if point_tipo not in valid_point_tipos:
@@ -2898,10 +2907,25 @@ class InventarioAliasesPendientesView(APIView):
                     break
             if len(almacen_rows) >= limit:
                 break
+        if q_norm:
+            almacen_rows = [
+                row
+                for row in almacen_rows
+                if q_norm in normalizar_nombre(row.get("nombre_origen") or "")
+                or q_norm in normalizar_nombre(row.get("nombre_normalizado") or "")
+                or q_norm in normalizar_nombre(row.get("sugerencia") or "")
+            ]
 
         point_qs = PointPendingMatch.objects.order_by("-fuzzy_score", "point_nombre")
         if point_tipo not in {"TODOS", "ALL"}:
             point_qs = point_qs.filter(tipo=point_tipo)
+        if q_norm:
+            point_qs = point_qs.filter(
+                Q(point_nombre__icontains=q)
+                | Q(point_codigo__icontains=q)
+                | Q(fuzzy_sugerencia__icontains=q)
+                | Q(tipo__icontains=q)
+            )
         point_total = point_qs.count()
         point_totals_by_tipo = {
             row["tipo"]: row["count"]
@@ -2931,6 +2955,11 @@ class InventarioAliasesPendientesView(APIView):
             .select_related("receta")
             .order_by("-match_score", "receta__nombre", "posicion")
         )
+        if q_norm:
+            recetas_qs = recetas_qs.filter(
+                Q(receta__nombre__icontains=q)
+                | Q(insumo_texto__icontains=q)
+            )
         recetas_total = recetas_qs.count()
         recetas_rows = [
             {
@@ -2945,6 +2974,22 @@ class InventarioAliasesPendientesView(APIView):
             }
             for linea in recetas_qs[:limit]
         ]
+        if source == "ALMACEN":
+            point_rows = []
+            recetas_rows = []
+            point_total = 0
+            point_totals_by_tipo = {}
+            recetas_total = 0
+        elif source == "POINT":
+            almacen_rows = []
+            recetas_rows = []
+            recetas_total = 0
+        elif source == "RECETAS":
+            almacen_rows = []
+            point_rows = []
+            point_total = 0
+            point_totals_by_tipo = {}
+
         if export == "csv":
             return self._export_csv(almacen_rows, point_rows, recetas_rows)
         if export == "xlsx":
@@ -2952,7 +2997,14 @@ class InventarioAliasesPendientesView(APIView):
 
         return Response(
             {
-                "filters": {"limit": limit, "runs": runs_to_scan, "point_tipo": point_tipo, "export": export},
+                "filters": {
+                    "limit": limit,
+                    "runs": runs_to_scan,
+                    "q": q,
+                    "source": source,
+                    "point_tipo": point_tipo,
+                    "export": export,
+                },
                 "totales": {
                     "almacen": len(almacen_rows),
                     "point": point_total,

@@ -665,6 +665,69 @@ class RecetasCosteoApiTests(TestCase):
         resp = self.client.get(url, {"point_tipo": "CUALQUIERA"})
         self.assertEqual(resp.status_code, 400)
 
+    def test_endpoint_inventario_aliases_pendientes_filters_q_and_source(self):
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-FILTER-01",
+            point_nombre="Vainilla premium",
+            method="EXACT",
+            fuzzy_score=100.0,
+            fuzzy_sugerencia="Vainilla",
+        )
+        receta_pending = Receta.objects.create(
+            nombre="Receta filtro pendientes",
+            sheet_name="Insumos filtro",
+            hash_contenido="hash-api-pending-filter-001",
+        )
+        LineaReceta.objects.create(
+            receta=receta_pending,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Vainilla crema",
+            cantidad=Decimal("1.0"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_score=85.0,
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[
+                {
+                    "nombre_origen": "Vainilla extra",
+                    "nombre_normalizado": "vainilla extra",
+                    "suggestion": "Vainilla",
+                    "score": 91,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                }
+            ],
+        )
+
+        url = reverse("api_inventario_aliases_pendientes")
+        resp = self.client.get(url, {"q": "vainilla", "source": "POINT", "point_tipo": "TODOS", "limit": 50})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["filters"]["source"], "POINT")
+        self.assertEqual(payload["filters"]["q"], "vainilla")
+        self.assertEqual(payload["totales"]["almacen"], 0)
+        self.assertEqual(payload["totales"]["recetas"], 0)
+        self.assertGreaterEqual(payload["totales"]["point"], 1)
+        self.assertEqual(len(payload["items"]["almacen"]), 0)
+        self.assertEqual(len(payload["items"]["recetas"]), 0)
+        self.assertGreaterEqual(len(payload["items"]["point"]), 1)
+        self.assertTrue(
+            any("vainilla" in (row.get("point_nombre") or "").lower() for row in payload["items"]["point"])
+        )
+
+    def test_endpoint_inventario_aliases_pendientes_source_invalido(self):
+        url = reverse("api_inventario_aliases_pendientes")
+        resp = self.client.get(url, {"source": "MIXTO"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("source", resp.json()["detail"].lower())
+
     def test_endpoint_inventario_aliases_pendientes_export_csv_xlsx(self):
         PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,
