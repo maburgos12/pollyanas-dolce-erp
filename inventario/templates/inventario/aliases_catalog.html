@@ -440,6 +440,14 @@
       </tbody>
     </table>
   </div>
+  {% else %}
+  <div class="alert alert-info" style="margin-top:12px;">
+    No hay sincronizaciones recientes para mostrar en este entorno.
+    <div class="toolbar" style="margin-top:10px;">
+      <a class="btn btn-secondary" href="{% url 'inventario:carga_almacen' %}">Ir a Carga Almacén</a>
+      <a class="btn btn-secondary" href="{% url 'inventario:sync_drive_now' %}">Ejecutar sync ahora</a>
+    </div>
+  </div>
   {% endif %}
 
   {% if pending_preview %}

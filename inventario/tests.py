@@ -23,6 +23,13 @@ class InventarioAliasesPendingTests(TestCase):
         )
         self.client.force_login(self.user)
 
+    def test_pending_recent_runs_empty_state_message(self):
+        response = self.client.get(reverse("inventario:aliases_catalog"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No hay sincronizaciones recientes para mostrar en este entorno.")
+        self.assertContains(response, reverse("inventario:carga_almacen"))
+        self.assertContains(response, reverse("inventario:sync_drive_now"))
+
     def test_pending_persisted_hide_and_restore_visibility(self):
         run = AlmacenSyncRun.objects.create(
             source=AlmacenSyncRun.SOURCE_DRIVE,
