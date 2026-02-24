@@ -26,6 +26,7 @@ from recetas.models import (
     VentaHistorica,
 )
 from recetas.utils.costeo_versionado import asegurar_version_costeo
+from recetas.utils.normalizacion import normalizar_nombre
 
 
 class RecetasCosteoApiTests(TestCase):
@@ -1823,6 +1824,45 @@ class RecetasCosteoApiTests(TestCase):
         payload_recetas = resp_recetas.json()
         self.assertEqual(payload_recetas["filters"]["source"], "RECETAS")
         self.assertEqual(payload_recetas["totales"]["candidatos_filtrados"], 0)
+
+    def test_endpoint_inventario_aliases_pendientes_unificados_resolver_source_almacen(self):
+        target = Insumo.objects.create(nombre="Harina API Target Almacen", unidad_base=self.unidad, activo=True)
+        nombre_cross = "Harina almacen source"
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            pending_preview=[
+                {
+                    "nombre_origen": nombre_cross,
+                    "nombre_normalizado": normalizar_nombre(nombre_cross),
+                    "suggestion": target.nombre,
+                    "score": 96,
+                    "method": "FUZZY",
+                    "fuente": "ALMACEN",
+                }
+            ],
+        )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados_resolver")
+        resp_almacen = self.client.post(
+            url,
+            {"dry_run": True, "min_sources": 1, "only_suggested": True, "score_min": 0, "source": "ALMACEN"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_almacen.status_code, 200)
+        payload_almacen = resp_almacen.json()
+        self.assertEqual(payload_almacen["filters"]["source"], "ALMACEN")
+        self.assertGreaterEqual(payload_almacen["totales"]["candidatos_filtrados"], 1)
+
+        resp_point = self.client.post(
+            url,
+            {"dry_run": True, "min_sources": 1, "only_suggested": True, "score_min": 0, "source": "POINT"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_point.status_code, 200)
+        payload_point = resp_point.json()
+        self.assertEqual(payload_point["filters"]["source"], "POINT")
+        self.assertEqual(payload_point["totales"]["candidatos_filtrados"], 0)
 
     def test_endpoint_inventario_aliases_pendientes_unificados_resolver_point_tipo_filter(self):
         target = Insumo.objects.create(nombre="Azucar API Target Tipo", unidad_base=self.unidad, activo=True)
