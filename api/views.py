@@ -3316,6 +3316,7 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
         runs_to_scan = int(data.get("runs") or 5)
         q = str(data.get("q") or "").strip()
         q_norm = normalizar_nombre(q)
+        source = str(data.get("source") or "TODOS").strip().upper()
         min_sources = int(data.get("min_sources") or 2)
         score_min = float(data.get("score_min") or 0)
         score_min = max(0.0, min(100.0, score_min))
@@ -3350,6 +3351,13 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
             cross_min_sources=min_sources,
             cross_score_min=score_min,
         )
+        if source == "ALMACEN":
+            filtered_rows = [row for row in filtered_rows if int(row.get("almacen_count") or 0) > 0]
+        elif source == "POINT":
+            filtered_rows = [row for row in filtered_rows if int(row.get("point_count") or 0) > 0]
+        elif source == "RECETAS":
+            filtered_rows = [row for row in filtered_rows if int(row.get("receta_count") or 0) > 0]
+
         if selected_norms:
             filtered_rows = [row for row in filtered_rows if (row.get("nombre_normalizado") or "") in selected_norms]
         rows_to_process = filtered_rows[:limit]
@@ -3470,6 +3478,7 @@ class InventarioAliasesPendientesUnificadosResolveView(APIView):
                     "q": q,
                     "runs": runs_to_scan,
                     "limit": limit,
+                    "source": source,
                     "min_sources": min_sources,
                     "score_min": round(score_min, 2),
                     "only_suggested": only_suggested,

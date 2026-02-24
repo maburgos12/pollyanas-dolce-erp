@@ -278,6 +278,7 @@ class Command(BaseCommand):
                 "min_sources": 2,
                 "score_min": 0,
                 "only_suggested": True,
+                "source": "POINT",
                 "limit": 20,
                 "runs": 5,
             },
@@ -286,6 +287,9 @@ class Command(BaseCommand):
         )
         self._assert_ok("Unificados resolver dry_run", resolve_dry, expected=200)
         resolve_totals = resolve_dry.data.get("totales") or {}
+        resolve_filters = resolve_dry.data.get("filters") or {}
+        if str(resolve_filters.get("source") or "") != "POINT":
+            raise CommandError("Resolver dry_run no devolvió source=POINT en filters.")
         if "aliases_creados_preview" not in resolve_totals:
             raise CommandError("Resolver dry_run no devolvió totales.aliases_creados_preview.")
         if "aliases_actualizados_preview" not in resolve_totals:
@@ -348,6 +352,7 @@ class Command(BaseCommand):
                 },
                 "resolver_dry_run": {
                     "status": resolve_dry.status,
+                    "filters": resolve_filters,
                     "totales": resolve_totals,
                 },
                 "unificados_export_csv": {"status": unificados_csv.status},

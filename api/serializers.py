@@ -265,6 +265,7 @@ class InventarioPointPendingResolveSerializer(serializers.Serializer):
 
 
 class InventarioCrossPendientesResolveSerializer(serializers.Serializer):
+    SOURCE_CHOICES = ("TODOS", "ALL", "ALMACEN", "POINT", "RECETAS")
     nombres = serializers.ListField(
         child=serializers.CharField(max_length=250),
         required=False,
@@ -275,6 +276,7 @@ class InventarioCrossPendientesResolveSerializer(serializers.Serializer):
     runs = serializers.IntegerField(required=False, min_value=1, max_value=30, default=5)
     limit = serializers.IntegerField(required=False, min_value=1, max_value=800, default=300)
     min_sources = serializers.IntegerField(required=False, min_value=1, max_value=3, default=2)
+    source = serializers.ChoiceField(required=False, choices=SOURCE_CHOICES, default="TODOS")
     score_min = serializers.FloatField(required=False, default=0)
     only_suggested = serializers.BooleanField(required=False, default=True)
     dry_run = serializers.BooleanField(required=False, default=True)

@@ -1742,6 +1742,48 @@ class RecetasCosteoApiTests(TestCase):
         linea.refresh_from_db()
         self.assertEqual(linea.insumo_id, target.id)
 
+    def test_endpoint_inventario_aliases_pendientes_unificados_resolver_source_filter(self):
+        target = Insumo.objects.create(nombre="Fresa API Target", unidad_base=self.unidad, activo=True)
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-CROSS-RSLV-SOURCE-01",
+            point_nombre="Fresa point source",
+            method="FUZZY",
+            fuzzy_score=95.0,
+            fuzzy_sugerencia=target.nombre,
+        )
+
+        url = reverse("api_inventario_aliases_pendientes_unificados_resolver")
+        resp_point = self.client.post(
+            url,
+            {"dry_run": True, "min_sources": 1, "only_suggested": True, "score_min": 0, "source": "POINT"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_point.status_code, 200)
+        payload_point = resp_point.json()
+        self.assertEqual(payload_point["filters"]["source"], "POINT")
+        self.assertGreaterEqual(payload_point["totales"]["candidatos_filtrados"], 1)
+
+        resp_recetas = self.client.post(
+            url,
+            {"dry_run": True, "min_sources": 1, "only_suggested": True, "score_min": 0, "source": "RECETAS"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_recetas.status_code, 200)
+        payload_recetas = resp_recetas.json()
+        self.assertEqual(payload_recetas["filters"]["source"], "RECETAS")
+        self.assertEqual(payload_recetas["totales"]["candidatos_filtrados"], 0)
+
+    def test_endpoint_inventario_aliases_pendientes_unificados_resolver_source_invalid(self):
+        url = reverse("api_inventario_aliases_pendientes_unificados_resolver")
+        resp = self.client.post(
+            url,
+            {"dry_run": True, "source": "MIXTO"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("source", str(resp.json()).lower())
+
     def test_endpoint_inventario_point_pendientes_resolver_insumos(self):
         pending = PointPendingMatch.objects.create(
             tipo=PointPendingMatch.TIPO_INSUMO,
