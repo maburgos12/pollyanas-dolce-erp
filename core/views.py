@@ -6,15 +6,21 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db import OperationalError, ProgrammingError
-from django.db.models import F
+from django.db.models import F, Q
 from django.db.models import Avg, Sum
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
-from django.contrib.auth import authenticate, login, logout
+from django.contrib import messages
+from django.contrib.auth import authenticate, login, logout, get_user_model
+from django.contrib.auth.models import Group
+from django.urls import reverse
 from django.utils import timezone
 from core.access import (
+    ROLE_ORDER,
+    can_manage_users,
+    primary_role,
     can_manage_crm,
     can_view_audit,
     can_manage_compras,
@@ -35,10 +41,48 @@ from maestros.models import CostoInsumo
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra, OrdenCompra
 from recetas.models import PlanProduccionItem, PronosticoVenta, Receta, LineaReceta
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
-from core.models import AuditLog
+from core.models import AuditLog, Departamento, Sucursal, UserProfile
 from core.audit import log_event
 
 logger = logging.getLogger(__name__)
+
+LOCK_FIELDS = [
+    ("lock_maestros", "Maestros"),
+    ("lock_recetas", "Recetas"),
+    ("lock_compras", "Compras"),
+    ("lock_inventario", "Inventario"),
+    ("lock_reportes", "Reportes"),
+    ("lock_crm", "CRM"),
+    ("lock_logistica", "Logística"),
+    ("lock_rrhh", "RRHH"),
+    ("lock_captura_piso", "Captura Piso"),
+    ("lock_auditoria", "Bitácora/Integraciones"),
+]
+
+
+def _is_checked(payload, key: str) -> bool:
+    return (payload.get(key) or "").strip().lower() in {"1", "true", "on", "yes"}
+
+
+def _safe_int(raw: str) -> int | None:
+    value = (raw or "").strip()
+    if not value.isdigit():
+        return None
+    return int(value)
+
+
+def _get_or_create_profile(user):
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    return profile
+
+
+def _assign_single_role(user, role_name: str) -> None:
+    role_name = (role_name or "").strip().upper()
+    if role_name not in ROLE_ORDER:
+        user.groups.clear()
+        return
+    group, _ = Group.objects.get_or_create(name=role_name)
+    user.groups.set([group])
 
 
 def _budget_period_bounds(periodo_tipo: str, periodo_mes: str) -> tuple[date, date]:
@@ -294,6 +338,13 @@ def login_view(request: HttpRequest) -> HttpResponse:
 def logout_view(request: HttpRequest) -> HttpResponse:
     logout(request)
     return redirect("login")
+
+
+def home_redirect(request: HttpRequest) -> HttpResponse:
+    if request.user.is_authenticated:
+        return redirect("dashboard")
+    return redirect("login")
+
 
 def dashboard(request: HttpRequest) -> HttpResponse:
     if not request.user.is_authenticated:
@@ -571,3 +622,174 @@ def audit_log_view(request: HttpRequest) -> HttpResponse:
         },
     }
     return render(request, "core/auditoria.html", context)
+
+
+def users_access_view(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_authenticated:
+        return redirect("/login/")
+    if not can_manage_users(request.user):
+        raise PermissionDenied("No tienes permisos para administrar usuarios y accesos.")
+
+    user_model = get_user_model()
+    departamentos = list(Departamento.objects.order_by("nombre"))
+    sucursales = list(Sucursal.objects.filter(activa=True).order_by("codigo"))
+    role_options = [(role, role) for role in ROLE_ORDER]
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip().lower()
+        if action == "create_user":
+            username = (request.POST.get("username") or "").strip()
+            if not username:
+                messages.error(request, "El usuario es obligatorio.")
+                return redirect("users_access")
+            if user_model.objects.filter(username=username).exists():
+                messages.error(request, "Ese usuario ya existe.")
+                return redirect("users_access")
+
+            password = (request.POST.get("password") or "").strip()
+            if len(password) < 8:
+                messages.error(request, "La contraseña debe tener al menos 8 caracteres.")
+                return redirect("users_access")
+
+            user = user_model.objects.create_user(
+                username=username,
+                email=(request.POST.get("email") or "").strip(),
+                password=password,
+            )
+            user.first_name = (request.POST.get("first_name") or "").strip()
+            user.last_name = (request.POST.get("last_name") or "").strip()
+            user.is_active = _is_checked(request.POST, "is_active")
+            user.save(update_fields=["first_name", "last_name", "is_active", "email"])
+
+            _assign_single_role(user, request.POST.get("role") or "")
+            profile = _get_or_create_profile(user)
+            profile.departamento_id = _safe_int(request.POST.get("departamento_id") or "")
+            profile.sucursal_id = _safe_int(request.POST.get("sucursal_id") or "")
+            profile.telefono = (request.POST.get("telefono") or "").strip()
+            for lock_field, _ in LOCK_FIELDS:
+                setattr(profile, lock_field, _is_checked(request.POST, lock_field))
+            profile.save()
+
+            log_event(
+                request.user,
+                "CREATE",
+                "auth.User",
+                user.id,
+                {
+                    "username": user.username,
+                    "role": primary_role(user),
+                    "is_active": user.is_active,
+                },
+            )
+            messages.success(request, f"Usuario {user.username} creado con accesos configurados.")
+            return redirect(f"{reverse('users_access')}?edit={user.id}")
+
+        if action == "update_user":
+            user_id = _safe_int(request.POST.get("user_id") or "")
+            target = user_model.objects.filter(pk=user_id).first() if user_id else None
+            if not target:
+                messages.error(request, "Usuario no encontrado.")
+                return redirect("users_access")
+            if target == request.user and not _is_checked(request.POST, "is_active"):
+                messages.error(request, "No puedes desactivar tu propio usuario.")
+                return redirect(f"{reverse('users_access')}?edit={target.id}")
+
+            target.first_name = (request.POST.get("first_name") or "").strip()
+            target.last_name = (request.POST.get("last_name") or "").strip()
+            target.email = (request.POST.get("email") or "").strip()
+            target.is_active = _is_checked(request.POST, "is_active")
+            target.save(update_fields=["first_name", "last_name", "email", "is_active"])
+
+            new_password = (request.POST.get("new_password") or "").strip()
+            if new_password:
+                if len(new_password) < 8:
+                    messages.error(request, "La nueva contraseña debe tener al menos 8 caracteres.")
+                    return redirect(f"{reverse('users_access')}?edit={target.id}")
+                target.set_password(new_password)
+                target.save(update_fields=["password"])
+
+            _assign_single_role(target, request.POST.get("role") or "")
+            profile = _get_or_create_profile(target)
+            profile.departamento_id = _safe_int(request.POST.get("departamento_id") or "")
+            profile.sucursal_id = _safe_int(request.POST.get("sucursal_id") or "")
+            profile.telefono = (request.POST.get("telefono") or "").strip()
+            for lock_field, _ in LOCK_FIELDS:
+                setattr(profile, lock_field, _is_checked(request.POST, lock_field))
+            profile.save()
+
+            log_event(
+                request.user,
+                "UPDATE",
+                "auth.User",
+                target.id,
+                {
+                    "username": target.username,
+                    "role": primary_role(target),
+                    "is_active": target.is_active,
+                    "password_changed": bool(new_password),
+                },
+            )
+            messages.success(request, f"Accesos actualizados para {target.username}.")
+            return redirect(f"{reverse('users_access')}?edit={target.id}")
+
+        messages.error(request, "Acción no reconocida.")
+        return redirect("users_access")
+
+    search_query = (request.GET.get("q") or "").strip()
+    edit_user_id = _safe_int(request.GET.get("edit") or "")
+    users_qs = (
+        user_model.objects.select_related("userprofile__departamento", "userprofile__sucursal")
+        .prefetch_related("groups")
+        .order_by("username")
+    )
+    if search_query:
+        users_qs = users_qs.filter(
+            Q(username__icontains=search_query)
+            | Q(first_name__icontains=search_query)
+            | Q(last_name__icontains=search_query)
+            | Q(email__icontains=search_query)
+        )
+
+    user_rows = []
+    edit_row = None
+    for u in users_qs[:300]:
+        profile = getattr(u, "userprofile", None)
+        row = {
+            "id": u.id,
+            "username": u.username,
+            "first_name": u.first_name or "",
+            "last_name": u.last_name or "",
+            "full_name": (f"{u.first_name} {u.last_name}").strip() or "-",
+            "email": u.email or "-",
+            "is_active": bool(u.is_active),
+            "role": primary_role(u),
+            "departamento_id": profile.departamento_id if profile else None,
+            "departamento_label": profile.departamento.nombre if profile and profile.departamento else "-",
+            "sucursal_id": profile.sucursal_id if profile else None,
+            "sucursal_label": profile.sucursal.nombre if profile and profile.sucursal else "-",
+            "telefono": profile.telefono if profile else "",
+            "locks": {key: bool(getattr(profile, key, False)) if profile else False for key, _ in LOCK_FIELDS},
+            "locks_count": sum(1 for key, _ in LOCK_FIELDS if profile and bool(getattr(profile, key, False))),
+            "lock_rows": [
+                {
+                    "field": key,
+                    "label": label,
+                    "value": bool(getattr(profile, key, False)) if profile else False,
+                }
+                for key, label in LOCK_FIELDS
+            ],
+        }
+        user_rows.append(row)
+        if edit_user_id and u.id == edit_user_id:
+            edit_row = row
+
+    context = {
+        "role_options": role_options,
+        "lock_fields": LOCK_FIELDS,
+        "departamentos": departamentos,
+        "sucursales": sucursales,
+        "users": user_rows,
+        "edit_row": edit_row,
+        "search_query": search_query,
+    }
+    return render(request, "core/usuarios_accesos.html", context)

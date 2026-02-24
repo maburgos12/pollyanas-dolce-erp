@@ -30,6 +30,16 @@ class UserProfile(models.Model):
     departamento = models.ForeignKey(Departamento, null=True, blank=True, on_delete=models.SET_NULL)
     sucursal = models.ForeignKey(Sucursal, null=True, blank=True, on_delete=models.SET_NULL)
     telefono = models.CharField(max_length=30, blank=True, default="")
+    lock_maestros = models.BooleanField(default=False)
+    lock_recetas = models.BooleanField(default=False)
+    lock_compras = models.BooleanField(default=False)
+    lock_inventario = models.BooleanField(default=False)
+    lock_reportes = models.BooleanField(default=False)
+    lock_crm = models.BooleanField(default=False)
+    lock_logistica = models.BooleanField(default=False)
+    lock_rrhh = models.BooleanField(default=False)
+    lock_captura_piso = models.BooleanField(default=False)
+    lock_auditoria = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "Perfil de usuario"

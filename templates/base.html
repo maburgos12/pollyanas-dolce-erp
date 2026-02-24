@@ -173,6 +173,16 @@
                         </a>
                     </li>
                     {% endif %}
+                    {% if ui_access.can_manage_users %}
+                    <li>
+                        <a href="{% url 'users_access' %}" class="{% if '/usuarios-accesos/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-1.5a3.5 3.5 0 0 0-3.5-3.5H6.5A3.5 3.5 0 0 0 3 19.5V21"/><circle cx="9.5" cy="8" r="3.5"/><path d="M18 8v6M15 11h6"/></svg>
+                            </span>
+                            <span>Usuarios</span>
+                        </a>
+                    </li>
+                    {% endif %}
                     <li>
                         <a href="{% url 'admin:index' %}">
                             <span class="nav-icon" aria-hidden="true">

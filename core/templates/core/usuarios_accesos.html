@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+
+{% block title %}Usuarios y Accesos - Pollyanas Dolce ERP{% endblock %}
+{% block page_title %}Administración · Usuarios y Accesos{% endblock %}
+{% block extra_css %}
+<style>
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .form-group-full { grid-column: 1 / -1; }
+  .form-checkbox-row { display: flex; align-items: end; }
+  .form-checkbox-row label { margin-bottom: 0; display: inline-flex; align-items: center; gap: 8px; }
+  .locks-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .lock-item { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 0; }
+  .filters-inline { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .filters-inline input { max-width: 420px; }
+  @media (max-width: 900px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .locks-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .filters-inline { flex-direction: column; align-items: stretch; }
+    .filters-inline input { max-width: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">Crear Usuario</div>
+  <form method="post" class="grid-2">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create_user">
+
+    <div class="form-group">
+      <label for="create_username">Usuario</label>
+      <input id="create_username" name="username" type="text" required>
+    </div>
+    <div class="form-group">
+      <label for="create_password">Contraseña inicial</label>
+      <input id="create_password" name="password" type="password" minlength="8" required>
+    </div>
+
+    <div class="form-group">
+      <label for="create_first_name">Nombre</label>
+      <input id="create_first_name" name="first_name" type="text">
+    </div>
+    <div class="form-group">
+      <label for="create_last_name">Apellido</label>
+      <input id="create_last_name" name="last_name" type="text">
+    </div>
+
+    <div class="form-group">
+      <label for="create_email">Correo</label>
+      <input id="create_email" name="email" type="email">
+    </div>
+    <div class="form-group">
+      <label for="create_telefono">Teléfono</label>
+      <input id="create_telefono" name="telefono" type="text">
+    </div>
+
+    <div class="form-group">
+      <label for="create_departamento_id">Departamento</label>
+      <select id="create_departamento_id" name="departamento_id">
+        <option value="">Sin departamento</option>
+        {% for d in departamentos %}
+          <option value="{{ d.id }}">{{ d.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="create_sucursal_id">Sucursal</label>
+      <select id="create_sucursal_id" name="sucursal_id">
+        <option value="">Sin sucursal</option>
+        {% for s in sucursales %}
+          <option value="{{ s.id }}">{{ s.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="create_role">Rol principal</label>
+      <select id="create_role" name="role" required>
+        <option value="">Selecciona rol...</option>
+        {% for role, role_label in role_options %}
+          <option value="{{ role }}">{{ role_label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group form-checkbox-row">
+      <label>
+        <input type="checkbox" name="is_active" value="1" checked>
+        Usuario activo
+      </label>
+    </div>
+
+    <div class="form-group form-group-full">
+      <label>Candados por módulo (si activas uno, ese usuario no entra al módulo)</label>
+      <div class="locks-grid">
+        {% for lock_field, lock_label in lock_fields %}
+          <label class="lock-item">
+            <input type="checkbox" name="{{ lock_field }}" value="1">
+            {{ lock_label }}
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="form-group form-group-full">
+      <button class="btn btn-primary" type="submit">Crear usuario y accesos</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header">Listado de Usuarios</div>
+  <form method="get" class="filters-inline">
+    <input type="text" name="q" value="{{ search_query }}" placeholder="Buscar por usuario, nombre o correo...">
+    <button class="btn btn-primary" type="submit">Buscar</button>
+    <a class="btn btn-secondary" href="{% url 'users_access' %}">Limpiar</a>
+  </form>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Usuario</th>
+        <th>Nombre</th>
+        <th>Rol</th>
+        <th>Departamento</th>
+        <th>Sucursal</th>
+        <th>Estatus</th>
+        <th>Candados</th>
+        <th>Acción</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in users %}
+      <tr>
+        <td>{{ row.username }}</td>
+        <td>{{ row.full_name }}</td>
+        <td>{{ row.role|default:"-" }}</td>
+        <td>{{ row.departamento_label }}</td>
+        <td>{{ row.sucursal_label }}</td>
+        <td>
+          {% if row.is_active %}
+            <span class="badge badge-success">Activo</span>
+          {% else %}
+            <span class="badge badge-danger">Inactivo</span>
+          {% endif %}
+        </td>
+        <td>{{ row.locks_count }}</td>
+        <td>
+          <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}?edit={{ row.id }}">Editar</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="8">Sin usuarios para el filtro actual.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if edit_row %}
+<div class="card">
+  <div class="card-header">Editar Usuario · {{ edit_row.username }}</div>
+  <form method="post" class="grid-2">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="update_user">
+    <input type="hidden" name="user_id" value="{{ edit_row.id }}">
+
+    <div class="form-group">
+      <label>Usuario</label>
+      <input type="text" value="{{ edit_row.username }}" disabled>
+    </div>
+    <div class="form-group">
+      <label for="edit_new_password">Nueva contraseña (opcional)</label>
+      <input id="edit_new_password" name="new_password" type="password" minlength="8">
+    </div>
+
+    <div class="form-group">
+      <label for="edit_first_name">Nombre</label>
+      <input id="edit_first_name" name="first_name" type="text" value="{{ edit_row.first_name }}">
+    </div>
+    <div class="form-group">
+      <label for="edit_last_name">Apellido</label>
+      <input id="edit_last_name" name="last_name" type="text" value="{{ edit_row.last_name }}">
+    </div>
+
+    <div class="form-group">
+      <label for="edit_email">Correo</label>
+      <input id="edit_email" name="email" type="email" value="{% if edit_row.email != '-' %}{{ edit_row.email }}{% endif %}">
+    </div>
+    <div class="form-group">
+      <label for="edit_telefono">Teléfono</label>
+      <input id="edit_telefono" name="telefono" type="text" value="{{ edit_row.telefono }}">
+    </div>
+
+    <div class="form-group">
+      <label for="edit_departamento_id">Departamento</label>
+      <select id="edit_departamento_id" name="departamento_id">
+        <option value="">Sin departamento</option>
+        {% for d in departamentos %}
+          <option value="{{ d.id }}" {% if edit_row.departamento_id == d.id %}selected{% endif %}>{{ d.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="edit_sucursal_id">Sucursal</label>
+      <select id="edit_sucursal_id" name="sucursal_id">
+        <option value="">Sin sucursal</option>
+        {% for s in sucursales %}
+          <option value="{{ s.id }}" {% if edit_row.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="edit_role">Rol principal</label>
+      <select id="edit_role" name="role" required>
+        <option value="">Selecciona rol...</option>
+        {% for role, role_label in role_options %}
+          <option value="{{ role }}" {% if edit_row.role == role %}selected{% endif %}>{{ role_label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group form-checkbox-row">
+      <label>
+        <input type="checkbox" name="is_active" value="1" {% if edit_row.is_active %}checked{% endif %}>
+        Usuario activo
+      </label>
+    </div>
+
+    <div class="form-group form-group-full">
+      <label>Candados por módulo</label>
+      <div class="locks-grid">
+        {% for lock_row in edit_row.lock_rows %}
+          <label class="lock-item">
+            <input type="checkbox" name="{{ lock_row.field }}" value="1" {% if lock_row.value %}checked{% endif %}>
+            {{ lock_row.label }}
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="form-group form-group-full">
+      <button class="btn btn-primary" type="submit">Guardar cambios</button>
+      <a class="btn btn-secondary" href="{% url 'users_access' %}">Cerrar edición</a>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

@@ -2,8 +2,11 @@ from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from unittest.mock import patch
 
+from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_compras
+from core.models import UserProfile
 from core.views import _compute_plan_forecast_semaforo
 from inventario.models import AlmacenSyncRun
 from maestros.models import PointPendingMatch
@@ -94,3 +97,41 @@ class DashboardHomologacionContextTests(TestCase):
         self.assertEqual(response.context["recetas_pending_matching_count"], 2)
         self.assertEqual(response.context["inventario_last_unmatched_count"], 5)
         self.assertEqual(response.context["homologacion_total_pending"], 10)
+
+
+class UsersAccessTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.admin = user_model.objects.create_user(
+            username="admin_users",
+            email="admin_users@example.com",
+            password="test12345",
+        )
+        admin_group, _ = Group.objects.get_or_create(name=ROLE_ADMIN)
+        self.admin.groups.add(admin_group)
+
+        self.compras = user_model.objects.create_user(
+            username="compras_user",
+            email="compras_user@example.com",
+            password="test12345",
+        )
+        compras_group, _ = Group.objects.get_or_create(name=ROLE_COMPRAS)
+        self.compras.groups.add(compras_group)
+
+    def test_admin_can_open_users_access_page(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("users_access"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Crear Usuario")
+
+    def test_non_admin_cannot_open_users_access_page(self):
+        self.client.force_login(self.compras)
+        response = self.client.get(reverse("users_access"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_lock_compras_blocks_access_even_with_compras_role(self):
+        self.assertTrue(can_view_compras(self.compras))
+        profile, _ = UserProfile.objects.get_or_create(user=self.compras)
+        profile.lock_compras = True
+        profile.save(update_fields=["lock_compras"])
+        self.assertFalse(can_view_compras(self.compras))

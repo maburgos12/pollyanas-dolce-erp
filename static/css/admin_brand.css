@@ -1,0 +1,246 @@
+:root {
+  --rosa: #f8e8ee;
+  --rosa-hover: #f0d0dc;
+  --rosa-deep: #e8b4c8;
+  --vino: #8b2252;
+  --vino-light: #a0365f;
+  --dorado: #c9a84c;
+  --blanco: #fffaf5;
+  --gris-suave: #f5f0eb;
+  --texto: #3d2b2b;
+  --texto-light: #7a6565;
+  --verde: #4caf50;
+  --rojo: #e53935;
+}
+
+html,
+body {
+  background: var(--blanco);
+  color: var(--texto);
+  font-family: "Nunito", sans-serif;
+}
+
+#header {
+  background: linear-gradient(180deg, var(--vino) 0%, #6b1740 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+#branding h1,
+#branding h1 a:link,
+#branding h1 a:visited {
+  color: #fff;
+  font-family: "Playfair Display", serif;
+  font-size: 29px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+#branding .site-tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffe7a3;
+  font-family: "Nunito", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  vertical-align: middle;
+}
+
+#user-tools,
+#user-tools a,
+#user-tools a:visited {
+  color: #fff;
+  font-family: "Nunito", sans-serif;
+  font-weight: 600;
+}
+
+#user-tools a:hover {
+  color: #ffe7a3;
+}
+
+div.breadcrumbs {
+  background: #fff;
+  border-bottom: 1px solid var(--rosa-deep);
+  color: var(--vino);
+  font-family: "Nunito", sans-serif;
+}
+
+div.breadcrumbs a {
+  color: var(--vino);
+}
+
+#content h1,
+#content h2,
+#content h3,
+.module h2,
+.module caption,
+.inline-group h2 {
+  font-family: "Playfair Display", serif;
+  color: var(--texto);
+}
+
+.module {
+  background: #fff;
+  border: 1px solid var(--rosa-deep);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(139, 34, 82, 0.06);
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.module h2,
+.module caption,
+.inline-group h2 {
+  background: var(--rosa);
+  color: var(--vino);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  border-bottom: 1px solid var(--rosa-deep);
+}
+
+#content-main .module table,
+.change-list .results {
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+a:link,
+a:visited {
+  color: var(--vino);
+}
+
+a:hover,
+a:focus {
+  color: var(--vino-light);
+}
+
+.button,
+input[type="submit"],
+input[type="button"],
+.submit-row input,
+a.button {
+  background: var(--vino);
+  border: 1px solid var(--vino);
+  color: #fff;
+  border-radius: 8px;
+  font-family: "Nunito", sans-serif;
+  font-weight: 700;
+  padding: 10px 16px;
+}
+
+.button:hover,
+input[type="submit"]:hover,
+input[type="button"]:hover,
+.submit-row input:hover,
+a.button:hover {
+  background: var(--vino-light);
+  border-color: var(--vino-light);
+}
+
+.button.default,
+input[type="submit"].default,
+.submit-row input.default {
+  background: linear-gradient(180deg, var(--vino) 0%, #741c46 100%);
+}
+
+.object-tools a:link,
+.object-tools a:visited {
+  background: var(--rosa);
+  color: var(--vino);
+  border: 1px solid var(--rosa-deep);
+  border-radius: 8px;
+  font-family: "Nunito", sans-serif;
+  font-weight: 700;
+}
+
+.object-tools a:hover,
+.object-tools a:focus {
+  background: var(--rosa-hover);
+  color: var(--vino);
+}
+
+#changelist-filter {
+  background: #fff;
+  border-left: 1px solid var(--rosa-deep);
+}
+
+#changelist-filter h2 {
+  background: var(--rosa);
+  color: var(--vino);
+  border-bottom: 1px solid var(--rosa-deep);
+}
+
+#changelist-filter li.selected {
+  border-left: 3px solid var(--vino);
+}
+
+.selector .selector-filter {
+  border-color: var(--rosa-deep);
+}
+
+.selector h2 {
+  background: var(--rosa);
+  color: var(--vino);
+}
+
+input,
+textarea,
+select,
+.vTextField,
+.vLargeTextField {
+  border: 1px solid var(--rosa-deep);
+  border-radius: 8px;
+  font-family: "Nunito", sans-serif;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+.vTextField:focus,
+.vLargeTextField:focus {
+  border-color: var(--vino);
+  box-shadow: 0 0 0 3px rgba(139, 34, 82, 0.12);
+}
+
+.form-row {
+  border-bottom: 1px solid var(--gris-suave);
+}
+
+p.help,
+.help,
+ul.messagelist li {
+  font-family: "Nunito", sans-serif;
+}
+
+ul.messagelist li.success {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+ul.messagelist li.warning {
+  background: #fff8e1;
+  color: #f57f17;
+}
+
+ul.messagelist li.error {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.dashboard #content {
+  width: min(1320px, 98vw);
+}
+
+@media (max-width: 1024px) {
+  #branding h1,
+  #branding h1 a:link,
+  #branding h1 a:visited {
+    font-size: 24px;
+  }
+}
