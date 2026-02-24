@@ -3268,7 +3268,34 @@ class IntegracionesOperationsHistoryView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        qs = AuditLog.objects.filter(action__in=self.ACTIONS).select_related("user").order_by("-timestamp")
+        sort_by = (data.get("sort_by") or "timestamp").strip().lower()
+        sort_dir = (data.get("sort_dir") or "desc").strip().lower()
+        allowed_sort = {
+            "timestamp": "timestamp",
+            "action": "action",
+            "model": "model",
+            "object_id": "object_id",
+            "user": "user__username",
+            "id": "id",
+        }
+        if sort_by not in allowed_sort:
+            return Response(
+                {"detail": "sort_by inválido. Usa timestamp, action, model, object_id, user o id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if sort_dir not in {"asc", "desc"}:
+            return Response(
+                {"detail": "sort_dir inválido. Usa asc o desc."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        sort_field = allowed_sort[sort_by]
+        primary_order = sort_field if sort_dir == "asc" else f"-{sort_field}"
+        secondary_order = "id" if sort_dir == "asc" else "-id"
+
+        qs = AuditLog.objects.filter(action__in=self.ACTIONS).select_related("user").order_by(
+            primary_order,
+            secondary_order,
+        )
         if action:
             qs = qs.filter(action=action)
         if data.get("date_from"):
@@ -3298,6 +3325,8 @@ class IntegracionesOperationsHistoryView(APIView):
                     "date_to": data.get("date_to"),
                     "limit": limit,
                     "offset": offset,
+                    "sort_by": sort_by,
+                    "sort_dir": sort_dir,
                     "export": export,
                 },
                 "totales": {
