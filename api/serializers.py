@@ -315,7 +315,7 @@ class IntegracionesOperationHistoryQuerySerializer(serializers.Serializer):
     export = serializers.ChoiceField(
         required=False,
         allow_blank=True,
-        choices=["", "csv"],
+        choices=["", "csv", "xlsx"],
         default="",
     )
 

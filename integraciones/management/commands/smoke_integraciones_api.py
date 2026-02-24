@@ -17,6 +17,7 @@ class HttpResult:
     status: int
     data: dict[str, Any]
     raw: str
+    headers: dict[str, str]
 
 
 def _http_json(
@@ -46,7 +47,12 @@ def _http_json(
                 data = json.loads(raw) if raw else {}
             except json.JSONDecodeError:
                 data = {}
-            return HttpResult(status=int(resp.status), data=data, raw=raw)
+            return HttpResult(
+                status=int(resp.status),
+                data=data,
+                raw=raw,
+                headers={k.lower(): v for k, v in dict(resp.headers).items()},
+            )
     except HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         data = {}
@@ -54,7 +60,12 @@ def _http_json(
             data = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
             data = {}
-        return HttpResult(status=int(exc.code), data=data, raw=raw)
+        return HttpResult(
+            status=int(exc.code),
+            data=data,
+            raw=raw,
+            headers={k.lower(): v for k, v in dict(exc.headers or {}).items()},
+        )
     except URLError as exc:
         raise CommandError(f"No se pudo conectar a {url}: {exc}") from exc
 
@@ -192,6 +203,21 @@ class Command(BaseCommand):
         self._assert_ok("Historial operaciones CSV", historial_csv, expected=200)
         if "timestamp,usuario,action,model,object_id,payload" not in historial_csv.raw:
             raise CommandError("Historial operaciones CSV no devolvió cabecera esperada.")
+        historial_xlsx = _http_json(
+            method="GET",
+            url=self._build_url(
+                base_url,
+                "/api/integraciones/point/operaciones/historial/",
+                query={"limit": 10, "export": "xlsx"},
+            ),
+            token=token,
+            timeout=timeout,
+            insecure=insecure,
+        )
+        self._assert_ok("Historial operaciones XLSX", historial_xlsx, expected=200)
+        xlsx_content_type = str(historial_xlsx.headers.get("content-type", "")).lower()
+        if "spreadsheetml" not in xlsx_content_type:
+            raise CommandError("Historial operaciones XLSX no devolvió content-type esperado.")
 
         deactivate_dry = _http_json(
             method="POST",
@@ -269,6 +295,10 @@ class Command(BaseCommand):
                 "historial_csv": {
                     "status": historial_csv.status,
                     "header_ok": True,
+                },
+                "historial_xlsx": {
+                    "status": historial_xlsx.status,
+                    "content_type_ok": True,
                 },
                 "deactivate_dry_run": deactivate_dry.data,
                 "purge_dry_run": purge_dry.data,

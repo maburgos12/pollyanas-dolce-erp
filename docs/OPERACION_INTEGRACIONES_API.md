@@ -13,7 +13,7 @@ Este runbook cubre operación diaria y smoke de endpoints de integraciones Point
 - `POST /api/integraciones/point/mantenimiento/ejecutar/`
   - Parámetros: `idle_days`, `idle_limit`, `retain_days`, `max_delete`, `dry_run`.
 - `GET /api/integraciones/point/operaciones/historial/`
-  - Filtros: `action`, `date_from`, `date_to`, `limit`, `export=csv`.
+  - Filtros: `action`, `date_from`, `date_to`, `limit`, `export=csv|xlsx`.
 
 Todos requieren autenticación `Token` y rol `ADMIN`/`DG` para operación.
 
@@ -45,6 +45,7 @@ El smoke valida:
 - `health`
 - `resumen`
 - `historial`
+- exportables de historial (`csv` y `xlsx`)
 - operaciones `dry_run` (desactivación, purga, mantenimiento combinado)
 
 ## 2.1) Comando de mantenimiento directo (cron-friendly)
@@ -97,7 +98,13 @@ curl -L -H "Authorization: Token <TOKEN_DRF>" \
   "https://pollyanas-dolce-erp-production.up.railway.app/api/integraciones/point/operaciones/historial/?limit=200&export=csv"
 ```
 
-3. Revisar en respuesta:
+3. Exportar historial XLSX:
+```bash
+curl -L -H "Authorization: Token <TOKEN_DRF>" \
+  "https://pollyanas-dolce-erp-production.up.railway.app/api/integraciones/point/operaciones/historial/?limit=200&export=xlsx" \
+  -o integraciones_operaciones_historial.xlsx
+```
+4. Revisar en respuesta:
 - acción ejecutada (`RUN_API_MAINTENANCE`, `PURGE_API_LOGS`, etc.)
 - timestamp
 - payload con totales (`deactivated`, `deleted`, `remaining_candidates`)

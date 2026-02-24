@@ -1024,6 +1024,24 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("timestamp,usuario,action,model,object_id,payload", body)
         self.assertIn("RUN_API_MAINTENANCE", body)
 
+    def test_endpoint_integraciones_operations_history_export_xlsx(self):
+        AuditLog.objects.create(
+            user=self.user,
+            action="RUN_API_MAINTENANCE",
+            model="integraciones.Operaciones",
+            object_id="",
+            payload={"dry_run": True},
+        )
+        url = reverse("api_integraciones_operations_history")
+        resp = self.client.get(url, {"limit": 10, "export": "xlsx"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp["Content-Type"],
+        )
+        self.assertIn("integraciones_operaciones_historial.xlsx", resp["Content-Disposition"])
+        self.assertTrue(resp.content.startswith(b"PK"))
+
     def test_endpoint_integraciones_operations_history_invalid_action(self):
         url = reverse("api_integraciones_operations_history")
         resp = self.client.get(url, {"action": "NO_EXISTE"})

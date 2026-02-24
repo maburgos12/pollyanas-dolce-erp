@@ -3223,6 +3223,33 @@ class IntegracionesOperationsHistoryView(APIView):
             )
         return response
 
+    @staticmethod
+    def _export_xlsx(rows: list[AuditLog]) -> HttpResponse:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "historial"
+        ws.append(["timestamp", "usuario", "action", "model", "object_id", "payload"])
+        for row in rows:
+            ws.append(
+                [
+                    row.timestamp.strftime("%Y-%m-%d %H:%M:%S") if row.timestamp else "",
+                    row.user.username if row.user_id else "",
+                    row.action,
+                    row.model,
+                    row.object_id,
+                    json.dumps(row.payload or {}, ensure_ascii=False),
+                ]
+            )
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="integraciones_operaciones_historial.xlsx"'
+        return response
+
     def get(self, request):
         if not can_view_audit(request.user):
             return Response(
@@ -3259,6 +3286,8 @@ class IntegracionesOperationsHistoryView(APIView):
         }
         if export == "csv":
             return self._export_csv(rows)
+        if export == "xlsx":
+            return self._export_xlsx(rows)
 
         return Response(
             {
