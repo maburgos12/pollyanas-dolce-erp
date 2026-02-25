@@ -128,6 +128,10 @@
 
 <section class="card">
   <div class="card-header">Últimas importaciones de bitácora</div>
+  <div class="quick-actions" style="margin-bottom:10px;">
+    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=import_runs_csv">Export historial CSV</a>
+    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=import_runs_xlsx">Export historial XLSX</a>
+  </div>
   {% if import_runs %}
     <div class="table-responsive">
       <table class="table table-striped">

@@ -158,6 +158,114 @@ def _export_bitacora_template_xlsx() -> HttpResponse:
     return response
 
 
+def _export_bitacora_runs_csv(runs) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="activos_import_bitacora_historial_{timestamp}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "fecha",
+            "usuario",
+            "archivo",
+            "modo",
+            "formato",
+            "hoja",
+            "filas_leidas",
+            "filas_validas",
+            "activos_creados",
+            "activos_actualizados",
+            "servicios_creados",
+            "servicios_omitidos",
+        ]
+    )
+    for run in runs:
+        payload = run.payload or {}
+        writer.writerow(
+            [
+                timezone.localtime(run.timestamp).strftime("%Y-%m-%d %H:%M"),
+                run.user.username if run.user else "Sistema",
+                payload.get("filename", ""),
+                "SIMULACION" if payload.get("dry_run") else "APLICADO",
+                payload.get("source_format", ""),
+                payload.get("sheet_name", ""),
+                payload.get("filas_leidas", 0),
+                payload.get("filas_validas", 0),
+                payload.get("activos_creados", 0),
+                payload.get("activos_actualizados", 0),
+                payload.get("servicios_creados", 0),
+                payload.get("servicios_omitidos", 0),
+            ]
+        )
+    return response
+
+
+def _export_bitacora_runs_xlsx(runs) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "historial_importaciones"
+    ws.append(
+        [
+            "fecha",
+            "usuario",
+            "archivo",
+            "modo",
+            "formato",
+            "hoja",
+            "filas_leidas",
+            "filas_validas",
+            "activos_creados",
+            "activos_actualizados",
+            "servicios_creados",
+            "servicios_omitidos",
+        ]
+    )
+    for run in runs:
+        payload = run.payload or {}
+        ws.append(
+            [
+                timezone.localtime(run.timestamp).strftime("%Y-%m-%d %H:%M"),
+                run.user.username if run.user else "Sistema",
+                payload.get("filename", ""),
+                "SIMULACION" if payload.get("dry_run") else "APLICADO",
+                payload.get("source_format", ""),
+                payload.get("sheet_name", ""),
+                payload.get("filas_leidas", 0),
+                payload.get("filas_validas", 0),
+                payload.get("activos_creados", 0),
+                payload.get("activos_actualizados", 0),
+                payload.get("servicios_creados", 0),
+                payload.get("servicios_omitidos", 0),
+            ]
+        )
+    for col, width in {
+        "A": 18,
+        "B": 16,
+        "C": 34,
+        "D": 12,
+        "E": 12,
+        "F": 14,
+        "G": 12,
+        "H": 12,
+        "I": 14,
+        "J": 18,
+        "K": 16,
+        "L": 16,
+    }.items():
+        ws.column_dimensions[col].width = width
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="activos_import_bitacora_historial_{timestamp}.xlsx"'
+    return response
+
+
 def _export_activos_depuracion_xlsx(rows: list[dict]) -> HttpResponse:
     timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
     wb = Workbook()
@@ -734,10 +842,19 @@ def activos_catalog(request):
         qs = qs.filter(activo=True)
 
     export_format = (request.GET.get("export") or "").strip().lower()
+    import_runs_qs = (
+        AuditLog.objects.select_related("user")
+        .filter(action="IMPORT", model="activos.BitacoraImport")
+        .order_by("-timestamp")
+    )
     if export_format == "template_bitacora_csv":
         return _export_bitacora_template_csv()
     if export_format == "template_bitacora_xlsx":
         return _export_bitacora_template_xlsx()
+    if export_format == "import_runs_csv":
+        return _export_bitacora_runs_csv(import_runs_qs[:300])
+    if export_format == "import_runs_xlsx":
+        return _export_bitacora_runs_xlsx(import_runs_qs[:300])
 
     if export_format in {"depuracion_csv", "depuracion_xlsx"}:
         all_name_counts = {
@@ -760,11 +877,7 @@ def activos_catalog(request):
         "criticidad_choices": Activo.CRITICIDAD_CHOICES,
         "filters": {"q": q, "estado": estado, "criticidad": criticidad, "solo_activos": solo_activos},
         "can_manage_activos": can_manage_inventario(request.user),
-        "import_runs": list(
-            AuditLog.objects.select_related("user")
-            .filter(action="IMPORT", model="activos.BitacoraImport")
-            .order_by("-timestamp")[:10]
-        ),
+        "import_runs": list(import_runs_qs[:10]),
     }
     return render(request, "activos/activos.html", context)
 

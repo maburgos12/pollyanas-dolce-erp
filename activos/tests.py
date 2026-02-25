@@ -390,6 +390,60 @@ class ActivosFlowsTests(TestCase):
         self.assertContains(response, "Últimas importaciones de bitácora")
         self.assertContains(response, "bitacora_test.csv")
 
+    def test_export_import_runs_csv(self):
+        AuditLog.objects.create(
+            user=self.admin,
+            action="IMPORT",
+            model="activos.BitacoraImport",
+            object_id="run1",
+            payload={"filename": "historial_test.csv", "filas_validas": 3, "source_format": "CSV"},
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("activos:activos"), {"export": "import_runs_csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.get("Content-Type", ""))
+        self.assertIn("activos_import_bitacora_historial_", response.get("Content-Disposition", ""))
+        body = response.content.decode("utf-8")
+        self.assertIn("fecha,usuario,archivo,modo,formato,hoja", body)
+        self.assertIn("historial_test.csv", body)
+
+    def test_export_import_runs_xlsx(self):
+        AuditLog.objects.create(
+            user=self.admin,
+            action="IMPORT",
+            model="activos.BitacoraImport",
+            object_id="run2",
+            payload={"filename": "historial_test.xlsx", "filas_validas": 4, "source_format": "XLSX"},
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("activos:activos"), {"export": "import_runs_xlsx"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response.get("Content-Type", ""),
+        )
+        self.assertIn("activos_import_bitacora_historial_", response.get("Content-Disposition", ""))
+        wb = load_workbook(filename=BytesIO(response.content))
+        ws = wb.active
+        headers = [cell.value for cell in ws[1]]
+        self.assertEqual(
+            headers,
+            [
+                "fecha",
+                "usuario",
+                "archivo",
+                "modo",
+                "formato",
+                "hoja",
+                "filas_leidas",
+                "filas_validas",
+                "activos_creados",
+                "activos_actualizados",
+                "servicios_creados",
+                "servicios_omitidos",
+            ],
+        )
+
     def test_admin_can_import_bitacora_csv_from_ui_apply(self):
         self.client.force_login(self.admin)
         upload = self._build_bitacora_csv_upload("bitacora_apply.csv")
