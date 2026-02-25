@@ -204,6 +204,30 @@ class ActivosFlowsTests(TestCase):
         self.assertTrue(reportes)
         self.assertTrue(all(item.get("semaforo_key") == "ROJO" for item in reportes))
 
+    def test_dashboard_alertas_criticas_context(self):
+        self.client.force_login(self.admin)
+        activo = Activo.objects.create(nombre="AA Critico", categoria="Aire", criticidad=Activo.CRITICIDAD_ALTA)
+        PlanMantenimiento.objects.create(
+            activo_ref=activo,
+            nombre="Plan vencido QA",
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            proxima_ejecucion=timezone.localdate() - timedelta(days=3),
+            frecuencia_dias=30,
+        )
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+            prioridad=OrdenMantenimiento.PRIORIDAD_CRITICA,
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            fecha_programada=timezone.localdate(),
+            descripcion="Orden critica QA",
+        )
+        response = self.client.get(reverse("activos:dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["planes_vencidos_rows"])
+        self.assertTrue(response.context["ordenes_criticas_rows"])
+
     def test_generar_ordenes_programadas_creates_preventive_order(self):
         self.client.force_login(self.admin)
         activo = Activo.objects.create(nombre="AA Planta", categoria="Aire", criticidad=Activo.CRITICIDAD_ALTA)

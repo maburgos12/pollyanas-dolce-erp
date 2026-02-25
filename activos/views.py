@@ -483,6 +483,26 @@ def dashboard(request):
         OrdenMantenimiento.objects.select_related("activo_ref", "plan_ref")
         .order_by("-fecha_programada", "-id")[:20]
     )
+    planes_vencidos_qs = list(
+        planes_activos_qs.filter(proxima_ejecucion__isnull=False, proxima_ejecucion__lt=today)
+        .select_related("activo_ref")
+        .order_by("proxima_ejecucion", "id")[:20]
+    )
+    planes_vencidos_rows = [
+        {
+            "plan": plan,
+            "dias_vencido": max((today - plan.proxima_ejecucion).days, 0) if plan.proxima_ejecucion else 0,
+        }
+        for plan in planes_vencidos_qs
+    ]
+    ordenes_criticas_rows = list(
+        ordenes_abiertas_qs.filter(
+            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+            prioridad__in=[OrdenMantenimiento.PRIORIDAD_CRITICA, OrdenMantenimiento.PRIORIDAD_ALTA],
+        )
+        .select_related("activo_ref")
+        .order_by("fecha_programada", "id")[:20]
+    )
 
     costo_mes = (
         OrdenMantenimiento.objects.filter(
@@ -529,6 +549,8 @@ def dashboard(request):
         "criticidad": criticidad,
         "proximos": proximos,
         "ordenes_recientes": ordenes_recientes,
+        "planes_vencidos_rows": planes_vencidos_rows,
+        "ordenes_criticas_rows": ordenes_criticas_rows,
     }
     return render(request, "activos/dashboard.html", context)
 

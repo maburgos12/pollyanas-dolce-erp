@@ -97,6 +97,66 @@
 </section>
 
 <section class="card">
+  <div class="card-header">Alertas críticas</div>
+  <div class="row" style="display:grid;grid-template-columns:repeat(2,minmax(320px,1fr));gap:14px;">
+    <div>
+      <h4 style="margin:0 0 8px;">Planes vencidos</h4>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Activo</th>
+              <th>Plan</th>
+              <th>Días vencido</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in planes_vencidos_rows %}
+              <tr>
+                <td>{{ item.plan.proxima_ejecucion|date:"Y-m-d" }}</td>
+                <td>{{ item.plan.activo_ref.nombre }}</td>
+                <td>{{ item.plan.nombre }}</td>
+                <td class="text-danger">{{ item.dias_vencido }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4" class="text-muted">Sin planes vencidos.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <h4 style="margin:0 0 8px;">Órdenes correctivas críticas/altas</h4>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Folio</th>
+              <th>Activo</th>
+              <th>Prioridad</th>
+              <th>Programada</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for o in ordenes_criticas_rows %}
+              <tr>
+                <td>{{ o.folio }}</td>
+                <td>{{ o.activo_ref.nombre }}</td>
+                <td><span class="badge badge-danger">{{ o.prioridad }}</span></td>
+                <td>{{ o.fecha_programada|date:"Y-m-d" }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4" class="text-muted">Sin órdenes críticas/altas abiertas.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
   <div class="card-header">Órdenes recientes</div>
   <div class="table-responsive">
     <table class="table table-striped">
