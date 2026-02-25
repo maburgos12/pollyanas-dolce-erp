@@ -1,7 +1,10 @@
+from io import BytesIO
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import TestCase
 from django.urls import reverse
+from openpyxl import load_workbook
 
 from core.access import ROLE_ADMIN, ROLE_ALMACEN, ROLE_VENTAS
 
@@ -76,3 +79,32 @@ class ActivosFlowsTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(PlanMantenimiento.objects.filter(activo_ref=activo).exists())
+
+    def test_export_activos_depuracion_csv(self):
+        self.client.force_login(self.admin)
+        Activo.objects.create(nombre="MATRIZ", categoria="Equipos", notas="")
+        response = self.client.get(reverse("activos:activos"), {"export": "depuracion_csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.get("Content-Type", ""))
+        self.assertIn("activos_pendientes_depuracion_", response.get("Content-Disposition", ""))
+        body = response.content.decode("utf-8")
+        self.assertIn("codigo,nombre,ubicacion,categoria,estado,notas,motivos,acciones_sugeridas", body)
+        self.assertIn("MATRIZ", body)
+
+    def test_export_activos_depuracion_xlsx(self):
+        self.client.force_login(self.admin)
+        Activo.objects.create(nombre="NIO", categoria="Equipos", notas="")
+        response = self.client.get(reverse("activos:activos"), {"export": "depuracion_xlsx"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response.get("Content-Type", ""),
+        )
+        self.assertIn("activos_pendientes_depuracion_", response.get("Content-Disposition", ""))
+        wb = load_workbook(filename=BytesIO(response.content))
+        ws = wb.active
+        headers = [cell.value for cell in ws[1]]
+        self.assertEqual(
+            headers,
+            ["codigo", "nombre", "ubicacion", "categoria", "estado", "notas", "motivos", "acciones_sugeridas"],
+        )

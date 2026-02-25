@@ -1,12 +1,17 @@
+import csv
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q, Sum
+from django.db.models.functions import Lower
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from openpyxl import Workbook
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
@@ -48,6 +53,99 @@ def _module_tabs(active: str) -> list[dict]:
         {"label": "Reportes", "url_name": "activos:reportes", "active": active == "reportes"},
         {"label": "Calendario", "url_name": "activos:calendario", "active": active == "calendario"},
     ]
+
+
+def _build_activos_depuracion_rows(activos_rows: list[Activo], *, all_name_counts: dict[str, int]) -> list[dict]:
+    suspect_exact = {
+        "matriz",
+        "crucero",
+        "colosio",
+        "payan",
+        "n i o",
+        "nio",
+        "tunel",
+        "leyva",
+        "logistica",
+    }
+    dep_rows = []
+    for activo in activos_rows:
+        nombre = (activo.nombre or "").strip()
+        nombre_norm = nombre.lower()
+        notas = (activo.notas or "").strip()
+
+        motivos = []
+        acciones = []
+        if not notas:
+            motivos.append("Sin detalle técnico (marca/modelo/serie)")
+            acciones.append("Completar notas con marca, modelo y serie")
+        if all_name_counts.get(nombre_norm, 0) > 1:
+            motivos.append("Nombre duplicado entre activos")
+            acciones.append("Estandarizar nombre con sufijo de ubicación o código interno")
+        if nombre_norm in suspect_exact:
+            motivos.append("Nombre parece ubicación/departamento, no equipo")
+            acciones.append("Renombrar con nombre real del equipo")
+        if (activo.categoria or "").strip().lower() == "equipos":
+            motivos.append("Categoría genérica")
+            acciones.append("Reclasificar categoría operativa")
+        if len(nombre.split()) <= 1 and len(nombre) <= 8:
+            motivos.append("Nombre muy corto o ambiguo")
+            acciones.append("Usar nombre descriptivo del activo")
+
+        if motivos:
+            dep_rows.append(
+                {
+                    "codigo": activo.codigo or "",
+                    "nombre": nombre,
+                    "ubicacion": (activo.ubicacion or "").strip(),
+                    "categoria": (activo.categoria or "").strip(),
+                    "estado": activo.estado,
+                    "notas": notas,
+                    "motivos": " | ".join(dict.fromkeys(motivos)),
+                    "acciones_sugeridas": " | ".join(dict.fromkeys(acciones)),
+                }
+            )
+    return dep_rows
+
+
+def _export_activos_depuracion_csv(rows: list[dict]) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="activos_pendientes_depuracion_{timestamp}.csv"'
+    writer = csv.writer(response)
+    headers = ["codigo", "nombre", "ubicacion", "categoria", "estado", "notas", "motivos", "acciones_sugeridas"]
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([row.get(h, "") for h in headers])
+    return response
+
+
+def _export_activos_depuracion_xlsx(rows: list[dict]) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "pendientes_depuracion"
+    headers = ["codigo", "nombre", "ubicacion", "categoria", "estado", "notas", "motivos", "acciones_sugeridas"]
+    ws.append(headers)
+    for row in rows:
+        ws.append([row.get(h, "") for h in headers])
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 32
+    ws.column_dimensions["C"].width = 24
+    ws.column_dimensions["D"].width = 18
+    ws.column_dimensions["E"].width = 16
+    ws.column_dimensions["F"].width = 48
+    ws.column_dimensions["G"].width = 48
+    ws.column_dimensions["H"].width = 48
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="activos_pendientes_depuracion_{timestamp}.xlsx"'
+    return response
 
 
 @login_required
@@ -217,6 +315,20 @@ def activos_catalog(request):
         qs = qs.filter(criticidad=criticidad)
     if solo_activos == "1":
         qs = qs.filter(activo=True)
+
+    export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format in {"depuracion_csv", "depuracion_xlsx"}:
+        all_name_counts = {
+            (row["nombre_lower"] or ""): int(row["total"] or 0)
+            for row in Activo.objects.filter(activo=True)
+            .annotate(nombre_lower=Lower("nombre"))
+            .values("nombre_lower")
+            .annotate(total=Count("id"))
+        }
+        dep_rows = _build_activos_depuracion_rows(list(qs), all_name_counts=all_name_counts)
+        if export_format == "depuracion_csv":
+            return _export_activos_depuracion_csv(dep_rows)
+        return _export_activos_depuracion_xlsx(dep_rows)
 
     context = {
         "module_tabs": _module_tabs("activos"),
