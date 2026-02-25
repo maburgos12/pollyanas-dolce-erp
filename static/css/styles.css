@@ -1086,6 +1086,20 @@ tr:hover,
   align-items: stretch;
 }
 
+.recipe-detail-shell .recipe-head {
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.recipe-detail-shell .recipe-head > *:first-child {
+  min-width: 260px;
+}
+
+.recipe-detail-shell .recipe-head .recipe-actions {
+  margin-left: auto;
+}
+
 .recipe-detail-shell .recipe-main-form .form-control,
 .recipe-detail-shell .recipe-main-form .form-select,
 .recipe-detail-shell .recipe-main-form .field-check {
@@ -1113,8 +1127,16 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipes-filters-compare {
-  grid-template-columns: repeat(4, minmax(200px, 1fr));
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) minmax(200px, 0.7fr) minmax(180px, 0.7fr);
   gap: 12px;
+}
+
+.recipe-detail-shell .recipes-filters-compare > div {
+  min-width: 0;
+}
+
+.recipe-detail-shell .recipes-filters-compare .form-label {
+  min-height: 20px;
 }
 
 .recipe-detail-shell .recipes-filters-compare .form-action {
@@ -1198,8 +1220,27 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 }
 
 @media (max-width: 1100px) {
+  .recipe-detail-shell .recipe-head .recipe-actions {
+    margin-left: 0;
+  }
+
   .recipe-detail-shell .recipes-filters-compare {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 780px) {
+  .recipe-detail-shell .recipe-main-form {
+    grid-template-columns: 1fr;
+  }
+
+  .recipe-detail-shell .recipe-main-submit {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .recipe-detail-shell .recipes-filters-compare {
+    grid-template-columns: 1fr;
   }
 }
 

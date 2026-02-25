@@ -5,7 +5,7 @@
 {% block content %}
 <div class="module-shell recipe-detail recipe-detail-shell">
 <div class="card">
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex justify-content-between align-items-center mb-3 recipe-head">
     <div>
       <h3 class="mb-0">{{ receta.nombre }}</h3>
       <div class="text-muted">Hoja: {{ receta.sheet_name }}</div>
@@ -93,7 +93,7 @@
 </div>
 
 <div class="card">
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex justify-content-between align-items-center mb-3 recipe-head">
     <h3 class="mb-0">Costeo Completo (Fase 2)</h3>
     <span class="badge bg-primary">Driver: {{ costeo_actual.driver.scope|default:"GLOBAL" }}{% if costeo_actual.driver %} · {{ costeo_actual.driver.nombre }}{% endif %}</span>
   </div>
@@ -135,7 +135,7 @@
 </div>
 
 <div class="card">
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex justify-content-between align-items-center mb-3 recipe-head">
     <h3 class="mb-0">Histórico de Versiones de Costo</h3>
     <span class="text-muted">Total {{ versiones_all|length }} versiones</span>
   </div>
