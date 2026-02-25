@@ -133,6 +133,8 @@ Sprint 1 entrega:
 - `recetas/management/commands/import_costeo.py` (comando de importación)
 - `recetas/utils/importador.py` (parser de Excel)
 - `recetas/utils/matching.py` (matching)
+- `activos/management/commands/importar_activos_bitacora.py` (importación masiva de activos/servicios desde bitácora XLSX/CSV)
+- `activos/utils/bitacora_import.py` (parser unificado de bitácora con soporte XLSX/CSV, `;`, `,` y decimales con coma)
 - `logs/` (reportes CSV del import)
 - `scripts/smoke_integraciones_api.sh` (smoke operacional de endpoints de integraciones)
 - `scripts/smoke_aliases_api.sh` (smoke operacional de endpoints de aliases/homologación inventario)
@@ -145,3 +147,4 @@ Sprint 1 entrega:
 ## Notas
 - El matching y captura operativa en UI ya incluyen búsqueda/autocomplete para insumos.
 - El importador es idempotente por `source_hash` en costos y por `hash_contenido` en recetas.
+- En `Activos > Catálogo` ya hay carga masiva de bitácora con modo simulación y descarga de plantilla (`CSV`/`XLSX`).
