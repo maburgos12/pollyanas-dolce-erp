@@ -7,8 +7,23 @@ python manage.py migrate
 echo "Bootstrapping roles..."
 python manage.py bootstrap_roles
 
+echo "Bootstrapping Point branches..."
+python manage.py bootstrap_sucursales_point --only-missing
+
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
+
+echo "Creating legacy CSS aliases for cached clients..."
+LATEST_STYLES_CSS="$(ls -1 /app/staticfiles/css/styles.*.css 2>/dev/null | grep -v '\\.map$' | sort | tail -n 1 || true)"
+if [ -n "${LATEST_STYLES_CSS}" ]; then
+  for LEGACY_HASH in e01c8c2bd142 c81c46f9d131 5f87aa237771; do
+    cp -f "${LATEST_STYLES_CSS}" "/app/staticfiles/css/styles.${LEGACY_HASH}.css" || true
+  done
+  cp -f "${LATEST_STYLES_CSS}" "/app/staticfiles/css/styles.css" || true
+  echo "Legacy CSS aliases ready -> ${LATEST_STYLES_CSS}"
+else
+  echo "No hashed styles CSS file found in /app/staticfiles/css"
+fi
 
 echo "DEBUG: CREATE_SUPERUSER=${CREATE_SUPERUSER}"
 echo "DEBUG: USERNAME=${DJANGO_SUPERUSER_USERNAME:-EMPTY}"
