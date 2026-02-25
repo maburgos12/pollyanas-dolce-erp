@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ receta.nombre }}{% endblock %}
+{% block body_class %}page-receta-detail{% endblock %}
 {% block page_title %}Recetas · {{ receta.nombre }}{% endblock %}
 {% block content %}
 <div class="module-shell recipe-detail recipe-detail-shell">
@@ -285,8 +286,13 @@
   </div>
 {% endif %}
 
-<div class="table-responsive card">
-  <table class="table align-middle recipe-lines-table">
+<div class="card">
+  <div class="table-scroll-controls">
+    <button type="button" class="btn btn-secondary btn-sm js-scroll-left" aria-label="Desplazar tabla a la izquierda">←</button>
+    <button type="button" class="btn btn-secondary btn-sm js-scroll-right" aria-label="Desplazar tabla a la derecha">→</button>
+  </div>
+  <div class="table-responsive recipe-lines-scroll js-drag-scroll">
+    <table class="table align-middle recipe-lines-table">
     <colgroup>
       <col class="col-pos">
       <col class="col-type">
@@ -382,7 +388,69 @@
         <th colspan="2"></th>
       </tr>
     </tfoot>
-  </table>
+    </table>
+  </div>
 </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const scroller = document.querySelector(".js-drag-scroll");
+  if (!scroller) return;
+  const btnLeft = document.querySelector(".js-scroll-left");
+  const btnRight = document.querySelector(".js-scroll-right");
+
+  let isDragging = false;
+  let didMove = false;
+  let startX = 0;
+  let startLeft = 0;
+
+  const stopDragging = () => {
+    isDragging = false;
+    scroller.classList.remove("is-dragging");
+  };
+
+  scroller.addEventListener("mousedown", (event) => {
+    if (event.button !== 0) return;
+    isDragging = true;
+    didMove = false;
+    scroller.classList.add("is-dragging");
+    startX = event.pageX - scroller.offsetLeft;
+    startLeft = scroller.scrollLeft;
+  });
+
+  window.addEventListener("mousemove", (event) => {
+    if (!isDragging) return;
+    const x = event.pageX - scroller.offsetLeft;
+    const delta = x - startX;
+    if (Math.abs(delta) > 2) didMove = true;
+    scroller.scrollLeft = startLeft - delta;
+  });
+
+  window.addEventListener("mouseup", stopDragging);
+  scroller.addEventListener("mouseleave", stopDragging);
+
+  scroller.addEventListener(
+    "click",
+    (event) => {
+      if (didMove) event.preventDefault();
+    },
+    true
+  );
+
+  const scrollStep = 320;
+  if (btnLeft) {
+    btnLeft.addEventListener("click", () => {
+      scroller.scrollBy({ left: -scrollStep, behavior: "smooth" });
+    });
+  }
+  if (btnRight) {
+    btnRight.addEventListener("click", () => {
+      scroller.scrollBy({ left: scrollStep, behavior: "smooth" });
+    });
+  }
+})();
+</script>
 {% endblock %}

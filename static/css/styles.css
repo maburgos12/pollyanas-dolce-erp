@@ -456,7 +456,25 @@ textarea:focus,
 
 .table-responsive {
   width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable both-edges;
+}
+
+.table-responsive::-webkit-scrollbar {
+  height: 10px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb {
+  background: rgba(139, 34, 82, 0.35);
+  border-radius: 999px;
+}
+
+.table-responsive::-webkit-scrollbar-track {
+  background: #f7eef2;
+  border-radius: 999px;
 }
 
 .recipe-detail .table-responsive {
@@ -464,7 +482,17 @@ textarea:focus,
 }
 
 .recipe-detail .card {
-  overflow: hidden;
+  overflow: visible;
+}
+
+.recipe-detail .table-responsive.card,
+.recipe-detail .card .table-responsive {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.table-responsive table {
+  min-width: max-content;
 }
 
 .recipes-filters {
@@ -958,6 +986,43 @@ tr:hover,
 
 .recipe-detail-shell .recipe-lines-table {
   min-width: 1180px;
+}
+
+.page-receta-detail .main-content {
+  overflow-x: auto;
+}
+
+.recipe-detail-shell .recipe-lines-scroll {
+  overflow-x: scroll;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+  touch-action: pan-x;
+  cursor: grab;
+  max-height: 62vh;
+}
+
+.recipe-detail-shell .recipe-lines-scroll.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.recipe-detail-shell .recipe-lines-scroll .recipe-lines-table {
+  width: max-content;
+  min-width: 1480px;
+}
+
+.recipe-detail-shell .recipe-lines-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.table-scroll-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .plan-produccion-shell .form-grid-auto {
