@@ -634,7 +634,7 @@ def activos_catalog(request):
         if action == "import_bitacora":
             archivo = request.FILES.get("archivo_bitacora")
             if not archivo:
-                messages.error(request, "Selecciona un archivo XLSX para importar.")
+                messages.error(request, "Selecciona un archivo XLSX o CSV para importar.")
                 return redirect("activos:activos")
             is_dry_run = (request.POST.get("dry_run") or "").strip().lower() in {"1", "on", "true", "yes"}
             skip_servicios = (request.POST.get("skip_servicios") or "").strip().lower() in {"1", "on", "true", "yes"}
@@ -649,7 +649,10 @@ def activos_catalog(request):
                 messages.error(request, str(exc))
                 return redirect("activos:activos")
             except Exception:
-                messages.error(request, "No se pudo procesar el archivo. Verifica formato de hoja y columnas B-I.")
+                messages.error(
+                    request,
+                    "No se pudo procesar el archivo. Verifica formato de hoja/columnas (nombre, marca, modelo, serie, fechas y costos).",
+                )
                 return redirect("activos:activos")
 
             mode_label = "simulación (sin guardar)" if is_dry_run else "importación aplicada"

@@ -88,14 +88,14 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Carga masiva de activos (Bitácora XLSX)</div>
+  <div class="card-header">Carga masiva de activos (Bitácora XLSX/CSV)</div>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="hidden" name="action" value="import_bitacora">
     <div class="row" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;align-items:end;">
       <div>
-        <label>Archivo bitácora (.xlsx)</label>
-        <input type="file" name="archivo_bitacora" accept=".xlsx" required>
+        <label>Archivo bitácora (.xlsx, .csv)</label>
+        <input type="file" name="archivo_bitacora" accept=".xlsx,.csv" required>
       </div>
       <div>
         <label>Hoja (opcional)</label>
@@ -116,7 +116,7 @@
       <button class="btn btn-primary" type="submit">Procesar bitácora</button>
     </div>
     <p class="form-help" style="margin-top:8px;">
-      Formato esperado: nombre (B), marca (C), modelo (D), serie (E), fecha/costo servicio 1 (F/G), fecha/costo servicio 2 (H/I).
+      Formato esperado: nombre, marca, modelo, serie, fecha/costo servicio 1, fecha/costo servicio 2 (XLSX o CSV).
     </p>
   </form>
 </section>

@@ -349,6 +349,21 @@ class ActivosFlowsTests(TestCase):
         self.assertTrue(Activo.objects.filter(nombre="HORNO TEST UI").exists())
         self.assertTrue(OrdenMantenimiento.objects.filter(descripcion__icontains="bitácora histórica").exists())
 
+    def test_admin_can_import_bitacora_csv_from_ui_apply(self):
+        self.client.force_login(self.admin)
+        upload = self._build_bitacora_csv_upload("bitacora_apply.csv")
+        response = self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "import_bitacora",
+                "archivo_bitacora": upload,
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Activo.objects.filter(nombre="HORNO TEST CSV").exists())
+        self.assertTrue(OrdenMantenimiento.objects.filter(descripcion__icontains="bitácora histórica").exists())
+
     @staticmethod
     def _build_bitacora_upload(filename: str) -> SimpleUploadedFile:
         wb = Workbook()
@@ -376,4 +391,18 @@ class ActivosFlowsTests(TestCase):
             filename,
             stream.getvalue(),
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    @staticmethod
+    def _build_bitacora_csv_upload(filename: str) -> SimpleUploadedFile:
+        csv_content = "\n".join(
+            [
+                "nombre,marca,modelo,serie,fecha_1,costo_1,fecha_2,costo_2",
+                "HORNO TEST CSV,ALPHA,HX-11,SER-002,2026-02-20,950.5,,",
+            ]
+        )
+        return SimpleUploadedFile(
+            filename,
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
         )

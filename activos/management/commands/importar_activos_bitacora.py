@@ -8,11 +8,11 @@ from activos.utils.bitacora_import import import_bitacora
 
 
 class Command(BaseCommand):
-    help = "Importa activos y servicios desde BITACORA SERVICIOS MODELOS Y SERIES.xlsx"
+    help = "Importa activos y servicios desde bitácora en XLSX o CSV"
 
     def add_arguments(self, parser):
-        parser.add_argument("archivo", type=str, help="Ruta al archivo XLSX")
-        parser.add_argument("--sheet", type=str, default="", help="Nombre de hoja (por defecto: primera)")
+        parser.add_argument("archivo", type=str, help="Ruta al archivo XLSX/CSV")
+        parser.add_argument("--sheet", type=str, default="", help="Nombre de hoja (solo XLSX; por defecto: primera)")
         parser.add_argument("--dry-run", action="store_true", help="Simula importación sin guardar")
         parser.add_argument(
             "--skip-servicios",
