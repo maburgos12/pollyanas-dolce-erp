@@ -362,6 +362,103 @@ def _export_ordenes_xlsx(ordenes_rows: list[OrdenMantenimiento]) -> HttpResponse
     return response
 
 
+def _export_reportes_servicio_csv(rows: list[dict]) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="activos_reportes_servicio_{timestamp}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "folio",
+            "fecha",
+            "activo_codigo",
+            "activo",
+            "prioridad",
+            "estatus",
+            "semaforo",
+            "dias",
+            "descripcion",
+            "responsable",
+        ]
+    )
+    for item in rows:
+        orden = item["orden"]
+        writer.writerow(
+            [
+                orden.folio,
+                str(orden.fecha_programada or ""),
+                orden.activo_ref.codigo if orden.activo_ref_id else "",
+                orden.activo_ref.nombre if orden.activo_ref_id else "",
+                orden.prioridad,
+                orden.estatus,
+                item.get("semaforo_label", ""),
+                item.get("dias", 0),
+                orden.descripcion or "",
+                orden.responsable or "",
+            ]
+        )
+    return response
+
+
+def _export_reportes_servicio_xlsx(rows: list[dict]) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "reportes_servicio"
+    ws.append(
+        [
+            "folio",
+            "fecha",
+            "activo_codigo",
+            "activo",
+            "prioridad",
+            "estatus",
+            "semaforo",
+            "dias",
+            "descripcion",
+            "responsable",
+        ]
+    )
+    for item in rows:
+        orden = item["orden"]
+        ws.append(
+            [
+                orden.folio,
+                str(orden.fecha_programada or ""),
+                orden.activo_ref.codigo if orden.activo_ref_id else "",
+                orden.activo_ref.nombre if orden.activo_ref_id else "",
+                orden.prioridad,
+                orden.estatus,
+                item.get("semaforo_label", ""),
+                int(item.get("dias", 0) or 0),
+                orden.descripcion or "",
+                orden.responsable or "",
+            ]
+        )
+    for col, width in {
+        "A": 18,
+        "B": 14,
+        "C": 16,
+        "D": 32,
+        "E": 12,
+        "F": 14,
+        "G": 12,
+        "H": 10,
+        "I": 56,
+        "J": 24,
+    }.items():
+        ws.column_dimensions[col].width = width
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="activos_reportes_servicio_{timestamp}.xlsx"'
+    return response
+
+
 @login_required
 def dashboard(request):
     if not can_view_inventario(request.user):
@@ -980,6 +1077,7 @@ def reportes_servicio(request):
         return redirect("activos:reportes")
 
     estado = (request.GET.get("estatus") or "ABIERTAS").strip().upper()
+    semaforo_filter = (request.GET.get("semaforo") or "").strip().upper()
     q = (request.GET.get("q") or "").strip()
     qs = OrdenMantenimiento.objects.select_related("activo_ref", "creado_por").filter(tipo=OrdenMantenimiento.TIPO_CORRECTIVO)
     if estado == "ABIERTAS":
@@ -991,7 +1089,7 @@ def reportes_servicio(request):
 
     today = timezone.localdate()
     reportes = []
-    for orden in qs.order_by("-fecha_programada", "-id")[:240]:
+    for orden in qs.order_by("-fecha_programada", "-id")[:1000]:
         dias = (today - orden.fecha_programada).days if orden.fecha_programada else 0
         if orden.estatus == OrdenMantenimiento.ESTATUS_CERRADA:
             semaforo = ("Verde", "badge-success")
@@ -1001,13 +1099,31 @@ def reportes_servicio(request):
             semaforo = ("Amarillo", "badge-warning")
         else:
             semaforo = ("Rojo", "badge-danger")
-        reportes.append({"orden": orden, "dias": dias, "semaforo_label": semaforo[0], "semaforo_class": semaforo[1]})
+        reportes.append(
+            {
+                "orden": orden,
+                "dias": dias,
+                "semaforo_label": semaforo[0],
+                "semaforo_class": semaforo[1],
+                "semaforo_key": semaforo[0].upper(),
+            }
+        )
+
+    if semaforo_filter in {"VERDE", "AMARILLO", "ROJO"}:
+        reportes = [item for item in reportes if item.get("semaforo_key") == semaforo_filter]
+
+    export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format in {"csv", "xlsx"}:
+        if export_format == "csv":
+            return _export_reportes_servicio_csv(reportes)
+        return _export_reportes_servicio_xlsx(reportes)
 
     context = {
         "module_tabs": _module_tabs("reportes"),
         "activos": list(Activo.objects.filter(activo=True).order_by("nombre")[:800]),
         "reportes": reportes,
         "estado": estado,
+        "semaforo_filter": semaforo_filter,
         "q": q,
         "today": today,
         "prioridad_choices": OrdenMantenimiento.PRIORIDAD_CHOICES,

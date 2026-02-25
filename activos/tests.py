@@ -1,4 +1,5 @@
 from io import BytesIO
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -131,6 +132,48 @@ class ActivosFlowsTests(TestCase):
         response = self.client.get(reverse("activos:calendario"), {"days": "15"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["days"], 15)
+
+    def test_export_reportes_servicio_csv(self):
+        self.client.force_login(self.admin)
+        activo = Activo.objects.create(nombre="Refrigerador QA", categoria="Refrigeración")
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+            prioridad=OrdenMantenimiento.PRIORIDAD_MEDIA,
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            fecha_programada=timezone.localdate(),
+            descripcion="Falla de prueba",
+        )
+        response = self.client.get(
+            reverse("activos:reportes"),
+            {"export": "csv", "estatus": "ABIERTAS"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.get("Content-Type", ""))
+        self.assertIn("activos_reportes_servicio_", response.get("Content-Disposition", ""))
+        body = response.content.decode("utf-8")
+        self.assertIn("folio,fecha,activo_codigo,activo,prioridad,estatus,semaforo,dias,descripcion,responsable", body)
+        self.assertIn("Falla de prueba", body)
+
+    def test_filter_reportes_servicio_by_semaforo(self):
+        self.client.force_login(self.admin)
+        activo = Activo.objects.create(nombre="Horno QA2", categoria="Hornos")
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+            prioridad=OrdenMantenimiento.PRIORIDAD_MEDIA,
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            fecha_programada=timezone.localdate() - timedelta(days=8),
+            descripcion="Falla roja",
+        )
+        response = self.client.get(
+            reverse("activos:reportes"),
+            {"estatus": "ABIERTAS", "semaforo": "ROJO"},
+        )
+        self.assertEqual(response.status_code, 200)
+        reportes = response.context["reportes"]
+        self.assertTrue(reportes)
+        self.assertTrue(all(item.get("semaforo_key") == "ROJO" for item in reportes))
 
     def test_generar_ordenes_programadas_creates_preventive_order(self):
         self.client.force_login(self.admin)

@@ -55,7 +55,7 @@
 <section class="card">
   <div class="card-header">Reportes correctivos</div>
   <form method="get">
-    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;align-items:end;">
+    <div class="row" style="display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;">
       <div>
         <label>Buscar</label>
         <input type="text" name="q" value="{{ q }}" placeholder="Folio, activo, falla...">
@@ -70,12 +70,25 @@
           <option value="CANCELADA" {% if estado == 'CANCELADA' %}selected{% endif %}>Cancelada</option>
         </select>
       </div>
+      <div>
+        <label>Semáforo</label>
+        <select name="semaforo">
+          <option value="" {% if not semaforo_filter %}selected{% endif %}>Todos</option>
+          <option value="VERDE" {% if semaforo_filter == 'VERDE' %}selected{% endif %}>Verde</option>
+          <option value="AMARILLO" {% if semaforo_filter == 'AMARILLO' %}selected{% endif %}>Amarillo</option>
+          <option value="ROJO" {% if semaforo_filter == 'ROJO' %}selected{% endif %}>Rojo</option>
+        </select>
+      </div>
       <div class="quick-actions">
         <button class="btn btn-primary" type="submit">Filtrar</button>
         <a href="{% url 'activos:reportes' %}" class="btn btn-secondary">Limpiar</a>
       </div>
     </div>
   </form>
+  <div class="quick-actions" style="margin-top:10px;">
+    <a class="btn btn-secondary" href="?q={{ q|urlencode }}&estatus={{ estado|urlencode }}&semaforo={{ semaforo_filter|urlencode }}&export=csv">Export CSV</a>
+    <a class="btn btn-secondary" href="?q={{ q|urlencode }}&estatus={{ estado|urlencode }}&semaforo={{ semaforo_filter|urlencode }}&export=xlsx">Export XLSX</a>
+  </div>
 
   <div class="table-responsive" style="margin-top:12px;">
     <table class="table table-striped">
