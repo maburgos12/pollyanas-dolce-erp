@@ -209,7 +209,12 @@ def _read_csv_text(archivo: str | Path | BinaryIO) -> str:
 def _iter_csv_rows(archivo: str | Path | BinaryIO) -> list[tuple[int, dict[str, Any]]]:
     text = _read_csv_text(archivo)
     sample = text[:2048]
-    delimiter = "\t" if sample.count("\t") > sample.count(",") else ","
+    delimiter_scores = {
+        ",": sample.count(","),
+        ";": sample.count(";"),
+        "\t": sample.count("\t"),
+    }
+    delimiter = max(delimiter_scores, key=delimiter_scores.get)
     reader = csv.reader(StringIO(text), delimiter=delimiter)
     all_rows = list(reader)
     if not all_rows:
@@ -293,7 +298,15 @@ def _as_decimal(value) -> Decimal:
     if value in (None, ""):
         return Decimal("0")
     try:
-        return Decimal(str(value)).quantize(Decimal("0.01"))
+        text = str(value).strip().replace("$", "").replace(" ", "")
+        if "," in text and "." in text:
+            if text.rfind(",") > text.rfind("."):
+                text = text.replace(".", "").replace(",", ".")
+            else:
+                text = text.replace(",", "")
+        elif "," in text and "." not in text:
+            text = text.replace(",", ".")
+        return Decimal(text).quantize(Decimal("0.01"))
     except Exception:
         return Decimal("0")
 

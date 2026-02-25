@@ -364,6 +364,23 @@ class ActivosFlowsTests(TestCase):
         self.assertTrue(Activo.objects.filter(nombre="HORNO TEST CSV").exists())
         self.assertTrue(OrdenMantenimiento.objects.filter(descripcion__icontains="bitácora histórica").exists())
 
+    def test_admin_can_import_bitacora_csv_semicolon_decimal_comma(self):
+        self.client.force_login(self.admin)
+        upload = self._build_bitacora_csv_upload("bitacora_decimal.csv", semicolon_decimal=True)
+        response = self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "import_bitacora",
+                "archivo_bitacora": upload,
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        activo = Activo.objects.get(nombre="HORNO TEST CSV DECIMAL")
+        orden = OrdenMantenimiento.objects.filter(activo_ref=activo).order_by("-id").first()
+        self.assertIsNotNone(orden)
+        self.assertEqual(str(orden.costo_otros), "1250.75")
+
     @staticmethod
     def _build_bitacora_upload(filename: str) -> SimpleUploadedFile:
         wb = Workbook()
@@ -394,13 +411,21 @@ class ActivosFlowsTests(TestCase):
         )
 
     @staticmethod
-    def _build_bitacora_csv_upload(filename: str) -> SimpleUploadedFile:
-        csv_content = "\n".join(
-            [
-                "nombre,marca,modelo,serie,fecha_1,costo_1,fecha_2,costo_2",
-                "HORNO TEST CSV,ALPHA,HX-11,SER-002,2026-02-20,950.5,,",
-            ]
-        )
+    def _build_bitacora_csv_upload(filename: str, *, semicolon_decimal: bool = False) -> SimpleUploadedFile:
+        if semicolon_decimal:
+            csv_content = "\n".join(
+                [
+                    "nombre;marca;modelo;serie;fecha_1;costo_1;fecha_2;costo_2",
+                    "HORNO TEST CSV DECIMAL;ALPHA;HX-12;SER-003;2026-02-20;1.250,75;;",
+                ]
+            )
+        else:
+            csv_content = "\n".join(
+                [
+                    "nombre,marca,modelo,serie,fecha_1,costo_1,fecha_2,costo_2",
+                    "HORNO TEST CSV,ALPHA,HX-11,SER-002,2026-02-20,950.5,,",
+                ]
+            )
         return SimpleUploadedFile(
             filename,
             csv_content.encode("utf-8"),
