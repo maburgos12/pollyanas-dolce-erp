@@ -2,9 +2,10 @@ from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from core.access import ROLE_ADMIN, ROLE_ALMACEN, ROLE_VENTAS
 
@@ -107,4 +108,63 @@ class ActivosFlowsTests(TestCase):
         self.assertEqual(
             headers,
             ["codigo", "nombre", "ubicacion", "categoria", "estado", "notas", "motivos", "acciones_sugeridas"],
+        )
+
+    def test_admin_can_import_bitacora_from_ui_dry_run(self):
+        self.client.force_login(self.admin)
+        upload = self._build_bitacora_upload("bitacora_dryrun.xlsx")
+        response = self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "import_bitacora",
+                "dry_run": "1",
+                "archivo_bitacora": upload,
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Activo.objects.filter(nombre="HORNO TEST UI").exists())
+
+    def test_admin_can_import_bitacora_from_ui_apply(self):
+        self.client.force_login(self.admin)
+        upload = self._build_bitacora_upload("bitacora_apply.xlsx")
+        response = self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "import_bitacora",
+                "archivo_bitacora": upload,
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Activo.objects.filter(nombre="HORNO TEST UI").exists())
+        self.assertTrue(OrdenMantenimiento.objects.filter(descripcion__icontains="bitácora histórica").exists())
+
+    @staticmethod
+    def _build_bitacora_upload(filename: str) -> SimpleUploadedFile:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Hoja1"
+        ws.cell(2, 2, "HORNOS")
+        ws.cell(2, 3, "MARCA")
+        ws.cell(2, 4, "MODELO")
+        ws.cell(2, 5, "SERIE:")
+        ws.cell(2, 6, "FECHA MANTENIMIENTO")
+        ws.cell(2, 7, "COSTO")
+        ws.cell(2, 8, "FECHA MANTENIMIENTO")
+        ws.cell(2, 9, "COSTO")
+        ws.cell(3, 2, "PRODUCCION MATRIZ")
+        ws.cell(4, 2, "HORNO TEST UI")
+        ws.cell(4, 3, "ALPHA")
+        ws.cell(4, 4, "HX-10")
+        ws.cell(4, 5, "SER-001")
+        ws.cell(4, 6, "2026-02-20")
+        ws.cell(4, 7, 1200)
+        stream = BytesIO()
+        wb.save(stream)
+        stream.seek(0)
+        return SimpleUploadedFile(
+            filename,
+            stream.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )

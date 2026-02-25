@@ -18,6 +18,7 @@ from core.audit import log_event
 from maestros.models import Proveedor
 
 from .models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
+from .utils.bitacora_import import import_bitacora
 
 
 def _safe_decimal(value) -> Decimal:
@@ -296,6 +297,38 @@ def activos_catalog(request):
                 {"activo": activo_obj.activo},
             )
             messages.success(request, f"{activo_obj.codigo}: {'Activo' if activo_obj.activo else 'Inactivo'}.")
+            return redirect("activos:activos")
+
+        if action == "import_bitacora":
+            archivo = request.FILES.get("archivo_bitacora")
+            if not archivo:
+                messages.error(request, "Selecciona un archivo XLSX para importar.")
+                return redirect("activos:activos")
+            is_dry_run = (request.POST.get("dry_run") or "").strip().lower() in {"1", "on", "true", "yes"}
+            skip_servicios = (request.POST.get("skip_servicios") or "").strip().lower() in {"1", "on", "true", "yes"}
+            try:
+                stats = import_bitacora(
+                    archivo,
+                    sheet_name=(request.POST.get("sheet_name") or "").strip(),
+                    dry_run=is_dry_run,
+                    skip_servicios=skip_servicios,
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect("activos:activos")
+            except Exception:
+                messages.error(request, "No se pudo procesar el archivo. Verifica formato de hoja y columnas B-I.")
+                return redirect("activos:activos")
+
+            mode_label = "simulación (sin guardar)" if is_dry_run else "importación aplicada"
+            messages.success(
+                request,
+                (
+                    f"Bitácora procesada ({mode_label}): filas válidas {stats['filas_validas']}, "
+                    f"activos creados {stats['activos_creados']}, actualizados {stats['activos_actualizados']}, "
+                    f"servicios creados {stats['servicios_creados']}, omitidos {stats['servicios_omitidos']}."
+                ),
+            )
             return redirect("activos:activos")
 
         messages.error(request, "Acción no reconocida.")
