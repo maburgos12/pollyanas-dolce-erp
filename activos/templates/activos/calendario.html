@@ -13,7 +13,7 @@
 <section class="card">
   <div class="card-header">Rango calendario</div>
   <form method="get">
-    <div class="row" style="display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:10px;align-items:end;">
+    <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(180px,1fr));gap:10px;align-items:end;">
       <div>
         <label>Desde</label>
         <input type="date" name="from" value="{{ date_from|date:'Y-m-d' }}">
@@ -23,10 +23,56 @@
         <input type="date" name="to" value="{{ date_to|date:'Y-m-d' }}">
       </div>
       <div>
+        <label>Ventana (días)</label>
+        <select name="days">
+          <option value="7" {% if days == 7 %}selected{% endif %}>7</option>
+          <option value="15" {% if days == 15 %}selected{% endif %}>15</option>
+          <option value="30" {% if days == 30 %}selected{% endif %}>30</option>
+          <option value="45" {% if days == 45 %}selected{% endif %}>45</option>
+          <option value="60" {% if days == 60 %}selected{% endif %}>60</option>
+        </select>
+      </div>
+      <div>
         <button type="submit" class="btn btn-primary">Filtrar</button>
       </div>
     </div>
   </form>
+  <div class="quick-actions" style="margin-top:10px;">
+    <a class="btn btn-secondary" href="?days=7">Próx. 7 días</a>
+    <a class="btn btn-secondary" href="?days=15">Próx. 15 días</a>
+    <a class="btn btn-secondary" href="?days=30">Próx. 30 días</a>
+    <a class="btn btn-secondary" href="?days=45">Próx. 45 días</a>
+  </div>
+</section>
+
+<div class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-number">{{ resumen.planes }}</div>
+    <div class="kpi-label">Planes en rango</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number">{{ resumen.ordenes_total }}</div>
+    <div class="kpi-label">Órdenes en rango</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-warning">{{ resumen.ordenes_pendientes }}</div>
+    <div class="kpi-label">Pendientes</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-danger">{{ resumen.ordenes_en_proceso }}</div>
+    <div class="kpi-label">En proceso</div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-number is-success">{{ resumen.ordenes_cerradas }}</div>
+    <div class="kpi-label">Cerradas</div>
+  </article>
+</div>
+
+<section class="card">
+  <div class="card-header">Resumen ventana</div>
+  <p class="text-muted">
+    Desde {{ date_from|date:"Y-m-d" }} hasta {{ date_to|date:"Y-m-d" }} ({{ days }} días).
+  </p>
 </section>
 
 <section class="card">

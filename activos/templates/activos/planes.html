@@ -141,6 +141,10 @@
       </div>
     </div>
   </form>
+  <div class="quick-actions" style="margin-top:10px;">
+    <a class="btn btn-secondary" href="?q={{ filters.q|urlencode }}&estatus={{ filters.estatus|urlencode }}&scope={{ filters.scope|urlencode }}&export=csv">Export CSV</a>
+    <a class="btn btn-secondary" href="?q={{ filters.q|urlencode }}&estatus={{ filters.estatus|urlencode }}&scope={{ filters.scope|urlencode }}&export=xlsx">Export XLSX</a>
+  </div>
 
   <div class="table-responsive" style="margin-top:12px;">
     <table class="table table-striped">

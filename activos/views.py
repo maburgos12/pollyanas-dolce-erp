@@ -157,6 +157,211 @@ def _export_activos_depuracion_xlsx(rows: list[dict]) -> HttpResponse:
     return response
 
 
+def _export_planes_csv(planes_rows: list[PlanMantenimiento]) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="activos_planes_{timestamp}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "activo_codigo",
+            "activo",
+            "plan",
+            "tipo",
+            "estatus",
+            "frecuencia_dias",
+            "tolerancia_dias",
+            "ultima_ejecucion",
+            "proxima_ejecucion",
+            "responsable",
+        ]
+    )
+    for plan in planes_rows:
+        writer.writerow(
+            [
+                plan.activo_ref.codigo if plan.activo_ref_id else "",
+                plan.activo_ref.nombre if plan.activo_ref_id else "",
+                plan.nombre,
+                plan.tipo,
+                plan.estatus,
+                plan.frecuencia_dias,
+                plan.tolerancia_dias,
+                str(plan.ultima_ejecucion or ""),
+                str(plan.proxima_ejecucion or ""),
+                plan.responsable or "",
+            ]
+        )
+    return response
+
+
+def _export_planes_xlsx(planes_rows: list[PlanMantenimiento]) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "planes"
+    ws.append(
+        [
+            "activo_codigo",
+            "activo",
+            "plan",
+            "tipo",
+            "estatus",
+            "frecuencia_dias",
+            "tolerancia_dias",
+            "ultima_ejecucion",
+            "proxima_ejecucion",
+            "responsable",
+        ]
+    )
+    for plan in planes_rows:
+        ws.append(
+            [
+                plan.activo_ref.codigo if plan.activo_ref_id else "",
+                plan.activo_ref.nombre if plan.activo_ref_id else "",
+                plan.nombre,
+                plan.tipo,
+                plan.estatus,
+                plan.frecuencia_dias,
+                plan.tolerancia_dias,
+                str(plan.ultima_ejecucion or ""),
+                str(plan.proxima_ejecucion or ""),
+                plan.responsable or "",
+            ]
+        )
+    for col, width in {
+        "A": 16,
+        "B": 32,
+        "C": 32,
+        "D": 14,
+        "E": 14,
+        "F": 16,
+        "G": 16,
+        "H": 18,
+        "I": 18,
+        "J": 24,
+    }.items():
+        ws.column_dimensions[col].width = width
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="activos_planes_{timestamp}.xlsx"'
+    return response
+
+
+def _export_ordenes_csv(ordenes_rows: list[OrdenMantenimiento]) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="activos_ordenes_{timestamp}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "folio",
+            "activo_codigo",
+            "activo",
+            "plan",
+            "tipo",
+            "prioridad",
+            "estatus",
+            "fecha_programada",
+            "fecha_inicio",
+            "fecha_cierre",
+            "responsable",
+            "costo_total",
+            "descripcion",
+        ]
+    )
+    for orden in ordenes_rows:
+        writer.writerow(
+            [
+                orden.folio,
+                orden.activo_ref.codigo if orden.activo_ref_id else "",
+                orden.activo_ref.nombre if orden.activo_ref_id else "",
+                orden.plan_ref.nombre if orden.plan_ref_id else "",
+                orden.tipo,
+                orden.prioridad,
+                orden.estatus,
+                str(orden.fecha_programada or ""),
+                str(orden.fecha_inicio or ""),
+                str(orden.fecha_cierre or ""),
+                orden.responsable or "",
+                str(orden.costo_total),
+                orden.descripcion or "",
+            ]
+        )
+    return response
+
+
+def _export_ordenes_xlsx(ordenes_rows: list[OrdenMantenimiento]) -> HttpResponse:
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ordenes"
+    ws.append(
+        [
+            "folio",
+            "activo_codigo",
+            "activo",
+            "plan",
+            "tipo",
+            "prioridad",
+            "estatus",
+            "fecha_programada",
+            "fecha_inicio",
+            "fecha_cierre",
+            "responsable",
+            "costo_total",
+            "descripcion",
+        ]
+    )
+    for orden in ordenes_rows:
+        ws.append(
+            [
+                orden.folio,
+                orden.activo_ref.codigo if orden.activo_ref_id else "",
+                orden.activo_ref.nombre if orden.activo_ref_id else "",
+                orden.plan_ref.nombre if orden.plan_ref_id else "",
+                orden.tipo,
+                orden.prioridad,
+                orden.estatus,
+                str(orden.fecha_programada or ""),
+                str(orden.fecha_inicio or ""),
+                str(orden.fecha_cierre or ""),
+                orden.responsable or "",
+                float(orden.costo_total or 0),
+                orden.descripcion or "",
+            ]
+        )
+    for col, width in {
+        "A": 18,
+        "B": 16,
+        "C": 28,
+        "D": 28,
+        "E": 14,
+        "F": 12,
+        "G": 14,
+        "H": 18,
+        "I": 14,
+        "J": 14,
+        "K": 24,
+        "L": 14,
+        "M": 56,
+    }.items():
+        ws.column_dimensions[col].width = width
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="activos_ordenes_{timestamp}.xlsx"'
+    return response
+
+
 @login_required
 def dashboard(request):
     if not can_view_inventario(request.user):
@@ -558,6 +763,13 @@ def planes(request):
             estatus=PlanMantenimiento.ESTATUS_ACTIVO,
         )
 
+    export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format in {"csv", "xlsx"}:
+        export_rows = list(qs[:1500])
+        if export_format == "csv":
+            return _export_planes_csv(export_rows)
+        return _export_planes_xlsx(export_rows)
+
     context = {
         "module_tabs": _module_tabs("planes"),
         "planes": list(qs[:300]),
@@ -643,6 +855,13 @@ def ordenes(request):
         qs = qs.filter(estatus__in=[OrdenMantenimiento.ESTATUS_PENDIENTE, OrdenMantenimiento.ESTATUS_EN_PROCESO])
     elif estado in {x[0] for x in OrdenMantenimiento.ESTATUS_CHOICES}:
         qs = qs.filter(estatus=estado)
+
+    export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format in {"csv", "xlsx"}:
+        export_rows = list(qs[:2000])
+        if export_format == "csv":
+            return _export_ordenes_csv(export_rows)
+        return _export_ordenes_xlsx(export_rows)
 
     context = {
         "module_tabs": _module_tabs("ordenes"),
@@ -804,16 +1023,24 @@ def calendario(request):
 
     date_from_raw = (request.GET.get("from") or "").strip()
     date_to_raw = (request.GET.get("to") or "").strip()
+    days_param = _safe_int(request.GET.get("days"), default=45)
+    if days_param <= 0:
+        days_param = 45
+    days_param = max(7, min(120, days_param))
     try:
         date_from = timezone.datetime.fromisoformat(date_from_raw).date() if date_from_raw else timezone.localdate()
     except ValueError:
         date_from = timezone.localdate()
     try:
-        date_to = timezone.datetime.fromisoformat(date_to_raw).date() if date_to_raw else (date_from + timedelta(days=45))
+        date_to = (
+            timezone.datetime.fromisoformat(date_to_raw).date()
+            if date_to_raw
+            else (date_from + timedelta(days=days_param))
+        )
     except ValueError:
-        date_to = date_from + timedelta(days=45)
+        date_to = date_from + timedelta(days=days_param)
     if date_to < date_from:
-        date_to = date_from + timedelta(days=45)
+        date_to = date_from + timedelta(days=days_param)
 
     planes = list(
         PlanMantenimiento.objects.select_related("activo_ref")
@@ -857,10 +1084,21 @@ def calendario(request):
         )
     events.sort(key=lambda r: (r["fecha"], r["tipo"], r["referencia"]))
 
+    ordenes_list = list(ordenes_qs)
+    resumen = {
+        "planes": len(planes),
+        "ordenes_total": len(ordenes_list),
+        "ordenes_pendientes": sum(1 for o in ordenes_list if o.estatus == OrdenMantenimiento.ESTATUS_PENDIENTE),
+        "ordenes_en_proceso": sum(1 for o in ordenes_list if o.estatus == OrdenMantenimiento.ESTATUS_EN_PROCESO),
+        "ordenes_cerradas": sum(1 for o in ordenes_list if o.estatus == OrdenMantenimiento.ESTATUS_CERRADA),
+    }
+
     context = {
         "module_tabs": _module_tabs("calendario"),
         "date_from": date_from,
         "date_to": date_to,
+        "days": days_param,
         "events": events,
+        "resumen": resumen,
     }
     return render(request, "activos/calendario.html", context)

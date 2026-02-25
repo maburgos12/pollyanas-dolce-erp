@@ -78,6 +78,8 @@
     <a href="?estatus=EN_PROCESO" class="btn btn-secondary">En proceso</a>
     <a href="?estatus=CERRADA" class="btn btn-secondary">Cerradas</a>
     <a href="?estatus=CANCELADA" class="btn btn-secondary">Canceladas</a>
+    <a href="?estatus={{ estado|urlencode }}&export=csv" class="btn btn-secondary">Export CSV</a>
+    <a href="?estatus={{ estado|urlencode }}&export=xlsx" class="btn btn-secondary">Export XLSX</a>
   </div>
   <div class="table-responsive">
     <table class="table table-striped">

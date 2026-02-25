@@ -82,6 +82,56 @@ class ActivosFlowsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(PlanMantenimiento.objects.filter(activo_ref=activo).exists())
 
+    def test_export_planes_csv(self):
+        self.client.force_login(self.admin)
+        activo = Activo.objects.create(nombre="Horno QA", categoria="Hornos")
+        PlanMantenimiento.objects.create(
+            activo_ref=activo,
+            nombre="Plan QA",
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            frecuencia_dias=30,
+            proxima_ejecucion=timezone.localdate(),
+        )
+        response = self.client.get(reverse("activos:planes"), {"export": "csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.get("Content-Type", ""))
+        self.assertIn("activos_planes_", response.get("Content-Disposition", ""))
+        body = response.content.decode("utf-8")
+        self.assertIn("activo_codigo,activo,plan,tipo,estatus", body)
+        self.assertIn("Plan QA", body)
+
+    def test_export_ordenes_xlsx(self):
+        self.client.force_login(self.admin)
+        activo = Activo.objects.create(nombre="Batidora QA", categoria="Batidoras")
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            fecha_programada=timezone.localdate(),
+            descripcion="Orden QA",
+        )
+        response = self.client.get(reverse("activos:ordenes"), {"export": "xlsx", "estatus": "ABIERTAS"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response.get("Content-Type", ""),
+        )
+        self.assertIn("activos_ordenes_", response.get("Content-Disposition", ""))
+        wb = load_workbook(filename=BytesIO(response.content))
+        ws = wb.active
+        headers = [cell.value for cell in ws[1]]
+        self.assertEqual(
+            headers[:7],
+            ["folio", "activo_codigo", "activo", "plan", "tipo", "prioridad", "estatus"],
+        )
+
+    def test_calendario_days_window(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("activos:calendario"), {"days": "15"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["days"], 15)
+
     def test_generar_ordenes_programadas_creates_preventive_order(self):
         self.client.force_login(self.admin)
         activo = Activo.objects.create(nombre="AA Planta", categoria="Aire", criticidad=Activo.CRITICIDAD_ALTA)
