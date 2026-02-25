@@ -45,7 +45,7 @@
                     {% endif %}
                     {% if ui_access.can_view_recetas %}
                     <li>
-                        <a href="{% url 'recetas:recetas_list' %}" class="{% if '/recetas/' in request.path and '/recetas/plan-produccion/' not in request.path %}active{% endif %}">
+                        <a href="{% url 'recetas:recetas_list' %}" class="{% if '/recetas/' in request.path and '/recetas/plan-produccion/' not in request.path and '/recetas/reabasto-cedis/' not in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
                             </span>
@@ -58,6 +58,14 @@
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>
                             </span>
                             <span>Plan Producción</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{% url 'recetas:reabasto_cedis' %}" class="{% if '/recetas/reabasto-cedis/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/><path d="M7 12h6"/><path d="m10 9 3 3-3 3"/></svg>
+                            </span>
+                            <span>Reabasto CEDIS</span>
                         </a>
                     </li>
                     {% endif %}
@@ -204,7 +212,10 @@
             <header class="header">
                 <h1 class="header-title">{% block page_title %}Dashboard{% endblock %}</h1>
                 <div class="header-meta">
-                    {% now "l, j \d\e F \d\e Y" %}
+                    <button id="densityToggle" class="btn btn-secondary btn-sm density-toggle" type="button" aria-pressed="false">
+                        Modo compacto
+                    </button>
+                    <span>{% now "l, j \d\e F \d\e Y" %}</span>
                 </div>
             </header>
 
@@ -218,6 +229,31 @@
             </div>
         </main>
     </div>
+    <script>
+      (() => {
+        const key = "ui_density_mode";
+        const body = document.body;
+        const toggle = document.getElementById("densityToggle");
+        if (!toggle) return;
+
+        const applyMode = (mode) => {
+          const compact = mode === "compact";
+          body.classList.toggle("ui-compact", compact);
+          toggle.setAttribute("aria-pressed", compact ? "true" : "false");
+          toggle.textContent = compact ? "Modo normal" : "Modo compacto";
+        };
+
+        const saved = localStorage.getItem(key);
+        applyMode(saved || "normal");
+
+        toggle.addEventListener("click", () => {
+          const compact = !body.classList.contains("ui-compact");
+          const mode = compact ? "compact" : "normal";
+          localStorage.setItem(key, mode);
+          applyMode(mode);
+        });
+      })();
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

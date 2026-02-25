@@ -207,6 +207,10 @@ h4 {
   color: var(--texto-light);
   font-size: 13px;
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .container {
@@ -404,6 +408,11 @@ h4 {
   min-height: 34px;
   padding: 6px 12px;
   font-size: 12px;
+}
+
+.density-toggle {
+  min-width: 122px;
+  white-space: nowrap;
 }
 
 .w-100 { width: 100%; }
@@ -1068,6 +1077,73 @@ tr:hover,
   justify-content: flex-end;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+body.ui-compact {
+  --control-height: 36px;
+  --card-padding: 14px;
+  --section-gap: 10px;
+}
+
+body.ui-compact .container {
+  padding: 16px;
+}
+
+body.ui-compact .header {
+  padding: 10px 18px;
+}
+
+body.ui-compact .header-title {
+  font-size: 21px;
+}
+
+body.ui-compact .header-meta {
+  font-size: 12px;
+}
+
+body.ui-compact .card {
+  margin-bottom: 10px;
+}
+
+body.ui-compact .card-header {
+  font-size: 25px;
+  margin-bottom: 10px;
+}
+
+body.ui-compact .btn {
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
+body.ui-compact .module-tab {
+  min-height: 34px;
+  padding: 6px 12px;
+}
+
+body.ui-compact .kpi-card {
+  min-height: 104px;
+  padding: 14px;
+}
+
+body.ui-compact .kpi-number {
+  font-size: 40px;
+}
+
+body.ui-compact .kpi-label {
+  font-size: 11px;
+}
+
+body.ui-compact th,
+body.ui-compact .table th,
+body.ui-compact .table thead th {
+  font-size: 11px;
+  padding: 9px 10px;
+}
+
+body.ui-compact td,
+body.ui-compact .table td {
+  font-size: 13px;
+  padding: 9px 10px;
 }
 
 .plan-produccion-shell .form-grid-auto {
