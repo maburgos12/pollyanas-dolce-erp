@@ -18,7 +18,7 @@
     </div>
   </div>
 
-  <form method="post" action="{% url 'recetas:receta_update' receta.id %}" class="recipes-filters mb-3">
+  <form method="post" action="{% url 'recetas:receta_update' receta.id %}" class="recipes-filters recipe-main-form mb-3">
     {% csrf_token %}
     <input class="form-control" type="text" name="nombre" value="{{ receta.nombre }}" placeholder="Nombre de receta" required>
     <input class="form-control" type="text" name="codigo_point" value="{{ receta.codigo_point }}" placeholder="Código Point (opcional)">
@@ -35,11 +35,11 @@
       {% endfor %}
     </select>
     <input class="form-control" type="text" name="sheet_name" value="{{ receta.sheet_name }}" placeholder="Hoja / categoría">
-    <label class="field-check">
+    <label class="field-check field-check-compact" title="Aplica presentaciones/tamaños (mini, chico, mediano, etc.)">
       <input type="checkbox" name="usa_presentaciones" {% if receta.usa_presentaciones %}checked{% endif %}>
-      <span>Aplica presentaciones/tamaños (mini, chico, mediano, etc.)</span>
+      <span>Aplica presentaciones/tamaños</span>
     </label>
-    <button class="btn btn-primary" type="submit">Guardar receta</button>
+    <button class="btn btn-primary recipe-main-submit" type="submit">Guardar receta</button>
   </form>
 
   {% if receta.tipo == "PREPARACION" and not receta.rendimiento_cantidad %}
@@ -144,7 +144,7 @@
     El histórico de versiones de costo no está disponible en este entorno.
   </div>
   {% endif %}
-  <form class="recipes-filters mb-3" method="get">
+  <form class="recipes-filters recipes-filters-compare mb-3" method="get">
     <div>
       <label class="form-label">Base</label>
       <select class="form-select" name="base">
@@ -161,8 +161,12 @@
         {% endfor %}
       </select>
     </div>
-    <button class="btn btn-primary" type="submit">Comparar versiones</button>
-    <a class="btn btn-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Limpiar</a>
+    <div class="form-action">
+      <button class="btn btn-primary w-100" type="submit">Comparar versiones</button>
+    </div>
+    <div class="form-action">
+      <a class="btn btn-secondary w-100" href="{% url 'recetas:receta_detail' receta.id %}">Limpiar</a>
+    </div>
   </form>
   {% if version_compare and selected_base and selected_target %}
   <div class="kpi-mini mb-3">

@@ -1043,7 +1043,7 @@ tr:hover,
 }
 
 .page-receta-detail .main-content {
-  overflow-x: hidden;
+  overflow-x: visible;
 }
 
 .recipe-detail-shell .recipe-lines-scroll {
@@ -1077,6 +1077,53 @@ tr:hover,
   justify-content: flex-end;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.recipe-detail-shell .recipe-main-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.recipe-detail-shell .recipe-main-form .form-control,
+.recipe-detail-shell .recipe-main-form .form-select,
+.recipe-detail-shell .recipe-main-form .field-check {
+  height: var(--control-height);
+}
+
+.recipe-detail-shell .field-check-compact {
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.recipe-detail-shell .field-check-compact span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.recipe-detail-shell .recipe-main-submit {
+  grid-column: 1 / -1;
+  justify-self: start;
+  min-width: 220px;
+}
+
+.recipe-detail-shell .recipes-filters-compare {
+  grid-template-columns: repeat(4, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.recipe-detail-shell .recipes-filters-compare .form-action {
+  display: flex;
+  align-items: flex-end;
+}
+
+.recipe-detail-shell .recipes-filters-compare .form-action .btn {
+  width: 100%;
 }
 
 body.ui-compact {
@@ -1144,6 +1191,16 @@ body.ui-compact td,
 body.ui-compact .table td {
   font-size: 13px;
   padding: 9px 10px;
+}
+
+body.ui-compact .recipe-detail-shell .recipe-main-submit {
+  min-width: 190px;
+}
+
+@media (max-width: 1100px) {
+  .recipe-detail-shell .recipes-filters-compare {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .plan-produccion-shell .form-grid-auto {
