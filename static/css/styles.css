@@ -989,7 +989,7 @@ tr:hover,
 }
 
 .page-receta-detail .main-content {
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .recipe-detail-shell .recipe-lines-scroll {
