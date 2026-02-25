@@ -830,6 +830,9 @@ def activos_catalog(request):
     estado = (request.GET.get("estado") or "").strip().upper()
     criticidad = (request.GET.get("criticidad") or "").strip().upper()
     solo_activos = (request.GET.get("solo_activos") or "1").strip()
+    import_q = (request.GET.get("import_q") or "").strip()
+    import_mode = (request.GET.get("import_mode") or "ALL").strip().upper()
+    import_format = (request.GET.get("import_format") or "ALL").strip().upper()
 
     qs = Activo.objects.select_related("proveedor_mantenimiento").order_by("nombre", "id")
     if q:
@@ -847,6 +850,16 @@ def activos_catalog(request):
         .filter(action="IMPORT", model="activos.BitacoraImport")
         .order_by("-timestamp")
     )
+    if import_mode in {"APLICADO", "SIMULACION"}:
+        target_dry_run = import_mode == "SIMULACION"
+        import_runs_qs = import_runs_qs.filter(payload__dry_run=target_dry_run)
+    if import_format in {"CSV", "XLSX"}:
+        import_runs_qs = import_runs_qs.filter(payload__source_format=import_format)
+    if import_q:
+        import_runs_qs = import_runs_qs.filter(
+            Q(payload__filename__icontains=import_q)
+            | Q(user__username__icontains=import_q)
+        )
     if export_format == "template_bitacora_csv":
         return _export_bitacora_template_csv()
     if export_format == "template_bitacora_xlsx":
@@ -876,6 +889,7 @@ def activos_catalog(request):
         "estado_choices": Activo.ESTADO_CHOICES,
         "criticidad_choices": Activo.CRITICIDAD_CHOICES,
         "filters": {"q": q, "estado": estado, "criticidad": criticidad, "solo_activos": solo_activos},
+        "import_filters": {"import_q": import_q, "import_mode": import_mode, "import_format": import_format},
         "can_manage_activos": can_manage_inventario(request.user),
         "import_runs": list(import_runs_qs[:10]),
     }

@@ -444,6 +444,52 @@ class ActivosFlowsTests(TestCase):
             ],
         )
 
+    def test_import_runs_filter_by_mode(self):
+        AuditLog.objects.create(
+            user=self.admin,
+            action="IMPORT",
+            model="activos.BitacoraImport",
+            object_id="run_aplicado",
+            payload={"filename": "aplicado.xlsx", "dry_run": False, "source_format": "XLSX"},
+        )
+        AuditLog.objects.create(
+            user=self.admin,
+            action="IMPORT",
+            model="activos.BitacoraImport",
+            object_id="run_simulacion",
+            payload={"filename": "simulacion.csv", "dry_run": True, "source_format": "CSV"},
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("activos:activos"), {"import_mode": "SIMULACION"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "simulacion.csv")
+        self.assertNotContains(response, "aplicado.xlsx")
+
+    def test_export_import_runs_csv_respects_format_filter(self):
+        AuditLog.objects.create(
+            user=self.admin,
+            action="IMPORT",
+            model="activos.BitacoraImport",
+            object_id="run_csv",
+            payload={"filename": "only_csv.csv", "dry_run": False, "source_format": "CSV"},
+        )
+        AuditLog.objects.create(
+            user=self.admin,
+            action="IMPORT",
+            model="activos.BitacoraImport",
+            object_id="run_xlsx",
+            payload={"filename": "other.xlsx", "dry_run": False, "source_format": "XLSX"},
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(
+            reverse("activos:activos"),
+            {"export": "import_runs_csv", "import_format": "CSV"},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("only_csv.csv", body)
+        self.assertNotIn("other.xlsx", body)
+
     def test_admin_can_import_bitacora_csv_from_ui_apply(self):
         self.client.force_login(self.admin)
         upload = self._build_bitacora_csv_upload("bitacora_apply.csv")

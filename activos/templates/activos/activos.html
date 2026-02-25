@@ -128,9 +128,37 @@
 
 <section class="card">
   <div class="card-header">Últimas importaciones de bitácora</div>
+  <form method="get" style="margin-bottom:10px;">
+    <div class="row" style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;align-items:end;">
+      <div>
+        <label>Buscar (archivo / usuario)</label>
+        <input type="text" name="import_q" value="{{ import_filters.import_q }}" placeholder="Ej. bitacora_febrero.csv">
+      </div>
+      <div>
+        <label>Modo</label>
+        <select name="import_mode">
+          <option value="ALL" {% if import_filters.import_mode == "ALL" %}selected{% endif %}>Todos</option>
+          <option value="APLICADO" {% if import_filters.import_mode == "APLICADO" %}selected{% endif %}>Aplicado</option>
+          <option value="SIMULACION" {% if import_filters.import_mode == "SIMULACION" %}selected{% endif %}>Simulación</option>
+        </select>
+      </div>
+      <div>
+        <label>Formato</label>
+        <select name="import_format">
+          <option value="ALL" {% if import_filters.import_format == "ALL" %}selected{% endif %}>Todos</option>
+          <option value="CSV" {% if import_filters.import_format == "CSV" %}selected{% endif %}>CSV</option>
+          <option value="XLSX" {% if import_filters.import_format == "XLSX" %}selected{% endif %}>XLSX</option>
+        </select>
+      </div>
+      <div class="quick-actions">
+        <button class="btn btn-primary" type="submit">Filtrar</button>
+        <a class="btn btn-secondary" href="{% url 'activos:activos' %}">Limpiar</a>
+      </div>
+    </div>
+  </form>
   <div class="quick-actions" style="margin-bottom:10px;">
-    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=import_runs_csv">Export historial CSV</a>
-    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=import_runs_xlsx">Export historial XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=import_runs_csv&import_q={{ import_filters.import_q|urlencode }}&import_mode={{ import_filters.import_mode|urlencode }}&import_format={{ import_filters.import_format|urlencode }}">Export historial CSV</a>
+    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=import_runs_xlsx&import_q={{ import_filters.import_q|urlencode }}&import_mode={{ import_filters.import_mode|urlencode }}&import_format={{ import_filters.import_format|urlencode }}">Export historial XLSX</a>
   </div>
   {% if import_runs %}
     <div class="table-responsive">
