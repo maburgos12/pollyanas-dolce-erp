@@ -15,6 +15,7 @@ from openpyxl import Workbook
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
+from core.models import AuditLog
 from maestros.models import Proveedor
 
 from .models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
@@ -685,6 +686,25 @@ def activos_catalog(request):
                 return redirect("activos:activos")
 
             mode_label = "simulación (sin guardar)" if is_dry_run else "importación aplicada"
+            log_event(
+                request.user,
+                "IMPORT",
+                "activos.BitacoraImport",
+                timezone.localtime().strftime("%Y%m%d%H%M%S"),
+                {
+                    "filename": getattr(archivo, "name", "bitacora"),
+                    "dry_run": is_dry_run,
+                    "skip_servicios": skip_servicios,
+                    "sheet_name": stats.get("sheet_name", ""),
+                    "source_format": stats.get("source_format", ""),
+                    "filas_leidas": stats.get("filas_leidas", 0),
+                    "filas_validas": stats.get("filas_validas", 0),
+                    "activos_creados": stats.get("activos_creados", 0),
+                    "activos_actualizados": stats.get("activos_actualizados", 0),
+                    "servicios_creados": stats.get("servicios_creados", 0),
+                    "servicios_omitidos": stats.get("servicios_omitidos", 0),
+                },
+            )
             messages.success(
                 request,
                 (
@@ -740,6 +760,11 @@ def activos_catalog(request):
         "criticidad_choices": Activo.CRITICIDAD_CHOICES,
         "filters": {"q": q, "estado": estado, "criticidad": criticidad, "solo_activos": solo_activos},
         "can_manage_activos": can_manage_inventario(request.user),
+        "import_runs": list(
+            AuditLog.objects.select_related("user")
+            .filter(action="IMPORT", model="activos.BitacoraImport")
+            .order_by("-timestamp")[:10]
+        ),
     }
     return render(request, "activos/activos.html", context)
 

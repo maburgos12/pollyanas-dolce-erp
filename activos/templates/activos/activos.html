@@ -127,6 +127,44 @@
 {% endif %}
 
 <section class="card">
+  <div class="card-header">Últimas importaciones de bitácora</div>
+  {% if import_runs %}
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Usuario</th>
+            <th>Archivo</th>
+            <th>Modo</th>
+            <th>Formato</th>
+            <th>Válidas</th>
+            <th>Activos (+ / ↻)</th>
+            <th>Servicios (+ / =)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for run in import_runs %}
+            <tr>
+              <td>{{ run.timestamp|date:"Y-m-d H:i" }}</td>
+              <td>{% if run.user %}{{ run.user.username }}{% else %}Sistema{% endif %}</td>
+              <td>{{ run.payload.filename|default:"-" }}</td>
+              <td>{% if run.payload.dry_run %}<span class="badge badge-warning">Simulación</span>{% else %}<span class="badge badge-success">Aplicado</span>{% endif %}</td>
+              <td>{{ run.payload.source_format|default:"-" }}</td>
+              <td>{{ run.payload.filas_validas|default:0 }}</td>
+              <td>{{ run.payload.activos_creados|default:0 }} / {{ run.payload.activos_actualizados|default:0 }}</td>
+              <td>{{ run.payload.servicios_creados|default:0 }} / {{ run.payload.servicios_omitidos|default:0 }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-muted">Sin importaciones registradas todavía.</p>
+  {% endif %}
+</section>
+
+<section class="card">
   <div class="card-header">Catálogo de activos</div>
   <form method="get">
     <div class="row" style="display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;">

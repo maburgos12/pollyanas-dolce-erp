@@ -9,6 +9,7 @@ from django.urls import reverse
 from openpyxl import Workbook, load_workbook
 
 from core.access import ROLE_ADMIN, ROLE_ALMACEN, ROLE_VENTAS
+from core.models import AuditLog
 
 from .models import Activo, OrdenMantenimiento, PlanMantenimiento
 from django.utils import timezone
@@ -371,6 +372,23 @@ class ActivosFlowsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(Activo.objects.filter(nombre="HORNO TEST UI").exists())
         self.assertTrue(OrdenMantenimiento.objects.filter(descripcion__icontains="bitácora histórica").exists())
+        self.assertTrue(
+            AuditLog.objects.filter(action="IMPORT", model="activos.BitacoraImport", user=self.admin).exists()
+        )
+
+    def test_activos_view_shows_import_runs_block(self):
+        AuditLog.objects.create(
+            user=self.admin,
+            action="IMPORT",
+            model="activos.BitacoraImport",
+            object_id="demo",
+            payload={"filename": "bitacora_test.csv", "filas_validas": 5, "source_format": "CSV"},
+        )
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("activos:activos"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Últimas importaciones de bitácora")
+        self.assertContains(response, "bitacora_test.csv")
 
     def test_admin_can_import_bitacora_csv_from_ui_apply(self):
         self.client.force_login(self.admin)
