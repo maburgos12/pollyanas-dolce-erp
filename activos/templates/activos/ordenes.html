@@ -15,6 +15,7 @@
   <div class="card-header">Nueva orden de mantenimiento</div>
   <form method="post">
     {% csrf_token %}
+    <input type="hidden" name="action" value="create_orden">
     <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;">
       <div>
         <label>Activo</label>
@@ -65,6 +66,46 @@
     </div>
     <div style="margin-top: 12px;">
       <button type="submit" class="btn btn-primary">Crear orden</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Registrar costos / cierre de orden</div>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="update_costos">
+    <div class="row" style="display:grid;grid-template-columns:repeat(5,minmax(160px,1fr));gap:10px;align-items:end;">
+      <div>
+        <label>Orden</label>
+        <select name="orden_id" required>
+          <option value="">Selecciona...</option>
+          {% for o in ordenes_editables %}
+            <option value="{{ o.id }}">{{ o.folio }} · {{ o.activo_ref.nombre }} · {{ o.estatus }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Costo repuestos</label>
+        <input type="number" step="0.01" min="0" name="costo_repuestos" value="0">
+      </div>
+      <div>
+        <label>Costo mano de obra</label>
+        <input type="number" step="0.01" min="0" name="costo_mano_obra" value="0">
+      </div>
+      <div>
+        <label>Otros costos</label>
+        <input type="number" step="0.01" min="0" name="costo_otros" value="0">
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" name="cerrar_orden" value="1">
+          Cerrar orden
+        </label>
+      </div>
+    </div>
+    <div style="margin-top: 12px;">
+      <button type="submit" class="btn btn-primary">Guardar costos</button>
     </div>
   </form>
 </section>

@@ -888,62 +888,118 @@ def ordenes(request):
     if request.method == "POST":
         if not can_manage_inventario(request.user):
             raise PermissionDenied("No tienes permisos para gestionar órdenes de mantenimiento.")
-        activo_id = (request.POST.get("activo_id") or "").strip()
-        plan_id = (request.POST.get("plan_id") or "").strip()
-        tipo = (request.POST.get("tipo") or OrdenMantenimiento.TIPO_PREVENTIVO).strip().upper()
-        prioridad = (request.POST.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA).strip().upper()
-        descripcion = (request.POST.get("descripcion") or "").strip()
-        responsable = (request.POST.get("responsable") or "").strip()
-        fecha_programada_raw = (request.POST.get("fecha_programada") or "").strip()
-        try:
-            fecha_programada = (
-                timezone.datetime.fromisoformat(fecha_programada_raw).date()
-                if fecha_programada_raw
-                else timezone.localdate()
+        action = (request.POST.get("action") or "create_orden").strip().lower()
+        if action == "create_orden":
+            activo_id = (request.POST.get("activo_id") or "").strip()
+            plan_id = (request.POST.get("plan_id") or "").strip()
+            tipo = (request.POST.get("tipo") or OrdenMantenimiento.TIPO_PREVENTIVO).strip().upper()
+            prioridad = (request.POST.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA).strip().upper()
+            descripcion = (request.POST.get("descripcion") or "").strip()
+            responsable = (request.POST.get("responsable") or "").strip()
+            fecha_programada_raw = (request.POST.get("fecha_programada") or "").strip()
+            try:
+                fecha_programada = (
+                    timezone.datetime.fromisoformat(fecha_programada_raw).date()
+                    if fecha_programada_raw
+                    else timezone.localdate()
+                )
+            except ValueError:
+                fecha_programada = timezone.localdate()
+            if not activo_id.isdigit():
+                messages.error(request, "Selecciona un activo válido.")
+                return redirect("activos:ordenes")
+            activo_obj = get_object_or_404(Activo, pk=int(activo_id))
+            plan_obj = None
+            if plan_id.isdigit():
+                plan_obj = PlanMantenimiento.objects.filter(pk=int(plan_id), activo_ref=activo_obj).first()
+            orden = OrdenMantenimiento.objects.create(
+                activo_ref=activo_obj,
+                plan_ref=plan_obj,
+                tipo=tipo if tipo in {x[0] for x in OrdenMantenimiento.TIPO_CHOICES} else OrdenMantenimiento.TIPO_PREVENTIVO,
+                prioridad=(
+                    prioridad
+                    if prioridad in {x[0] for x in OrdenMantenimiento.PRIORIDAD_CHOICES}
+                    else OrdenMantenimiento.PRIORIDAD_MEDIA
+                ),
+                descripcion=descripcion,
+                responsable=responsable,
+                fecha_programada=fecha_programada,
+                creado_por=request.user,
             )
-        except ValueError:
-            fecha_programada = timezone.localdate()
-        if not activo_id.isdigit():
-            messages.error(request, "Selecciona un activo válido.")
+            BitacoraMantenimiento.objects.create(
+                orden=orden,
+                accion="CREADA",
+                comentario="Orden creada desde UI",
+                usuario=request.user,
+            )
+            log_event(
+                request.user,
+                "CREATE",
+                "activos.OrdenMantenimiento",
+                orden.id,
+                {
+                    "folio": orden.folio,
+                    "activo_id": orden.activo_ref_id,
+                    "tipo": orden.tipo,
+                    "prioridad": orden.prioridad,
+                    "estatus": orden.estatus,
+                },
+            )
+            messages.success(request, f"Orden {orden.folio} creada.")
             return redirect("activos:ordenes")
-        activo_obj = get_object_or_404(Activo, pk=int(activo_id))
-        plan_obj = None
-        if plan_id.isdigit():
-            plan_obj = PlanMantenimiento.objects.filter(pk=int(plan_id), activo_ref=activo_obj).first()
-        orden = OrdenMantenimiento.objects.create(
-            activo_ref=activo_obj,
-            plan_ref=plan_obj,
-            tipo=tipo if tipo in {x[0] for x in OrdenMantenimiento.TIPO_CHOICES} else OrdenMantenimiento.TIPO_PREVENTIVO,
-            prioridad=(
-                prioridad
-                if prioridad in {x[0] for x in OrdenMantenimiento.PRIORIDAD_CHOICES}
-                else OrdenMantenimiento.PRIORIDAD_MEDIA
-            ),
-            descripcion=descripcion,
-            responsable=responsable,
-            fecha_programada=fecha_programada,
-            creado_por=request.user,
-        )
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            accion="CREADA",
-            comentario="Orden creada desde UI",
-            usuario=request.user,
-        )
-        log_event(
-            request.user,
-            "CREATE",
-            "activos.OrdenMantenimiento",
-            orden.id,
-            {
-                "folio": orden.folio,
-                "activo_id": orden.activo_ref_id,
-                "tipo": orden.tipo,
-                "prioridad": orden.prioridad,
-                "estatus": orden.estatus,
-            },
-        )
-        messages.success(request, f"Orden {orden.folio} creada.")
+
+        if action == "update_costos":
+            orden_id = _safe_int(request.POST.get("orden_id"))
+            if not orden_id:
+                messages.error(request, "Selecciona una orden válida.")
+                return redirect("activos:ordenes")
+            orden = get_object_or_404(OrdenMantenimiento, pk=orden_id)
+            orden.costo_repuestos = _safe_decimal(request.POST.get("costo_repuestos"))
+            orden.costo_mano_obra = _safe_decimal(request.POST.get("costo_mano_obra"))
+            orden.costo_otros = _safe_decimal(request.POST.get("costo_otros"))
+            close_now = (request.POST.get("cerrar_orden") or "").strip().lower() in {"1", "on", "true", "yes"}
+            if close_now and orden.estatus != OrdenMantenimiento.ESTATUS_CERRADA:
+                orden.estatus = OrdenMantenimiento.ESTATUS_CERRADA
+                if not orden.fecha_inicio:
+                    orden.fecha_inicio = timezone.localdate()
+                orden.fecha_cierre = timezone.localdate()
+            orden.save(
+                update_fields=[
+                    "costo_repuestos",
+                    "costo_mano_obra",
+                    "costo_otros",
+                    "estatus",
+                    "fecha_inicio",
+                    "fecha_cierre",
+                    "actualizado_en",
+                ]
+            )
+            BitacoraMantenimiento.objects.create(
+                orden=orden,
+                accion="COSTOS",
+                comentario=(
+                    f"Costos actualizados: repuestos={orden.costo_repuestos}, "
+                    f"mano_obra={orden.costo_mano_obra}, otros={orden.costo_otros}"
+                ),
+                usuario=request.user,
+            )
+            log_event(
+                request.user,
+                "UPDATE",
+                "activos.OrdenMantenimiento",
+                orden.id,
+                {
+                    "folio": orden.folio,
+                    "costo_repuestos": str(orden.costo_repuestos),
+                    "costo_mano_obra": str(orden.costo_mano_obra),
+                    "costo_otros": str(orden.costo_otros),
+                    "estatus": orden.estatus,
+                },
+            )
+            messages.success(request, f"Orden {orden.folio} actualizada (costos).")
+            return redirect("activos:ordenes")
+
+        messages.error(request, "Acción no reconocida.")
         return redirect("activos:ordenes")
 
     estado = (request.GET.get("estatus") or "abiertas").strip().upper()
@@ -963,6 +1019,11 @@ def ordenes(request):
     context = {
         "module_tabs": _module_tabs("ordenes"),
         "ordenes": list(qs[:120]),
+        "ordenes_editables": list(
+            OrdenMantenimiento.objects.select_related("activo_ref")
+            .exclude(estatus=OrdenMantenimiento.ESTATUS_CANCELADA)
+            .order_by("-fecha_programada", "-id")[:600]
+        ),
         "activos": list(Activo.objects.filter(activo=True).order_by("nombre")[:800]),
         "planes": list(
             PlanMantenimiento.objects.filter(

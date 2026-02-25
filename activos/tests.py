@@ -127,6 +127,35 @@ class ActivosFlowsTests(TestCase):
             ["folio", "activo_codigo", "activo", "plan", "tipo", "prioridad", "estatus"],
         )
 
+    def test_admin_can_update_orden_costos_and_close(self):
+        self.client.force_login(self.admin)
+        activo = Activo.objects.create(nombre="Conservador QA", categoria="Refrigeración")
+        orden = OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+            estatus=OrdenMantenimiento.ESTATUS_EN_PROCESO,
+            fecha_programada=timezone.localdate(),
+            descripcion="Servicio costo",
+        )
+        response = self.client.post(
+            reverse("activos:ordenes"),
+            {
+                "action": "update_costos",
+                "orden_id": str(orden.id),
+                "costo_repuestos": "1500.25",
+                "costo_mano_obra": "800",
+                "costo_otros": "120",
+                "cerrar_orden": "1",
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        orden.refresh_from_db()
+        self.assertEqual(str(orden.costo_repuestos), "1500.25")
+        self.assertEqual(str(orden.costo_mano_obra), "800.00")
+        self.assertEqual(str(orden.costo_otros), "120.00")
+        self.assertEqual(orden.estatus, OrdenMantenimiento.ESTATUS_CERRADA)
+
     def test_calendario_days_window(self):
         self.client.force_login(self.admin)
         response = self.client.get(reverse("activos:calendario"), {"days": "15"})
