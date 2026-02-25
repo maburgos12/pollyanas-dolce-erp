@@ -56,6 +56,14 @@ def _module_tabs(active: str) -> list[dict]:
     ]
 
 
+def _prioridad_por_criticidad(criticidad: str) -> str:
+    if criticidad == Activo.CRITICIDAD_ALTA:
+        return OrdenMantenimiento.PRIORIDAD_ALTA
+    if criticidad == Activo.CRITICIDAD_BAJA:
+        return OrdenMantenimiento.PRIORIDAD_BAJA
+    return OrdenMantenimiento.PRIORIDAD_MEDIA
+
+
 def _build_activos_depuracion_rows(activos_rows: list[Activo], *, all_name_counts: dict[str, int]) -> list[dict]:
     suspect_exact = {
         "matriz",
@@ -446,6 +454,85 @@ def planes(request):
                 {"ultima_ejecucion": str(fecha), "proxima_ejecucion": str(plan.proxima_ejecucion or "")},
             )
             messages.success(request, f"Ejecución registrada para {plan.nombre}.")
+            return redirect("activos:planes")
+
+        if action == "generar_ordenes_programadas":
+            scope = (request.POST.get("scope") or "overdue").strip().lower()
+            dry_run = (request.POST.get("dry_run") or "").strip().lower() in {"1", "on", "true", "yes"}
+            today = timezone.localdate()
+            if scope == "week":
+                plan_qs = PlanMantenimiento.objects.filter(
+                    estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+                    activo=True,
+                    proxima_ejecucion__isnull=False,
+                    proxima_ejecucion__gte=today,
+                    proxima_ejecucion__lte=today + timedelta(days=7),
+                )
+            else:
+                plan_qs = PlanMantenimiento.objects.filter(
+                    estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+                    activo=True,
+                    proxima_ejecucion__isnull=False,
+                    proxima_ejecucion__lte=today,
+                )
+
+            created = 0
+            skipped = 0
+            plan_qs = plan_qs.select_related("activo_ref").order_by("proxima_ejecucion", "id")
+            for plan in plan_qs:
+                if not plan.activo_ref or not plan.activo_ref.activo:
+                    skipped += 1
+                    continue
+
+                exists = OrdenMantenimiento.objects.filter(
+                    plan_ref=plan,
+                    fecha_programada=plan.proxima_ejecucion,
+                ).exclude(estatus=OrdenMantenimiento.ESTATUS_CANCELADA).exists()
+                if exists:
+                    skipped += 1
+                    continue
+
+                if dry_run:
+                    created += 1
+                    continue
+
+                orden = OrdenMantenimiento.objects.create(
+                    activo_ref=plan.activo_ref,
+                    plan_ref=plan,
+                    tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
+                    prioridad=_prioridad_por_criticidad(plan.activo_ref.criticidad),
+                    estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+                    fecha_programada=plan.proxima_ejecucion or today,
+                    responsable=plan.responsable or "",
+                    descripcion=f"Orden preventiva automática desde plan: {plan.nombre}",
+                    creado_por=request.user if request.user.is_authenticated else None,
+                )
+                BitacoraMantenimiento.objects.create(
+                    orden=orden,
+                    accion="AUTO_PLAN",
+                    comentario="Generada automáticamente desde plan activo",
+                    usuario=request.user if request.user.is_authenticated else None,
+                    costo_adicional=Decimal("0"),
+                )
+                created += 1
+                log_event(
+                    request.user,
+                    "CREATE",
+                    "activos.OrdenMantenimiento",
+                    orden.id,
+                    {
+                        "origen": "plan_auto",
+                        "plan_id": plan.id,
+                        "fecha_programada": str(plan.proxima_ejecucion or ""),
+                        "folio": orden.folio,
+                    },
+                )
+
+            run_mode = "simulación" if dry_run else "aplicado"
+            messages.success(
+                request,
+                f"Generación de órdenes ({run_mode}): creadas {created}, omitidas {skipped}.",
+            )
             return redirect("activos:planes")
 
         messages.error(request, "Acción no reconocida.")

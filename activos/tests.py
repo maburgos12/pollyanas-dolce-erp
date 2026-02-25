@@ -10,6 +10,7 @@ from openpyxl import Workbook, load_workbook
 from core.access import ROLE_ADMIN, ROLE_ALMACEN, ROLE_VENTAS
 
 from .models import Activo, OrdenMantenimiento, PlanMantenimiento
+from django.utils import timezone
 
 
 class ActivosFlowsTests(TestCase):
@@ -80,6 +81,68 @@ class ActivosFlowsTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(PlanMantenimiento.objects.filter(activo_ref=activo).exists())
+
+    def test_generar_ordenes_programadas_creates_preventive_order(self):
+        self.client.force_login(self.admin)
+        activo = Activo.objects.create(nombre="AA Planta", categoria="Aire", criticidad=Activo.CRITICIDAD_ALTA)
+        plan = PlanMantenimiento.objects.create(
+            activo_ref=activo,
+            nombre="Plan semanal",
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            proxima_ejecucion=timezone.localdate(),
+            frecuencia_dias=7,
+        )
+        response = self.client.post(
+            reverse("activos:planes"),
+            {
+                "action": "generar_ordenes_programadas",
+                "scope": "overdue",
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            OrdenMantenimiento.objects.filter(
+                plan_ref=plan,
+                tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
+                fecha_programada=timezone.localdate(),
+            ).exists()
+        )
+
+    def test_generar_ordenes_programadas_avoids_duplicates(self):
+        self.client.force_login(self.admin)
+        today = timezone.localdate()
+        activo = Activo.objects.create(nombre="Horno Línea 2", categoria="Hornos")
+        plan = PlanMantenimiento.objects.create(
+            activo_ref=activo,
+            nombre="Plan mensual",
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            proxima_ejecucion=today,
+            frecuencia_dias=30,
+        )
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            plan_ref=plan,
+            tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            fecha_programada=today,
+            descripcion="Existente",
+        )
+        response = self.client.post(
+            reverse("activos:planes"),
+            {
+                "action": "generar_ordenes_programadas",
+                "scope": "overdue",
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            OrdenMantenimiento.objects.filter(plan_ref=plan, fecha_programada=today).count(),
+            1,
+        )
 
     def test_export_activos_depuracion_csv(self):
         self.client.force_login(self.admin)
