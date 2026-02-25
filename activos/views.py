@@ -128,6 +128,35 @@ def _export_activos_depuracion_csv(rows: list[dict]) -> HttpResponse:
     return response
 
 
+def _export_bitacora_template_csv() -> HttpResponse:
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="plantilla_bitacora_activos.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["nombre", "marca", "modelo", "serie", "fecha_1", "costo_1", "fecha_2", "costo_2"])
+    writer.writerow(["HORNO PRINCIPAL", "ACME", "HX-20", "SER-001", "2026-02-01", "1250.00", "", ""])
+    return response
+
+
+def _export_bitacora_template_xlsx() -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "bitacora"
+    ws.append(["nombre", "marca", "modelo", "serie", "fecha_1", "costo_1", "fecha_2", "costo_2"])
+    ws.append(["HORNO PRINCIPAL", "ACME", "HX-20", "SER-001", "2026-02-01", 1250.00, "", ""])
+    for col, width in {"A": 28, "B": 18, "C": 18, "D": 18, "E": 14, "F": 12, "G": 14, "H": 12}.items():
+        ws.column_dimensions[col].width = width
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="plantilla_bitacora_activos.xlsx"'
+    return response
+
+
 def _export_activos_depuracion_xlsx(rows: list[dict]) -> HttpResponse:
     timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
     wb = Workbook()
@@ -685,6 +714,11 @@ def activos_catalog(request):
         qs = qs.filter(activo=True)
 
     export_format = (request.GET.get("export") or "").strip().lower()
+    if export_format == "template_bitacora_csv":
+        return _export_bitacora_template_csv()
+    if export_format == "template_bitacora_xlsx":
+        return _export_bitacora_template_xlsx()
+
     if export_format in {"depuracion_csv", "depuracion_xlsx"}:
         all_name_counts = {
             (row["nombre_lower"] or ""): int(row["total"] or 0)

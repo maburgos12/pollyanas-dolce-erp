@@ -89,6 +89,10 @@
 
 <section class="card">
   <div class="card-header">Carga masiva de activos (Bitácora XLSX/CSV)</div>
+  <div class="quick-actions" style="margin-bottom:10px;">
+    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=template_bitacora_csv">Descargar plantilla CSV</a>
+    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=template_bitacora_xlsx">Descargar plantilla XLSX</a>
+  </div>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="hidden" name="action" value="import_bitacora">

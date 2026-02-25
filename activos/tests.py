@@ -319,6 +319,29 @@ class ActivosFlowsTests(TestCase):
             ["codigo", "nombre", "ubicacion", "categoria", "estado", "notas", "motivos", "acciones_sugeridas"],
         )
 
+    def test_export_template_bitacora_csv(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("activos:activos"), {"export": "template_bitacora_csv"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.get("Content-Type", ""))
+        self.assertIn("plantilla_bitacora_activos.csv", response.get("Content-Disposition", ""))
+        body = response.content.decode("utf-8")
+        self.assertIn("nombre,marca,modelo,serie,fecha_1,costo_1,fecha_2,costo_2", body)
+
+    def test_export_template_bitacora_xlsx(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("activos:activos"), {"export": "template_bitacora_xlsx"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response.get("Content-Type", ""),
+        )
+        self.assertIn("plantilla_bitacora_activos.xlsx", response.get("Content-Disposition", ""))
+        wb = load_workbook(filename=BytesIO(response.content))
+        ws = wb.active
+        headers = [cell.value for cell in ws[1]]
+        self.assertEqual(headers, ["nombre", "marca", "modelo", "serie", "fecha_1", "costo_1", "fecha_2", "costo_2"])
+
     def test_admin_can_import_bitacora_from_ui_dry_run(self):
         self.client.force_login(self.admin)
         upload = self._build_bitacora_upload("bitacora_dryrun.xlsx")
