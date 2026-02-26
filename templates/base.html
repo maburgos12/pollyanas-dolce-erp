@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}ERP - Pollyanas Dolce{% endblock %}</title>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260225-1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260226-1">
     {% block extra_css %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -25,6 +25,16 @@
 
             <nav>
                 <ul class="sidebar-nav">
+                    {% if ui_access.branch_capture_only %}
+                    <li>
+                        <a href="{% url 'recetas:reabasto_cedis' %}" class="{% if '/recetas/reabasto-cedis/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/><path d="M7 12h6"/><path d="m10 9 3 3-3 3"/></svg>
+                            </span>
+                            <span>Cierre Sucursal</span>
+                        </a>
+                    </li>
+                    {% else %}
                     <li>
                         <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
@@ -199,6 +209,7 @@
                             <span>Administración</span>
                         </a>
                     </li>
+                    {% endif %}
                 </ul>
             </nav>
 
