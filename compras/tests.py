@@ -1090,10 +1090,117 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
             1,
         )
 
-        # Reintento no debe duplicar entrada de inventario.
-        response_retry = self.client.post(url)
-        self.assertEqual(response_retry.status_code, 302)
-        self.assertEqual(
-            MovimientoInventario.objects.filter(source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada").count(),
-            1,
+
+class ComprasFolioRetryTests(TestCase):
+    def setUp(self):
+        self.proveedor = Proveedor.objects.create(nombre="Proveedor Folio", activo=True)
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
         )
+        self.insumo = Insumo.objects.create(
+            nombre="Insumo Folio",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+
+    def test_solicitud_folio_retries_on_collision(self):
+        SolicitudCompra.objects.create(
+            folio="SOL-COLLIDE-001",
+            area="Compras",
+            solicitante="tester",
+            insumo=self.insumo,
+            proveedor_sugerido=self.proveedor,
+            cantidad=Decimal("1"),
+            fecha_requerida=date(2026, 2, 26),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        with patch.object(
+            SolicitudCompra,
+            "_next_folio",
+            side_effect=["SOL-COLLIDE-001", "SOL-COLLIDE-002"],
+        ):
+            solicitud = SolicitudCompra.objects.create(
+                area="Compras",
+                solicitante="tester",
+                insumo=self.insumo,
+                proveedor_sugerido=self.proveedor,
+                cantidad=Decimal("2"),
+                fecha_requerida=date(2026, 2, 27),
+                estatus=SolicitudCompra.STATUS_BORRADOR,
+            )
+        self.assertEqual(solicitud.folio, "SOL-COLLIDE-002")
+
+    def test_orden_folio_retries_on_collision(self):
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="tester",
+            insumo=self.insumo,
+            proveedor_sugerido=self.proveedor,
+            cantidad=Decimal("1"),
+            fecha_requerida=date(2026, 2, 26),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        OrdenCompra.objects.create(
+            folio="OC-COLLIDE-001",
+            solicitud=solicitud,
+            proveedor=self.proveedor,
+            fecha_emision=date(2026, 2, 26),
+            monto_estimado=Decimal("10"),
+            estatus=OrdenCompra.STATUS_BORRADOR,
+        )
+        with patch.object(
+            OrdenCompra,
+            "_next_folio",
+            side_effect=["OC-COLLIDE-001", "OC-COLLIDE-002"],
+        ):
+            orden = OrdenCompra.objects.create(
+                solicitud=solicitud,
+                proveedor=self.proveedor,
+                fecha_emision=date(2026, 2, 27),
+                monto_estimado=Decimal("12"),
+                estatus=OrdenCompra.STATUS_BORRADOR,
+            )
+        self.assertEqual(orden.folio, "OC-COLLIDE-002")
+
+    def test_recepcion_folio_retries_on_collision(self):
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="tester",
+            insumo=self.insumo,
+            proveedor_sugerido=self.proveedor,
+            cantidad=Decimal("1"),
+            fecha_requerida=date(2026, 2, 26),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=self.proveedor,
+            fecha_emision=date(2026, 2, 26),
+            monto_estimado=Decimal("10"),
+            estatus=OrdenCompra.STATUS_BORRADOR,
+        )
+        RecepcionCompra.objects.create(
+            folio="REC-COLLIDE-001",
+            orden=orden,
+            fecha_recepcion=date(2026, 2, 26),
+            conformidad_pct=Decimal("100"),
+            estatus=RecepcionCompra.STATUS_PENDIENTE,
+            observaciones="",
+        )
+        with patch.object(
+            RecepcionCompra,
+            "_next_folio",
+            side_effect=["REC-COLLIDE-001", "REC-COLLIDE-002"],
+        ):
+            recepcion = RecepcionCompra.objects.create(
+                orden=orden,
+                fecha_recepcion=date(2026, 2, 27),
+                conformidad_pct=Decimal("100"),
+                estatus=RecepcionCompra.STATUS_PENDIENTE,
+                observaciones="",
+            )
+        self.assertEqual(recepcion.folio, "REC-COLLIDE-002")

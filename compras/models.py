@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, IntegrityError, transaction
 from django.utils import timezone
 from django.conf import settings
 from unidecode import unidecode
@@ -41,13 +41,29 @@ class SolicitudCompra(models.Model):
     class Meta:
         ordering = ["-creado_en"]
 
+    def _next_folio(self) -> str:
+        ymd = timezone.localdate().strftime("%y%m%d")
+        prefix = f"SOL-{ymd}-"
+        today_count = SolicitudCompra.objects.filter(folio__startswith=prefix).count() + 1
+        return f"{prefix}{today_count:03d}"
+
     def save(self, *args, **kwargs):
-        if not self.folio:
-            ymd = timezone.localdate().strftime("%y%m%d")
-            prefix = f"SOL-{ymd}-"
-            today_count = SolicitudCompra.objects.filter(folio__startswith=prefix).count() + 1
-            self.folio = f"{prefix}{today_count:03d}"
-        super().save(*args, **kwargs)
+        if self.folio:
+            return super().save(*args, **kwargs)
+        last_exc = None
+        for _ in range(10):
+            self.folio = self._next_folio()
+            try:
+                with transaction.atomic():
+                    return super().save(*args, **kwargs)
+            except IntegrityError as exc:
+                # Colisión por concurrencia: recalcular siguiente folio y reintentar.
+                last_exc = exc
+                self.folio = ""
+                continue
+        if last_exc:
+            raise last_exc
+        raise IntegrityError("No fue posible generar folio único de solicitud de compra.")
 
     def __str__(self):
         return self.folio
@@ -80,13 +96,28 @@ class OrdenCompra(models.Model):
     class Meta:
         ordering = ["-creado_en"]
 
+    def _next_folio(self) -> str:
+        ymd = timezone.localdate().strftime("%y%m%d")
+        prefix = f"OC-{ymd}-"
+        today_count = OrdenCompra.objects.filter(folio__startswith=prefix).count() + 1
+        return f"{prefix}{today_count:03d}"
+
     def save(self, *args, **kwargs):
-        if not self.folio:
-            ymd = timezone.localdate().strftime("%y%m%d")
-            prefix = f"OC-{ymd}-"
-            today_count = OrdenCompra.objects.filter(folio__startswith=prefix).count() + 1
-            self.folio = f"{prefix}{today_count:03d}"
-        super().save(*args, **kwargs)
+        if self.folio:
+            return super().save(*args, **kwargs)
+        last_exc = None
+        for _ in range(10):
+            self.folio = self._next_folio()
+            try:
+                with transaction.atomic():
+                    return super().save(*args, **kwargs)
+            except IntegrityError as exc:
+                last_exc = exc
+                self.folio = ""
+                continue
+        if last_exc:
+            raise last_exc
+        raise IntegrityError("No fue posible generar folio único de orden de compra.")
 
     def __str__(self):
         return self.folio
@@ -113,13 +144,28 @@ class RecepcionCompra(models.Model):
     class Meta:
         ordering = ["-creado_en"]
 
+    def _next_folio(self) -> str:
+        ymd = timezone.localdate().strftime("%y%m%d")
+        prefix = f"REC-{ymd}-"
+        today_count = RecepcionCompra.objects.filter(folio__startswith=prefix).count() + 1
+        return f"{prefix}{today_count:03d}"
+
     def save(self, *args, **kwargs):
-        if not self.folio:
-            ymd = timezone.localdate().strftime("%y%m%d")
-            prefix = f"REC-{ymd}-"
-            today_count = RecepcionCompra.objects.filter(folio__startswith=prefix).count() + 1
-            self.folio = f"{prefix}{today_count:03d}"
-        super().save(*args, **kwargs)
+        if self.folio:
+            return super().save(*args, **kwargs)
+        last_exc = None
+        for _ in range(10):
+            self.folio = self._next_folio()
+            try:
+                with transaction.atomic():
+                    return super().save(*args, **kwargs)
+            except IntegrityError as exc:
+                last_exc = exc
+                self.folio = ""
+                continue
+        if last_exc:
+            raise last_exc
+        raise IntegrityError("No fue posible generar folio único de recepción.")
 
     def __str__(self):
         return self.folio

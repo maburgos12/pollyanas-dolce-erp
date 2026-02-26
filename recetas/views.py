@@ -4,12 +4,13 @@ from math import sqrt
 from datetime import date, timedelta
 from calendar import monthrange
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from typing import Dict, Any, List
 from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError
 from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum
 from django.core.paginator import Paginator
@@ -21,13 +22,15 @@ from django.views.decorators.http import require_POST
 from openpyxl import Workbook, load_workbook
 
 from compras.models import OrdenCompra, SolicitudCompra
-from core.access import can_manage_compras
+from core.access import can_manage_compras, can_view_recetas, is_branch_capture_only
 from core.audit import log_event
 from core.models import Sucursal
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from .models import (
     Receta,
+    RecetaCodigoPointAlias,
+    normalizar_codigo_point,
     LineaReceta,
     RecetaPresentacion,
     RecetaCostoVersion,
@@ -37,6 +40,10 @@ from .models import (
     PronosticoVenta,
     SolicitudVenta,
     VentaHistorica,
+    PoliticaStockSucursalProducto,
+    InventarioCedisProducto,
+    SolicitudReabastoCedis,
+    SolicitudReabastoCedisLinea,
 )
 from .utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
 from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
@@ -1962,17 +1969,91 @@ def _resolve_receta_for_sales(receta_name: str, codigo_point: str) -> Receta | N
     receta = None
     if codigo_point:
         receta = Receta.objects.filter(codigo_point__iexact=codigo_point).order_by("id").first()
+        if receta is None:
+            codigo_norm = normalizar_codigo_point(codigo_point)
+            if codigo_norm:
+                alias = (
+                    RecetaCodigoPointAlias.objects.filter(
+                        codigo_point_normalizado=codigo_norm,
+                        activo=True,
+                    )
+                    .select_related("receta")
+                    .first()
+                )
+                if alias and alias.receta_id:
+                    receta = alias.receta
+    if receta is None and receta_name:
+        receta = _resolve_receta_by_point_name_for_sales(receta_name)
     if receta is None and receta_name:
         receta = Receta.objects.filter(nombre_normalizado=normalizar_nombre(receta_name)).order_by("id").first()
+        if receta is None:
+            codigo_norm = normalizar_codigo_point(receta_name)
+            if codigo_norm:
+                receta = Receta.objects.filter(codigo_point__iexact=receta_name).order_by("id").first()
+                if receta is None:
+                    alias = (
+                        RecetaCodigoPointAlias.objects.filter(
+                            codigo_point_normalizado=codigo_norm,
+                            activo=True,
+                        )
+                        .select_related("receta")
+                        .first()
+                    )
+                    if alias and alias.receta_id:
+                        receta = alias.receta
+    return receta
+
+
+def _resolve_receta_by_point_name_for_sales(receta_name: str) -> Receta | None:
+    key = normalizar_nombre(receta_name)
+    if not key:
+        return None
+
+    cache = getattr(_resolve_receta_by_point_name_for_sales, "_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(_resolve_receta_by_point_name_for_sales, "_cache", cache)
+    if key in cache:
+        return cache[key]
+
+    receta = None
+    alias_exact = (
+        RecetaCodigoPointAlias.objects.filter(activo=True, nombre_point__iexact=(receta_name or "").strip())
+        .select_related("receta")
+        .order_by("id")
+        .first()
+    )
+    if alias_exact and alias_exact.receta_id:
+        receta = alias_exact.receta
+    if receta is None:
+        aliases = (
+            RecetaCodigoPointAlias.objects.filter(activo=True)
+            .exclude(nombre_point__isnull=True)
+            .exclude(nombre_point="")
+            .select_related("receta")
+            .order_by("id")
+        )
+        for alias in aliases:
+            if alias.receta_id and normalizar_nombre(alias.nombre_point or "") == key:
+                receta = alias.receta
+                break
+
+    cache[key] = receta
     return receta
 
 
 def _resolve_sucursal_for_sales(sucursal_name: str, sucursal_codigo: str, default_sucursal: Sucursal | None) -> Sucursal | None:
     sucursal = None
     if sucursal_codigo:
-        sucursal = Sucursal.objects.filter(codigo__iexact=sucursal_codigo).order_by("id").first()
+        sucursal = Sucursal.objects.filter(codigo__iexact=sucursal_codigo, activa=True).order_by("id").first()
     if sucursal is None and sucursal_name:
-        sucursal = Sucursal.objects.filter(nombre__iexact=sucursal_name).order_by("id").first()
+        sucursal = Sucursal.objects.filter(nombre__iexact=sucursal_name, activa=True).order_by("id").first()
+    if sucursal is None and sucursal_name:
+        objetivo = normalizar_nombre(sucursal_name)
+        for row in Sucursal.objects.filter(activa=True).only("id", "codigo", "nombre").order_by("id"):
+            if normalizar_nombre(row.nombre) == objetivo or normalizar_nombre(row.codigo) == objetivo:
+                sucursal = row
+                break
     return sucursal or default_sucursal
 
 
@@ -4314,17 +4395,75 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
     if not can_manage_compras(request.user):
         raise PermissionDenied("No tienes permisos para generar solicitudes de compra.")
 
-    explosion = _plan_explosion(plan)
-    materias_primas = [row for row in explosion["insumos"] if row["origen"] != "Interno" and Decimal(str(row["cantidad"] or 0)) > 0]
-    area_tag = f"PLAN_PRODUCCION:{plan.id}"
-    referencia_plan = f"PLAN_PRODUCCION:{plan.id}"
     auto_create_oc = bool(request.POST.get("auto_create_oc"))
     replace_prev_raw = (request.POST.get("replace_prev") or "1").strip().lower()
     replace_prev = replace_prev_raw not in {"0", "false", "off", "no"}
+    stats = _generar_solicitudes_compra_desde_plan(
+        plan=plan,
+        user=request.user,
+        replace_prev=replace_prev,
+        auto_create_oc=auto_create_oc,
+    )
+
+    if stats["creadas"] == 0 and stats["actualizadas"] == 0:
+        messages.warning(
+            request,
+            "No se generaron solicitudes: el plan no tiene materia prima con cantidad válida.",
+        )
+    else:
+        mode_label = "reemplazo" if replace_prev else "acumulado"
+        msg = (
+            f"Solicitudes generadas: {stats['creadas']}. "
+            f"Solicitudes actualizadas: {stats['actualizadas']}. "
+            f"Modo: {mode_label}. "
+            f"Borradores reemplazados del plan: {stats['deleted_prev']}."
+        )
+        if auto_create_oc:
+            msg += (
+                f" OC borrador creadas (agrupadas por proveedor): {stats['oc_creadas']}. "
+                f"OC borrador actualizadas: {stats['oc_actualizadas']}. "
+                f"OCs borrador previas reemplazadas: {stats['oc_prev_deleted']}."
+            )
+            if stats["sin_proveedor"]:
+                msg += (
+                    f" Insumos sin proveedor principal: {stats['sin_proveedor']} "
+                    "(no entraron a OC automática)."
+                )
+        messages.success(request, msg)
+    next_view = (request.POST.get("next_view") or "plan").strip().lower()
+    compras_query = urlencode(
+        {
+            "source": "plan",
+            "plan_id": str(plan.id),
+            "reabasto": "all",
+        }
+    )
+    if next_view == "compras":
+        return redirect(f"{reverse('compras:solicitudes')}?{compras_query}")
+    if next_view == "compras_print":
+        return redirect(f"{reverse('compras:solicitudes_print')}?{compras_query}")
+    return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+
+
+def _generar_solicitudes_compra_desde_plan(
+    plan: PlanProduccion,
+    user,
+    replace_prev: bool = True,
+    auto_create_oc: bool = False,
+    area_tag: str | None = None,
+    referencia_plan: str | None = None,
+) -> Dict[str, Any]:
+    explosion = _plan_explosion(plan)
+    materias_primas = [
+        row
+        for row in explosion["insumos"]
+        if row["origen"] != "Interno" and Decimal(str(row["cantidad"] or 0)) > 0
+    ]
+    area_tag = area_tag or f"PLAN_PRODUCCION:{plan.id}"
+    referencia_plan = referencia_plan or f"PLAN_PRODUCCION:{plan.id}"
 
     deleted_prev = 0
     if replace_prev:
-        # Idempotencia operativa: si vuelven a generar, reemplazamos únicamente borradores del plan.
         borradores_previos = SolicitudCompra.objects.filter(
             area=area_tag,
             estatus=SolicitudCompra.STATUS_BORRADOR,
@@ -4365,7 +4504,7 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
             else:
                 solicitud.save(update_fields=["cantidad"])
             log_event(
-                request.user,
+                user,
                 "UPDATE",
                 "compras.SolicitudCompra",
                 solicitud.id,
@@ -4380,7 +4519,7 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
         else:
             solicitud = SolicitudCompra.objects.create(
                 area=area_tag,
-                solicitante=request.user.username,
+                solicitante=user.username,
                 insumo=insumo,
                 proveedor_sugerido=proveedor,
                 cantidad=qty,
@@ -4388,7 +4527,7 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
                 estatus=SolicitudCompra.STATUS_BORRADOR,
             )
             log_event(
-                request.user,
+                user,
                 "CREATE",
                 "compras.SolicitudCompra",
                 solicitud.id,
@@ -4447,7 +4586,7 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
                 orden.fecha_entrega_estimada = plan.fecha_produccion
                 orden.save(update_fields=["monto_estimado", "fecha_entrega_estimada"])
                 log_event(
-                    request.user,
+                    user,
                     "UPDATE",
                     "compras.OrdenCompra",
                     orden.id,
@@ -4472,7 +4611,7 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
                     estatus=OrdenCompra.STATUS_BORRADOR,
                 )
                 log_event(
-                    request.user,
+                    user,
                     "CREATE",
                     "compras.OrdenCompra",
                     orden.id,
@@ -4486,29 +4625,1063 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
                 )
                 oc_creadas += 1
 
-    if creadas == 0 and actualizadas == 0:
+    return {
+        "creadas": creadas,
+        "actualizadas": actualizadas,
+        "deleted_prev": deleted_prev,
+        "sin_proveedor": sin_proveedor,
+        "oc_prev_deleted": oc_prev_deleted,
+        "oc_creadas": oc_creadas,
+        "oc_actualizadas": oc_actualizadas,
+    }
+
+
+def _reabasto_redirect(fecha_operacion: date, sucursal_id: int | None = None) -> str:
+    params = {"fecha": fecha_operacion.isoformat()}
+    if sucursal_id:
+        params["sucursal_id"] = str(sucursal_id)
+    return f"{reverse('recetas:reabasto_cedis')}?{urlencode(params)}"
+
+
+def _quantize_qty(value: Decimal) -> Decimal:
+    return max(Decimal("0"), Decimal(str(value or 0))).quantize(Decimal("0.001"))
+
+
+def _aplicar_lote_multiplo(value: Decimal, policy: PoliticaStockSucursalProducto | None) -> Decimal:
+    qty = _quantize_qty(value)
+    if qty <= 0 or not policy:
+        return qty
+
+    lote_minimo = _quantize_qty(policy.lote_minimo)
+    if lote_minimo > 0 and qty < lote_minimo:
+        qty = lote_minimo
+
+    multiplo = _quantize_qty(policy.multiplo_empaque)
+    if multiplo > 0:
+        factor = (qty / multiplo).quantize(Decimal("1"), rounding=ROUND_CEILING)
+        qty = _quantize_qty(factor * multiplo)
+    return qty
+
+
+def _calcular_sugerido_reabasto(
+    policy: PoliticaStockSucursalProducto | None,
+    stock_reportado: Decimal,
+    en_transito: Decimal,
+    consumo_proyectado: Decimal,
+) -> Decimal:
+    if not policy:
+        return Decimal("0")
+
+    objetivo = _to_decimal_safe(policy.stock_objetivo)
+    seguridad = _to_decimal_safe(policy.stock_seguridad)
+    sugerido_base = objetivo + seguridad + consumo_proyectado - stock_reportado - en_transito
+    return _aplicar_lote_multiplo(_quantize_qty(sugerido_base), policy)
+
+
+def _map_reabasto_header(header: str) -> str:
+    key = normalizar_nombre(header or "").replace("_", " ")
+    if key in {"receta", "producto", "producto final", "nombre producto", "nombre receta", "item"}:
+        return "receta"
+    if key in {"codigo", "codigo point", "sku"}:
+        return "codigo_point"
+    if key in {
+        "cantidad",
+        "solicitado",
+        "cantidad solicitada",
+        "cantidad pedido",
+        "pedido",
+        "solicitud final",
+        "solicitud_final",
+        "pedido final",
+    }:
+        return "solicitado"
+    if key in {
+        "stock",
+        "stock reportado",
+        "existencia",
+        "inventario",
+        "existencia cierre",
+        "existencia al cierre",
+        "stock cierre",
+        "stock final",
+        "stock final cierre",
+        "stock_final_cierre",
+    }:
+        return "stock_reportado"
+    if key in {"en transito", "transito"}:
+        return "en_transito"
+    if key in {"consumo proyectado", "consumo", "proyeccion consumo"}:
+        return "consumo_proyectado"
+    if key in {"justificacion", "motivo"}:
+        return "justificacion"
+    if key in {"observaciones", "nota", "notas"}:
+        return "observaciones"
+    if key in {"solicitud sugerida", "cantidad sugerida"}:
+        return "solicitado"
+    if key in {"solicitud requerida", "cantidad requerida", "solicitud_requerida"}:
+        return "solicitado"
+    return key
+
+
+def _load_reabasto_rows(uploaded) -> list[dict]:
+    filename = (uploaded.name or "").lower()
+    rows: list[dict] = []
+    if filename.endswith(".csv"):
+        uploaded.seek(0)
+        content = uploaded.read().decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(content.splitlines())
+        for raw in reader:
+            parsed = {}
+            for key, value in (raw or {}).items():
+                if not key:
+                    continue
+                parsed[_map_reabasto_header(str(key))] = value
+            rows.append(parsed)
+        return rows
+
+    if filename.endswith(".xlsx") or filename.endswith(".xlsm"):
+        uploaded.seek(0)
+        wb = load_workbook(uploaded, read_only=True, data_only=True)
+        ws = wb.active
+        values = list(ws.values)
+        if not values:
+            return []
+        headers = [_map_reabasto_header(str(h or "")) for h in values[0]]
+        for raw in values[1:]:
+            parsed = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                parsed[header] = raw[idx] if idx < len(raw) else None
+            rows.append(parsed)
+        return rows
+
+    raise ValueError("Formato no soportado. Usa CSV o XLSX.")
+
+
+def _resolve_receta_reabasto(receta_txt: str, codigo_point: str) -> Receta | None:
+    code = (codigo_point or "").strip()
+    if code:
+        receta = Receta.objects.filter(codigo_point__iexact=code).first()
+        if receta:
+            return receta
+    name = normalizar_nombre(receta_txt or "")
+    if not name:
+        return None
+    return Receta.objects.filter(nombre_normalizado=name).order_by("id").first()
+
+
+def _consolidado_reabasto_por_fecha(fecha_operacion: date) -> list[dict]:
+    totals = (
+        SolicitudReabastoCedisLinea.objects.filter(solicitud__fecha_operacion=fecha_operacion)
+        .exclude(solicitud__estado=SolicitudReabastoCedis.ESTADO_CANCELADA)
+        .values("receta_id", "receta__nombre")
+        .annotate(
+            total_solicitado=Sum("solicitado"),
+            total_sugerido=Sum("sugerido"),
+            sucursales=Count("solicitud__sucursal", distinct=True),
+        )
+        .order_by("receta__nombre")
+    )
+    inv_map = {
+        x.receta_id: x
+        for x in InventarioCedisProducto.objects.filter(receta_id__in=[row["receta_id"] for row in totals]).select_related("receta")
+    }
+    rows: list[dict] = []
+    for row in totals:
+        rid = row["receta_id"]
+        inv = inv_map.get(rid)
+        disponible = inv.disponible if inv else Decimal("0")
+        solicitado = _to_decimal_safe(row.get("total_solicitado"))
+        faltante = max(Decimal("0"), solicitado - disponible)
+        rows.append(
+            {
+                "receta_id": rid,
+                "receta": row.get("receta__nombre") or "-",
+                "sucursales": int(row.get("sucursales") or 0),
+                "total_sugerido": _quantize_qty(_to_decimal_safe(row.get("total_sugerido"))),
+                "total_solicitado": _quantize_qty(solicitado),
+                "cedis_disponible": _quantize_qty(disponible),
+                "cedis_faltante_producir": _quantize_qty(faltante),
+            }
+        )
+    return rows
+
+
+def _resumen_cierre_sucursales_reabasto(fecha_operacion: date, sucursales: list[Sucursal]) -> Dict[str, Any]:
+    fecha_corte = fecha_operacion - timedelta(days=1)
+    solicitudes = (
+        SolicitudReabastoCedis.objects.filter(fecha_operacion=fecha_operacion, sucursal__in=sucursales)
+        .select_related("sucursal")
+        .order_by("sucursal__codigo")
+    )
+    by_sucursal = {s.sucursal_id: s for s in solicitudes}
+
+    detalle: list[dict] = []
+    enviadas_en_tiempo = 0
+    enviadas_tardias = 0
+    borrador = 0
+    pendientes = 0
+    for suc in sucursales:
+        sol = by_sucursal.get(suc.id)
+        if not sol:
+            pendientes += 1
+            detalle.append(
+                {
+                    "sucursal": suc,
+                    "estado": "PENDIENTE",
+                    "estado_label": "Pendiente (sin captura)",
+                    "actualizado_en": None,
+                    "semaforo": "rojo",
+                }
+            )
+            continue
+
+        actualizado_local = timezone.localtime(sol.actualizado_en) if sol.actualizado_en else None
+        actualizado_date = actualizado_local.date() if actualizado_local else None
+        estado = (sol.estado or "").upper()
+
+        if estado in {SolicitudReabastoCedis.ESTADO_ENVIADA, SolicitudReabastoCedis.ESTADO_ATENDIDA}:
+            if actualizado_date and actualizado_date <= fecha_corte:
+                enviadas_en_tiempo += 1
+                detalle.append(
+                    {
+                        "sucursal": suc,
+                        "estado": estado,
+                        "estado_label": f"{sol.get_estado_display()} (en tiempo)",
+                        "actualizado_en": actualizado_local,
+                        "semaforo": "verde",
+                    }
+                )
+            else:
+                enviadas_tardias += 1
+                detalle.append(
+                    {
+                        "sucursal": suc,
+                        "estado": estado,
+                        "estado_label": f"{sol.get_estado_display()} (tardía)",
+                        "actualizado_en": actualizado_local,
+                        "semaforo": "amarillo",
+                    }
+                )
+            continue
+
+        if estado == SolicitudReabastoCedis.ESTADO_BORRADOR:
+            borrador += 1
+            detalle.append(
+                {
+                    "sucursal": suc,
+                    "estado": estado,
+                    "estado_label": "Borrador (no enviada)",
+                    "actualizado_en": actualizado_local,
+                    "semaforo": "amarillo",
+                }
+            )
+        else:
+            pendientes += 1
+            detalle.append(
+                {
+                    "sucursal": suc,
+                    "estado": estado or "PENDIENTE",
+                    "estado_label": "Pendiente (sin envío válido)",
+                    "actualizado_en": actualizado_local,
+                    "semaforo": "rojo",
+                }
+            )
+
+    total = len(sucursales)
+    listo_8am = total > 0 and enviadas_en_tiempo == total
+    pendientes_codigos = [row["sucursal"].codigo for row in detalle if row["semaforo"] in {"rojo", "amarillo"}]
+    return {
+        "fecha_corte": fecha_corte,
+        "total": total,
+        "en_tiempo": enviadas_en_tiempo,
+        "tardias": enviadas_tardias,
+        "borrador": borrador,
+        "pendientes": pendientes,
+        "listo_8am": listo_8am,
+        "detalle": detalle,
+        "pendientes_codigos": pendientes_codigos,
+    }
+
+
+def _user_sucursal_scope(user) -> Sucursal | None:
+    profile = getattr(user, "userprofile", None)
+    if profile and getattr(profile, "sucursal_id", None):
+        return profile.sucursal
+    return None
+
+
+def _assert_can_capture_for_sucursal(user, sucursal: Sucursal) -> None:
+    """
+    En flujo sucursal->CEDIS, un usuario no gestor solo puede operar su sucursal asignada.
+    Si no tiene sucursal asignada, se bloquea para evitar capturas cruzadas.
+    """
+    if can_manage_compras(user):
+        return
+    user_sucursal = _user_sucursal_scope(user)
+    if not user_sucursal:
+        raise PermissionDenied("Tu usuario no tiene sucursal asignada para captura de reabasto.")
+    if user_sucursal.id != sucursal.id:
+        raise PermissionDenied("Solo puedes capturar reabasto para tu sucursal asignada.")
+
+
+@login_required
+def reabasto_cedis(request: HttpRequest) -> HttpResponse:
+    if not can_view_recetas(request.user):
+        raise PermissionDenied("No tienes permisos para ver reabasto CEDIS.")
+
+    branch_capture_only_mode = is_branch_capture_only(request.user)
+    user_sucursal = _user_sucursal_scope(request.user)
+    has_sucursal_scope = bool(user_sucursal)
+    # Si un usuario tiene sucursal asignada, este módulo opera en modo captura simple para evitar flujo avanzado.
+    sucursal_locked = bool(branch_capture_only_mode or has_sucursal_scope)
+    can_manage = can_manage_compras(request.user) and not sucursal_locked
+
+    fecha_raw = request.GET.get("fecha")
+    if _parse_date_safe(fecha_raw):
+        fecha_operacion = _parse_date_safe(fecha_raw)
+    else:
+        fecha_operacion = (timezone.localdate() + timedelta(days=1)) if sucursal_locked else timezone.localdate()
+
+    sucursales = list(Sucursal.objects.filter(activa=True).order_by("codigo"))
+    if sucursal_locked and user_sucursal and all(s.id != user_sucursal.id for s in sucursales):
+        sucursales = [user_sucursal] + sucursales
+
+    sucursal_id = _to_int_safe(request.GET.get("sucursal_id"))
+    sucursal = None
+    if sucursal_locked and user_sucursal:
+        sucursal = user_sucursal
+    elif sucursal_locked and not user_sucursal:
+        messages.error(request, "Este usuario de sucursal no tiene sucursal asignada. Contacta a administración.")
+        sucursal = None
+    elif sucursal_id:
+        sucursal = next((s for s in sucursales if s.id == sucursal_id), None)
+    if not sucursal and sucursales and not sucursal_locked and sucursal_id:
+        sucursal = sucursales[0]
+
+    solicitud = None
+    lineas = []
+    politicas = []
+    if sucursal:
+        solicitud = (
+            SolicitudReabastoCedis.objects.filter(
+                fecha_operacion=fecha_operacion,
+                sucursal=sucursal,
+            )
+            .select_related("sucursal", "creado_por")
+            .first()
+        )
+        politicas = list(
+            PoliticaStockSucursalProducto.objects.filter(sucursal=sucursal, activa=True)
+            .select_related("receta")
+            .order_by("receta__nombre")
+        )
+        if solicitud:
+            lineas = list(
+                solicitud.lineas.select_related("receta", "receta__rendimiento_unidad").order_by("receta__nombre")
+            )
+
+    line_by_receta = {line.receta_id: line for line in lineas}
+    receta_ids = sorted(set(line_by_receta.keys()) | {p.receta_id for p in politicas})
+    recetas_map = {
+        r.id: r
+        for r in Receta.objects.filter(id__in=receta_ids).select_related("rendimiento_unidad")
+    }
+    politicas_map = {p.receta_id: p for p in politicas}
+    rows_detalle: list[dict] = []
+    for rid in receta_ids:
+        receta = recetas_map.get(rid)
+        if not receta:
+            continue
+        linea = line_by_receta.get(rid)
+        policy = politicas_map.get(rid)
+        stock_reportado = _to_decimal_safe(linea.stock_reportado if linea else 0)
+        en_transito = _to_decimal_safe(linea.en_transito if linea else 0)
+        consumo_proyectado = _to_decimal_safe(linea.consumo_proyectado if linea else 0)
+        sugerido_calc = _calcular_sugerido_reabasto(policy, stock_reportado, en_transito, consumo_proyectado)
+        solicitado_val = _to_decimal_safe(linea.solicitado if linea else 0)
+        rows_detalle.append(
+            {
+                "receta": receta,
+                "linea": linea,
+                "policy": policy,
+                "stock_reportado": _quantize_qty(stock_reportado),
+                "en_transito": _quantize_qty(en_transito),
+                "consumo_proyectado": _quantize_qty(consumo_proyectado),
+                "sugerido": _quantize_qty(sugerido_calc),
+                "solicitado": _quantize_qty(solicitado_val),
+                "delta": _quantize_qty(solicitado_val - sugerido_calc),
+            }
+        )
+
+    rows_cierre: list[dict] = []
+    for policy in politicas:
+        receta = recetas_map.get(policy.receta_id) or policy.receta
+        if not receta:
+            continue
+        linea = line_by_receta.get(policy.receta_id)
+        stock_reportado = _quantize_qty(_to_decimal_safe(linea.stock_reportado if linea else 0))
+        sugerido = _quantize_qty(_calcular_sugerido_reabasto(policy, stock_reportado, Decimal("0"), Decimal("0")))
+        solicitado_existente = _quantize_qty(_to_decimal_safe(linea.solicitado if linea else sugerido))
+        rows_cierre.append(
+            {
+                "receta": receta,
+                "policy": policy,
+                "linea": linea,
+                "stock_reportado": stock_reportado,
+                "sugerido": sugerido,
+                "solicitado": solicitado_existente,
+                "override_solicitado": bool(linea and solicitado_existente != sugerido),
+                "observaciones": (linea.observaciones if linea else ""),
+            }
+        )
+
+    recetas_producto = list(
+        Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
+        .order_by("nombre")
+        .only("id", "nombre", "codigo_point")
+    )
+    if not recetas_producto:
+        recetas_producto = list(Receta.objects.order_by("nombre").only("id", "nombre", "codigo_point")[:400])
+
+    inventario_cedis = list(
+        InventarioCedisProducto.objects.select_related("receta")
+        .filter(receta__in=[r.id for r in recetas_producto])
+        .order_by("receta__nombre")
+    )
+    inventario_map = {inv.receta_id: inv for inv in inventario_cedis}
+    productos_sin_inventario = [r for r in recetas_producto if r.id not in inventario_map]
+
+    consolidado_rows = _consolidado_reabasto_por_fecha(fecha_operacion)
+    total_solicitado = sum((row["total_solicitado"] for row in consolidado_rows), Decimal("0"))
+    total_faltante = sum((row["cedis_faltante_producir"] for row in consolidado_rows), Decimal("0"))
+
+    solicitudes_hoy = list(
+        SolicitudReabastoCedis.objects.filter(fecha_operacion=fecha_operacion)
+        .select_related("sucursal")
+        .order_by("sucursal__codigo")
+    )
+    resumen_cierre = _resumen_cierre_sucursales_reabasto(fecha_operacion, sucursales)
+
+    return render(
+        request,
+        "recetas/reabasto_cedis.html",
+        {
+            "can_manage_reabasto": can_manage,
+            "sucursal_locked": sucursal_locked,
+            "user_sucursal": user_sucursal,
+            "branch_capture_only_mode": branch_capture_only_mode,
+            "show_simple_capture": True,
+            "fecha_operacion": fecha_operacion,
+            "sucursales": sucursales,
+            "sucursal": sucursal,
+            "solicitud": solicitud,
+            "solicitudes_hoy": solicitudes_hoy,
+            "rows_detalle": rows_detalle,
+            "rows_cierre": rows_cierre,
+            "recetas_producto": recetas_producto,
+            "inventario_cedis": inventario_cedis,
+            "productos_sin_inventario": productos_sin_inventario,
+            "consolidado_rows": consolidado_rows,
+            "total_solicitado": _quantize_qty(total_solicitado),
+            "total_faltante": _quantize_qty(total_faltante),
+            "resumen_cierre": resumen_cierre,
+        },
+    )
+
+
+@login_required
+@require_POST
+def reabasto_cedis_politica_guardar(request: HttpRequest) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para editar políticas de stock.")
+
+    fecha_operacion = _parse_date_safe(request.POST.get("fecha_operacion")) or timezone.localdate()
+    sucursal = get_object_or_404(Sucursal, pk=_to_int_safe(request.POST.get("sucursal_id")))
+    receta = get_object_or_404(Receta, pk=_to_int_safe(request.POST.get("receta_id")))
+
+    policy, _ = PoliticaStockSucursalProducto.objects.get_or_create(
+        sucursal=sucursal,
+        receta=receta,
+        defaults={"activa": True},
+    )
+    policy.stock_minimo = _quantize_qty(_to_decimal_safe(request.POST.get("stock_minimo")))
+    policy.stock_objetivo = _quantize_qty(_to_decimal_safe(request.POST.get("stock_objetivo")))
+    policy.stock_maximo = _quantize_qty(_to_decimal_safe(request.POST.get("stock_maximo")))
+    policy.dias_cobertura = max(1, _to_int_safe(request.POST.get("dias_cobertura"), 1))
+    policy.stock_seguridad = _quantize_qty(_to_decimal_safe(request.POST.get("stock_seguridad")))
+    policy.lote_minimo = _quantize_qty(_to_decimal_safe(request.POST.get("lote_minimo")))
+    policy.multiplo_empaque = _quantize_qty(_to_decimal_safe(request.POST.get("multiplo_empaque"))) or Decimal("1")
+    policy.activa = request.POST.get("activa", "on") == "on"
+    policy.save()
+
+    messages.success(request, "Política de stock guardada.")
+    return redirect(_reabasto_redirect(fecha_operacion, sucursal.id))
+
+
+@login_required
+@require_POST
+def reabasto_cedis_inventario_guardar(request: HttpRequest) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para editar inventario CEDIS.")
+
+    fecha_operacion = _parse_date_safe(request.POST.get("fecha_operacion")) or timezone.localdate()
+    sucursal_id = _to_int_safe(request.POST.get("sucursal_id"))
+    receta = get_object_or_404(Receta, pk=_to_int_safe(request.POST.get("receta_id")))
+
+    inv, _ = InventarioCedisProducto.objects.get_or_create(receta=receta)
+    inv.stock_actual = _quantize_qty(_to_decimal_safe(request.POST.get("stock_actual")))
+    inv.stock_reservado = _quantize_qty(_to_decimal_safe(request.POST.get("stock_reservado")))
+    inv.save()
+
+    messages.success(request, "Inventario CEDIS actualizado.")
+    return redirect(_reabasto_redirect(fecha_operacion, sucursal_id or None))
+
+
+@login_required
+@require_POST
+def reabasto_cedis_linea_guardar(request: HttpRequest) -> HttpResponse:
+    if not can_view_recetas(request.user):
+        raise PermissionDenied("No tienes permisos para registrar solicitud de reabasto.")
+
+    fecha_operacion = _parse_date_safe(request.POST.get("fecha_operacion")) or timezone.localdate()
+    sucursal = get_object_or_404(Sucursal, pk=_to_int_safe(request.POST.get("sucursal_id")))
+    _assert_can_capture_for_sucursal(request.user, sucursal)
+    receta = get_object_or_404(Receta, pk=_to_int_safe(request.POST.get("receta_id")))
+    solicitud, _ = SolicitudReabastoCedis.objects.get_or_create(
+        fecha_operacion=fecha_operacion,
+        sucursal=sucursal,
+        defaults={"creado_por": request.user},
+    )
+
+    stock_reportado = _quantize_qty(_to_decimal_safe(request.POST.get("stock_reportado")))
+    en_transito = _quantize_qty(_to_decimal_safe(request.POST.get("en_transito")))
+    consumo_proyectado = _quantize_qty(_to_decimal_safe(request.POST.get("consumo_proyectado")))
+    solicitado_raw = (request.POST.get("solicitado") or "").strip()
+
+    policy = (
+        PoliticaStockSucursalProducto.objects.filter(
+            sucursal=sucursal,
+            receta=receta,
+            activa=True,
+        )
+        .order_by("-id")
+        .first()
+    )
+    sugerido = _calcular_sugerido_reabasto(policy, stock_reportado, en_transito, consumo_proyectado)
+    if solicitado_raw == "":
+        solicitado = sugerido
+    else:
+        solicitado = _quantize_qty(_to_decimal_safe(solicitado_raw))
+        solicitado = _aplicar_lote_multiplo(solicitado, policy)
+
+    linea, created = SolicitudReabastoCedisLinea.objects.get_or_create(
+        solicitud=solicitud,
+        receta=receta,
+        defaults={
+            "stock_reportado": stock_reportado,
+            "en_transito": en_transito,
+            "consumo_proyectado": consumo_proyectado,
+            "sugerido": sugerido,
+            "solicitado": solicitado,
+            "justificacion": (request.POST.get("justificacion") or "").strip()[:255],
+            "observaciones": (request.POST.get("observaciones") or "").strip()[:255],
+        },
+    )
+    if not created:
+        linea.stock_reportado = stock_reportado
+        linea.en_transito = en_transito
+        linea.consumo_proyectado = consumo_proyectado
+        linea.sugerido = sugerido
+        linea.solicitado = solicitado
+        linea.justificacion = (request.POST.get("justificacion") or "").strip()[:255]
+        linea.observaciones = (request.POST.get("observaciones") or "").strip()[:255]
+        linea.save()
+
+    if solicitud.estado == SolicitudReabastoCedis.ESTADO_CANCELADA:
+        solicitud.estado = SolicitudReabastoCedis.ESTADO_BORRADOR
+        solicitud.save(update_fields=["estado", "actualizado_en"])
+
+    messages.success(request, "Línea de reabasto guardada.")
+    return redirect(_reabasto_redirect(fecha_operacion, sucursal.id))
+
+
+@login_required
+@require_POST
+def reabasto_cedis_cierre_guardar(request: HttpRequest) -> HttpResponse:
+    if not can_view_recetas(request.user):
+        raise PermissionDenied("No tienes permisos para registrar cierre de sucursal.")
+
+    fecha_operacion = _parse_date_safe(request.POST.get("fecha_operacion")) or timezone.localdate()
+    sucursal = get_object_or_404(Sucursal, pk=_to_int_safe(request.POST.get("sucursal_id")))
+    _assert_can_capture_for_sucursal(request.user, sucursal)
+
+    solicitud, _ = SolicitudReabastoCedis.objects.get_or_create(
+        fecha_operacion=fecha_operacion,
+        sucursal=sucursal,
+        defaults={"creado_por": request.user},
+    )
+
+    receta_ids = []
+    for rid in request.POST.getlist("row_receta_id"):
+        rid_int = _to_int_safe(rid)
+        if rid_int and rid_int not in receta_ids:
+            receta_ids.append(rid_int)
+    if not receta_ids:
+        messages.error(request, "No se recibieron productos de cierre para procesar.")
+        return redirect(_reabasto_redirect(fecha_operacion, sucursal.id))
+
+    receta_map = Receta.objects.in_bulk(receta_ids)
+    policy_map = {
+        p.receta_id: p
+        for p in PoliticaStockSucursalProducto.objects.filter(
+            sucursal=sucursal,
+            activa=True,
+            receta_id__in=receta_ids,
+        ).only("id", "receta_id", "stock_minimo", "stock_objetivo", "stock_seguridad", "lote_minimo", "multiplo_empaque")
+    }
+    existing_map = {
+        line.receta_id: line
+        for line in SolicitudReabastoCedisLinea.objects.filter(
+            solicitud=solicitud,
+            receta_id__in=receta_ids,
+        )
+    }
+
+    created = 0
+    updated = 0
+    skipped = 0
+    for receta_id in receta_ids:
+        receta = receta_map.get(receta_id)
+        if not receta:
+            skipped += 1
+            continue
+
+        line = existing_map.get(receta_id)
+        stock_raw = (request.POST.get(f"stock_reportado_{receta_id}") or "").strip()
+        solicitado_raw = (request.POST.get(f"solicitado_{receta_id}") or "").strip()
+        observaciones = (request.POST.get(f"observaciones_{receta_id}") or "").strip()[:255]
+
+        if not stock_raw and not solicitado_raw and not line:
+            skipped += 1
+            continue
+
+        if stock_raw:
+            stock_reportado = _quantize_qty(_to_decimal_safe(stock_raw))
+        else:
+            stock_reportado = _quantize_qty(_to_decimal_safe(line.stock_reportado if line else 0))
+
+        policy = policy_map.get(receta_id)
+        sugerido = _calcular_sugerido_reabasto(policy, stock_reportado, Decimal("0"), Decimal("0"))
+
+        if solicitado_raw:
+            solicitado = _quantize_qty(_to_decimal_safe(solicitado_raw))
+            solicitado = _aplicar_lote_multiplo(solicitado, policy)
+        else:
+            solicitado = _quantize_qty(sugerido)
+
+        defaults = {
+            "stock_reportado": stock_reportado,
+            "en_transito": Decimal("0"),
+            "consumo_proyectado": Decimal("0"),
+            "sugerido": _quantize_qty(sugerido),
+            "solicitado": solicitado,
+            "justificacion": "Cierre sucursal",
+            "observaciones": observaciones,
+        }
+        if line:
+            line.stock_reportado = defaults["stock_reportado"]
+            line.en_transito = defaults["en_transito"]
+            line.consumo_proyectado = defaults["consumo_proyectado"]
+            line.sugerido = defaults["sugerido"]
+            line.solicitado = defaults["solicitado"]
+            line.justificacion = defaults["justificacion"]
+            line.observaciones = defaults["observaciones"]
+            line.save()
+            updated += 1
+        else:
+            SolicitudReabastoCedisLinea.objects.create(
+                solicitud=solicitud,
+                receta=receta,
+                **defaults,
+            )
+            created += 1
+
+    accion = (request.POST.get("accion") or "BORRADOR").strip().upper()
+    if accion == "ENVIAR":
+        solicitud.estado = SolicitudReabastoCedis.ESTADO_ENVIADA
+        msg_estado = "enviada a CEDIS"
+    else:
+        if solicitud.estado != SolicitudReabastoCedis.ESTADO_ATENDIDA:
+            solicitud.estado = SolicitudReabastoCedis.ESTADO_BORRADOR
+        msg_estado = "guardada en borrador"
+
+    notas = (request.POST.get("notas_cierre") or "").strip()
+    if notas:
+        solicitud.notas = notas[:255]
+    solicitud.save(update_fields=["estado", "notas", "actualizado_en"])
+
+    messages.success(
+        request,
+        f"Cierre {msg_estado}. Líneas creadas: {created}, actualizadas: {updated}, omitidas: {skipped}.",
+    )
+    return redirect(_reabasto_redirect(fecha_operacion, sucursal.id))
+
+
+@login_required
+@require_POST
+def reabasto_cedis_linea_eliminar(request: HttpRequest, linea_id: int) -> HttpResponse:
+    if not can_view_recetas(request.user):
+        raise PermissionDenied("No tienes permisos para modificar solicitud de reabasto.")
+
+    linea = get_object_or_404(
+        SolicitudReabastoCedisLinea.objects.select_related("solicitud", "solicitud__sucursal"),
+        pk=linea_id,
+    )
+    _assert_can_capture_for_sucursal(request.user, linea.solicitud.sucursal)
+    fecha_operacion = linea.solicitud.fecha_operacion
+    sucursal_id = linea.solicitud.sucursal_id
+    linea.delete()
+    messages.success(request, "Línea eliminada.")
+    return redirect(_reabasto_redirect(fecha_operacion, sucursal_id))
+
+
+@login_required
+@require_POST
+def reabasto_cedis_estado_guardar(request: HttpRequest, solicitud_id: int) -> HttpResponse:
+    solicitud = get_object_or_404(SolicitudReabastoCedis, pk=solicitud_id)
+    _assert_can_capture_for_sucursal(request.user, solicitud.sucursal)
+    estado = (request.POST.get("estado") or "").strip().upper()
+    if estado not in {
+        SolicitudReabastoCedis.ESTADO_BORRADOR,
+        SolicitudReabastoCedis.ESTADO_ENVIADA,
+        SolicitudReabastoCedis.ESTADO_ATENDIDA,
+        SolicitudReabastoCedis.ESTADO_CANCELADA,
+    }:
+        messages.error(request, "Estado inválido.")
+        return redirect(_reabasto_redirect(solicitud.fecha_operacion, solicitud.sucursal_id))
+
+    if estado in {SolicitudReabastoCedis.ESTADO_ATENDIDA, SolicitudReabastoCedis.ESTADO_CANCELADA} and not can_manage_compras(
+        request.user
+    ):
+        raise PermissionDenied("Solo compras/administración puede cerrar o cancelar solicitudes.")
+
+    solicitud.estado = estado
+    solicitud.notas = (request.POST.get("notas") or solicitud.notas or "").strip()
+    solicitud.save(update_fields=["estado", "notas", "actualizado_en"])
+    messages.success(request, "Estado de solicitud actualizado.")
+    return redirect(_reabasto_redirect(solicitud.fecha_operacion, solicitud.sucursal_id))
+
+
+@login_required
+@require_POST
+def reabasto_cedis_importar(request: HttpRequest) -> HttpResponse:
+    if not can_view_recetas(request.user):
+        raise PermissionDenied("No tienes permisos para importar solicitudes de reabasto.")
+
+    fecha_operacion = _parse_date_safe(request.POST.get("fecha_operacion")) or timezone.localdate()
+    sucursal = get_object_or_404(Sucursal, pk=_to_int_safe(request.POST.get("sucursal_id")))
+    _assert_can_capture_for_sucursal(request.user, sucursal)
+    uploaded = request.FILES.get("archivo")
+    if not uploaded:
+        messages.error(request, "Selecciona un archivo CSV/XLSX para importar.")
+        return redirect(_reabasto_redirect(fecha_operacion, sucursal.id))
+
+    try:
+        rows = _load_reabasto_rows(uploaded)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect(_reabasto_redirect(fecha_operacion, sucursal.id))
+
+    if not rows:
+        messages.warning(request, "El archivo no contiene renglones.")
+        return redirect(_reabasto_redirect(fecha_operacion, sucursal.id))
+
+    solicitud, _ = SolicitudReabastoCedis.objects.get_or_create(
+        fecha_operacion=fecha_operacion,
+        sucursal=sucursal,
+        defaults={"creado_por": request.user},
+    )
+
+    created = 0
+    updated = 0
+    skipped = 0
+    for row in rows:
+        receta = _resolve_receta_reabasto(str(row.get("receta") or ""), str(row.get("codigo_point") or ""))
+        if not receta:
+            skipped += 1
+            continue
+
+        policy = (
+            PoliticaStockSucursalProducto.objects.filter(
+                sucursal=sucursal,
+                receta=receta,
+                activa=True,
+            )
+            .order_by("-id")
+            .first()
+        )
+        stock_reportado = _quantize_qty(_to_decimal_safe(row.get("stock_reportado")))
+        en_transito = _quantize_qty(_to_decimal_safe(row.get("en_transito")))
+        consumo_proyectado = _quantize_qty(_to_decimal_safe(row.get("consumo_proyectado")))
+        sugerido = _calcular_sugerido_reabasto(policy, stock_reportado, en_transito, consumo_proyectado)
+
+        solicitado_raw = str(row.get("solicitado") or "").strip()
+        if solicitado_raw == "":
+            solicitado = sugerido
+        else:
+            solicitado = _quantize_qty(_to_decimal_safe(solicitado_raw))
+            solicitado = _aplicar_lote_multiplo(solicitado, policy)
+
+        linea, was_created = SolicitudReabastoCedisLinea.objects.get_or_create(
+            solicitud=solicitud,
+            receta=receta,
+            defaults={
+                "stock_reportado": stock_reportado,
+                "en_transito": en_transito,
+                "consumo_proyectado": consumo_proyectado,
+                "sugerido": sugerido,
+                "solicitado": solicitado,
+                "justificacion": (str(row.get("justificacion") or "").strip())[:255],
+                "observaciones": (str(row.get("observaciones") or "").strip())[:255],
+            },
+        )
+        if was_created:
+            created += 1
+        else:
+            linea.stock_reportado = stock_reportado
+            linea.en_transito = en_transito
+            linea.consumo_proyectado = consumo_proyectado
+            linea.sugerido = sugerido
+            linea.solicitado = solicitado
+            linea.justificacion = (str(row.get("justificacion") or "").strip())[:255]
+            linea.observaciones = (str(row.get("observaciones") or "").strip())[:255]
+            linea.save()
+            updated += 1
+
+    messages.success(
+        request,
+        f"Importación lista. Creadas: {created}, actualizadas: {updated}, omitidas: {skipped}.",
+    )
+    return redirect(_reabasto_redirect(fecha_operacion, sucursal.id))
+
+
+@login_required
+def reabasto_cedis_consolidado_export(request: HttpRequest) -> HttpResponse:
+    if not can_view_recetas(request.user):
+        raise PermissionDenied("No tienes permisos para exportar consolidado CEDIS.")
+
+    fecha_operacion = _parse_date_safe(request.GET.get("fecha")) or timezone.localdate()
+    export_format = (request.GET.get("format") or "xlsx").strip().lower()
+    rows = _consolidado_reabasto_por_fecha(fecha_operacion)
+
+    if export_format == "csv":
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="cedis_consolidado_{fecha_operacion.isoformat()}.csv"'
+        writer = csv.writer(response)
+        writer.writerow(
+            [
+                "receta",
+                "sucursales",
+                "total_sugerido",
+                "total_solicitado",
+                "cedis_disponible",
+                "cedis_faltante_producir",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    row["receta"],
+                    row["sucursales"],
+                    float(row["total_sugerido"]),
+                    float(row["total_solicitado"]),
+                    float(row["cedis_disponible"]),
+                    float(row["cedis_faltante_producir"]),
+                ]
+            )
+        return response
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Consolidado CEDIS"
+    ws.append(
+        [
+            "Receta",
+            "Sucursales",
+            "Total sugerido",
+            "Total solicitado",
+            "CEDIS disponible",
+            "CEDIS faltante producir",
+        ]
+    )
+    for row in rows:
+        ws.append(
+            [
+                row["receta"],
+                row["sucursales"],
+                float(row["total_sugerido"]),
+                float(row["total_solicitado"]),
+                float(row["cedis_disponible"]),
+                float(row["cedis_faltante_producir"]),
+            ]
+        )
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="cedis_consolidado_{fecha_operacion.isoformat()}.xlsx"'
+    return response
+
+
+@login_required
+@require_POST
+def reabasto_cedis_generar_plan(request: HttpRequest) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para generar plan desde reabasto CEDIS.")
+
+    fecha_operacion = _parse_date_safe(request.POST.get("fecha_operacion")) or timezone.localdate()
+    resumen_cierre = _resumen_cierre_sucursales_reabasto(
+        fecha_operacion,
+        list(Sucursal.objects.filter(activa=True).order_by("codigo")),
+    )
+    if not resumen_cierre["listo_8am"] and resumen_cierre["pendientes_codigos"]:
         messages.warning(
             request,
-            "No se generaron solicitudes: el plan no tiene materia prima con cantidad válida.",
+            f"Aviso operativo 8:00 AM: faltan o están tardías sucursales ({', '.join(resumen_cierre['pendientes_codigos'])}).",
+        )
+    plan, created_items, total_qty = _upsert_plan_reabasto_cedis(fecha_operacion, request.user)
+    if not plan:
+        messages.warning(
+            request,
+            "No hay faltantes a producir para esta fecha. Primero registra solicitudes de sucursal.",
+        )
+        return redirect(_reabasto_redirect(fecha_operacion))
+    messages.success(
+        request,
+        f"Plan CEDIS generado/actualizado: {plan.nombre}. Renglones: {created_items}.",
+    )
+    return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+
+
+def _upsert_plan_reabasto_cedis(fecha_operacion: date, user) -> tuple[PlanProduccion | None, int, Decimal]:
+    consolidado_rows = _consolidado_reabasto_por_fecha(fecha_operacion)
+    faltantes = [row for row in consolidado_rows if _to_decimal_safe(row.get("cedis_faltante_producir")) > 0]
+    if not faltantes:
+        return None, 0, Decimal("0")
+
+    marker = f"[AUTO_REABASTO_CEDIS:{fecha_operacion.isoformat()}]"
+    nombre_plan = f"CEDIS Reabasto {fecha_operacion.isoformat()}"
+    plan = (
+        PlanProduccion.objects.filter(
+            fecha_produccion=fecha_operacion,
+            nombre=nombre_plan,
+        )
+        .order_by("-id")
+        .first()
+    )
+    if not plan:
+        plan = PlanProduccion.objects.create(
+            nombre=nombre_plan,
+            fecha_produccion=fecha_operacion,
+            notas=f"{marker} Generado automáticamente desde consolidado de reabasto CEDIS.",
+            creado_por=user,
         )
     else:
-        mode_label = "reemplazo" if replace_prev else "acumulado"
-        msg = (
-            f"Solicitudes generadas: {creadas}. "
-            f"Solicitudes actualizadas: {actualizadas}. "
-            f"Modo: {mode_label}. "
-            f"Borradores reemplazados del plan: {deleted_prev}."
+        notas_actuales = (plan.notas or "").strip()
+        if marker not in notas_actuales:
+            plan.notas = f"{marker}\n{notas_actuales}".strip()
+            plan.save(update_fields=["notas", "actualizado_en"])
+
+    plan.items.all().delete()
+    created_items = 0
+    for row in faltantes:
+        rid = _to_int_safe(row.get("receta_id"))
+        if not rid:
+            continue
+        receta = Receta.objects.filter(pk=rid).first()
+        if not receta:
+            continue
+        cantidad = _quantize_qty(_to_decimal_safe(row.get("cedis_faltante_producir")))
+        if cantidad <= 0:
+            continue
+        PlanProduccionItem.objects.create(
+            plan=plan,
+            receta=receta,
+            cantidad=cantidad,
+            notas="AUTO_REABASTO_CEDIS",
         )
-        if auto_create_oc:
-            msg += (
-                f" OC borrador creadas (agrupadas por proveedor): {oc_creadas}. "
-                f"OC borrador actualizadas: {oc_actualizadas}. "
-                f"OCs borrador previas reemplazadas: {oc_prev_deleted}."
-            )
-            if sin_proveedor:
-                msg += f" Insumos sin proveedor principal: {sin_proveedor} (no entraron a OC automática)."
-        messages.success(request, msg)
-    next_view = (request.POST.get("next_view") or "plan").strip().lower()
+        created_items += 1
+
+    if created_items <= 0:
+        return None, 0, Decimal("0")
+
+    total_qty = sum((_to_decimal_safe(row.get("cedis_faltante_producir")) for row in faltantes), Decimal("0"))
+    log_event(
+        user,
+        "CREATE",
+        "recetas.PlanProduccion",
+        plan.id,
+        {
+            "source": "REABASTO_CEDIS",
+            "fecha_operacion": fecha_operacion.isoformat(),
+            "items": created_items,
+            "qty_total": float(total_qty),
+            "plan_nombre": plan.nombre,
+        },
+    )
+    return plan, created_items, total_qty
+
+
+@login_required
+@require_POST
+def reabasto_cedis_generar_compras(request: HttpRequest) -> HttpResponse:
+    if not can_manage_compras(request.user):
+        raise PermissionDenied("No tienes permisos para generar compras desde reabasto CEDIS.")
+
+    fecha_operacion = _parse_date_safe(request.POST.get("fecha_operacion")) or timezone.localdate()
+    resumen_cierre = _resumen_cierre_sucursales_reabasto(
+        fecha_operacion,
+        list(Sucursal.objects.filter(activa=True).order_by("codigo")),
+    )
+    if not resumen_cierre["listo_8am"] and resumen_cierre["pendientes_codigos"]:
+        messages.warning(
+            request,
+            f"Aviso operativo 8:00 AM: faltan o están tardías sucursales ({', '.join(resumen_cierre['pendientes_codigos'])}).",
+        )
+    plan, created_items, _ = _upsert_plan_reabasto_cedis(fecha_operacion, request.user)
+    if not plan:
+        messages.warning(
+            request,
+            "No hay faltantes a producir para generar compras en esta fecha.",
+        )
+        return redirect(_reabasto_redirect(fecha_operacion))
+
+    stats = _generar_solicitudes_compra_desde_plan(
+        plan=plan,
+        user=request.user,
+        replace_prev=True,
+        auto_create_oc=True,
+    )
+
+    if stats["creadas"] == 0 and stats["actualizadas"] == 0:
+        messages.warning(
+            request,
+            f"Plan {plan.nombre} (renglones {created_items}) generado, pero no hubo materia prima para solicitudes de compra.",
+        )
+    else:
+        messages.success(
+            request,
+            (
+                f"Plan {plan.nombre} listo ({created_items} renglones). "
+                f"Solicitudes compra: creadas {stats['creadas']}, actualizadas {stats['actualizadas']}. "
+                f"OC borrador por proveedor: creadas {stats['oc_creadas']}, actualizadas {stats['oc_actualizadas']}."
+            ),
+        )
     compras_query = urlencode(
         {
             "source": "plan",
@@ -4516,11 +5689,7 @@ def plan_produccion_generar_solicitudes(request: HttpRequest, plan_id: int) -> H
             "reabasto": "all",
         }
     )
-    if next_view == "compras":
-        return redirect(f"{reverse('compras:solicitudes')}?{compras_query}")
-    if next_view == "compras_print":
-        return redirect(f"{reverse('compras:solicitudes_print')}?{compras_query}")
-    return redirect(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+    return redirect(f"{reverse('compras:solicitudes')}?{compras_query}")
 
 
 @login_required

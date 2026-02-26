@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, IntegrityError, transaction
 from django.utils import timezone
 from maestros.models import Insumo, UnidadMedida
 from django.conf import settings
@@ -422,3 +422,131 @@ class PlanProduccionItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.plan.nombre}: {self.receta.nombre} x {self.cantidad}"
+
+
+class PoliticaStockSucursalProducto(models.Model):
+    sucursal = models.ForeignKey("core.Sucursal", on_delete=models.CASCADE, related_name="politicas_stock_producto")
+    receta = models.ForeignKey(Receta, on_delete=models.CASCADE, related_name="politicas_stock_sucursal")
+    stock_minimo = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    stock_objetivo = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    stock_maximo = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    dias_cobertura = models.PositiveIntegerField(default=1)
+    stock_seguridad = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    lote_minimo = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    multiplo_empaque = models.DecimalField(max_digits=18, decimal_places=3, default=1)
+    activa = models.BooleanField(default=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Política stock sucursal-producto"
+        verbose_name_plural = "Políticas stock sucursal-producto"
+        ordering = ["sucursal__codigo", "receta__nombre"]
+        unique_together = [("sucursal", "receta")]
+
+    def __str__(self) -> str:
+        return f"{self.sucursal.codigo} · {self.receta.nombre}"
+
+
+class InventarioCedisProducto(models.Model):
+    receta = models.OneToOneField(Receta, on_delete=models.CASCADE, related_name="inventario_cedis")
+    stock_actual = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    stock_reservado = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Inventario CEDIS de producto"
+        verbose_name_plural = "Inventario CEDIS de productos"
+        ordering = ["receta__nombre"]
+
+    @property
+    def disponible(self) -> Decimal:
+        return max(Decimal("0"), Decimal(str(self.stock_actual or 0)) - Decimal(str(self.stock_reservado or 0)))
+
+    def __str__(self) -> str:
+        return f"CEDIS · {self.receta.nombre}"
+
+
+class SolicitudReabastoCedis(models.Model):
+    ESTADO_BORRADOR = "BORRADOR"
+    ESTADO_ENVIADA = "ENVIADA"
+    ESTADO_ATENDIDA = "ATENDIDA"
+    ESTADO_CANCELADA = "CANCELADA"
+    ESTADO_CHOICES = [
+        (ESTADO_BORRADOR, "Borrador"),
+        (ESTADO_ENVIADA, "Enviada"),
+        (ESTADO_ATENDIDA, "Atendida"),
+        (ESTADO_CANCELADA, "Cancelada"),
+    ]
+
+    folio = models.CharField(max_length=24, unique=True, blank=True)
+    fecha_operacion = models.DateField(default=timezone.localdate, db_index=True)
+    sucursal = models.ForeignKey("core.Sucursal", on_delete=models.PROTECT, related_name="solicitudes_reabasto")
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR, db_index=True)
+    notas = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="solicitudes_reabasto_creadas",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Solicitud sucursal a CEDIS"
+        verbose_name_plural = "Solicitudes sucursal a CEDIS"
+        ordering = ["-fecha_operacion", "-id"]
+        unique_together = [("fecha_operacion", "sucursal")]
+
+    def _next_folio(self) -> str:
+        ymd = timezone.localdate().strftime("%y%m%d")
+        prefix = f"SRC-{ymd}-"
+        today_count = SolicitudReabastoCedis.objects.filter(folio__startswith=prefix).count() + 1
+        return f"{prefix}{today_count:03d}"
+
+    def save(self, *args, **kwargs):
+        if self.folio:
+            return super().save(*args, **kwargs)
+        last_exc = None
+        for _ in range(10):
+            self.folio = self._next_folio()
+            try:
+                with transaction.atomic():
+                    return super().save(*args, **kwargs)
+            except IntegrityError as exc:
+                last_exc = exc
+                self.folio = ""
+                continue
+        if last_exc:
+            raise last_exc
+        raise IntegrityError("No fue posible generar folio único de solicitud sucursal->CEDIS.")
+
+    def __str__(self) -> str:
+        return f"{self.folio} · {self.sucursal.codigo}"
+
+
+class SolicitudReabastoCedisLinea(models.Model):
+    solicitud = models.ForeignKey(SolicitudReabastoCedis, on_delete=models.CASCADE, related_name="lineas")
+    receta = models.ForeignKey(Receta, on_delete=models.PROTECT, related_name="solicitudes_reabasto_lineas")
+    stock_reportado = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    en_transito = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    consumo_proyectado = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    sugerido = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    solicitado = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    justificacion = models.CharField(max_length=255, blank=True, default="")
+    observaciones = models.CharField(max_length=255, blank=True, default="")
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Línea solicitud reabasto CEDIS"
+        verbose_name_plural = "Líneas solicitud reabasto CEDIS"
+        ordering = ["id"]
+        unique_together = [("solicitud", "receta")]
+
+    @property
+    def delta_vs_sugerido(self) -> Decimal:
+        return Decimal(str(self.solicitado or 0)) - Decimal(str(self.sugerido or 0))
+
+    def __str__(self) -> str:
+        return f"{self.solicitud.folio} · {self.receta.nombre}"

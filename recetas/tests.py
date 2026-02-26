@@ -6,12 +6,15 @@ from io import BytesIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
 from openpyxl import Workbook, load_workbook
 
+from core.access import ROLE_COMPRAS, ROLE_VENTAS
+from core.models import UserProfile
 from compras.models import OrdenCompra, SolicitudCompra
 from core.models import Sucursal
 from maestros.models import Insumo, Proveedor, UnidadMedida
@@ -23,6 +26,8 @@ from recetas.models import (
     PronosticoVenta,
     Receta,
     RecetaCostoVersion,
+    SolicitudReabastoCedis,
+    SolicitudReabastoCedisLinea,
     SolicitudVenta,
     VentaHistorica,
 )
@@ -1427,3 +1432,125 @@ class ImportCosteoDriverExcelTests(TestCase):
         self.assertIsNotNone(latest)
         self.assertGreater(latest.costo_mo, Decimal("0"))
         self.assertGreater(latest.costo_indirecto, Decimal("0"))
+
+
+class ReabastoCedisSecurityAndFolioTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        ventas_group, _ = Group.objects.get_or_create(name=ROLE_VENTAS)
+        compras_group, _ = Group.objects.get_or_create(name=ROLE_COMPRAS)
+
+        self.user_ventas_no_sucursal = user_model.objects.create_user(
+            username="ventas_sin_sucursal",
+            email="ventas_sin_sucursal@example.com",
+            password="test12345",
+        )
+        self.user_ventas_no_sucursal.groups.add(ventas_group)
+
+        self.user_ventas_sucursal = user_model.objects.create_user(
+            username="ventas_sucursal",
+            email="ventas_sucursal@example.com",
+            password="test12345",
+        )
+        self.user_ventas_sucursal.groups.add(ventas_group)
+
+        self.user_compras = user_model.objects.create_user(
+            username="compras_reabasto",
+            email="compras_reabasto@example.com",
+            password="test12345",
+        )
+        self.user_compras.groups.add(compras_group)
+
+        self.sucursal_colosio = Sucursal.objects.create(codigo="COLOSIO", nombre="Colosio", activa=True)
+        self.sucursal_leyva = Sucursal.objects.create(codigo="LEYVA", nombre="Leyva", activa=True)
+        UserProfile.objects.create(user=self.user_ventas_sucursal, sucursal=self.sucursal_leyva)
+
+        self.receta = Receta.objects.create(
+            nombre="Pastel Seguridad Reabasto",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-reabasto-security-001",
+        )
+
+    def test_no_sucursal_profile_user_cannot_capture_reabasto(self):
+        self.client.force_login(self.user_ventas_no_sucursal)
+        before = SolicitudReabastoCedis.objects.count()
+        response = self.client.post(
+            reverse("recetas:reabasto_cedis_linea_guardar"),
+            {
+                "fecha_operacion": "2026-02-26",
+                "sucursal_id": self.sucursal_colosio.id,
+                "receta_id": self.receta.id,
+                "stock_reportado": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(SolicitudReabastoCedis.objects.count(), before)
+
+    def test_branch_user_cannot_capture_other_branch(self):
+        self.client.force_login(self.user_ventas_sucursal)
+        response = self.client.post(
+            reverse("recetas:reabasto_cedis_linea_guardar"),
+            {
+                "fecha_operacion": "2026-02-26",
+                "sucursal_id": self.sucursal_colosio.id,
+                "receta_id": self.receta.id,
+                "stock_reportado": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_branch_user_can_capture_assigned_branch(self):
+        self.client.force_login(self.user_ventas_sucursal)
+        response = self.client.post(
+            reverse("recetas:reabasto_cedis_linea_guardar"),
+            {
+                "fecha_operacion": "2026-02-26",
+                "sucursal_id": self.sucursal_leyva.id,
+                "receta_id": self.receta.id,
+                "stock_reportado": "2",
+                "en_transito": "1",
+                "consumo_proyectado": "0.5",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        solicitud = SolicitudReabastoCedis.objects.get(
+            fecha_operacion=date(2026, 2, 26),
+            sucursal=self.sucursal_leyva,
+        )
+        self.assertTrue(
+            SolicitudReabastoCedisLinea.objects.filter(
+                solicitud=solicitud,
+                receta=self.receta,
+            ).exists()
+        )
+
+    def test_compras_user_can_update_estado_without_sucursal_profile(self):
+        solicitud = SolicitudReabastoCedis.objects.create(
+            fecha_operacion=date(2026, 2, 26),
+            sucursal=self.sucursal_colosio,
+        )
+        self.client.force_login(self.user_compras)
+        response = self.client.post(
+            reverse("recetas:reabasto_cedis_estado_guardar", kwargs={"solicitud_id": solicitud.id}),
+            {"estado": SolicitudReabastoCedis.ESTADO_ATENDIDA},
+        )
+        self.assertEqual(response.status_code, 302)
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estado, SolicitudReabastoCedis.ESTADO_ATENDIDA)
+
+    def test_reabasto_folio_retries_on_unique_collision(self):
+        SolicitudReabastoCedis.objects.create(
+            folio="SRC-COLLIDE-001",
+            fecha_operacion=date(2026, 2, 26),
+            sucursal=self.sucursal_colosio,
+        )
+        with patch.object(
+            SolicitudReabastoCedis,
+            "_next_folio",
+            side_effect=["SRC-COLLIDE-001", "SRC-COLLIDE-002"],
+        ):
+            solicitud = SolicitudReabastoCedis.objects.create(
+                fecha_operacion=date(2026, 2, 26),
+                sucursal=self.sucursal_leyva,
+            )
+        self.assertEqual(solicitud.folio, "SRC-COLLIDE-002")
