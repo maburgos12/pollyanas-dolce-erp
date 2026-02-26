@@ -1023,11 +1023,11 @@ tr:hover,
 }
 
 .page-compras-solicitudes .header {
-  position: static;
+  position: sticky;
 }
 
 .page-compras-solicitudes .main-content {
-  overflow-x: clip;
+  overflow-x: visible;
 }
 
 .recipe-detail-shell .recipe-actions {
@@ -1088,9 +1088,22 @@ tr:hover,
 
 .recipe-detail-shell .recipe-main-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
+}
+
+.recipe-detail-shell .recipe-main-grid > * {
+  min-width: 0;
+}
+
+.recipe-detail-shell .recipe-main-grid > *:nth-child(1),
+.recipe-detail-shell .recipe-main-grid > *:nth-child(2),
+.recipe-detail-shell .recipe-main-grid > *:nth-child(3),
+.recipe-detail-shell .recipe-main-grid > *:nth-child(4),
+.recipe-detail-shell .recipe-main-grid > *:nth-child(5),
+.recipe-detail-shell .recipe-main-grid > *:nth-child(6) {
+  grid-column: span 2;
 }
 
 .recipe-detail-shell .recipe-head {
@@ -1115,16 +1128,18 @@ tr:hover,
 
 .recipe-detail-shell .recipe-main-controls {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 12px;
-  align-items: center;
+  align-items: stretch;
 }
 
 .recipe-detail-shell .field-check-compact {
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
-  max-width: 100%;
+  min-width: 320px;
+  max-width: 430px;
+  flex: 1 1 auto;
 }
 
 .recipe-detail-shell .field-check-compact span {
@@ -1137,8 +1152,26 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-main-submit {
-  min-width: 220px;
+  min-width: 240px;
   flex: 0 0 auto;
+}
+
+.recipe-detail-shell .recipe-lines-scroll {
+  scrollbar-gutter: stable both-edges;
+}
+
+.recipe-detail-shell .recipe-lines-scroll::-webkit-scrollbar {
+  height: 12px;
+}
+
+.recipe-detail-shell .recipe-lines-scroll::-webkit-scrollbar-thumb {
+  background: rgba(139, 34, 82, 0.35);
+  border-radius: 999px;
+}
+
+.recipe-detail-shell .recipe-lines-scroll::-webkit-scrollbar-track {
+  background: rgba(240, 208, 220, 0.35);
+  border-radius: 999px;
 }
 
 .recipe-detail-shell .recipes-filters-compare {
@@ -1239,6 +1272,10 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 }
 
 @media (max-width: 1100px) {
+  .recipe-detail-shell .recipe-main-grid > * {
+    grid-column: span 4;
+  }
+
   .recipe-detail-shell .recipe-head .recipe-actions {
     margin-left: 0;
   }
@@ -1250,12 +1287,21 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
 @media (max-width: 780px) {
   .recipe-detail-shell .recipe-main-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .recipe-detail-shell .recipe-main-grid > * {
+    grid-column: span 1;
   }
 
   .recipe-detail-shell .recipe-main-controls {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .recipe-detail-shell .field-check-compact {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .recipe-detail-shell .recipe-main-submit {
@@ -1429,5 +1475,9 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .mobile-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .page-compras-solicitudes .header {
+    position: static;
   }
 }
