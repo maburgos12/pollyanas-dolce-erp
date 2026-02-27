@@ -184,7 +184,7 @@ h4 {
   min-height: 100vh;
   position: relative;
   z-index: 1;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .header {
@@ -1034,7 +1034,7 @@ tr:hover,
 }
 
 .page-compras-solicitudes .main-content {
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .recipe-detail-shell .recipe-actions {
@@ -1050,7 +1050,7 @@ tr:hover,
 }
 
 .page-receta-detail .main-content {
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .recipe-detail-shell .recipe-lines-scroll {
@@ -1095,7 +1095,7 @@ tr:hover,
 
 .recipe-detail-shell .recipe-main-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: 12px;
   align-items: stretch;
 }
@@ -1127,9 +1127,10 @@ tr:hover,
 
 .recipe-detail-shell .recipe-main-controls {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto;
+  grid-template-columns: minmax(min(260px, 100%), 1fr) minmax(180px, 230px);
   gap: 12px;
   align-items: stretch;
+  min-width: 0;
 }
 
 .recipe-detail-shell .field-check-compact {
@@ -1151,8 +1152,9 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-main-submit {
-  min-width: 210px;
-  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .recipe-detail-shell .recipe-lines-scroll {
@@ -1277,6 +1279,10 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .recipe-detail-shell .recipes-filters-compare {
     grid-template-columns: repeat(2, minmax(min(200px, 100%), 1fr));
+  }
+
+  .recipe-detail-shell .recipe-main-controls {
+    grid-template-columns: 1fr;
   }
 }
 
