@@ -24,9 +24,21 @@ class Command(BaseCommand):
             default=1000.0,
             help="Límite superior de cantidad inferida para evitar outliers (default: 1000).",
         )
+        parser.add_argument(
+            "--min-match-score",
+            type=float,
+            default=0.0,
+            help="Score mínimo de matching para considerar inferencia (default: 0).",
+        )
+        parser.add_argument(
+            "--only-auto",
+            action="store_true",
+            help="Solo evalúa líneas en AUTO_APPROVED.",
+        )
 
     def handle(self, *args, **options):
         max_cantidad = Decimal(str(options["max_cantidad"]))
+        min_match_score = float(options["min_match_score"])
         candidates = (
             LineaReceta.objects.filter(insumo__isnull=False)
             .filter(Q(cantidad__isnull=True) | Q(cantidad__lte=0))
@@ -34,6 +46,10 @@ class Command(BaseCommand):
             .select_related("receta", "insumo")
             .order_by("receta__nombre", "posicion")
         )
+        if min_match_score > 0:
+            candidates = candidates.filter(match_score__gte=min_match_score)
+        if options.get("only_auto"):
+            candidates = candidates.filter(match_status=LineaReceta.STATUS_AUTO)
 
         total = candidates.count()
         inferibles = []
