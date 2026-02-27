@@ -412,29 +412,50 @@
 
   let isDragging = false;
   let didMove = false;
+  let activePointerId = null;
   let startX = 0;
   let startLeft = 0;
 
   const stopDragging = () => {
     isDragging = false;
+    activePointerId = null;
     scroller.classList.remove("is-dragging");
   };
 
-  scroller.addEventListener("mousedown", (event) => {
-    if (event.button !== 0) return;
+  const startDrag = (clientX) => {
     isDragging = true;
     didMove = false;
     scroller.classList.add("is-dragging");
-    startX = event.pageX - scroller.offsetLeft;
+    startX = clientX;
     startLeft = scroller.scrollLeft;
-  });
+  };
 
-  window.addEventListener("mousemove", (event) => {
+  const moveDrag = (clientX) => {
     if (!isDragging) return;
-    const x = event.pageX - scroller.offsetLeft;
-    const delta = x - startX;
+    const delta = clientX - startX;
     if (Math.abs(delta) > 2) didMove = true;
     scroller.scrollLeft = startLeft - delta;
+  };
+
+  scroller.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    activePointerId = event.pointerId;
+    scroller.setPointerCapture(event.pointerId);
+    startDrag(event.clientX);
+  });
+
+  scroller.addEventListener("pointermove", (event) => {
+    if (!isDragging || activePointerId !== event.pointerId) return;
+    moveDrag(event.clientX);
+  });
+
+  scroller.addEventListener("pointerup", stopDragging);
+  scroller.addEventListener("pointercancel", stopDragging);
+  scroller.addEventListener("lostpointercapture", stopDragging);
+
+  window.addEventListener("mousemove", (event) => {
+    if (activePointerId !== null) return;
+    moveDrag(event.clientX);
   });
 
   window.addEventListener("mouseup", stopDragging);
