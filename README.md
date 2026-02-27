@@ -136,6 +136,7 @@ Sprint 1 entrega:
 - `recetas/management/commands/backfill_linea_snapshots_from_linecost.py` (reconstruye snapshot faltante con costo_linea_excel/cantidad)
 - `recetas/management/commands/rematch_lineas_receta.py` (reintenta matching masivo en líneas REJECTED/NO_MATCH con motor actual)
 - `recetas/management/commands/auditar_insumos_sin_costo_recetas.py` (lista insumos de recetas sin costo base y sugiere homologaciones)
+- `maestros/management/commands/bootstrap_costos_desde_recetas.py` (genera costos base por mediana usando evidencia de recetas con cantidad/costo)
 - `core/management/commands/bootstrap_sucursales_point.py` (alta/actualización de sucursales base Point)
 - `recetas/utils/importador.py` (parser de Excel)
 - `recetas/utils/matching.py` (matching)
