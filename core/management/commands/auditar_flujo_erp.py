@@ -114,9 +114,15 @@ class Command(BaseCommand):
             .count(),
         }
 
+        lineas_principales = LineaReceta.objects.exclude(tipo_linea=LineaReceta.TIPO_SUBSECCION)
+
         calidad_receta = {
-            "lineas_sin_match": LineaReceta.objects.filter(Q(insumo__isnull=True) | Q(match_method="NO_MATCH")).count(),
-            "lineas_needs_review": LineaReceta.objects.filter(match_status="NEEDS_REVIEW").count(),
+            "lineas_sin_match": lineas_principales.filter(
+                Q(insumo__isnull=True) | Q(match_method=LineaReceta.MATCH_NONE)
+            ).count(),
+            "lineas_needs_review": lineas_principales.filter(
+                match_status=LineaReceta.STATUS_NEEDS_REVIEW
+            ).count(),
             "lineas_ligadas_sin_cantidad": LineaReceta.objects.filter(insumo__isnull=False)
             .filter(Q(cantidad__isnull=True) | Q(cantidad__lte=0))
             .count(),
