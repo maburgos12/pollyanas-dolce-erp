@@ -1738,12 +1738,18 @@ def _export_solicitudes_csv(
         ]
     )
     for s in solicitudes:
+        if s.source_tipo == "reabasto_cedis":
+            source_label = "REABASTO_CEDIS"
+        elif s.source_tipo == "plan":
+            source_label = "PLAN"
+        else:
+            source_label = "MANUAL"
         writer.writerow(
             [
                 s.folio,
                 s.area,
                 s.solicitante,
-                "PLAN" if s.source_tipo == "plan" else "MANUAL",
+                source_label,
                 s.source_plan_id or "",
                 s.insumo.nombre,
                 s.proveedor_sugerido.nombre if s.proveedor_sugerido_id else "",
@@ -1803,12 +1809,18 @@ def _export_solicitudes_xlsx(
         ]
     )
     for s in solicitudes:
+        if s.source_tipo == "reabasto_cedis":
+            source_label = "REABASTO_CEDIS"
+        elif s.source_tipo == "plan":
+            source_label = "PLAN"
+        else:
+            source_label = "MANUAL"
         ws.append(
             [
                 s.folio,
                 s.area,
                 s.solicitante,
-                "PLAN" if s.source_tipo == "plan" else "MANUAL",
+                source_label,
                 s.source_plan_id or "",
                 s.insumo.nombre,
                 s.proveedor_sugerido.nombre if s.proveedor_sugerido_id else "",
@@ -2591,7 +2603,13 @@ def _filtered_solicitudes(
                 plan_id_int = int(maybe_id)
                 s.source_tipo = "plan"
                 s.source_plan_id = plan_id_int
-                s.source_plan_nombre = planes_map.get(plan_id_int).nombre if plan_id_int in planes_map else f"Plan {plan_id_int}"
+                plan_obj = planes_map.get(plan_id_int)
+                s.source_plan_nombre = plan_obj.nombre if plan_obj else f"Plan {plan_id_int}"
+                if plan_obj:
+                    plan_name = (plan_obj.nombre or "").strip().upper()
+                    plan_notes = (plan_obj.notas or "").strip().upper()
+                    if plan_name.startswith("CEDIS REABASTO ") or "[AUTO_REABASTO_CEDIS:" in plan_notes:
+                        s.source_tipo = "reabasto_cedis"
         s.costo_unitario = latest_cost_by_insumo.get(s.insumo_id, Decimal("0"))
         s.presupuesto_estimado = (s.cantidad or Decimal("0")) * (s.costo_unitario or Decimal("0"))
 

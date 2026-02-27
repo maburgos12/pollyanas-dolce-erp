@@ -30,6 +30,7 @@ class UserProfile(models.Model):
     departamento = models.ForeignKey(Departamento, null=True, blank=True, on_delete=models.SET_NULL)
     sucursal = models.ForeignKey(Sucursal, null=True, blank=True, on_delete=models.SET_NULL)
     telefono = models.CharField(max_length=30, blank=True, default="")
+    modo_captura_sucursal = models.BooleanField(default=False)
     lock_maestros = models.BooleanField(default=False)
     lock_recetas = models.BooleanField(default=False)
     lock_compras = models.BooleanField(default=False)

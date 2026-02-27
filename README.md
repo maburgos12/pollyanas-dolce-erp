@@ -131,6 +131,8 @@ Sprint 1 entrega:
 
 ## Archivos importantes
 - `recetas/management/commands/import_costeo.py` (comando de importación)
+- `recetas/management/commands/importar_ventas_point_archivos.py` (sincroniza historial de ventas desde exportes Point CSV/XLSX/XLSM/XLS)
+- `core/management/commands/bootstrap_sucursales_point.py` (alta/actualización de sucursales base Point)
 - `recetas/utils/importador.py` (parser de Excel)
 - `recetas/utils/matching.py` (matching)
 - `activos/management/commands/importar_activos_bitacora.py` (importación masiva de activos/servicios desde bitácora XLSX/CSV)
@@ -148,3 +150,6 @@ Sprint 1 entrega:
 - El matching y captura operativa en UI ya incluyen búsqueda/autocomplete para insumos.
 - El importador es idempotente por `source_hash` en costos y por `hash_contenido` en recetas.
 - En `Activos > Catálogo` ya hay carga masiva de bitácora con modo simulación y descarga de plantilla (`CSV`/`XLSX`).
+- Para ventas Point sin credenciales API directas: exporta reportes desde Point a carpeta/Drive y corre `python manage.py importar_ventas_point_archivos <ruta> --recursive --dry-run` antes de confirmar sin `--dry-run`.
+- El importador de ventas prioriza identidad de producto de Point (`codigo_point` + `nombre_point`) y sincroniza alias de receta al importar sin `--dry-run`.
+- En deploy (`start.sh`) se corre `bootstrap_sucursales_point --only-missing` para mantener catálogo base de sucursales Point.

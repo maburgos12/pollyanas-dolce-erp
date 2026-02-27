@@ -15,6 +15,7 @@ from core.access import (
     can_view_recetas,
     can_view_rrhh,
     can_view_reportes,
+    is_branch_capture_only,
 )
 
 
@@ -38,5 +39,6 @@ def ui_access(request):
             "can_view_rrhh": can_view_rrhh(user),
             "can_manage_rrhh": can_manage_rrhh(user),
             "can_capture_piso": can_capture_piso(user),
+            "branch_capture_only": is_branch_capture_only(user),
         }
     }

@@ -950,7 +950,9 @@
           <td>{{ s.area }}</td>
           <td>{{ s.solicitante }}</td>
           <td>
-            {% if s.source_tipo == 'plan' %}
+            {% if s.source_tipo == 'reabasto_cedis' %}
+              <span class="badge-rojo"><a href="{% url 'recetas:plan_produccion' %}?plan_id={{ s.source_plan_id }}" style="color: inherit; text-decoration: none;">Reabasto CEDIS · Plan #{{ s.source_plan_id }}</a></span>
+            {% elif s.source_tipo == 'plan' %}
               <span class="badge-amarillo"><a href="{% url 'recetas:plan_produccion' %}?plan_id={{ s.source_plan_id }}" style="color: inherit; text-decoration: none;">Plan #{{ s.source_plan_id }}</a></span>
             {% else %}
               <span class="badge-verde">Manual</span>

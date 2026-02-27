@@ -14,6 +14,10 @@ from .models import (
     Receta,
     RecetaCodigoPointAlias,
     RecetaCostoVersion,
+    InventarioCedisProducto,
+    PoliticaStockSucursalProducto,
+    SolicitudReabastoCedis,
+    SolicitudReabastoCedisLinea,
     SolicitudVenta,
     VentaHistorica,
 )
@@ -238,3 +242,69 @@ class SolicitudVentaAdmin(admin.ModelAdmin):
     list_filter = ("alcance", "periodo", "sucursal", "fuente")
     search_fields = ("receta__nombre", "receta__codigo_point", "sucursal__codigo", "sucursal__nombre")
     autocomplete_fields = ("receta", "sucursal")
+
+
+@admin.register(PoliticaStockSucursalProducto)
+class PoliticaStockSucursalProductoAdmin(admin.ModelAdmin):
+    list_display = (
+        "sucursal",
+        "receta",
+        "stock_minimo",
+        "stock_objetivo",
+        "stock_maximo",
+        "dias_cobertura",
+        "stock_seguridad",
+        "activa",
+        "actualizado_en",
+    )
+    list_filter = ("sucursal", "activa")
+    search_fields = ("sucursal__codigo", "sucursal__nombre", "receta__nombre", "receta__codigo_point")
+    autocomplete_fields = ("sucursal", "receta")
+
+
+@admin.register(InventarioCedisProducto)
+class InventarioCedisProductoAdmin(admin.ModelAdmin):
+    list_display = ("receta", "stock_actual", "stock_reservado", "disponible_admin", "actualizado_en")
+    search_fields = ("receta__nombre", "receta__codigo_point")
+    autocomplete_fields = ("receta",)
+
+    @admin.display(description="Disponible")
+    def disponible_admin(self, obj):
+        return obj.disponible
+
+
+class SolicitudReabastoCedisLineaInline(admin.TabularInline):
+    model = SolicitudReabastoCedisLinea
+    extra = 0
+    autocomplete_fields = ("receta",)
+
+
+@admin.register(SolicitudReabastoCedis)
+class SolicitudReabastoCedisAdmin(admin.ModelAdmin):
+    list_display = ("folio", "fecha_operacion", "sucursal", "estado", "creado_por", "creado_en", "actualizado_en")
+    list_filter = ("estado", "fecha_operacion", "sucursal")
+    search_fields = ("folio", "sucursal__codigo", "sucursal__nombre", "notas")
+    autocomplete_fields = ("sucursal", "creado_por")
+    inlines = [SolicitudReabastoCedisLineaInline]
+
+
+@admin.register(SolicitudReabastoCedisLinea)
+class SolicitudReabastoCedisLineaAdmin(admin.ModelAdmin):
+    list_display = (
+        "solicitud",
+        "receta",
+        "stock_reportado",
+        "en_transito",
+        "consumo_proyectado",
+        "sugerido",
+        "solicitado",
+        "delta_vs_sugerido_admin",
+        "actualizado_en",
+    )
+    list_filter = ("solicitud__fecha_operacion", "solicitud__sucursal")
+    search_fields = ("solicitud__folio", "receta__nombre", "justificacion", "observaciones")
+    autocomplete_fields = ("solicitud", "receta")
+
+    @admin.display(description="Delta vs sugerido")
+    def delta_vs_sugerido_admin(self, obj):
+        return obj.delta_vs_sugerido

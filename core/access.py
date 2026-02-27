@@ -154,3 +154,12 @@ def can_capture_piso(user: AbstractBaseUser) -> bool:
         ROLE_VENTAS,
         ROLE_LOGISTICA,
     ) and not _is_locked(user, "lock_captura_piso")
+
+
+def is_branch_capture_only(user: AbstractBaseUser) -> bool:
+    if not user or not user.is_authenticated or user.is_superuser:
+        return False
+    profile = getattr(user, "userprofile", None)
+    if not profile:
+        return False
+    return bool(getattr(profile, "modo_captura_sucursal", False))

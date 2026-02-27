@@ -1,0 +1,578 @@
+{% extends "base.html" %}
+{% block title %}Reabasto CEDIS{% endblock %}
+{% block page_title %}Recetas · Reabasto Sucursal a CEDIS{% endblock %}
+{% block content %}
+<div class="module-shell plan-produccion-shell">
+  {% if not ui_access.branch_capture_only %}
+  <div class="card">
+    <div class="card-header">Filtro Operativo</div>
+    <form class="form-grid-auto" method="get">
+      <div class="form-group">
+        <label class="form-label">Fecha de operación</label>
+        <input class="form-control" type="date" name="fecha" value="{{ fecha_operacion|date:'Y-m-d' }}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sucursal</label>
+        {% if sucursal_locked and sucursal %}
+          <input class="form-control" type="text" value="{{ sucursal.codigo }} - {{ sucursal.nombre }}" readonly>
+          <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
+        {% else %}
+          <select class="form-select" name="sucursal_id">
+            <option value="" {% if not sucursal %}selected{% endif %}>Selecciona sucursal...</option>
+            {% for s in sucursales %}
+              <option value="{{ s.id }}" {% if sucursal and sucursal.id == s.id %}selected{% endif %}>
+                {{ s.codigo }} - {{ s.nombre }}
+              </option>
+            {% endfor %}
+          </select>
+        {% endif %}
+      </div>
+      <div class="form-group" style="align-self:end;">
+        <button class="btn btn-primary" type="submit">Aplicar</button>
+      </div>
+      <div class="form-group" style="align-self:end;">
+        <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis_consolidado_export' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}&format=xlsx">Exportar consolidado XLSX</a>
+      </div>
+    </form>
+    {% if can_manage_reabasto %}
+    <div class="toolbar" style="margin-top: 10px;">
+      <form method="post" action="{% url 'recetas:reabasto_cedis_generar_plan' %}">
+        {% csrf_token %}
+        <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+        <button class="btn btn-primary" type="submit">Generar plan CEDIS desde faltante</button>
+      </form>
+      <form method="post" action="{% url 'recetas:reabasto_cedis_generar_compras' %}">
+        {% csrf_token %}
+        <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+        <button class="btn btn-secondary" type="submit">Generar compras (solicitudes + OC)</button>
+      </form>
+    </div>
+    {% endif %}
+    <p class="muted mb-0">
+      Solicitudes del día: <strong>{{ solicitudes_hoy|length }}</strong> ·
+      Total solicitado: <strong>{{ total_solicitado|floatformat:2 }}</strong> ·
+      Faltante a producir CEDIS: <strong>{{ total_faltante|floatformat:2 }}</strong>
+    </p>
+    {% if sucursal_locked and sucursal %}
+    <p class="muted mb-0">
+      Captura de sucursal: estás trabajando sobre <strong>{{ sucursal.codigo }}</strong>. Para producir mañana, registra y envía hoy al cierre.
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if not ui_access.branch_capture_only %}
+  <div class="card">
+    <div class="card-header">Control de Cierre de Sucursales (arranque CEDIS 8:00 AM)</div>
+    <p class="muted">
+      Para producir el <strong>{{ fecha_operacion|date:"d/m/Y" }}</strong>, la carga debe quedar enviada el
+      <strong>{{ resumen_cierre.fecha_corte|date:"d/m/Y" }}</strong> al cierre de sucursal.
+    </p>
+    <div class="kpi-mini">
+      <article class="kpi-card">
+        <div class="kpi-number">{{ resumen_cierre.total }}</div>
+        <div class="kpi-label">Sucursales activas</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number is-success">{{ resumen_cierre.en_tiempo }}</div>
+        <div class="kpi-label">Enviadas en tiempo</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number is-warning">{{ resumen_cierre.tardias }}</div>
+        <div class="kpi-label">Enviadas tardías</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number is-warning">{{ resumen_cierre.borrador }}</div>
+        <div class="kpi-label">En borrador</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number is-danger">{{ resumen_cierre.pendientes }}</div>
+        <div class="kpi-label">Pendientes</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number {% if resumen_cierre.listo_8am %}is-success{% else %}is-danger{% endif %}">
+          {% if resumen_cierre.listo_8am %}LISTO{% else %}RIESGO{% endif %}
+        </div>
+        <div class="kpi-label">Estado 8:00 AM</div>
+      </article>
+    </div>
+    {% if resumen_cierre.pendientes_codigos %}
+    <div class="alert alert-danger">
+      Sucursales por regularizar: {{ resumen_cierre.pendientes_codigos|join:", " }}.
+    </div>
+    {% endif %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Sucursal</th>
+            <th>Estado</th>
+            <th>Última actualización</th>
+            <th>Semáforo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in resumen_cierre.detalle %}
+          <tr>
+            <td>{{ row.sucursal.codigo }} - {{ row.sucursal.nombre }}</td>
+            <td>{{ row.estado_label }}</td>
+            <td>{% if row.actualizado_en %}{{ row.actualizado_en|date:"d/m/Y H:i" }}{% else %}-{% endif %}</td>
+            <td>
+              {% if row.semaforo == 'verde' %}
+                <span class="badge-verde">OK</span>
+              {% elif row.semaforo == 'amarillo' %}
+                <span class="badge-amarillo">Atención</span>
+              {% else %}
+                <span class="badge-rojo">Pendiente</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if sucursal %}
+  <div class="card">
+    <div class="card-header">
+      {% if show_simple_capture %}
+        Cierre diario de sucursal · {{ sucursal.codigo }}
+      {% else %}
+        Solicitud diaria de {{ sucursal.codigo }}
+      {% endif %}
+    </div>
+    <div class="toolbar mb-2">
+      {% if solicitud %}
+      <span class="badge badge-primary">Folio: {{ solicitud.folio }}</span>
+      <span class="badge {% if solicitud.estado == 'ENVIADA' %}badge-warning{% elif solicitud.estado == 'ATENDIDA' %}badge-success{% elif solicitud.estado == 'CANCELADA' %}badge-danger{% else %}badge-primary{% endif %}">
+        Estado: {{ solicitud.get_estado_display }}
+      </span>
+      {% else %}
+      <span class="badge badge-warning">Sin solicitud creada aún para esta fecha/sucursal</span>
+      {% endif %}
+    </div>
+
+    {% if show_simple_capture %}
+    <form method="post" action="{% url 'recetas:reabasto_cedis_cierre_guardar' %}">
+      {% csrf_token %}
+      <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+      <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
+      <p class="muted mb-2">
+        Captura simple para sucursal: llena <strong>stock final de cierre</strong>. El sistema calcula automáticamente la
+        <strong>solicitud requerida</strong> para reabastecer stock mínimo.
+      </p>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Stock mínimo</th>
+              <th>Stock final cierre</th>
+              <th>Solicitud requerida</th>
+              <th>Observaciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows_cierre %}
+            <tr>
+              <td>
+                {{ row.receta.nombre }}
+                <input type="hidden" name="row_receta_id" value="{{ row.receta.id }}">
+              </td>
+              <td>
+                <span class="js-stock-min" data-receta="{{ row.receta.id }}">{{ row.policy.stock_minimo|floatformat:2 }}</span>
+              </td>
+              <td>
+                <input
+                  class="form-control js-stock-final"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  name="stock_reportado_{{ row.receta.id }}"
+                  value="{{ row.stock_reportado|floatformat:3 }}"
+                  data-receta="{{ row.receta.id }}"
+                >
+              </td>
+              <td>
+                <span class="badge badge-primary js-sugerido" data-receta="{{ row.receta.id }}">{{ row.sugerido|floatformat:2 }}</span>
+              </td>
+              <td>
+                <input class="form-control" type="text" name="observaciones_{{ row.receta.id }}" maxlength="255" value="{{ row.observaciones }}">
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">No hay políticas cargadas para esta sucursal. Contacta a Compras/Administración.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="form-group mt-2">
+        <label class="form-label">Notas generales de cierre</label>
+        <input class="form-control" type="text" name="notas_cierre" maxlength="255" value="{{ solicitud.notas }}">
+      </div>
+      <div class="toolbar mt-2">
+        <button class="btn btn-secondary" type="submit" name="accion" value="BORRADOR">Guardar borrador</button>
+        <button class="btn btn-primary" type="submit" name="accion" value="ENVIAR">Guardar y enviar a CEDIS</button>
+      </div>
+    </form>
+    {% else %}
+    <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:reabasto_cedis_linea_guardar' %}">
+      {% csrf_token %}
+      <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+      <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
+      <div class="form-group">
+        <label class="form-label">Producto final</label>
+        <select class="form-select" name="receta_id" required>
+          <option value="">Selecciona...</option>
+          {% for receta in recetas_producto %}
+          <option value="{{ receta.id }}">{{ receta.nombre }}{% if receta.codigo_point %} ({{ receta.codigo_point }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Stock reportado</label>
+        <input class="form-control" type="number" step="0.001" min="0" name="stock_reportado" value="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">En tránsito</label>
+        <input class="form-control" type="number" step="0.001" min="0" name="en_transito" value="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Consumo proyectado</label>
+        <input class="form-control" type="number" step="0.001" min="0" name="consumo_proyectado" value="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Solicitado (vacío = sugerido)</label>
+        <input class="form-control" type="number" step="0.001" min="0" name="solicitado" placeholder="Auto sugerido">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Justificación</label>
+        <input class="form-control" type="text" name="justificacion" maxlength="255">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Observaciones</label>
+        <input class="form-control" type="text" name="observaciones" maxlength="255">
+      </div>
+      <div class="form-group" style="align-self:end;">
+        <button class="btn btn-primary" type="submit">Agregar renglón</button>
+      </div>
+    </form>
+
+    <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:reabasto_cedis_importar' %}" enctype="multipart/form-data">
+      {% csrf_token %}
+      <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+      <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
+      <div class="form-group">
+        <label class="form-label">Carga masiva de solicitud (CSV/XLSX)</label>
+        <input class="form-control" type="file" name="archivo" accept=".csv,.xlsx,.xlsm" required>
+      </div>
+      <div class="form-group" style="align-self:end;">
+        <button class="btn btn-secondary" type="submit">Importar archivo</button>
+      </div>
+    </form>
+    <p class="muted mb-2">Columnas sugeridas: <code>receta</code>, <code>codigo_point</code>, <code>solicitado</code>, <code>stock_reportado</code>, <code>en_transito</code>, <code>consumo_proyectado</code>, <code>justificacion</code>, <code>observaciones</code>.</p>
+
+    {% if solicitud %}
+    <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:reabasto_cedis_estado_guardar' solicitud.id %}">
+      {% csrf_token %}
+      <div class="form-group">
+        <label class="form-label">Estado solicitud</label>
+        <select class="form-select" name="estado">
+          <option value="BORRADOR" {% if solicitud.estado == 'BORRADOR' %}selected{% endif %}>Borrador</option>
+          <option value="ENVIADA" {% if solicitud.estado == 'ENVIADA' %}selected{% endif %}>Enviada a CEDIS</option>
+          <option value="ATENDIDA" {% if solicitud.estado == 'ATENDIDA' %}selected{% endif %}>Atendida por CEDIS</option>
+          <option value="CANCELADA" {% if solicitud.estado == 'CANCELADA' %}selected{% endif %}>Cancelada</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notas</label>
+        <input class="form-control" type="text" name="notas" value="{{ solicitud.notas }}">
+      </div>
+      <div class="form-group" style="align-self:end;">
+        <button class="btn btn-primary" type="submit">Guardar estado</button>
+      </div>
+    </form>
+    {% endif %}
+    {% endif %}
+
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          {% if show_simple_capture %}
+          <tr>
+            <th>Producto</th>
+            <th>Stock final</th>
+            <th>Solicitado</th>
+            <th>Estado</th>
+            <th>Observaciones</th>
+          </tr>
+          {% else %}
+          <tr>
+            <th>Producto</th>
+            <th>Stock</th>
+            <th>Tránsito</th>
+            <th>Consumo proj.</th>
+            <th>Sugerido</th>
+            <th>Solicitado</th>
+            <th>Delta</th>
+            <th>Política</th>
+            <th>Acciones</th>
+          </tr>
+          {% endif %}
+        </thead>
+        <tbody>
+          {% for row in rows_detalle %}
+          {% if show_simple_capture %}
+          <tr>
+            <td>{{ row.receta.nombre }}</td>
+            <td>{{ row.stock_reportado|floatformat:2 }}</td>
+            <td>{{ row.solicitado|floatformat:2 }}</td>
+            <td>
+              {% if solicitud %}
+                {{ solicitud.get_estado_display }}
+              {% else %}
+                Sin guardar
+              {% endif %}
+            </td>
+            <td>{{ row.linea.observaciones|default:"-" }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td>{{ row.receta.nombre }}</td>
+            <td>{{ row.stock_reportado|floatformat:2 }}</td>
+            <td>{{ row.en_transito|floatformat:2 }}</td>
+            <td>{{ row.consumo_proyectado|floatformat:2 }}</td>
+            <td>{{ row.sugerido|floatformat:2 }}</td>
+            <td>{{ row.solicitado|floatformat:2 }}</td>
+            <td>{% if row.delta > 0 %}+{% endif %}{{ row.delta|floatformat:2 }}</td>
+            <td>
+              {% if row.policy %}
+                Min {{ row.policy.stock_minimo|floatformat:2 }} · Obj {{ row.policy.stock_objetivo|floatformat:2 }}
+              {% else %}
+                <span class="badge badge-warning">Sin política</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.linea %}
+              <form method="post" action="{% url 'recetas:reabasto_cedis_linea_eliminar' row.linea.id %}">
+                {% csrf_token %}
+                <button class="btn btn-danger btn-small" type="submit">Eliminar</button>
+              </form>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+          </tr>
+          {% endif %}
+          {% empty %}
+          {% if show_simple_capture %}
+          <tr><td colspan="5">Sin renglones guardados para esta solicitud.</td></tr>
+          {% else %}
+          <tr><td colspan="9">Sin renglones para esta solicitud.</td></tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% elif not ui_access.branch_capture_only %}
+  <div class="card">
+    <div class="alert alert-info">Selecciona una sucursal para capturar o revisar el reabasto.</div>
+  </div>
+  {% elif branch_capture_only_mode %}
+  <div class="card">
+    <div class="alert alert-danger">Tu usuario no tiene sucursal asignada. Contacta a administración para habilitar captura de cierre.</div>
+  </div>
+  {% endif %}
+
+  {% if not ui_access.branch_capture_only %}
+  <div class="card">
+    <div class="card-header">Política de stock por sucursal-producto</div>
+    {% if sucursal %}
+    {% if can_manage_reabasto %}
+    <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:reabasto_cedis_politica_guardar' %}">
+      {% csrf_token %}
+      <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+      <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
+      <div class="form-group">
+        <label class="form-label">Producto final</label>
+        <select class="form-select" name="receta_id" required>
+          <option value="">Selecciona...</option>
+          {% for receta in recetas_producto %}
+          <option value="{{ receta.id }}">{{ receta.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-control" type="number" step="0.001" min="0" name="stock_minimo" value="0"></div>
+      <div class="form-group"><label class="form-label">Stock objetivo</label><input class="form-control" type="number" step="0.001" min="0" name="stock_objetivo" value="0"></div>
+      <div class="form-group"><label class="form-label">Stock máximo</label><input class="form-control" type="number" step="0.001" min="0" name="stock_maximo" value="0"></div>
+      <div class="form-group"><label class="form-label">Días cobertura</label><input class="form-control" type="number" min="1" name="dias_cobertura" value="1"></div>
+      <div class="form-group"><label class="form-label">Stock seguridad</label><input class="form-control" type="number" step="0.001" min="0" name="stock_seguridad" value="0"></div>
+      <div class="form-group"><label class="form-label">Lote mínimo</label><input class="form-control" type="number" step="0.001" min="0" name="lote_minimo" value="0"></div>
+      <div class="form-group"><label class="form-label">Múltiplo empaque</label><input class="form-control" type="number" step="0.001" min="0.001" name="multiplo_empaque" value="1"></div>
+      <div class="form-group" style="align-self:end;"><button class="btn btn-secondary" type="submit">Guardar política</button></div>
+    </form>
+    {% else %}
+    <div class="alert alert-info">Solo Compras/Administración puede editar políticas.</div>
+    {% endif %}
+    {% else %}
+    <p class="muted">No hay sucursal activa seleccionada.</p>
+    {% endif %}
+
+    {% if rows_detalle %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th>Stock mínimo</th>
+            <th>Stock objetivo</th>
+            <th>Stock máximo</th>
+            <th>Días cobertura</th>
+            <th>Lote mínimo</th>
+            <th>Múltiplo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows_detalle %}
+          <tr>
+            <td>{{ row.receta.nombre }}</td>
+            <td>{% if row.policy %}{{ row.policy.stock_minimo|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td>{% if row.policy %}{{ row.policy.stock_objetivo|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td>{% if row.policy %}{{ row.policy.stock_maximo|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td>{% if row.policy %}{{ row.policy.dias_cobertura }}{% else %}-{% endif %}</td>
+            <td>{% if row.policy %}{{ row.policy.lote_minimo|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td>{% if row.policy %}{{ row.policy.multiplo_empaque|floatformat:2 }}{% else %}-{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-header">Inventario de producto terminado en CEDIS</div>
+    {% if can_manage_reabasto %}
+    <form class="form-grid-auto mb-2" method="post" action="{% url 'recetas:reabasto_cedis_inventario_guardar' %}">
+      {% csrf_token %}
+      <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+      {% if sucursal %}<input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">{% endif %}
+      <div class="form-group">
+        <label class="form-label">Producto final</label>
+        <select class="form-select" name="receta_id" required>
+          <option value="">Selecciona...</option>
+          {% for receta in recetas_producto %}
+          <option value="{{ receta.id }}">{{ receta.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Stock actual</label><input class="form-control" type="number" step="0.001" min="0" name="stock_actual" value="0"></div>
+      <div class="form-group"><label class="form-label">Stock reservado</label><input class="form-control" type="number" step="0.001" min="0" name="stock_reservado" value="0"></div>
+      <div class="form-group" style="align-self:end;"><button class="btn btn-secondary" type="submit">Guardar inventario CEDIS</button></div>
+    </form>
+    {% else %}
+    <div class="alert alert-info">Solo Compras/Administración puede editar inventario CEDIS.</div>
+    {% endif %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th>Stock actual</th>
+            <th>Reservado</th>
+            <th>Disponible</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for inv in inventario_cedis %}
+          <tr>
+            <td>{{ inv.receta.nombre }}</td>
+            <td>{{ inv.stock_actual|floatformat:2 }}</td>
+            <td>{{ inv.stock_reservado|floatformat:2 }}</td>
+            <td>{{ inv.disponible|floatformat:2 }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4">Sin inventario CEDIS capturado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Consolidado sucursales vs CEDIS ({{ fecha_operacion|date:"d/m/Y" }})</div>
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th>Sucursales</th>
+            <th>Total sugerido</th>
+            <th>Total solicitado</th>
+            <th>CEDIS disponible</th>
+            <th>Faltante a producir</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in consolidado_rows %}
+          <tr>
+            <td>{{ row.receta }}</td>
+            <td>{{ row.sucursales }}</td>
+            <td>{{ row.total_sugerido|floatformat:2 }}</td>
+            <td>{{ row.total_solicitado|floatformat:2 }}</td>
+            <td>{{ row.cedis_disponible|floatformat:2 }}</td>
+            <td>{{ row.cedis_faltante_producir|floatformat:2 }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6">Sin solicitudes registradas para esta fecha.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    const parseNumber = (raw) => {
+      if (raw === null || raw === undefined) return 0;
+      const txt = String(raw).trim().replace(",", ".");
+      if (!txt) return 0;
+      const n = Number(txt);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const fmt = (n) => n.toFixed(2);
+
+    const stockMinNodes = Array.from(document.querySelectorAll(".js-stock-min[data-receta]"));
+    const stockMinMap = {};
+    for (const node of stockMinNodes) {
+      const rid = node.dataset.receta;
+      stockMinMap[rid] = parseNumber(node.textContent);
+    }
+
+    const recalc = (rid) => {
+      const stockInput = document.querySelector(`.js-stock-final[data-receta="${rid}"]`);
+      const sugNode = document.querySelector(`.js-sugerido[data-receta="${rid}"]`);
+      if (!stockInput || !sugNode) return;
+      const stockMin = stockMinMap[rid] || 0;
+      const stockFinal = parseNumber(stockInput.value);
+      const sugerido = Math.max(stockMin - stockFinal, 0);
+      sugNode.textContent = fmt(sugerido);
+    };
+
+    const stockInputs = Array.from(document.querySelectorAll(".js-stock-final[data-receta]"));
+    for (const input of stockInputs) {
+      const rid = input.dataset.receta;
+      recalc(rid);
+      input.addEventListener("input", () => recalc(rid));
+      input.addEventListener("change", () => recalc(rid));
+    }
+  })();
+</script>
+{% endblock %}

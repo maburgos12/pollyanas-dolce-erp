@@ -35,6 +35,7 @@ from core.access import (
     can_view_recetas,
     can_view_rrhh,
     can_view_reportes,
+    is_branch_capture_only,
 )
 from maestros.models import Insumo, Proveedor, PointPendingMatch
 from maestros.models import CostoInsumo
@@ -58,6 +59,10 @@ LOCK_FIELDS = [
     ("lock_captura_piso", "Captura Piso"),
     ("lock_auditoria", "Bitácora/Integraciones"),
 ]
+
+
+def _redirect_capture_module():
+    return redirect(reverse("recetas:reabasto_cedis"))
 
 
 def _is_checked(payload, key: str) -> bool:
@@ -325,6 +330,8 @@ def login_view(request: HttpRequest) -> HttpResponse:
             if user is not None and user.is_active:
                 login(request, user)
                 logger.info(f"Login successful for user={username}")
+                if is_branch_capture_only(user):
+                    return _redirect_capture_module()
                 return redirect("dashboard")
             else:
                 logger.warning(f"Authentication failed for username={username}")
@@ -342,6 +349,8 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 
 def home_redirect(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
+        if is_branch_capture_only(request.user):
+            return _redirect_capture_module()
         return redirect("dashboard")
     return redirect("login")
 
@@ -349,6 +358,8 @@ def home_redirect(request: HttpRequest) -> HttpResponse:
 def dashboard(request: HttpRequest) -> HttpResponse:
     if not request.user.is_authenticated:
         return redirect("/login/")
+    if is_branch_capture_only(request.user):
+        return _redirect_capture_module()
 
     u = request.user
     ctx = {
@@ -666,6 +677,7 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
             profile.departamento_id = _safe_int(request.POST.get("departamento_id") or "")
             profile.sucursal_id = _safe_int(request.POST.get("sucursal_id") or "")
             profile.telefono = (request.POST.get("telefono") or "").strip()
+            profile.modo_captura_sucursal = _is_checked(request.POST, "modo_captura_sucursal")
             for lock_field, _ in LOCK_FIELDS:
                 setattr(profile, lock_field, _is_checked(request.POST, lock_field))
             profile.save()
@@ -713,6 +725,7 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
             profile.departamento_id = _safe_int(request.POST.get("departamento_id") or "")
             profile.sucursal_id = _safe_int(request.POST.get("sucursal_id") or "")
             profile.telefono = (request.POST.get("telefono") or "").strip()
+            profile.modo_captura_sucursal = _is_checked(request.POST, "modo_captura_sucursal")
             for lock_field, _ in LOCK_FIELDS:
                 setattr(profile, lock_field, _is_checked(request.POST, lock_field))
             profile.save()
@@ -768,6 +781,7 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
             "sucursal_id": profile.sucursal_id if profile else None,
             "sucursal_label": profile.sucursal.nombre if profile and profile.sucursal else "-",
             "telefono": profile.telefono if profile else "",
+            "modo_captura_sucursal": bool(profile.modo_captura_sucursal) if profile else False,
             "locks": {key: bool(getattr(profile, key, False)) if profile else False for key, _ in LOCK_FIELDS},
             "locks_count": sum(1 for key, _ in LOCK_FIELDS if profile and bool(getattr(profile, key, False))),
             "lock_rows": [

@@ -448,6 +448,18 @@
     true
   );
 
+  scroller.addEventListener(
+    "wheel",
+    (event) => {
+      const canScrollX = scroller.scrollWidth > scroller.clientWidth;
+      if (!canScrollX) return;
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      event.preventDefault();
+      scroller.scrollLeft += event.deltaY;
+    },
+    { passive: false }
+  );
+
   const scrollStep = 320;
   if (btnLeft) {
     btnLeft.addEventListener("click", () => {

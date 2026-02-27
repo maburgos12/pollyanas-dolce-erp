@@ -89,6 +89,12 @@
         Usuario activo
       </label>
     </div>
+    <div class="form-group form-checkbox-row">
+      <label>
+        <input type="checkbox" name="modo_captura_sucursal" value="1">
+        Solo módulo cierre sucursal
+      </label>
+    </div>
 
     <div class="form-group form-group-full">
       <label>Candados por módulo (si activas uno, ese usuario no entra al módulo)</label>
@@ -124,6 +130,7 @@
         <th>Rol</th>
         <th>Departamento</th>
         <th>Sucursal</th>
+        <th>Modo sucursal</th>
         <th>Estatus</th>
         <th>Candados</th>
         <th>Acción</th>
@@ -138,6 +145,13 @@
         <td>{{ row.departamento_label }}</td>
         <td>{{ row.sucursal_label }}</td>
         <td>
+          {% if row.modo_captura_sucursal %}
+            <span class="badge badge-warning">Solo captura</span>
+          {% else %}
+            <span class="badge badge-primary">Normal</span>
+          {% endif %}
+        </td>
+        <td>
           {% if row.is_active %}
             <span class="badge badge-success">Activo</span>
           {% else %}
@@ -151,7 +165,7 @@
       </tr>
       {% empty %}
       <tr>
-        <td colspan="8">Sin usuarios para el filtro actual.</td>
+        <td colspan="9">Sin usuarios para el filtro actual.</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -225,6 +239,12 @@
       <label>
         <input type="checkbox" name="is_active" value="1" {% if edit_row.is_active %}checked{% endif %}>
         Usuario activo
+      </label>
+    </div>
+    <div class="form-group form-checkbox-row">
+      <label>
+        <input type="checkbox" name="modo_captura_sucursal" value="1" {% if edit_row.modo_captura_sucursal %}checked{% endif %}>
+        Solo módulo cierre sucursal
       </label>
     </div>
 
