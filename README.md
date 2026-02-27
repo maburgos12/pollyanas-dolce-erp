@@ -132,6 +132,7 @@ Sprint 1 entrega:
 ## Archivos importantes
 - `recetas/management/commands/import_costeo.py` (comando de importación)
 - `recetas/management/commands/importar_ventas_point_archivos.py` (sincroniza historial de ventas desde exportes Point CSV/XLSX/XLSM/XLS)
+- `recetas/management/commands/inferir_cantidad_lineas_desde_costo.py` (infiere cantidad en líneas ligadas usando costo línea Excel / costo unitario snapshot)
 - `core/management/commands/bootstrap_sucursales_point.py` (alta/actualización de sucursales base Point)
 - `recetas/utils/importador.py` (parser de Excel)
 - `recetas/utils/matching.py` (matching)
