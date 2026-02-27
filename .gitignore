@@ -19,6 +19,14 @@ media/
 
 # Logs
 logs/*.log
+logs/*.csv
+logs/*.xlsx
+logs/*.tsv
+logs/*.tmp
+
+# Local automation/smoke artifacts
+.playwright-cli/
+output/
 
 # OS / editor
 .DS_Store
