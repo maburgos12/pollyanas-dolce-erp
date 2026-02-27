@@ -115,12 +115,23 @@ class Command(BaseCommand):
         }
 
         lineas_principales = LineaReceta.objects.exclude(tipo_linea=LineaReceta.TIPO_SUBSECCION)
+        conceptos_no_materiales = [
+            "presentación",
+            "presentacion",
+            "armado",
+            "subtotal",
+            "margen",
+            "rendimiento",
+        ]
+        lineas_materiales = lineas_principales
+        for concepto in conceptos_no_materiales:
+            lineas_materiales = lineas_materiales.exclude(insumo_texto__iexact=concepto)
 
         calidad_receta = {
-            "lineas_sin_match": lineas_principales.filter(
-                Q(insumo__isnull=True) | Q(match_method=LineaReceta.MATCH_NONE)
+            "lineas_sin_match": lineas_materiales.filter(
+                match_status=LineaReceta.STATUS_REJECTED
             ).count(),
-            "lineas_needs_review": lineas_principales.filter(
+            "lineas_needs_review": lineas_materiales.filter(
                 match_status=LineaReceta.STATUS_NEEDS_REVIEW
             ).count(),
             "lineas_ligadas_sin_cantidad": LineaReceta.objects.filter(insumo__isnull=False)
