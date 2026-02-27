@@ -35,6 +35,22 @@ class Command(BaseCommand):
             action="store_true",
             help="Solo evalúa líneas en AUTO_APPROVED.",
         )
+        parser.add_argument(
+            "--relax-piece-rule",
+            action="store_true",
+            help=(
+                "Permite fracciones en líneas detectadas como pieza. "
+                "Útil cuando el origen no trae unidad confiable."
+            ),
+        )
+        parser.add_argument(
+            "--use-linecost-as-qty-when-tiny",
+            action="store_true",
+            help=(
+                "Si qty=costo_linea/snapshot resulta minúscula, usa costo_linea_excel "
+                "como cantidad (fallback para archivos donde esa columna trae cantidad)."
+            ),
+        )
 
     def handle(self, *args, **options):
         max_cantidad = Decimal(str(options["max_cantidad"]))
@@ -50,6 +66,8 @@ class Command(BaseCommand):
             candidates = candidates.filter(match_score__gte=min_match_score)
         if options.get("only_auto"):
             candidates = candidates.filter(match_status=LineaReceta.STATUS_AUTO)
+        relax_piece_rule = bool(options.get("relax_piece_rule"))
+        fallback_linecost_qty = bool(options.get("use_linecost_as_qty_when_tiny"))
 
         total = candidates.count()
         inferibles = []
@@ -66,7 +84,16 @@ class Command(BaseCommand):
                 continue
 
             is_piece = self._is_piece_line(linea)
-            qty = self._normalize_qty(qty_raw, is_piece)
+            if fallback_linecost_qty:
+                # Algunos archivos legados guardan cantidad en costo_linea_excel.
+                # Si la qty calculada por costo unitario es demasiado chica, toma el valor directo.
+                try:
+                    excel_value = Decimal(str(linea.costo_linea_excel))
+                except InvalidOperation:
+                    excel_value = Decimal("0")
+                if qty_raw < Decimal("0.005") and excel_value > 0 and excel_value <= max_cantidad:
+                    qty_raw = excel_value
+            qty = self._normalize_qty(qty_raw, is_piece, relax_piece_rule)
             if qty is None:
                 skipped += 1
                 continue
@@ -108,8 +135,8 @@ class Command(BaseCommand):
             return True
         return False
 
-    def _normalize_qty(self, qty_raw: Decimal, is_piece: bool) -> Decimal | None:
-        if is_piece:
+    def _normalize_qty(self, qty_raw: Decimal, is_piece: bool, relax_piece_rule: bool = False) -> Decimal | None:
+        if is_piece and not relax_piece_rule:
             # En piezas evitamos fracciones improbables; solo aceptamos cercanía a entero.
             if qty_raw < Decimal("0.5"):
                 return None

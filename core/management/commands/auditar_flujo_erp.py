@@ -136,6 +136,7 @@ class Command(BaseCommand):
             ).count(),
             "lineas_ligadas_sin_cantidad": LineaReceta.objects.filter(insumo__isnull=False)
             .filter(Q(cantidad__isnull=True) | Q(cantidad__lte=0))
+            .exclude(costo_linea_excel__lte=0)
             .count(),
             "lineas_ligadas_sin_costo_snapshot": LineaReceta.objects.filter(insumo__isnull=False)
             .filter(Q(costo_unitario_snapshot__isnull=True) | Q(costo_unitario_snapshot__lte=0))

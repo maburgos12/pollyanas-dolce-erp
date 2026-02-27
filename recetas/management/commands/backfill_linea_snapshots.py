@@ -13,8 +13,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         qs = (
             LineaReceta.objects.select_related("insumo")
-            .filter(insumo__isnull=False, costo_unitario_snapshot__isnull=True)
-            .filter(~Q(tipo_linea=LineaReceta.TIPO_SUBSECCION))
+            .filter(insumo__isnull=False)
+            .filter(Q(costo_unitario_snapshot__isnull=True) | Q(costo_unitario_snapshot__lte=0))
         )
         total = qs.count()
         updated = 0
