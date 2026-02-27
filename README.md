@@ -133,6 +133,8 @@ Sprint 1 entrega:
 - `recetas/management/commands/import_costeo.py` (comando de importación)
 - `recetas/management/commands/importar_ventas_point_archivos.py` (sincroniza historial de ventas desde exportes Point CSV/XLSX/XLSM/XLS)
 - `recetas/management/commands/inferir_cantidad_lineas_desde_costo.py` (infiere cantidad en líneas ligadas usando costo línea Excel / costo unitario snapshot)
+- `recetas/management/commands/backfill_linea_snapshots_from_linecost.py` (reconstruye snapshot faltante con costo_linea_excel/cantidad)
+- `recetas/management/commands/rematch_lineas_receta.py` (reintenta matching masivo en líneas REJECTED/NO_MATCH con motor actual)
 - `core/management/commands/bootstrap_sucursales_point.py` (alta/actualización de sucursales base Point)
 - `recetas/utils/importador.py` (parser de Excel)
 - `recetas/utils/matching.py` (matching)
