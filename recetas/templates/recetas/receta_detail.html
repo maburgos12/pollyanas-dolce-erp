@@ -412,14 +412,22 @@
 
   let isDragging = false;
   let didMove = false;
-  let activePointerId = null;
   let startX = 0;
   let startLeft = 0;
+  let touchIdentifier = null;
+  let suppressClickUntil = 0;
+  const dragThreshold = 4;
+
+  const isInteractiveTarget = (target) =>
+    !!target.closest("a, button, input, select, textarea, label, .btn, [role='button']");
 
   const stopDragging = () => {
+    if (isDragging && didMove) {
+      suppressClickUntil = Date.now() + 220;
+    }
     isDragging = false;
-    activePointerId = null;
     scroller.classList.remove("is-dragging");
+    touchIdentifier = null;
   };
 
   const startDrag = (clientX) => {
@@ -433,28 +441,17 @@
   const moveDrag = (clientX) => {
     if (!isDragging) return;
     const delta = clientX - startX;
-    if (Math.abs(delta) > 2) didMove = true;
+    if (Math.abs(delta) > dragThreshold) didMove = true;
     scroller.scrollLeft = startLeft - delta;
   };
 
-  scroller.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    activePointerId = event.pointerId;
-    scroller.setPointerCapture(event.pointerId);
+  scroller.addEventListener("mousedown", (event) => {
+    if (event.button !== 0) return;
+    if (isInteractiveTarget(event.target)) return;
     startDrag(event.clientX);
   });
 
-  scroller.addEventListener("pointermove", (event) => {
-    if (!isDragging || activePointerId !== event.pointerId) return;
-    moveDrag(event.clientX);
-  });
-
-  scroller.addEventListener("pointerup", stopDragging);
-  scroller.addEventListener("pointercancel", stopDragging);
-  scroller.addEventListener("lostpointercapture", stopDragging);
-
   window.addEventListener("mousemove", (event) => {
-    if (activePointerId !== null) return;
     moveDrag(event.clientX);
   });
 
@@ -462,9 +459,39 @@
   scroller.addEventListener("mouseleave", stopDragging);
 
   scroller.addEventListener(
+    "touchstart",
+    (event) => {
+      if (event.touches.length !== 1) return;
+      if (isInteractiveTarget(event.target)) return;
+      const touch = event.touches[0];
+      touchIdentifier = touch.identifier;
+      startDrag(touch.clientX);
+    },
+    { passive: true }
+  );
+
+  scroller.addEventListener(
+    "touchmove",
+    (event) => {
+      if (!isDragging) return;
+      const touch = Array.from(event.touches).find((t) => t.identifier === touchIdentifier);
+      if (!touch) return;
+      moveDrag(touch.clientX);
+      if (didMove) event.preventDefault();
+    },
+    { passive: false }
+  );
+
+  scroller.addEventListener("touchend", stopDragging);
+  scroller.addEventListener("touchcancel", stopDragging);
+
+  scroller.addEventListener(
     "click",
     (event) => {
-      if (didMove) event.preventDefault();
+      if (Date.now() < suppressClickUntil) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     },
     true
   );
