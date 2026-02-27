@@ -32,6 +32,7 @@ body {
   background: var(--blanco);
   color: var(--texto);
   font-family: 'Nunito', sans-serif;
+  overflow-x: hidden;
 }
 
 h1,
@@ -178,9 +179,12 @@ h4 {
 
 .main-content {
   margin-left: 252px;
+  width: calc(100% - 252px);
+  max-width: calc(100vw - 252px);
   min-height: 100vh;
   position: relative;
   z-index: 1;
+  overflow-x: auto;
 }
 
 .header {
@@ -188,6 +192,7 @@ h4 {
   top: 0;
   z-index: 1200;
   isolation: isolate;
+  width: 100%;
   background: #fff;
   border-bottom: 1px solid var(--rosa);
   box-shadow: 0 1px 0 rgba(139, 34, 82, 0.08);
@@ -1027,7 +1032,7 @@ tr:hover,
 }
 
 .page-compras-solicitudes .main-content {
-  overflow-x: visible;
+  overflow-x: auto;
 }
 
 .recipe-detail-shell .recipe-actions {
@@ -1043,19 +1048,19 @@ tr:hover,
 }
 
 .page-receta-detail .main-content {
-  overflow-x: visible;
+  overflow-x: auto;
 }
 
 .recipe-detail-shell .recipe-lines-scroll {
   display: block;
   width: 100%;
   overflow-x: auto !important;
-  overflow-y: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 4px;
   touch-action: pan-x;
   cursor: grab;
-  max-height: clamp(320px, 58vh, 760px);
+  max-height: none;
 }
 
 .recipe-detail-shell .recipe-lines-scroll.is-dragging {
@@ -1064,8 +1069,8 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-lines-scroll .recipe-lines-table {
-  width: 100%;
-  min-width: 1320px;
+  width: max-content;
+  min-width: 1360px;
 }
 
 .recipe-detail-shell .recipe-lines-scroll thead th {
@@ -1088,22 +1093,14 @@ tr:hover,
 
 .recipe-detail-shell .recipe-main-grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   align-items: stretch;
 }
 
 .recipe-detail-shell .recipe-main-grid > * {
   min-width: 0;
-}
-
-.recipe-detail-shell .recipe-main-grid > *:nth-child(1),
-.recipe-detail-shell .recipe-main-grid > *:nth-child(2),
-.recipe-detail-shell .recipe-main-grid > *:nth-child(3),
-.recipe-detail-shell .recipe-main-grid > *:nth-child(4),
-.recipe-detail-shell .recipe-main-grid > *:nth-child(5),
-.recipe-detail-shell .recipe-main-grid > *:nth-child(6) {
-  grid-column: span 2;
+  grid-column: auto;
 }
 
 .recipe-detail-shell .recipe-head {
@@ -1127,19 +1124,19 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-main-controls {
-  display: flex;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
   gap: 12px;
   align-items: stretch;
 }
 
 .recipe-detail-shell .field-check-compact {
   padding: 0 12px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  min-width: 320px;
-  max-width: 430px;
-  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
 }
 
 .recipe-detail-shell .field-check-compact span {
@@ -1152,7 +1149,7 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-main-submit {
-  min-width: 240px;
+  min-width: 210px;
   flex: 0 0 auto;
 }
 
@@ -1272,10 +1269,6 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 }
 
 @media (max-width: 1100px) {
-  .recipe-detail-shell .recipe-main-grid > * {
-    grid-column: span 4;
-  }
-
   .recipe-detail-shell .recipe-head .recipe-actions {
     margin-left: 0;
   }
@@ -1287,15 +1280,11 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
 @media (max-width: 780px) {
   .recipe-detail-shell .recipe-main-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .recipe-detail-shell .recipe-main-grid > * {
-    grid-column: span 1;
+    grid-template-columns: 1fr;
   }
 
   .recipe-detail-shell .recipe-main-controls {
-    flex-direction: column;
+    grid-template-columns: 1fr;
     align-items: stretch;
   }
 
@@ -1375,6 +1364,8 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .main-content {
     margin-left: 84px;
+    width: calc(100% - 84px);
+    max-width: calc(100vw - 84px);
   }
 
   .sidebar-nav a {
@@ -1394,6 +1385,8 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .main-content {
     margin-left: 0;
+    width: 100%;
+    max-width: 100vw;
   }
 
   .header {
