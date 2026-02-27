@@ -143,6 +143,7 @@ Sprint 1 entrega:
 - `integraciones/management/commands/smoke_integraciones_api.py` (comando smoke con salida JSON)
 - `inventario/management/commands/smoke_aliases_api.py` (comando smoke para pendientes/pendientes-unificados)
 - `core/management/commands/auditar_flujo_erp.py` (auditoría integral de consistencia: duplicados, match/costos en recetas y cobertura de inventario)
+- `inventario/management/commands/backfill_existencias_insumos.py` (crea existencias faltantes para insumos activos en modo seguro dry-run/apply)
 - `integraciones/management/commands/run_integraciones_maintenance.py` (mantenimiento operativo CLI con bitácora)
 - `scripts/auto_maintenance_integraciones.sh` (scheduler opcional para mantenimiento periódico)
 - `docs/OPERACION_ALIASES_API.md` (runbook operativo de aliases API)
