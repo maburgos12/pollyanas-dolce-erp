@@ -1086,22 +1086,56 @@ tr:hover,
   min-width: 1180px;
 }
 
+.recipe-detail-shell .recipe-presentaciones-card {
+  border-color: rgba(139, 34, 82, 0.14);
+}
+
+.recipe-detail-shell .recipe-presentaciones-card .card-header,
+.recipe-detail-shell .recipe-presentaciones-card h3 {
+  letter-spacing: 0.01em;
+}
+
 .recipe-detail-shell .recipe-presentaciones-table {
+  width: 100%;
+  min-width: 980px;
   table-layout: fixed;
-  min-width: 1060px;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 170px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: auto; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 320px; }
 .recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 230px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 190px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 170px; }
 .recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 120px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 180px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 190px; }
+
+.recipe-detail-shell .recipe-presentaciones-table thead th {
+  vertical-align: bottom;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.recipe-detail-shell .recipe-presentaciones-table tbody td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
 
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-name,
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-derived {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.recipe-detail-shell .recipe-presentaciones-table .pres-head-qty,
+.recipe-detail-shell .recipe-presentaciones-table .pres-head-cost {
+  white-space: nowrap;
+}
+
+.recipe-detail-shell .recipe-presentaciones-table .pres-head-unit {
+  display: block;
+  font-size: 11px;
+  line-height: 1.1;
+  opacity: 0.85;
+  margin-top: 2px;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-qty,
@@ -1113,6 +1147,13 @@ tr:hover,
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-actions .recipe-actions {
   justify-content: flex-end;
   flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.recipe-detail-shell .recipe-presentaciones-table .cell-pres-actions .btn {
+  min-width: 74px;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .page-receta-detail .main-content {
@@ -1505,6 +1546,10 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .recipe-lines-table {
     min-width: 980px;
+  }
+
+  .recipe-detail-shell .recipe-presentaciones-table {
+    min-width: 860px;
   }
 
   .recipe-actions-compact .btn {
