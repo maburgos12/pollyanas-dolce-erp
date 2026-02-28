@@ -1090,6 +1090,11 @@ tr:hover,
   border-color: rgba(139, 34, 82, 0.14);
 }
 
+.recipe-detail-shell .recipe-presentaciones-wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
 .recipe-detail-shell .recipe-presentaciones-card .card-header,
 .recipe-detail-shell .recipe-presentaciones-card h3 {
   letter-spacing: 0.01em;
@@ -1097,26 +1102,28 @@ tr:hover,
 
 .recipe-detail-shell .recipe-presentaciones-table {
   width: 100%;
-  min-width: 980px;
+  min-width: 960px;
   table-layout: fixed;
 }
 
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 170px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 320px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 230px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 170px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 120px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 190px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 18%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 34%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 14%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 12%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 9%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 13%; }
 
 .recipe-detail-shell .recipe-presentaciones-table thead th {
   vertical-align: bottom;
   padding-top: 12px;
   padding-bottom: 12px;
+  font-size: 12.5px;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table tbody td {
-  padding-top: 10px;
-  padding-bottom: 10px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  font-size: 14px;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-name,
@@ -1151,9 +1158,11 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-actions .btn {
-  min-width: 74px;
+  min-width: 68px;
+  min-height: 34px;
   padding-left: 10px;
   padding-right: 10px;
+  font-size: 13px;
 }
 
 .page-receta-detail .main-content {
