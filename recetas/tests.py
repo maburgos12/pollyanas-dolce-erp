@@ -210,6 +210,52 @@ class RecetaDerivedInsumoAutolinkTests(TestCase):
         pres_code = f"DERIVADO:RECETA:{receta.id}:PRESENTACION:{presentacion.id}"
         self.assertTrue(Insumo.objects.filter(codigo=pres_code, activo=True).exists())
 
+    def test_producto_final_requires_linked_insumo_in_main_lines(self):
+        receta = Receta.objects.create(
+            nombre="Pastel QA",
+            hash_contenido="hash-qa-prod-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+        response = self.client.post(
+            reverse("recetas:linea_create", args=[receta.id]),
+            data={
+                "posicion": "1",
+                "tipo_linea": LineaReceta.TIPO_NORMAL,
+                "insumo_texto": "Armado libre",
+                "cantidad": "1",
+                "unidad_id": str(self.unidad_pza.id),
+                "unidad_texto": "pza",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(LineaReceta.objects.filter(receta=receta).exists())
+
+    def test_linked_insumo_requires_positive_qty(self):
+        receta = Receta.objects.create(
+            nombre="Pastel QA 2",
+            hash_contenido="hash-qa-prod-002",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+        pan = Insumo.objects.create(
+            nombre="Pan Vainilla QA",
+            unidad_base=self.unidad_pza,
+            activo=True,
+        )
+        response = self.client.post(
+            reverse("recetas:linea_create", args=[receta.id]),
+            data={
+                "posicion": "1",
+                "tipo_linea": LineaReceta.TIPO_NORMAL,
+                "insumo_texto": "Pan Vainilla QA",
+                "insumo_id": str(pan.id),
+                "cantidad": "",
+                "unidad_id": str(self.unidad_kg.id),
+                "unidad_texto": "kg",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(LineaReceta.objects.filter(receta=receta).exists())
+
 
 class RecetasAuthRedirectTests(TestCase):
     def test_drivers_legacy_redirects_to_login_when_anonymous(self):

@@ -9,6 +9,14 @@
     </div>
     <a class="btn btn-outline-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Volver a receta</a>
   </div>
+  <div class="alert alert-info">
+    {% if receta.tipo == "PRODUCTO_FINAL" %}
+      Esta receta es <strong>producto final</strong>: agrega solo componentes ligados (insumos/subinsumos) con cantidad.
+      La unidad se fija automáticamente según el insumo para evitar errores.
+    {% else %}
+      Esta receta es <strong>insumo interno</strong>: define rendimiento y costos para reutilizarla en productos finales.
+    {% endif %}
+  </div>
 
   <form method="post">
     {% csrf_token %}
@@ -38,7 +46,7 @@
       </div>
       <div class="form-group">
         <label for="unidad_texto">Unidad (texto)</label>
-        <input id="unidad_texto" class="form-control" type="text" name="unidad_texto" value="{{ linea.unidad_texto|default:'' }}">
+        <input id="unidad_texto" class="form-control" type="text" name="unidad_texto" value="{{ linea.unidad_texto|default:'' }}" readonly>
       </div>
     </div>
 
@@ -73,8 +81,7 @@
         <select id="insumo_id" class="form-select" name="insumo_id" style="display:none;">
           <option value="">Sin ligar</option>
           <optgroup label="Insumos internos (producidos)">
-            {% for i in insumos %}
-              {% if i.codigo|default:""|slice:":16" == "DERIVADO:RECETA:" %}
+            {% for i in insumos_internos %}
               <option
                 value="{{ i.id }}"
                 data-origin="INTERNO"
@@ -83,12 +90,24 @@
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
                 {% if linea.insumo_id == i.id %}selected{% endif %}
               >{{ i.nombre }} [Interno]</option>
-              {% endif %}
             {% endfor %}
           </optgroup>
+          {% if insumos_empaque %}
+          <optgroup label="Empaques">
+            {% for i in insumos_empaque %}
+              <option
+                value="{{ i.id }}"
+                data-origin="EMPAQUE"
+                data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
+                data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
+                data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
+                {% if linea.insumo_id == i.id %}selected{% endif %}
+              >{{ i.nombre }} [Empaque]</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
           <optgroup label="Materia prima">
-            {% for i in insumos %}
-              {% if i.codigo|default:""|slice:":16" != "DERIVADO:RECETA:" %}
+            {% for i in insumos_materia_prima %}
               <option
                 value="{{ i.id }}"
                 data-origin="MATERIA_PRIMA"
@@ -97,7 +116,6 @@
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
                 {% if linea.insumo_id == i.id %}selected{% endif %}
               >{{ i.nombre }} [Materia prima]</option>
-              {% endif %}
             {% endfor %}
           </optgroup>
         </select>
@@ -260,6 +278,7 @@
       origenInput.value = "-";
       costoUnitarioInput.value = "-";
       costoEstimadoInput.value = "-";
+      unidadSelect.removeAttribute("disabled");
       return;
     }
     const origin = option.dataset.origin || "-";
@@ -268,10 +287,19 @@
     const unitCost = toNum(option.dataset.costoUnitario || "");
     const qty = toNum(cantidadInput.value);
 
-    origenInput.value = origin === "INTERNO" ? "Insumo interno (producido)" : "Materia prima";
+    if (origin === "INTERNO") {
+      origenInput.value = "Insumo interno (producido)";
+    } else if (origin === "EMPAQUE") {
+      origenInput.value = "Empaque";
+    } else {
+      origenInput.value = "Materia prima";
+    }
 
     if (unitId) {
       unidadSelect.value = unitId;
+      unidadSelect.setAttribute("disabled", "disabled");
+    } else {
+      unidadSelect.removeAttribute("disabled");
     }
     if (unitCode) {
       unidadTexto.value = unitCode;

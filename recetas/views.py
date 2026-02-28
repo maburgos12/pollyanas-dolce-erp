@@ -196,6 +196,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "selected_base": selected_base,
             "selected_target": selected_target,
             "version_compare": compare_data,
+            "rend_unit_code": (receta.rendimiento_unidad.codigo if receta.rendimiento_unidad else ""),
         },
     )
 
@@ -279,10 +280,26 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
         .order_by("origen_orden", "nombre")
     )
     insumos = list(insumos_qs[:1200])
+    insumos_internos = [i for i in insumos if (i.codigo or "").startswith("DERIVADO:RECETA:")]
+    insumos_empaque = [
+        i
+        for i in insumos
+        if not (i.codigo or "").startswith("DERIVADO:RECETA:")
+        and "empaque" in normalizar_nombre(i.categoria or "")
+    ]
+    empaque_ids = {i.id for i in insumos_empaque}
+    insumos_materia_prima = [
+        i
+        for i in insumos
+        if not (i.codigo or "").startswith("DERIVADO:RECETA:") and i.id not in empaque_ids
+    ]
     return {
         "receta": receta,
         "linea": linea,
         "insumos": insumos,
+        "insumos_internos": insumos_internos,
+        "insumos_empaque": insumos_empaque,
+        "insumos_materia_prima": insumos_materia_prima,
         "unidades": UnidadMedida.objects.order_by("codigo"),
         "linea_tipo_choices": LineaReceta.TIPO_CHOICES,
     }
@@ -327,8 +344,26 @@ def _autofill_unidad_from_insumo(linea: LineaReceta) -> None:
         return
     if linea.unidad is None and linea.insumo.unidad_base is not None:
         linea.unidad = linea.insumo.unidad_base
+    if linea.insumo.unidad_base is not None:
+        # La unidad del componente ligado es fija para evitar inconsistencias de costeo.
+        linea.unidad = linea.insumo.unidad_base
     if linea.unidad and not (linea.unidad_texto or "").strip():
         linea.unidad_texto = linea.unidad.codigo
+    if linea.unidad:
+        linea.unidad_texto = linea.unidad.codigo
+
+
+def _validate_linea_operativa(receta: Receta, linea: LineaReceta) -> str | None:
+    if linea.tipo_linea != LineaReceta.TIPO_NORMAL:
+        return None
+    if receta.tipo == Receta.TIPO_PRODUCTO_FINAL and not linea.insumo_id:
+        return "En producto final, cada renglón principal debe estar ligado a un insumo/subinsumo."
+    if linea.insumo_id and (linea.cantidad is None or linea.cantidad <= 0):
+        unidad = linea.unidad.codigo if linea.unidad else (linea.unidad_texto or "").strip()
+        if unidad:
+            return f"Captura cantidad mayor a cero para el insumo ligado ({unidad})."
+        return "Captura cantidad mayor a cero para el insumo ligado."
+    return None
 
 
 def _extract_presentacion_from_recipe_name(recipe_name: str) -> str | None:
@@ -604,6 +639,10 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
             linea.match_score = 0.0
 
         _autofill_unidad_from_insumo(linea)
+        validation_error = _validate_linea_operativa(receta, linea)
+        if validation_error:
+            messages.error(request, validation_error)
+            return render(request, "recetas/linea_form.html", _linea_form_context(receta, linea))
         _switch_line_to_internal_cost(linea)
         linea.save()
         _sync_derived_insumos_safe(request, receta)
@@ -656,6 +695,10 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
             linea.match_score = 0.0
 
         _autofill_unidad_from_insumo(linea)
+        validation_error = _validate_linea_operativa(receta, linea)
+        if validation_error:
+            messages.error(request, validation_error)
+            return render(request, "recetas/linea_form.html", _linea_form_context(receta, linea))
         _switch_line_to_internal_cost(linea)
         linea.save()
         _sync_derived_insumos_safe(request, receta)
@@ -692,7 +735,7 @@ def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
             messages.error(request, "El nombre de la presentación es obligatorio.")
             return redirect("recetas:presentacion_create", pk=pk)
         if not peso_por_unidad_kg or peso_por_unidad_kg <= 0:
-            messages.error(request, "Peso por unidad (kg) debe ser mayor que cero.")
+            messages.error(request, "Cantidad por presentación debe ser mayor que cero.")
             return redirect("recetas:presentacion_create", pk=pk)
 
         presentacion, _ = RecetaPresentacion.objects.update_or_create(
@@ -735,7 +778,7 @@ def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> Ht
             messages.error(request, "El nombre de la presentación es obligatorio.")
             return redirect("recetas:presentacion_edit", pk=pk, presentacion_id=presentacion_id)
         if not peso_por_unidad_kg or peso_por_unidad_kg <= 0:
-            messages.error(request, "Peso por unidad (kg) debe ser mayor que cero.")
+            messages.error(request, "Cantidad por presentación debe ser mayor que cero.")
             return redirect("recetas:presentacion_edit", pk=pk, presentacion_id=presentacion_id)
 
         presentacion.nombre = nombre[:80]

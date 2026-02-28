@@ -16,8 +16,8 @@ class Receta(models.Model):
     TIPO_PREPARACION = "PREPARACION"
     TIPO_PRODUCTO_FINAL = "PRODUCTO_FINAL"
     TIPO_CHOICES = [
-        (TIPO_PREPARACION, "Preparación base (pan, betún, crema, relleno)"),
-        (TIPO_PRODUCTO_FINAL, "Producto final de venta"),
+        (TIPO_PREPARACION, "Insumo interno (batida/mezcla, no venta directa)"),
+        (TIPO_PRODUCTO_FINAL, "Producto final de venta (armado)"),
     ]
 
     nombre = models.CharField(max_length=250)

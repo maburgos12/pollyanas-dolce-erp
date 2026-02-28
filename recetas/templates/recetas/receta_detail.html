@@ -52,6 +52,12 @@
     El costo unitario se calcula como <strong>costo total / rendimiento</strong>.
   </div>
   {% endif %}
+  {% if receta.tipo == "PRODUCTO_FINAL" %}
+  <div class="alert alert-info mt-2">
+    Producto final: arma el costo como rompecabezas de componentes ligados (panes, rellenos, coberturas, empaques).
+    Cada línea usa la unidad fija del insumo/subinsumo seleccionado.
+  </div>
+  {% endif %}
 
   <div class="kpi-grid mb-3">
     <div class="kpi-card">
@@ -142,7 +148,7 @@
       </thead>
       <tbody>
         <tr>
-          <th>Peso / Molde (kg)</th>
+          <th>Cantidad por presentación{% if rend_unit_code %} ({{ rend_unit_code }}){% endif %}</th>
           {% for p in presentaciones %}
             <td class="text-end">{{ p.peso_por_unidad_kg|floatformat:3 }}</td>
           {% endfor %}
@@ -311,7 +317,7 @@
           <tr>
             <th>Presentación</th>
             <th>Insumo derivado</th>
-            <th class="text-end">Peso por unidad (kg)</th>
+            <th class="text-end">Cantidad por presentación{% if rend_unit_code %} ({{ rend_unit_code }}){% endif %}</th>
             <th class="text-end">Unidades por batida</th>
             <th class="text-end">Unidades por pastel</th>
             <th class="text-end">Costo por unidad</th>
