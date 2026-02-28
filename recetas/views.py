@@ -309,6 +309,80 @@ def _autofill_unidad_from_insumo(linea: LineaReceta) -> None:
         linea.unidad_texto = linea.unidad.codigo
 
 
+def _extract_presentacion_from_recipe_name(recipe_name: str) -> str | None:
+    normalized = normalizar_nombre(recipe_name or "")
+    if not normalized:
+        return None
+    token_map = [
+        ("media plancha", "Media Plancha"),
+        ("1 2 plancha", "Media Plancha"),
+        ("rosca", "Rosca"),
+        ("individual", "Individual"),
+        ("bollito", "Bollito"),
+        ("bollos", "Bollos"),
+        ("bollo", "Bollo"),
+        ("grande", "Grande"),
+        ("mediano", "Mediano"),
+        ("chico", "Chico"),
+        ("mini", "Mini"),
+    ]
+    for token, label in token_map:
+        if f" {token}" in f" {normalized}" or normalized.endswith(token):
+            return label
+    return None
+
+
+def _select_best_pan_derived_candidate(
+    recipe_name: str,
+    ingredient_text: str,
+) -> Insumo | None:
+    presentacion = _extract_presentacion_from_recipe_name(recipe_name)
+    if not presentacion:
+        return None
+
+    ingredient_norm = normalizar_nombre(ingredient_text or "")
+    recipe_norm = normalizar_nombre(recipe_name or "")
+    full_context = f"{ingredient_norm} {recipe_norm}".strip()
+    if not full_context.startswith("pan "):
+        return None
+    if full_context.startswith("decorado pan"):
+        return None
+
+    flavor_patterns: list[str]
+    if "3 leches" in full_context:
+        flavor_patterns = ["Pan 3 Leches"]
+    elif "chocolate" in full_context:
+        flavor_patterns = ["Pan de Chocolate Deleite Dawn"]
+    elif "vainilla" in full_context:
+        flavor_patterns = ["Pan Vainilla Dawn", "Pan de Vainilla Espiga"]
+    else:
+        flavor_patterns = ["Pan 3 Leches", "Pan de Chocolate Deleite Dawn", "Pan Vainilla Dawn", "Pan de Vainilla Espiga"]
+
+    for pattern in flavor_patterns:
+        candidate = (
+            Insumo.objects.filter(codigo__startswith="DERIVADO:RECETA:", activo=True)
+            .filter(nombre__icontains=pattern)
+            .filter(nombre__icontains=f"- {presentacion}")
+            .order_by("nombre", "id")
+            .first()
+        )
+        if candidate:
+            return candidate
+    return None
+
+
+def _autolink_pan_derived_from_recipe(receta: Receta, linea: LineaReceta) -> None:
+    ingredient_text = (linea.insumo_texto or "").strip()
+    if not ingredient_text and linea.insumo:
+        ingredient_text = linea.insumo.nombre
+    candidate = _select_best_pan_derived_candidate(receta.nombre, ingredient_text)
+    if not candidate:
+        return
+    if linea.insumo_id == candidate.id:
+        return
+    linea.insumo = candidate
+
+
 def _sync_derived_insumos_safe(request: HttpRequest, receta: Receta) -> None:
     try:
         sync_receta_derivados(receta)
@@ -488,6 +562,7 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
         linea.posicion = int(request.POST.get("posicion") or linea.posicion)
         linea.insumo = Insumo.objects.filter(pk=insumo_id).first() if insumo_id else None
         linea.unidad = UnidadMedida.objects.filter(pk=unidad_id).first() if unidad_id else None
+        _autolink_pan_derived_from_recipe(receta, linea)
 
         if linea.insumo:
             linea.match_status = LineaReceta.STATUS_AUTO
@@ -540,6 +615,7 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
             insumo=Insumo.objects.filter(pk=insumo_id).first() if insumo_id else None,
             unidad=UnidadMedida.objects.filter(pk=unidad_id).first() if unidad_id else None,
         )
+        _autolink_pan_derived_from_recipe(receta, linea)
         if linea.insumo:
             linea.match_status = LineaReceta.STATUS_AUTO
             linea.match_method = "MANUAL"

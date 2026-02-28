@@ -26,6 +26,7 @@ from recetas.models import (
     PronosticoVenta,
     Receta,
     RecetaCostoVersion,
+    RecetaPresentacion,
     SolicitudReabastoCedis,
     SolicitudReabastoCedisLinea,
     SolicitudVenta,
@@ -126,6 +127,88 @@ class MatchingPendientesAutocompleteTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["count"], 1)
         self.assertEqual(len(payload["results"]), 1)
+
+
+class RecetaDerivedInsumoAutolinkTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_receta_derivados",
+            email="admin_receta_derivados@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+
+        self.unidad_pza = UnidadMedida.objects.create(
+            codigo="pza",
+            nombre="Pieza",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        self.unidad_kg = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+
+    def test_linea_pan_autolink_to_derived_presentacion(self):
+        receta = Receta.objects.create(
+            nombre="Pastel 3 Pecados - Chico",
+            hash_contenido="hash-autolink-pan-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+        pan_generico = Insumo.objects.create(
+            nombre="Pan Chocolate",
+            unidad_base=self.unidad_pza,
+            activo=True,
+        )
+        pan_derivado = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:114:PRESENTACION:24",
+            nombre="Pan de Chocolate Deleite Dawn - Chico",
+            unidad_base=self.unidad_pza,
+            activo=True,
+        )
+
+        response = self.client.post(
+            reverse("recetas:linea_create", args=[receta.id]),
+            data={
+                "posicion": "1",
+                "tipo_linea": LineaReceta.TIPO_NORMAL,
+                "etapa": "",
+                "insumo_texto": "Pan Chocolate",
+                "insumo_id": str(pan_generico.id),
+                "cantidad": "2",
+                "unidad_id": str(self.unidad_pza.id),
+                "unidad_texto": "pza",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        linea = LineaReceta.objects.get(receta=receta, posicion=1)
+        self.assertEqual(linea.insumo_id, pan_derivado.id)
+        self.assertEqual(linea.match_status, LineaReceta.STATUS_AUTO)
+
+    def test_signals_sync_prepare_and_presentacion_derived_insumos(self):
+        receta = Receta.objects.create(
+            nombre="Batida Test Chocolate",
+            hash_contenido="hash-signal-derived-001",
+            tipo=Receta.TIPO_PREPARACION,
+            usa_presentaciones=True,
+            rendimiento_cantidad=Decimal("10.000000"),
+            rendimiento_unidad=self.unidad_kg,
+        )
+        prep_code = f"DERIVADO:RECETA:{receta.id}:PREPARACION"
+        self.assertTrue(Insumo.objects.filter(codigo=prep_code, activo=True).exists())
+
+        presentacion = RecetaPresentacion.objects.create(
+            receta=receta,
+            nombre="Chico",
+            peso_por_unidad_kg=Decimal("0.280000"),
+            activo=True,
+        )
+        pres_code = f"DERIVADO:RECETA:{receta.id}:PRESENTACION:{presentacion.id}"
+        self.assertTrue(Insumo.objects.filter(codigo=pres_code, activo=True).exists())
 
 
 class RecetasAuthRedirectTests(TestCase):
