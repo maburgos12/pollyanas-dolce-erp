@@ -75,6 +75,23 @@ def _presentacion_sort_key(nombre: str) -> tuple[int, str]:
 def recetas_list(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
     estado = request.GET.get("estado", "").strip().lower()
+    tipo = request.GET.get("tipo", "").strip().upper()
+    familia = request.GET.get("familia", "").strip()
+    categoria = request.GET.get("categoria", "").strip()
+
+    familias_catalogo = list(
+        Receta.objects.exclude(familia__exact="")
+        .values_list("familia", flat=True)
+        .distinct()
+        .order_by("familia")
+    )
+    categorias_catalogo = list(
+        Receta.objects.exclude(categoria__exact="")
+        .values_list("categoria", flat=True)
+        .distinct()
+        .order_by("categoria")
+    )
+
     recetas = Receta.objects.select_related("rendimiento_unidad").all().annotate(
         pendientes_count=Count(
             "lineas",
@@ -84,6 +101,12 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
     )
     if q:
         recetas = recetas.filter(nombre__icontains=q)
+    if tipo in {Receta.TIPO_PREPARACION, Receta.TIPO_PRODUCTO_FINAL}:
+        recetas = recetas.filter(tipo=tipo)
+    if familia:
+        recetas = recetas.filter(familia=familia)
+    if categoria:
+        recetas = recetas.filter(categoria=categoria)
     if estado == "pendientes":
         recetas = recetas.filter(pendientes_count__gt=0)
     elif estado == "ok":
@@ -94,6 +117,15 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
     total_pendientes = recetas.filter(pendientes_count__gt=0).count()
     total_lineas = sum(r.lineas_count for r in recetas)
 
+    qs_filters = {
+        "q": q,
+        "estado": estado,
+        "tipo": tipo,
+        "familia": familia,
+        "categoria": categoria,
+    }
+    qs_base = urlencode({k: v for k, v in qs_filters.items() if v})
+
     paginator = Paginator(recetas, 20)
     page = paginator.get_page(request.GET.get("page"))
     return render(
@@ -103,9 +135,15 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             "page": page,
             "q": q,
             "estado": estado,
+            "tipo": tipo,
+            "familia": familia,
+            "categoria": categoria,
+            "familias_catalogo": familias_catalogo,
+            "categorias_catalogo": categorias_catalogo,
             "total_recetas": total_recetas,
             "total_pendientes": total_pendientes,
             "total_lineas": total_lineas,
+            "qs_base": qs_base,
         },
     )
 
@@ -208,6 +246,8 @@ def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     nombre = (request.POST.get("nombre") or "").strip()
     codigo_point = (request.POST.get("codigo_point") or "").strip()
+    familia = (request.POST.get("familia") or "").strip()
+    categoria = (request.POST.get("categoria") or "").strip()
     sheet_name = (request.POST.get("sheet_name") or "").strip()
     tipo = (request.POST.get("tipo") or Receta.TIPO_PREPARACION).strip()
     usa_presentaciones = request.POST.get("usa_presentaciones") == "on"
@@ -223,6 +263,8 @@ def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
 
     receta.nombre = nombre[:250]
     receta.codigo_point = codigo_point[:80]
+    receta.familia = familia[:120]
+    receta.categoria = categoria[:120]
     receta.sheet_name = sheet_name[:120]
     receta.tipo = tipo
     receta.usa_presentaciones = usa_presentaciones

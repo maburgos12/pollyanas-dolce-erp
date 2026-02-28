@@ -20,6 +20,23 @@
 
   <form class="recipes-filters" method="get">
     <input class="form-control" name="q" placeholder="Buscar receta..." value="{{ q }}">
+    <select class="form-select" name="tipo">
+      <option value="" {% if not tipo %}selected{% endif %}>Todos los tipos</option>
+      <option value="PREPARACION" {% if tipo == "PREPARACION" %}selected{% endif %}>Insumo interno (batida/mezcla)</option>
+      <option value="PRODUCTO_FINAL" {% if tipo == "PRODUCTO_FINAL" %}selected{% endif %}>Producto final</option>
+    </select>
+    <select class="form-select" name="familia">
+      <option value="" {% if not familia %}selected{% endif %}>Todas las familias</option>
+      {% for item in familias_catalogo %}
+      <option value="{{ item }}" {% if familia == item %}selected{% endif %}>{{ item }}</option>
+      {% endfor %}
+    </select>
+    <select class="form-select" name="categoria">
+      <option value="" {% if not categoria %}selected{% endif %}>Todas las categorías</option>
+      {% for item in categorias_catalogo %}
+      <option value="{{ item }}" {% if categoria == item %}selected{% endif %}>{{ item }}</option>
+      {% endfor %}
+    </select>
     <select class="form-select" name="estado">
       <option value="" {% if not estado %}selected{% endif %}>Todos</option>
       <option value="pendientes" {% if estado == "pendientes" %}selected{% endif %}>Con pendientes</option>
@@ -41,6 +58,8 @@
       <tr>
         <th>Receta</th>
         <th>Tipo</th>
+        <th>Familia</th>
+        <th>Categoría</th>
         <th>Rendimiento</th>
         <th>Hoja</th>
         <th>Pendientes</th>
@@ -53,6 +72,8 @@
       <tr>
         <td><a href="{% url 'recetas:receta_detail' r.id %}">{{ r.nombre }}</a></td>
         <td>{% if r.tipo == "PRODUCTO_FINAL" %}<span class="badge bg-primary">Producto final</span>{% else %}<span class="badge bg-success">Preparación</span>{% endif %}</td>
+        <td>{{ r.familia|default:"-" }}</td>
+        <td>{{ r.categoria|default:"-" }}</td>
         <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad|floatformat:2 }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
         <td>{{ r.sheet_name }}</td>
         <td>
@@ -66,7 +87,7 @@
         <td class="text-end">${{ r.costo_total_estimado|floatformat:2 }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="7" class="text-muted">Sin recetas</td></tr>
+      <tr><td colspan="9" class="text-muted">Sin recetas</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -75,11 +96,11 @@
 <nav>
   <ul class="pagination">
     {% if page.has_previous %}
-      <li class="page-item"><a class="page-link" href="?q={{ q }}&estado={{ estado }}&page={{ page.previous_page_number }}">Anterior</a></li>
+      <li class="page-item"><a class="page-link" href="?{% if qs_base %}{{ qs_base }}&{% endif %}page={{ page.previous_page_number }}">Anterior</a></li>
     {% endif %}
     <li class="page-item disabled"><a class="page-link">Página {{ page.number }} de {{ page.paginator.num_pages }}</a></li>
     {% if page.has_next %}
-      <li class="page-item"><a class="page-link" href="?q={{ q }}&estado={{ estado }}&page={{ page.next_page_number }}">Siguiente</a></li>
+      <li class="page-item"><a class="page-link" href="?{% if qs_base %}{{ qs_base }}&{% endif %}page={{ page.next_page_number }}">Siguiente</a></li>
     {% endif %}
   </ul>
 </nav>

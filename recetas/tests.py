@@ -129,6 +129,58 @@ class MatchingPendientesAutocompleteTests(TestCase):
         self.assertEqual(len(payload["results"]), 1)
 
 
+class RecetasListCatalogFiltersTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_recetas_catalogo",
+            email="admin_recetas_catalogo@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+        self.unidad_kg = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.receta_preparacion = Receta.objects.create(
+            nombre="Batida Chocolate",
+            hash_contenido="hash-catalogo-001",
+            tipo=Receta.TIPO_PREPARACION,
+            familia="Batidas",
+            categoria="Chocolate",
+            rendimiento_cantidad=Decimal("10.000000"),
+            rendimiento_unidad=self.unidad_kg,
+        )
+        self.receta_producto = Receta.objects.create(
+            nombre="Pastel Fresas con Crema - Chico",
+            hash_contenido="hash-catalogo-002",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pasteles",
+            categoria="Frutales",
+        )
+
+    def test_recetas_list_filters_by_tipo(self):
+        response = self.client.get(reverse("recetas:recetas_list"), {"tipo": Receta.TIPO_PRODUCTO_FINAL})
+        self.assertEqual(response.status_code, 200)
+        nombres = [r.nombre for r in response.context["page"].object_list]
+        self.assertIn(self.receta_producto.nombre, nombres)
+        self.assertNotIn(self.receta_preparacion.nombre, nombres)
+
+    def test_recetas_list_filters_by_familia_and_categoria(self):
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"familia": "Pasteles", "categoria": "Frutales"},
+        )
+        self.assertEqual(response.status_code, 200)
+        page = response.context["page"]
+        self.assertEqual(page.paginator.count, 1)
+        self.assertEqual(page.object_list[0].id, self.receta_producto.id)
+        self.assertIn("Pasteles", response.context["familias_catalogo"])
+        self.assertIn("Frutales", response.context["categorias_catalogo"])
+
+
 class RecetaDerivedInsumoAutolinkTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
