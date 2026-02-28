@@ -49,6 +49,28 @@ from .utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_re
 from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 from .utils.normalizacion import normalizar_nombre
 
+
+def _presentacion_sort_key(nombre: str) -> tuple[int, str]:
+    norm = normalizar_nombre(nombre or "")
+    order = {
+        "mini": 10,
+        "chico": 20,
+        "mediano": 30,
+        "grande": 40,
+        "bollos": 50,
+        "bollo": 50,
+        "bollito": 50,
+        "individual": 60,
+        "media plancha": 70,
+        "1 2 plancha": 70,
+        "rosca": 80,
+    }
+    for token, rank in order.items():
+        if f" {token}" in f" {norm}" or norm.endswith(token):
+            return rank, norm
+    return 999, norm
+
+
 @login_required
 def recetas_list(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
@@ -108,7 +130,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
         )
 
     lineas = list(receta.lineas.select_related("insumo").order_by("posicion"))
-    presentaciones = receta.presentaciones.all().order_by("nombre")
+    presentaciones = sorted(list(receta.presentaciones.all()), key=lambda p: _presentacion_sort_key(p.nombre))
     costeo_unavailable = False
     try:
         costeo_actual = calcular_costeo_receta(receta)

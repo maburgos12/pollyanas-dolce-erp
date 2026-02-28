@@ -96,6 +96,70 @@
   </div>
 </div>
 
+{% if receta.tipo == "PREPARACION" %}
+<div class="card">
+  <div class="d-flex justify-content-between align-items-center mb-3 recipe-head">
+    <h3 class="mb-0">Resumen de Batida / Mezcla</h3>
+    <span class="text-muted">Cálculo interno automático</span>
+  </div>
+  <div class="kpi-mini mb-3">
+    <div class="kpi-card">
+      <div class="kpi-number">${{ total_costo_estimado|floatformat:2 }}</div>
+      <div class="kpi-label">Costo total batida</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">
+        {% if receta.rendimiento_cantidad %}
+          {{ receta.rendimiento_cantidad|floatformat:3 }}
+        {% else %}
+          0
+        {% endif %}
+      </div>
+      <div class="kpi-label">Total batida{% if receta.rendimiento_unidad %} ({{ receta.rendimiento_unidad.codigo }}){% endif %}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">
+        {% if receta.costo_por_unidad_rendimiento %}
+          ${{ receta.costo_por_unidad_rendimiento|floatformat:6 }}
+        {% else %}
+          0
+        {% endif %}
+      </div>
+      <div class="kpi-label">Costo / {{ receta.rendimiento_unidad.codigo|default:"unidad" }}</div>
+    </div>
+  </div>
+
+  {% if receta.usa_presentaciones and presentaciones %}
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Elemento</th>
+          {% for p in presentaciones %}
+            <th class="text-end">{{ p.nombre }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>Peso / Molde (kg)</th>
+          {% for p in presentaciones %}
+            <td class="text-end">{{ p.peso_por_unidad_kg|floatformat:3 }}</td>
+          {% endfor %}
+        </tr>
+        <tr>
+          <th>Costo por unidad</th>
+          {% for p in presentaciones %}
+            <td class="text-end">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+          {% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
   <div class="d-flex justify-content-between align-items-center mb-3 recipe-head">
     <h3 class="mb-0">Costeo Completo (Fase 2)</h3>
