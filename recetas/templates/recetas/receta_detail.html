@@ -319,7 +319,15 @@
       <a class="btn btn-primary" href="{% url 'recetas:presentacion_create' receta.id %}">Agregar presentación</a>
     </div>
     <div class="table-responsive">
-      <table class="table align-middle">
+      <table class="table align-middle recipe-presentaciones-table">
+        <colgroup>
+          <col class="col-pres-name">
+          <col class="col-pres-derived">
+          <col class="col-pres-qty">
+          <col class="col-pres-cost">
+          <col class="col-pres-status">
+          <col class="col-pres-actions">
+        </colgroup>
         <thead>
           <tr>
             <th>Presentación</th>
@@ -333,12 +341,12 @@
         <tbody>
           {% for p in presentaciones %}
           <tr>
-            <td>{{ p.nombre }}</td>
-            <td>{{ receta.nombre }} - {{ p.nombre }}</td>
-            <td class="text-end">{{ p.peso_por_unidad_kg|floatformat:2 }}</td>
-            <td class="text-end">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td class="cell-pres-name">{{ p.nombre }}</td>
+            <td class="cell-pres-derived">{{ receta.nombre }} - {{ p.nombre }}</td>
+            <td class="text-end cell-pres-qty">{{ p.peso_por_unidad_kg|floatformat:2 }}</td>
+            <td class="text-end cell-pres-cost">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
             <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>
-            <td>
+            <td class="cell-pres-actions">
               <div class="recipe-actions">
                 <a class="btn btn-secondary" href="{% url 'recetas:presentacion_edit' receta.id p.id %}">Editar</a>
                 <form method="post" action="{% url 'recetas:presentacion_delete' receta.id p.id %}" class="inline-form" onsubmit="return confirm('¿Eliminar presentación?');">

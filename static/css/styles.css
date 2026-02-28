@@ -1086,6 +1086,35 @@ tr:hover,
   min-width: 1180px;
 }
 
+.recipe-detail-shell .recipe-presentaciones-table {
+  table-layout: fixed;
+  min-width: 1060px;
+}
+
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 170px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: auto; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 230px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 190px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 120px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 180px; }
+
+.recipe-detail-shell .recipe-presentaciones-table .cell-pres-name,
+.recipe-detail-shell .recipe-presentaciones-table .cell-pres-derived {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.recipe-detail-shell .recipe-presentaciones-table .cell-pres-qty,
+.recipe-detail-shell .recipe-presentaciones-table .cell-pres-cost {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.recipe-detail-shell .recipe-presentaciones-table .cell-pres-actions .recipe-actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
 .page-receta-detail .main-content {
   overflow-x: hidden;
 }
