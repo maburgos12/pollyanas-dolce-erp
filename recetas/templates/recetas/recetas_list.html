@@ -18,10 +18,18 @@
     </div>
   </div>
 
+  <div class="module-tabs mb-3">
+    <a class="module-tab {% if vista == 'productos' %}active{% endif %}" href="?vista=productos">Productos ({{ total_productos }})</a>
+    <a class="module-tab {% if vista == 'insumos' %}active{% endif %}" href="?vista=insumos">Insumos ({{ total_insumos }})</a>
+    <a class="module-tab {% if vista == 'subinsumos' %}active{% endif %}" href="?vista=subinsumos">Subinsumos ({{ total_subinsumos }})</a>
+    <a class="module-tab {% if vista == 'todo' %}active{% endif %}" href="?vista=todo">Todo ({{ total_all }})</a>
+  </div>
+
   <form class="recipes-filters" method="get">
+    <input type="hidden" name="vista" value="{{ vista }}">
     <input class="form-control" name="q" placeholder="Buscar receta..." value="{{ q }}">
     <select class="form-select" name="tipo">
-      <option value="" {% if not tipo %}selected{% endif %}>Todos los tipos</option>
+      <option value="" {% if not tipo %}selected{% endif %}>Tipo (opcional)</option>
       <option value="PREPARACION" {% if tipo == "PREPARACION" %}selected{% endif %}>Insumo interno (batida/mezcla)</option>
       <option value="PRODUCTO_FINAL" {% if tipo == "PRODUCTO_FINAL" %}selected{% endif %}>Producto final</option>
     </select>
@@ -43,7 +51,7 @@
       <option value="ok" {% if estado == "ok" %}selected{% endif %}>Sin pendientes</option>
     </select>
     <button class="btn btn-primary" type="submit">Filtrar</button>
-    <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Limpiar</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}?vista={{ vista }}">Limpiar</a>
   </form>
   <div class="toolbar mt-2">
     <a class="btn btn-primary" href="{% url 'recetas:plan_produccion' %}">Ir a Plan de Producción</a>

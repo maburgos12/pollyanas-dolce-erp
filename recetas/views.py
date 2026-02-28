@@ -73,6 +73,7 @@ def _presentacion_sort_key(nombre: str) -> tuple[int, str]:
 
 @login_required
 def recetas_list(request: HttpRequest) -> HttpResponse:
+    vista = (request.GET.get("vista") or "").strip().lower()
     q = request.GET.get("q", "").strip()
     estado = request.GET.get("estado", "").strip().lower()
     tipo = request.GET.get("tipo", "").strip().upper()
@@ -92,13 +93,38 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         .order_by("categoria")
     )
 
-    recetas = Receta.objects.select_related("rendimiento_unidad").all().annotate(
+    recetas_base = Receta.objects.all()
+    total_all = recetas_base.count()
+    total_productos = recetas_base.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).count()
+    total_insumos = recetas_base.filter(tipo=Receta.TIPO_PREPARACION).count()
+    total_subinsumos = recetas_base.filter(
+        tipo=Receta.TIPO_PREPARACION,
+        usa_presentaciones=True,
+    ).count()
+
+    # Vista rápida por botones: por defecto mostramos Productos para evitar lista mezclada.
+    if vista not in {"productos", "insumos", "subinsumos", "todo"}:
+        if tipo == Receta.TIPO_PRODUCTO_FINAL:
+            vista = "productos"
+        elif tipo == Receta.TIPO_PREPARACION:
+            vista = "insumos"
+        else:
+            vista = "productos"
+
+    recetas = recetas_base.select_related("rendimiento_unidad").annotate(
         pendientes_count=Count(
             "lineas",
             filter=Q(lineas__match_status=LineaReceta.STATUS_NEEDS_REVIEW),
         ),
         lineas_count=Count("lineas"),
     )
+    if vista == "productos":
+        recetas = recetas.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
+    elif vista == "insumos":
+        recetas = recetas.filter(tipo=Receta.TIPO_PREPARACION)
+    elif vista == "subinsumos":
+        recetas = recetas.filter(tipo=Receta.TIPO_PREPARACION, usa_presentaciones=True)
+
     if q:
         recetas = recetas.filter(nombre__icontains=q)
     if tipo in {Receta.TIPO_PREPARACION, Receta.TIPO_PRODUCTO_FINAL}:
@@ -118,6 +144,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
     total_lineas = sum(r.lineas_count for r in recetas)
 
     qs_filters = {
+        "vista": vista,
         "q": q,
         "estado": estado,
         "tipo": tipo,
@@ -133,6 +160,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         "recetas/recetas_list.html",
         {
             "page": page,
+            "vista": vista,
             "q": q,
             "estado": estado,
             "tipo": tipo,
@@ -143,6 +171,10 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             "total_recetas": total_recetas,
             "total_pendientes": total_pendientes,
             "total_lineas": total_lineas,
+            "total_all": total_all,
+            "total_productos": total_productos,
+            "total_insumos": total_insumos,
+            "total_subinsumos": total_subinsumos,
             "qs_base": qs_base,
         },
     )

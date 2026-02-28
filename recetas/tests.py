@@ -153,6 +153,16 @@ class RecetasListCatalogFiltersTests(TestCase):
             rendimiento_cantidad=Decimal("10.000000"),
             rendimiento_unidad=self.unidad_kg,
         )
+        self.receta_subinsumo = Receta.objects.create(
+            nombre="Batida Vainilla con Presentaciones",
+            hash_contenido="hash-catalogo-003",
+            tipo=Receta.TIPO_PREPARACION,
+            familia="Batidas",
+            categoria="Vainilla",
+            usa_presentaciones=True,
+            rendimiento_cantidad=Decimal("12.000000"),
+            rendimiento_unidad=self.unidad_kg,
+        )
         self.receta_producto = Receta.objects.create(
             nombre="Pastel Fresas con Crema - Chico",
             hash_contenido="hash-catalogo-002",
@@ -161,12 +171,28 @@ class RecetasListCatalogFiltersTests(TestCase):
             categoria="Frutales",
         )
 
+    def test_recetas_list_default_view_shows_productos(self):
+        response = self.client.get(reverse("recetas:recetas_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["vista"], "productos")
+        nombres = [r.nombre for r in response.context["page"].object_list]
+        self.assertIn(self.receta_producto.nombre, nombres)
+        self.assertNotIn(self.receta_preparacion.nombre, nombres)
+
     def test_recetas_list_filters_by_tipo(self):
         response = self.client.get(reverse("recetas:recetas_list"), {"tipo": Receta.TIPO_PRODUCTO_FINAL})
         self.assertEqual(response.status_code, 200)
         nombres = [r.nombre for r in response.context["page"].object_list]
         self.assertIn(self.receta_producto.nombre, nombres)
         self.assertNotIn(self.receta_preparacion.nombre, nombres)
+
+    def test_recetas_list_quick_view_subinsumos(self):
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos"})
+        self.assertEqual(response.status_code, 200)
+        nombres = [r.nombre for r in response.context["page"].object_list]
+        self.assertIn(self.receta_subinsumo.nombre, nombres)
+        self.assertNotIn(self.receta_preparacion.nombre, nombres)
+        self.assertNotIn(self.receta_producto.nombre, nombres)
 
     def test_recetas_list_filters_by_familia_and_categoria(self):
         response = self.client.get(
