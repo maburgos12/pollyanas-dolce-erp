@@ -143,27 +143,33 @@
   </div>
 
   {% if receta.usa_presentaciones and presentaciones %}
-  <div class="table-responsive">
-    <table class="table align-middle">
+  <div class="table-responsive recipe-mix-matrix-wrap">
+    <table class="table align-middle recipe-mix-matrix-table">
+      <colgroup>
+        <col class="col-mix-label">
+        {% for p in presentaciones %}
+          <col class="col-mix-value">
+        {% endfor %}
+      </colgroup>
       <thead>
         <tr>
-          <th>Elemento</th>
+          <th class="mix-label-heading">Elemento</th>
           {% for p in presentaciones %}
-            <th class="text-end">{{ p.nombre }}</th>
+            <th class="text-center mix-head-value">{{ p.nombre }}</th>
           {% endfor %}
         </tr>
       </thead>
       <tbody>
         <tr>
-          <th>Cantidad por presentación{% if rend_unit_code %} ({{ rend_unit_code }}){% endif %}</th>
+          <th class="mix-row-label">Cantidad por presentación{% if rend_unit_code %} ({{ rend_unit_code }}){% endif %}</th>
           {% for p in presentaciones %}
-            <td class="text-end">{{ p.peso_por_unidad_kg|floatformat:3 }}</td>
+            <td class="text-center mix-cell-number">{{ p.peso_por_unidad_kg|floatformat:3 }}</td>
           {% endfor %}
         </tr>
         <tr>
-          <th>Costo por unidad</th>
+          <th class="mix-row-label">Costo por unidad</th>
           {% for p in presentaciones %}
-            <td class="text-end">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td class="text-center mix-cell-number">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
           {% endfor %}
         </tr>
       </tbody>
@@ -337,8 +343,8 @@
               {% if rend_unit_code %}<span class="pres-head-unit">({{ rend_unit_code }})</span>{% endif %}
             </th>
             <th class="text-end pres-head-cost">Costo por unidad</th>
-            <th>Estatus</th>
-            <th>Acciones</th>
+            <th class="pres-head-status">Estatus</th>
+            <th class="pres-head-actions">Acciones</th>
           </tr>
         </thead>
         <tbody>
