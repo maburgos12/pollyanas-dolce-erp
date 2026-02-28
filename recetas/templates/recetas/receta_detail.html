@@ -338,11 +338,11 @@
           <tr>
             <th>Presentación</th>
             <th>Insumo derivado</th>
-            <th class="text-end pres-head-qty">
+            <th class="text-center pres-head-qty">
               Cantidad por presentación
               {% if rend_unit_code %}<span class="pres-head-unit">({{ rend_unit_code }})</span>{% endif %}
             </th>
-            <th class="text-end pres-head-cost">Costo por unidad</th>
+            <th class="text-center pres-head-cost">Costo por unidad</th>
             <th class="pres-head-status">Estatus</th>
             <th class="pres-head-actions">Acciones</th>
           </tr>
@@ -352,8 +352,8 @@
           <tr>
             <td class="cell-pres-name">{{ p.nombre }}</td>
             <td class="cell-pres-derived">{{ receta.nombre }} - {{ p.nombre }}</td>
-            <td class="text-end cell-pres-qty">{{ p.peso_por_unidad_kg|floatformat:2 }}</td>
-            <td class="text-end cell-pres-cost">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td class="cell-pres-qty">{{ p.peso_por_unidad_kg|floatformat:2 }}</td>
+            <td class="cell-pres-cost">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
             <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>
             <td class="cell-pres-actions">
               <div class="recipe-actions">

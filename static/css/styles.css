@@ -1097,33 +1097,41 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table {
-  width: max-content;
+  width: 100%;
   min-width: 980px;
-  margin: 0 auto;
+  margin: 0;
   table-layout: fixed;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .col-mix-label {
-  width: 360px;
+  width: 34%;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .col-mix-value {
-  width: 130px;
+  width: auto;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .mix-label-heading,
 .recipe-detail-shell .recipe-mix-matrix-table .mix-row-label {
   white-space: nowrap;
+  text-align: left;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .mix-head-value {
-  text-align: center;
+  text-align: center !important;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .mix-cell-number {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  text-align: center !important;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .recipe-detail-shell .recipe-presentaciones-wrap {
@@ -1140,18 +1148,18 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-presentaciones-table {
-  width: max-content;
-  min-width: 1120px;
-  margin: 0 auto;
+  width: 100%;
+  min-width: 980px;
+  margin: 0;
   table-layout: fixed;
 }
 
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 170px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 330px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 180px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 150px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 110px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 180px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 17%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 31%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 16%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 14%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 10%; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 12%; }
 
 .recipe-detail-shell .recipe-presentaciones-table thead th {
   vertical-align: bottom;
@@ -1177,6 +1185,7 @@ tr:hover,
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-qty,
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-cost {
   white-space: nowrap;
+  text-align: center !important;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-unit {
@@ -1192,6 +1201,7 @@ tr:hover,
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-cost {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  text-align: center !important;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-status,
@@ -1607,19 +1617,19 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   }
 
   .recipe-detail-shell .recipe-presentaciones-table {
-    min-width: 980px;
+    min-width: 860px;
   }
 
   .recipe-detail-shell .recipe-mix-matrix-table {
-    min-width: 840px;
+    min-width: 820px;
   }
 
   .recipe-detail-shell .recipe-mix-matrix-table .col-mix-label {
-    width: 290px;
+    width: 32%;
   }
 
   .recipe-detail-shell .recipe-mix-matrix-table .col-mix-value {
-    width: 110px;
+    width: auto;
   }
 
   .recipe-actions-compact .btn {
