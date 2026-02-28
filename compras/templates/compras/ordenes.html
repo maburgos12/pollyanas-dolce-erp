@@ -83,7 +83,7 @@
           <td>{{ o.proveedor.nombre }}</td>
           <td>{{ o.fecha_emision }}</td>
           <td>{{ o.fecha_entrega_estimada|default:"-" }}</td>
-          <td class="text-end">${{ o.monto_estimado }}</td>
+          <td class="text-end">${{ o.monto_estimado|floatformat:2 }}</td>
           <td>
             {% if o.estatus == 'CERRADA' or o.estatus == 'CONFIRMADA' %}
               <span class="badge bg-success">{{ o.get_estatus_display }}</span>

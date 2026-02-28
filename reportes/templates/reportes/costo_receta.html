@@ -24,7 +24,7 @@
   <div class="kpi-mini">
     <div class="kpi-card"><div class="kpi-number">{{ total_recetas }}</div><div class="kpi-label">Recetas</div></div>
     <div class="kpi-card"><div class="kpi-number is-success">{{ recetas_con_costo }}</div><div class="kpi-label">Con costo</div></div>
-    <div class="kpi-card"><div class="kpi-number">{{ total_costo|floatformat:0 }}</div><div class="kpi-label">Costo acumulado</div></div>
+    <div class="kpi-card"><div class="kpi-number">${{ total_costo|floatformat:2 }}</div><div class="kpi-label">Costo acumulado</div></div>
   </div>
   <div class="table-responsive">
     <table class="table table-striped">

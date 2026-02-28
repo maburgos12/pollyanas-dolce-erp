@@ -133,7 +133,7 @@
     <div class="kpi-card">
       <div class="kpi-number">
         {% if receta.costo_por_unidad_rendimiento %}
-          ${{ receta.costo_por_unidad_rendimiento|floatformat:6 }}
+          ${{ receta.costo_por_unidad_rendimiento|floatformat:2 }}
         {% else %}
           0
         {% endif %}
