@@ -23,7 +23,12 @@
     <div class="recipe-main-grid">
       <input class="form-control" type="text" name="nombre" value="{{ receta.nombre }}" placeholder="Nombre de receta" required>
       <input class="form-control" type="text" name="codigo_point" value="{{ receta.codigo_point }}" placeholder="Código Point (opcional)">
-      <input class="form-control" type="text" name="familia" value="{{ receta.familia }}" placeholder="Familia (ej. Pasteles / Betunes / Panes)">
+      <select class="form-select" name="familia">
+        <option value="">Familia Point (seleccionar)</option>
+        {% for item in familias_catalogo %}
+        <option value="{{ item }}" {% if receta.familia == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
       <input class="form-control" type="text" name="categoria" value="{{ receta.categoria }}" placeholder="Categoría (ej. Chocolate / Frutales / Empaque)">
       <select class="form-select" name="tipo">
         {% for value, label in tipo_choices %}

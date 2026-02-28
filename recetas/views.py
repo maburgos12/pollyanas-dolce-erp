@@ -48,6 +48,7 @@ from .models import (
 from .utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta, comparativo_versiones
 from .utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 from .utils.normalizacion import normalizar_nombre
+from .catalogs import familias_producto_catalogo
 
 
 def _presentacion_sort_key(nombre: str) -> tuple[int, str]:
@@ -80,12 +81,13 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
     familia = request.GET.get("familia", "").strip()
     categoria = request.GET.get("categoria", "").strip()
 
-    familias_catalogo = list(
+    familias_db = list(
         Receta.objects.exclude(familia__exact="")
         .values_list("familia", flat=True)
         .distinct()
         .order_by("familia")
     )
+    familias_catalogo = familias_producto_catalogo(familias_db)
     categorias_catalogo = list(
         Receta.objects.exclude(categoria__exact="")
         .values_list("categoria", flat=True)
@@ -182,6 +184,13 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
 @login_required
 def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
+    familias_db = list(
+        Receta.objects.exclude(familia__exact="")
+        .values_list("familia", flat=True)
+        .distinct()
+        .order_by("familia")
+    )
+    familias_catalogo = familias_producto_catalogo(familias_db)
     versiones_unavailable = False
     versiones_all = []
     versiones_recientes = []
@@ -267,6 +276,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "selected_target": selected_target,
             "version_compare": compare_data,
             "rend_unit_code": (receta.rendimiento_unidad.codigo if receta.rendimiento_unidad else ""),
+            "familias_catalogo": familias_catalogo,
         },
     )
 
@@ -292,6 +302,10 @@ def receta_update(request: HttpRequest, pk: int) -> HttpResponse:
 
     if tipo not in {Receta.TIPO_PREPARACION, Receta.TIPO_PRODUCTO_FINAL}:
         tipo = Receta.TIPO_PREPARACION
+
+    if tipo == Receta.TIPO_PRODUCTO_FINAL and not familia:
+        messages.error(request, "En producto final selecciona una familia de Point.")
+        return redirect("recetas:receta_detail", pk=pk)
 
     receta.nombre = nombre[:250]
     receta.codigo_point = codigo_point[:80]

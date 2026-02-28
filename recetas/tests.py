@@ -1494,6 +1494,24 @@ class RecetaPhase2ViewsTests(TestCase):
         self.assertContains(resp, "Comparar versiones")
         self.assertContains(resp, "Exportar versiones CSV")
         self.assertContains(resp, "Drivers costeo")
+        self.assertContains(resp, "Familia Point (seleccionar)")
+        self.assertIn("Pastel", resp.context["familias_catalogo"])
+
+    def test_receta_update_producto_final_requires_familia(self):
+        payload = {
+            "nombre": "Receta Driver",
+            "codigo_point": "",
+            "familia": "",
+            "categoria": "",
+            "sheet_name": "Insumos 1",
+            "tipo": Receta.TIPO_PRODUCTO_FINAL,
+            "rendimiento_cantidad": "8",
+            "rendimiento_unidad_id": str(self.unidad.id),
+        }
+        resp = self.client.post(reverse("recetas:receta_update", args=[self.receta.id]), payload)
+        self.assertEqual(resp.status_code, 302)
+        self.receta.refresh_from_db()
+        self.assertEqual(self.receta.tipo, Receta.TIPO_PREPARACION)
 
     def test_receta_versiones_export_csv(self):
         resp = self.client.get(
