@@ -532,6 +532,9 @@ textarea:focus,
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: auto;
+  border: 1px solid var(--rosa);
+  border-radius: var(--radius-md);
+  background: #fff;
 }
 
 .table-responsive::-webkit-scrollbar {
@@ -564,6 +567,37 @@ textarea:focus,
 
 .table-responsive table {
   min-width: max-content;
+}
+
+.table-responsive > table,
+.table-responsive > .table {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  border-radius: 0;
+  overflow: visible;
+  table-layout: auto;
+  background: transparent;
+}
+
+.table-responsive > table th,
+.table-responsive > table td,
+.table-responsive > .table th,
+.table-responsive > .table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.table-responsive > table th.text-end,
+.table-responsive > table td.text-end,
+.table-responsive > table th.text-center,
+.table-responsive > table td.text-center,
+.table-responsive > .table th.text-end,
+.table-responsive > .table td.text-end,
+.table-responsive > .table th.text-center,
+.table-responsive > .table td.text-center {
+  white-space: nowrap;
 }
 
 .recipes-filters {
@@ -758,7 +792,7 @@ tr:hover,
 }
 
 .recipe-lines-table {
-  table-layout: fixed;
+  table-layout: auto;
   min-width: 1120px;
 }
 
@@ -1057,9 +1091,7 @@ tr:hover,
 .recipe-detail-shell .table-responsive {
   position: relative;
   z-index: 1;
-  border: 1px solid var(--rosa);
-  border-radius: var(--radius-md);
-  background: #fff;
+  border-color: var(--rosa);
 }
 
 .recipe-detail-shell .table-responsive {
@@ -1119,7 +1151,7 @@ tr:hover,
   width: max-content;
   min-width: 1060px;
   margin: 0;
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .col-mix-label {
@@ -1170,15 +1202,15 @@ tr:hover,
   width: max-content;
   min-width: 1160px;
   margin: 0;
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 170px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 360px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 260px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 220px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 340px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 220px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 180px; }
 .recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 120px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 160px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 170px; }
 
 .recipe-detail-shell .recipe-presentaciones-table thead th {
   vertical-align: bottom;
