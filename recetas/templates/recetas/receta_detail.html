@@ -143,7 +143,7 @@
   </div>
 
   {% if receta.usa_presentaciones and presentaciones %}
-  <div class="table-responsive recipe-mix-matrix-wrap">
+  <div class="table-responsive recipe-mix-matrix-wrap js-drag-scroll">
     <table class="table align-middle recipe-mix-matrix-table">
       <colgroup>
         <col class="col-mix-label">
@@ -324,7 +324,7 @@
       <h3 class="mb-0">Presentaciones / Tamaños</h3>
       <a class="btn btn-primary" href="{% url 'recetas:presentacion_create' receta.id %}">Agregar presentación</a>
     </div>
-    <div class="table-responsive recipe-presentaciones-wrap">
+    <div class="table-responsive recipe-presentaciones-wrap js-drag-scroll">
       <table class="table align-middle recipe-presentaciones-table">
         <colgroup>
           <col class="col-pres-name">
@@ -493,120 +493,111 @@
 {% block extra_js %}
 <script>
 (() => {
-  const scroller = document.querySelector(".js-drag-scroll");
-  if (!scroller) return;
-  const btnLeft = document.querySelector(".js-scroll-left");
-  const btnRight = document.querySelector(".js-scroll-right");
-
-  let isDragging = false;
-  let didMove = false;
-  let startX = 0;
-  let startLeft = 0;
-  let touchIdentifier = null;
-  let suppressClickUntil = 0;
-  const dragThreshold = 4;
+  const scrollers = Array.from(document.querySelectorAll(".js-drag-scroll"));
+  if (!scrollers.length) return;
 
   const isInteractiveTarget = (target) =>
     !!target.closest("a, button, input, select, textarea, label, .btn, [role='button']");
 
-  const stopDragging = () => {
-    if (isDragging && didMove) {
-      suppressClickUntil = Date.now() + 220;
-    }
-    isDragging = false;
-    scroller.classList.remove("is-dragging");
-    touchIdentifier = null;
-  };
+  scrollers.forEach((scroller) => {
+    let isDragging = false;
+    let didMove = false;
+    let startX = 0;
+    let startLeft = 0;
+    let touchIdentifier = null;
+    let suppressClickUntil = 0;
+    const dragThreshold = 4;
 
-  const startDrag = (clientX) => {
-    isDragging = true;
-    didMove = false;
-    scroller.classList.add("is-dragging");
-    startX = clientX;
-    startLeft = scroller.scrollLeft;
-  };
+    const card = scroller.closest(".card") || document;
+    const btnLeft = card.querySelector(".js-scroll-left");
+    const btnRight = card.querySelector(".js-scroll-right");
 
-  const moveDrag = (clientX) => {
-    if (!isDragging) return;
-    const delta = clientX - startX;
-    if (Math.abs(delta) > dragThreshold) didMove = true;
-    scroller.scrollLeft = startLeft - delta;
-  };
+    const stopDragging = () => {
+      if (isDragging && didMove) suppressClickUntil = Date.now() + 220;
+      isDragging = false;
+      scroller.classList.remove("is-dragging");
+      touchIdentifier = null;
+    };
 
-  scroller.addEventListener("mousedown", (event) => {
-    if (event.button !== 0) return;
-    if (isInteractiveTarget(event.target)) return;
-    startDrag(event.clientX);
-  });
+    const startDrag = (clientX) => {
+      isDragging = true;
+      didMove = false;
+      scroller.classList.add("is-dragging");
+      startX = clientX;
+      startLeft = scroller.scrollLeft;
+    };
 
-  window.addEventListener("mousemove", (event) => {
-    moveDrag(event.clientX);
-  });
-
-  window.addEventListener("mouseup", stopDragging);
-  scroller.addEventListener("mouseleave", stopDragging);
-
-  scroller.addEventListener(
-    "touchstart",
-    (event) => {
-      if (event.touches.length !== 1) return;
-      if (isInteractiveTarget(event.target)) return;
-      const touch = event.touches[0];
-      touchIdentifier = touch.identifier;
-      startDrag(touch.clientX);
-    },
-    { passive: true }
-  );
-
-  scroller.addEventListener(
-    "touchmove",
-    (event) => {
+    const moveDrag = (clientX) => {
       if (!isDragging) return;
-      const touch = Array.from(event.touches).find((t) => t.identifier === touchIdentifier);
-      if (!touch) return;
-      moveDrag(touch.clientX);
-      if (didMove) event.preventDefault();
-    },
-    { passive: false }
-  );
+      const delta = clientX - startX;
+      if (Math.abs(delta) > dragThreshold) didMove = true;
+      scroller.scrollLeft = startLeft - delta;
+    };
 
-  scroller.addEventListener("touchend", stopDragging);
-  scroller.addEventListener("touchcancel", stopDragging);
+    scroller.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      if (isInteractiveTarget(event.target)) return;
+      startDrag(event.clientX);
+    });
 
-  scroller.addEventListener(
-    "click",
-    (event) => {
-      if (Date.now() < suppressClickUntil) {
+    window.addEventListener("mousemove", (event) => moveDrag(event.clientX));
+    window.addEventListener("mouseup", stopDragging);
+    scroller.addEventListener("mouseleave", stopDragging);
+
+    scroller.addEventListener(
+      "touchstart",
+      (event) => {
+        if (event.touches.length !== 1) return;
+        if (isInteractiveTarget(event.target)) return;
+        const touch = event.touches[0];
+        touchIdentifier = touch.identifier;
+        startDrag(touch.clientX);
+      },
+      { passive: true }
+    );
+
+    scroller.addEventListener(
+      "touchmove",
+      (event) => {
+        if (!isDragging) return;
+        const touch = Array.from(event.touches).find((t) => t.identifier === touchIdentifier);
+        if (!touch) return;
+        moveDrag(touch.clientX);
+        if (didMove) event.preventDefault();
+      },
+      { passive: false }
+    );
+
+    scroller.addEventListener("touchend", stopDragging);
+    scroller.addEventListener("touchcancel", stopDragging);
+
+    scroller.addEventListener(
+      "click",
+      (event) => {
+        if (Date.now() < suppressClickUntil) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      },
+      true
+    );
+
+    scroller.addEventListener(
+      "wheel",
+      (event) => {
+        const canScrollX = scroller.scrollWidth > scroller.clientWidth;
+        if (!canScrollX) return;
+        if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
         event.preventDefault();
-        event.stopPropagation();
-      }
-    },
-    true
-  );
+        scroller.scrollLeft += event.deltaY;
+      },
+      { passive: false }
+    );
 
-  scroller.addEventListener(
-    "wheel",
-    (event) => {
-      const canScrollX = scroller.scrollWidth > scroller.clientWidth;
-      if (!canScrollX) return;
-      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-      event.preventDefault();
-      scroller.scrollLeft += event.deltaY;
-    },
-    { passive: false }
-  );
-
-  const scrollStep = 320;
-  if (btnLeft) {
-    btnLeft.addEventListener("click", () => {
-      scroller.scrollBy({ left: -scrollStep, behavior: "smooth" });
-    });
-  }
-  if (btnRight) {
-    btnRight.addEventListener("click", () => {
-      scroller.scrollBy({ left: scrollStep, behavior: "smooth" });
-    });
-  }
+    const scrollStep = 320;
+    if (btnLeft) btnLeft.addEventListener("click", () => scroller.scrollBy({ left: -scrollStep, behavior: "smooth" }));
+    if (btnRight) btnRight.addEventListener("click", () => scroller.scrollBy({ left: scrollStep, behavior: "smooth" }));
+  });
 })();
 </script>
 {% endblock %}

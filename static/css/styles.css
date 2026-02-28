@@ -30,7 +30,7 @@
 html {
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {
@@ -40,7 +40,7 @@ body {
   font-family: 'Nunito', sans-serif;
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 h1,
@@ -56,7 +56,7 @@ h4 {
   min-height: 100vh;
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .sidebar {
@@ -196,7 +196,7 @@ h4 {
   min-height: 100vh;
   position: relative;
   z-index: 1;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .header {
@@ -237,7 +237,7 @@ h4 {
   padding: clamp(14px, 1.6vw, 24px);
   max-width: 100%;
   min-width: 0;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .card {
@@ -535,6 +535,7 @@ textarea:focus,
   border: 1px solid var(--rosa);
   border-radius: var(--radius-md);
   background: #fff;
+  padding: 0;
 }
 
 .table-responsive::-webkit-scrollbar {
@@ -576,8 +577,9 @@ textarea:focus,
   margin: 0;
   border-radius: 0;
   overflow: visible;
-  table-layout: auto;
+  table-layout: auto !important;
   background: transparent;
+  border: 0;
 }
 
 .table-responsive > table th,
@@ -587,6 +589,7 @@ textarea:focus,
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: normal;
+  vertical-align: middle;
 }
 
 .table-responsive > table th.text-end,
@@ -974,6 +977,8 @@ tr:hover,
   display: grid;
   gap: var(--section-gap);
   min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 .module-shell > .card {
@@ -1134,7 +1139,7 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-lines-table {
-  min-width: 1180px;
+  min-width: 1240px;
 }
 
 .recipe-detail-shell .recipe-presentaciones-card {
@@ -1145,21 +1150,24 @@ tr:hover,
   width: 100%;
   overflow-x: auto !important;
   -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table {
   width: max-content;
-  min-width: 1060px;
+  min-width: max(100%, 980px);
   margin: 0;
   table-layout: auto;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .col-mix-label {
   width: 320px;
+  min-width: 320px;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .col-mix-value {
-  width: 125px;
+  width: 150px;
+  min-width: 150px;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .mix-label-heading,
@@ -1170,19 +1178,19 @@ tr:hover,
 
 .recipe-detail-shell .recipe-mix-matrix-table .mix-head-value {
   text-align: center !important;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-left: 8px;
-  padding-right: 8px;
+  white-space: nowrap !important;
+  overflow: visible;
+  text-overflow: clip;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .mix-cell-number {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   text-align: center !important;
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .recipe-detail-shell .recipe-presentaciones-wrap {
@@ -1191,6 +1199,7 @@ tr:hover,
   margin: 0;
   overflow-x: auto !important;
   -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
 }
 
 .recipe-detail-shell .recipe-presentaciones-card .card-header,
@@ -1200,17 +1209,17 @@ tr:hover,
 
 .recipe-detail-shell .recipe-presentaciones-table {
   width: max-content;
-  min-width: 1160px;
+  min-width: max(100%, 1280px);
   margin: 0;
   table-layout: auto;
 }
 
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 170px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 340px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 220px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 180px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 120px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 170px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 190px; min-width: 190px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 390px; min-width: 390px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 260px; min-width: 260px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 210px; min-width: 210px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 140px; min-width: 140px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 190px; min-width: 190px; }
 
 .recipe-detail-shell .recipe-presentaciones-table thead th {
   vertical-align: bottom;
@@ -1219,8 +1228,8 @@ tr:hover,
   padding-left: 16px;
   padding-right: 16px;
   font-size: 12.5px;
-  white-space: normal;
-  overflow: hidden;
+  white-space: nowrap;
+  overflow: visible;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table tbody td {
@@ -1231,14 +1240,14 @@ tr:hover,
 
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-name,
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-derived {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap !important;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-qty,
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-cost {
-  white-space: normal !important;
+  white-space: nowrap !important;
   line-height: 1.2;
   text-align: center !important;
 }
@@ -1286,7 +1295,7 @@ tr:hover,
 }
 
 .page-receta-detail .main-content {
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .recipe-detail-shell .recipe-lines-scroll {
@@ -1308,7 +1317,7 @@ tr:hover,
 
 .recipe-detail-shell .recipe-lines-scroll .recipe-lines-table {
   width: max-content;
-  min-width: 1360px;
+  min-width: 1460px;
 }
 
 .recipe-detail-shell .recipe-lines-scroll thead th {
@@ -1678,11 +1687,11 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
   }
 
   .recipe-detail-shell .recipe-presentaciones-table {
-    min-width: 1180px;
+    min-width: 1240px;
   }
 
   .recipe-detail-shell .recipe-mix-matrix-table {
-    min-width: 940px;
+    min-width: 980px;
   }
 
   .recipe-detail-shell .recipe-mix-matrix-table .col-mix-label {
