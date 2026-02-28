@@ -816,8 +816,6 @@ def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         nombre = (request.POST.get("nombre") or "").strip()
         peso_por_unidad_kg = _to_decimal_or_none(request.POST.get("peso_por_unidad_kg"))
-        unidades_por_batch = request.POST.get("unidades_por_batch") or None
-        unidades_por_pastel = request.POST.get("unidades_por_pastel") or None
         activo = request.POST.get("activo") == "on"
         if not nombre:
             messages.error(request, "El nombre de la presentación es obligatorio.")
@@ -831,8 +829,6 @@ def presentacion_create(request: HttpRequest, pk: int) -> HttpResponse:
             nombre=nombre[:80],
             defaults={
                 "peso_por_unidad_kg": peso_por_unidad_kg,
-                "unidades_por_batch": _to_non_negative_decimal_or_none(unidades_por_batch),
-                "unidades_por_pastel": _to_non_negative_decimal_or_none(unidades_por_pastel),
                 "activo": activo,
             },
         )
@@ -859,8 +855,6 @@ def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> Ht
     if request.method == "POST":
         nombre = (request.POST.get("nombre") or "").strip()
         peso_por_unidad_kg = _to_decimal_or_none(request.POST.get("peso_por_unidad_kg"))
-        unidades_por_batch = request.POST.get("unidades_por_batch") or None
-        unidades_por_pastel = request.POST.get("unidades_por_pastel") or None
         activo = request.POST.get("activo") == "on"
         if not nombre:
             messages.error(request, "El nombre de la presentación es obligatorio.")
@@ -871,8 +865,6 @@ def presentacion_edit(request: HttpRequest, pk: int, presentacion_id: int) -> Ht
 
         presentacion.nombre = nombre[:80]
         presentacion.peso_por_unidad_kg = peso_por_unidad_kg
-        presentacion.unidades_por_batch = _to_non_negative_decimal_or_none(unidades_por_batch)
-        presentacion.unidades_por_pastel = _to_non_negative_decimal_or_none(unidades_por_pastel)
         presentacion.activo = activo
         presentacion.save()
         _sync_derived_insumos_safe(request, receta)

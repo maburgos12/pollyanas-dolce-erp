@@ -325,10 +325,7 @@
             <th>Presentación</th>
             <th>Insumo derivado</th>
             <th class="text-end">Cantidad por presentación{% if rend_unit_code %} ({{ rend_unit_code }}){% endif %}</th>
-            <th class="text-end">Unidades por batida</th>
-            <th class="text-end">Unidades por pastel</th>
             <th class="text-end">Costo por unidad</th>
-            <th class="text-end">Costo por pastel</th>
             <th>Estatus</th>
             <th>Acciones</th>
           </tr>
@@ -339,10 +336,7 @@
             <td>{{ p.nombre }}</td>
             <td>{{ receta.nombre }} - {{ p.nombre }}</td>
             <td class="text-end">{{ p.peso_por_unidad_kg|floatformat:2 }}</td>
-            <td class="text-end">{% if p.unidades_por_batch %}{{ p.unidades_por_batch|floatformat:2 }}{% else %}-{% endif %}</td>
-            <td class="text-end">{% if p.unidades_por_pastel %}{{ p.unidades_por_pastel|floatformat:2 }}{% else %}-{% endif %}</td>
             <td class="text-end">{% if p.costo_por_unidad_estimado %}${{ p.costo_por_unidad_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
-            <td class="text-end">{% if p.costo_por_pastel_estimado %}${{ p.costo_por_pastel_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
             <td>{% if p.activo %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-danger">Inactiva</span>{% endif %}</td>
             <td>
               <div class="recipe-actions">
@@ -355,7 +349,7 @@
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="9" class="text-muted">Sin presentaciones registradas.</td></tr>
+          <tr><td colspan="6" class="text-muted">Sin presentaciones registradas.</td></tr>
           {% endfor %}
         </tbody>
       </table>

@@ -21,17 +21,9 @@
         <label for="peso_por_unidad_kg">Cantidad por presentación (en unidad de rendimiento)</label>
         <input id="peso_por_unidad_kg" class="form-control" type="number" step="0.000001" min="0.000001" name="peso_por_unidad_kg" value="{{ presentacion.peso_por_unidad_kg|default:'' }}" required>
       </div>
-      <div class="form-group">
-        <label for="unidades_por_batch">Unidades por batida</label>
-        <input id="unidades_por_batch" class="form-control" type="number" step="0.000001" min="0" name="unidades_por_batch" value="{{ presentacion.unidades_por_batch|default:'' }}" placeholder="Ej. 6">
-      </div>
-      <div class="form-group">
-        <label for="unidades_por_pastel">Unidades por pastel</label>
-        <input id="unidades_por_pastel" class="form-control" type="number" step="0.000001" min="0" name="unidades_por_pastel" value="{{ presentacion.unidades_por_pastel|default:'' }}" placeholder="Ej. 2">
-      </div>
       <div class="form-group full">
         <small class="text-muted d-block mb-2">
-          Define cuánta mezcla/batida consume una unidad de esta presentación. El subinsumo derivado quedará disponible para armar productos finales.
+          Define cuánta mezcla/batida consume una unidad de esta presentación. El sistema calcula costo por unidad/tamaño automáticamente.
         </small>
         <label for="activo">Estatus</label>
         <div class="field-check">
