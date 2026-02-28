@@ -570,7 +570,26 @@ textarea:focus,
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
-  align-items: end;
+  align-items: stretch;
+  grid-auto-rows: minmax(var(--control-height), auto);
+}
+
+/* Uniforma visualmente filtros y botones (evita selects más "delgados" en Safari). */
+.recipes-filters .form-control,
+.recipes-filters .form-select,
+.recipes-filters .btn {
+  min-height: var(--control-height);
+  height: var(--control-height);
+  margin: 0;
+}
+
+.recipes-filters .btn {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.recipes-filters .form-select {
+  line-height: 1.15;
 }
 
 .form-grid-auto {
