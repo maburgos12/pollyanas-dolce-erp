@@ -89,7 +89,7 @@
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
                 {% if linea.insumo_id == i.id %}selected{% endif %}
-              >{{ i.nombre }} [Interno]</option>
+              >{% if i.codigo %}[{{ i.codigo }}] {% elif i.codigo_point %}[{{ i.codigo_point }}] {% endif %}{{ i.nombre }} [Interno]</option>
             {% endfor %}
           </optgroup>
           {% if insumos_empaque %}
@@ -102,7 +102,7 @@
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
                 {% if linea.insumo_id == i.id %}selected{% endif %}
-              >{{ i.nombre }} [Empaque]</option>
+              >{% if i.codigo %}[{{ i.codigo }}] {% elif i.codigo_point %}[{{ i.codigo_point }}] {% endif %}{{ i.nombre }} [Empaque]</option>
             {% endfor %}
           </optgroup>
           {% endif %}
@@ -115,7 +115,7 @@
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
                 {% if linea.insumo_id == i.id %}selected{% endif %}
-              >{{ i.nombre }} [Materia prima]</option>
+              >{% if i.codigo %}[{{ i.codigo }}] {% elif i.codigo_point %}[{{ i.codigo_point }}] {% endif %}{{ i.nombre }} [Materia prima]</option>
             {% endfor %}
           </optgroup>
         </select>
