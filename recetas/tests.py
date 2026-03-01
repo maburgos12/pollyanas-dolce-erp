@@ -1583,6 +1583,21 @@ class RecetaPhase2ViewsTests(TestCase):
         body = resp.content.decode("utf-8")
         self.assertIn("scope,nombre,receta", body)
 
+    def test_drivers_costeo_plantilla_xlsx_valida(self):
+        resp = self.client.get(reverse("recetas:drivers_costeo_plantilla"), {"format": "xlsx"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resp["Content-Type"],
+        )
+        wb = load_workbook(filename=BytesIO(resp.content), data_only=True)
+        self.assertIn("drivers_costeo", wb.sheetnames)
+        self.assertIn("instrucciones", wb.sheetnames)
+        ws = wb["drivers_costeo"]
+        self.assertEqual(ws["A1"].value, "scope")
+        self.assertEqual(ws["B1"].value, "nombre")
+        self.assertEqual(ws["A2"].value, "PRODUCTO")
+
     def test_drivers_costeo_handles_missing_table_gracefully(self):
         with patch("recetas.views.CostoDriver.objects.select_related", side_effect=OperationalError("missing table")):
             resp = self.client.get(reverse("recetas:drivers_costeo"))

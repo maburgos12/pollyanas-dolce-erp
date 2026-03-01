@@ -20,6 +20,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment
 
 from compras.models import OrdenCompra, SolicitudCompra
 from core.access import can_manage_compras, can_view_recetas, is_branch_capture_only
@@ -1150,8 +1151,67 @@ def drivers_costeo_plantilla(request: HttpRequest) -> HttpResponse:
     ws.append(headers)
     for row in rows:
         ws.append(row)
-    for col in ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"):
-        ws.column_dimensions[col].width = 24
+
+    header_fill = PatternFill("solid", fgColor="F8E8EE")
+    header_font = Font(color="8B2252", bold=True)
+    center = Alignment(horizontal="center", vertical="center")
+
+    for col in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center
+
+    ws.auto_filter.ref = f"A1:M{len(rows) + 1}"
+    ws.freeze_panes = "A2"
+
+    widths = {
+        "A": 14,   # scope
+        "B": 30,   # nombre
+        "C": 32,   # receta
+        "D": 20,   # codigo_point
+        "E": 20,   # familia
+        "F": 12,   # lote_desde
+        "G": 12,   # lote_hasta
+        "H": 10,   # mo_pct
+        "I": 12,   # indirecto_pct
+        "J": 10,   # mo_fijo
+        "K": 14,   # indirecto_fijo
+        "L": 10,   # prioridad
+        "M": 8,    # activo
+    }
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+    ws_guide = wb.create_sheet("instrucciones")
+    ws_guide.append(["Campo", "Obligatorio", "Descripción / valores válidos"])
+    guide_rows = [
+        ["scope", "Sí", "GLOBAL | FAMILIA | PRODUCTO | LOTE"],
+        ["nombre", "Sí", "Nombre descriptivo del driver."],
+        ["receta", "Condicional", "Obligatorio si scope=PRODUCTO."],
+        ["codigo_point", "Opcional", "Alias de receta para encontrarla por código Point."],
+        ["familia", "Condicional", "Obligatorio si scope=FAMILIA."],
+        ["lote_desde", "Condicional", "Usar con scope=LOTE (decimal >= 0)."],
+        ["lote_hasta", "Condicional", "Usar con scope=LOTE (decimal >= lote_desde)."],
+        ["mo_pct", "Sí", "Porcentaje de mano de obra, por ejemplo 8."],
+        ["indirecto_pct", "Sí", "Porcentaje de indirectos, por ejemplo 4."],
+        ["mo_fijo", "Opcional", "Monto fijo adicional de MO."],
+        ["indirecto_fijo", "Opcional", "Monto fijo adicional de indirectos."],
+        ["prioridad", "Sí", "Menor número = mayor prioridad."],
+        ["activo", "Sí", "1 activo / 0 inactivo."],
+    ]
+    for row in guide_rows:
+        ws_guide.append(row)
+    for col in range(1, 4):
+        cell = ws_guide.cell(row=1, column=col)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center
+    ws_guide.column_dimensions["A"].width = 22
+    ws_guide.column_dimensions["B"].width = 14
+    ws_guide.column_dimensions["C"].width = 72
+    ws_guide.freeze_panes = "A2"
+
     out = BytesIO()
     wb.save(out)
     out.seek(0)
