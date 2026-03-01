@@ -9,14 +9,14 @@ from django.core.paginator import Paginator
 from django.views.generic import ListView, CreateView, UpdateView, DeleteView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.urls import reverse_lazy
-from django.db.models import Count, Q
+from django.db.models import Count, DateField, DecimalField, OuterRef, Q, Subquery
 from django.contrib.auth.decorators import login_required
 from openpyxl import Workbook
 from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_maestros, has_any_role
 from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
 
-from .models import PointPendingMatch, Proveedor, Insumo, InsumoAlias, UnidadMedida
+from .models import CostoInsumo, PointPendingMatch, Proveedor, Insumo, InsumoAlias, UnidadMedida
 
 # ============ PROVEEDORES ============
 
@@ -73,10 +73,27 @@ class InsumoListView(LoginRequiredMixin, ListView):
     paginate_by = 20
     
     def get_queryset(self):
-        queryset = Insumo.objects.select_related('unidad_base', 'proveedor_principal')
+        latest_cost_qs = (
+            CostoInsumo.objects.filter(insumo=OuterRef("pk"))
+            .order_by("-fecha", "-id")
+        )
+        queryset = (
+            Insumo.objects.select_related("unidad_base", "proveedor_principal")
+            .annotate(
+                latest_costo_unitario=Subquery(
+                    latest_cost_qs.values("costo_unitario")[:1],
+                    output_field=DecimalField(max_digits=18, decimal_places=6),
+                ),
+                latest_costo_fecha=Subquery(
+                    latest_cost_qs.values("fecha")[:1],
+                    output_field=DateField(),
+                ),
+            )
+        )
         search = self.request.GET.get('q')
         estado = self.request.GET.get('estado')
         point_status = self.request.GET.get('point_status')
+        costo_status = self.request.GET.get("costo_status")
         if search:
             queryset = queryset.filter(
                 Q(nombre__icontains=search)
@@ -92,6 +109,10 @@ class InsumoListView(LoginRequiredMixin, ListView):
             queryset = queryset.filter(activo=True).filter(Q(codigo_point="") | Q(codigo_point__isnull=True))
         elif point_status == "completos":
             queryset = queryset.filter(activo=True).exclude(Q(codigo_point="") | Q(codigo_point__isnull=True))
+        if costo_status == "sin_costo":
+            queryset = queryset.filter(Q(latest_costo_unitario__isnull=True) | Q(latest_costo_unitario__lte=0))
+        elif costo_status == "con_costo":
+            queryset = queryset.filter(latest_costo_unitario__gt=0)
         return queryset.order_by('nombre')
     
     def get_context_data(self, **kwargs):
@@ -107,6 +128,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
         context['search_query'] = self.request.GET.get('q', '')
         context['estado'] = self.request.GET.get('estado', '')
         context['point_status'] = self.request.GET.get('point_status', '')
+        context["costo_status"] = self.request.GET.get("costo_status", "")
         context['total_insumos'] = qs.count()
         context['total_activos'] = qs.filter(activo=True).count()
         context['total_point_pendientes'] = total_pending_point

@@ -49,6 +49,11 @@
       <option value="pendientes" {% if point_status == "pendientes" %}selected{% endif %}>Point: Pendientes</option>
       <option value="completos" {% if point_status == "completos" %}selected{% endif %}>Point: Completos</option>
     </select>
+    <select class="form-select" name="costo_status">
+      <option value="" {% if not costo_status %}selected{% endif %}>Costo: Todos</option>
+      <option value="con_costo" {% if costo_status == "con_costo" %}selected{% endif %}>Costo: Con costo</option>
+      <option value="sin_costo" {% if costo_status == "sin_costo" %}selected{% endif %}>Costo: Sin costo/0</option>
+    </select>
     <button class="btn btn-primary" type="submit">Filtrar</button>
     <a class="btn btn-secondary" href="{% url 'maestros:insumo_list' %}">Limpiar</a>
   </form>
@@ -64,6 +69,8 @@
           <th>Categoría</th>
           <th>Unidad base</th>
           <th>Proveedor principal</th>
+          <th class="text-end">Último costo</th>
+          <th>Fecha costo</th>
           <th>Estatus</th>
           <th>Acciones</th>
         </tr>
@@ -78,6 +85,14 @@
             <td>{{ i.categoria|default:"-" }}</td>
             <td>{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% else %}-{% endif %}</td>
             <td>{% if i.proveedor_principal %}{{ i.proveedor_principal.nombre }}{% else %}-{% endif %}</td>
+            <td class="text-end">
+              {% if i.latest_costo_unitario and i.latest_costo_unitario > 0 %}
+                ${{ i.latest_costo_unitario|floatformat:2 }}
+              {% else %}
+                <span class="badge bg-danger">Sin costo</span>
+              {% endif %}
+            </td>
+            <td>{% if i.latest_costo_fecha %}{{ i.latest_costo_fecha|date:"Y-m-d" }}{% else %}-{% endif %}</td>
             <td>
               {% if i.activo %}<span class="badge bg-success">Activo</span>{% else %}<span class="badge bg-danger">Inactivo</span>{% endif %}
               {% if i.activo and not i.codigo_point %}
@@ -92,7 +107,7 @@
             </td>
           </tr>
         {% empty %}
-          <tr><td colspan="9" class="text-muted">No hay insumos registrados.</td></tr>
+          <tr><td colspan="11" class="text-muted">No hay insumos registrados.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -102,11 +117,11 @@
   <nav>
     <ul class="pagination">
       {% if page_obj.has_previous %}
-      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
+      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&costo_status={{ costo_status }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
       {% endif %}
       <li><span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span></li>
       {% if page_obj.has_next %}
-      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
+      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&costo_status={{ costo_status }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
       {% endif %}
     </ul>
   </nav>
