@@ -335,6 +335,82 @@ class RecetaDerivedInsumoAutolinkTests(TestCase):
         self.assertFalse(LineaReceta.objects.filter(receta=receta).exists())
 
 
+class RecetaPresentacionCosteoTests(TestCase):
+    def setUp(self):
+        self.unidad_kg = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.unidad_lt = UnidadMedida.objects.create(
+            codigo="lt",
+            nombre="Litro",
+            tipo=UnidadMedida.TIPO_VOLUMEN,
+            factor_to_base=Decimal("1000"),
+        )
+
+    def test_costo_presentacion_calcula_para_receta_en_kg(self):
+        insumo = Insumo.objects.create(nombre="Harina Test KG", unidad_base=self.unidad_kg, activo=True)
+        receta = Receta.objects.create(
+            nombre="Batida KG",
+            hash_contenido="hash-pres-kg-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("10.000000"),
+            rendimiento_unidad=self.unidad_kg,
+        )
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=insumo,
+            insumo_texto="Harina Test KG",
+            cantidad=Decimal("2.000000"),
+            unidad=self.unidad_kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5.000000"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        presentacion = RecetaPresentacion.objects.create(
+            receta=receta,
+            nombre="Mini",
+            peso_por_unidad_kg=Decimal("0.500000"),
+            activo=True,
+        )
+        self.assertEqual(presentacion.costo_por_unidad_estimado, Decimal("0.500000"))
+
+    def test_costo_presentacion_calcula_para_receta_en_lt(self):
+        insumo = Insumo.objects.create(nombre="Leche Test LT", unidad_base=self.unidad_lt, activo=True)
+        receta = Receta.objects.create(
+            nombre="Flan Base LT",
+            hash_contenido="hash-pres-lt-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("20.000000"),
+            rendimiento_unidad=self.unidad_lt,
+        )
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=insumo,
+            insumo_texto="Leche Test LT",
+            cantidad=Decimal("4.000000"),
+            unidad=self.unidad_lt,
+            unidad_texto="lt",
+            costo_unitario_snapshot=Decimal("25.000000"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        presentacion = RecetaPresentacion.objects.create(
+            receta=receta,
+            nombre="Vaso",
+            peso_por_unidad_kg=Decimal("0.750000"),
+            activo=True,
+        )
+        self.assertEqual(presentacion.costo_por_unidad_estimado, Decimal("3.750000"))
+
+
 class RecetasAuthRedirectTests(TestCase):
     def test_drivers_legacy_redirects_to_login_when_anonymous(self):
         response = self.client.get(reverse("recetas:drivers_costeo_legacy"))

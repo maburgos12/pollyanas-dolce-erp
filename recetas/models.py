@@ -284,12 +284,12 @@ class RecetaPresentacion(models.Model):
 
     @property
     def costo_por_unidad_estimado(self) -> Decimal | None:
-        costo_kg = self.receta.costo_por_kg_estimado
-        if costo_kg is None:
+        costo_unidad_rendimiento = self.receta.costo_por_unidad_rendimiento
+        if costo_unidad_rendimiento is None:
             return None
         if not self.peso_por_unidad_kg or self.peso_por_unidad_kg <= 0:
             return None
-        return costo_kg * Decimal(self.peso_por_unidad_kg)
+        return costo_unidad_rendimiento * Decimal(self.peso_por_unidad_kg)
 
     @property
     def costo_por_pastel_estimado(self) -> Decimal | None:
