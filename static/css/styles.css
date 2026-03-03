@@ -1214,17 +1214,18 @@ tr:hover,
 
 .recipe-detail-shell .recipe-mix-matrix-wrap {
   width: 100%;
+  max-width: 100%;
   overflow-x: auto !important;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 2px;
-  --table-min-width: 980px;
+  --table-min-width: 1040px;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table {
   width: max(100%, var(--table-min-width));
   min-width: var(--table-min-width);
   margin: 0;
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 .recipe-detail-shell .recipe-mix-matrix-table .col-mix-label {
@@ -1258,11 +1259,17 @@ tr:hover,
   padding-right: 10px;
 }
 
+.recipe-detail-shell .recipe-mix-matrix-table th,
+.recipe-detail-shell .recipe-mix-matrix-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .recipe-detail-shell .recipe-presentaciones-wrap {
   width: 100%;
-  max-width: none;
+  max-width: 100%;
   margin: 0;
-  --table-min-width: 1200px;
+  --table-min-width: 1120px;
   overflow-x: auto !important;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 2px;
@@ -1277,15 +1284,15 @@ tr:hover,
   width: max(100%, var(--table-min-width));
   min-width: var(--table-min-width);
   margin: 0;
-  table-layout: auto;
+  table-layout: fixed;
 }
 
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 170px; min-width: 170px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-name { width: 160px; min-width: 160px; }
 .recipe-detail-shell .recipe-presentaciones-table .col-pres-derived { width: 360px; min-width: 320px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 230px; min-width: 210px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-qty { width: 220px; min-width: 210px; }
 .recipe-detail-shell .recipe-presentaciones-table .col-pres-cost { width: 180px; min-width: 170px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 140px; min-width: 130px; }
-.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 190px; min-width: 180px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-status { width: 130px; min-width: 120px; }
+.recipe-detail-shell .recipe-presentaciones-table .col-pres-actions { width: 170px; min-width: 160px; }
 
 .recipe-detail-shell .recipe-presentaciones-table thead th {
   vertical-align: bottom;
@@ -1294,7 +1301,7 @@ tr:hover,
   padding-left: 16px;
   padding-right: 16px;
   font-size: 12.5px;
-  white-space: normal;
+  white-space: nowrap;
   overflow: visible;
   text-overflow: initial;
 }
@@ -1320,18 +1327,18 @@ tr:hover,
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-label {
-  display: block;
-  white-space: normal;
+  display: inline;
+  white-space: nowrap;
   line-height: 1.15;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-unit {
-  display: block;
+  display: inline;
   font-size: 11px;
   line-height: 1.1;
   opacity: 0.85;
-  margin-top: 2px;
-  margin-left: 0;
+  margin-top: 0;
+  margin-left: 4px;
   white-space: nowrap;
 }
 
@@ -1346,6 +1353,12 @@ tr:hover,
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-actions,
 .recipe-detail-shell .recipe-presentaciones-table tbody td:nth-child(5) {
   text-align: center;
+}
+
+.recipe-detail-shell .recipe-presentaciones-table th:nth-child(n+3),
+.recipe-detail-shell .recipe-presentaciones-table td:nth-child(n+3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .recipe-detail-shell .recipe-presentaciones-table .cell-pres-actions .recipe-actions {
@@ -1364,6 +1377,19 @@ tr:hover,
 
 .page-receta-detail .main-content {
   overflow-x: hidden;
+}
+
+.page-receta-detail .container,
+.page-receta-detail .module-shell,
+.page-receta-detail .card {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.page-receta-detail .card .table-responsive {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
 }
 
 .recipe-detail-shell .recipe-lines-scroll {
