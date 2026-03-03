@@ -169,6 +169,8 @@
   const origenInput = document.getElementById("insumo_origen");
   const costoUnitarioInput = document.getElementById("costo_unitario_preview");
   const costoEstimadoInput = document.getElementById("costo_estimado_preview");
+  const recetaNameNorm = normalizeText("{{ receta.nombre|escapejs }}");
+  const isBolloRecipe = recetaNameNorm.includes(" bollo") || recetaNameNorm.startsWith("bollo") || recetaNameNorm.includes(" bollos") || recetaNameNorm.includes(" bollito");
   const insumoOptions = Array.from(insumoSelect.querySelectorAll("option"))
     .filter((opt) => !!opt.value)
     .map((opt) => ({ value: opt.value, label: opt.textContent.trim() }));
@@ -241,6 +243,7 @@
   function suggestionsFor(query) {
     const q = normalizeText(query);
     if (!q) return [];
+    const qLooksLikePan = q.startsWith("pan ") || q === "pan" || q.includes("pan chocolate") || q.includes("pan vainilla");
     const tokens = q.split(/\s+/).filter(Boolean);
     return insumoOptions
       .map((item) => {
@@ -260,6 +263,14 @@
             score += tokenHits * 55;
           }
           score += Math.round(diceCoefficient(q, norm) * 220);
+        }
+        if (isBolloRecipe && qLooksLikePan) {
+          if (norm.includes("derivado:receta:") && norm.includes("preparacion")) {
+            score += 260;
+          }
+          if (norm.includes("presentacion:")) {
+            score -= 180;
+          }
         }
         return { ...item, idx, score };
       })

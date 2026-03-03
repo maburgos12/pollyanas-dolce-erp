@@ -508,11 +508,28 @@ def _validate_linea_operativa(receta: Receta, linea: LineaReceta) -> str | None:
         return None
     if receta.tipo == Receta.TIPO_PRODUCTO_FINAL and not linea.insumo_id:
         return "En producto final, cada renglón principal debe estar ligado a un insumo/subinsumo."
+    if linea.insumo_id and linea.insumo and linea.insumo.unidad_base_id is None:
+        return (
+            f"El insumo ligado ({linea.insumo.nombre}) no tiene unidad base. "
+            "Asigna unidad en Catálogo de insumos para poder costear."
+        )
     if linea.insumo_id and (linea.cantidad is None or linea.cantidad <= 0):
         unidad = linea.unidad.codigo if linea.unidad else (linea.unidad_texto or "").strip()
         if unidad:
             return f"Captura cantidad mayor a cero para el insumo ligado ({unidad})."
         return "Captura cantidad mayor a cero para el insumo ligado."
+
+    # Regla operativa: en recetas tipo bollo, el pan se consume desde batida base (kg),
+    # no desde presentaciones en pieza.
+    presentacion = _extract_presentacion_from_recipe_name(receta.nombre)
+    ingredient_text = ((linea.insumo_texto or "").strip() or (linea.insumo.nombre if linea.insumo else "")).lower()
+    if presentacion in {"Bollo", "Bollos", "Bollito"} and ingredient_text.startswith("pan"):
+        unit = linea.insumo.unidad_base if (linea.insumo and linea.insumo.unidad_base_id) else None
+        if not unit or unit.tipo != UnidadMedida.TIPO_MASA:
+            return (
+                "En recetas de bollo, el pan debe ligarse a la batida base en kg. "
+                "Selecciona el insumo derivado de preparación (no presentación por pieza)."
+            )
     return None
 
 
