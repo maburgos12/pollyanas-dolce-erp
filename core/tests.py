@@ -1,13 +1,16 @@
+import os
+from types import SimpleNamespace
 from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_compras
 from core.models import UserProfile
 from core.views import _compute_plan_forecast_semaforo
+from core.management.commands.ejecutar_rutina_diaria_erp import _prefer_public_database_url_if_needed
 from inventario.models import AlmacenSyncRun
 from maestros.models import PointPendingMatch
 from recetas.models import LineaReceta, Receta
@@ -135,3 +138,56 @@ class UsersAccessTests(TestCase):
         profile.lock_compras = True
         profile.save(update_fields=["lock_compras"])
         self.assertFalse(can_view_compras(self.compras))
+
+
+class RutinaDiariaDatabaseFallbackTests(TestCase):
+    def test_fallback_returns_none_without_public_url(self):
+        with patch.dict(
+            os.environ,
+            {
+                "DATABASE_URL": "postgresql://u:p@postgres.railway.internal:5432/railway",
+            },
+            clear=False,
+        ):
+            os.environ.pop("DATABASE_PUBLIC_URL", None)
+            result = _prefer_public_database_url_if_needed()
+        self.assertIsNone(result)
+
+    @patch("core.management.commands.ejecutar_rutina_diaria_erp.dj_database_url.parse")
+    @patch("core.management.commands.ejecutar_rutina_diaria_erp.socket.getaddrinfo", side_effect=OSError("dns fail"))
+    def test_fallback_switches_to_public_url_when_internal_dns_fails(self, _dns_mock, parse_mock):
+        parse_mock.return_value = {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": "railway",
+            "USER": "postgres",
+            "PASSWORD": "secret",
+            "HOST": "shinkansen.proxy.rlwy.net",
+            "PORT": "29018",
+        }
+        mock_conn = MagicMock()
+        fake_connections = {"default": mock_conn}
+        fake_settings = SimpleNamespace(DATABASES={"default": {"ENGINE": "django.db.backends.postgresql"}})
+
+        with patch.dict(
+            os.environ,
+            {
+                "DATABASE_URL": "postgresql://postgres:secret@postgres.railway.internal:5432/railway",
+                "DATABASE_PUBLIC_URL": "postgresql://postgres:secret@shinkansen.proxy.rlwy.net:29018/railway?sslmode=require",
+            },
+            clear=False,
+        ):
+            with (
+                patch("core.management.commands.ejecutar_rutina_diaria_erp.connections", fake_connections),
+                patch("core.management.commands.ejecutar_rutina_diaria_erp.settings", fake_settings),
+            ):
+                result = _prefer_public_database_url_if_needed()
+                effective_db_url = os.environ.get("DATABASE_URL")
+
+        self.assertIn("DATABASE_URL fallback aplicado", result or "")
+        self.assertIn("DATABASE_PUBLIC_URL", result or "")
+        self.assertEqual(
+            effective_db_url,
+            "postgresql://postgres:secret@shinkansen.proxy.rlwy.net:29018/railway?sslmode=require",
+        )
+        parse_mock.assert_called_once()
+        mock_conn.close.assert_called_once()
