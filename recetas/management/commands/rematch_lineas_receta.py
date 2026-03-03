@@ -3,12 +3,22 @@ from django.db.models import Q
 
 from recetas.models import LineaReceta, Receta
 from recetas.utils.matching import clasificar_match, match_insumo
+from recetas.utils.normalizacion import normalizar_nombre
 from recetas.utils.template_loader import (
     _get_or_create_component_insumo,
     _latest_cost_by_insumos,
     _should_autocreate_component,
     _unit_from_text,
 )
+
+IGNORABLE_META_INGREDIENTS = {
+    "subtotal",
+    "rendimiento",
+    "margen",
+    "presentacion",
+    "presentacion final",
+    "armado",
+}
 
 
 class Command(BaseCommand):
@@ -52,6 +62,18 @@ class Command(BaseCommand):
             default=100,
             help="Imprime progreso cada N líneas evaluadas (default: 100).",
         )
+        parser.add_argument(
+            "--auto-ignore-meta",
+            action="store_true",
+            default=True,
+            help="Auto-aprueba líneas meta (subtotal/rendimiento/presentación/armado) sin costo ni cantidad.",
+        )
+        parser.add_argument(
+            "--no-auto-ignore-meta",
+            action="store_false",
+            dest="auto_ignore_meta",
+            help="Desactiva auto-aprobación de líneas meta.",
+        )
 
     def handle(self, *args, **options):
         qs = LineaReceta.objects.select_related("receta", "insumo", "unidad").order_by("receta__nombre", "posicion", "id")
@@ -77,6 +99,7 @@ class Command(BaseCommand):
         limit = max(1, int(options.get("limit") or 500))
         offset = max(0, int(options.get("offset") or 0))
         progress_every = max(1, int(options.get("progress_every") or 100))
+        auto_ignore_meta = bool(options.get("auto_ignore_meta", True))
         qs = qs[offset : offset + limit]
         total = qs.count()
         updates = []
@@ -96,8 +119,15 @@ class Command(BaseCommand):
                 still_rejected += 1
                 continue
 
+            ingrediente_norm = normalizar_nombre(ingrediente)
             insumo, score, method = match_insumo(ingrediente)
             status = clasificar_match(score)
+
+            if auto_ignore_meta and self._is_meta_line(linea, ingrediente_norm):
+                insumo = None
+                score = 100.0
+                method = "META_LINEA"
+                status = LineaReceta.STATUS_AUTO
 
             if insumo is None and _should_autocreate_component(
                 recipe_type=linea.receta.tipo,
@@ -163,6 +193,7 @@ class Command(BaseCommand):
         self.stdout.write("Rematch de líneas de receta")
         self.stdout.write(f"  - universo filtrado: {total_universe}")
         self.stdout.write(f"  - página evaluada: offset={offset}, limit={limit}, total={total}")
+        self.stdout.write(f"  - auto_ignore_meta: {auto_ignore_meta}")
         self.stdout.write(f"  - líneas evaluadas: {total}")
         self.stdout.write(f"  - auto aprobadas: {promoted_auto}")
         self.stdout.write(f"  - quedan en revisión: {promoted_review}")
@@ -222,3 +253,13 @@ class Command(BaseCommand):
                 asegurar_version_costeo(receta, fuente="REMATCH_LINEAS")
 
         self.stdout.write(self.style.SUCCESS(f"Líneas actualizadas: {applied}"))
+
+    @staticmethod
+    def _is_meta_line(linea: LineaReceta, ingrediente_norm: str) -> bool:
+        if linea.tipo_linea != LineaReceta.TIPO_NORMAL:
+            return False
+        if ingrediente_norm not in IGNORABLE_META_INGREDIENTS:
+            return False
+        has_qty = linea.cantidad is not None and linea.cantidad > 0
+        has_cost = linea.costo_linea_excel is not None and linea.costo_linea_excel > 0
+        return not has_qty and not has_cost
