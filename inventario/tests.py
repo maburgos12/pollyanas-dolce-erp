@@ -9,8 +9,9 @@ from openpyxl import load_workbook
 from io import BytesIO
 
 from core.models import AuditLog
+from compras.models import SolicitudCompra
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
-from maestros.models import Insumo, InsumoAlias, PointPendingMatch, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 from recetas.models import LineaReceta, Receta
 
 
@@ -917,6 +918,252 @@ class InventarioAliasesPendingTests(TestCase):
         ws = wb.active
         headers = [ws.cell(row=1, column=1).value, ws.cell(row=1, column=2).value, ws.cell(row=1, column=3).value]
         self.assertEqual(headers, ["alias", "normalizado", "insumo_oficial"])
+
+    def test_aliases_catalog_renders_master_data_blocks(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        Insumo.objects.create(nombre="Azucar Normal", unidad_base=unidad)
+        response = self.client.get(reverse("inventario:aliases_catalog"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Datos Maestros · Normalización y Duplicados")
+        self.assertIn("master_normalize", response.context)
+        self.assertIn("master_duplicates", response.context)
+        self.assertIn("totales", response.context["master_normalize"])
+        self.assertIn("totales", response.context["master_duplicates"])
+
+    def test_master_normalize_apply_updates_nombre_normalizado(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        insumo = Insumo.objects.create(
+            nombre="Azúcar Glass",
+            nombre_normalizado="valor-invalido",
+            unidad_base=unidad,
+        )
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "master_normalize",
+                "master_scope": "insumos",
+                "master_limit": "100",
+                "master_offset": "0",
+                "master_mode": "apply",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        insumo.refresh_from_db()
+        self.assertEqual(insumo.nombre_normalizado, "azucar glass")
+
+    def test_master_duplicates_export_csv_and_xlsx_from_aliases_catalog(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        Insumo.objects.create(nombre="Mantequilla Barra", unidad_base=unidad)
+        Insumo.objects.create(nombre="MANTEQUILLA  BARRA", unidad_base=unidad)
+
+        response_csv = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {
+                "master_dup_scope": "insumos",
+                "master_dup_min_count": "2",
+                "export": "master_duplicates_csv",
+            },
+        )
+        self.assertEqual(response_csv.status_code, 200)
+        self.assertIn("text/csv", response_csv["Content-Type"])
+        body = response_csv.content.decode("utf-8")
+        self.assertIn("group_type,duplicate_key,count,model,id,nombre,activo,codigo_point", body)
+        self.assertIn("mantequilla barra", body)
+
+        response_xlsx = self.client.get(
+            reverse("inventario:aliases_catalog"),
+            {
+                "master_dup_scope": "insumos",
+                "master_dup_min_count": "2",
+                "export": "master_duplicates_xlsx",
+            },
+        )
+        self.assertEqual(response_xlsx.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response_xlsx["Content-Type"],
+        )
+        wb = load_workbook(BytesIO(response_xlsx.content), data_only=True)
+        ws = wb.active
+        headers = [ws.cell(row=1, column=i).value for i in range(1, 9)]
+        self.assertEqual(
+            headers,
+            ["group_type", "duplicate_key", "count", "model", "id", "nombre", "activo", "codigo_point"],
+        )
+
+    def test_resolve_duplicate_insumo_merges_relations_and_deactivates_source(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        proveedor = Proveedor.objects.create(nombre="Proveedor Merge")
+        source = Insumo.objects.create(nombre="Mantequilla Barra", unidad_base=unidad, proveedor_principal=proveedor)
+        target = Insumo.objects.create(nombre="MANTEQUILLA BARRA", unidad_base=unidad)
+        alias = InsumoAlias.objects.create(nombre="Mantequilla barra premium", insumo=source)
+        CostoInsumo.objects.create(
+            insumo=source,
+            proveedor=proveedor,
+            costo_unitario=Decimal("120.000000"),
+            source_hash="hash-merge-costo-source-001",
+        )
+        receta = Receta.objects.create(nombre="Receta Merge Insumo", hash_contenido="hash-merge-receta-001")
+        linea_with_source = LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=source,
+            insumo_texto=source.nombre,
+            cantidad=Decimal("2"),
+            unidad=unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("120.000000"),
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        linea_pending = LineaReceta.objects.create(
+            receta=receta,
+            posicion=2,
+            insumo=None,
+            insumo_texto=source.nombre,
+            cantidad=Decimal("1"),
+            unidad=None,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("0"),
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+        MovimientoInventario.objects.create(
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=source,
+            cantidad=Decimal("3"),
+            referencia="MV-MERGE-001",
+            source_hash="hash-mv-merge-001",
+        )
+        AjusteInventario.objects.create(
+            insumo=source,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("9"),
+            motivo="Ajuste merge",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.user,
+        )
+        SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="admin_inv",
+            insumo=source,
+            cantidad=Decimal("5"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=source,
+            stock_actual=Decimal("10"),
+            punto_reorden=Decimal("3"),
+            stock_minimo=Decimal("4"),
+            stock_maximo=Decimal("12"),
+            inventario_promedio=Decimal("8"),
+            dias_llegada_pedido=2,
+            consumo_diario_promedio=Decimal("1"),
+        )
+        target_ex = ExistenciaInsumo.objects.create(
+            insumo=target,
+            stock_actual=Decimal("7"),
+            punto_reorden=Decimal("4"),
+            stock_minimo=Decimal("5"),
+            stock_maximo=Decimal("11"),
+            inventario_promedio=Decimal("6"),
+            dias_llegada_pedido=1,
+            consumo_diario_promedio=Decimal("2"),
+        )
+        PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-MANTE-001",
+            point_nombre=source.nombre,
+            fuzzy_score=99.0,
+            fuzzy_sugerencia=target.nombre,
+        )
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "resolve_duplicate_insumo",
+                "source_insumo_id": str(source.id),
+                "target_insumo_id": str(target.id),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        source.refresh_from_db()
+        target.refresh_from_db()
+        alias.refresh_from_db()
+        linea_with_source.refresh_from_db()
+        linea_pending.refresh_from_db()
+        target_ex.refresh_from_db()
+
+        self.assertFalse(source.activo)
+        self.assertEqual(alias.insumo_id, target.id)
+        self.assertEqual(CostoInsumo.objects.filter(insumo=target).count(), 1)
+        self.assertEqual(linea_with_source.insumo_id, target.id)
+        self.assertEqual(linea_pending.insumo_id, target.id)
+        self.assertEqual(linea_pending.match_status, LineaReceta.STATUS_AUTO)
+        self.assertEqual(linea_pending.match_method, "ALIAS")
+        self.assertEqual(MovimientoInventario.objects.filter(insumo=target).count(), 1)
+        self.assertEqual(AjusteInventario.objects.filter(insumo=target).count(), 1)
+        self.assertEqual(SolicitudCompra.objects.filter(insumo=target).count(), 1)
+        self.assertEqual(target_ex.stock_actual, Decimal("17"))
+        self.assertFalse(ExistenciaInsumo.objects.filter(insumo=source).exists())
+        self.assertEqual(target.codigo_point, "PT-MANTE-001")
+        self.assertEqual(target.nombre_point, source.nombre)
+        self.assertFalse(PointPendingMatch.objects.filter(point_codigo="PT-MANTE-001").exists())
+        self.assertTrue(
+            AuditLog.objects.filter(action="MASTER_DUPLICATE_RESOLVE_INSUMO", model="maestros.Insumo").exists()
+        )
+
+    def test_resolve_duplicate_insumo_group_consolidates_members(self):
+        unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
+        proveedor = Proveedor.objects.create(nombre="Proveedor Group")
+        insumo_a = Insumo.objects.create(nombre="Azucar Glass", unidad_base=unidad, proveedor_principal=proveedor)
+        insumo_b = Insumo.objects.create(nombre="AZUCAR   GLASS", unidad_base=unidad)
+        insumo_c = Insumo.objects.create(nombre="Azúcar Glass", unidad_base=unidad)
+        for idx, insumo in enumerate([insumo_a, insumo_b, insumo_c], start=1):
+            InsumoAlias.objects.create(nombre=f"Alias {idx} Azucar Glass", insumo=insumo)
+            CostoInsumo.objects.create(
+                insumo=insumo,
+                proveedor=proveedor,
+                costo_unitario=Decimal("10.000000") + Decimal(idx),
+                source_hash=f"hash-merge-group-{idx}",
+            )
+            ExistenciaInsumo.objects.create(
+                insumo=insumo,
+                stock_actual=Decimal(idx),
+                punto_reorden=Decimal("1"),
+                stock_minimo=Decimal("1"),
+                stock_maximo=Decimal("3"),
+                inventario_promedio=Decimal("1"),
+                dias_llegada_pedido=1,
+                consumo_diario_promedio=Decimal("1"),
+            )
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "resolve_duplicate_insumo_group",
+                "duplicate_key": "azucar glass",
+                "target_insumo_id": str(insumo_b.id),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        insumo_a.refresh_from_db()
+        insumo_b.refresh_from_db()
+        insumo_c.refresh_from_db()
+        target_ex = ExistenciaInsumo.objects.get(insumo=insumo_b)
+
+        self.assertFalse(insumo_a.activo)
+        self.assertTrue(insumo_b.activo)
+        self.assertFalse(insumo_c.activo)
+        self.assertEqual(InsumoAlias.objects.filter(insumo=insumo_b).count(), 4)
+        self.assertEqual(CostoInsumo.objects.filter(insumo=insumo_b).count(), 3)
+        self.assertEqual(target_ex.stock_actual, Decimal("6"))
+        self.assertFalse(ExistenciaInsumo.objects.filter(insumo=insumo_a).exists())
+        self.assertFalse(ExistenciaInsumo.objects.filter(insumo=insumo_c).exists())
+
+        log = AuditLog.objects.filter(action="MASTER_DUPLICATE_RESOLVE_GROUP", model="maestros.Insumo").first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.payload.get("target_id"), insumo_b.id)
+        self.assertEqual(int(log.payload.get("sources_resolved", 0)), 2)
 
 
 class InventarioAjustesApprovalTests(TestCase):

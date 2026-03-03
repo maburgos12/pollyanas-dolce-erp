@@ -15,17 +15,26 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import PermissionDenied
-from django.db.models import Q
+from django.db import transaction
+from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 
-from core.access import ROLE_ADMIN, ROLE_DG, can_manage_inventario, can_view_inventario, has_any_role
+from core.access import (
+    ROLE_ADMIN,
+    ROLE_DG,
+    can_manage_inventario,
+    can_view_inventario,
+    can_view_maestros,
+    has_any_role,
+)
 from core.audit import log_event
-from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch
-from recetas.models import LineaReceta
+from compras.models import SolicitudCompra
+from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor
+from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias, normalizar_codigo_point
 from recetas.utils.matching import clasificar_match, match_insumo
 from recetas.utils.normalizacion import normalizar_nombre
 from inventario.utils.almacen_import import (
@@ -1072,6 +1081,521 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
     return render(request, "inventario/importar_archivos.html", context)
 
 
+MASTER_NORMALIZE_SCOPES = ("all", "insumos", "recetas", "aliases_insumo", "receta_codigos_point")
+MASTER_DUPLICATES_SCOPES = ("all", "insumos", "recetas", "proveedores", "codigos_point")
+
+
+def _read_master_normalize_filters(params) -> tuple[str, str, int, int]:
+    scope = str(params.get("master_scope") or "all").strip().lower()
+    if scope not in MASTER_NORMALIZE_SCOPES:
+        scope = "all"
+    q = (params.get("master_q") or "").strip()
+    limit = int(_to_decimal(params.get("master_limit"), "80"))
+    limit = max(1, min(5000, limit))
+    offset = int(_to_decimal(params.get("master_offset"), "0"))
+    offset = max(0, min(100000, offset))
+    return scope, q, limit, offset
+
+
+def _read_master_duplicates_filters(params) -> tuple[str, str, bool, int, int, int]:
+    scope = str(params.get("master_dup_scope") or "all").strip().lower()
+    if scope not in MASTER_DUPLICATES_SCOPES:
+        scope = "all"
+    q = (params.get("master_dup_q") or "").strip()
+    include_inactive = str(params.get("master_dup_include_inactive") or "").strip() in {"1", "true", "on", "yes"}
+    min_count = int(_to_decimal(params.get("master_dup_min_count"), "2"))
+    min_count = max(2, min(200, min_count))
+    limit = int(_to_decimal(params.get("master_dup_limit"), "120"))
+    limit = max(1, min(3000, limit))
+    offset = int(_to_decimal(params.get("master_dup_offset"), "0"))
+    offset = max(0, min(100000, offset))
+    return scope, q, include_inactive, min_count, limit, offset
+
+
+def _master_query_by_scope(scope: str, q: str):
+    q_norm = normalizar_nombre(q) if q else ""
+    if scope == "insumos":
+        qs = Insumo.objects.all().order_by("id")
+        if q:
+            qs = qs.filter(
+                Q(nombre__icontains=q)
+                | Q(nombre_normalizado__icontains=q_norm)
+                | Q(codigo__icontains=q)
+                | Q(codigo_point__icontains=q)
+            )
+        return qs
+    if scope == "recetas":
+        qs = Receta.objects.all().order_by("id")
+        if q:
+            qs = qs.filter(
+                Q(nombre__icontains=q)
+                | Q(nombre_normalizado__icontains=q_norm)
+                | Q(codigo_point__icontains=q)
+            )
+        return qs
+    if scope == "aliases_insumo":
+        qs = InsumoAlias.objects.select_related("insumo").all().order_by("id")
+        if q:
+            qs = qs.filter(
+                Q(nombre__icontains=q)
+                | Q(nombre_normalizado__icontains=q_norm)
+                | Q(insumo__nombre__icontains=q)
+            )
+        return qs
+    if scope == "receta_codigos_point":
+        qs = RecetaCodigoPointAlias.objects.select_related("receta").all().order_by("id")
+        if q:
+            qs = qs.filter(
+                Q(codigo_point__icontains=q)
+                | Q(codigo_point_normalizado__icontains=normalizar_codigo_point(q))
+                | Q(nombre_point__icontains=q)
+                | Q(receta__nombre__icontains=q)
+            )
+        return qs
+    return None
+
+
+def _master_serialize_normalize_row(scope: str, obj, current: str, suggested: str) -> dict[str, object]:
+    if scope == "insumos":
+        return {
+            "scope": scope,
+            "model": "maestros.Insumo",
+            "id": obj.id,
+            "label": obj.nombre,
+            "actual": current,
+            "sugerido": suggested,
+            "changed": bool((current or "") != (suggested or "")),
+            "codigo": obj.codigo or "",
+            "codigo_point": obj.codigo_point or "",
+        }
+    if scope == "recetas":
+        return {
+            "scope": scope,
+            "model": "recetas.Receta",
+            "id": obj.id,
+            "label": obj.nombre,
+            "actual": current,
+            "sugerido": suggested,
+            "changed": bool((current or "") != (suggested or "")),
+            "codigo_point": obj.codigo_point or "",
+        }
+    if scope == "aliases_insumo":
+        return {
+            "scope": scope,
+            "model": "maestros.InsumoAlias",
+            "id": obj.id,
+            "label": obj.nombre,
+            "actual": current,
+            "sugerido": suggested,
+            "changed": bool((current or "") != (suggested or "")),
+            "insumo_id": obj.insumo_id,
+            "insumo": obj.insumo.nombre if obj.insumo_id else "",
+        }
+    return {
+        "scope": scope,
+        "model": "recetas.RecetaCodigoPointAlias",
+        "id": obj.id,
+        "label": obj.codigo_point or "",
+        "actual": current,
+        "sugerido": suggested,
+        "changed": bool((current or "") != (suggested or "")),
+        "receta_id": obj.receta_id,
+        "receta": obj.receta.nombre if obj.receta_id else "",
+    }
+
+
+def _run_master_normalize(scope: str, q: str, limit: int, offset: int, apply_changes: bool = False) -> dict[str, object]:
+    selected_scopes = (
+        ["insumos", "recetas", "aliases_insumo", "receta_codigos_point"] if scope == "all" else [scope]
+    )
+    by_scope: dict[str, dict[str, int]] = {}
+    items: list[dict[str, object]] = []
+    total_candidates = 0
+    total_changed = 0
+    total_updated = 0
+
+    for current_scope in selected_scopes:
+        qs = _master_query_by_scope(current_scope, q)
+        if qs is None:
+            continue
+        scoped_total = qs.count()
+        scoped_rows = qs[offset : offset + limit]
+        scoped_changed = 0
+        scoped_updated = 0
+
+        for obj in scoped_rows:
+            if current_scope in {"insumos", "recetas", "aliases_insumo"}:
+                current_val = str(getattr(obj, "nombre_normalizado", "") or "")
+                suggested = normalizar_nombre(getattr(obj, "nombre", "") or "")
+                field_name = "nombre_normalizado"
+            else:
+                current_val = str(getattr(obj, "codigo_point_normalizado", "") or "")
+                suggested = normalizar_codigo_point(getattr(obj, "codigo_point", "") or "")
+                field_name = "codigo_point_normalizado"
+
+            changed = current_val != suggested
+            if changed:
+                scoped_changed += 1
+                if apply_changes:
+                    setattr(obj, field_name, suggested)
+                    obj.save(update_fields=[field_name])
+                    scoped_updated += 1
+
+            items.append(_master_serialize_normalize_row(current_scope, obj, current_val, suggested))
+
+        total_candidates += scoped_total
+        total_changed += scoped_changed
+        total_updated += scoped_updated
+        by_scope[current_scope] = {
+            "candidates": scoped_total,
+            "returned": len(scoped_rows),
+            "changed": scoped_changed,
+            "updated": scoped_updated,
+        }
+
+    return {
+        "filters": {
+            "scope": scope,
+            "q": q,
+            "limit": limit,
+            "offset": offset,
+            "scopes_evaluated": selected_scopes,
+            "apply_changes": bool(apply_changes),
+        },
+        "totales": {
+            "candidates": total_candidates,
+            "changed": total_changed,
+            "updated": total_updated,
+            "returned": len(items),
+        },
+        "by_scope": by_scope,
+        "items": items,
+    }
+
+
+def _build_master_duplicate_group(group_type: str, key: str, members: list[dict[str, object]]) -> dict[str, object]:
+    members_sorted = sorted(
+        members,
+        key=lambda item: (
+            str(item.get("nombre") or item.get("label") or "").lower(),
+            int(item.get("id") or 0),
+        ),
+    )
+    return {
+        "group_type": group_type,
+        "duplicate_key": key,
+        "count": len(members_sorted),
+        "members": members_sorted,
+    }
+
+
+def _build_master_duplicates(
+    scope: str,
+    q: str,
+    include_inactive: bool,
+    min_count: int,
+    limit: int,
+    offset: int,
+) -> dict[str, object]:
+    q_norm = normalizar_nombre(q) if q else ""
+    selected_scopes = ["insumos", "recetas", "proveedores", "codigos_point"] if scope == "all" else [scope]
+    groups: list[dict[str, object]] = []
+    by_scope_totals = {k: 0 for k in selected_scopes}
+
+    if "insumos" in selected_scopes:
+        qs = Insumo.objects.all().order_by("id")
+        if not include_inactive:
+            qs = qs.filter(activo=True)
+        if q:
+            qs = qs.filter(
+                Q(nombre__icontains=q)
+                | Q(nombre_normalizado__icontains=q_norm)
+                | Q(codigo__icontains=q)
+                | Q(codigo_point__icontains=q)
+            )
+        grouped = (
+            qs.values("nombre_normalizado")
+            .annotate(total=Count("id"))
+            .filter(total__gte=min_count)
+            .order_by("-total", "nombre_normalizado")
+        )
+        for row in grouped:
+            key = str(row.get("nombre_normalizado") or "")
+            members = [
+                {
+                    "model": "maestros.Insumo",
+                    "id": int(obj.id),
+                    "nombre": obj.nombre,
+                    "activo": bool(obj.activo),
+                    "codigo_point": obj.codigo_point or "",
+                }
+                for obj in qs.filter(nombre_normalizado=key).order_by("id")
+            ]
+            groups.append(_build_master_duplicate_group("insumos", key, members))
+        by_scope_totals["insumos"] = len([g for g in groups if g["group_type"] == "insumos"])
+
+    if "recetas" in selected_scopes:
+        qs = Receta.objects.all().order_by("id")
+        if q:
+            qs = qs.filter(
+                Q(nombre__icontains=q)
+                | Q(nombre_normalizado__icontains=q_norm)
+                | Q(codigo_point__icontains=q)
+            )
+        grouped = (
+            qs.values("nombre_normalizado")
+            .annotate(total=Count("id"))
+            .filter(total__gte=min_count)
+            .order_by("-total", "nombre_normalizado")
+        )
+        for row in grouped:
+            key = str(row.get("nombre_normalizado") or "")
+            members = [
+                {
+                    "model": "recetas.Receta",
+                    "id": int(obj.id),
+                    "nombre": obj.nombre,
+                    "activo": True,
+                    "codigo_point": obj.codigo_point or "",
+                }
+                for obj in qs.filter(nombre_normalizado=key).order_by("id")
+            ]
+            groups.append(_build_master_duplicate_group("recetas", key, members))
+        by_scope_totals["recetas"] = len([g for g in groups if g["group_type"] == "recetas"])
+
+    if "proveedores" in selected_scopes:
+        qs = Proveedor.objects.all().order_by("id")
+        if not include_inactive:
+            qs = qs.filter(activo=True)
+        if q:
+            qs = qs.filter(nombre__icontains=q)
+        by_key: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for provider in qs:
+            key = normalizar_nombre(provider.nombre or "")
+            if not key:
+                continue
+            by_key[key].append(
+                {
+                    "model": "maestros.Proveedor",
+                    "id": int(provider.id),
+                    "nombre": provider.nombre,
+                    "activo": bool(provider.activo),
+                    "codigo_point": "",
+                }
+            )
+        for key, members in sorted(by_key.items(), key=lambda item: (-len(item[1]), item[0])):
+            if len(members) < min_count:
+                continue
+            groups.append(_build_master_duplicate_group("proveedores", key, members))
+        by_scope_totals["proveedores"] = len([g for g in groups if g["group_type"] == "proveedores"])
+
+    if "codigos_point" in selected_scopes:
+        by_code: dict[str, list[dict[str, object]]] = defaultdict(list)
+        insumos_qs = Insumo.objects.exclude(codigo_point="").order_by("id")
+        recetas_qs = Receta.objects.exclude(codigo_point="").order_by("id")
+        if not include_inactive:
+            insumos_qs = insumos_qs.filter(activo=True)
+        if q:
+            insumos_qs = insumos_qs.filter(Q(codigo_point__icontains=q) | Q(nombre__icontains=q))
+            recetas_qs = recetas_qs.filter(Q(codigo_point__icontains=q) | Q(nombre__icontains=q))
+        for insumo in insumos_qs:
+            key = normalizar_codigo_point(insumo.codigo_point or "")
+            if not key:
+                continue
+            by_code[key].append(
+                {
+                    "model": "maestros.Insumo",
+                    "id": int(insumo.id),
+                    "nombre": insumo.nombre,
+                    "activo": bool(insumo.activo),
+                    "codigo_point": insumo.codigo_point or "",
+                }
+            )
+        for receta in recetas_qs:
+            key = normalizar_codigo_point(receta.codigo_point or "")
+            if not key:
+                continue
+            by_code[key].append(
+                {
+                    "model": "recetas.Receta",
+                    "id": int(receta.id),
+                    "nombre": receta.nombre,
+                    "activo": True,
+                    "codigo_point": receta.codigo_point or "",
+                }
+            )
+        for key, members in sorted(by_code.items(), key=lambda item: (-len(item[1]), item[0])):
+            if len(members) < min_count:
+                continue
+            groups.append(_build_master_duplicate_group("codigos_point", key, members))
+        by_scope_totals["codigos_point"] = len([g for g in groups if g["group_type"] == "codigos_point"])
+
+    groups.sort(key=lambda row: (-int(row.get("count") or 0), str(row.get("duplicate_key") or "").lower()))
+    total_groups = len(groups)
+    page_groups = groups[offset : offset + limit]
+
+    return {
+        "filters": {
+            "scope": scope,
+            "q": q,
+            "include_inactive": include_inactive,
+            "min_count": min_count,
+            "limit": limit,
+            "offset": offset,
+        },
+        "totales": {
+            "groups_total": total_groups,
+            "groups_returned": len(page_groups),
+            "by_scope": by_scope_totals,
+        },
+        "items": page_groups,
+    }
+
+
+def _export_master_duplicates_csv(groups: list[dict[str, object]]) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="master_duplicates.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["group_type", "duplicate_key", "count", "model", "id", "nombre", "activo", "codigo_point"])
+    for group in groups:
+        for member in group.get("members") or []:
+            writer.writerow(
+                [
+                    group.get("group_type") or "",
+                    group.get("duplicate_key") or "",
+                    group.get("count") or 0,
+                    member.get("model") or "",
+                    member.get("id") or "",
+                    member.get("nombre") or "",
+                    "1" if member.get("activo") else "0",
+                    member.get("codigo_point") or "",
+                ]
+            )
+    return response
+
+
+def _export_master_duplicates_xlsx(groups: list[dict[str, object]]) -> HttpResponse:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "duplicates"
+    sheet.append(["group_type", "duplicate_key", "count", "model", "id", "nombre", "activo", "codigo_point"])
+    for group in groups:
+        for member in group.get("members") or []:
+            sheet.append(
+                [
+                    group.get("group_type") or "",
+                    group.get("duplicate_key") or "",
+                    group.get("count") or 0,
+                    member.get("model") or "",
+                    member.get("id") or "",
+                    member.get("nombre") or "",
+                    "1" if member.get("activo") else "0",
+                    member.get("codigo_point") or "",
+                ]
+            )
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="master_duplicates.xlsx"'
+    return response
+
+
+def _merge_insumo_into_target(source: Insumo, target: Insumo) -> dict[str, int]:
+    if source.id == target.id:
+        return {
+            "aliases_updated": 0,
+            "costos_updated": 0,
+            "lineas_updated": 0,
+            "movimientos_updated": 0,
+            "ajustes_updated": 0,
+            "solicitudes_updated": 0,
+            "existencia_merged": 0,
+        }
+
+    alias_count = InsumoAlias.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
+    costo_count = CostoInsumo.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
+    linea_count = LineaReceta.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
+    movimiento_count = MovimientoInventario.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
+    ajuste_count = AjusteInventario.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
+    solicitud_count = SolicitudCompra.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
+
+    existencia_merged = 0
+    source_ex = ExistenciaInsumo.objects.filter(insumo_id=source.id).first()
+    if source_ex:
+        target_ex = ExistenciaInsumo.objects.filter(insumo_id=target.id).first()
+        if not target_ex:
+            source_ex.insumo_id = target.id
+            source_ex.actualizado_en = timezone.now()
+            source_ex.save(update_fields=["insumo", "actualizado_en"])
+            existencia_merged = 1
+        else:
+            target_ex.stock_actual = _to_decimal(target_ex.stock_actual) + _to_decimal(source_ex.stock_actual)
+            target_ex.punto_reorden = max(_to_decimal(target_ex.punto_reorden), _to_decimal(source_ex.punto_reorden))
+            target_ex.stock_minimo = max(_to_decimal(target_ex.stock_minimo), _to_decimal(source_ex.stock_minimo))
+            target_ex.stock_maximo = max(_to_decimal(target_ex.stock_maximo), _to_decimal(source_ex.stock_maximo))
+            target_ex.inventario_promedio = max(
+                _to_decimal(target_ex.inventario_promedio),
+                _to_decimal(source_ex.inventario_promedio),
+            )
+            target_ex.dias_llegada_pedido = max(
+                int(target_ex.dias_llegada_pedido or 0),
+                int(source_ex.dias_llegada_pedido or 0),
+            )
+            target_ex.consumo_diario_promedio = max(
+                _to_decimal(target_ex.consumo_diario_promedio),
+                _to_decimal(source_ex.consumo_diario_promedio),
+            )
+            target_ex.actualizado_en = timezone.now()
+            target_ex.save(
+                update_fields=[
+                    "stock_actual",
+                    "punto_reorden",
+                    "stock_minimo",
+                    "stock_maximo",
+                    "inventario_promedio",
+                    "dias_llegada_pedido",
+                    "consumo_diario_promedio",
+                    "actualizado_en",
+                ]
+            )
+            source_ex.delete()
+            existencia_merged = 1
+
+    if source.proveedor_principal_id and not target.proveedor_principal_id:
+        target.proveedor_principal_id = source.proveedor_principal_id
+    if source.unidad_base_id and not target.unidad_base_id:
+        target.unidad_base_id = source.unidad_base_id
+    if source.codigo_point and not target.codigo_point:
+        target.codigo_point = source.codigo_point
+    if source.nombre_point and not target.nombre_point:
+        target.nombre_point = source.nombre_point
+    target.save(
+        update_fields=[
+            "proveedor_principal",
+            "unidad_base",
+            "codigo_point",
+            "nombre_point",
+        ]
+    )
+
+    source.activo = False
+    source.save(update_fields=["activo"])
+
+    return {
+        "aliases_updated": alias_count,
+        "costos_updated": costo_count,
+        "lineas_updated": linea_count,
+        "movimientos_updated": movimiento_count,
+        "ajustes_updated": ajuste_count,
+        "solicitudes_updated": solicitud_count,
+        "existencia_merged": existencia_merged,
+    }
+
+
 @login_required
 def aliases_catalog(request: HttpRequest) -> HttpResponse:
     if not can_view_inventario(request.user):
@@ -1558,6 +2082,154 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             request.session.pop("inventario_alias_import_preview", None)
             request.session.pop("inventario_alias_import_stats", None)
             messages.success(request, "Pendientes de importación limpiados.")
+        elif action == "master_normalize":
+            if not can_view_maestros(request.user):
+                raise PermissionDenied("No tienes permisos para normalización de datos maestros.")
+            scope, master_q, master_limit, master_offset = _read_master_normalize_filters(request.POST)
+            mode = str(request.POST.get("master_mode") or "preview").strip().lower()
+            apply_changes = mode == "apply"
+            if apply_changes and (not has_any_role(request.user, ROLE_ADMIN, ROLE_DG)):
+                messages.error(request, "Solo ADMIN o DG pueden aplicar normalización persistente.")
+            else:
+                result = _run_master_normalize(
+                    scope=scope,
+                    q=master_q,
+                    limit=master_limit,
+                    offset=master_offset,
+                    apply_changes=apply_changes,
+                )
+                if apply_changes:
+                    messages.success(
+                        request,
+                        (
+                            "Normalización aplicada. "
+                            f"Candidatos: {result['totales']['candidates']}. "
+                            f"Cambios detectados: {result['totales']['changed']}. "
+                            f"Actualizados: {result['totales']['updated']}."
+                        ),
+                    )
+                else:
+                    messages.info(
+                        request,
+                        (
+                            "Vista previa de normalización generada. "
+                            f"Candidatos: {result['totales']['candidates']}. "
+                            f"Cambios potenciales: {result['totales']['changed']}."
+                        ),
+                    )
+                log_event(
+                    request.user,
+                    "MASTER_NORMALIZE_APPLY" if apply_changes else "MASTER_NORMALIZE_PREVIEW",
+                    "master.Normalization",
+                    "",
+                    payload={
+                        "scope": scope,
+                        "q": master_q,
+                        "limit": master_limit,
+                        "offset": master_offset,
+                        "totals": result["totales"],
+                    },
+                )
+        elif action == "resolve_duplicate_insumo":
+            source_id_raw = (request.POST.get("source_insumo_id") or "").strip()
+            target_id_raw = (request.POST.get("target_insumo_id") or "").strip()
+            source = Insumo.objects.filter(pk=source_id_raw).first() if source_id_raw.isdigit() else None
+            target = Insumo.objects.filter(pk=target_id_raw).first() if target_id_raw.isdigit() else None
+            if not source or not target:
+                messages.error(request, "Selecciona origen y destino válidos para resolver duplicado.")
+            elif source.id == target.id:
+                messages.error(request, "Origen y destino no pueden ser el mismo insumo.")
+            else:
+                with transaction.atomic():
+                    merge_stats = _merge_insumo_into_target(source, target)
+                    ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
+                    if ok_alias:
+                        _remove_pending_name_from_session(request, alias_norm)
+                        _remove_pending_name_from_recent_runs(alias_norm)
+                        _resolve_cross_source_with_alias(source.nombre, target)
+                messages.success(
+                    request,
+                    (
+                        f"Duplicado resuelto: '{source.nombre}' → '{target.nombre}'. "
+                        f"Aliases {merge_stats['aliases_updated']}, Costos {merge_stats['costos_updated']}, "
+                        f"Líneas receta {merge_stats['lineas_updated']}, Movimientos {merge_stats['movimientos_updated']}, "
+                        f"Ajustes {merge_stats['ajustes_updated']}, Solicitudes {merge_stats['solicitudes_updated']}."
+                    ),
+                )
+                log_event(
+                    request.user,
+                    "MASTER_DUPLICATE_RESOLVE_INSUMO",
+                    "maestros.Insumo",
+                    target.id,
+                    payload={
+                        "source_id": source.id,
+                        "target_id": target.id,
+                        "source_nombre": source.nombre,
+                        "target_nombre": target.nombre,
+                        **merge_stats,
+                    },
+                )
+        elif action == "resolve_duplicate_insumo_group":
+            duplicate_key = normalizar_nombre((request.POST.get("duplicate_key") or "").strip())
+            target_id_raw = (request.POST.get("target_insumo_id") or "").strip()
+            if not duplicate_key:
+                messages.error(request, "Llave de duplicado inválida.")
+            else:
+                members = list(
+                    Insumo.objects.filter(nombre_normalizado=duplicate_key).order_by("-activo", "id")
+                )
+                if len(members) < 2:
+                    messages.warning(request, "Ese grupo ya no tiene duplicados activos para resolver.")
+                else:
+                    target = None
+                    if target_id_raw.isdigit():
+                        target = next((m for m in members if m.id == int(target_id_raw)), None)
+                    if not target:
+                        target = members[0]
+                    sources = [m for m in members if m.id != target.id]
+                    totals = {
+                        "sources_resolved": 0,
+                        "aliases_updated": 0,
+                        "costos_updated": 0,
+                        "lineas_updated": 0,
+                        "movimientos_updated": 0,
+                        "ajustes_updated": 0,
+                        "solicitudes_updated": 0,
+                        "existencia_merged": 0,
+                    }
+                    with transaction.atomic():
+                        for source in sources:
+                            merge_stats = _merge_insumo_into_target(source, target)
+                            totals["sources_resolved"] += 1
+                            for k, v in merge_stats.items():
+                                totals[k] += int(v or 0)
+                            ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
+                            if ok_alias:
+                                _remove_pending_name_from_session(request, alias_norm)
+                                _remove_pending_name_from_recent_runs(alias_norm)
+                                _resolve_cross_source_with_alias(source.nombre, target)
+
+                    messages.success(
+                        request,
+                        (
+                            f"Grupo '{duplicate_key}' resuelto hacia '{target.nombre}'. "
+                            f"Fuentes consolidadas {totals['sources_resolved']}. "
+                            f"Aliases {totals['aliases_updated']}, Costos {totals['costos_updated']}, "
+                            f"Líneas receta {totals['lineas_updated']}."
+                        ),
+                    )
+                    log_event(
+                        request.user,
+                        "MASTER_DUPLICATE_RESOLVE_GROUP",
+                        "maestros.Insumo",
+                        target.id,
+                        payload={
+                            "duplicate_key": duplicate_key,
+                            "target_id": target.id,
+                            "target_nombre": target.nombre,
+                            **totals,
+                        },
+                    )
 
         base_url = reverse("inventario:aliases_catalog")
         redirect_params = {}
@@ -1591,6 +2263,38 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             redirect_params["cross_source"] = cross_source_post
         if cross_only_suggested_post:
             redirect_params["cross_only_suggested"] = "1"
+        master_scope_post, master_q_post, master_limit_post, master_offset_post = _read_master_normalize_filters(
+            request.POST
+        )
+        if "master_scope" in request.POST:
+            redirect_params["master_scope"] = master_scope_post
+        if master_q_post:
+            redirect_params["master_q"] = master_q_post
+        if "master_limit" in request.POST:
+            redirect_params["master_limit"] = master_limit_post
+        if "master_offset" in request.POST:
+            redirect_params["master_offset"] = master_offset_post
+
+        (
+            master_dup_scope_post,
+            master_dup_q_post,
+            master_dup_include_inactive_post,
+            master_dup_min_count_post,
+            master_dup_limit_post,
+            master_dup_offset_post,
+        ) = _read_master_duplicates_filters(request.POST)
+        if "master_dup_scope" in request.POST:
+            redirect_params["master_dup_scope"] = master_dup_scope_post
+        if master_dup_q_post:
+            redirect_params["master_dup_q"] = master_dup_q_post
+        if master_dup_include_inactive_post:
+            redirect_params["master_dup_include_inactive"] = "1"
+        if "master_dup_min_count" in request.POST:
+            redirect_params["master_dup_min_count"] = master_dup_min_count_post
+        if "master_dup_limit" in request.POST:
+            redirect_params["master_dup_limit"] = master_dup_limit_post
+        if "master_dup_offset" in request.POST:
+            redirect_params["master_dup_offset"] = master_dup_offset_post
         if redirect_params:
             return redirect(f"{base_url}?{urlencode(redirect_params)}")
         return redirect(base_url)
@@ -1708,6 +2412,40 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "multi_source_rows": sum(1 for row in cross_filtered_sorted_rows if int(row.get("sources_active") or 0) >= 2),
     }
 
+    (
+        master_scope,
+        master_q,
+        master_limit,
+        master_offset,
+    ) = _read_master_normalize_filters(request.GET)
+    master_normalize_preview = _run_master_normalize(
+        scope=master_scope,
+        q=master_q,
+        limit=master_limit,
+        offset=master_offset,
+        apply_changes=False,
+    )
+
+    (
+        master_dup_scope,
+        master_dup_q,
+        master_dup_include_inactive,
+        master_dup_min_count,
+        master_dup_limit,
+        master_dup_offset,
+    ) = _read_master_duplicates_filters(request.GET)
+    master_duplicates = _build_master_duplicates(
+        scope=master_dup_scope,
+        q=master_dup_q,
+        include_inactive=master_dup_include_inactive,
+        min_count=master_dup_min_count,
+        limit=master_dup_limit,
+        offset=master_dup_offset,
+    )
+    master_duplicate_insumo_groups = [
+        g for g in (master_duplicates.get("items") or []) if g.get("group_type") == "insumos"
+    ]
+
     export_format = (request.GET.get("export") or "").strip().lower()
     if export_format == "cross_pending_csv":
         return _export_cross_pending_csv(cross_filtered_sorted_rows)
@@ -1727,6 +2465,10 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         return _export_aliases_catalog_csv(aliases_qs)
     if export_format == "aliases_xlsx":
         return _export_aliases_catalog_xlsx(aliases_qs)
+    if export_format == "master_duplicates_csv":
+        return _export_master_duplicates_csv(master_duplicates["items"])
+    if export_format == "master_duplicates_xlsx":
+        return _export_master_duplicates_xlsx(master_duplicates["items"])
 
     import_preview = list(request.session.get("inventario_alias_import_preview", []))[:200]
     import_stats = request.session.get("inventario_alias_import_stats", {})
@@ -1864,6 +2606,19 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
         "cross_unified_rows": cross_unified_rows,
         "alias_import_preview": import_preview,
         "alias_import_stats": import_stats,
+        "master_normalize": master_normalize_preview,
+        "master_scope": master_scope,
+        "master_q": master_q,
+        "master_limit": master_limit,
+        "master_offset": master_offset,
+        "master_duplicates": master_duplicates,
+        "master_dup_scope": master_dup_scope,
+        "master_dup_q": master_dup_q,
+        "master_dup_include_inactive": master_dup_include_inactive,
+        "master_dup_min_count": master_dup_min_count,
+        "master_dup_limit": master_dup_limit,
+        "master_dup_offset": master_dup_offset,
+        "master_duplicate_insumo_groups": master_duplicate_insumo_groups,
     }
     return render(request, "inventario/aliases_catalog.html", context)
 

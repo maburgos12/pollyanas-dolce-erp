@@ -47,6 +47,192 @@
 </section>
 
 <section class="card">
+  <div class="card-header">Datos Maestros · Normalización y Duplicados</div>
+  <p class="muted">Herramientas de higiene de catálogo para evitar drift en nombres/códigos y prevenir duplicados en operaciones.</p>
+
+  <div class="table-responsive" style="margin-top:8px;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th style="width:50%;">Normalización</th>
+          <th style="width:50%;">Duplicados</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <form method="post" class="form-grid-auto">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="master_normalize">
+              <select class="input-field" name="master_scope">
+                <option value="all" {% if master_scope == "all" %}selected{% endif %}>Scope · Todos</option>
+                <option value="insumos" {% if master_scope == "insumos" %}selected{% endif %}>Scope · Insumos</option>
+                <option value="recetas" {% if master_scope == "recetas" %}selected{% endif %}>Scope · Recetas</option>
+                <option value="aliases_insumo" {% if master_scope == "aliases_insumo" %}selected{% endif %}>Scope · Aliases insumo</option>
+                <option value="receta_codigos_point" {% if master_scope == "receta_codigos_point" %}selected{% endif %}>Scope · Códigos Point (receta)</option>
+              </select>
+              <input class="input-field" type="text" name="master_q" value="{{ master_q }}" placeholder="Filtro opcional...">
+              <input class="input-field" type="number" name="master_limit" min="1" max="5000" value="{{ master_limit }}">
+              <input class="input-field" type="number" name="master_offset" min="0" max="100000" value="{{ master_offset }}">
+              <button class="btn btn-secondary" type="submit" name="master_mode" value="preview">Vista previa</button>
+              {% if can_manage_inventario %}
+              <button class="btn btn-primary" type="submit" name="master_mode" value="apply">Aplicar</button>
+              {% endif %}
+            </form>
+
+            <div class="toolbar" style="margin-top:10px;">
+              <span class="badge badge-primary">Candidatos: {{ master_normalize.totales.candidates }}</span>
+              <span class="badge badge-warning">Cambios: {{ master_normalize.totales.changed }}</span>
+              <span class="badge badge-success">Actualizados: {{ master_normalize.totales.updated }}</span>
+            </div>
+
+            <div class="table-responsive" style="margin-top:10px;">
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Scope</th>
+                    <th class="text-end">Candidatos</th>
+                    <th class="text-end">Retornados</th>
+                    <th class="text-end">Cambios</th>
+                    <th class="text-end">Actualizados</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for k, v in master_normalize.by_scope.items %}
+                  <tr>
+                    <td>{{ k }}</td>
+                    <td class="text-end">{{ v.candidates }}</td>
+                    <td class="text-end">{{ v.returned }}</td>
+                    <td class="text-end">{{ v.changed }}</td>
+                    <td class="text-end">{{ v.updated }}</td>
+                  </tr>
+                  {% empty %}
+                  <tr><td colspan="5" class="text-muted">Sin datos por scope.</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </td>
+
+          <td>
+            <form method="get" class="form-grid-auto">
+              <select class="input-field" name="master_dup_scope">
+                <option value="all" {% if master_dup_scope == "all" %}selected{% endif %}>Scope · Todos</option>
+                <option value="insumos" {% if master_dup_scope == "insumos" %}selected{% endif %}>Scope · Insumos</option>
+                <option value="recetas" {% if master_dup_scope == "recetas" %}selected{% endif %}>Scope · Recetas</option>
+                <option value="proveedores" {% if master_dup_scope == "proveedores" %}selected{% endif %}>Scope · Proveedores</option>
+                <option value="codigos_point" {% if master_dup_scope == "codigos_point" %}selected{% endif %}>Scope · Códigos Point</option>
+              </select>
+              <input class="input-field" type="text" name="master_dup_q" value="{{ master_dup_q }}" placeholder="Filtro opcional...">
+              <input class="input-field" type="number" name="master_dup_min_count" min="2" max="200" value="{{ master_dup_min_count }}">
+              <input class="input-field" type="number" name="master_dup_limit" min="1" max="3000" value="{{ master_dup_limit }}">
+              <input class="input-field" type="number" name="master_dup_offset" min="0" max="100000" value="{{ master_dup_offset }}">
+              <label class="inline-check"><input type="checkbox" name="master_dup_include_inactive" {% if master_dup_include_inactive %}checked{% endif %}> Incluir inactivos</label>
+              <button class="btn btn-primary" type="submit">Refrescar</button>
+              <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Limpiar</a>
+            </form>
+
+            <div class="toolbar" style="margin-top:10px;">
+              <span class="badge badge-primary">Grupos: {{ master_duplicates.totales.groups_total }}</span>
+              <span class="badge badge-warning">Página: {{ master_duplicates.totales.groups_returned }}</span>
+              <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?master_dup_scope={{ master_dup_scope }}&master_dup_q={{ master_dup_q|urlencode }}&master_dup_min_count={{ master_dup_min_count }}&master_dup_limit={{ master_dup_limit }}&master_dup_offset={{ master_dup_offset }}{% if master_dup_include_inactive %}&master_dup_include_inactive=1{% endif %}&export=master_duplicates_csv">Exportar CSV</a>
+              <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?master_dup_scope={{ master_dup_scope }}&master_dup_q={{ master_dup_q|urlencode }}&master_dup_min_count={{ master_dup_min_count }}&master_dup_limit={{ master_dup_limit }}&master_dup_offset={{ master_dup_offset }}{% if master_dup_include_inactive %}&master_dup_include_inactive=1{% endif %}&export=master_duplicates_xlsx">Exportar XLSX</a>
+            </div>
+
+            <div class="table-responsive" style="margin-top:10px;">
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Tipo</th>
+                    <th>Llave</th>
+                    <th class="text-end">Count</th>
+                    <th>Miembros</th>
+                    {% if can_manage_inventario %}<th>Resolver</th>{% endif %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in master_duplicates.items %}
+                  <tr>
+                    <td>{{ row.group_type }}</td>
+                    <td><code>{{ row.duplicate_key }}</code></td>
+                    <td class="text-end">{{ row.count }}</td>
+                    <td>
+                      {% for m in row.members|slice:":5" %}
+                        <span class="badge badge-primary">{{ m.nombre }} ({{ m.model }})</span>
+                      {% endfor %}
+                      {% if row.count > 5 %}
+                        <span class="badge badge-warning">+{{ row.count|add:"-5" }} más</span>
+                      {% endif %}
+                    </td>
+                    {% if can_manage_inventario %}
+                    <td>
+                      {% if row.group_type == "insumos" and row.count >= 2 %}
+                      <form method="post" class="inline-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="resolve_duplicate_insumo_group">
+                        <input type="hidden" name="duplicate_key" value="{{ row.duplicate_key }}">
+                        <input type="hidden" name="master_dup_scope" value="{{ master_dup_scope }}">
+                        <input type="hidden" name="master_dup_q" value="{{ master_dup_q }}">
+                        <input type="hidden" name="master_dup_min_count" value="{{ master_dup_min_count }}">
+                        <input type="hidden" name="master_dup_limit" value="{{ master_dup_limit }}">
+                        <input type="hidden" name="master_dup_offset" value="{{ master_dup_offset }}">
+                        <select class="input-field" name="target_insumo_id">
+                          {% for m in row.members %}
+                          <option value="{{ m.id }}">{{ m.nombre }}{% if forloop.first %} (canon sugerido){% endif %}</option>
+                          {% endfor %}
+                        </select>
+                        <button class="btn btn-primary" type="submit">Consolidar grupo</button>
+                      </form>
+                      {% else %}
+                      <span class="text-muted">N/A</span>
+                      {% endif %}
+                    </td>
+                    {% endif %}
+                  </tr>
+                  {% empty %}
+                  <tr><td colspan="{% if can_manage_inventario %}5{% else %}4{% endif %}" class="text-muted">Sin duplicados para filtros actuales.</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+
+            {% if can_manage_inventario %}
+            <div class="card" style="margin-top:10px; padding:12px;">
+              <div class="card-header" style="font-size:16px; margin-bottom:8px;">Resolver duplicado puntual de insumo</div>
+              <form method="post" class="form-grid-auto">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="resolve_duplicate_insumo">
+                <input type="hidden" name="master_dup_scope" value="{{ master_dup_scope }}">
+                <input type="hidden" name="master_dup_q" value="{{ master_dup_q }}">
+                <input type="hidden" name="master_dup_min_count" value="{{ master_dup_min_count }}">
+                <input type="hidden" name="master_dup_limit" value="{{ master_dup_limit }}">
+                <input type="hidden" name="master_dup_offset" value="{{ master_dup_offset }}">
+                <select class="input-field" name="source_insumo_id" required>
+                  <option value="">Insumo origen (duplicado)...</option>
+                  {% for g in master_duplicate_insumo_groups %}
+                    {% for m in g.members %}
+                    <option value="{{ m.id }}">{{ m.nombre }} · {{ g.duplicate_key }}</option>
+                    {% endfor %}
+                  {% endfor %}
+                </select>
+                <select class="input-field" name="target_insumo_id" required>
+                  <option value="">Insumo destino (canon)...</option>
+                  {% for i in insumo_alias_targets %}
+                  <option value="{{ i.id }}">{{ i.nombre }}</option>
+                  {% endfor %}
+                </select>
+                <button class="btn btn-primary" type="submit">Resolver duplicado puntual</button>
+              </form>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
   <div class="card-header">Homologación Cruzada (Point + Almacén + Recetas)</div>
   <p class="muted">Prioriza nombres que aparezcan en 2 o 3 fuentes para normalizar todo el ecosistema con un solo alias.</p>
 
