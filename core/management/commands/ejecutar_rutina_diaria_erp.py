@@ -72,6 +72,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Simula operaciones en sync Drive/Point. Hardening/auditoría se omiten.",
         )
+        parser.add_argument(
+            "--continue-on-error",
+            action="store_true",
+            help="Continúa con siguientes pasos aunque uno falle y reporta resumen de errores.",
+        )
 
     def handle(self, *args, **options):
         started_at = timezone.now()
@@ -92,6 +97,7 @@ class Command(BaseCommand):
             f"- started_at: {started_at.isoformat()}",
             f"- month: {options['month']}",
             f"- dry_run: {'SI' if dry_run else 'NO'}",
+            f"- continue_on_error: {'SI' if options['continue_on_error'] else 'NO'}",
             "",
             "## Pasos",
         ]
@@ -99,18 +105,37 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Rutina diaria ERP"))
         self.stdout.write(f"  - month: {options['month']}")
         self.stdout.write(f"  - dry_run: {'SI' if dry_run else 'NO'}")
+        self.stdout.write(f"  - continue_on_error: {'SI' if options['continue_on_error'] else 'NO'}")
+
+        errors: list[str] = []
+
+        def run_step(step_name: str, callback):
+            try:
+                callback()
+                summary_lines.append(f"- [OK] {step_name}")
+            except Exception as exc:
+                msg = f"{step_name}: {exc.__class__.__name__}: {exc}"
+                errors.append(msg)
+                summary_lines.append(f"- [ERROR] {msg}")
+                self.stderr.write(self.style.ERROR(msg))
+                if not options["continue_on_error"]:
+                    raise
 
         if not skip_drive:
             self.stdout.write("1) Sync almacén Drive")
-            call_command(
-                "sync_almacen_drive",
-                month=str(options["month"]),
-                fuzzy_threshold=int(options["drive_fuzzy_threshold"]),
-                create_aliases=bool(options["drive_create_aliases"]),
-                dry_run=dry_run,
-            )
-            summary_lines.append(
-                f"- [OK] sync_almacen_drive month={options['month']} fuzzy={options['drive_fuzzy_threshold']}"
+
+            def _run_drive():
+                call_command(
+                    "sync_almacen_drive",
+                    month=str(options["month"]),
+                    fuzzy_threshold=int(options["drive_fuzzy_threshold"]),
+                    create_aliases=bool(options["drive_create_aliases"]),
+                    dry_run=dry_run,
+                )
+
+            run_step(
+                f"sync_almacen_drive month={options['month']} fuzzy={options['drive_fuzzy_threshold']}",
+                _run_drive,
             )
         else:
             self.stdout.write("1) Sync almacén Drive omitido")
@@ -118,21 +143,25 @@ class Command(BaseCommand):
 
         if not skip_point:
             point_dir = Path(str(options["point_dir"])).expanduser().resolve()
-            if not point_dir.exists():
-                raise CommandError(f"No existe point-dir: {point_dir}")
             self.stdout.write("2) Sync catálogos Point")
-            call_command(
-                "sync_point_catalogs",
-                str(point_dir),
-                fuzzy_threshold=int(options["point_fuzzy_threshold"]),
-                apply_proveedores=not dry_run,
-                apply_insumos=not dry_run,
-                apply_productos=not dry_run,
-                create_aliases=not dry_run,
-                dry_run=dry_run,
-            )
-            summary_lines.append(
-                f"- [OK] sync_point_catalogs dir={point_dir} fuzzy={options['point_fuzzy_threshold']}"
+
+            def _run_point():
+                if not point_dir.exists():
+                    raise CommandError(f"No existe point-dir: {point_dir}")
+                call_command(
+                    "sync_point_catalogs",
+                    str(point_dir),
+                    fuzzy_threshold=int(options["point_fuzzy_threshold"]),
+                    apply_proveedores=not dry_run,
+                    apply_insumos=not dry_run,
+                    apply_productos=not dry_run,
+                    create_aliases=not dry_run,
+                    dry_run=dry_run,
+                )
+
+            run_step(
+                f"sync_point_catalogs dir={point_dir} fuzzy={options['point_fuzzy_threshold']}",
+                _run_point,
             )
         else:
             self.stdout.write("2) Sync catálogos Point omitido")
@@ -140,16 +169,14 @@ class Command(BaseCommand):
 
         if not skip_hardening:
             self.stdout.write("3) Hardening post-import")
-            call_command("ejecutar_hardening_post_import")
-            summary_lines.append("- [OK] ejecutar_hardening_post_import")
+            run_step("ejecutar_hardening_post_import", lambda: call_command("ejecutar_hardening_post_import"))
         else:
             self.stdout.write("3) Hardening post-import omitido")
             summary_lines.append("- [SKIP] ejecutar_hardening_post_import")
 
         if not skip_audit:
             self.stdout.write("4) Auditoría final")
-            call_command("auditar_flujo_erp")
-            summary_lines.append("- [OK] auditar_flujo_erp")
+            run_step("auditar_flujo_erp", lambda: call_command("auditar_flujo_erp"))
         else:
             self.stdout.write("4) Auditoría final omitida")
             summary_lines.append("- [SKIP] auditar_flujo_erp")
@@ -163,7 +190,12 @@ class Command(BaseCommand):
                 f"- duration_sec: {(finished_at - started_at).total_seconds():.2f}",
             ]
         )
+        if errors:
+            summary_lines.extend(["", "## Errores", *[f"- {e}" for e in errors]])
         summary_path.write_text("\n".join(summary_lines), encoding="utf-8")
 
-        self.stdout.write(self.style.SUCCESS("Rutina diaria completada"))
+        if errors:
+            self.stdout.write(self.style.WARNING("Rutina diaria completada con errores"))
+        else:
+            self.stdout.write(self.style.SUCCESS("Rutina diaria completada"))
         self.stdout.write(f"  - resumen: {summary_path}")
