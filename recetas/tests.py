@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import OperationalError
 from django.test import TestCase
@@ -1870,3 +1871,85 @@ class ReabastoCedisSecurityAndFolioTests(TestCase):
                 sucursal=self.sucursal_leyva,
             )
         self.assertEqual(solicitud.folio, "SRC-COLLIDE-002")
+
+
+class RematchLineasRecetaCommandTests(TestCase):
+    def setUp(self):
+        self.unidad_kg = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.receta = Receta.objects.create(
+            nombre="Receta Rematch Command",
+            hash_contenido="hash-rematch-command-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unidad_kg,
+        )
+        self.linea_meta = LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            etapa="",
+            insumo=None,
+            insumo_texto="Presentación",
+            cantidad=None,
+            unidad_texto="",
+            unidad=None,
+            costo_linea_excel=Decimal("2.000000"),
+            costo_unitario_snapshot=None,
+            match_score=63.6,
+            match_method=LineaReceta.MATCH_NONE,
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+        self.linea_sub = LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=2,
+            tipo_linea=LineaReceta.TIPO_SUBSECCION,
+            etapa="Decorado",
+            insumo=None,
+            insumo_texto="Decorado",
+            cantidad=Decimal("0.100000"),
+            unidad_texto="kg",
+            unidad=self.unidad_kg,
+            costo_linea_excel=Decimal("0.500000"),
+            costo_unitario_snapshot=None,
+            match_score=70.0,
+            match_method=LineaReceta.MATCH_FUZZY,
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+        )
+
+    def test_rematch_dry_run_does_not_modify_lines(self):
+        call_command(
+            "rematch_lineas_receta",
+            "--include-needs-review",
+            "--receta",
+            "Receta Rematch Command",
+            "--limit",
+            "50",
+        )
+        self.linea_meta.refresh_from_db()
+        self.linea_sub.refresh_from_db()
+        self.assertEqual(self.linea_meta.match_status, LineaReceta.STATUS_REJECTED)
+        self.assertEqual(self.linea_meta.match_method, LineaReceta.MATCH_NONE)
+        self.assertEqual(self.linea_sub.match_status, LineaReceta.STATUS_NEEDS_REVIEW)
+
+    def test_rematch_apply_auto_approves_meta_and_subsection(self):
+        with patch("recetas.utils.costeo_versionado.asegurar_version_costeo"):
+            call_command(
+                "rematch_lineas_receta",
+                "--apply",
+                "--include-needs-review",
+                "--receta",
+                "Receta Rematch Command",
+                "--limit",
+                "50",
+            )
+        self.linea_meta.refresh_from_db()
+        self.linea_sub.refresh_from_db()
+        self.assertEqual(self.linea_meta.match_status, LineaReceta.STATUS_AUTO)
+        self.assertEqual(self.linea_meta.match_method, "META_LINEA")
+        self.assertEqual(self.linea_sub.match_status, LineaReceta.STATUS_AUTO)
+        self.assertEqual(self.linea_sub.match_method, LineaReceta.MATCH_SUBSECTION)
