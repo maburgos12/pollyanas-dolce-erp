@@ -23,6 +23,7 @@ logs/*.csv
 logs/*.xlsx
 logs/*.tsv
 logs/*.tmp
+logs/bloque1_dato_maestro_*/
 
 # Local automation/smoke artifacts
 .playwright-cli/
