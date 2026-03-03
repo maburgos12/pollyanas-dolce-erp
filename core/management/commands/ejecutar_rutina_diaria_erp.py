@@ -1,10 +1,48 @@
 from __future__ import annotations
 
-from datetime import datetime
+import os
+import socket
 from pathlib import Path
+from urllib.parse import urlparse
 
+import dj_database_url
 from django.core.management import BaseCommand, CommandError, call_command
+from django.conf import settings
+from django.db import connections
 from django.utils import timezone
+
+
+def _prefer_public_database_url_if_needed() -> str | None:
+    """
+    Para ejecución local: si DATABASE_URL apunta a host privado Railway no resolvible,
+    cambia temporalmente a DATABASE_PUBLIC_URL para esta corrida.
+    """
+    db_url = str(os.environ.get("DATABASE_URL") or "").strip()
+    public_url = str(os.environ.get("DATABASE_PUBLIC_URL") or "").strip()
+    if not db_url or not public_url:
+        return None
+    if "railway.internal" not in db_url:
+        return None
+
+    try:
+        host = (urlparse(db_url).hostname or "").strip()
+    except Exception:
+        host = ""
+    if not host:
+        return None
+
+    try:
+        socket.getaddrinfo(host, None)
+        return None
+    except OSError:
+        os.environ["DATABASE_URL"] = public_url
+        db_cfg = dj_database_url.parse(public_url, conn_max_age=0)
+        settings.DATABASES["default"] = db_cfg
+        # Fuerza reconexión con settings runtime actualizados.
+        conn = connections["default"]
+        conn.close()
+        conn.settings_dict.update(db_cfg)
+        return f"DATABASE_URL fallback aplicado: {host} -> DATABASE_PUBLIC_URL"
 
 
 class Command(BaseCommand):
@@ -147,6 +185,11 @@ class Command(BaseCommand):
         self.stdout.write(f"  - month: {options['month']}")
         self.stdout.write(f"  - dry_run: {'SI' if dry_run else 'NO'}")
         self.stdout.write(f"  - continue_on_error: {'SI' if options['continue_on_error'] else 'NO'}")
+
+        db_fallback_msg = _prefer_public_database_url_if_needed()
+        if db_fallback_msg:
+            self.stdout.write(f"  - {db_fallback_msg}")
+            summary_lines.append(f"- db_fallback: {db_fallback_msg}")
 
         errors: list[str] = []
 
