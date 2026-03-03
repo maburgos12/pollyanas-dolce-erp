@@ -27,7 +27,7 @@
 
   <form class="recipes-filters" method="get">
     <input type="hidden" name="vista" value="{{ vista }}">
-    <input class="form-control" name="q" placeholder="Buscar receta..." value="{{ q }}">
+    <input class="form-control" name="q" placeholder="Buscar receta (coincidencia aproximada)..." value="{{ q }}">
     <select class="form-select" name="tipo">
       <option value="" {% if not tipo %}selected{% endif %}>Tipo (opcional)</option>
       <option value="PREPARACION" {% if tipo == "PREPARACION" %}selected{% endif %}>Insumo interno (batida/mezcla)</option>

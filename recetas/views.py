@@ -21,6 +21,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
+from rapidfuzz import fuzz
 
 from compras.models import OrdenCompra, SolicitudCompra
 from core.access import can_manage_compras, can_view_recetas, is_branch_capture_only
@@ -71,6 +72,38 @@ def _presentacion_sort_key(nombre: str) -> tuple[int, str]:
         if f" {token}" in f" {norm}" or norm.endswith(token):
             return rank, norm
     return 999, norm
+
+
+def _recipe_search_score(query_norm: str, receta: Receta) -> float:
+    """Score de coincidencia aproximada para búsqueda en listado de recetas."""
+    if not query_norm:
+        return 0.0
+
+    fields = [
+        receta.nombre or "",
+        receta.codigo_point or "",
+        receta.familia or "",
+        receta.categoria or "",
+        receta.sheet_name or "",
+    ]
+
+    best = 0.0
+    for field in fields:
+        field_norm = normalizar_nombre(field)
+        if not field_norm:
+            continue
+        if query_norm == field_norm:
+            return 100.0
+        if query_norm in field_norm:
+            best = max(best, 96.0)
+            continue
+        score = max(
+            float(fuzz.WRatio(query_norm, field_norm)),
+            float(fuzz.partial_ratio(query_norm, field_norm)),
+            float(fuzz.token_set_ratio(query_norm, field_norm)),
+        )
+        best = max(best, score)
+    return best
 
 
 @login_required
@@ -129,22 +162,50 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         recetas = recetas.filter(tipo=Receta.TIPO_PREPARACION, usa_presentaciones=True)
 
     if q:
-        recetas = recetas.filter(nombre__icontains=q)
+        query_norm = normalizar_nombre(q)
+        recetas_ranked: list[tuple[float, Receta]] = []
+        for receta in recetas:
+            score = _recipe_search_score(query_norm, receta)
+            if score >= 60.0:
+                recetas_ranked.append((score, receta))
+        recetas_ranked.sort(key=lambda item: (-item[0], normalizar_nombre(item[1].nombre)))
+        recetas = [item[1] for item in recetas_ranked]
     if tipo in {Receta.TIPO_PREPARACION, Receta.TIPO_PRODUCTO_FINAL}:
-        recetas = recetas.filter(tipo=tipo)
+        if isinstance(recetas, list):
+            recetas = [r for r in recetas if r.tipo == tipo]
+        else:
+            recetas = recetas.filter(tipo=tipo)
     if familia:
-        recetas = recetas.filter(familia=familia)
+        if isinstance(recetas, list):
+            recetas = [r for r in recetas if (r.familia or "") == familia]
+        else:
+            recetas = recetas.filter(familia=familia)
     if categoria:
-        recetas = recetas.filter(categoria=categoria)
+        if isinstance(recetas, list):
+            recetas = [r for r in recetas if (r.categoria or "") == categoria]
+        else:
+            recetas = recetas.filter(categoria=categoria)
     if estado == "pendientes":
-        recetas = recetas.filter(pendientes_count__gt=0)
+        if isinstance(recetas, list):
+            recetas = [r for r in recetas if (r.pendientes_count or 0) > 0]
+        else:
+            recetas = recetas.filter(pendientes_count__gt=0)
     elif estado == "ok":
-        recetas = recetas.filter(pendientes_count=0)
-    recetas = recetas.order_by("nombre")
+        if isinstance(recetas, list):
+            recetas = [r for r in recetas if (r.pendientes_count or 0) == 0]
+        else:
+            recetas = recetas.filter(pendientes_count=0)
+    if not isinstance(recetas, list):
+        recetas = recetas.order_by("nombre")
 
-    total_recetas = recetas.count()
-    total_pendientes = recetas.filter(pendientes_count__gt=0).count()
-    total_lineas = sum(r.lineas_count for r in recetas)
+    if isinstance(recetas, list):
+        total_recetas = len(recetas)
+        total_pendientes = sum(1 for r in recetas if (r.pendientes_count or 0) > 0)
+        total_lineas = sum((r.lineas_count or 0) for r in recetas)
+    else:
+        total_recetas = recetas.count()
+        total_pendientes = recetas.filter(pendientes_count__gt=0).count()
+        total_lineas = sum(r.lineas_count for r in recetas)
 
     qs_filters = {
         "vista": vista,
