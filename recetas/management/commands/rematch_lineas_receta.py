@@ -144,9 +144,10 @@ class Command(BaseCommand):
                 if not before_exists:
                     autocreated_components += 1
 
-            if linea.tipo_linea == LineaReceta.TIPO_SUBSECCION and insumo is None:
-                score = 100.0
-                method = LineaReceta.MATCH_SUBSECTION
+            if linea.tipo_linea == LineaReceta.TIPO_SUBSECCION:
+                if insumo is None:
+                    score = 100.0
+                    method = LineaReceta.MATCH_SUBSECTION
                 status = LineaReceta.STATUS_AUTO
 
             if status == LineaReceta.STATUS_AUTO:
@@ -260,6 +261,4 @@ class Command(BaseCommand):
             return False
         if ingrediente_norm not in IGNORABLE_META_INGREDIENTS:
             return False
-        has_qty = linea.cantidad is not None and linea.cantidad > 0
-        has_cost = linea.costo_linea_excel is not None and linea.costo_linea_excel > 0
-        return not has_qty and not has_cost
+        return True
