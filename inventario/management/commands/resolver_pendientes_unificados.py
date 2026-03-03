@@ -45,6 +45,12 @@ class Command(BaseCommand):
         parser.add_argument("--min-sources", type=int, default=2, help="Mínimo de fuentes activas para incluir (default: 2).")
         parser.add_argument("--score-min", type=float, default=0.0, help="Score mínimo sugerido [0-100] (default: 0).")
         parser.add_argument(
+            "--min-token-overlap",
+            type=float,
+            default=0.5,
+            help="Solapamiento mínimo de tokens entre alias y sugerencia [0-1] (default: 0.5).",
+        )
+        parser.add_argument(
             "--only-suggested",
             action="store_true",
             default=True,
@@ -108,6 +114,7 @@ class Command(BaseCommand):
         point_tipo = str(options["point_tipo"] or PointPendingMatch.TIPO_INSUMO).strip().upper()
         min_sources = max(1, min(3, int(options["min_sources"])))
         score_min = max(0.0, min(100.0, float(options["score_min"] or 0.0)))
+        min_token_overlap = max(0.0, min(1.0, float(options["min_token_overlap"] or 0.0)))
         only_suggested = bool(options.get("only_suggested", True))
         if bool(options.get("include_no_suggested")):
             only_suggested = False
@@ -198,6 +205,7 @@ class Command(BaseCommand):
         unchanged = 0
         skipped_no_suggestion = 0
         skipped_no_target = 0
+        skipped_low_overlap = 0
         point_resolved_total = 0
         recetas_resolved_total = 0
         preview_actions: list[dict] = []
@@ -235,6 +243,25 @@ class Command(BaseCommand):
                             "action": "skip_no_target",
                             "sources_active": int(row.get("sources_active") or 0),
                             "total_count": int(row.get("total_count") or 0),
+                        }
+                    )
+                    continue
+
+                overlap = self._token_overlap(alias_name, suggestion_name)
+                if overlap < min_token_overlap:
+                    skipped_low_overlap += 1
+                    preview_actions.append(
+                        {
+                            "nombre_muestra": alias_name,
+                            "nombre_normalizado": row.get("nombre_normalizado") or "",
+                            "sugerencia": suggestion_name,
+                            "insumo_target": insumo_target.nombre,
+                            "insumo_id": insumo_target.id,
+                            "action": "skip_low_overlap",
+                            "sources_active": int(row.get("sources_active") or 0),
+                            "total_count": int(row.get("total_count") or 0),
+                            "score_max": float(row.get("score_max") or 0.0),
+                            "token_overlap": overlap,
                         }
                     )
                     continue
@@ -297,6 +324,7 @@ class Command(BaseCommand):
                         "sources_active": int(row.get("sources_active") or 0),
                         "total_count": int(row.get("total_count") or 0),
                         "score_max": float(row.get("score_max") or 0.0),
+                        "token_overlap": overlap,
                     }
                 )
 
@@ -311,7 +339,8 @@ class Command(BaseCommand):
         self.stdout.write(
             "  - filtros: "
             f"runs={runs_to_scan}, limit={limit}, offset={offset}, source={source}, point_tipo={point_tipo}, "
-            f"min_sources={min_sources}, score_min={score_min:.2f}, only_suggested={only_suggested}, "
+            f"min_sources={min_sources}, score_min={score_min:.2f}, min_token_overlap={min_token_overlap:.2f}, "
+            f"only_suggested={only_suggested}, "
             f"sort_by={sort_by}, sort_dir={sort_dir}, q={q or '-'}"
         )
         self.stdout.write(
@@ -327,6 +356,7 @@ class Command(BaseCommand):
             f"aliases_creados_preview={preview_create_aliases if dry_run else created_aliases}, "
             f"aliases_actualizados_preview={preview_update_aliases if dry_run else updated_aliases}, "
             f"sin_cambio={unchanged}, sin_sugerencia={skipped_no_suggestion}, sin_insumo_objetivo={skipped_no_target}, "
+            f"solapamiento_bajo={skipped_low_overlap}, "
             f"point_resueltos={point_resolved_total}, recetas_resueltas={recetas_resolved_total}"
         )
 
@@ -342,6 +372,7 @@ class Command(BaseCommand):
             "sources_active",
             "total_count",
             "score_max",
+            "token_overlap",
         ]
         with path.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=headers)
@@ -358,5 +389,18 @@ class Command(BaseCommand):
                         "sources_active": row.get("sources_active", 0),
                         "total_count": row.get("total_count", 0),
                         "score_max": f"{float(row.get('score_max') or 0.0):.2f}",
+                        "token_overlap": f"{float(row.get('token_overlap') or 0.0):.2f}",
                     }
                 )
+
+    @staticmethod
+    def _token_overlap(left: str, right: str) -> float:
+        left_tokens = {t for t in normalizar_nombre(left).split() if t}
+        right_tokens = {t for t in normalizar_nombre(right).split() if t}
+        if not left_tokens or not right_tokens:
+            return 0.0
+        inter = len(left_tokens & right_tokens)
+        union = len(left_tokens | right_tokens)
+        if union == 0:
+            return 0.0
+        return inter / union
