@@ -11,46 +11,41 @@
   </div>
   <div class="alert alert-info">
     {% if receta.tipo == "PRODUCTO_FINAL" %}
-      Esta receta es <strong>producto final</strong>: agrega solo componentes ligados (insumos/subinsumos) con cantidad.
-      La unidad se fija automáticamente según el insumo para evitar errores.
+      Esta receta es <strong>producto final</strong>: selecciona insumo/subinsumo y captura la cantidad.
+      El sistema toma la unidad y costo del catálogo automáticamente.
     {% else %}
-      Esta receta es <strong>insumo interno</strong>: define rendimiento y costos para reutilizarla en productos finales.
+      Esta receta es <strong>insumo interno</strong>: agrega materia prima o insumos base con cantidad.
+      La unidad y costo se detectan desde el catálogo.
     {% endif %}
+  </div>
+  <div class="toolbar mb-3">
+    <a class="btn btn-secondary" href="{% url 'maestros:insumo_create' %}" target="_blank" rel="noopener">+ Crear insumo nuevo</a>
+    <span class="text-muted">Si no encuentras un insumo, créalo y vuelve a esta pantalla.</span>
   </div>
 
   <form method="post">
     {% csrf_token %}
     <div class="kpi-grid">
       <div class="form-group">
-        <label for="posicion">Posición</label>
-        <input id="posicion" class="form-control" type="number" min="1" name="posicion" value="{{ linea.posicion|default:'' }}">
+        <label for="insumo_autocomplete">Buscar insumo (autocompletar)</label>
+        <input id="insumo_autocomplete" class="form-control" type="text" placeholder="Escribe para buscar el insumo..." autocomplete="off">
+        <div id="insumo_autocomplete_suggestions" class="autocomplete-suggestions" role="listbox" aria-label="Sugerencias de insumo"></div>
       </div>
       <div class="form-group">
-        <label for="cantidad">Cantidad</label>
-        <input id="cantidad" class="form-control" type="number" step="0.000001" min="0" name="cantidad" value="{{ linea.cantidad|default:'' }}">
+        <label for="cantidad">Cantidad requerida</label>
+        <input id="cantidad" class="form-control" type="number" step="0.000001" min="0" name="cantidad" value="{{ linea.cantidad|default:'' }}" required>
       </div>
       <div class="form-group">
-        <label for="costo_linea_excel">Costo línea excel</label>
-        <input id="costo_linea_excel" class="form-control" type="number" step="0.000001" min="0" name="costo_linea_excel" value="{{ linea.costo_linea_excel|default:'' }}">
+        <label for="insumo_texto">Ingrediente (texto)</label>
+        <input id="insumo_texto" class="form-control" type="text" name="insumo_texto" value="{{ linea.insumo_texto|default:'' }}" placeholder="Se autocompleta al seleccionar insumo">
       </div>
     </div>
 
     <div class="kpi-grid">
-      <div class="form-group">
-        <label for="insumo_texto">Ingrediente (texto)</label>
-        <input id="insumo_texto" class="form-control" type="text" name="insumo_texto" value="{{ linea.insumo_texto|default:'' }}" required>
-      </div>
       <div class="form-group">
         <label for="etapa">Etapa / Sección</label>
         <input id="etapa" class="form-control" type="text" name="etapa" value="{{ linea.etapa|default:'' }}" placeholder="Ej. Dream Whip, Fresa fresca">
       </div>
-      <div class="form-group">
-        <label for="unidad_texto">Unidad (texto)</label>
-        <input id="unidad_texto" class="form-control" type="text" name="unidad_texto" value="{{ linea.unidad_texto|default:'' }}" readonly>
-      </div>
-    </div>
-
-    <div class="kpi-grid">
       <div class="form-group">
         <label for="tipo_linea">Tipo de línea</label>
         <select id="tipo_linea" class="form-select" name="tipo_linea">
@@ -65,13 +60,9 @@
           {% endfor %}
         </select>
       </div>
-    </div>
-
-    <div class="kpi-grid">
       <div class="form-group">
-        <label for="insumo_autocomplete">Buscar insumo (autocompletar)</label>
-        <input id="insumo_autocomplete" class="form-control" type="text" placeholder="Escribe y presiona Enter..." autocomplete="off">
-        <div id="insumo_autocomplete_suggestions" class="autocomplete-suggestions" role="listbox" aria-label="Sugerencias de insumo"></div>
+        <label for="unidad_detectada_preview">Unidad detectada</label>
+        <input id="unidad_detectada_preview" class="form-control" type="text" value="{{ linea.unidad_texto|default:'-' }}" readonly>
       </div>
     </div>
 
@@ -85,6 +76,7 @@
               <option
                 value="{{ i.id }}"
                 data-origin="INTERNO"
+                data-nombre="{{ i.nombre }}"
                 data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
@@ -98,6 +90,7 @@
               <option
                 value="{{ i.id }}"
                 data-origin="EMPAQUE"
+                data-nombre="{{ i.nombre }}"
                 data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
@@ -111,6 +104,7 @@
               <option
                 value="{{ i.id }}"
                 data-origin="MATERIA_PRIMA"
+                data-nombre="{{ i.nombre }}"
                 data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
@@ -120,17 +114,19 @@
           </optgroup>
         </select>
         <div class="text-muted mt-1">
-          Escribe para buscar, presiona Enter para tomar la mejor coincidencia.
+          Escribe para buscar y presiona Enter para elegir la mejor coincidencia.
         </div>
       </div>
       <div class="form-group">
-        <label for="unidad_id">Unidad normalizada</label>
-        <select id="unidad_id" class="form-select" name="unidad_id">
+        <label for="unidad_id">Unidad normalizada (automática)</label>
+        <select id="unidad_id" class="form-select" name="unidad_id" style="display:none;">
           <option value="">Sin unidad</option>
           {% for u in unidades %}
           <option value="{{ u.id }}" {% if linea.unidad_id == u.id %}selected{% endif %}>{{ u.codigo }} - {{ u.nombre }}</option>
           {% endfor %}
         </select>
+        <input id="unidad_texto" class="form-control" type="hidden" name="unidad_texto" value="{{ linea.unidad_texto|default:'' }}">
+        <div class="text-muted mt-1">La unidad se toma del insumo seleccionado para evitar errores de captura.</div>
       </div>
     </div>
 
@@ -160,8 +156,10 @@
 (function () {
   const insumoSelect = document.getElementById("insumo_id");
   const insumoAutocomplete = document.getElementById("insumo_autocomplete");
+  const insumoTextoInput = document.getElementById("insumo_texto");
   const suggestionsBox = document.getElementById("insumo_autocomplete_suggestions");
   const unidadSelect = document.getElementById("unidad_id");
+  const unidadDetectadaPreview = document.getElementById("unidad_detectada_preview");
   const unidadTexto = document.getElementById("unidad_texto");
   const cantidadInput = document.getElementById("cantidad");
   const origenInput = document.getElementById("insumo_origen");
@@ -190,17 +188,60 @@
       .replace(/[\u0300-\u036f]/g, "");
   }
 
+  function bigrams(text) {
+    const source = " " + text + " ";
+    const grams = [];
+    for (let i = 0; i < source.length - 1; i += 1) {
+      grams.push(source.slice(i, i + 2));
+    }
+    return grams;
+  }
+
+  function diceCoefficient(a, b) {
+    if (!a || !b) return 0;
+    const a2 = bigrams(a);
+    const b2 = bigrams(b);
+    if (!a2.length || !b2.length) return 0;
+    const map = new Map();
+    a2.forEach((g) => map.set(g, (map.get(g) || 0) + 1));
+    let overlap = 0;
+    b2.forEach((g) => {
+      const count = map.get(g) || 0;
+      if (count > 0) {
+        overlap += 1;
+        map.set(g, count - 1);
+      }
+    });
+    return (2 * overlap) / (a2.length + b2.length);
+  }
+
   function suggestionsFor(query) {
     const q = normalizeText(query);
     if (!q) return [];
+    const tokens = q.split(/\s+/).filter(Boolean);
     return insumoOptions
       .map((item) => {
         const norm = normalizeText(item.label);
         const idx = norm.indexOf(q);
-        return { ...item, idx };
+        let score = 0;
+        if (norm === q) {
+          score = 1000;
+        } else {
+          if (idx === 0) {
+            score += 320;
+          } else if (idx > 0) {
+            score += 250 - Math.min(idx, 120);
+          }
+          if (tokens.length) {
+            const tokenHits = tokens.filter((token) => norm.includes(token)).length;
+            score += tokenHits * 55;
+          }
+          score += Math.round(diceCoefficient(q, norm) * 220);
+        }
+        return { ...item, idx, score };
       })
-      .filter((item) => item.idx >= 0)
-      .sort((a, b) => (a.idx - b.idx) || (a.label.length - b.label.length))
+      .filter((item) => item.score >= 80)
+      .sort((a, b) => (b.score - a.score) || (a.label.length - b.label.length))
       .slice(0, 12);
   }
 
@@ -279,9 +320,11 @@
       costoUnitarioInput.value = "-";
       costoEstimadoInput.value = "-";
       unidadSelect.removeAttribute("disabled");
+      if (unidadDetectadaPreview) unidadDetectadaPreview.value = "-";
       return;
     }
     const origin = option.dataset.origin || "-";
+    const insumoNombre = option.dataset.nombre || "";
     const unitId = option.dataset.unidadId || "";
     const unitCode = option.dataset.unidadCodigo || "";
     const unitCost = toNum(option.dataset.costoUnitario || "");
@@ -303,6 +346,12 @@
     }
     if (unitCode) {
       unidadTexto.value = unitCode;
+      if (unidadDetectadaPreview) unidadDetectadaPreview.value = unitCode;
+    } else if (unidadDetectadaPreview) {
+      unidadDetectadaPreview.value = "-";
+    }
+    if (insumoNombre && insumoTextoInput) {
+      insumoTextoInput.value = insumoNombre;
     }
 
     if (Number.isFinite(unitCost) && unitCost > 0) {

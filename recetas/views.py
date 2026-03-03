@@ -756,19 +756,19 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
 
     if request.method == "POST":
         insumo_id = request.POST.get("insumo_id")
-        unidad_id = request.POST.get("unidad_id")
         tipo_linea = (request.POST.get("tipo_linea") or LineaReceta.TIPO_NORMAL).strip()
         if tipo_linea not in {LineaReceta.TIPO_NORMAL, LineaReceta.TIPO_SUBSECCION}:
             tipo_linea = LineaReceta.TIPO_NORMAL
         linea.insumo_texto = (request.POST.get("insumo_texto") or "").strip()[:250]
+        if not linea.insumo_texto and insumo_id:
+            insumo_for_name = Insumo.objects.filter(pk=insumo_id).first()
+            if insumo_for_name:
+                linea.insumo_texto = insumo_for_name.nombre[:250]
         linea.unidad_texto = (request.POST.get("unidad_texto") or "").strip()[:40]
         linea.etapa = (request.POST.get("etapa") or "").strip()[:120]
         linea.tipo_linea = tipo_linea
         linea.cantidad = _to_decimal_or_none(request.POST.get("cantidad"))
-        linea.costo_linea_excel = _to_decimal_or_none(request.POST.get("costo_linea_excel"))
-        linea.posicion = int(request.POST.get("posicion") or linea.posicion)
         linea.insumo = Insumo.objects.filter(pk=insumo_id).first() if insumo_id else None
-        linea.unidad = UnidadMedida.objects.filter(pk=unidad_id).first() if unidad_id else None
         _autolink_pan_derived_from_recipe(receta, linea)
 
         if linea.insumo:
@@ -809,22 +809,26 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     if request.method == "POST":
         insumo_id = request.POST.get("insumo_id")
-        unidad_id = request.POST.get("unidad_id")
         tipo_linea = (request.POST.get("tipo_linea") or LineaReceta.TIPO_NORMAL).strip()
         if tipo_linea not in {LineaReceta.TIPO_NORMAL, LineaReceta.TIPO_SUBSECCION}:
             tipo_linea = LineaReceta.TIPO_NORMAL
         posicion_default = (receta.lineas.order_by("-posicion").first().posicion + 1) if receta.lineas.exists() else 1
+        insumo_texto = (request.POST.get("insumo_texto") or "").strip()[:250]
+        if not insumo_texto and insumo_id:
+            insumo_for_name = Insumo.objects.filter(pk=insumo_id).first()
+            if insumo_for_name:
+                insumo_texto = insumo_for_name.nombre[:250]
         linea = LineaReceta(
             receta=receta,
-            posicion=int(request.POST.get("posicion") or posicion_default),
+            posicion=posicion_default,
             tipo_linea=tipo_linea,
             etapa=(request.POST.get("etapa") or "").strip()[:120],
-            insumo_texto=(request.POST.get("insumo_texto") or "").strip()[:250],
+            insumo_texto=insumo_texto,
             unidad_texto=(request.POST.get("unidad_texto") or "").strip()[:40],
             cantidad=_to_decimal_or_none(request.POST.get("cantidad")),
-            costo_linea_excel=_to_decimal_or_none(request.POST.get("costo_linea_excel")),
+            costo_linea_excel=None,
             insumo=Insumo.objects.filter(pk=insumo_id).first() if insumo_id else None,
-            unidad=UnidadMedida.objects.filter(pk=unidad_id).first() if unidad_id else None,
+            unidad=None,
         )
         _autolink_pan_derived_from_recipe(receta, linea)
         if linea.insumo:
