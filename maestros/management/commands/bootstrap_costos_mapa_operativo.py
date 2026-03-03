@@ -12,8 +12,12 @@ from maestros.models import CostoInsumo, Insumo, Proveedor
 OPERATIVE_MAP = {
     # destino_sin_costo: fuente_con_costo
     "Betún Azúcar Glass Chocolate": "Betún de Chocolate Azúcar Glass",
+    "Betún Chocolate Azúcar Glass": "Betún de Chocolate Azúcar Glass",
+    "Chocolate Original": "Betún de Chocolate Original Dolce",
     "Pan Chocolate": "Pan de Chocolate Deleite Dawn",
+    "Chocolate Relleno": "Betún Azúcar Glass Chocolate",
     "Crumble Nuez": "Masa Base Pay con Nuez",
+    "Decorado Pan": "Pan 3 Leches - Chico",
     "Ganache Crunch": "Cobertura Crunch",
 }
 
@@ -56,8 +60,13 @@ class Command(BaseCommand):
             if latest is None:
                 self.stdout.write(self.style.WARNING(f"Omitido sin costo fuente: {source_name}"))
                 continue
-            has_target_cost = CostoInsumo.objects.filter(insumo=target).exists()
-            if has_target_cost:
+            latest_target = (
+                CostoInsumo.objects.filter(insumo=target)
+                .order_by("-fecha", "-id")
+                .values_list("costo_unitario", flat=True)
+                .first()
+            )
+            if latest_target is not None and Decimal(str(latest_target)) > 0:
                 self.stdout.write(f"Ya tiene costo: {target_name}")
                 continue
             proposals.append((target, source, Decimal(str(latest))))
