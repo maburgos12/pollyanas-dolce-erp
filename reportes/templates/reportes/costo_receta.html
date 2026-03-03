@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Reportes - Costo por receta{% endblock %}
 {% block page_title %}Reportes · Costo por Receta{% endblock %}
+{% block body_class %}page-reportes-costo{% endblock %}
 
 {% block content %}
+<div class="module-shell reportes-shell">
 <nav class="module-tabs">
   <a class="module-tab active" href="{% url 'reportes:costo_receta' %}">Costo receta</a>
   <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
@@ -57,4 +59,5 @@
     </table>
   </div>
 </section>
+</div>
 {% endblock %}

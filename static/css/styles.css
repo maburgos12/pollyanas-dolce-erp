@@ -1077,6 +1077,40 @@ tr:hover,
   gap: 12px;
 }
 
+.compras-solicitudes .form-grid-auto,
+.plan-produccion-shell .form-grid-auto,
+.reportes-shell .form-grid-auto,
+.page-compras-ordenes .form-grid-auto,
+.page-compras-recepciones .form-grid-auto {
+  align-items: end;
+  grid-auto-rows: minmax(var(--control-height), auto);
+}
+
+.compras-solicitudes .form-grid-auto .input-field,
+.compras-solicitudes .form-grid-auto .form-control,
+.compras-solicitudes .form-grid-auto .form-select,
+.compras-solicitudes .form-grid-auto .btn,
+.plan-produccion-shell .form-grid-auto .input-field,
+.plan-produccion-shell .form-grid-auto .form-control,
+.plan-produccion-shell .form-grid-auto .form-select,
+.plan-produccion-shell .form-grid-auto .btn,
+.reportes-shell .form-grid-auto .input-field,
+.reportes-shell .form-grid-auto .form-control,
+.reportes-shell .form-grid-auto .form-select,
+.reportes-shell .form-grid-auto .btn,
+.page-compras-ordenes .form-grid-auto .input-field,
+.page-compras-ordenes .form-grid-auto .form-control,
+.page-compras-ordenes .form-grid-auto .form-select,
+.page-compras-ordenes .form-grid-auto .btn,
+.page-compras-recepciones .form-grid-auto .input-field,
+.page-compras-recepciones .form-grid-auto .form-control,
+.page-compras-recepciones .form-grid-auto .form-select,
+.page-compras-recepciones .form-grid-auto .btn {
+  min-height: var(--control-height);
+  height: var(--control-height);
+  margin: 0;
+}
+
 .compras-solicitudes .toolbar,
 .plan-produccion-shell .toolbar {
   overflow-x: auto;
@@ -1121,11 +1155,44 @@ tr:hover,
   min-width: 1180px;
 }
 
+.page-compras-ordenes .table-responsive table,
+.page-compras-recepciones .table-responsive table {
+  min-width: 1080px;
+}
+
+.plan-produccion-shell .table-responsive table {
+  min-width: 1180px;
+}
+
+.reportes-shell .table-responsive table {
+  min-width: 980px;
+}
+
+.reportes-shell .toolbar,
+.reportes-shell .form-grid-auto {
+  gap: 12px;
+}
+
+.reportes-shell .card-header {
+  font-size: 34px;
+  line-height: 1.1;
+}
+
 .page-compras-solicitudes .header {
   position: sticky;
 }
 
 .page-compras-solicitudes .main-content {
+  overflow-x: hidden;
+}
+
+.page-compras-ordenes .main-content,
+.page-compras-recepciones .main-content,
+.page-plan-produccion .main-content,
+.page-reportes-costo .main-content,
+.page-reportes-consumo .main-content,
+.page-reportes-faltantes .main-content,
+.page-reportes-bi .main-content {
   overflow-x: hidden;
 }
 
@@ -1247,7 +1314,7 @@ tr:hover,
 
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-qty,
 .recipe-detail-shell .recipe-presentaciones-table .pres-head-cost {
-  white-space: normal;
+  white-space: nowrap;
   line-height: 1.2;
   text-align: center !important;
 }

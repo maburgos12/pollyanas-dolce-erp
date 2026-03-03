@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Reportes - BI Ejecutivo{% endblock %}
 {% block page_title %}Reportes · BI Ejecutivo{% endblock %}
+{% block body_class %}page-reportes-bi{% endblock %}
 
 {% block content %}
+<div class="module-shell reportes-shell">
 <nav class="module-tabs">
   <a class="module-tab" href="{% url 'reportes:costo_receta' %}">Costo receta</a>
   <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
@@ -121,5 +123,6 @@
       </table>
     </div>
   </section>
+</div>
 </div>
 {% endblock %}
