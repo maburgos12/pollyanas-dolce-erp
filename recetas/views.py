@@ -527,7 +527,7 @@ def _extract_presentacion_from_recipe_name(recipe_name: str) -> str | None:
         ("individual", "Individual"),
         ("bollito", "Bollito"),
         ("bollos", "Bollos"),
-        ("bollo", "Bollo"),
+        ("bollo", "Bollos"),
         ("grande", "Grande"),
         ("mediano", "Mediano"),
         ("chico", "Chico"),
@@ -565,7 +565,22 @@ def _select_best_pan_derived_candidate(
     else:
         flavor_patterns = ["Pan 3 Leches", "Pan de Chocolate Deleite Dawn", "Pan Vainilla Dawn", "Pan de Vainilla Espiga"]
 
+    # Para productos tipo "Bollo", la operación usa cantidad en kg desde la batida base.
+    # En ese caso preferimos el insumo derivado de PREPARACION (kg), no el de PRESENTACION (pza).
+    is_bollo_recipe = presentacion in {"Bollo", "Bollos", "Bollito"}
+
     for pattern in flavor_patterns:
+        if is_bollo_recipe:
+            prep_candidate = (
+                Insumo.objects.filter(codigo__startswith="DERIVADO:RECETA:", activo=True)
+                .filter(codigo__icontains=":PREPARACION")
+                .filter(nombre__icontains=pattern)
+                .order_by("nombre", "id")
+                .first()
+            )
+            if prep_candidate:
+                return prep_candidate
+
         candidate = (
             Insumo.objects.filter(codigo__startswith="DERIVADO:RECETA:", activo=True)
             .filter(nombre__icontains=pattern)

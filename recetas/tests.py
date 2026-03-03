@@ -12,13 +12,14 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import OperationalError
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 
 from core.access import ROLE_COMPRAS, ROLE_VENTAS
 from core.models import UserProfile
 from compras.models import OrdenCompra, SolicitudCompra
 from core.models import Sucursal
-from maestros.models import Insumo, Proveedor, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import (
     CostoDriver,
     LineaReceta,
@@ -267,6 +268,64 @@ class RecetaDerivedInsumoAutolinkTests(TestCase):
         linea = LineaReceta.objects.get(receta=receta, posicion=1)
         self.assertEqual(linea.insumo_id, pan_derivado.id)
         self.assertEqual(linea.match_status, LineaReceta.STATUS_AUTO)
+
+    def test_linea_bollo_autolink_prefers_preparacion_kg(self):
+        receta = Receta.objects.create(
+            nombre="Bollo Chocolate",
+            hash_contenido="hash-autolink-bollo-pan-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+        pan_generico = Insumo.objects.create(
+            nombre="Pan Chocolate",
+            unidad_base=self.unidad_pza,
+            activo=True,
+        )
+        pan_preparacion = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:29:PREPARACION",
+            nombre="Pan de Chocolate Deleite Dawn",
+            unidad_base=self.unidad_kg,
+            activo=True,
+        )
+        pan_bollo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:29:PRESENTACION:99",
+            nombre="Pan de Chocolate Deleite Dawn - Bollos",
+            unidad_base=self.unidad_pza,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=pan_preparacion,
+            fecha=timezone.localdate(),
+            moneda="MXN",
+            costo_unitario=Decimal("42.402733"),
+            source_hash="test-bollo-prep-cost-001",
+            raw={},
+        )
+        CostoInsumo.objects.create(
+            insumo=pan_bollo,
+            fecha=timezone.localdate(),
+            moneda="MXN",
+            costo_unitario=Decimal("3.180205"),
+            source_hash="test-bollo-pres-cost-001",
+            raw={},
+        )
+
+        response = self.client.post(
+            reverse("recetas:linea_create", args=[receta.id]),
+            data={
+                "tipo_linea": LineaReceta.TIPO_NORMAL,
+                "etapa": "",
+                "insumo_texto": "Pan Chocolate",
+                "insumo_id": str(pan_generico.id),
+                "cantidad": "0.075",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        linea = LineaReceta.objects.get(receta=receta, posicion=1)
+        self.assertEqual(linea.insumo_id, pan_preparacion.id)
+        self.assertEqual(linea.unidad_id, self.unidad_kg.id)
+        self.assertEqual(linea.costo_unitario_snapshot, Decimal("42.402733"))
+        self.assertAlmostEqual(linea.costo_total_estimado or 0, 3.180204975, places=6)
 
     def test_signals_sync_prepare_and_presentacion_derived_insumos(self):
         receta = Receta.objects.create(
