@@ -150,10 +150,12 @@ Sprint 1 entrega:
 - `integraciones/management/commands/smoke_integraciones_api.py` (comando smoke con salida JSON)
 - `inventario/management/commands/smoke_aliases_api.py` (comando smoke para pendientes/pendientes-unificados)
 - `core/management/commands/auditar_flujo_erp.py` (auditoría integral de consistencia: duplicados, match/costos en recetas y cobertura de inventario)
+- `core/management/commands/ejecutar_rutina_diaria_erp.py` (orquesta sync Drive + sync Point + hardening + auditoría con resumen en logs)
 - `inventario/management/commands/backfill_existencias_insumos.py` (crea existencias faltantes para insumos activos en modo seguro dry-run/apply)
 - `integraciones/management/commands/run_integraciones_maintenance.py` (mantenimiento operativo CLI con bitácora)
 - `scripts/auto_maintenance_integraciones.sh` (scheduler opcional para mantenimiento periódico)
 - `docs/OPERACION_ALIASES_API.md` (runbook operativo de aliases API)
+- `docs/OPERACION_RUTINA_DIARIA_ERP.md` (runbook de ejecución diaria/diagnóstico con `--continue-on-error`)
 
 ## Notas
 - El matching y captura operativa en UI ya incluyen búsqueda/autocomplete para insumos.
