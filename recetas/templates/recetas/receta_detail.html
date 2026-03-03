@@ -395,6 +395,7 @@
       <col class="col-stage">
       <col class="col-ingredient">
       <col class="col-linked">
+      <col class="col-origin">
       <col class="col-qty">
       <col class="col-unit">
       <col class="col-cost">
@@ -438,7 +439,7 @@
             <span class="badge bg-danger">Sin match</span>
           {% endif %}
         </td>
-        <td>
+        <td class="cell-origin">
           {% if l.insumo %}
             {% if l.insumo.codigo|default:""|slice:":16" == "DERIVADO:RECETA:" %}
               <span class="badge bg-success">Interno</span>
