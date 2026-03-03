@@ -11,7 +11,7 @@ class Command(BaseCommand):
     help = (
         "Ejecuta la rutina diaria operativa del ERP en orden: "
         "1) sync almacén (Drive), 2) sync Point, 3) hardening post-import, "
-        "4) auditoría global."
+        "4) rematch de recetas, 5) auditoría global."
     )
 
     def add_arguments(self, parser):
@@ -51,6 +51,11 @@ class Command(BaseCommand):
             help="Omite auditoría final.",
         )
         parser.add_argument(
+            "--skip-rematch",
+            action="store_true",
+            help="Omite rematch de líneas de receta.",
+        )
+        parser.add_argument(
             "--drive-fuzzy-threshold",
             type=int,
             default=88,
@@ -61,6 +66,41 @@ class Command(BaseCommand):
             type=int,
             default=85,
             help="Umbral fuzzy para sync de Point (default: 85).",
+        )
+        parser.add_argument(
+            "--rematch-limit",
+            type=int,
+            default=500,
+            help="Límite de líneas por corrida de rematch recetas (default: 500).",
+        )
+        parser.add_argument(
+            "--rematch-offset",
+            type=int,
+            default=0,
+            help="Offset de líneas para rematch recetas (default: 0).",
+        )
+        parser.add_argument(
+            "--rematch-progress-every",
+            type=int,
+            default=100,
+            help="Progreso cada N líneas en rematch recetas (default: 100).",
+        )
+        parser.add_argument(
+            "--rematch-recipe",
+            default="",
+            help="Filtro contains por nombre de receta para rematch.",
+        )
+        parser.add_argument(
+            "--rematch-include-needs-review",
+            action="store_true",
+            default=True,
+            help="Incluye NEEDS_REVIEW en rematch recetas (default: true).",
+        )
+        parser.add_argument(
+            "--no-rematch-include-needs-review",
+            action="store_false",
+            dest="rematch_include_needs_review",
+            help="Excluye NEEDS_REVIEW en rematch recetas.",
         )
         parser.add_argument(
             "--drive-create-aliases",
@@ -89,6 +129,7 @@ class Command(BaseCommand):
         skip_drive = bool(options["skip_drive"])
         skip_point = bool(options["skip_point"])
         skip_hardening = bool(options["skip_hardening"]) or dry_run
+        skip_rematch = bool(options["skip_rematch"])
         skip_audit = bool(options["skip_audit"]) or dry_run
 
         summary_lines = [
@@ -174,11 +215,38 @@ class Command(BaseCommand):
             self.stdout.write("3) Hardening post-import omitido")
             summary_lines.append("- [SKIP] ejecutar_hardening_post_import")
 
+        if not skip_rematch:
+            self.stdout.write("4) Rematch recetas")
+
+            def _run_rematch():
+                kwargs = {
+                    "limit": int(options["rematch_limit"]),
+                    "offset": int(options["rematch_offset"]),
+                    "progress_every": int(options["rematch_progress_every"]),
+                    "apply": not dry_run,
+                }
+                receta_filter = str(options.get("rematch_recipe") or "").strip()
+                if receta_filter:
+                    kwargs["receta"] = receta_filter
+                if bool(options.get("rematch_include_needs_review", True)):
+                    kwargs["include_needs_review"] = True
+                call_command("rematch_lineas_receta", **kwargs)
+
+            run_step(
+                "rematch_lineas_receta "
+                f"limit={options['rematch_limit']} offset={options['rematch_offset']} "
+                f"include_needs_review={'SI' if options['rematch_include_needs_review'] else 'NO'}",
+                _run_rematch,
+            )
+        else:
+            self.stdout.write("4) Rematch recetas omitido")
+            summary_lines.append("- [SKIP] rematch_lineas_receta")
+
         if not skip_audit:
-            self.stdout.write("4) Auditoría final")
+            self.stdout.write("5) Auditoría final")
             run_step("auditar_flujo_erp", lambda: call_command("auditar_flujo_erp"))
         else:
-            self.stdout.write("4) Auditoría final omitida")
+            self.stdout.write("5) Auditoría final omitida")
             summary_lines.append("- [SKIP] auditar_flujo_erp")
 
         finished_at = timezone.now()
