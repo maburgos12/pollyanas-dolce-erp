@@ -119,6 +119,8 @@ from .serializers import (
     InventarioAliasCreateSerializer,
     InventarioCrossPendientesResolveSerializer,
     InventarioAliasMassReassignSerializer,
+    MasterDuplicatesSerializer,
+    MasterNormalizeSerializer,
     InventarioPointPendingResolveSerializer,
     MRPRequestSerializer,
     MRPRequerimientosRequestSerializer,
@@ -449,6 +451,464 @@ class AuditLogListView(APIView):
                     "returned": len(rows),
                 },
                 "items": rows,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class MasterDataNormalizeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _query_by_scope(self, scope: str, q: str):
+        q_norm = normalizar_nombre(q) if q else ""
+        if scope == "insumos":
+            qs = Insumo.objects.all().order_by("id")
+            if q:
+                qs = qs.filter(
+                    Q(nombre__icontains=q)
+                    | Q(nombre_normalizado__icontains=q_norm)
+                    | Q(codigo__icontains=q)
+                    | Q(codigo_point__icontains=q)
+                )
+            return qs
+
+        if scope == "recetas":
+            qs = Receta.objects.all().order_by("id")
+            if q:
+                qs = qs.filter(
+                    Q(nombre__icontains=q)
+                    | Q(nombre_normalizado__icontains=q_norm)
+                    | Q(codigo_point__icontains=q)
+                )
+            return qs
+
+        if scope == "aliases_insumo":
+            qs = InsumoAlias.objects.select_related("insumo").all().order_by("id")
+            if q:
+                qs = qs.filter(
+                    Q(nombre__icontains=q)
+                    | Q(nombre_normalizado__icontains=q_norm)
+                    | Q(insumo__nombre__icontains=q)
+                )
+            return qs
+
+        if scope == "receta_codigos_point":
+            qs = RecetaCodigoPointAlias.objects.select_related("receta").all().order_by("id")
+            if q:
+                qs = qs.filter(
+                    Q(codigo_point__icontains=q)
+                    | Q(codigo_point_normalizado__icontains=normalizar_codigo_point(q))
+                    | Q(nombre_point__icontains=q)
+                    | Q(receta__nombre__icontains=q)
+                )
+            return qs
+        return None
+
+    def _serialize_row(self, scope: str, obj, current: str, suggested: str) -> dict[str, Any]:
+        if scope == "insumos":
+            label = obj.nombre
+            extra = {"codigo": obj.codigo or "", "codigo_point": obj.codigo_point or ""}
+            model_name = "maestros.Insumo"
+        elif scope == "recetas":
+            label = obj.nombre
+            extra = {"codigo_point": obj.codigo_point or ""}
+            model_name = "recetas.Receta"
+        elif scope == "aliases_insumo":
+            label = obj.nombre
+            extra = {"insumo_id": obj.insumo_id, "insumo": obj.insumo.nombre if obj.insumo_id else ""}
+            model_name = "maestros.InsumoAlias"
+        else:
+            label = obj.codigo_point or ""
+            extra = {"receta_id": obj.receta_id, "receta": obj.receta.nombre if obj.receta_id else ""}
+            model_name = "recetas.RecetaCodigoPointAlias"
+
+        return {
+            "scope": scope,
+            "model": model_name,
+            "id": obj.id,
+            "label": label,
+            "actual": current,
+            "sugerido": suggested,
+            "changed": bool((current or "") != (suggested or "")),
+            **extra,
+        }
+
+    def post(self, request):
+        if not can_view_maestros(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar normalización de datos maestros."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = MasterNormalizeSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+
+        scope = payload["scope"]
+        q = payload["q"]
+        dry_run = bool(payload["dry_run"])
+        limit = int(payload["limit"])
+        offset = int(payload["offset"])
+        selected_scopes = (
+            ["insumos", "recetas", "aliases_insumo", "receta_codigos_point"]
+            if scope == "all"
+            else [scope]
+        )
+
+        if (not dry_run) and (not has_any_role(request.user, ROLE_ADMIN, ROLE_DG)):
+            return Response(
+                {"detail": "Solo ADMIN o DG pueden aplicar normalización persistente."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        summary_by_scope: dict[str, dict[str, int]] = {}
+        rows: list[dict[str, Any]] = []
+        total_candidates = 0
+        total_changed = 0
+        total_updated = 0
+
+        for current_scope in selected_scopes:
+            qs = self._query_by_scope(current_scope, q)
+            if qs is None:
+                continue
+            scoped_total = qs.count()
+            scoped_rows = qs[offset : offset + limit]
+            scoped_changed = 0
+            scoped_updated = 0
+
+            for obj in scoped_rows:
+                if current_scope in {"insumos", "recetas", "aliases_insumo"}:
+                    current_val = str(getattr(obj, "nombre_normalizado", "") or "")
+                    suggested = normalizar_nombre(getattr(obj, "nombre", "") or "")
+                    field_name = "nombre_normalizado"
+                else:
+                    current_val = str(getattr(obj, "codigo_point_normalizado", "") or "")
+                    suggested = normalizar_codigo_point(getattr(obj, "codigo_point", "") or "")
+                    field_name = "codigo_point_normalizado"
+
+                changed = current_val != suggested
+                if changed:
+                    scoped_changed += 1
+                    if not dry_run:
+                        setattr(obj, field_name, suggested)
+                        obj.save(update_fields=[field_name])
+                        scoped_updated += 1
+
+                rows.append(self._serialize_row(current_scope, obj, current_val, suggested))
+
+            total_candidates += scoped_total
+            total_changed += scoped_changed
+            total_updated += scoped_updated
+            summary_by_scope[current_scope] = {
+                "candidates": scoped_total,
+                "returned": len(scoped_rows),
+                "changed": scoped_changed,
+                "updated": scoped_updated,
+            }
+
+        action = "PREVIEW_MASTER_NORMALIZE" if dry_run else "MASTER_NORMALIZE"
+        log_event(
+            request.user,
+            action,
+            "master.Normalization",
+            "",
+            payload={
+                "scope": scope,
+                "q": q,
+                "dry_run": dry_run,
+                "limit": limit,
+                "offset": offset,
+                "totals": {
+                    "candidates": total_candidates,
+                    "changed": total_changed,
+                    "updated": total_updated,
+                },
+            },
+        )
+
+        return Response(
+            {
+                "dry_run": dry_run,
+                "filters": {
+                    "scope": scope,
+                    "q": q,
+                    "limit": limit,
+                    "offset": offset,
+                    "scopes_evaluated": selected_scopes,
+                },
+                "totales": {
+                    "candidates": total_candidates,
+                    "changed": total_changed,
+                    "updated": total_updated,
+                    "returned": len(rows),
+                },
+                "by_scope": summary_by_scope,
+                "items": rows,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class MasterDataDuplicatesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _build_group(group_type: str, key: str, members: list[dict[str, Any]]) -> dict[str, Any]:
+        members_sorted = sorted(
+            members,
+            key=lambda item: (
+                str(item.get("nombre") or item.get("label") or "").lower(),
+                int(item.get("id") or 0),
+            ),
+        )
+        return {
+            "group_type": group_type,
+            "duplicate_key": key,
+            "count": len(members_sorted),
+            "members": members_sorted,
+        }
+
+    @staticmethod
+    def _export_csv(groups: list[dict[str, Any]]) -> HttpResponse:
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="master_duplicates.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["group_type", "duplicate_key", "count", "model", "id", "nombre", "activo", "codigo_point"])
+        for group in groups:
+            for member in group.get("members") or []:
+                writer.writerow(
+                    [
+                        group.get("group_type") or "",
+                        group.get("duplicate_key") or "",
+                        group.get("count") or 0,
+                        member.get("model") or "",
+                        member.get("id") or "",
+                        member.get("nombre") or "",
+                        "1" if member.get("activo") else "0",
+                        member.get("codigo_point") or "",
+                    ]
+                )
+        return response
+
+    @staticmethod
+    def _export_xlsx(groups: list[dict[str, Any]]) -> HttpResponse:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "duplicates"
+        sheet.append(["group_type", "duplicate_key", "count", "model", "id", "nombre", "activo", "codigo_point"])
+        for group in groups:
+            for member in group.get("members") or []:
+                sheet.append(
+                    [
+                        group.get("group_type") or "",
+                        group.get("duplicate_key") or "",
+                        group.get("count") or 0,
+                        member.get("model") or "",
+                        member.get("id") or "",
+                        member.get("nombre") or "",
+                        "1" if member.get("activo") else "0",
+                        member.get("codigo_point") or "",
+                    ]
+                )
+
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="master_duplicates.xlsx"'
+        return response
+
+    def get(self, request):
+        if not can_view_maestros(request.user):
+            return Response(
+                {"detail": "No tienes permisos para consultar duplicados de datos maestros."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = MasterDuplicatesSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+
+        scope = payload["scope"]
+        q = payload["q"]
+        include_inactive = bool(payload["include_inactive"])
+        min_count = int(payload["min_count"])
+        limit = int(payload["limit"])
+        offset = int(payload["offset"])
+        export_kind = payload.get("export", "")
+        q_norm = normalizar_nombre(q) if q else ""
+
+        selected_scopes = (
+            ["insumos", "recetas", "proveedores", "codigos_point"]
+            if scope == "all"
+            else [scope]
+        )
+        groups: list[dict[str, Any]] = []
+        by_scope_totals = {k: 0 for k in selected_scopes}
+
+        if "insumos" in selected_scopes:
+            qs = Insumo.objects.all().order_by("id")
+            if not include_inactive:
+                qs = qs.filter(activo=True)
+            if q:
+                qs = qs.filter(
+                    Q(nombre__icontains=q)
+                    | Q(nombre_normalizado__icontains=q_norm)
+                    | Q(codigo__icontains=q)
+                    | Q(codigo_point__icontains=q)
+                )
+
+            grouped = (
+                qs.values("nombre_normalizado")
+                .annotate(total=Count("id"))
+                .filter(total__gte=min_count)
+                .order_by("-total", "nombre_normalizado")
+            )
+            for row in grouped:
+                dup_key = str(row.get("nombre_normalizado") or "")
+                members = [
+                    {
+                        "model": "maestros.Insumo",
+                        "id": int(obj.id),
+                        "nombre": obj.nombre,
+                        "activo": bool(obj.activo),
+                        "codigo_point": obj.codigo_point or "",
+                    }
+                    for obj in qs.filter(nombre_normalizado=dup_key).order_by("id")
+                ]
+                groups.append(self._build_group("insumos", dup_key, members))
+            by_scope_totals["insumos"] = len([g for g in groups if g["group_type"] == "insumos"])
+
+        if "recetas" in selected_scopes:
+            qs = Receta.objects.all().order_by("id")
+            if q:
+                qs = qs.filter(
+                    Q(nombre__icontains=q)
+                    | Q(nombre_normalizado__icontains=q_norm)
+                    | Q(codigo_point__icontains=q)
+                )
+            grouped = (
+                qs.values("nombre_normalizado")
+                .annotate(total=Count("id"))
+                .filter(total__gte=min_count)
+                .order_by("-total", "nombre_normalizado")
+            )
+            for row in grouped:
+                dup_key = str(row.get("nombre_normalizado") or "")
+                members = [
+                    {
+                        "model": "recetas.Receta",
+                        "id": int(obj.id),
+                        "nombre": obj.nombre,
+                        "activo": True,
+                        "codigo_point": obj.codigo_point or "",
+                    }
+                    for obj in qs.filter(nombre_normalizado=dup_key).order_by("id")
+                ]
+                groups.append(self._build_group("recetas", dup_key, members))
+            by_scope_totals["recetas"] = len([g for g in groups if g["group_type"] == "recetas"])
+
+        if "proveedores" in selected_scopes:
+            qs = Proveedor.objects.all().order_by("id")
+            if not include_inactive:
+                qs = qs.filter(activo=True)
+            if q:
+                qs = qs.filter(nombre__icontains=q)
+
+            index: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for provider in qs:
+                key = normalizar_nombre(provider.nombre or "")
+                if not key:
+                    continue
+                index[key].append(
+                    {
+                        "model": "maestros.Proveedor",
+                        "id": int(provider.id),
+                        "nombre": provider.nombre,
+                        "activo": bool(provider.activo),
+                        "codigo_point": "",
+                    }
+                )
+
+            for key, members in sorted(index.items(), key=lambda item: (-len(item[1]), item[0])):
+                if len(members) < min_count:
+                    continue
+                groups.append(self._build_group("proveedores", key, members))
+            by_scope_totals["proveedores"] = len([g for g in groups if g["group_type"] == "proveedores"])
+
+        if "codigos_point" in selected_scopes:
+            code_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+            insumos_qs = Insumo.objects.exclude(codigo_point="").order_by("id")
+            recetas_qs = Receta.objects.exclude(codigo_point="").order_by("id")
+            if not include_inactive:
+                insumos_qs = insumos_qs.filter(activo=True)
+            if q:
+                insumos_qs = insumos_qs.filter(Q(codigo_point__icontains=q) | Q(nombre__icontains=q))
+                recetas_qs = recetas_qs.filter(Q(codigo_point__icontains=q) | Q(nombre__icontains=q))
+
+            for insumo in insumos_qs:
+                key = normalizar_codigo_point(insumo.codigo_point or "")
+                if not key:
+                    continue
+                code_map[key].append(
+                    {
+                        "model": "maestros.Insumo",
+                        "id": int(insumo.id),
+                        "nombre": insumo.nombre,
+                        "activo": bool(insumo.activo),
+                        "codigo_point": insumo.codigo_point or "",
+                    }
+                )
+
+            for receta in recetas_qs:
+                key = normalizar_codigo_point(receta.codigo_point or "")
+                if not key:
+                    continue
+                code_map[key].append(
+                    {
+                        "model": "recetas.Receta",
+                        "id": int(receta.id),
+                        "nombre": receta.nombre,
+                        "activo": True,
+                        "codigo_point": receta.codigo_point or "",
+                    }
+                )
+
+            for key, members in sorted(code_map.items(), key=lambda item: (-len(item[1]), item[0])):
+                if len(members) < min_count:
+                    continue
+                groups.append(self._build_group("codigos_point", key, members))
+            by_scope_totals["codigos_point"] = len([g for g in groups if g["group_type"] == "codigos_point"])
+
+        groups.sort(key=lambda row: (-int(row.get("count") or 0), str(row.get("duplicate_key") or "").lower()))
+        total_groups = len(groups)
+        page_groups = groups[offset : offset + limit]
+
+        if export_kind == "csv":
+            return self._export_csv(page_groups)
+        if export_kind == "xlsx":
+            return self._export_xlsx(page_groups)
+
+        return Response(
+            {
+                "filters": {
+                    "scope": scope,
+                    "q": q,
+                    "include_inactive": include_inactive,
+                    "min_count": min_count,
+                    "limit": limit,
+                    "offset": offset,
+                },
+                "totales": {
+                    "groups_total": total_groups,
+                    "groups_returned": len(page_groups),
+                    "by_scope": by_scope_totals,
+                },
+                "items": page_groups,
             },
             status=status.HTTP_200_OK,
         )

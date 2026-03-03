@@ -960,3 +960,39 @@ class InventarioAjusteResponseSerializer(serializers.Serializer):
     creado_en = serializers.DateTimeField()
     aprobado_en = serializers.DateTimeField(allow_null=True)
     aplicado_en = serializers.DateTimeField(allow_null=True)
+
+
+class MasterNormalizeSerializer(serializers.Serializer):
+    SCOPE_CHOICES = ["all", "insumos", "recetas", "aliases_insumo", "receta_codigos_point"]
+
+    scope = serializers.ChoiceField(choices=SCOPE_CHOICES, required=False, default="all")
+    q = serializers.CharField(required=False, allow_blank=True, default="")
+    dry_run = serializers.BooleanField(required=False, default=True)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=5000, default=1000)
+    offset = serializers.IntegerField(required=False, min_value=0, max_value=100000, default=0)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        attrs["q"] = (attrs.get("q") or "").strip()
+        attrs["scope"] = (attrs.get("scope") or "all").strip().lower()
+        return attrs
+
+
+class MasterDuplicatesSerializer(serializers.Serializer):
+    SCOPE_CHOICES = ["all", "insumos", "recetas", "proveedores", "codigos_point"]
+    EXPORT_CHOICES = ["", "csv", "xlsx"]
+
+    scope = serializers.ChoiceField(choices=SCOPE_CHOICES, required=False, default="all")
+    q = serializers.CharField(required=False, allow_blank=True, default="")
+    include_inactive = serializers.BooleanField(required=False, default=False)
+    min_count = serializers.IntegerField(required=False, min_value=2, max_value=200, default=2)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=3000, default=1000)
+    offset = serializers.IntegerField(required=False, min_value=0, max_value=100000, default=0)
+    export = serializers.ChoiceField(choices=EXPORT_CHOICES, required=False, default="")
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        attrs["q"] = (attrs.get("q") or "").strip()
+        attrs["scope"] = (attrs.get("scope") or "all").strip().lower()
+        attrs["export"] = (attrs.get("export") or "").strip().lower()
+        return attrs

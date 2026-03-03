@@ -24,6 +24,7 @@ from recetas.models import (
     RecetaCodigoPointAlias,
     SolicitudVenta,
     VentaHistorica,
+    normalizar_codigo_point,
 )
 from recetas.utils.costeo_versionado import asegurar_version_costeo
 from recetas.utils.normalizacion import normalizar_nombre
@@ -5615,6 +5616,131 @@ class RecetasCosteoApiTests(TestCase):
         for name in ("api_ventas_solicitud_import_preview", "api_ventas_solicitud_import_confirm"):
             resp = self.client.post(reverse(name), payload, content_type="application/json")
             self.assertEqual(resp.status_code, 403)
+
+    def test_endpoint_master_normalize_dry_run_and_apply(self):
+        insumo = Insumo.objects.create(
+            nombre="Azúcar Premium Master",
+            unidad_base=self.unidad,
+            activo=True,
+            codigo_point=" INS-001 ",
+        )
+        Insumo.objects.filter(pk=insumo.id).update(nombre_normalizado="normal_mal_insumo")
+
+        receta = Receta.objects.create(
+            nombre="Receta Azúcar Master",
+            hash_contenido="hash-api-master-normalize-001",
+            codigo_point=" REC-001 ",
+        )
+        Receta.objects.filter(pk=receta.id).update(nombre_normalizado="normal_mal_receta")
+
+        alias = InsumoAlias.objects.create(nombre="Azucar prm", insumo=insumo)
+        InsumoAlias.objects.filter(pk=alias.id).update(nombre_normalizado="normal_mal_alias")
+
+        point_alias = RecetaCodigoPointAlias.objects.create(
+            receta=receta,
+            codigo_point=" REC-001 ",
+            nombre_point="Receta Point 001",
+        )
+        RecetaCodigoPointAlias.objects.filter(pk=point_alias.id).update(codigo_point_normalizado="codigo_mal")
+
+        url = reverse("api_master_normalize")
+        resp_dry = self.client.post(
+            url,
+            {"scope": "all", "dry_run": True, "limit": 200},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_dry.status_code, 200)
+        payload_dry = resp_dry.json()
+        self.assertTrue(payload_dry["dry_run"])
+        self.assertGreaterEqual(payload_dry["totales"]["changed"], 4)
+
+        insumo.refresh_from_db()
+        receta.refresh_from_db()
+        alias.refresh_from_db()
+        point_alias.refresh_from_db()
+        self.assertEqual(insumo.nombre_normalizado, "normal_mal_insumo")
+        self.assertEqual(receta.nombre_normalizado, "normal_mal_receta")
+        self.assertEqual(alias.nombre_normalizado, "normal_mal_alias")
+        self.assertEqual(point_alias.codigo_point_normalizado, "codigo_mal")
+
+        resp_apply = self.client.post(
+            url,
+            {"scope": "all", "dry_run": False, "limit": 200},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_apply.status_code, 200)
+        payload_apply = resp_apply.json()
+        self.assertFalse(payload_apply["dry_run"])
+        self.assertGreaterEqual(payload_apply["totales"]["updated"], 4)
+
+        insumo.refresh_from_db()
+        receta.refresh_from_db()
+        alias.refresh_from_db()
+        point_alias.refresh_from_db()
+        self.assertEqual(insumo.nombre_normalizado, normalizar_nombre(insumo.nombre))
+        self.assertEqual(receta.nombre_normalizado, normalizar_nombre(receta.nombre))
+        self.assertEqual(alias.nombre_normalizado, normalizar_nombre(alias.nombre))
+        self.assertEqual(point_alias.codigo_point_normalizado, normalizar_codigo_point(point_alias.codigo_point))
+
+    def test_endpoint_master_duplicates(self):
+        Proveedor.objects.create(nombre="Proveedor Demo", activo=True)
+        Proveedor.objects.create(nombre="  proveedor   demo ", activo=True)
+
+        Insumo.objects.create(nombre="Mantequilla Salted", unidad_base=self.unidad, activo=True, codigo_point="MP-001")
+        Insumo.objects.create(nombre="Mantequilla  Salted", unidad_base=self.unidad, activo=True, codigo_point=" mp 001 ")
+
+        Receta.objects.create(
+            nombre="Pastel Demo Duplicado",
+            hash_contenido="hash-api-master-dup-receta-001",
+            codigo_point="REC-900",
+        )
+        Receta.objects.create(
+            nombre="Pastel   Demo Duplicado",
+            hash_contenido="hash-api-master-dup-receta-002",
+            codigo_point=" rec 900 ",
+        )
+
+        url = reverse("api_master_duplicates")
+        resp = self.client.get(
+            url,
+            {"scope": "all", "include_inactive": 1, "min_count": 2, "limit": 200},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertGreaterEqual(payload["totales"]["groups_total"], 4)
+
+        group_types = {item["group_type"] for item in payload["items"]}
+        self.assertIn("insumos", group_types)
+        self.assertIn("recetas", group_types)
+        self.assertIn("proveedores", group_types)
+        self.assertIn("codigos_point", group_types)
+
+        resp_csv = self.client.get(url, {"scope": "all", "min_count": 2, "export": "csv"})
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("master_duplicates.csv", resp_csv["Content-Disposition"])
+
+        resp_xlsx = self.client.get(url, {"scope": "all", "min_count": 2, "export": "xlsx"})
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn("master_duplicates.xlsx", resp_xlsx["Content-Disposition"])
+
+    def test_endpoint_master_endpoints_require_permission(self):
+        user_model = get_user_model()
+        user = user_model.objects.create_user(
+            username="sin_perm_master_api",
+            email="sin_perm_master_api@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+
+        resp_duplicates = self.client.get(reverse("api_master_duplicates"))
+        self.assertEqual(resp_duplicates.status_code, 403)
+
+        resp_normalize = self.client.post(
+            reverse("api_master_normalize"),
+            {"scope": "all", "dry_run": True},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_normalize.status_code, 403)
 
 
 class InventarioAjustesApiTests(TestCase):
