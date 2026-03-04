@@ -38,10 +38,20 @@ class Proveedor(models.Model):
         return self.nombre
 
 class Insumo(models.Model):
+    TIPO_MATERIA_PRIMA = "MATERIA_PRIMA"
+    TIPO_INTERNO = "INSUMO_INTERNO"
+    TIPO_EMPAQUE = "EMPAQUE"
+    TIPO_CHOICES = [
+        (TIPO_MATERIA_PRIMA, "Materia prima (compra directa)"),
+        (TIPO_INTERNO, "Insumo interno (producido)"),
+        (TIPO_EMPAQUE, "Empaque"),
+    ]
+
     codigo = models.CharField(max_length=60, blank=True, default="")
     codigo_point = models.CharField(max_length=80, blank=True, default="", db_index=True)
     nombre_point = models.CharField(max_length=250, blank=True, default="")
     nombre = models.CharField(max_length=250)
+    tipo_item = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_MATERIA_PRIMA, db_index=True)
     categoria = models.CharField(max_length=120, blank=True, default="")
     nombre_normalizado = models.CharField(max_length=260, db_index=True)
     unidad_base = models.ForeignKey(UnidadMedida, null=True, blank=True, on_delete=models.SET_NULL)
@@ -60,6 +70,18 @@ class Insumo(models.Model):
 
     def __str__(self) -> str:
         return self.nombre
+
+    @property
+    def es_materia_prima(self) -> bool:
+        return self.tipo_item == self.TIPO_MATERIA_PRIMA
+
+    @property
+    def es_insumo_interno(self) -> bool:
+        return self.tipo_item == self.TIPO_INTERNO
+
+    @property
+    def es_empaque(self) -> bool:
+        return self.tipo_item == self.TIPO_EMPAQUE
 
 
 class InsumoAlias(models.Model):

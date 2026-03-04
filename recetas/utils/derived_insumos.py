@@ -66,6 +66,7 @@ def _get_or_create_derived_insumo(presentacion: RecetaPresentacion, pza_unit: Un
     insumo = Insumo.objects.create(
         codigo=code,
         nombre=_derived_name(presentacion),
+        tipo_item=Insumo.TIPO_INTERNO,
         unidad_base=pza_unit,
         activo=bool(presentacion.activo),
     )
@@ -130,6 +131,9 @@ def sync_presentacion_insumo(
     if insumo.unidad_base_id != pza_unit.id:
         insumo.unidad_base = pza_unit
         updates.append("unidad_base")
+    if insumo.tipo_item != Insumo.TIPO_INTERNO:
+        insumo.tipo_item = Insumo.TIPO_INTERNO
+        updates.append("tipo_item")
 
     desired_active = False if deactivate else bool(presentacion.activo)
     if insumo.activo != desired_active:
@@ -197,6 +201,7 @@ def sync_preparacion_insumo(receta: Receta) -> DerivedSyncStats:
         insumo = Insumo.objects.create(
             codigo=code,
             nombre=nombre,
+            tipo_item=Insumo.TIPO_INTERNO,
             unidad_base=receta.rendimiento_unidad,
             activo=True,
         )
@@ -214,6 +219,9 @@ def sync_preparacion_insumo(receta: Receta) -> DerivedSyncStats:
     if receta.rendimiento_unidad and insumo.unidad_base_id != receta.rendimiento_unidad_id:
         insumo.unidad_base = receta.rendimiento_unidad
         updates.append("unidad_base")
+    if insumo.tipo_item != Insumo.TIPO_INTERNO:
+        insumo.tipo_item = Insumo.TIPO_INTERNO
+        updates.append("tipo_item")
     if not insumo.activo:
         insumo.activo = True
         updates.append("activo")

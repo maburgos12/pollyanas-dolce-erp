@@ -422,8 +422,10 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
         .annotate(
             latest_costo_unitario=Subquery(latest_cost_subquery),
             origen_orden=Case(
+                When(tipo_item=Insumo.TIPO_INTERNO, then=Value(0)),
                 When(codigo__startswith="DERIVADO:RECETA:", then=Value(0)),
-                default=Value(1),
+                When(tipo_item=Insumo.TIPO_EMPAQUE, then=Value(1)),
+                default=Value(2),
                 output_field=IntegerField(),
             ),
         )
@@ -434,10 +436,14 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
     def _option_score(i: Insumo) -> int:
         score = 0
         code = (i.codigo or "")
-        if code.startswith("DERIVADO:RECETA:"):
+        is_internal = i.tipo_item == Insumo.TIPO_INTERNO or code.startswith("DERIVADO:RECETA:")
+        is_empaque = i.tipo_item == Insumo.TIPO_EMPAQUE or "empaque" in normalizar_nombre(i.categoria or "")
+        if is_internal:
             score += 300
-            if ":PREPARACION" in code:
+            if code.endswith(":PREPARACION"):
                 score += 50
+        elif is_empaque:
+            score += 120
         if (i.codigo_point or "").strip():
             score += 80
         if i.latest_costo_unitario is not None and Decimal(str(i.latest_costo_unitario or 0)) > 0:
@@ -469,19 +475,15 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
             insumos.append(linea.insumo)
             insumos = sorted(insumos, key=lambda x: ((x.origen_orden or 9), x.nombre.lower()))
 
-    insumos_internos = [i for i in insumos if (i.codigo or "").startswith("DERIVADO:RECETA:")]
-    insumos_empaque = [
-        i
-        for i in insumos
-        if not (i.codigo or "").startswith("DERIVADO:RECETA:")
-        and "empaque" in normalizar_nombre(i.categoria or "")
-    ]
-    empaque_ids = {i.id for i in insumos_empaque}
-    insumos_materia_prima = [
-        i
-        for i in insumos
-        if not (i.codigo or "").startswith("DERIVADO:RECETA:") and i.id not in empaque_ids
-    ]
+    def _is_internal(i: Insumo) -> bool:
+        return i.tipo_item == Insumo.TIPO_INTERNO or (i.codigo or "").startswith("DERIVADO:RECETA:")
+
+    def _is_empaque(i: Insumo) -> bool:
+        return i.tipo_item == Insumo.TIPO_EMPAQUE or "empaque" in normalizar_nombre(i.categoria or "")
+
+    insumos_internos = [i for i in insumos if _is_internal(i)]
+    insumos_empaque = [i for i in insumos if not _is_internal(i) and _is_empaque(i)]
+    insumos_materia_prima = [i for i in insumos if not _is_internal(i) and not _is_empaque(i)]
     return {
         "receta": receta,
         "linea": linea,

@@ -94,6 +94,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
         estado = self.request.GET.get('estado')
         point_status = self.request.GET.get('point_status')
         costo_status = self.request.GET.get("costo_status")
+        tipo_item = self.request.GET.get("tipo_item")
         if search:
             queryset = queryset.filter(
                 Q(nombre__icontains=search)
@@ -113,6 +114,8 @@ class InsumoListView(LoginRequiredMixin, ListView):
             queryset = queryset.filter(Q(latest_costo_unitario__isnull=True) | Q(latest_costo_unitario__lte=0))
         elif costo_status == "con_costo":
             queryset = queryset.filter(latest_costo_unitario__gt=0)
+        if tipo_item in {Insumo.TIPO_MATERIA_PRIMA, Insumo.TIPO_INTERNO, Insumo.TIPO_EMPAQUE}:
+            queryset = queryset.filter(tipo_item=tipo_item)
         return queryset.order_by('nombre')
     
     def get_context_data(self, **kwargs):
@@ -129,17 +132,21 @@ class InsumoListView(LoginRequiredMixin, ListView):
         context['estado'] = self.request.GET.get('estado', '')
         context['point_status'] = self.request.GET.get('point_status', '')
         context["costo_status"] = self.request.GET.get("costo_status", "")
+        context["tipo_item"] = self.request.GET.get("tipo_item", "")
         context['total_insumos'] = qs.count()
         context['total_activos'] = qs.filter(activo=True).count()
         context['total_point_pendientes'] = total_pending_point
         context['total_point_completos'] = total_complete_point
         context['point_ratio'] = point_ratio
+        context["total_materia_prima"] = active_qs.filter(tipo_item=Insumo.TIPO_MATERIA_PRIMA).count()
+        context["total_insumos_internos"] = active_qs.filter(tipo_item=Insumo.TIPO_INTERNO).count()
+        context["total_empaques"] = active_qs.filter(tipo_item=Insumo.TIPO_EMPAQUE).count()
         return context
 
 class InsumoCreateView(LoginRequiredMixin, CreateView):
     model = Insumo
     template_name = 'maestros/insumo_form.html'
-    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'categoria', 'unidad_base', 'proveedor_principal', 'activo']
+    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'tipo_item', 'categoria', 'unidad_base', 'proveedor_principal', 'activo']
     success_url = reverse_lazy('maestros:insumo_list')
     
     def get_context_data(self, **kwargs):
@@ -160,7 +167,7 @@ class InsumoCreateView(LoginRequiredMixin, CreateView):
 class InsumoUpdateView(LoginRequiredMixin, UpdateView):
     model = Insumo
     template_name = 'maestros/insumo_form.html'
-    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'categoria', 'unidad_base', 'proveedor_principal', 'activo']
+    fields = ['codigo', 'codigo_point', 'nombre', 'nombre_point', 'tipo_item', 'categoria', 'unidad_base', 'proveedor_principal', 'activo']
     success_url = reverse_lazy('maestros:insumo_list')
     
     def get_context_data(self, **kwargs):

@@ -76,7 +76,7 @@
             {% for i in insumos_internos %}
               <option
                 value="{{ i.id }}"
-                data-origin="INTERNO"
+                data-origin="INSUMO_INTERNO"
                 data-nombre="{{ i.nombre }}"
                 data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
@@ -366,7 +366,7 @@
     const qty = toNum(cantidadInput.value);
     const qtyRaw = String(cantidadInput.value || "").trim();
 
-    if (origin === "INTERNO") {
+    if (origin === "INSUMO_INTERNO" || origin === "INTERNO") {
       origenInput.value = "Insumo interno (producido)";
     } else if (origin === "EMPAQUE") {
       origenInput.value = "Empaque";

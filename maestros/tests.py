@@ -179,3 +179,53 @@ class PointPendingReviewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(PointPendingMatch.objects.filter(id=pending_ok.id).exists())
         self.assertTrue(PointPendingMatch.objects.filter(id=pending_other.id).exists())
+
+
+class InsumoTipoItemCatalogTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_superuser(
+            username="admin_insumo_tipo",
+            email="admin_insumo_tipo@example.com",
+            password="test12345",
+        )
+        self.client.force_login(self.user)
+        self.unidad = UnidadMedida.objects.create(
+            codigo="pza",
+            nombre="Pieza",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        self.insumo_mp = Insumo.objects.create(
+            nombre="Harina Selecta",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unidad,
+            activo=True,
+        )
+        self.insumo_int = Insumo.objects.create(
+            nombre="Batida Vainilla",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+            activo=True,
+        )
+        self.insumo_emp = Insumo.objects.create(
+            nombre="Caja Pastel M",
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            unidad_base=self.unidad,
+            activo=True,
+        )
+
+    def test_insumo_list_filters_by_tipo_item(self):
+        response = self.client.get(reverse("maestros:insumo_list"), {"tipo_item": Insumo.TIPO_INTERNO})
+        self.assertEqual(response.status_code, 200)
+        names = [x.nombre for x in response.context["insumos"]]
+        self.assertIn(self.insumo_int.nombre, names)
+        self.assertNotIn(self.insumo_mp.nombre, names)
+        self.assertNotIn(self.insumo_emp.nombre, names)
+
+    def test_insumo_list_context_includes_tipo_item_kpis(self):
+        response = self.client.get(reverse("maestros:insumo_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_materia_prima"], 1)
+        self.assertEqual(response.context["total_insumos_internos"], 1)
+        self.assertEqual(response.context["total_empaques"], 1)

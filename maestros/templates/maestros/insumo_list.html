@@ -26,6 +26,18 @@
       <div class="kpi-number is-warning">{{ point_ratio|floatformat:2 }}%</div>
       <div class="kpi-label">Cobertura homologación Point</div>
     </div>
+    <div class="kpi-card">
+      <div class="kpi-number">{{ total_materia_prima }}</div>
+      <div class="kpi-label">Materia prima</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number is-success">{{ total_insumos_internos }}</div>
+      <div class="kpi-label">Insumos internos</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number is-warning">{{ total_empaques }}</div>
+      <div class="kpi-label">Empaques</div>
+    </div>
   </div>
 
   <div class="d-flex justify-content-between align-items-center mb-3">
@@ -54,6 +66,12 @@
       <option value="con_costo" {% if costo_status == "con_costo" %}selected{% endif %}>Costo: Con costo</option>
       <option value="sin_costo" {% if costo_status == "sin_costo" %}selected{% endif %}>Costo: Sin costo/0</option>
     </select>
+    <select class="form-select" name="tipo_item">
+      <option value="" {% if not tipo_item %}selected{% endif %}>Tipo: Todos</option>
+      <option value="MATERIA_PRIMA" {% if tipo_item == "MATERIA_PRIMA" %}selected{% endif %}>Tipo: Materia prima</option>
+      <option value="INSUMO_INTERNO" {% if tipo_item == "INSUMO_INTERNO" %}selected{% endif %}>Tipo: Insumo interno</option>
+      <option value="EMPAQUE" {% if tipo_item == "EMPAQUE" %}selected{% endif %}>Tipo: Empaque</option>
+    </select>
     <button class="btn btn-primary" type="submit">Filtrar</button>
     <a class="btn btn-secondary" href="{% url 'maestros:insumo_list' %}">Limpiar</a>
   </form>
@@ -66,6 +84,7 @@
           <th>Código Point</th>
           <th>Insumo</th>
           <th>Nombre Point</th>
+          <th>Tipo</th>
           <th>Categoría</th>
           <th>Unidad base</th>
           <th>Proveedor principal</th>
@@ -82,6 +101,15 @@
             <td>{{ i.codigo_point|default:"-" }}</td>
             <td>{{ i.nombre }}</td>
             <td>{{ i.nombre_point|default:"-" }}</td>
+            <td>
+              {% if i.tipo_item == "INSUMO_INTERNO" %}
+                <span class="badge bg-success">Insumo interno</span>
+              {% elif i.tipo_item == "EMPAQUE" %}
+                <span class="badge bg-warning">Empaque</span>
+              {% else %}
+                <span class="badge bg-secondary">Materia prima</span>
+              {% endif %}
+            </td>
             <td>{{ i.categoria|default:"-" }}</td>
             <td>{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% else %}-{% endif %}</td>
             <td>{% if i.proveedor_principal %}{{ i.proveedor_principal.nombre }}{% else %}-{% endif %}</td>
@@ -107,7 +135,7 @@
             </td>
           </tr>
         {% empty %}
-          <tr><td colspan="11" class="text-muted">No hay insumos registrados.</td></tr>
+          <tr><td colspan="12" class="text-muted">No hay insumos registrados.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -117,11 +145,11 @@
   <nav>
     <ul class="pagination">
       {% if page_obj.has_previous %}
-      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&costo_status={{ costo_status }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
+      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&costo_status={{ costo_status }}&tipo_item={{ tipo_item }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
       {% endif %}
       <li><span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span></li>
       {% if page_obj.has_next %}
-      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&costo_status={{ costo_status }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
+      <li><a class="page-link" href="?q={{ search_query }}&estado={{ estado }}&point_status={{ point_status }}&costo_status={{ costo_status }}&tipo_item={{ tipo_item }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
       {% endif %}
     </ul>
   </nav>
