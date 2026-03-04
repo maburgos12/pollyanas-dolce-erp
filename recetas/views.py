@@ -417,7 +417,7 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
         .values("costo_unitario")[:1]
     )
     insumos_qs = (
-        Insumo.objects.filter(activo=True)
+        Insumo.objects.filter(activo=True, unidad_base__isnull=False)
         .select_related("unidad_base")
         .annotate(
             latest_costo_unitario=Subquery(latest_cost_subquery),
@@ -429,7 +429,46 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
         )
         .order_by("origen_orden", "nombre")
     )
-    insumos = list(insumos_qs[:1200])
+    raw_insumos = list(insumos_qs[:1600])
+
+    def _option_score(i: Insumo) -> int:
+        score = 0
+        code = (i.codigo or "")
+        if code.startswith("DERIVADO:RECETA:"):
+            score += 300
+            if ":PREPARACION" in code:
+                score += 50
+        if (i.codigo_point or "").strip():
+            score += 80
+        if i.latest_costo_unitario is not None and Decimal(str(i.latest_costo_unitario or 0)) > 0:
+            score += 60
+        if i.proveedor_principal_id:
+            score += 20
+        if i.unidad_base_id:
+            score += 10
+        # Evita que "ruido" de pruebas prevalezca sobre catálogo real.
+        if normalizar_nombre(i.nombre).startswith("qa flow"):
+            score -= 120
+        return score
+
+    # Consolidación operativa del selector: un solo canónico por nombre normalizado.
+    best_by_norm: dict[str, Insumo] = {}
+    for insumo in raw_insumos:
+        key = insumo.nombre_normalizado or normalizar_nombre(insumo.nombre or "")
+        current = best_by_norm.get(key)
+        if current is None:
+            best_by_norm[key] = insumo
+            continue
+        if _option_score(insumo) > _option_score(current):
+            best_by_norm[key] = insumo
+
+    insumos = sorted(best_by_norm.values(), key=lambda x: ((x.origen_orden or 9), x.nombre.lower()))
+    if linea and linea.insumo_id:
+        selected_present = any(i.id == linea.insumo_id for i in insumos)
+        if not selected_present and linea.insumo and linea.insumo.activo and linea.insumo.unidad_base_id:
+            insumos.append(linea.insumo)
+            insumos = sorted(insumos, key=lambda x: ((x.origen_orden or 9), x.nombre.lower()))
+
     insumos_internos = [i for i in insumos if (i.codigo or "").startswith("DERIVADO:RECETA:")]
     insumos_empaque = [
         i
