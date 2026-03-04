@@ -787,6 +787,7 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     linea = get_object_or_404(LineaReceta, pk=linea_id, receta=receta)
 
     if request.method == "POST":
+        original_insumo_id = linea.insumo_id
         insumo_id = request.POST.get("insumo_id")
         tipo_linea = (request.POST.get("tipo_linea") or LineaReceta.TIPO_NORMAL).strip()
         if tipo_linea not in {LineaReceta.TIPO_NORMAL, LineaReceta.TIPO_SUBSECCION}:
@@ -802,6 +803,11 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
         linea.cantidad = _to_decimal_or_none(request.POST.get("cantidad"))
         linea.insumo = Insumo.objects.filter(pk=insumo_id).first() if insumo_id else None
         _autolink_pan_derived_from_recipe(receta, linea)
+        if original_insumo_id != linea.insumo_id:
+            # Si cambió el insumo ligado (manual/autolink), invalidamos snapshot previo
+            # para recalcular costo unitario con el nuevo insumo.
+            linea.costo_unitario_snapshot = None
+            linea.costo_linea_excel = None
 
         if linea.insumo:
             linea.match_status = LineaReceta.STATUS_AUTO
@@ -862,7 +868,11 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
             insumo=Insumo.objects.filter(pk=insumo_id).first() if insumo_id else None,
             unidad=None,
         )
+        original_insumo_id = linea.insumo_id
         _autolink_pan_derived_from_recipe(receta, linea)
+        if original_insumo_id != linea.insumo_id:
+            linea.costo_unitario_snapshot = None
+            linea.costo_linea_excel = None
         if linea.insumo:
             linea.match_status = LineaReceta.STATUS_AUTO
             linea.match_method = "MANUAL"

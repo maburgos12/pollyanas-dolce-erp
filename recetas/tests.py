@@ -327,6 +327,79 @@ class RecetaDerivedInsumoAutolinkTests(TestCase):
         self.assertEqual(linea.costo_unitario_snapshot, Decimal("42.402733"))
         self.assertAlmostEqual(linea.costo_total_estimado or 0, 3.180204975, places=6)
 
+    def test_linea_bollo_edit_refreshes_snapshot_when_autolink_changes_insumo(self):
+        receta = Receta.objects.create(
+            nombre="Bollo Chocolate",
+            hash_contenido="hash-autolink-bollo-pan-002",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+        pan_generico = Insumo.objects.create(
+            nombre="Pan Chocolate",
+            unidad_base=self.unidad_pza,
+            activo=True,
+        )
+        pan_preparacion = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:29:PREPARACION",
+            nombre="Pan de Chocolate Deleite Dawn",
+            unidad_base=self.unidad_kg,
+            activo=True,
+        )
+        pan_bollo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:29:PRESENTACION:98",
+            nombre="Pan de Chocolate Deleite Dawn - Bollos",
+            unidad_base=self.unidad_pza,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=pan_preparacion,
+            fecha=timezone.localdate(),
+            moneda="MXN",
+            costo_unitario=Decimal("42.402733"),
+            source_hash="test-bollo-prep-cost-002",
+            raw={},
+        )
+        CostoInsumo.objects.create(
+            insumo=pan_bollo,
+            fecha=timezone.localdate(),
+            moneda="MXN",
+            costo_unitario=Decimal("3.180205"),
+            source_hash="test-bollo-pres-cost-002",
+            raw={},
+        )
+
+        linea = LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=pan_bollo,
+            insumo_texto="Pan Chocolate",
+            cantidad=Decimal("0.075000"),
+            unidad=self.unidad_pza,
+            unidad_texto="pza",
+            costo_unitario_snapshot=Decimal("3.180205"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method="MANUAL",
+            match_score=100.0,
+        )
+
+        response = self.client.post(
+            reverse("recetas:linea_edit", args=[receta.id, linea.id]),
+            data={
+                "tipo_linea": LineaReceta.TIPO_NORMAL,
+                "insumo_texto": "Pan Chocolate",
+                "insumo_id": str(pan_generico.id),
+                "cantidad": "0.075",
+                "etapa": "",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        linea.refresh_from_db()
+
+        self.assertEqual(linea.insumo_id, pan_preparacion.id)
+        self.assertEqual(linea.unidad_id, self.unidad_kg.id)
+        self.assertEqual(linea.costo_unitario_snapshot, Decimal("42.402733"))
+        self.assertAlmostEqual(linea.costo_total_estimado or 0, 3.180204975, places=6)
+
     def test_signals_sync_prepare_and_presentacion_derived_insumos(self):
         receta = Receta.objects.create(
             nombre="Batida Test Chocolate",
