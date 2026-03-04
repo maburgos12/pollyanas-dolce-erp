@@ -484,9 +484,13 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
     insumos_internos = [i for i in insumos if _is_internal(i)]
     insumos_empaque = [i for i in insumos if not _is_internal(i) and _is_empaque(i)]
     insumos_materia_prima = [i for i in insumos if not _is_internal(i) and not _is_empaque(i)]
+    quick_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and (
+        linea is None or linea.tipo_linea == LineaReceta.TIPO_NORMAL
+    )
     return {
         "receta": receta,
         "linea": linea,
+        "quick_mode": quick_mode,
         "insumos": insumos,
         "insumos_internos": insumos_internos,
         "insumos_empaque": insumos_empaque,
@@ -828,9 +832,12 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     linea = get_object_or_404(LineaReceta, pk=linea_id, receta=receta)
 
     if request.method == "POST":
+        quick_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and request.POST.get("modo_rapido") == "1"
         original_insumo_id = linea.insumo_id
         insumo_id = request.POST.get("insumo_id")
         tipo_linea = (request.POST.get("tipo_linea") or LineaReceta.TIPO_NORMAL).strip()
+        if quick_mode:
+            tipo_linea = LineaReceta.TIPO_NORMAL
         if tipo_linea not in {LineaReceta.TIPO_NORMAL, LineaReceta.TIPO_SUBSECCION}:
             tipo_linea = LineaReceta.TIPO_NORMAL
         linea.insumo_texto = (request.POST.get("insumo_texto") or "").strip()[:250]
@@ -887,8 +894,11 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
 def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     if request.method == "POST":
+        quick_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and request.POST.get("modo_rapido") == "1"
         insumo_id = request.POST.get("insumo_id")
         tipo_linea = (request.POST.get("tipo_linea") or LineaReceta.TIPO_NORMAL).strip()
+        if quick_mode:
+            tipo_linea = LineaReceta.TIPO_NORMAL
         if tipo_linea not in {LineaReceta.TIPO_NORMAL, LineaReceta.TIPO_SUBSECCION}:
             tipo_linea = LineaReceta.TIPO_NORMAL
         posicion_default = (receta.lineas.order_by("-posicion").first().posicion + 1) if receta.lineas.exists() else 1

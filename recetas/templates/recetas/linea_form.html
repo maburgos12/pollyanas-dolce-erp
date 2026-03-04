@@ -4,13 +4,22 @@
 <div class="card">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
-      <h3 class="mb-0">{% if linea %}Editar línea{% else %}Nueva línea{% endif %}</h3>
+      <h3 class="mb-0">
+        {% if quick_mode %}
+          {% if linea %}Editar componente{% else %}Nuevo componente{% endif %}
+        {% else %}
+          {% if linea %}Editar línea{% else %}Nueva línea{% endif %}
+        {% endif %}
+      </h3>
       <div class="text-muted">Receta: {{ receta.nombre }}</div>
     </div>
     <a class="btn btn-outline-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Volver a receta</a>
   </div>
   <div class="alert alert-info">
-    {% if receta.tipo == "PRODUCTO_FINAL" %}
+    {% if quick_mode %}
+      Modo rápido de <strong>producto final</strong>: busca el insumo, captura cantidad y guarda.
+      La unidad y costo se toman automáticamente del catálogo.
+    {% elif receta.tipo == "PRODUCTO_FINAL" %}
       Esta receta es <strong>producto final</strong>: selecciona insumo/subinsumo y captura la cantidad.
       El sistema toma la unidad y costo del catálogo automáticamente.
     {% else %}
@@ -38,11 +47,16 @@
       </div>
       <div class="form-group">
         <label for="insumo_texto">Ingrediente (texto)</label>
-        <input id="insumo_texto" class="form-control" type="text" name="insumo_texto" value="{{ linea.insumo_texto|default:'' }}" placeholder="Se autocompleta al seleccionar insumo">
+        <input id="insumo_texto" class="form-control" type="text" name="insumo_texto" value="{{ linea.insumo_texto|default:'' }}" placeholder="Se autocompleta al seleccionar insumo" {% if quick_mode %}readonly{% endif %}>
       </div>
     </div>
 
     <div class="kpi-grid">
+      {% if quick_mode %}
+      <input type="hidden" name="modo_rapido" value="1">
+      <input type="hidden" name="tipo_linea" value="NORMAL">
+      <input type="hidden" name="etapa" value="{{ linea.etapa|default:'' }}">
+      {% else %}
       <div class="form-group">
         <label for="etapa">Etapa / Sección</label>
         <input id="etapa" class="form-control" type="text" name="etapa" value="{{ linea.etapa|default:'' }}" placeholder="Ej. Dream Whip, Fresa fresca">
@@ -61,6 +75,7 @@
           {% endfor %}
         </select>
       </div>
+      {% endif %}
       <div class="form-group">
         <label for="unidad_detectada_preview">Unidad detectada</label>
         <input id="unidad_detectada_preview" class="form-control" type="text" value="{{ linea.unidad_texto|default:'-' }}" readonly>
@@ -150,7 +165,9 @@
     </div>
 
     <div class="recipe-actions">
-      <button type="submit" class="btn btn-primary">Guardar</button>
+      <button type="submit" class="btn btn-primary">
+        {% if quick_mode %}Guardar componente{% else %}Guardar{% endif %}
+      </button>
       <a class="btn btn-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Cancelar</a>
     </div>
   </form>

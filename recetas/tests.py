@@ -232,6 +232,28 @@ class RecetaDerivedInsumoAutolinkTests(TestCase):
             factor_to_base=Decimal("1000"),
         )
 
+    def test_linea_form_producto_final_uses_quick_mode(self):
+        receta = Receta.objects.create(
+            nombre="Pastel QA Modo Rapido",
+            hash_contenido="hash-quick-mode-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+        response = self.client.get(reverse("recetas:linea_create", args=[receta.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="modo_rapido"')
+        self.assertContains(response, "Guardar componente")
+
+    def test_linea_form_preparacion_uses_full_mode(self):
+        receta = Receta.objects.create(
+            nombre="Batida QA Modo Completo",
+            hash_contenido="hash-quick-mode-002",
+            tipo=Receta.TIPO_PREPARACION,
+        )
+        response = self.client.get(reverse("recetas:linea_create", args=[receta.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="modo_rapido"')
+        self.assertContains(response, "Tipo de línea")
+
     def test_linea_pan_autolink_to_derived_presentacion(self):
         receta = Receta.objects.create(
             nombre="Pastel 3 Pecados - Chico",
