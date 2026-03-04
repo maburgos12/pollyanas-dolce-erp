@@ -28,12 +28,20 @@
     {% endif %}
   </div>
   <div class="toolbar mb-3">
+    {% if receta.tipo == "PRODUCTO_FINAL" %}
+      {% if quick_mode %}
+        <a class="btn btn-secondary" href="?advanced=1">Opciones avanzadas</a>
+      {% else %}
+        <a class="btn btn-secondary" href="?">Modo rápido</a>
+      {% endif %}
+    {% endif %}
     <a class="btn btn-secondary" href="{% url 'maestros:insumo_create' %}" target="_blank" rel="noopener">+ Crear insumo nuevo</a>
     <span class="text-muted">Si no encuentras un insumo, créalo y vuelve a esta pantalla.</span>
   </div>
 
   <form method="post">
     {% csrf_token %}
+    <input type="hidden" name="advanced_mode" value="{% if advanced_mode %}1{% else %}0{% endif %}">
     <div class="kpi-grid">
       <div class="form-group">
         <label for="insumo_autocomplete">Buscar insumo (autocompletar)</label>

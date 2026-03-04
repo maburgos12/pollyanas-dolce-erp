@@ -254,6 +254,18 @@ class RecetaDerivedInsumoAutolinkTests(TestCase):
         self.assertNotContains(response, 'name="modo_rapido"')
         self.assertContains(response, "Tipo de línea")
 
+    def test_linea_form_producto_final_can_switch_to_advanced_mode(self):
+        receta = Receta.objects.create(
+            nombre="Pastel QA Avanzado",
+            hash_contenido="hash-quick-mode-003",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+        response = self.client.get(reverse("recetas:linea_create", args=[receta.id]), {"advanced": "1"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="modo_rapido"')
+        self.assertContains(response, 'name="advanced_mode" value="1"')
+        self.assertContains(response, "Tipo de línea")
+
     def test_linea_pan_autolink_to_derived_presentacion(self):
         receta = Receta.objects.create(
             nombre="Pastel 3 Pecados - Chico",

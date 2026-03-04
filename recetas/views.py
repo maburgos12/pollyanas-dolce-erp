@@ -410,7 +410,12 @@ def _to_non_negative_decimal_or_none(value: str | None) -> Decimal | None:
         return None
 
 
-def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dict[str, Any]:
+def _linea_form_context(
+    receta: Receta,
+    linea: LineaReceta | None = None,
+    *,
+    advanced_mode: bool = False,
+) -> Dict[str, Any]:
     latest_cost_subquery = (
         CostoInsumo.objects.filter(insumo=OuterRef("pk"))
         .order_by("-fecha", "-id")
@@ -484,12 +489,13 @@ def _linea_form_context(receta: Receta, linea: LineaReceta | None = None) -> Dic
     insumos_internos = [i for i in insumos if _is_internal(i)]
     insumos_empaque = [i for i in insumos if not _is_internal(i) and _is_empaque(i)]
     insumos_materia_prima = [i for i in insumos if not _is_internal(i) and not _is_empaque(i)]
-    quick_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and (
+    quick_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and not advanced_mode and (
         linea is None or linea.tipo_linea == LineaReceta.TIPO_NORMAL
     )
     return {
         "receta": receta,
         "linea": linea,
+        "advanced_mode": advanced_mode,
         "quick_mode": quick_mode,
         "insumos": insumos,
         "insumos_internos": insumos_internos,
@@ -832,7 +838,8 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
     linea = get_object_or_404(LineaReceta, pk=linea_id, receta=receta)
 
     if request.method == "POST":
-        quick_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and request.POST.get("modo_rapido") == "1"
+        advanced_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and request.POST.get("advanced_mode") == "1"
+        quick_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and not advanced_mode
         original_insumo_id = linea.insumo_id
         insumo_id = request.POST.get("insumo_id")
         tipo_linea = (request.POST.get("tipo_linea") or LineaReceta.TIPO_NORMAL).strip()
@@ -878,7 +885,11 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
         validation_error = _validate_linea_operativa(receta, linea)
         if validation_error:
             messages.error(request, validation_error)
-            return render(request, "recetas/linea_form.html", _linea_form_context(receta, linea))
+            return render(
+                request,
+                "recetas/linea_form.html",
+                _linea_form_context(receta, linea, advanced_mode=advanced_mode),
+            )
         _switch_line_to_internal_cost(linea)
         linea.save()
         _sync_derived_insumos_safe(request, receta)
@@ -886,7 +897,12 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
         messages.success(request, "Línea actualizada.")
         return redirect("recetas:receta_detail", pk=pk)
 
-    return render(request, "recetas/linea_form.html", _linea_form_context(receta, linea))
+    advanced_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and request.GET.get("advanced") == "1"
+    return render(
+        request,
+        "recetas/linea_form.html",
+        _linea_form_context(receta, linea, advanced_mode=advanced_mode),
+    )
 
 
 @login_required
@@ -894,7 +910,8 @@ def linea_edit(request: HttpRequest, pk: int, linea_id: int) -> HttpResponse:
 def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
     receta = get_object_or_404(Receta, pk=pk)
     if request.method == "POST":
-        quick_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and request.POST.get("modo_rapido") == "1"
+        advanced_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and request.POST.get("advanced_mode") == "1"
+        quick_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and not advanced_mode
         insumo_id = request.POST.get("insumo_id")
         tipo_linea = (request.POST.get("tipo_linea") or LineaReceta.TIPO_NORMAL).strip()
         if quick_mode:
@@ -945,14 +962,19 @@ def linea_create(request: HttpRequest, pk: int) -> HttpResponse:
         validation_error = _validate_linea_operativa(receta, linea)
         if validation_error:
             messages.error(request, validation_error)
-            return render(request, "recetas/linea_form.html", _linea_form_context(receta, linea))
+            return render(
+                request,
+                "recetas/linea_form.html",
+                _linea_form_context(receta, linea, advanced_mode=advanced_mode),
+            )
         _switch_line_to_internal_cost(linea)
         linea.save()
         _sync_derived_insumos_safe(request, receta)
         _sync_cost_version_safe(request, receta, "LINEA_CREATE")
         messages.success(request, "Línea agregada.")
         return redirect("recetas:receta_detail", pk=pk)
-    return render(request, "recetas/linea_form.html", _linea_form_context(receta))
+    advanced_mode = receta.tipo == Receta.TIPO_PRODUCTO_FINAL and request.GET.get("advanced") == "1"
+    return render(request, "recetas/linea_form.html", _linea_form_context(receta, advanced_mode=advanced_mode))
 
 
 @login_required
