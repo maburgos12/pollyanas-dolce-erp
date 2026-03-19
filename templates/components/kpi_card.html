@@ -1,0 +1,50 @@
+{#
+  Componente: KPI Card
+  Parámetros:
+    value     — número a mostrar (requerido)
+    label     — texto descriptivo (requerido)
+    tone      — "success" | "warning" | "danger" | "dorado" | "" (opcional, default vino)
+    icon      — nombre de icono: "box" | "recipe" | "supplier" | "alert" | "chart" | "cart" | "check" (opcional)
+    delta     — texto de variación, ej. "+5 vs mes pasado" (opcional)
+    delta_dir — "up" | "down" | "flat" (opcional, default "flat")
+  Uso:
+    {% include "components/kpi_card.html" with value=42 label="Insumos" tone="success" icon="box" %}
+#}
+<article class="kpi-card">
+    <div class="kpi-card-inner">
+        {% if icon %}
+        <div class="kpi-icon {% if tone == 'success' %}is-success{% elif tone == 'warning' %}is-warning{% elif tone == 'danger' %}is-danger{% elif tone == 'dorado' %}is-dorado{% endif %}">
+            {% if icon == "box" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
+            {% elif icon == "recipe" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+            {% elif icon == "supplier" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4L11 7h7.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-10Z"/></svg>
+            {% elif icon == "alert" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+            {% elif icon == "chart" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+            {% elif icon == "cart" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/></svg>
+            {% elif icon == "check" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            {% elif icon == "users" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            {% elif icon == "clock" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            {% elif icon == "tag" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"/><circle cx="7" cy="7" r="1.5"/></svg>
+            {% else %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div class="kpi-body">
+            <div class="kpi-number {% if tone == 'success' %}is-success{% elif tone == 'warning' %}is-warning{% elif tone == 'danger' %}is-danger{% endif %}">{{ value }}</div>
+            <div class="kpi-label">{{ label }}</div>
+            {% if delta %}
+            <div class="kpi-delta {{ delta_dir|default:'flat' }}">{{ delta }}</div>
+            {% endif %}
+        </div>
+    </div>
+</article>

@@ -1,0 +1,20 @@
+{#
+  Componente: Section Header
+  Parámetros:
+    title        — título de la sección (requerido)
+    action_url   — URL del enlace de acción (opcional)
+    action_label — texto del enlace (opcional, default "Ver todo")
+    subtitle     — texto secundario debajo del título (opcional)
+  Uso:
+    {% include "components/section_header.html" with title="Inventario" action_url="/inventario/" action_label="Ver todo" %}
+    {% include "components/section_header.html" with title="Alertas" subtitle="Últimas 24 horas" %}
+#}
+<div class="section-header">
+    <div>
+        <h2 class="section-header-title">{{ title }}</h2>
+        {% if subtitle %}<p class="muted" style="font-size:12px;margin:2px 0 0;">{{ subtitle }}</p>{% endif %}
+    </div>
+    {% if action_url %}
+    <a href="{{ action_url }}" class="section-header-action">{{ action_label|default:"Ver todo" }}</a>
+    {% endif %}
+</div>
