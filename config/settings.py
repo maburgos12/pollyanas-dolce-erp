@@ -1,5 +1,6 @@
 """Django settings."""
 import os
+import socket
 import sys
 
 import dj_database_url
@@ -7,11 +8,43 @@ import dj_database_url
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def load_local_env_file(filepath: str) -> None:
+    if not os.path.exists(filepath):
+        return
+
+    with open(filepath, encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            os.environ.setdefault(key, value)
+
+
+load_local_env_file(os.path.join(BASE_DIR, ".env"))
+
+
 def env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    try:
+        return int(raw) if raw is not None else int(default)
+    except (TypeError, ValueError):
+        return int(default)
 
 
 def env_list(name: str, default: str = "") -> list[str]:
@@ -63,6 +96,7 @@ INSTALLED_APPS = [
     "rrhh",
     "logistica",
     "integraciones",
+    "pos_bridge",
     "reportes",
     "api",
 ]
@@ -73,6 +107,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "core.middleware.EnsureCSRFCookieOnHtmlMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "core.middleware.BranchCaptureOnlyMiddleware",
@@ -109,16 +144,39 @@ if DATABASE_URL:
         )
     }
 elif os.getenv("DB_HOST"):
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.getenv("DB_NAME", "pastelerias_erp"),
-            "USER": os.getenv("DB_USER", "postgres"),
-            "PASSWORD": os.getenv("DB_PASSWORD", "postgres"),
-            "HOST": os.getenv("DB_HOST", "localhost"),
-            "PORT": os.getenv("DB_PORT", "5432"),
+    db_host = os.getenv("DB_HOST", "localhost")
+    if DEBUG:
+        try:
+            socket.getaddrinfo(db_host, None)
+        except OSError:
+            DATABASES = {
+                "default": {
+                    "ENGINE": "django.db.backends.sqlite3",
+                    "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
+                }
+            }
+        else:
+            DATABASES = {
+                "default": {
+                    "ENGINE": "django.db.backends.postgresql",
+                    "NAME": os.getenv("DB_NAME", "pastelerias_erp"),
+                    "USER": os.getenv("DB_USER", "postgres"),
+                    "PASSWORD": os.getenv("DB_PASSWORD", "postgres"),
+                    "HOST": db_host,
+                    "PORT": os.getenv("DB_PORT", "5432"),
+                }
+            }
+    else:
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": os.getenv("DB_NAME", "pastelerias_erp"),
+                "USER": os.getenv("DB_USER", "postgres"),
+                "PASSWORD": os.getenv("DB_PASSWORD", "postgres"),
+                "HOST": db_host,
+                "PORT": os.getenv("DB_PORT", "5432"),
+            }
         }
-    }
 elif DEBUG:
     DATABASES = {
         "default": {
@@ -151,9 +209,32 @@ else:
     STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+PICKUP_AVAILABILITY_FRESHNESS_MINUTES = env_int("PICKUP_AVAILABILITY_FRESHNESS_MINUTES", 20)
+PICKUP_STOCK_BUFFER_DEFAULT = os.getenv("PICKUP_STOCK_BUFFER_DEFAULT", "1")
+PICKUP_LOW_STOCK_THRESHOLD = os.getenv("PICKUP_LOW_STOCK_THRESHOLD", "3")
+PICKUP_RESERVATION_TTL_MINUTES = env_int("PICKUP_RESERVATION_TTL_MINUTES", 15)
+
 CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", default=False)
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "")
+if railway_public_domain:
+    trusted_origin = f"https://{railway_public_domain}"
+    if trusted_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(trusted_origin)
+
+CSRF_FAILURE_VIEW = "core.views.csrf_failure"
+for trusted_origin in (
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "https://localhost",
+    "https://127.0.0.1",
+    "https://localhost:8000",
+    "https://127.0.0.1:8000",
+):
+    if trusted_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(trusted_origin)
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
@@ -181,8 +262,8 @@ SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000" if not DEB
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=not DEBUG)
 SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=not DEBUG)
 SECURE_SSL_REDIRECT = False
-SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", default=not DEBUG)
-CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=not DEBUG)
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", default=(not DEBUG and RUNNING_ON_RAILWAY))
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=(not DEBUG and RUNNING_ON_RAILWAY))
 X_FRAME_OPTIONS = os.getenv("X_FRAME_OPTIONS", "DENY")
 
 # Inventario: fórmula de punto de reorden.
@@ -195,3 +276,10 @@ INVENTARIO_REORDER_MAX_DIFF_PCT = float(os.getenv("INVENTARIO_REORDER_MAX_DIFF_P
 # API pública: límite de requests por cliente por minuto.
 # 0 o negativo = sin límite.
 PUBLIC_API_RATE_LIMIT_PER_MINUTE = int(os.getenv("PUBLIC_API_RATE_LIMIT_PER_MINUTE", "120"))
+
+POINT_BRIDGE_STORAGE_ROOT = os.getenv(
+    "POINT_BRIDGE_STORAGE_ROOT",
+    os.path.join(BASE_DIR, "storage", "pos_bridge"),
+)
+POINT_BRIDGE_SYNC_INTERVAL_HOURS = int(os.getenv("POINT_BRIDGE_SYNC_INTERVAL_HOURS", "24"))
+POINT_BRIDGE_RETRY_ATTEMPTS = int(os.getenv("POINT_BRIDGE_RETRY_ATTEMPTS", "3"))

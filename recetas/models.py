@@ -19,6 +19,14 @@ class Receta(models.Model):
         (TIPO_PREPARACION, "Insumo interno (batida/mezcla, no venta directa)"),
         (TIPO_PRODUCTO_FINAL, "Producto final de venta (armado)"),
     ]
+    TEMPORALIDAD_PERMANENTE = "PERMANENTE"
+    TEMPORALIDAD_TEMPORAL = "TEMPORAL"
+    TEMPORALIDAD_FECHA_ESPECIAL = "FECHA_ESPECIAL"
+    TEMPORALIDAD_CHOICES = [
+        (TEMPORALIDAD_PERMANENTE, "Permanente"),
+        (TEMPORALIDAD_TEMPORAL, "Temporal"),
+        (TEMPORALIDAD_FECHA_ESPECIAL, "Fecha especial"),
+    ]
 
     nombre = models.CharField(max_length=250)
     codigo_point = models.CharField(max_length=80, blank=True, default="", db_index=True)
@@ -26,6 +34,13 @@ class Receta(models.Model):
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_PREPARACION, db_index=True)
     familia = models.CharField(max_length=120, blank=True, default="", db_index=True)
     categoria = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    temporalidad = models.CharField(
+        max_length=20,
+        choices=TEMPORALIDAD_CHOICES,
+        default=TEMPORALIDAD_PERMANENTE,
+        db_index=True,
+    )
+    temporalidad_detalle = models.CharField(max_length=120, blank=True, default="")
     usa_presentaciones = models.BooleanField(default=False)
     sheet_name = models.CharField(max_length=120, blank=True, default="")
     rendimiento_cantidad = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)

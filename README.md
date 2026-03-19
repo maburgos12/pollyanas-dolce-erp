@@ -164,3 +164,4 @@ Sprint 1 entrega:
 - Para ventas Point sin credenciales API directas: exporta reportes desde Point a carpeta/Drive y corre `python manage.py importar_ventas_point_archivos <ruta> --recursive --dry-run` antes de confirmar sin `--dry-run`.
 - El importador de ventas prioriza identidad de producto de Point (`codigo_point` + `nombre_point`) y sincroniza alias de receta al importar sin `--dry-run`.
 - En deploy (`start.sh`) se corre `bootstrap_sucursales_point --only-missing` para mantener catálogo base de sucursales Point.
+- El nuevo módulo `pos_bridge` agrega browser automation determinística para Point sin API, incluyendo inventario y backfill histórico de ventas por producto/sucursal. Ver [`pos_bridge/README.md`](pos_bridge/README.md) para variables, comandos y calibración inicial.

@@ -28,6 +28,12 @@ logs/bloque1_dato_maestro_*/
 # Local automation/smoke artifacts
 .playwright-cli/
 output/
+storage/pos_bridge/logs/*
+storage/pos_bridge/raw_exports/*
+storage/pos_bridge/screenshots/*
+!storage/pos_bridge/logs/.gitkeep
+!storage/pos_bridge/raw_exports/.gitkeep
+!storage/pos_bridge/screenshots/.gitkeep
 
 # OS / editor
 .DS_Store

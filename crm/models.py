@@ -4,6 +4,8 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from core.models import Sucursal
+from recetas.models import Receta
 from recetas.utils.normalizacion import normalizar_nombre
 
 
@@ -85,6 +87,20 @@ class PedidoCliente(models.Model):
     descripcion = models.CharField(max_length=250)
     fecha_compromiso = models.DateField(null=True, blank=True)
     sucursal = models.CharField(max_length=120, blank=True, default="")
+    sucursal_ref = models.ForeignKey(
+        Sucursal,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="crm_pedidos",
+    )
+    pickup_reservation = models.OneToOneField(
+        "crm.PickupReservation",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="pedido",
+    )
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_NUEVO)
     prioridad = models.CharField(max_length=20, choices=PRIORIDAD_CHOICES, default=PRIORIDAD_MEDIA)
     canal = models.CharField(max_length=20, choices=CANAL_CHOICES, default=CANAL_MOSTRADOR)
@@ -126,7 +142,61 @@ class PedidoCliente(models.Model):
     def save(self, *args, **kwargs):
         if not self.folio:
             self.folio = self._generate_folio()
+        if self.sucursal_ref_id and not (self.sucursal or "").strip():
+            self.sucursal = self.sucursal_ref.nombre
         super().save(*args, **kwargs)
+
+
+class PickupReservation(models.Model):
+    STATUS_ACTIVE = "ACTIVE"
+    STATUS_CONFIRMED = "CONFIRMED"
+    STATUS_RELEASED = "RELEASED"
+    STATUS_EXPIRED = "EXPIRED"
+    STATUS_CANCELED = "CANCELED"
+    STATUS_REJECTED = "REJECTED"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_CONFIRMED, "Confirmed"),
+        (STATUS_RELEASED, "Released"),
+        (STATUS_EXPIRED, "Expired"),
+        (STATUS_CANCELED, "Canceled"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    SOURCE_WEB = "WEB"
+    SOURCE_CHOICES = [
+        (SOURCE_WEB, "Web"),
+    ]
+
+    token = models.CharField(max_length=64, unique=True, db_index=True)
+    receta = models.ForeignKey(Receta, on_delete=models.PROTECT, related_name="pickup_reservations")
+    sucursal = models.ForeignKey(Sucursal, on_delete=models.PROTECT, related_name="pickup_reservations")
+    quantity = models.DecimalField(max_digits=18, decimal_places=3, default=1)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE, db_index=True)
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default=SOURCE_WEB)
+    source_client_prefix = models.CharField(max_length=12, blank=True, default="")
+    external_reference = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    client_name = models.CharField(max_length=180, blank=True, default="")
+    snapshot_stock_qty = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    reserved_qty_at_creation = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    buffer_qty = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    available_to_promise = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    snapshot_captured_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    released_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["status", "expires_at"], name="crm_pickup_status_exp_idx"),
+            models.Index(fields=["receta", "sucursal", "status"], name="crm_pickup_recipe_branch_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.token} · {self.receta.nombre} · {self.sucursal.nombre} · {self.status}"
 
 
 class SeguimientoPedido(models.Model):

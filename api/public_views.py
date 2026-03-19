@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from crm.models import Cliente, PedidoCliente
+from crm.services import PickupAvailabilityService, PickupReservationError
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo
@@ -83,6 +84,17 @@ def _auth_public_client(request):
 
     client.mark_used()
     return client, None
+
+
+def _reservation_error_response(exc: PickupReservationError):
+    return Response(
+        {
+            "detail": str(exc),
+            "code": exc.code,
+            "payload": exc.payload,
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+    )
 
 
 class PublicHealthView(APIView):
@@ -284,3 +296,167 @@ class PublicPedidosCreateView(APIView):
         }
         _log_access(client, request, status.HTTP_201_CREATED)
         return Response(payload, status=status.HTTP_201_CREATED)
+
+
+class PublicPickupAvailabilityView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        client, error = _auth_public_client(request)
+        if error:
+            return error
+
+        product_code = (request.query_params.get("product_code") or "").strip()
+        branch_code = (request.query_params.get("branch_code") or "").strip()
+        quantity = request.query_params.get("quantity") or "1"
+
+        service = PickupAvailabilityService()
+        try:
+            availability = service.get_availability(
+                product_code=product_code,
+                branch_code=branch_code,
+                quantity=quantity,
+            )
+        except PickupReservationError as exc:
+            _log_access(client, request, status.HTTP_400_BAD_REQUEST)
+            return _reservation_error_response(exc)
+
+        _log_access(client, request, status.HTTP_200_OK)
+        return Response(availability.to_dict(), status=status.HTTP_200_OK)
+
+
+class PublicPickupReservationsView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        client, error = _auth_public_client(request)
+        if error:
+            return error
+
+        service = PickupAvailabilityService()
+        try:
+            reservation = service.create_reservation(
+                product_code=(request.data.get("product_code") or "").strip(),
+                branch_code=(request.data.get("branch_code") or "").strip(),
+                quantity=request.data.get("quantity") or "1",
+                client_name=(request.data.get("cliente_nombre") or "").strip(),
+                source_client_prefix=client.clave_prefijo,
+                external_reference=(request.data.get("external_reference") or "").strip(),
+                hold_minutes=_bounded_int(request.data.get("hold_minutes"), default=15, min_value=1, max_value=120),
+                metadata={
+                    "channel": "public_api",
+                    "notes": (request.data.get("notes") or "").strip(),
+                },
+            )
+        except PickupReservationError as exc:
+            _log_access(client, request, status.HTTP_400_BAD_REQUEST)
+            return _reservation_error_response(exc)
+
+        _log_access(client, request, status.HTTP_201_CREATED)
+        return Response(
+            {
+                "reservation_token": reservation.token,
+                "status": reservation.status,
+                "product_code": reservation.receta.codigo_point,
+                "product_name": reservation.receta.nombre,
+                "branch_code": reservation.sucursal.codigo,
+                "branch_name": reservation.sucursal.nombre,
+                "quantity": str(reservation.quantity),
+                "expires_at": reservation.expires_at.isoformat() if reservation.expires_at else None,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PublicPickupReservationConfirmView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, token: str):
+        client, error = _auth_public_client(request)
+        if error:
+            return error
+
+        cliente_nombre = (request.data.get("cliente_nombre") or "").strip()
+        descripcion = (request.data.get("descripcion") or "").strip()
+        if not cliente_nombre or not descripcion:
+            _log_access(client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "cliente_nombre y descripcion son obligatorios"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        prioridad = (request.data.get("prioridad") or PedidoCliente.PRIORIDAD_MEDIA).strip()
+        if prioridad not in {
+            PedidoCliente.PRIORIDAD_BAJA,
+            PedidoCliente.PRIORIDAD_MEDIA,
+            PedidoCliente.PRIORIDAD_ALTA,
+            PedidoCliente.PRIORIDAD_URGENTE,
+        }:
+            prioridad = PedidoCliente.PRIORIDAD_MEDIA
+
+        fecha_compromiso_raw = request.data.get("fecha_compromiso")
+        fecha_compromiso = None
+        if fecha_compromiso_raw not in (None, ""):
+            fecha_compromiso = parse_date(str(fecha_compromiso_raw))
+            if fecha_compromiso is None:
+                _log_access(client, request, status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"detail": "fecha_compromiso inválida. Usa formato YYYY-MM-DD"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        service = PickupAvailabilityService()
+        try:
+            reservation, pedido = service.confirm_reservation(
+                token=token,
+                cliente_nombre=cliente_nombre,
+                descripcion=descripcion,
+                monto_estimado=request.data.get("monto_estimado"),
+                fecha_compromiso=fecha_compromiso,
+                prioridad=prioridad,
+            )
+        except PickupReservationError as exc:
+            _log_access(client, request, status.HTTP_400_BAD_REQUEST)
+            return _reservation_error_response(exc)
+
+        _log_access(client, request, status.HTTP_201_CREATED)
+        return Response(
+            {
+                "reservation_token": reservation.token,
+                "reservation_status": reservation.status,
+                "pedido_id": pedido.id,
+                "folio": pedido.folio,
+                "cliente": pedido.cliente.nombre,
+                "estatus": pedido.estatus,
+                "branch_code": reservation.sucursal.codigo,
+                "branch_name": reservation.sucursal.nombre,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PublicPickupReservationReleaseView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, token: str):
+        client, error = _auth_public_client(request)
+        if error:
+            return error
+
+        reason = (request.data.get("reason") or "").strip()
+        service = PickupAvailabilityService()
+        try:
+            reservation = service.release_reservation(token=token, reason=reason)
+        except PickupReservationError as exc:
+            _log_access(client, request, status.HTTP_400_BAD_REQUEST)
+            return _reservation_error_response(exc)
+
+        _log_access(client, request, status.HTTP_200_OK)
+        return Response(
+            {
+                "reservation_token": reservation.token,
+                "status": reservation.status,
+                "refund_required": reservation.status == reservation.STATUS_CANCELED,
+            },
+            status=status.HTTP_200_OK,
+        )

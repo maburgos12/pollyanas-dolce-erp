@@ -29,6 +29,7 @@ echo "DEBUG: CREATE_SUPERUSER=${CREATE_SUPERUSER}"
 echo "DEBUG: USERNAME=${DJANGO_SUPERUSER_USERNAME:-EMPTY}"
 echo "DEBUG: ENABLE_AUTO_SYNC_ALMACEN=${ENABLE_AUTO_SYNC_ALMACEN:-0}"
 echo "DEBUG: ENABLE_AUTO_MAINT_INTEGRACIONES=${ENABLE_AUTO_MAINT_INTEGRACIONES:-0}"
+echo "DEBUG: ENABLE_AUTO_SYNC_POS_BRIDGE=${ENABLE_AUTO_SYNC_POS_BRIDGE:-0}"
 
 if [ "${CREATE_SUPERUSER:-0}" = "1" ]; then
   echo "Creating superuser..."
@@ -74,6 +75,11 @@ fi
 if [ "${ENABLE_AUTO_MAINT_INTEGRACIONES:-0}" = "1" ]; then
   echo "Starting auto maintenance worker (integraciones)..."
   ./scripts/auto_maintenance_integraciones.sh &
+fi
+
+if [ "${ENABLE_AUTO_SYNC_POS_BRIDGE:-0}" = "1" ]; then
+  echo "Starting auto sync worker (pos_bridge)..."
+  ./scripts/auto_sync_pos_bridge.sh &
 fi
 
 echo "Starting Gunicorn..."
