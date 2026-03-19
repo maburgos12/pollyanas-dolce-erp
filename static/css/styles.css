@@ -4338,3 +4338,244 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   FASE 1 — Refinamiento Visual
+   ============================================================ */
+
+/* Transición en filas de tabla */
+tr,
+.table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+/* KPI card hover elevado */
+.kpi-card {
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+.kpi-card:hover {
+  border-color: var(--rosa-deep);
+  box-shadow: var(--surface-shadow-hover);
+  transform: translateY(-2px);
+}
+
+/* KPI card con icono (inner layout) */
+.kpi-card-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.kpi-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.kpi-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--rosa);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--vino);
+}
+.kpi-icon svg { width: 22px; height: 22px; }
+.kpi-icon.is-success { background: #E8F5E9; color: #2E7D32; }
+.kpi-icon.is-warning { background: #FFF8E1; color: #F57F17; }
+.kpi-icon.is-danger  { background: #FFEBEE; color: #C62828; }
+.kpi-icon.is-dorado  { background: #FDF8EE; color: var(--dorado); }
+
+/* Delta de KPI (variación vs período anterior) */
+.kpi-delta {
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.kpi-delta.up   { color: #2E7D32; }
+.kpi-delta.down { color: #C62828; }
+.kpi-delta.flat { color: var(--texto-light); }
+
+/* Dashboard grid 2 columnas */
+.dashboard-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--section-gap);
+}
+@media (max-width: 900px) {
+  .dashboard-grid-2 { grid-template-columns: 1fr; }
+}
+
+/* Separador de sección */
+.section-sep {
+  border: none;
+  border-top: 1px solid var(--rosa-deep);
+  margin: 4px 0 16px;
+  opacity: 0.6;
+}
+
+/* Cabecera de sección reutilizable */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.section-header-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 18px;
+  color: var(--texto);
+  margin: 0;
+}
+.section-header-action {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--vino);
+  text-decoration: none;
+}
+.section-header-action:hover { text-decoration: underline; }
+
+/* Estado vacío */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 10px;
+  color: var(--texto-light);
+  text-align: center;
+}
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.35;
+  color: var(--vino);
+}
+.empty-state-icon svg { width: 48px; height: 48px; }
+.empty-state-msg { font-size: 14px; font-weight: 600; }
+
+/* Animación fade-in escalonada para KPI cards */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.card-animate { animation: fadeInUp 0.3s ease both; }
+.kpi-grid .kpi-card:nth-child(1) { animation: fadeInUp 0.3s 0.05s ease both; }
+.kpi-grid .kpi-card:nth-child(2) { animation: fadeInUp 0.3s 0.10s ease both; }
+.kpi-grid .kpi-card:nth-child(3) { animation: fadeInUp 0.3s 0.15s ease both; }
+.kpi-grid .kpi-card:nth-child(4) { animation: fadeInUp 0.3s 0.20s ease both; }
+
+/* Banners de alerta sutiles */
+.alert-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.alert-banner-danger  { background: #fff0f2; border: 1px solid #f4c5ce; border-left: 4px solid var(--rojo);    color: #b02b46; }
+.alert-banner-warning { background: #fffbf0; border: 1px solid #ffe082; border-left: 4px solid var(--amarillo); color: #7c5a00; }
+.alert-banner-info    { background: #fff7fa; border: 1px solid var(--rosa-deep); border-left: 4px solid var(--vino); color: var(--vino); }
+
+/* Barra de progreso (para presupuesto) */
+.progress-bar-wrap {
+  width: 100%;
+  background: var(--gris-suave);
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+  margin: 8px 0 4px;
+}
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--verde);
+  transition: width 0.5s ease;
+}
+.progress-bar-fill.is-warning { background: var(--amarillo); }
+.progress-bar-fill.is-danger  { background: var(--rojo); }
+
+/* Hero — mini-stats horizontales */
+.hero-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.hero-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 72px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--rosa-deep);
+  gap: 2px;
+}
+.hero-stat-number {
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--vino);
+  font-weight: 700;
+}
+.hero-stat-number.is-danger  { color: var(--rojo); }
+.hero-stat-number.is-warning { color: var(--dorado); }
+.hero-stat-number.is-success { color: var(--verde); }
+.hero-stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--texto-light);
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+/* Accesos rápidos en grid de cards */
+.quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.quick-action-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 12px;
+  background: #fff;
+  border: 1px solid var(--rosa-deep);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: var(--texto);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  transition: all 0.2s ease;
+  min-height: 80px;
+}
+.quick-action-card:hover {
+  background: var(--rosa);
+  border-color: var(--vino);
+  color: var(--vino);
+  transform: translateY(-2px);
+  box-shadow: var(--surface-shadow-hover);
+}
+.quick-action-icon { width: 28px; height: 28px; color: var(--vino); opacity: 0.85; }
+.quick-action-icon svg { width: 28px; height: 28px; }
+
+/* Compact mode overrides nuevos elementos */
+body.ui-compact .kpi-icon { width: 36px; height: 36px; }
+body.ui-compact .kpi-icon svg { width: 18px; height: 18px; }
+body.ui-compact .hero-stat-number { font-size: 18px; }
+body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
