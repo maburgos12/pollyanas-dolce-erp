@@ -9,6 +9,7 @@ from django.conf import settings
 from django.db import connections
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
+from django.utils.deprecation import MiddlewareMixin
 
 from core.access import is_branch_capture_only
 

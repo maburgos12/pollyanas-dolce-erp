@@ -4670,3 +4670,13 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
         "erp_command_center": _users_command_center(enterprise_ready_summary, users_maturity_summary),
     }
     return render(request, "core/usuarios_accesos.html", context)
+
+
+def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
+    """Vista personalizada para errores CSRF."""
+    from django.http import HttpResponseForbidden
+    return HttpResponseForbidden(
+        "<h1>Error 403 — Token CSRF inválido</h1>"
+        "<p>Por favor recarga la página e intenta de nuevo.</p>",
+        content_type="text/html",
+    )
