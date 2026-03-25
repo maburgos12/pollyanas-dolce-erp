@@ -8,9 +8,17 @@ from django.utils import timezone
 class PointSyncJob(models.Model):
     JOB_TYPE_INVENTORY = "inventory"
     JOB_TYPE_SALES = "sales"
+    JOB_TYPE_RECIPES = "recipes"
+    JOB_TYPE_WASTE = "waste"
+    JOB_TYPE_PRODUCTION = "production"
+    JOB_TYPE_TRANSFERS = "transfers"
     JOB_TYPE_CHOICES = [
         (JOB_TYPE_INVENTORY, "Inventory"),
         (JOB_TYPE_SALES, "Sales"),
+        (JOB_TYPE_RECIPES, "Recipes"),
+        (JOB_TYPE_WASTE, "Waste"),
+        (JOB_TYPE_PRODUCTION, "Production"),
+        (JOB_TYPE_TRANSFERS, "Transfers"),
     ]
 
     STATUS_PENDING = "PENDING"

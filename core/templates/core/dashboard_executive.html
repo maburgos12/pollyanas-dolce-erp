@@ -1,0 +1,567 @@
+{% extends "base.html" %}
+{% load humanize static %}
+
+{% block title %}Dashboard Ejecutivo - Pollyanas Dolce ERP{% endblock %}
+{% block page_title %}Dashboard Ejecutivo{% endblock %}
+{% block body_class %}page-dashboard-executive{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}">
+<style>
+  .home-exec-shell {
+    display: grid;
+    gap: 14px;
+  }
+
+  .home-exec-hero,
+  .home-exec-card {
+    padding: 16px 18px;
+    border-radius: 22px;
+    border: 1px solid rgba(145, 36, 86, 0.10);
+    background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,248,251,0.96));
+    box-shadow: 0 10px 30px rgba(93, 22, 59, 0.04);
+  }
+
+  .home-exec-hero {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: flex-start;
+  }
+
+  .home-exec-kicker {
+    font-size: 0.82rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #8b6e78;
+    margin-bottom: 4px;
+  }
+
+  .home-exec-hero h1,
+  .home-exec-title {
+    margin: 0;
+    color: #42292e;
+  }
+
+  .home-exec-hero h1 {
+    font-size: clamp(1.75rem, 2.2vw, 2.35rem);
+    line-height: 1.02;
+    margin-bottom: 6px;
+  }
+
+  .home-exec-copy {
+    margin: 0;
+    color: #6f6170;
+    max-width: 62ch;
+    line-height: 1.35;
+  }
+
+  .home-exec-pills,
+  .home-exec-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .home-exec-pills {
+    justify-content: flex-end;
+  }
+
+  .home-exec-pill {
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(122, 40, 83, 0.08);
+    color: #7a2853;
+    font-weight: 700;
+    font-size: 0.86rem;
+    white-space: nowrap;
+  }
+
+  .home-exec-grid-top {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .home-exec-grid-secondary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .home-exec-kpi {
+    min-height: 0;
+  }
+
+  .home-exec-kpi-value {
+    font-size: clamp(1.45rem, 1.8vw, 2.2rem);
+    line-height: 1;
+    margin-bottom: 6px;
+    color: #922456;
+    font-weight: 700;
+  }
+
+  .home-exec-kpi-value.is-success { color: #236d53; }
+  .home-exec-kpi-value.is-warning { color: #b38a25; }
+  .home-exec-kpi-value.is-danger { color: #bc3b3b; }
+
+  .home-exec-kpi-label {
+    font-size: 0.86rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #7c6971;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .home-exec-note {
+    color: #6b5e65;
+    line-height: 1.4;
+  }
+
+  .home-exec-kpi.is-hero {
+    background:
+      radial-gradient(circle at top right, rgba(146, 36, 86, 0.08), transparent 38%),
+      linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,248,251,0.96));
+  }
+
+  .home-exec-kpi.is-context {
+    background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(252,249,250,0.92));
+  }
+
+  .home-exec-grid-half {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .home-exec-grid-stack {
+    display: grid;
+    gap: 10px;
+  }
+
+  .home-exec-section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+
+  .home-exec-title {
+    font-size: clamp(1.08rem, 1.3vw, 1.35rem);
+    line-height: 1.08;
+  }
+
+  .home-exec-mini-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .home-exec-mini {
+    padding: 10px 12px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.74);
+    border: 1px solid rgba(145, 36, 86, 0.08);
+  }
+
+  .home-exec-mini strong {
+    display: block;
+    font-size: 1.05rem;
+    color: #42292e;
+  }
+
+  .home-exec-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  .home-exec-table th,
+  .home-exec-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(145, 36, 86, 0.08);
+    vertical-align: top;
+  }
+
+  .home-exec-table th {
+    background: rgba(122, 40, 83, 0.03);
+    color: #8a757e;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.78rem;
+  }
+
+  .text-end {
+    text-align: right;
+  }
+
+  .home-exec-tone {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+
+  .home-exec-tone.success { background: rgba(35, 109, 83, 0.10); color: #236d53; }
+  .home-exec-tone.warning { background: rgba(185, 140, 36, 0.12); color: #9b6b00; }
+  .home-exec-tone.danger { background: rgba(188, 59, 59, 0.10); color: #a53434; }
+  .home-exec-tone.neutral { background: rgba(122, 40, 83, 0.08); color: #7a2853; }
+
+  .home-exec-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .home-exec-list-item {
+    padding: 10px 12px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.74);
+    border: 1px solid rgba(145, 36, 86, 0.08);
+  }
+
+  .home-exec-list-item--tight {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 8px 10px;
+  }
+
+  .home-exec-list-item strong {
+    display: block;
+    color: #42292e;
+  }
+
+  .home-exec-subtle {
+    color: #8a757e;
+    font-size: 0.88rem;
+  }
+
+  .home-exec-card .table-responsive {
+    max-height: 320px;
+    overflow: auto;
+  }
+
+  .home-exec-metric-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 68px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(122, 40, 83, 0.08);
+    color: #7a2853;
+    font-weight: 700;
+    font-size: 0.84rem;
+    white-space: nowrap;
+  }
+
+  .home-exec-metric-pill.success {
+    background: rgba(35, 109, 83, 0.10);
+    color: #236d53;
+  }
+
+  .home-exec-metric-pill.warning {
+    background: rgba(185, 140, 36, 0.12);
+    color: #9b6b00;
+  }
+
+  .home-exec-actions .btn,
+  .home-exec-pills .home-exec-pill {
+    white-space: nowrap;
+  }
+
+  @media (max-width: 1380px) {
+    .home-exec-grid-top {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 1120px) {
+    .home-exec-grid-half,
+    .home-exec-mini-grid,
+    .home-exec-grid-secondary {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .home-exec-hero {
+      flex-direction: column;
+    }
+
+    .home-exec-pills {
+      justify-content: flex-start;
+    }
+
+    .home-exec-grid-top {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="home-exec-shell">
+  <section class="home-exec-hero">
+    <div>
+      <div class="home-exec-kicker">Dirección general</div>
+      <h1>Home ejecutiva del ERP</h1>
+      <p class="home-exec-copy">Portada compacta con la misma lógica del BI ejecutivo: ventas confirmadas, pronóstico, rentabilidad, sobreproducción y cuadre mensual. Sin duplicar fórmulas viejas.</p>
+    </div>
+    <div class="home-exec-pills">
+      <span class="home-exec-pill">Corte ventas: {{ daily_sales_snapshot.date_label|default:"Sin corte" }}</span>
+      <span class="home-exec-pill">Costeo semanal: {{ profitability_panel.latest_week|default:"Sin corte" }}</span>
+      <span class="home-exec-pill">Flujo producción/merma: {{ production_sales_panel.cutoff_date|default:"Sin corte" }}</span>
+    </div>
+  </section>
+
+  <section class="home-exec-actions">
+    <a class="btn btn-primary" href="{% url 'reportes:bi' %}">Abrir BI completo</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Abrir costeo semanal</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:dg_operacion_dashboard' %}">Abrir DG operación</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:produccion_cedis_weekly_dashboard' %}">Abrir producción CEDIS</a>
+  </section>
+
+  <section class="home-exec-grid-top">
+    <article class="home-exec-card home-exec-kpi is-hero">
+      <div class="home-exec-kpi-value">${{ daily_sales_snapshot.total_amount|default:0|floatformat:2|intcomma }}</div>
+      <div class="home-exec-kpi-label">Venta último corte</div>
+      <div class="home-exec-note">{{ daily_sales_snapshot.date_label|default:"Sin fecha" }} · {{ daily_sales_snapshot.source_label|default:"Sin fuente" }}</div>
+    </article>
+    <article class="home-exec-card home-exec-kpi is-hero">
+      <div class="home-exec-kpi-value {% if not daily_sales_snapshot.tickets_available %}is-warning{% endif %}">
+        {% if daily_sales_snapshot.tickets_available %}${{ daily_sales_snapshot.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
+      </div>
+      <div class="home-exec-kpi-label">Ticket promedio</div>
+      <div class="home-exec-note">
+        {% if daily_sales_snapshot.tickets_available %}
+          {{ daily_sales_snapshot.total_tickets|intcomma }} tickets confirmados
+        {% else %}
+          Point no entregó tickets válidos para el corte visible
+        {% endif %}
+      </div>
+    </article>
+    <article class="home-exec-card home-exec-kpi is-hero">
+      <div class="home-exec-kpi-value is-success">${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</div>
+      <div class="home-exec-kpi-label">Pronóstico próxima semana</div>
+      <div class="home-exec-note">{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas · {{ forecast_panel.target_week_label }}</div>
+    </article>
+    <article class="home-exec-card home-exec-kpi is-hero">
+      <div class="home-exec-kpi-value {% if yoy_panel.hero_row and yoy_panel.hero_row.amount_delta_pct is not None and yoy_panel.hero_row.amount_delta_pct < 0 %}is-warning{% else %}is-success{% endif %}">
+        {% if yoy_panel.hero_row and yoy_panel.hero_row.amount_delta_pct is not None %}{{ yoy_panel.hero_row.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+      </div>
+      <div class="home-exec-kpi-label">Mes vs año anterior</div>
+      <div class="home-exec-note">{{ yoy_panel.hero_note|default:"Sin mes" }}</div>
+    </article>
+  </section>
+
+  <section class="home-exec-grid-secondary">
+    <article class="home-exec-card home-exec-kpi is-context">
+      <div class="home-exec-kpi-value {% if criticos_count > 0 %}is-danger{% else %}is-success{% endif %}">{{ criticos_count|intcomma }}</div>
+      <div class="home-exec-kpi-label">Stock crítico</div>
+      <div class="home-exec-note">{{ bajo_reorden_count|intcomma }} bajo reorden · inventario central</div>
+    </article>
+    <article class="home-exec-card home-exec-kpi is-context">
+      <div class="home-exec-kpi-value {% if purchase_snapshot and purchase_snapshot.ordenes_abiertas > 0 %}is-warning{% else %}is-success{% endif %}">
+        {% if purchase_snapshot %}{{ purchase_snapshot.ordenes_abiertas|intcomma }}{% else %}0{% endif %}
+      </div>
+      <div class="home-exec-kpi-label">Compras abiertas</div>
+      <div class="home-exec-note">
+        {% if purchase_snapshot %}{{ purchase_snapshot.recepciones_abiertas|intcomma }} recepciones pendientes{% else %}Sin lectura de compras{% endif %}
+      </div>
+    </article>
+  </section>
+
+  <section class="home-exec-grid-half">
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <div class="home-exec-kicker">Pronóstico</div>
+          <h2 class="home-exec-title">Tendencia y fechas atípicas</h2>
+          <p class="home-exec-copy">Base sobre 2-3 semanas normales. Los picos se marcan por anomalía histórica hasta que exista calendario oficial.</p>
+        </div>
+        <span class="home-exec-pill">{{ forecast_panel.baseline_label }}</span>
+      </div>
+      <div class="home-exec-mini-grid">
+        <div class="home-exec-mini">
+          <span class="home-exec-subtle">Escenario base</span>
+          <strong>${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</strong>
+          <div>{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas</div>
+        </div>
+        <div class="home-exec-mini">
+          <span class="home-exec-subtle">Escenario alto</span>
+          <strong>${{ forecast_panel.high_scenario_amount|floatformat:2|intcomma }}</strong>
+          <div>{{ forecast_panel.high_scenario_quantity|floatformat:0|intcomma }} piezas</div>
+        </div>
+        <div class="home-exec-mini">
+          <span class="home-exec-subtle">Ticket esperado</span>
+          <strong>${{ forecast_panel.forecast_avg_ticket|floatformat:2|intcomma }}</strong>
+          <div>{{ forecast_panel.forecast_tickets|intcomma }} tickets esperados</div>
+        </div>
+      </div>
+      <div class="home-exec-grid-stack mt-3">
+        {% for row in forecast_panel.weekly_rows|slice:":4" %}
+        <article class="home-exec-list-item home-exec-list-item--tight">
+          <div>
+            <strong>{{ row.week_label }}</strong>
+            <div class="home-exec-subtle">${{ row.amount|floatformat:2|intcomma }} · {{ row.quantity|floatformat:0|intcomma }} piezas</div>
+          </div>
+          <div>
+            {% if row.atypical %}
+            <span class="home-exec-tone warning">Atípica</span>
+            {% else %}
+            <span class="home-exec-tone success">Base normal</span>
+            {% endif %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <div class="home-exec-kicker">Comparativo</div>
+          <h2 class="home-exec-title">Mes contra mismo mes del año anterior</h2>
+          <p class="home-exec-copy">El mes actual compara solo hasta el mismo día disponible para no mezclar meses parciales con meses cerrados.</p>
+        </div>
+      </div>
+      <div class="home-exec-grid-stack">
+        {% for row in yoy_panel.rows %}
+        <article class="home-exec-list-item home-exec-list-item--tight">
+          <div>
+            <strong>{{ row.month_label }}</strong>
+            <div class="home-exec-subtle">
+              Actual ${{ row.amount|floatformat:2|intcomma }} · previo ${{ row.prev_amount|floatformat:2|intcomma }}
+              {% if row.is_partial %}· corte parcial{% endif %}
+            </div>
+          </div>
+          <div class="home-exec-metric-pill {% if row.amount_delta_pct is not None and row.amount_delta_pct >= 0 %}success{% else %}warning{% endif %}">
+            {% if row.amount_delta_pct is not None %}{{ row.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="home-exec-grid-half">
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <div class="home-exec-kicker">Rentabilidad</div>
+          <h2 class="home-exec-title">Productos que funcionan y productos a mover</h2>
+          <p class="home-exec-copy">Margen sobre materia prima costada. Mano de obra e indirectos siguen pendientes y no se esconden.</p>
+        </div>
+        <span class="home-exec-pill">{{ profitability_panel.lookback_days }} días</span>
+      </div>
+      <div class="home-exec-grid-stack">
+        {% for row in profitability_panel.rows|slice:":5" %}
+        <article class="home-exec-list-item home-exec-list-item--tight">
+          <div>
+            <strong>{{ row.label }}</strong>
+            <div class="home-exec-subtle">{{ row.categoria|default:row.familia }} · ${{ row.revenue|floatformat:2|intcomma }}</div>
+          </div>
+          <div style="display:grid; gap:6px; justify-items:end;">
+            <span class="home-exec-metric-pill">{% if row.margin_pct is not None %}{{ row.margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}</span>
+            <span class="home-exec-tone {% if row.bucket == 'Defender' %}success{% elif row.bucket == 'Promocionar' %}warning{% elif row.bucket == 'Ajustar margen' %}danger{% else %}neutral{% endif %}">{{ row.bucket }}</span>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      <div class="home-exec-note">{{ profitability_panel.basis_note }}</div>
+    </article>
+
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <div class="home-exec-kicker">Promoción</div>
+          <h2 class="home-exec-title">Candidatos a promoción</h2>
+          <p class="home-exec-copy">Productos con margen suficiente y presión comercial adecuada para mover volumen.</p>
+        </div>
+      </div>
+      <div class="home-exec-list">
+        {% for row in profitability_panel.promo_candidates|slice:":4" %}
+        <article class="home-exec-list-item">
+          <strong>{{ row.label }}</strong>
+          <div class="home-exec-subtle">{{ row.categoria|default:row.familia }}</div>
+          <div>Margen {{ row.margin_pct|floatformat:1 }}% · {{ row.quantity|floatformat:0|intcomma }} piezas · ${{ row.revenue|floatformat:2|intcomma }}</div>
+        </article>
+        {% empty %}
+        <article class="home-exec-list-item">
+          <strong>Sin promoción sugerida</strong>
+          <div class="home-exec-subtle">No hay productos bajo el criterio actual de margen/volumen.</div>
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="home-exec-grid-half">
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <div class="home-exec-kicker">Producción</div>
+          <h2 class="home-exec-title">Producido contra vendido</h2>
+          <p class="home-exec-copy">Lectura semanal sin mezclar transferencias internas, para detectar sobreproducción o déficit real.</p>
+        </div>
+        <span class="home-exec-pill">{{ production_sales_panel.week_label }} · corte {{ production_sales_panel.cutoff_date }}</span>
+      </div>
+      <div class="home-exec-grid-stack">
+        {% for row in production_sales_panel.weekly_rows|slice:":4" %}
+        <article class="home-exec-list-item home-exec-list-item--tight">
+          <div>
+            <strong>{{ row.week_label }}</strong>
+            <div class="home-exec-subtle">Prod. {{ row.produced_units|floatformat:0|intcomma }} · Venta {{ row.sold_units|floatformat:0|intcomma }}</div>
+          </div>
+          <div class="home-exec-metric-pill {% if row.delta_units >= 0 %}success{% else %}warning{% endif %}">{{ row.delta_units|floatformat:0|intcomma }}</div>
+        </article>
+        {% endfor %}
+      </div>
+      <div class="home-exec-grid-stack mt-3">
+        {% for row in production_sales_panel.category_rows|slice:":5" %}
+        <article class="home-exec-list-item home-exec-list-item--tight">
+          <div>
+            <strong>{{ row.label }}</strong>
+            <div class="home-exec-subtle">{{ row.status }}</div>
+          </div>
+          <div class="home-exec-metric-pill {% if row.tone == 'success' %}success{% else %}warning{% endif %}">{{ row.delta_units|floatformat:0|intcomma }}</div>
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <div class="home-exec-kicker">Cuadre mensual</div>
+          <h2 class="home-exec-title">Inventario inicial + producción - venta - merma</h2>
+          <p class="home-exec-copy">Puente mensual de inventario. Si no cuadra, se muestra la variación; no se maquilla.</p>
+        </div>
+        <span class="home-exec-pill">Corte común {{ inventory_ledger_panel.cutoff_date }}</span>
+      </div>
+      <div class="home-exec-grid-stack">
+        {% for row in inventory_ledger_panel.rows|slice:":4" %}
+        <article class="home-exec-list-item home-exec-list-item--tight">
+          <div>
+            <strong>{{ row.month_label }}</strong>
+            <div class="home-exec-subtle">
+              Teórico {{ row.theoretical_closing|floatformat:0|intcomma }} · real {{ row.actual_closing|floatformat:0|intcomma }}
+              {% if row.is_partial %}· corte parcial{% endif %}
+            </div>
+          </div>
+          <div class="home-exec-metric-pill {% if row.variance_units == 0 %}success{% else %}warning{% endif %}">{{ row.variance_units|floatformat:0|intcomma }}</div>
+        </article>
+        {% endfor %}
+      </div>
+      <div class="home-exec-note">{{ inventory_ledger_panel.basis_note }}</div>
+    </article>
+  </section>
+</div>
+{% endblock %}

@@ -4,17 +4,804 @@
 {% block body_class %}page-compras-recepciones{% endblock %}
 
 {% block content %}
+<div class="module-shell compras-recepciones">
 <nav class="module-tabs">
-  <a class="module-tab" href="{% url 'compras:solicitudes' %}">Solicitudes</a>
-  <a class="module-tab" href="{% url 'compras:ordenes' %}">Órdenes</a>
-  <a class="module-tab active" href="{% url 'compras:recepciones' %}">Recepciones</a>
+  <a class="module-tab" href="{% if plan_scope_context %}{{ plan_scope_context.solicitudes_url }}{% else %}{% url 'compras:solicitudes' %}{% endif %}">Solicitudes</a>
+  <a class="module-tab" href="{% if plan_scope_context %}{{ plan_scope_context.ordenes_url }}{% else %}{% url 'compras:ordenes' %}{% endif %}">Órdenes</a>
+  <a class="module-tab active" href="{% if plan_scope_context %}{{ plan_scope_context.recepciones_url }}{% else %}{% url 'compras:recepciones' %}{% endif %}">Recepciones</a>
 </nav>
+
+<section class="card">
+  <div class="card-header">Resumen de compras</div>
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+    </article>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Contexto documental del módulo</div>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <tbody>
+        <tr>
+          <th style="width:22%;">Documento</th>
+          <td style="width:28%;">Recepciones de compra</td>
+          <th style="width:22%;">Fuente de control</th>
+          <td style="width:28%;">Órdenes emitidas, cantidades recibidas, evidencia de entrega y aplicación al inventario.</td>
+        </tr>
+        <tr>
+          <th>Etapa actual</th>
+          <td>{% if plan_scope_context %}{{ plan_scope_context.stage_label }}{% else %}Recepción, aplicación y cierre documental{% endif %}</td>
+          <th>Propósito</th>
+          <td>Convertir la orden emitida en recepción validada, con trazabilidad de cantidades, diferencias y cierre operativo.</td>
+        </tr>
+        <tr>
+          <th>Regla de salida</th>
+          <td>{% if plan_scope_context %}Recepciones aplicadas y listas para cierre del plan{% else %}Recepción validada, aplicada y conciliada con inventario{% endif %}</td>
+          <th>Siguiente paso</th>
+          <td>{% if plan_scope_context %}{{ plan_scope_context.next_action.label }}{% else %}Aplicar recepciones y cerrar el ciclo documental{% endif %}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if plan_scope_context %}
+<section class="card">
+  <div class="card-header">Contexto del plan</div>
+  <p class="muted">
+    Estás trabajando recepciones del plan <strong>{{ plan_scope_context.label }}</strong>
+    {% if plan_scope_context.fecha_produccion %}· fecha {{ plan_scope_context.fecha_produccion }}{% endif %}
+    · alcance <code>{{ plan_scope_context.plan_scope }}</code>
+  </p>
+  <div class="toolbar">
+    <a class="btn btn-primary" href="{{ plan_scope_context.back_url }}">Volver al plan</a>
+    <a class="btn btn-secondary" href="{{ plan_scope_context.solicitudes_url }}">Abrir solicitudes del plan</a>
+    <a class="btn btn-secondary" href="{{ plan_scope_context.ordenes_url }}">Abrir órdenes del plan</a>
+  </div>
+  <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
+    {% for item in plan_scope_context.summary_cards %}
+    <article class="kpi-card">
+      <div class="kpi-number {% if item.tone == 'warning' %}is-warning{% else %}is-primary{% endif %}">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.label }}</div>
+      <div class="muted">Abiertos: {{ item.open }}</div>
+    </article>
+    {% endfor %}
+    <article class="kpi-card">
+      <div class="kpi-number {% if plan_scope_context.blocked_total > 0 %}is-warning{% else %}is-success{% endif %}">{{ plan_scope_context.summary_label }}</div>
+      <div class="kpi-label">Bloqueos del plan</div>
+      <div class="muted">{{ plan_scope_context.blocked_total }}</div>
+    </article>
+  </div>
+  {% if plan_scope_context.demand_signal %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Señal histórica de demanda del plan</div>
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card">
+      <div class="kpi-number {% if plan_scope_context.demand_signal.historico_tone == 'danger' %}is-danger{% elif plan_scope_context.demand_signal.historico_tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ plan_scope_context.demand_signal.historico_status }}</div>
+      <div class="kpi-label">Base histórica</div>
+      <div class="muted" style="margin-top:8px;">{{ plan_scope_context.demand_signal.historico_detail }}</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ plan_scope_context.demand_signal.historico_days }}</div>
+      <div class="kpi-label">Días observados</div>
+      <div class="muted" style="margin-top:8px;">{{ plan_scope_context.demand_signal.historico_recetas }} productos con histórico</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ plan_scope_context.demand_signal.historico_total|floatformat:0 }}</div>
+      <div class="kpi-label">Unidades históricas</div>
+      <div class="muted" style="margin-top:8px;">{{ plan_scope_context.demand_signal.historico_sucursales }} sucursales comparables</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ plan_scope_context.demand_signal.historico_years }}</div>
+      <div class="kpi-label">Años observados</div>
+      <div class="muted" style="margin-top:8px;">Serie histórica del plan</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ plan_scope_context.demand_signal.comparable_years }}</div>
+      <div class="kpi-label">Temporadas comparables</div>
+      <div class="muted" style="margin-top:8px;">Años con demanda del mismo mes</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{% if plan_scope_context.demand_signal.forecast_count %}{{ plan_scope_context.demand_signal.alignment_pct }}%{% else %}-{% endif %}</div>
+      <div class="kpi-label">Alineación forecast/solicitud</div>
+      <div class="muted" style="margin-top:8px;">{{ plan_scope_context.demand_signal.alignment_label }}</div>
+    </article>
+  </div>
+  {% if plan_scope_context.demand_gate %}
+  <div class="alert {% if plan_scope_context.demand_gate.tone == 'danger' %}alert-danger{% elif plan_scope_context.demand_gate.tone == 'warning' %}alert-warning{% else %}alert-success{% endif %}" style="margin-top: 12px;">
+    <strong>Control de demanda comercial:</strong>
+    {{ plan_scope_context.demand_gate.detail }}
+    <span class="muted" style="margin-left:8px;">{{ plan_scope_context.demand_gate.next_step }}</span>
+  </div>
+  {% endif %}
+  {% if plan_scope_context.master_demand_gate %}
+  <div class="alert {% if plan_scope_context.master_demand_gate.tone == 'danger' %}alert-danger{% elif plan_scope_context.master_demand_gate.tone == 'warning' %}alert-warning{% else %}alert-success{% endif %}" style="margin-top: 12px;">
+    <strong>Control de maestro crítico por demanda:</strong>
+    {{ plan_scope_context.master_demand_gate.detail }}
+    <span class="muted" style="margin-left:8px;">{{ plan_scope_context.master_demand_gate.next_step }}</span>
+    {% if plan_scope_context.master_demand_gate.blockers %}
+    <a class="btn btn-secondary btn-sm" href="{{ plan_scope_context.master_demand_gate.action_url }}" style="margin-left: 8px;">{{ plan_scope_context.master_demand_gate.action_label }}</a>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if plan_scope_context.daily_critical_close_focus %}
+  <div class="enterprise-focus-alert tone-{{ plan_scope_context.daily_critical_close_focus.tone|default:'danger' }}" style="margin:16px 0;">
+    <div>
+      <div class="enterprise-focus-title">{{ plan_scope_context.daily_critical_close_focus.title }}</div>
+      <div class="enterprise-focus-text">{{ plan_scope_context.daily_critical_close_focus.detail }}</div>
+      <div class="muted" style="margin-top:8px;">
+        Demanda {{ plan_scope_context.daily_critical_close_focus.historico_units|floatformat:1 }} ·
+        Consumo BOM {{ plan_scope_context.daily_critical_close_focus.required_qty|floatformat:2 }} ·
+        Faltante {{ plan_scope_context.daily_critical_close_focus.missing|join:", " }}
+      </div>
+    </div>
+    <div class="enterprise-focus-actions">
+      <a class="btn btn-secondary btn-sm" href="{{ plan_scope_context.daily_critical_close_focus.url }}">{{ plan_scope_context.daily_critical_close_focus.cta }}</a>
+    </div>
+  </div>
+  {% endif %}
+  {% if plan_scope_context.master_demand_blocks_issue %}
+  <div class="alert alert-danger" style="margin-top: 12px;">
+    <strong>Liberación documental retenida:</strong>
+    El plan no puede avanzar mientras el maestro crítico por demanda siga abierto.
+    <span class="muted" style="margin-left:8px;">{{ plan_scope_context.master_demand_gate.next_step }}</span>
+  </div>
+  {% endif %}
+  {% if plan_scope_context.branch_priority_rows %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Sucursales que empujan el plan</div>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Sucursal</th>
+          <th>Estatus</th>
+          <th>Detalle</th>
+          <th>Producto dominante</th>
+          <th class="text-end">Histórico</th>
+          <th class="text-end">Solicitud</th>
+          <th class="text-end">Plan</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in plan_scope_context.branch_priority_rows %}
+        <tr>
+          <td><strong>{{ row.sucursal_codigo }}</strong> · {{ row.sucursal_nombre }}</td>
+          <td><span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% elif row.tone == 'primary' %}badge badge-primary{% else %}badge-verde{% endif %}">{{ row.status }}</span></td>
+          <td>{{ row.detail }}</td>
+          <td><strong>{{ row.dominant_recipe_name }}</strong><br><span class="muted">Histórico: {{ row.dominant_recipe_units|floatformat:0 }}</span></td>
+          <td class="text-end">{{ row.historico_units|floatformat:0 }}</td>
+          <td class="text-end">{{ row.solicitud_total|floatformat:0 }}</td>
+          <td class="text-end">{{ row.dominant_plan_qty|floatformat:0 }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if plan_scope_context.branch_supply_rows %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Insumo a asegurar por sucursal</div>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Sucursal</th>
+          <th>Producto</th>
+          <th>Insumo</th>
+          <th class="text-end">Requerido</th>
+          <th class="text-end">Stock</th>
+          <th class="text-end">Brecha</th>
+          <th>Faltante maestro</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in plan_scope_context.branch_supply_rows %}
+        <tr>
+          <td><strong>{{ row.sucursal_codigo }}</strong> · {{ row.sucursal_nombre }}</td>
+          <td>{{ row.dominant_recipe_name }}</td>
+          <td><strong>{{ row.insumo_nombre }}</strong></td>
+          <td class="text-end">{{ row.required_qty|floatformat:2 }} {{ row.unidad }}</td>
+          <td class="text-end">{{ row.stock_actual|floatformat:2 }} {{ row.unidad }}</td>
+          <td class="text-end">{{ row.shortage|floatformat:2 }} {{ row.unidad }}</td>
+          <td>{% if row.master_missing %}{{ row.master_missing|join:", " }}{% elif row.missing_cost %}Costo pendiente{% else %}Listo{% endif %}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if plan_scope_context.commercial_priority_rows %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Artículos prioritarios por demanda del plan</div>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Artículo</th>
+          <th>Prioridad</th>
+          <th>Demanda reciente</th>
+          <th>Consumo BOM del plan</th>
+          <th>Solicitud actual</th>
+          <th>Faltante maestro</th>
+          <th>Productos asociados</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in plan_scope_context.commercial_priority_rows %}
+        <tr>
+          <td><strong>{{ row.insumo_nombre }}</strong></td>
+          <td><span class="badge {% if row.priority_tone == 'danger' %}bg-danger{% elif row.priority_tone == 'warning' %}bg-warning text-dark{% else %}badge badge-primary{% endif %}">{{ row.priority_label }}</span></td>
+          <td>{{ row.historico_units|floatformat:0 }}</td>
+          <td>{{ row.required_qty|floatformat:2 }}</td>
+          <td>{{ row.solicitud_qty|floatformat:2 }}</td>
+          <td>{{ row.master_missing|join:", " }}</td>
+          <td>{{ row.recipe_names|join:", " }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">Abrir artículo</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+  <div class="alert alert-soft" style="margin-top: 12px;">
+    <strong>Etapa documental actual:</strong> {{ plan_scope_context.stage_label }}.
+    {{ plan_scope_context.stage_detail }}
+  </div>
+  <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
+    <article class="kpi-card">
+      <div class="kpi-number {% if plan_scope_context.document_progress_pct >= 100 %}is-success{% elif plan_scope_context.document_progress_pct >= 50 %}is-warning{% else %}is-danger{% endif %}">{{ plan_scope_context.document_progress_pct }}%</div>
+      <div class="kpi-label">Cierre documental ERP</div>
+      <div class="muted">{{ plan_scope_context.document_ready_checks }}/{{ plan_scope_context.document_total_checks }} criterios cerrados</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if plan_scope_context.handoff_progress_pct >= 100 %}is-success{% elif plan_scope_context.handoff_progress_pct >= 50 %}is-warning{% else %}is-danger{% endif %}">{{ plan_scope_context.handoff_progress_pct }}%</div>
+      <div class="kpi-label">Entrega entre etapas</div>
+      <div class="muted">{{ plan_scope_context.handoff_ready_checks }}/{{ plan_scope_context.handoff_total_checks }} entregas cerradas</div>
+    </article>
+  </div>
+  <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
+    {% for item in plan_scope_context.pipeline_steps %}
+    <article class="kpi-card {% if item.is_active %}is-active{% endif %}">
+      <div class="kpi-number {% if item.semaphore_tone == 'danger' %}is-danger{% elif item.semaphore_tone == 'warning' %}is-warning{% elif item.semaphore_tone == 'primary' %}is-primary{% else %}is-success{% endif %}">{{ item.progress_pct }}%</div>
+      <div class="kpi-label">Madurez ERP · {{ item.label }}</div>
+      <div class="muted mt-2">{{ item.status_label }} · abiertos {{ item.open }} · cerrados {{ item.closed }}</div>
+      <div class="erp-progress mt-2">
+        <div class="erp-progress-fill {% if item.semaphore_tone == 'danger' %}is-danger{% elif item.semaphore_tone == 'warning' %}is-warning{% elif item.semaphore_tone == 'primary' %}is-primary{% else %}is-success{% endif %}" style="width: {{ item.progress_pct }}%;"></div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  <div class="toolbar" style="margin-top: 12px;">
+    <a class="btn btn-primary" href="{{ plan_scope_context.next_action.url }}">{{ plan_scope_context.next_action.label }}</a>
+    <span class="muted">{{ plan_scope_context.next_action.detail }}</span>
+  </div>
+  {% if plan_scope_context.upstream_dependency_rows %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Dependencias upstream del plan</div>
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Origen</th>
+          <th>Responsable</th>
+          <th>Estatus</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Criterio de salida</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in plan_scope_context.upstream_dependency_rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td>{{ row.owner }}</td>
+          <td><span class="{% if row.tone == 'success' %}badge-verde{% elif row.tone == 'danger' %}badge-rojo{% else %}badge-amarillo{% endif %}">{{ row.status }}</span></td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.depends_on }}</td>
+          <td>{{ row.exit_criteria }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if plan_scope_context.drilldown_actions %}
+  <div class="toolbar" style="margin-top: 10px;">
+    {% for item in plan_scope_context.drilldown_actions %}
+    <a class="btn btn-secondary" href="{{ item.url }}">{{ item.label }} ({{ item.count }})</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
+    {% for item in plan_scope_context.pipeline_steps %}
+    <article class="kpi-card">
+      <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% elif item.tone == 'primary' %}is-primary{% elif item.tone == 'success' %}is-success{% endif %}">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.label }}</div>
+      <div class="muted">
+        {{ item.status_label }} · abiertos {{ item.open }} · bloqueados {{ item.blocked }} · cerrados {{ item.closed }}
+      </div>
+      <div class="muted" style="margin-top: 4px;">
+        <span class="{% if item.semaphore_tone == 'danger' %}badge-rojo{% elif item.semaphore_tone == 'warning' %}badge-amarillo{% elif item.semaphore_tone == 'primary' %}badge badge-primary{% elif item.semaphore_tone == 'success' %}badge-verde{% else %}badge{% endif %}">
+          {{ item.semaphore_label }}
+        </span>
+        <span style="margin-left: 8px;">Cierre {{ item.progress_pct }}%</span>
+      </div>
+      <div class="erp-progress" style="margin-top: 8px;">
+        <div class="erp-progress-fill {% if item.semaphore_tone == 'danger' %}is-danger{% elif item.semaphore_tone == 'warning' %}is-warning{% elif item.semaphore_tone == 'primary' %}is-primary{% elif item.semaphore_tone == 'success' %}is-success{% endif %}" style="width: {{ item.progress_pct }}%;"></div>
+      </div>
+      <div class="muted" style="margin-top: 8px;">{{ item.action_detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% if plan_scope_context.stage_focus %}
+  <div class="alert {% if plan_scope_context.stage_focus.tone == 'success' %}alert-success{% elif plan_scope_context.stage_focus.tone == 'primary' %}alert-soft{% elif plan_scope_context.stage_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
+    <strong>Bloqueo prioritario por etapa:</strong>
+    {{ plan_scope_context.stage_focus.label }}.
+    {{ plan_scope_context.stage_focus.summary }}
+    <a class="btn btn-secondary btn-sm" href="{{ plan_scope_context.stage_focus.action_url }}" style="margin-left: 8px;">{{ plan_scope_context.stage_focus.action_label }}</a>
+  </div>
+  {% if plan_scope_context.stage_focus.rows %}
+  <div class="table-responsive" style="margin-top: 12px;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Responsable</th>
+          <th>Folio</th>
+          <th>Estatus</th>
+          <th>Detalle</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in plan_scope_context.stage_focus.rows %}
+        <tr>
+          <td>{{ row.owner|default:"Operación ERP" }}</td>
+          <td>{{ row.folio }}</td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.detail }}</td>
+          <td>
+            <a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a>
+            {% if row.edit_url %}
+            <a class="btn btn-secondary btn-sm" href="{{ row.edit_url }}">Editar artículo</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+  <div class="kpi-grid kpi-mini" style="margin-top: 12px;">
+    {% for item in plan_scope_context.closure_checks %}
+    <article class="kpi-card {% if item.is_active %}is-active{% endif %}">
+      <div class="kpi-number {% if item.is_ready %}is-success{% else %}is-warning{% endif %}">{% if item.is_ready %}OK{% else %}Por validar{% endif %}</div>
+      <div class="kpi-label">{{ item.label }}</div>
+      <div class="muted">{{ item.detail }}</div>
+      <div class="muted" style="margin-top: 6px;">{{ item.action_detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}" style="margin-top: 8px;">{{ item.action_label }}</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% if plan_scope_context.closure_focus %}
+  <div class="alert {% if plan_scope_context.closure_focus.tone == 'success' %}alert-success{% elif plan_scope_context.closure_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
+    <strong>Criterio de cierre prioritario:</strong>
+    {{ plan_scope_context.closure_focus.summary }}
+    <a class="btn btn-secondary btn-sm" href="{{ plan_scope_context.closure_focus.action_url }}" style="margin-left: 8px;">{{ plan_scope_context.closure_focus.action_label }}</a>
+    <div class="muted" style="margin-top: 6px;">{{ plan_scope_context.closure_focus.action_detail }}</div>
+  </div>
+  {% if plan_scope_context.closure_focus_rows %}
+  <div class="table-responsive" style="margin-top: 12px;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Ámbito</th>
+          <th>Responsable</th>
+          <th>Folio</th>
+          <th>Estatus</th>
+          <th>Detalle</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in plan_scope_context.closure_focus_rows %}
+        <tr>
+          <td>{{ row.scope|default:"-" }}</td>
+          <td>{{ row.owner|default:"Operación ERP" }}</td>
+          <td>{{ row.folio }}</td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.detail }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Entregas entre etapas</div>
+  <div class="kpi-grid kpi-mini">
+    {% for item in plan_scope_context.handoff_checks %}
+    <article class="kpi-card {% if item.is_active %}is-active{% endif %}">
+      <div class="kpi-number {% if item.is_ready %}is-success{% elif item.blocked_count > 0 %}is-danger{% else %}is-warning{% endif %}">
+        {% if item.is_ready %}OK{% else %}Por validar{% endif %}
+      </div>
+      <div class="kpi-label">{{ item.label }}</div>
+      <div class="muted">Listos {{ item.ready_count }} · bloqueados {{ item.blocked_count }}</div>
+      <div class="muted" style="margin-top: 6px;">{{ item.action_detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}" style="margin-top: 8px;">{{ item.action_label }}</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% if plan_scope_context.handoff_focus %}
+  <div class="alert {% if plan_scope_context.handoff_focus.tone == 'success' %}alert-success{% elif plan_scope_context.handoff_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
+    <strong>Entrega prioritaria:</strong>
+    {{ plan_scope_context.handoff_focus.summary }}
+    <a class="btn btn-secondary btn-sm" href="{{ plan_scope_context.handoff_focus.action_url }}" style="margin-left: 8px;">{{ plan_scope_context.handoff_focus.action_label }}</a>
+    <div class="muted" style="margin-top: 6px;">{{ plan_scope_context.handoff_focus.action_detail }}</div>
+  </div>
+  {% if plan_scope_context.handoff_focus_rows %}
+  <div class="table-responsive" style="margin-top: 12px;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Ámbito</th>
+          <th>Responsable</th>
+          <th>Folio</th>
+          <th>Estatus</th>
+          <th>Detalle</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in plan_scope_context.handoff_focus_rows %}
+        <tr>
+          <td>{{ row.scope|default:"-" }}</td>
+          <td>{{ row.owner|default:"Operación ERP" }}</td>
+          <td>{{ row.folio }}</td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.detail }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+  {% if plan_scope_context.master_blocker_class_cards %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro por clase</div>
+  <div class="kpi-grid kpi-mini">
+    {% for item in plan_scope_context.master_blocker_class_cards %}
+    <article class="kpi-card {% if item.is_active %}is-active{% endif %}">
+      <div class="kpi-number {% if item.count > 0 %}is-danger{% else %}is-success{% endif %}">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.class_label }}</div>
+      <div class="muted">{{ item.dominant_label }} · {{ item.dominant_count }}</div>
+      <div class="muted" style="margin-top: 6px;">{{ item.action_detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ item.focus_url }}" style="margin-top: 8px;">Enfocar</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if plan_scope_context.master_blocker_missing_cards %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro por dato faltante</div>
+  <div class="kpi-grid kpi-mini">
+    {% for item in plan_scope_context.master_blocker_missing_cards %}
+    <article class="kpi-card {% if item.is_active %}is-active{% endif %}">
+      <div class="kpi-number is-danger">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.missing_label }}</div>
+      <div class="muted">Clase dominante: {{ item.dominant_class_label }} ({{ item.dominant_class_count }})</div>
+      <div class="muted">{{ item.action_detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ item.focus_url }}">Enfocar</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if plan_scope_context.master_focus %}
+  <div class="alert {% if plan_scope_context.master_focus.tone == 'success' %}alert-success{% elif plan_scope_context.master_focus.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
+    <strong>Bloqueo maestro prioritario:</strong>
+    {{ plan_scope_context.master_focus.summary }}
+    <a class="btn btn-secondary btn-sm" href="{{ plan_scope_context.master_focus.action_url }}" style="margin-left: 8px;">{{ plan_scope_context.master_focus.action_label }}</a>
+    <div class="muted" style="margin-top: 6px;">{{ plan_scope_context.master_focus.action_detail }}</div>
+  </div>
+  {% if plan_scope_context.master_focus_rows %}
+  <div class="table-responsive" style="margin-top: 12px;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Clase</th>
+          <th>Responsable</th>
+          <th>Artículo</th>
+          <th>Faltante</th>
+          <th>Impacto</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in plan_scope_context.master_focus_rows %}
+        <tr>
+          <td>{{ row.class_label }}</td>
+          <td>{{ row.owner|default:"Maestros / DG" }}</td>
+          <td>{{ row.insumo_nombre }}</td>
+          <td>{{ row.missing_field }}</td>
+          <td>{{ row.count }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+</section>
+
+<details class="erp-advanced-panel">
+  <summary class="erp-advanced-summary">
+    <span>Ver análisis documental y trazabilidad</span>
+    <span class="muted">Cierre, bloqueos y seguimiento</span>
+  </summary>
+  <div class="erp-advanced-body">
+<section class="card table-card">
+  <div class="card-header">Flujo documental de recepciones</div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Objetivo</th>
+          <th>Control dominante</th>
+          <th>Salida esperada</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>01 · Orden abierta</strong></td>
+          <td>Compras</td>
+          <td>Partir de una orden liberada y trazable.</td>
+          <td>Documento de compra vigente.</td>
+          <td>Base segura para recibir mercancía.</td>
+        </tr>
+        <tr>
+          <td><strong>02 · Recepción</strong></td>
+          <td>Almacén / Recepción</td>
+          <td>Registrar lo recibido contra lo ordenado.</td>
+          <td>Control de diferencias y entregas parciales.</td>
+          <td>Entrada documental confiable.</td>
+        </tr>
+        <tr>
+          <td><strong>03 · Aplicación</strong></td>
+          <td>Inventario / Costos</td>
+          <td>Impactar inventario y costo con datos cerrados.</td>
+          <td>Conciliación ERP.</td>
+          <td>Inventario actualizado sin desvíos.</td>
+        </tr>
+        <tr>
+          <td><strong>04 · Cierre</strong></td>
+          <td>Compras / Auditoría</td>
+          <td>Cerrar saldos, remanentes y recepción pendiente.</td>
+          <td>Gobierno de entregas.</td>
+          <td>Documento listo para auditoría y seguimiento.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Criterios de cierre</div>
+  <div class="enterprise-kpi-strip enterprise-kpi-strip-compact">
+    <article class="enterprise-kpi-card">
+      <div class="enterprise-kpi-label">Cierre global</div>
+      <div class="kpi-number">{{ release_gate_completion }}%</div>
+      <div class="muted">La etapa queda liberada cuando artículo, orden y recepción ya cierran la cadena documental mínima.</div>
+    </article>
+  </div>
+  <div class="blocker-list">
+    {% for row in release_gate_rows %}
+    <article class="stage-row">
+      <div class="stage-step">{{ row.step }}</div>
+      <div class="blocker-meta">
+        <strong>{{ row.title }}</strong>
+        <small>{{ row.detail }}</small>
+      </div>
+      <div class="module-chip-list">
+        <span class="module-chip manage">Cerrados {{ row.completed }}</span>
+        <span class="module-chip {% if row.tone == 'success' %}manage{% else %}blocked{% endif %}">Abiertos {{ row.open_count }}</span>
+      </div>
+      <div class="blocker-action">
+        <a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+{% if critical_path_rows %}
+<section class="card">
+  <div class="card-header">Prioridades de atención</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Prioridad</th>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Brechas</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Lectura ejecutiva</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in critical_path_rows %}
+        <tr>
+          <td><strong>{{ row.rank }}</strong></td>
+          <td><strong>{{ row.title }}</strong><div class="muted">{{ row.status }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.count }}</td>
+          <td>{{ row.completion }}%</td>
+          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if trunk_handoff_rows %}
+<section class="card">
+  <div class="card-header">Dependencias del flujo</div>
+  <p class="muted" style="margin: 0 0 1rem;">Expone cómo el flujo de compras baja al troncal del ERP: solicitudes/BOM, órdenes documentales y recepciones/inventario.</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo ERP</th>
+          <th>Responsable</th>
+          <th>Estatus</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Criterio de salida</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in trunk_handoff_rows %}
+        <tr>
+          <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td><span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">{{ row.status }}</span></td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td><strong>{{ row.depends_on }}</strong></td>
+          <td>{{ row.exit_criteria }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if executive_radar_rows %}
+<section class="card">
+  <div class="card-header">Resumen de seguimiento</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Bloqueo dominante</th>
+          <th>Depende de</th>
+          <th>Cierre</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in executive_radar_rows %}
+        <tr>
+          <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.dominant_blocker }}</td>
+          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+          <td><span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">{{ row.progress_pct }}% · {{ row.blockers }} abiertos</span></td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Control por frente</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Frente</th>
+          <th>Responsable</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in erp_governance_rows %}
+        <tr>
+          <td><strong>{{ row.front }}</strong></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+  </div>
+</details>
 
 <section class="card">
   <div class="card-header">Nueva Recepción</div>
   {% if can_manage_compras %}
   <form method="post" class="form-grid-auto">
     {% csrf_token %}
+    <input type="hidden" name="source" value="{{ source_filter }}">
+    <input type="hidden" name="plan_id" value="{{ plan_filter }}">
+    {% if plan_scope_context %}
+    <div class="input-field input-readonly">
+      <strong>Recepción bloqueada al plan</strong><br>
+      {{ plan_scope_context.label }} · <code>{{ plan_scope_context.plan_scope }}</code>
+    </div>
+    {% endif %}
     <select class="input-field" name="orden_id" required>
       <option value="">Orden de compra</option>
       {% for o in ordenes %}<option value="{{ o.id }}">{{ o.folio }} - {{ o.proveedor.nombre }}</option>{% endfor %}
@@ -33,8 +820,186 @@
 </section>
 
 <section class="card">
+  <div class="card-header">Control Documental</div>
+  <p class="muted">{{ workflow_summary.note }}</p>
+  <div class="kpi-grid kpi-mini">
+    {% for item in workflow_summary.cards %}
+    <article class="kpi-card {% if estatus_filter == item.code %}is-active{% endif %}">
+      <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% elif item.tone == 'primary' %}is-primary{% else %}is-success{% endif %}">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.label }}</div>
+      <a class="btn btn-secondary btn-sm" href="{% url 'compras:recepciones' %}{{ item.query }}{% if current_query_without_estatus %}&{{ current_query_without_estatus }}{% endif %}">Abrir</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% if workflow_summary.gate_cards %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Semáforo de etapa</div>
+  <div class="kpi-grid kpi-mini">
+    {% for item in workflow_summary.gate_cards %}
+    <article class="kpi-card">
+      <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">
+        {% if item.blocked_count %}Abierta{% else %}OK{% endif %}
+      </div>
+      <div class="kpi-label">{{ item.label }}</div>
+      <div class="muted">Listas {{ item.ready_count }} · bloqueadas {{ item.blocked_count }}</div>
+      <div class="muted">{{ item.detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{% url 'compras:recepciones' %}{{ item.query }}{% if current_query_without_estatus %}&{{ current_query_without_estatus }}{% endif %}">{{ item.action_label }}</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">Salud operativa ERP</div>
+  <p class="muted">Prioriza validación, cierre con justificación y aplicación correcta a inventario para no romper conciliación ni auditoría.</p>
+  <div class="kpi-grid kpi-mini mb-3">
+    {% for item in enterprise_board.source_cards %}
+    <article class="kpi-card {% if source_filter == item.key %}is-active{% endif %}">
+      <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% elif item.tone == 'primary' %}is-primary{% else %}is-success{% endif %}">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.label }}</div>
+      <a class="btn btn-secondary btn-sm" href="{% url 'compras:recepciones' %}{{ item.query }}{% if current_query %}&plan_id={{ plan_filter }}{% endif %}{% if proveedor_filter %}&proveedor_id={{ proveedor_filter }}{% endif %}{% if estatus_filter and estatus_filter != 'ALL' %}&estatus={{ estatus_filter }}{% endif %}{% if mes_filter %}&mes={{ mes_filter }}{% endif %}{% if q_filter %}&q={{ q_filter|urlencode }}{% endif %}">Abrir</a>
+    </article>
+    {% endfor %}
+  </div>
+  <div class="kpi-grid kpi-mini mb-3">
+    {% for item in enterprise_board.next_step_cards %}
+    <article class="kpi-card {% if workflow_action_filter == item.key %}is-active{% endif %}">
+      <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% elif item.tone == 'primary' %}is-primary{% else %}is-success{% endif %}">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.label }}</div>
+      <div class="muted">{{ item.action_detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{% url 'compras:recepciones' %}{{ item.query }}{% if current_query_without_workflow %}&{{ current_query_without_workflow }}{% endif %}">Abrir</a>
+    </article>
+    {% endfor %}
+  </div>
+  <div class="kpi-grid kpi-mini">
+    {% for item in enterprise_board.blocker_cards %}
+    <article class="kpi-card {% if blocker_key_filter == item.key %}is-active{% endif %}">
+      <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% elif item.tone == 'primary' %}is-primary{% else %}is-success{% endif %}">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.label }}</div>
+      <div class="muted">{{ item.action_detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{% url 'compras:recepciones' %}{{ item.query }}{% if current_query_without_blocker %}&{{ current_query_without_blocker }}{% endif %}">Abrir</a>
+    </article>
+    {% endfor %}
+  </div>
+  <p class="muted mb-0" style="margin-top: 12px;">
+    Bloqueadas ERP: <strong>{{ enterprise_board.blocked_total }}</strong>
+    · Aplicadas a inventario: <strong>{{ enterprise_board.applied_total }}</strong>
+  </p>
+  {% if enterprise_board.blocker_detail_rows %}
+  <div class="table-responsive" style="margin-top: 12px;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Recepción bloqueada</th>
+          <th>Bloqueo</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in enterprise_board.blocker_detail_rows %}
+        <tr>
+          <td><strong>{{ item.folio }}</strong></td>
+          <td><span class="badge-rojo">{{ item.message }}</span></td>
+          <td>
+            <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
+            {% if item.edit_url %}
+            <a class="btn btn-secondary btn-sm" href="{{ item.edit_url }}">Editar artículo</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if enterprise_board.master_blocker_class_cards %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro por clase</div>
+  <div class="kpi-grid kpi-mini">
+    {% for item in enterprise_board.master_blocker_class_cards %}
+    <article class="kpi-card">
+      <div class="kpi-number {% if item.class_key == 'EMPAQUE' %}is-warning{% elif item.class_key == 'INTERNO' %}is-primary{% else %}is-danger{% endif %}">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.class_label }}</div>
+      <div class="muted">Faltante dominante: {{ item.dominant_label }} ({{ item.dominant_count }})</div>
+      <div class="muted">{{ item.action_detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if enterprise_board.master_blocker_missing_cards %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro por dato faltante</div>
+  <div class="kpi-grid kpi-mini">
+    {% for item in enterprise_board.master_blocker_missing_cards %}
+    <article class="kpi-card {% if master_missing_filter == item.key %}is-active{% endif %}">
+      <div class="kpi-number is-danger">{{ item.count }}</div>
+      <div class="kpi-label">{{ item.missing_label }}</div>
+      <div class="muted">Clase dominante: {{ item.dominant_class_label }} ({{ item.dominant_class_count }})</div>
+      <div class="muted">{{ item.action_detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="?master_missing={{ item.key }}">Enfocar</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if enterprise_board.master_blocker_detail_rows %}
+  <div class="card-header" style="padding:16px 0 8px 0;border:0;">Detalle del maestro bloqueando recepciones</div>
+  <div class="table-responsive" style="margin-top: 12px;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Clase</th>
+          <th>Artículo</th>
+          <th>Faltante maestro</th>
+          <th>Recepciones afectadas</th>
+          <th>Folios</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in enterprise_board.master_blocker_detail_rows %}
+        <tr>
+          <td><strong>{{ item.class_label }}</strong></td>
+          <td>{{ item.insumo_nombre }}</td>
+          <td>
+            <span class="{% if item.tone == 'danger' %}badge-rojo{% else %}badge-amarillo{% endif %}">{{ item.missing_field }}</span>
+            <div class="muted">{{ item.message }}</div>
+          </td>
+          <td>{{ item.count }}</td>
+          <td>
+            {{ item.folios_preview }}
+            {% if item.folios_more %}<span class="muted"> · +{{ item.folios_more }} más</span>{% endif %}
+          </td>
+          <td>
+            <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
+            {% if item.edit_url %}
+            <a class="btn btn-secondary btn-sm" href="{{ item.edit_url }}">Editar artículo</a>
+            {% endif %}
+          </td>
+        </tr>
+        <tr class="table-row-detail">
+          <td colspan="6" class="muted">{{ item.action_detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
   <div class="card-header">Recepciones Registradas</div>
   <form method="get" class="form-grid-auto mb-3">
+    <select class="input-field" name="source">
+      <option value="all" {% if source_filter == "all" %}selected{% endif %}>Todos los orígenes</option>
+      <option value="manual" {% if source_filter == "manual" %}selected{% endif %}>Captura directa</option>
+      <option value="plan" {% if source_filter == "plan" %}selected{% endif %}>Plan producción</option>
+      <option value="reabasto_cedis" {% if source_filter == "reabasto_cedis" %}selected{% endif %}>Reabasto CEDIS</option>
+    </select>
+    <select class="input-field" name="plan_id">
+      <option value="">Todos los planes</option>
+      {% for plan in plan_options %}
+      <option value="{{ plan.id }}" {% if plan_filter == plan.id|stringformat:"s" %}selected{% endif %}>{{ plan.nombre }}</option>
+      {% endfor %}
+    </select>
     <select class="input-field" name="proveedor_id">
       <option value="">Todos los proveedores</option>
       {% for p in proveedores %}
@@ -43,8 +1008,19 @@
     </select>
     <select class="input-field" name="estatus">
       <option value="all" {% if estatus_filter == "ALL" %}selected{% endif %}>Todos los estatus</option>
+      <option value="BLOCKED_ERP" {% if estatus_filter == "BLOCKED_ERP" %}selected{% endif %}>Bloqueadas ERP</option>
       {% for value, label in status_choices %}
       <option value="{{ value }}" {% if estatus_filter == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <select class="input-field" name="master_class">
+      {% for value, label in master_class_choices %}
+      <option value="{{ value }}" {% if master_class_filter == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <select class="input-field" name="master_missing">
+      {% for value, label in master_missing_choices %}
+      <option value="{{ value }}" {% if master_missing_filter == value %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
     <input class="input-field" type="month" name="mes" value="{{ mes_filter }}">
@@ -52,6 +1028,16 @@
     <button class="btn btn-primary" type="submit">Aplicar filtros</button>
     <a class="btn btn-secondary" href="{% url 'compras:recepciones' %}">Limpiar</a>
   </form>
+  <p class="muted">
+    Origen:
+    <strong>{% if source_filter == 'all' %}Todos{% elif source_filter == 'manual' %}Captura directa{% elif source_filter == 'plan' %}Plan producción{% else %}Reabasto CEDIS{% endif %}</strong>
+    · Estatus:
+    <strong>{% if estatus_filter == 'ALL' %}Todos{% else %}{{ estatus_filter }}{% endif %}</strong>
+    · Clase maestro:
+    <strong>{% if master_class_filter == 'all' %}Todas{% else %}{{ master_class_filter }}{% endif %}</strong>
+    · Faltante maestro:
+    <strong>{% if master_missing_filter == 'all' %}Todos{% else %}{{ master_missing_filter }}{% endif %}</strong>
+  </p>
   <div class="toolbar mb-3">
     <a class="btn btn-secondary" href="?{% if current_query %}{{ current_query }}&{% endif %}export=csv">Exportar CSV</a>
     <a class="btn btn-secondary" href="?{% if current_query %}{{ current_query }}&{% endif %}export=xlsx">Exportar XLSX</a>
@@ -62,10 +1048,14 @@
         <tr>
           <th>Recepción</th>
           <th>OC</th>
+          <th>Origen</th>
           <th>Proveedor</th>
           <th>Fecha</th>
           <th>Conformidad</th>
           <th>Estatus</th>
+          <th>Etapa</th>
+          <th>Maestro ERP</th>
+          <th>Siguiente paso</th>
           <th>Observaciones</th>
           {% if can_manage_compras %}<th>Flujo</th>{% endif %}
         </tr>
@@ -75,6 +1065,22 @@
         <tr>
           <td>{{ r.folio }}</td>
           <td>{{ r.orden.folio }}</td>
+          <td>
+            {% if r.source_tipo == 'reabasto_cedis' %}
+              <span class="badge badge-primary">Reabasto CEDIS</span>
+              {% if r.source_plan_id %}
+              <div class="muted"><a href="{% url 'recetas:plan_produccion' %}?plan_id={{ r.source_plan_id }}">Plan #{{ r.source_plan_id }}</a></div>
+              {% endif %}
+            {% elif r.source_tipo == 'plan' %}
+              <span class="badge-amarillo">
+                <a href="{% url 'recetas:plan_produccion' %}?plan_id={{ r.source_plan_id }}" style="color: inherit; text-decoration: none;">
+                  {{ r.source_plan_nombre|default:"Plan" }}
+                </a>
+              </span>
+            {% else %}
+              <span class="badge-verde">Captura directa</span>
+            {% endif %}
+          </td>
           <td>{{ r.orden.proveedor.nombre }}</td>
           <td>{{ r.fecha_recepcion }}</td>
           <td>{{ r.conformidad_pct }}%</td>
@@ -87,25 +1093,70 @@
               <span class="badge bg-primary">{{ r.get_estatus_display }}</span>
             {% endif %}
           </td>
+          <td>
+            {% if r.workflow_health_tone == 'danger' %}
+            <div><span class="badge-rojo">{{ r.workflow_health_label }}</span></div>
+            {% elif r.workflow_health_tone == 'warning' %}
+            <div><span class="badge-amarillo">{{ r.workflow_health_label }}</span></div>
+            {% elif r.workflow_health_tone == 'primary' %}
+            <div><span class="badge badge-primary">{{ r.workflow_health_label }}</span></div>
+            {% elif r.workflow_health_tone == 'success' %}
+            <div><span class="badge-verde">{{ r.workflow_health_label }}</span></div>
+            {% else %}
+            <div><span class="badge">{{ r.workflow_health_label }}</span></div>
+            {% endif %}
+            <div><strong>{{ r.workflow_stage }}</strong></div>
+          </td>
+          <td>
+            {% if r.enterprise_master_summary.status_tone == 'danger' %}
+            <div><span class="badge-rojo">{{ r.enterprise_master_summary.status_label }}</span></div>
+            {% elif r.enterprise_master_summary.status_tone == 'warning' %}
+            <div><span class="badge-amarillo">{{ r.enterprise_master_summary.status_label }}</span></div>
+            {% else %}
+            <div><span class="badge-verde">{{ r.enterprise_master_summary.status_label }}</span></div>
+            {% endif %}
+            <div class="muted">{{ r.enterprise_master_summary.summary }}</div>
+            {% if r.enterprise_master_summary.action_url %}
+            <div class="mt-1">
+              <a class="{% if r.enterprise_master_summary.status_tone == 'danger' %}badge-rojo{% else %}badge-verde{% endif %}" href="{{ r.enterprise_master_summary.action_url }}">{{ r.enterprise_master_summary.action_label }}</a>
+            </div>
+            {% endif %}
+          </td>
+          <td>
+            <strong>{{ r.workflow_action_label }}</strong>
+            <div class="muted">{{ r.workflow_next }}</div>
+            {% if r.has_workflow_blockers %}
+            <div class="muted">
+              {% for blocker in r.workflow_blockers|slice:":2" %}{{ blocker }}{% if not forloop.last %} · {% endif %}{% endfor %}
+              {% if r.workflow_blockers|length > 2 %} · +{{ r.workflow_blockers|length|add:"-2" }} más{% endif %}
+            </div>
+            <div class="mt-1">
+              {% for detail in r.workflow_blocker_details|slice:":2" %}
+              <a class="{% if detail.tone == 'danger' %}badge-rojo{% else %}badge-amarillo{% endif %}" href="{{ detail.action_url }}">{{ detail.action_label }}</a>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </td>
           <td>{{ r.observaciones|default:"-" }}</td>
           {% if can_manage_compras %}
           <td>
             <div class="recipe-actions">
             {% if r.estatus == 'PENDIENTE' %}
-              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'DIFERENCIAS' %}" class="inline-form">{% csrf_token %}<button class="btn btn-secondary" type="submit">Con diferencias</button></form>
-              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form">{% csrf_token %}<button class="btn btn-success" type="submit">Cerrar</button></form>
+              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'DIFERENCIAS' %}" class="inline-form">{% csrf_token %}<input type="hidden" name="return_query" value="{{ current_query }}"><input type="hidden" name="source" value="{{ source_filter }}"><input type="hidden" name="plan_id" value="{{ plan_filter }}"><button class="btn btn-secondary" type="submit" {% if r.has_workflow_blockers %}disabled title="{{ r.workflow_blockers|join:', ' }}"{% endif %}>Con diferencias</button></form>
+              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form">{% csrf_token %}<input type="hidden" name="return_query" value="{{ current_query }}"><input type="hidden" name="source" value="{{ source_filter }}"><input type="hidden" name="plan_id" value="{{ plan_filter }}"><button class="btn btn-success" type="submit" {% if r.has_workflow_blockers %}disabled title="{{ r.workflow_blockers|join:', ' }}"{% endif %}>Cerrar</button></form>
             {% elif r.estatus == 'DIFERENCIAS' %}
-              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form">{% csrf_token %}<button class="btn btn-primary" type="submit">Cerrar</button></form>
+              <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form">{% csrf_token %}<input type="hidden" name="return_query" value="{{ current_query }}"><input type="hidden" name="source" value="{{ source_filter }}"><input type="hidden" name="plan_id" value="{{ plan_filter }}"><button class="btn btn-primary" type="submit" {% if r.has_workflow_blockers %}disabled title="{{ r.workflow_blockers|join:', ' }}"{% endif %}>Cerrar</button></form>
             {% endif %}
             </div>
           </td>
           {% endif %}
         </tr>
         {% empty %}
-        <tr><td colspan="8" class="text-muted">Sin recepciones registradas.</td></tr>
+        <tr><td colspan="{% if can_manage_compras %}12{% else %}11{% endif %}" class="text-muted">Sin recepciones registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
+</div>
 {% endblock %}

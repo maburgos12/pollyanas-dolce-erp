@@ -64,7 +64,9 @@ class MermaPOS(models.Model):
     producto_texto = models.CharField(max_length=250, blank=True, default="")
     cantidad = models.DecimalField(max_digits=18, decimal_places=3, default=Decimal("0"))
     motivo = models.CharField(max_length=160, blank=True, default="")
+    responsable_texto = models.CharField(max_length=160, blank=True, default="")
     fuente = models.CharField(max_length=40, blank=True, default="IMPORT_POS_MERMA")
+    source_hash = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True)
     creado_en = models.DateTimeField(default=timezone.now)
     actualizado_en = models.DateTimeField(auto_now=True)
 

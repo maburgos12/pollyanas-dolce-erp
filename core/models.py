@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.conf import settings
 from django.utils import timezone
 
@@ -6,6 +7,7 @@ class Sucursal(models.Model):
     codigo = models.CharField(max_length=20, unique=True)
     nombre = models.CharField(max_length=120)
     activa = models.BooleanField(default=True)
+    fecha_apertura = models.DateField(null=True, blank=True, db_index=True)
 
     class Meta:
         verbose_name = "Sucursal"
@@ -13,6 +15,19 @@ class Sucursal(models.Model):
 
     def __str__(self) -> str:
         return f"{self.codigo} - {self.nombre}"
+
+    def esta_operativa(self, reference_date=None) -> bool:
+        reference_date = reference_date or timezone.localdate()
+        return self.activa and (self.fecha_apertura is None or self.fecha_apertura <= reference_date)
+
+
+def sucursales_operativas_q(reference_date=None) -> Q:
+    reference_date = reference_date or timezone.localdate()
+    return Q(activa=True) & (Q(fecha_apertura__isnull=True) | Q(fecha_apertura__lte=reference_date))
+
+
+def sucursales_operativas(reference_date=None):
+    return Sucursal.objects.filter(sucursales_operativas_q(reference_date)).order_by("codigo", "nombre")
 
 class Departamento(models.Model):
     codigo = models.CharField(max_length=30, unique=True)

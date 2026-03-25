@@ -48,3 +48,15 @@ htmlcov/
 # Build artifacts
 build/
 dist/
+
+# Archive de proceso de desarrollo
+_archive/
+
+# Logs operativos (se generan en runtime)
+logs/*.csv
+logs/*.md
+logs/bloque1_*
+
+# Output de tests
+output/playwright/
+output/spreadsheet/

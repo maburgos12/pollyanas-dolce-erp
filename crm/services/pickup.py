@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Max, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from core.audit import log_event
-from core.models import Sucursal
+from core.models import Sucursal, sucursales_operativas_q
 from crm.models import Cliente, PedidoCliente, PickupReservation, SeguimientoPedido
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct
 from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
@@ -77,9 +77,13 @@ class PickupAvailabilityService:
     STATUS_LOW_STOCK = "LOW_STOCK"
     STATUS_OUT_OF_STOCK = "OUT_OF_STOCK"
     STATUS_UNKNOWN = "UNKNOWN"
+    MIN_DATETIME = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
 
     def __init__(self):
-        self.freshness_minutes = max(int(getattr(settings, "PICKUP_AVAILABILITY_FRESHNESS_MINUTES", 20)), 1)
+        configured_freshness = max(int(getattr(settings, "PICKUP_AVAILABILITY_FRESHNESS_MINUTES", 20)), 1)
+        sync_interval_hours = max(int(getattr(settings, "POINT_BRIDGE_SYNC_INTERVAL_HOURS", 0)), 0)
+        sync_interval_freshness = sync_interval_hours * 60
+        self.freshness_minutes = max(configured_freshness, sync_interval_freshness)
         self.default_buffer_qty = self._decimal(getattr(settings, "PICKUP_STOCK_BUFFER_DEFAULT", "1"))
         self.low_stock_threshold = self._decimal(getattr(settings, "PICKUP_LOW_STOCK_THRESHOLD", "3"))
         self.default_ttl_minutes = max(int(getattr(settings, "PICKUP_RESERVATION_TTL_MINUTES", 15)), 1)
@@ -96,7 +100,11 @@ class PickupAvailabilityService:
         if not raw_code:
             raise PickupReservationError("product_code es obligatorio.", code="missing_product_code")
 
-        receta = Receta.objects.filter(codigo_point__iexact=raw_code).order_by("id").first()
+        receta = (
+            Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL, codigo_point__iexact=raw_code)
+            .order_by("id")
+            .first()
+        )
         if receta is not None:
             return receta
 
@@ -107,8 +115,45 @@ class PickupAvailabilityService:
             .order_by("id")
             .first()
         )
-        if alias and alias.receta_id:
+        if alias and alias.receta_id and alias.receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
             return alias.receta
+
+        receta_by_name = (
+            Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL, nombre__iexact=raw_code)
+            .order_by("id")
+            .first()
+        )
+        if receta_by_name is not None:
+            return receta_by_name
+
+        alias_by_name = (
+            RecetaCodigoPointAlias.objects.filter(
+                nombre_point__iexact=raw_code,
+                activo=True,
+                receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
+            )
+            .select_related("receta")
+            .order_by("id")
+            .first()
+        )
+        if alias_by_name and alias_by_name.receta_id:
+            return alias_by_name.receta
+
+        target_name = normalizar_nombre(raw_code)
+        if target_name:
+            name_matches: dict[int, Receta] = {}
+            for receta in Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).only("id", "nombre"):
+                if normalizar_nombre(receta.nombre) == target_name:
+                    name_matches[receta.id] = receta
+            for alias_match in (
+                RecetaCodigoPointAlias.objects.filter(activo=True, receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+                .select_related("receta")
+                .only("id", "nombre_point", "receta__id", "receta__nombre", "receta__tipo")
+            ):
+                if normalizar_nombre(alias_match.nombre_point or "") == target_name and alias_match.receta_id:
+                    name_matches[alias_match.receta_id] = alias_match.receta
+            if len(name_matches) == 1:
+                return next(iter(name_matches.values()))
 
         raise PickupReservationError(
             "Producto no encontrado en catálogo ERP.",
@@ -121,15 +166,35 @@ class PickupAvailabilityService:
         if not raw_code:
             raise PickupReservationError("branch_code es obligatorio.", code="missing_branch_code")
 
-        sucursal = Sucursal.objects.filter(codigo__iexact=raw_code, activa=True).first()
+        operativas = Sucursal.objects.filter(sucursales_operativas_q())
+        sucursal = operativas.filter(codigo__iexact=raw_code).first()
         if sucursal is None:
-            sucursal = Sucursal.objects.filter(nombre__iexact=raw_code, activa=True).first()
+            sucursal = operativas.filter(nombre__iexact=raw_code).first()
         if sucursal is None:
             target = normalizar_nombre(raw_code)
-            for row in Sucursal.objects.filter(activa=True).only("id", "codigo", "nombre"):
-                if normalizar_nombre(row.nombre) == target:
+            for row in operativas.only("id", "codigo", "nombre"):
+                if normalizar_nombre(row.nombre) == target or normalizar_nombre(row.codigo) == target:
                     sucursal = row
                     break
+        if sucursal is None:
+            target = normalizar_nombre(raw_code)
+            scored_matches: list[tuple[int, int, Sucursal]] = []
+            for row in operativas.only("id", "codigo", "nombre"):
+                codigo_norm = normalizar_nombre(row.codigo)
+                nombre_norm = normalizar_nombre(row.nombre)
+                score = 0
+                if codigo_norm and codigo_norm in target:
+                    score = max(score, 3)
+                if nombre_norm and nombre_norm in target:
+                    score = max(score, 2)
+                if score:
+                    scored_matches.append((score, row.id, row))
+            if scored_matches:
+                scored_matches.sort(key=lambda item: (-item[0], item[1]))
+                top_score = scored_matches[0][0]
+                top_matches = [row for score, _, row in scored_matches if score == top_score]
+                if len({row.id for row in top_matches}) == 1:
+                    sucursal = top_matches[0]
         if sucursal is None:
             raise PickupReservationError(
                 "Sucursal no encontrada o inactiva.",
@@ -137,8 +202,38 @@ class PickupAvailabilityService:
                 payload={"branch_code": raw_code},
             )
 
-        point_branch = PointBranch.objects.filter(erp_branch=sucursal).order_by("id").first()
+        point_branch = self._resolve_point_branch(sucursal)
         return sucursal, point_branch
+
+    def _resolve_point_branch(self, sucursal: Sucursal) -> PointBranch | None:
+        branches = list(
+            PointBranch.objects.filter(erp_branch=sucursal).only("id", "last_seen_at", "updated_at")
+        )
+        if not branches:
+            return None
+
+        latest_snapshot_map = {
+            row["branch_id"]: row["latest_captured_at"]
+            for row in (
+                PointInventorySnapshot.objects.filter(branch_id__in=[branch.id for branch in branches])
+                .values("branch_id")
+                .annotate(latest_captured_at=Max("captured_at"))
+            )
+        }
+
+        def _stamp(value):
+            return value or self.MIN_DATETIME
+
+        return max(
+            branches,
+            key=lambda branch: (
+                latest_snapshot_map.get(branch.id) is not None,
+                _stamp(latest_snapshot_map.get(branch.id)),
+                _stamp(branch.last_seen_at),
+                _stamp(branch.updated_at),
+                branch.id,
+            ),
+        )
 
     def _candidate_codes(self, receta: Receta) -> list[str]:
         candidates: list[str] = []
@@ -164,7 +259,7 @@ class PickupAvailabilityService:
         if candidate_codes:
             code_query = Q()
             for code in candidate_codes:
-                code_query |= Q(sku__iexact=code) | Q(external_id__iexact=code)
+                code_query |= Q(sku__iexact=code) | Q(external_id__iexact=code) | Q(name__iexact=code)
             products = list(products_qs.filter(code_query))
         else:
             products = []
@@ -184,7 +279,8 @@ class PickupAvailabilityService:
             for product in PointProduct.objects.filter(id__in=branch_product_ids).only("id", "sku", "external_id", "name"):
                 sku_norm = normalizar_codigo_point(product.sku or "")
                 ext_norm = normalizar_codigo_point(product.external_id or "")
-                if sku_norm in target_norms or ext_norm in target_norms:
+                name_norm = normalizar_codigo_point(product.name or "")
+                if sku_norm in target_norms or ext_norm in target_norms or name_norm in target_norms:
                     products.append(product)
 
         if not products:

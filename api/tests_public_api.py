@@ -15,7 +15,7 @@ from crm.models import Cliente, PedidoCliente
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
-from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct
+from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
 from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
 
 
@@ -231,6 +231,76 @@ class PublicApiTests(APITestCase):
         PICKUP_LOW_STOCK_THRESHOLD="2",
         PICKUP_RESERVATION_TTL_MINUTES=15,
     )
+    def test_pickup_availability_matches_point_product_name_when_code_lives_in_name_field(self):
+        self.point_product.sku = "1001"
+        self.point_product.name = "01PSV"
+        self.point_product.save(update_fields=["sku", "name", "normalized_name", "updated_at"])
+
+        url = reverse("api_public_pickup_availability")
+        response = self.client.get(
+            url,
+            {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+            **self._auth_headers(),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "AVAILABLE")
+        self.assertIsNotNone(response.data["captured_at"])
+        self.assertIsNotNone(response.data["snapshot_age_seconds"])
+        self.assertEqual(response.data["available_to_promise"], "4.000")
+
+    @override_settings(
+        PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20,
+        PICKUP_STOCK_BUFFER_DEFAULT="1",
+        PICKUP_LOW_STOCK_THRESHOLD="2",
+        PICKUP_RESERVATION_TTL_MINUTES=15,
+    )
+    def test_pickup_availability_resolves_product_by_point_display_name(self):
+        url = reverse("api_public_pickup_availability")
+        response = self.client.get(
+            url,
+            {"product_code": "Pastel Selva Negra", "branch_code": "MATRIZ", "quantity": "1"},
+            **self._auth_headers(),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "AVAILABLE")
+        self.assertEqual(response.data["product_code"], "01PSV")
+
+    @override_settings(
+        PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20,
+        PICKUP_STOCK_BUFFER_DEFAULT="1",
+        PICKUP_LOW_STOCK_THRESHOLD="2",
+        PICKUP_RESERVATION_TTL_MINUTES=15,
+    )
+    def test_pickup_availability_resolves_branch_by_visible_label(self):
+        url = reverse("api_public_pickup_availability")
+        response = self.client.get(
+            url,
+            {"product_code": "01PSV", "branch_code": "Sucursal Matriz - Guasave", "quantity": "1"},
+            **self._auth_headers(),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "AVAILABLE")
+        self.assertEqual(response.data["branch_code"], "MATRIZ")
+
+    def test_pickup_availability_ignores_preparacion_codes(self):
+        self.pickup_receta.tipo = Receta.TIPO_PREPARACION
+        self.pickup_receta.save(update_fields=["tipo"])
+
+        url = reverse("api_public_pickup_availability")
+        response = self.client.get(
+            url,
+            {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+            **self._auth_headers(),
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "product_not_found")
+
+    @override_settings(
+        PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20,
+        PICKUP_STOCK_BUFFER_DEFAULT="1",
+        PICKUP_LOW_STOCK_THRESHOLD="2",
+        PICKUP_RESERVATION_TTL_MINUTES=15,
+    )
     def test_pickup_reservation_create_and_confirm_creates_order(self):
         reserve_url = reverse("api_public_pickup_reservations")
         reserve_response = self.client.post(
@@ -310,6 +380,7 @@ class PublicApiTests(APITestCase):
 
     @override_settings(
         PICKUP_AVAILABILITY_FRESHNESS_MINUTES=1,
+        POINT_BRIDGE_SYNC_INTERVAL_HOURS=0,
         PICKUP_STOCK_BUFFER_DEFAULT="1",
         PICKUP_LOW_STOCK_THRESHOLD="2",
         PICKUP_RESERVATION_TTL_MINUTES=15,
@@ -325,3 +396,74 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], "UNKNOWN")
         self.assertFalse(response.data["available"])
+
+    @override_settings(
+        PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20,
+        POINT_BRIDGE_SYNC_INTERVAL_HOURS=24,
+        PICKUP_STOCK_BUFFER_DEFAULT="1",
+        PICKUP_LOW_STOCK_THRESHOLD="2",
+        PICKUP_RESERVATION_TTL_MINUTES=15,
+    )
+    def test_pickup_availability_uses_sync_interval_as_freshness_floor(self):
+        PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - timedelta(hours=6))
+        url = reverse("api_public_pickup_availability")
+        response = self.client.get(
+            url,
+            {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+            **self._auth_headers(),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "AVAILABLE")
+        self.assertTrue(response.data["is_fresh"])
+
+    @override_settings(
+        PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20,
+        POINT_BRIDGE_SYNC_INTERVAL_HOURS=24,
+        PICKUP_STOCK_BUFFER_DEFAULT="1",
+        PICKUP_LOW_STOCK_THRESHOLD="2",
+        PICKUP_RESERVATION_TTL_MINUTES=15,
+    )
+    def test_pickup_availability_uses_point_branch_with_latest_snapshot(self):
+        stale_branch = PointBranch.objects.create(
+            external_id="Matriz",
+            name="Matriz",
+            status=PointBranch.STATUS_ACTIVE,
+            erp_branch=self.sucursal,
+        )
+        stale_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+        )
+        PointInventorySnapshot.objects.create(
+            branch=stale_branch,
+            product=self.point_product,
+            stock=Decimal("0"),
+            min_stock=Decimal("1"),
+            max_stock=Decimal("8"),
+            captured_at=timezone.now() - timedelta(days=3),
+            sync_job=stale_job,
+        )
+
+        url = reverse("api_public_pickup_availability")
+        response = self.client.get(
+            url,
+            {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+            **self._auth_headers(),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "AVAILABLE")
+        self.assertEqual(response.data["available_to_promise"], "4.000")
+
+    def test_pickup_availability_rejects_branch_with_future_opening_date(self):
+        self.sucursal.activa = True
+        self.sucursal.fecha_apertura = timezone.localdate() + timedelta(days=7)
+        self.sucursal.save(update_fields=["activa", "fecha_apertura"])
+
+        url = reverse("api_public_pickup_availability")
+        response = self.client.get(
+            url,
+            {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+            **self._auth_headers(),
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "branch_not_found")

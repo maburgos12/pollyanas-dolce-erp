@@ -10,6 +10,8 @@ from recetas.utils.derived_insumos import sync_presentacion_insumo, sync_receta_
 
 @receiver(post_save, sender=Receta, dispatch_uid="recetas_sync_derivados_on_receta_save")
 def sync_derivados_on_receta_save(sender, instance: Receta, **kwargs):
+    if kwargs.get("raw"):
+        return
     try:
         sync_receta_derivados(instance)
     except (OperationalError, ProgrammingError):
@@ -22,6 +24,8 @@ def sync_derivados_on_receta_save(sender, instance: Receta, **kwargs):
 
 @receiver(post_save, sender=RecetaPresentacion, dispatch_uid="recetas_sync_derivado_on_presentacion_save")
 def sync_derivado_on_presentacion_save(sender, instance: RecetaPresentacion, **kwargs):
+    if kwargs.get("raw"):
+        return
     try:
         sync_presentacion_insumo(instance)
     except (OperationalError, ProgrammingError):

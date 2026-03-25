@@ -1,115 +1,369 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Recetas{% endblock %}
+{% block body_class %}page-recetas-list{% endblock %}
 {% block content %}
-<div class="card">
-  <div class="card-header">Recetas</div>
-  <div class="kpi-grid mb-3">
-    <div class="kpi-card">
-      <div class="kpi-number">{{ total_recetas }}</div>
-      <div class="kpi-label">Recetas</div>
+<div class="module-shell recipes-shell">
+  <section class="card recipes-hero-card mb-3">
+    <div class="recipes-hero-head">
+      <div>
+        <h2 class="recipes-hero-title">Recetas</h2>
+        <p class="recipes-hero-copy">
+          Administra recetas base, derivados y productos finales con una vista limpia de estado, costo, componentes y acción pendiente.
+        </p>
+      </div>
+      <div class="recipes-hero-actions">
+        <a class="btn btn-primary" href="{% url 'recetas:receta_create' %}">+ Nueva receta</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Costeo semanal</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion' %}">Plan de producción</a>
+      </div>
     </div>
-    <div class="kpi-card">
-      <div class="kpi-number is-warning">{{ total_pendientes }}</div>
-      <div class="kpi-label">Con Pendientes</div>
+    <div class="kpi-grid kpi-mini mb-3">
+      <article class="kpi-card">
+        <div class="kpi-number">{{ total_recetas }}</div>
+        <div class="kpi-label">Recetas activas</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number is-success">{{ health_summary.listas }}</div>
+        <div class="kpi-label">Listas para operar</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number is-warning">{{ health_summary.pendientes }}</div>
+        <div class="kpi-label">Por validar</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.blockers }}</div>
+        <div class="kpi-label">Bloqueos abiertos</div>
+      </article>
     </div>
-    <div class="kpi-card">
-      <div class="kpi-number">{{ total_lineas }}</div>
-      <div class="kpi-label">Líneas Totales</div>
+    <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-0">
+      <div class="enterprise-pill-card {% if vista == 'insumos' %}is-active{% endif %}">
+        <div class="enterprise-pill-title">Bases</div>
+        <div class="enterprise-pill-text">{{ total_batidas_base }} recetas base internas.</div>
+        <a class="btn btn-secondary btn-sm" href="?vista=insumos&tipo=PREPARACION">Ver bases</a>
+      </div>
+      <div class="enterprise-pill-card {% if vista == 'subinsumos' %}is-active{% endif %}">
+        <div class="enterprise-pill-title">Derivados</div>
+        <div class="enterprise-pill-text">{{ total_subinsumos }} recetas con presentaciones activas.</div>
+        <a class="btn btn-secondary btn-sm" href="?vista=subinsumos">Ver derivados</a>
+      </div>
+      <div class="enterprise-pill-card {% if vista == 'productos' %}is-active{% endif %}">
+        <div class="enterprise-pill-title">Productos finales</div>
+        <div class="enterprise-pill-text">{{ total_productos }} artículos listos para venta y planeación.</div>
+        <a class="btn btn-secondary btn-sm" href="?vista=productos">Ver productos</a>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div class="module-tabs mb-3">
-    <a class="module-tab {% if vista == 'productos' %}active{% endif %}" href="?vista=productos">Productos ({{ total_productos }})</a>
-    <a class="module-tab {% if vista == 'insumos' %}active{% endif %}" href="?vista=insumos">Insumos ({{ total_insumos }})</a>
-    <a class="module-tab {% if vista == 'subinsumos' %}active{% endif %}" href="?vista=subinsumos">Subinsumos ({{ total_subinsumos }})</a>
-    <a class="module-tab {% if vista == 'todo' %}active{% endif %}" href="?vista=todo">Todo ({{ total_all }})</a>
-  </div>
+  <section class="card recipes-filter-card">
+    <div class="recipes-filter-head">
+      <div>
+        <div class="recipes-filter-title">Catálogo de recetas</div>
+        <div class="text-muted">Selecciona la capa del catálogo y filtra solo lo necesario para trabajar.</div>
+      </div>
+      <div class="recipes-filter-actions">
+        <a class="btn btn-secondary" href="{% url 'recetas:mrp_form' %}">Simulación MRP</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Parámetros de costeo</a>
+        <form method="post" action="{% url 'recetas:recetas_sync_new' %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-secondary" type="submit">Buscar nuevos en Point</button>
+        </form>
+        <form method="post" action="{% url 'recetas:recetas_sync_group' %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <input type="hidden" name="vista" value="{{ vista }}">
+          <input type="hidden" name="q" value="{{ q }}">
+          <input type="hidden" name="tipo" value="{{ tipo }}">
+          <input type="hidden" name="modo_operativo" value="{{ modo_operativo }}">
+          <input type="hidden" name="familia" value="{{ familia }}">
+          <input type="hidden" name="categoria" value="{{ categoria }}">
+          <button class="btn btn-secondary" type="submit">Actualizar grupo filtrado</button>
+        </form>
+        <form method="post" action="{% url 'recetas:recetas_sync_all' %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-secondary" type="submit">Actualizar todo Point</button>
+        </form>
+      </div>
+    </div>
 
-  <form class="recipes-filters" method="get">
-    <input type="hidden" name="vista" value="{{ vista }}">
-    <input class="form-control" name="q" placeholder="Buscar receta (coincidencia aproximada)..." value="{{ q }}">
-    <select class="form-select" name="tipo">
-      <option value="" {% if not tipo %}selected{% endif %}>Tipo (opcional)</option>
-      <option value="PREPARACION" {% if tipo == "PREPARACION" %}selected{% endif %}>Insumo interno (batida/mezcla)</option>
-      <option value="PRODUCTO_FINAL" {% if tipo == "PRODUCTO_FINAL" %}selected{% endif %}>Producto final</option>
-    </select>
-    <select class="form-select" name="familia">
-      <option value="" {% if not familia %}selected{% endif %}>Todas las familias</option>
-      {% for item in familias_catalogo %}
-      <option value="{{ item }}" {% if familia == item %}selected{% endif %}>{{ item }}</option>
-      {% endfor %}
-    </select>
-    <select class="form-select" name="categoria">
-      <option value="" {% if not categoria %}selected{% endif %}>Todas las categorías</option>
-      {% for item in categorias_catalogo %}
-      <option value="{{ item }}" {% if categoria == item %}selected{% endif %}>{{ item }}</option>
-      {% endfor %}
-    </select>
-    <select class="form-select" name="estado">
-      <option value="" {% if not estado %}selected{% endif %}>Todos</option>
-      <option value="pendientes" {% if estado == "pendientes" %}selected{% endif %}>Con pendientes</option>
-      <option value="ok" {% if estado == "ok" %}selected{% endif %}>Sin pendientes</option>
-    </select>
-    <button class="btn btn-primary" type="submit">Filtrar</button>
-    <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}?vista={{ vista }}">Limpiar</a>
-  </form>
-  <div class="toolbar mt-2">
-    <a class="btn btn-primary" href="{% url 'recetas:plan_produccion' %}">Ir a Plan de Producción</a>
-    <a class="btn btn-secondary" href="{% url 'recetas:mrp_form' %}">MRP rápido</a>
-    <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Drivers de costeo</a>
-  </div>
-</div>
+    <div class="module-tabs mb-3">
+      <a class="module-tab {% if vista == 'productos' %}active{% endif %}" href="?vista=productos{% if modo_operativo %}&modo_operativo={{ modo_operativo }}{% endif %}">Productos ({{ total_productos }})</a>
+      <a class="module-tab {% if vista == 'insumos' %}active{% endif %}" href="?vista=insumos{% if modo_operativo %}&modo_operativo={{ modo_operativo }}{% endif %}">Bases ({{ total_insumos }})</a>
+      <a class="module-tab {% if vista == 'subinsumos' %}active{% endif %}" href="?vista=subinsumos{% if modo_operativo %}&modo_operativo={{ modo_operativo }}{% endif %}">Derivados ({{ total_subinsumos }})</a>
+      <a class="module-tab {% if vista == 'todo' %}active{% endif %}" href="?vista=todo{% if modo_operativo %}&modo_operativo={{ modo_operativo }}{% endif %}">Todo ({{ total_all }})</a>
+    </div>
 
-<div class="table-responsive card">
-  <table class="table align-middle">
-    <thead>
-      <tr>
-        <th>Receta</th>
-        <th>Tipo</th>
-        <th>Familia</th>
-        <th>Categoría</th>
-        <th>Rendimiento</th>
-        <th>Hoja</th>
-        <th>Pendientes</th>
-        <th class="text-end">Líneas</th>
-        <th class="text-end">Costo total (estimado)</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in page.object_list %}
-      <tr>
-        <td><a href="{% url 'recetas:receta_detail' r.id %}">{{ r.nombre }}</a></td>
-        <td>{% if r.tipo == "PRODUCTO_FINAL" %}<span class="badge bg-primary">Producto final</span>{% else %}<span class="badge bg-success">Preparación</span>{% endif %}</td>
-        <td>{{ r.familia|default:"-" }}</td>
-        <td>{{ r.categoria|default:"-" }}</td>
-        <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad|floatformat:2 }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
-        <td>{{ r.sheet_name }}</td>
-        <td>
-          {% if r.pendientes_count > 0 %}
-            <span class="badge bg-warning text-dark">{{ r.pendientes_count }}</span>
-          {% else %}
-            <span class="badge bg-success">0</span>
+    <div class="module-tabs mb-3">
+      <a class="module-tab {% if not modo_operativo %}active{% endif %}" href="?vista={{ vista }}">Todos los modos</a>
+      <a class="module-tab {% if modo_operativo == 'BASE' %}active{% endif %}" href="?vista={{ vista }}&modo_operativo=BASE">Base</a>
+      <a class="module-tab {% if modo_operativo == 'BASE_DERIVADOS' %}active{% endif %}" href="?vista={{ vista }}&modo_operativo=BASE_DERIVADOS">Base + derivados</a>
+      <a class="module-tab {% if modo_operativo == 'FINAL' %}active{% endif %}" href="?vista={{ vista }}&modo_operativo=FINAL">Producto final</a>
+    </div>
+
+    <form class="recipes-filters-clean" method="get">
+      <input type="hidden" name="vista" value="{{ vista }}">
+      <input class="form-control" name="q" placeholder="Buscar receta..." value="{{ q }}">
+      <select class="form-select" name="modo_operativo">
+        <option value="" {% if not modo_operativo %}selected{% endif %}>Todos los modos</option>
+        <option value="BASE" {% if modo_operativo == "BASE" %}selected{% endif %}>Base</option>
+        <option value="BASE_DERIVADOS" {% if modo_operativo == "BASE_DERIVADOS" %}selected{% endif %}>Base + derivados</option>
+        <option value="FINAL" {% if modo_operativo == "FINAL" %}selected{% endif %}>Producto final</option>
+      </select>
+      <select class="form-select" name="familia">
+        <option value="" {% if not familia %}selected{% endif %}>Todas las familias</option>
+        {% for item in familias_catalogo %}
+        <option value="{{ item }}" {% if familia == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
+      <select class="form-select" name="categoria">
+        <option value="" {% if not categoria %}selected{% endif %}>Todas las categorías</option>
+        {% for item in categorias_catalogo %}
+        <option value="{{ item }}" {% if categoria == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
+      <select class="form-select" name="health_status">
+        <option value="" {% if not health_status %}selected{% endif %}>Estado: Todos</option>
+        <option value="listas" {% if health_status == "listas" %}selected{% endif %}>Lista para operar</option>
+        <option value="pendientes" {% if health_status == "pendientes" %}selected{% endif %}>Por validar</option>
+        <option value="incompletas" {% if health_status == "incompletas" %}selected{% endif %}>Incompletas</option>
+      </select>
+      <div class="recipes-filter-submit">
+        <button class="btn btn-primary" type="submit">Filtrar</button>
+        <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}?vista={{ vista }}">Limpiar</a>
+      </div>
+
+      <details class="erp-advanced-panel recipe-filter-advanced">
+        <summary class="erp-advanced-summary">
+          <span>Filtros avanzados</span>
+          <span class="text-muted">Validaciones finas, cadena y gobierno</span>
+        </summary>
+        <div class="erp-advanced-body recipe-filter-advanced-grid">
+          <select class="form-select" name="tipo">
+            <option value="" {% if not tipo %}selected{% endif %}>Tipo (opcional)</option>
+            <option value="PREPARACION" {% if tipo == "PREPARACION" %}selected{% endif %}>Base interna</option>
+            <option value="PRODUCTO_FINAL" {% if tipo == "PRODUCTO_FINAL" %}selected{% endif %}>Producto final</option>
+          </select>
+          <select class="form-select" name="chain_status">
+            <option value="" {% if not chain_status %}selected{% endif %}>Cadena: Todas</option>
+            <option value="listas" {% if chain_status == "listas" %}selected{% endif %}>Lista para operar</option>
+            <option value="pendientes" {% if chain_status == "pendientes" %}selected{% endif %}>Por validar</option>
+            <option value="incompletas" {% if chain_status == "incompletas" %}selected{% endif %}>Incompleta</option>
+          </select>
+          <select class="form-select" name="chain_checkpoint">
+            <option value="" {% if not chain_checkpoint %}selected{% endif %}>Control: Todos</option>
+            <option value="base_ready" {% if chain_checkpoint == "base_ready" %}selected{% endif %}>Base por validar</option>
+            <option value="derived_sync" {% if chain_checkpoint == "derived_sync" %}selected{% endif %}>Derivados por actualizar</option>
+            <option value="final_usage" {% if chain_checkpoint == "final_usage" %}selected{% endif %}>Sin consumo final</option>
+            <option value="upstream_trace" {% if chain_checkpoint == "upstream_trace" %}selected{% endif %}>Sin base origen</option>
+            <option value="packaging_ready" {% if chain_checkpoint == "packaging_ready" %}selected{% endif %}>Sin empaque</option>
+            <option value="internal_components" {% if chain_checkpoint == "internal_components" %}selected{% endif %}>Sin internos</option>
+          </select>
+          <select class="form-select" name="governance_issue">
+            <option value="" {% if not governance_issue %}selected{% endif %}>Gobierno: Todos</option>
+            <option value="familia" {% if governance_issue == "familia" %}selected{% endif %}>Sin familia</option>
+            <option value="categoria" {% if governance_issue == "categoria" %}selected{% endif %}>Sin categoría</option>
+            <option value="maestro_incompleto" {% if governance_issue == "maestro_incompleto" %}selected{% endif %}>Maestro incompleto</option>
+            <option value="rendimiento" {% if governance_issue == "rendimiento" %}selected{% endif %}>Sin rendimiento</option>
+            <option value="derivados" {% if governance_issue == "derivados" %}selected{% endif %}>Sin derivados</option>
+            <option value="sync_derivados" {% if governance_issue == "sync_derivados" %}selected{% endif %}>Derivados por actualizar</option>
+            <option value="sin_consumo_final" {% if governance_issue == "sin_consumo_final" %}selected{% endif %}>Sin consumo final</option>
+            <option value="sin_base_origen" {% if governance_issue == "sin_base_origen" %}selected{% endif %}>Sin trazabilidad</option>
+            <option value="sin_empaque" {% if governance_issue == "sin_empaque" %}selected{% endif %}>Sin empaque</option>
+            <option value="base_directa" {% if governance_issue == "base_directa" %}selected{% endif %}>Usa base sin presentación</option>
+            <option value="componentes" {% if governance_issue == "componentes" %}selected{% endif %}>Sin componentes</option>
+          </select>
+          <select class="form-select" name="enterprise_stage">
+            <option value="" {% if not enterprise_stage_filter %}selected{% endif %}>Etapa: Todas</option>
+            <option value="base_setup" {% if enterprise_stage_filter == "base_setup" %}selected{% endif %}>Base en alta</option>
+            <option value="derivados_setup" {% if enterprise_stage_filter == "derivados_setup" %}selected{% endif %}>Derivados en configuración</option>
+            <option value="ready_for_final" {% if enterprise_stage_filter == "ready_for_final" %}selected{% endif %}>Base liberada a final</option>
+            <option value="feeding_final" {% if enterprise_stage_filter == "feeding_final" %}selected{% endif %}>Alimentando finales</option>
+            <option value="final_setup" {% if enterprise_stage_filter == "final_setup" %}selected{% endif %}>Final en armado</option>
+            <option value="final_normalization" {% if enterprise_stage_filter == "final_normalization" %}selected{% endif %}>Final pendiente</option>
+            <option value="final_packaging" {% if enterprise_stage_filter == "final_packaging" %}selected{% endif %}>Final sin empaque</option>
+            <option value="final_ready" {% if enterprise_stage_filter == "final_ready" %}selected{% endif %}>Final liberado</option>
+          </select>
+        </div>
+      </details>
+    </form>
+  </section>
+
+  <section class="card recipes-context-shell">
+    <div class="recipes-context-grid">
+      <article class="card card-subtle recipes-context-card">
+        <div class="recipes-context-title">Prioridad del catálogo</div>
+        <p class="muted mb-0">{{ chain_focus.summary }}</p>
+      </article>
+      <article class="card card-subtle recipes-context-card">
+        <div class="recipes-context-title">Acción recomendada</div>
+        <p class="muted mb-0">{{ chain_focus.action_label }}. {{ chain_focus.action_detail }}</p>
+      </article>
+      <article class="card card-subtle recipes-context-card">
+        <div class="recipes-context-title">Uso de la pantalla</div>
+        <p class="muted mb-0">Aquí se decide qué receta abrir, corregir o completar. La ficha individual concentra BOM, costeo y trazabilidad.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="recipes-catalog-grid">
+    {% for r in page.object_list %}
+    <article class="card recipe-catalog-card recipe-catalog-card-clean">
+      <div class="recipe-catalog-card-head">
+        <div>
+          <a class="recipe-catalog-title" href="{% url 'recetas:receta_detail' r.id %}">{{ r.nombre }}</a>
+          <div class="recipe-catalog-meta">
+            {% if r.tipo == "PRODUCTO_FINAL" %}
+              <span class="badge bg-primary">Producto final</span>
+            {% elif r.usa_presentaciones %}
+              <span class="badge bg-warning text-dark">Base + derivados</span>
+            {% else %}
+              <span class="badge bg-success">Base interna</span>
+            {% endif %}
+            {% if r.familia %}<span>{{ r.familia }}</span>{% endif %}
+            {% if r.categoria %}<span>{{ r.categoria }}</span>{% endif %}
+            {% if r.codigo_point %}<span>Código {{ r.codigo_point }}</span>{% endif %}
+          </div>
+        </div>
+        <div class="recipe-catalog-head-actions">
+          <div class="recipe-catalog-metric">
+            <span class="recipe-catalog-metric-label">Costo total</span>
+            <strong>${{ r.costo_total_estimado|floatformat:2|intcomma }}</strong>
+          </div>
+          <div class="recipe-catalog-metric">
+            <span class="recipe-catalog-metric-label">Componentes</span>
+            <strong>{{ r.lineas_count }}</strong>
+          </div>
+          {% if perms.recetas.change_receta and r.codigo_point %}
+          <form method="post" action="{% url 'recetas:receta_sync_point' r.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button class="btn btn-secondary btn-sm" type="submit">Actualizar Point</button>
+          </form>
           {% endif %}
-        </td>
-        <td class="text-end">{{ r.lineas_count }}</td>
-        <td class="text-end">${{ r.costo_total_estimado|floatformat:2 }}</td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="9" class="text-muted">Sin recetas</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+        </div>
+      </div>
 
-<nav>
-  <ul class="pagination">
-    {% if page.has_previous %}
-      <li class="page-item"><a class="page-link" href="?{% if qs_base %}{{ qs_base }}&{% endif %}page={{ page.previous_page_number }}">Anterior</a></li>
-    {% endif %}
-    <li class="page-item disabled"><a class="page-link">Página {{ page.number }} de {{ page.paginator.num_pages }}</a></li>
-    {% if page.has_next %}
-      <li class="page-item"><a class="page-link" href="?{% if qs_base %}{{ qs_base }}&{% endif %}page={{ page.next_page_number }}">Siguiente</a></li>
-    {% endif %}
-  </ul>
-</nav>
+      <div class="recipe-catalog-content-grid">
+        <div class="recipe-catalog-column">
+          <div class="recipe-catalog-section-title">Resumen</div>
+          <div class="recipe-catalog-status-row">
+            {% if r.enterprise_stage %}
+            <span class="badge {% if r.enterprise_stage.tone == 'success' %}bg-success{% elif r.enterprise_stage.tone == 'warning' %}bg-warning text-dark{% else %}bg-danger{% endif %}">{{ r.enterprise_stage.label }}</span>
+            {% endif %}
+            <span class="badge {% if r.document_status.tone == 'success' %}bg-success{% elif r.document_status.tone == 'warning' %}bg-warning text-dark{% else %}bg-danger{% endif %}">{{ r.document_status.label }}</span>
+            <span class="badge {% if r.chain_status_info.code == 'success' %}bg-success{% elif r.chain_status_info.code == 'warning' %}bg-warning text-dark{% else %}bg-danger{% endif %}">{{ r.chain_status_info.label }}</span>
+          </div>
+          <div>
+            {% if r.operational_health.code == "success" %}
+              <span class="badge bg-success">{{ r.operational_health.label }}</span>
+            {% elif r.operational_health.code == "warning" %}
+              <span class="badge bg-warning text-dark">{{ r.operational_health.label }}</span>
+            {% else %}
+              <span class="badge bg-danger">{{ r.operational_health.label }}</span>
+            {% endif %}
+          </div>
+          <div class="text-muted mt-2">{{ r.operational_health.description }}</div>
+          {% if r.rendimiento_cantidad %}
+          <div class="text-muted mt-2">Rendimiento: <strong>{{ r.rendimiento_cantidad|floatformat:2 }} {{ r.rendimiento_unidad.codigo|default:"" }}</strong></div>
+          {% endif %}
+          {% if r.master_gap_summary.dominant_label %}
+          <div class="text-muted mt-2">Faltante dominante: <strong>{{ r.master_gap_summary.dominant_label }}</strong> ({{ r.master_gap_summary.dominant_count }})</div>
+          {% endif %}
+        </div>
+
+        <div class="recipe-catalog-column">
+          <div class="recipe-catalog-section-title">Qué falta y qué hacer</div>
+          {% if r.chain_focus_summary %}
+          <div class="recipe-catalog-focus tone-{{ r.chain_focus_summary.tone }}">
+            <strong>{{ r.chain_focus_summary.label }}</strong>
+            <div>{{ r.chain_focus_summary.summary }}</div>
+          </div>
+          {% endif %}
+          {% if r.chain_checkpoints %}
+          <div class="recipes-inline-links mt-2">
+            {% for cp in r.chain_checkpoints %}
+            <span class="badge {% if cp.code == 'success' %}bg-success{% elif cp.code == 'warning' %}bg-warning text-dark{% else %}bg-danger{% endif %}">{{ cp.label }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <div class="text-muted mt-2">
+            {% if r.primary_action %}
+              {{ r.primary_action.label }}
+            {% else %}
+              Sin bloqueo crítico abierto.
+            {% endif %}
+          </div>
+          <div class="recipes-action-row mt-2">
+          {% if r.primary_action %}
+              {% if r.primary_action.label == "Aplicar derivados sugeridos" %}
+              <form method="post" action="{% url 'recetas:receta_apply_direct_base_replacements' r.id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary btn-sm">{{ r.primary_action.label }}</button>
+              </form>
+              {% else %}
+              <a class="btn btn-secondary btn-sm" href="{{ r.primary_action.url }}">{{ r.primary_action.label }}</a>
+              {% endif %}
+            {% endif %}
+            <a class="btn btn-primary btn-sm" href="{% url 'recetas:receta_detail' r.id %}">Abrir ficha</a>
+            {% if r.chain_action_links %}
+              {% for action in r.chain_action_links %}
+              <a class="btn btn-outline-secondary btn-sm" href="{{ action.url }}">{{ action.label }}</a>
+              {% endfor %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      {% if r.enterprise_stage_playbook or r.governance_issues %}
+      <details class="recipe-catalog-details">
+        <summary>Ver contexto</summary>
+        <div class="recipe-catalog-details-body">
+          {% if r.enterprise_stage_playbook %}
+          <div class="recipes-context-pills">
+            {% for item in r.enterprise_stage_playbook %}
+            <span class="badge {% if item.done %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ item.label }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if "sin_empaque" in r.governance_issues %}
+          <div class="text-muted">Producto final todavía sin empaque ligado en su BOM.</div>
+          {% endif %}
+          {% if "base_directa" in r.governance_issues %}
+          <div class="text-muted">El producto final está consumiendo la base completa aunque ya existen presentaciones activas. <a class="recipe-inline-link" href="{% url 'recetas:receta_detail' r.id %}">Ajustar componente</a></div>
+          {% endif %}
+          {% if r.supply_chain_snapshot %}
+          <div class="text-muted">Derivados: <strong>{{ r.supply_chain_snapshot.presentacion_count }}</strong> · Finales ligados: <strong>{{ r.supply_chain_snapshot.downstream_recipe_count }}</strong></div>
+          {% endif %}
+          {% if r.direct_base_snapshot.suggested_count %}
+          <div class="text-muted">Sugerencias listas: <strong>{{ r.direct_base_snapshot.suggested_count }}</strong>{% if r.direct_base_snapshot.exact_count %} · Exactas: <strong>{{ r.direct_base_snapshot.exact_count }}</strong>{% endif %}</div>
+          {% endif %}
+          {% if r.product_upstream_snapshot %}
+          <div class="text-muted">Bases origen: <strong>{{ r.product_upstream_snapshot.upstream_base_count }}</strong> · Internos sin origen: <strong>{{ r.product_upstream_snapshot.internal_without_source_count }}</strong></div>
+          {% endif %}
+          <div class="text-muted">Observaciones: {% if r.pendientes_count > 0 %}<strong>{{ r.pendientes_count }} por validar</strong>{% else %}<strong>0</strong>{% endif %}</div>
+        </div>
+      </details>
+      {% endif %}
+    </article>
+    {% empty %}
+    <section class="card">
+      <div class="text-muted">Sin recetas</div>
+    </section>
+    {% endfor %}
+  </section>
+
+  <nav>
+    <ul class="pagination">
+      {% if page.has_previous %}
+        <li class="page-item"><a class="page-link" href="?{% if qs_base %}{{ qs_base }}&{% endif %}page={{ page.previous_page_number }}">Anterior</a></li>
+      {% endif %}
+      <li class="page-item disabled"><a class="page-link">Página {{ page.number }} de {{ page.paginator.num_pages }}</a></li>
+      {% if page.has_next %}
+        <li class="page-item"><a class="page-link" href="?{% if qs_base %}{{ qs_base }}&{% endif %}page={{ page.next_page_number }}">Siguiente</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+</div>
 {% endblock %}

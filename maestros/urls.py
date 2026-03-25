@@ -13,6 +13,8 @@ urlpatterns = [
     
     # Insumos
     path('insumos/', views.InsumoListView.as_view(), name='insumo_list'),
+    path('insumos/resolver-duplicado/', views.insumo_resolve_duplicate, name='insumo_resolve_duplicate'),
+    path('insumos/resolver-duplicado-grupo/', views.insumo_resolve_duplicate_group, name='insumo_resolve_duplicate_group'),
     path('point-pendientes/', views.point_pending_review, name='point_pending_review'),
     path('insumos/export-point/', views.insumo_point_mapping_csv, name='insumo_point_mapping_csv'),
     path('insumos/crear/', views.InsumoCreateView.as_view(), name='insumo_create'),

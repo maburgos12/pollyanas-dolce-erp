@@ -1,0 +1,888 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Producción CEDIS semanal{% endblock %}
+{% block page_title %}Dashboard · Producción CEDIS semanal{% endblock %}
+{% block body_class %}page-produccion-cedis-weekly-dashboard{% endblock %}
+{% block extra_css %}
+<style>
+  .cedis-shell { display: grid; gap: 18px; }
+  .cedis-hero {
+    position: relative;
+    overflow: hidden;
+    padding: 28px;
+    border-radius: 28px;
+    background:
+      radial-gradient(circle at top left, rgba(84, 126, 197, 0.22), transparent 24%),
+      radial-gradient(circle at top right, rgba(46, 180, 149, 0.18), transparent 22%),
+      linear-gradient(135deg, #10273e 0%, #163555 52%, #0f1f34 100%);
+    color: #f5efe8;
+    box-shadow: 0 30px 70px rgba(18, 35, 57, 0.35);
+  }
+  .cedis-hero-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 18px;
+    align-items: end;
+  }
+  .cedis-eyebrow {
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .18em;
+    color: rgba(240, 229, 220, .7);
+    margin-bottom: 10px;
+  }
+  .cedis-title {
+    margin: 0 0 10px;
+    font-family: "Playfair Display", serif;
+    font-size: 2rem;
+    line-height: 1.02;
+  }
+  .cedis-subtitle {
+    margin: 0;
+    max-width: 68ch;
+    color: rgba(245, 239, 232, .82);
+  }
+  .cedis-hero-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .cedis-badge {
+    min-width: 150px;
+    padding: 12px 14px;
+    border-radius: 18px;
+    background: rgba(255,255,255,.09);
+    border: 1px solid rgba(255,255,255,.09);
+  }
+  .cedis-badge span {
+    display: block;
+    color: rgba(243, 235, 228, .72);
+    font-size: .78rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .cedis-badge strong {
+    display: block;
+    margin-top: 4px;
+    font-size: 1.2rem;
+    color: #fff8f3;
+  }
+  .cedis-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+  }
+  .cedis-filter {
+    display: grid;
+    grid-template-columns: minmax(0, 220px) auto;
+    gap: 12px;
+    align-items: end;
+    margin-top: 18px;
+  }
+  .cedis-filter input { width: 100%; }
+  .cedis-command-grid,
+  .cedis-story-grid {
+    display: grid;
+    gap: 16px;
+  }
+  .cedis-command-grid {
+    grid-template-columns: 1.15fr .85fr;
+  }
+  .cedis-story-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cedis-grid-4, .cedis-grid-3, .cedis-grid-2 {
+    display: grid;
+    gap: 16px;
+  }
+  .cedis-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .cedis-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cedis-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cedis-card, .cedis-panel {
+    border-radius: 24px;
+    border: 1px solid rgba(152, 116, 94, .12);
+    background: linear-gradient(180deg, #fff 0%, #fff9f5 100%);
+    box-shadow: 0 14px 34px rgba(77, 55, 45, .08);
+  }
+  .cedis-card { padding: 18px; }
+  .cedis-label {
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .16em;
+    color: #927061;
+    margin-bottom: 10px;
+  }
+  .cedis-value {
+    font-family: "Playfair Display", serif;
+    font-size: 2rem;
+    line-height: 1;
+    color: #312019;
+  }
+  .cedis-foot {
+    margin-top: 10px;
+    color: #715d54;
+    font-size: .92rem;
+  }
+  .cedis-tone-success { color: #1f7056; }
+  .cedis-tone-warning { color: #8c611a; }
+  .cedis-tone-danger { color: #9a2f2f; }
+  .cedis-panel { padding: 20px 22px; }
+  .cedis-panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .cedis-panel-title {
+    margin: 0;
+    font-family: "Playfair Display", serif;
+    font-size: 1.35rem;
+    color: #39231b;
+  }
+  .cedis-panel-subtitle {
+    margin: 5px 0 0;
+    color: #7a665d;
+    font-size: .94rem;
+  }
+  .cedis-story-card {
+    padding: 16px 18px;
+    border-radius: 20px;
+    background: linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(255,248,243,.92) 100%);
+    border: 1px solid rgba(160, 118, 97, .12);
+  }
+  .cedis-story-kicker {
+    margin-bottom: 8px;
+    color: #9b765f;
+    font-size: .74rem;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+  .cedis-story-value {
+    font-family: "Playfair Display", serif;
+    font-size: 1.75rem;
+    line-height: 1;
+    color: #312019;
+    margin-bottom: 8px;
+  }
+  .cedis-story-copy {
+    margin: 0;
+    color: #735e54;
+    font-size: .92rem;
+  }
+  .cedis-quality-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .cedis-quality-card {
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: rgba(255,255,255,.84);
+    border: 1px solid rgba(170, 126, 102, .11);
+  }
+  .cedis-quality-card strong {
+    display: block;
+    color: #39241a;
+    font-size: 1.2rem;
+    margin-bottom: 4px;
+  }
+  .cedis-quality-card span {
+    color: #7b655a;
+    font-size: .88rem;
+  }
+  .cedis-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: #f6ede7;
+    color: #6a4838;
+    font-weight: 700;
+    font-size: .82rem;
+  }
+  .cedis-pill.is-success { background: #eef8f1; color: #1d6c53; }
+  .cedis-pill.is-warning { background: #fff4de; color: #8a5c18; }
+  .cedis-pill.is-danger { background: #fff0ef; color: #9a2f2f; }
+  .cedis-table-wrap {
+    overflow: auto;
+    border-radius: 18px;
+    border: 1px solid rgba(175, 126, 101, .12);
+  }
+  .cedis-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+    background: #fff;
+  }
+  .cedis-table th, .cedis-table td {
+    padding: 11px 13px;
+    border-bottom: 1px solid rgba(177, 132, 111, .12);
+  }
+  .cedis-table th {
+    background: #fff8f4;
+    color: #8c6a59;
+    font-size: .76rem;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+  }
+  .cedis-num { text-align: right; font-variant-numeric: tabular-nums; }
+  .cedis-chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .cedis-chart {
+    padding: 18px;
+    border-radius: 24px;
+    background:
+      radial-gradient(circle at top right, rgba(84, 126, 197, .12), transparent 28%),
+      linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(255,249,245,.95) 100%);
+    border: 1px solid rgba(152, 116, 94, .12);
+  }
+  .cedis-chart--wide {
+    grid-column: 1 / -1;
+  }
+  .cedis-chart h3 {
+    margin: 0 0 6px;
+    color: #3a241c;
+    font-size: 1rem;
+  }
+  .cedis-chart p {
+    margin: 0 0 12px;
+    color: #80685f;
+    font-size: .88rem;
+  }
+  .cedis-chart canvas {
+    width: 100%;
+    min-height: 260px;
+  }
+  .cedis-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin-top: 12px;
+  }
+  .cedis-chart-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #765f55;
+    font-size: .86rem;
+  }
+  .cedis-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    display: inline-block;
+  }
+  @media (max-width: 1200px) {
+    .cedis-grid-4, .cedis-grid-3, .cedis-chart-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .cedis-grid-2, .cedis-hero-grid, .cedis-command-grid {
+      grid-template-columns: 1fr;
+    }
+    .cedis-hero-badges { justify-content: flex-start; }
+  }
+  @media (max-width: 720px) {
+    .cedis-grid-4, .cedis-grid-3, .cedis-grid-2, .cedis-chart-grid, .cedis-filter, .cedis-story-grid, .cedis-quality-grid {
+      grid-template-columns: 1fr;
+    }
+    .cedis-hero { padding: 22px 18px; }
+    .cedis-title { font-size: 1.6rem; }
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="module-shell cedis-shell">
+  <section class="cedis-hero">
+    <div class="cedis-hero-grid">
+      <div>
+        <div class="cedis-eyebrow">Dashboard semanal CEDIS</div>
+        <h1 class="cedis-title">Producción CEDIS vs ventas, merma y pronóstico</h1>
+        <p class="cedis-subtitle">Tablero semanal orientado a Dirección General y operación central. Usa producción Point, ventas reales reconciliadas, merma capturada por personal y un pronóstico simple de próxima semana para detectar exceso, faltante o presión comercial.</p>
+        <div class="cedis-actions">
+          <a class="btn btn-secondary" href="{% url 'recetas:dg_operacion_dashboard' %}">Volver al cockpit DG</a>
+          <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion' %}">Abrir plan operativo</a>
+          <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis' %}?fecha={{ week_end|date:'Y-m-d' }}">Abrir reabasto CEDIS</a>
+        </div>
+      </div>
+      <div class="cedis-hero-badges">
+        <div class="cedis-badge">
+          <span>Semana actual</span>
+          <strong>{{ week_label }}</strong>
+        </div>
+        <div class="cedis-badge">
+          <span>Semana anterior</span>
+          <strong>{{ previous_week_label }}</strong>
+        </div>
+        <div class="cedis-badge">
+          <span>Rango</span>
+          <strong>{{ week_start|date:"d M" }} · {{ week_end|date:"d M" }}</strong>
+        </div>
+      </div>
+    </div>
+    <form method="get" class="cedis-filter">
+      <input type="date" name="week_of" value="{{ week_start|date:'Y-m-d' }}" aria-label="Semana base">
+      <button class="btn btn-primary" type="submit">Actualizar semana</button>
+    </form>
+  </section>
+
+  <section class="cedis-command-grid">
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Lectura ejecutiva de la semana</h2>
+          <p class="cedis-panel-subtitle">Señal rápida para saber si el centro va holgado, justo o detrás de la demanda comercial.</p>
+        </div>
+        <span class="cedis-pill {% if executive_summary.gap_tone == 'success' %}is-success{% else %}is-danger{% endif %}">{{ executive_summary.gap_label }}</span>
+      </div>
+      <div class="cedis-story-grid">
+        <div class="cedis-story-card">
+          <div class="cedis-story-kicker">Flujo central</div>
+          <div class="cedis-story-value">{{ executive_summary.inflow_units|floatformat:0 }}</div>
+          <p class="cedis-story-copy">Unidades que entraron al centro esta semana combinando producción CEDIS y transferencias recibidas.</p>
+        </div>
+        <div class="cedis-story-card">
+          <div class="cedis-story-kicker">Gap vs venta</div>
+          <div class="cedis-story-value {% if executive_summary.gap_tone == 'success' %}cedis-tone-success{% else %}cedis-tone-danger{% endif %}">{{ executive_summary.inflow_gap_units|floatformat:0 }}</div>
+          <p class="cedis-story-copy">Diferencia entre entradas centrales y unidades vendidas. Positivo implica holgura; negativo indica presión de surtido.</p>
+        </div>
+        <div class="cedis-story-card">
+          <div class="cedis-story-kicker">Peso de transferencias</div>
+          <div class="cedis-story-value">{{ executive_summary.transfer_share_pct|floatformat:1 }}%</div>
+          <p class="cedis-story-copy">Participación de transferencias dentro del abastecimiento central de la semana.</p>
+        </div>
+        <div class="cedis-story-card">
+          <div class="cedis-story-kicker">Tasa de merma</div>
+          <div class="cedis-story-value {% if executive_summary.waste_rate_pct > 3 %}cedis-tone-danger{% elif executive_summary.waste_rate_pct > 1 %}cedis-tone-warning{% else %}cedis-tone-success{% endif %}">{{ executive_summary.waste_rate_pct|floatformat:1 }}%</div>
+          <p class="cedis-story-copy">Merma semanal en piezas sobre venta semanal. Sirve para ver deterioro operativo más allá del costo monetario.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Confianza del dato</h2>
+          <p class="cedis-panel-subtitle">Transparencia sobre qué tan completa quedó la semana para tickets y clasificación operativa.</p>
+        </div>
+        <span class="cedis-pill {% if tickets_available %}is-success{% else %}is-warning{% endif %}">{{ executive_summary.ticket_signal }}</span>
+      </div>
+      <div class="cedis-quality-grid">
+        <div class="cedis-quality-card">
+          <strong>{% if tickets_available %}{{ tickets|floatformat:0 }}{% else %}N/D{% endif %}</strong>
+          <span>Tickets semanales disponibles para monetización del tráfico.</span>
+        </div>
+        <div class="cedis-quality-card">
+          <strong>{{ category_mapping_quality.sales_classification_pct|floatformat:1 }}%</strong>
+          <span>Venta semanal clasificada en categorías operativas visibles en tablero.</span>
+        </div>
+        <div class="cedis-quality-card">
+          <strong>{{ category_mapping_quality.inflow_classification_pct|floatformat:1 }}%</strong>
+          <span>Producción directa clasificada en categorías productivas comparables contra venta.</span>
+        </div>
+        <div class="cedis-quality-card">
+          <strong>{{ category_mapping_quality.unclassified_sales_qty|floatformat:0 }} / {{ category_mapping_quality.unclassified_production_qty|floatformat:0 }}</strong>
+          <span>Venta y entradas aún sin clasificar. No bloquean el tablero, pero sí reducen precisión analítica.</span>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="cedis-grid-4">
+    <article class="cedis-card">
+      <div class="cedis-label">Cobertura operativa</div>
+      <div class="cedis-value {% if alert_tone == 'success' %}cedis-tone-success{% elif alert_tone == 'danger' %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">{{ coverage_ratio|floatformat:2 }}</div>
+      <div class="cedis-foot">Entradas centrales / unidades vendidas. Sirve como semáforo rápido de presión semanal.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Ventas semana ($)</div>
+      <div class="cedis-value">${{ sales_amount|floatformat:0 }}</div>
+      <div class="cedis-foot">
+        {% if tickets_available %}
+          {{ tickets }} tickets · ticket promedio ${{ avg_ticket|floatformat:0 }}
+        {% else %}
+          Tickets N/D en la fuente semanal actual.
+        {% endif %}
+      </div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Unidades vendidas</div>
+      <div class="cedis-value">{{ sales_units|floatformat:0 }}</div>
+      <div class="cedis-foot">Venta comercial de sucursales activas, excluyendo ramas no comerciales.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Alerta semanal</div>
+      <div class="cedis-value {% if alert_tone == 'success' %}cedis-tone-success{% elif alert_tone == 'danger' %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">{{ alert_status }}</div>
+      <div class="cedis-foot">{{ alert_detail }}</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Producción CEDIS</div>
+      <div class="cedis-value">{{ production_units|floatformat:0 }}</div>
+      <div class="cedis-foot">Producción directa de ramas configuradas como centrales.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Transferencias a CEDIS</div>
+      <div class="cedis-value">{{ transfer_units|floatformat:0 }}</div>
+      <div class="cedis-foot">Entradas recibidas por transferencia hacia inventario central.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Merma semanal ($)</div>
+      <div class="cedis-value {% if waste_cost > 0 %}cedis-tone-warning{% endif %}">${{ waste_cost|floatformat:0 }}</div>
+      <div class="cedis-foot">{{ waste_units|floatformat:0 }} piezas registradas por el personal.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Pronóstico próxima semana</div>
+      <div class="cedis-value">${{ forecast_total_sales_amount|floatformat:0 }}</div>
+      <div class="cedis-foot">Ventas estimadas · {{ forecast_total_units|floatformat:0 }} unidades · producción orientativa {{ forecast_total_production|floatformat:0 }}</div>
+    </article>
+  </section>
+
+  <section class="cedis-grid-2">
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Comparativo semana actual vs anterior</h2>
+          <p class="cedis-panel-subtitle">Corte semanal principal para leer cambio porcentual y dirección operativa.</p>
+        </div>
+        <span class="cedis-pill {% if alert_tone == 'success' %}is-success{% elif alert_tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ alert_status }}</span>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Indicador</th>
+              <th class="cedis-num">Actual</th>
+              <th class="cedis-num">Anterior</th>
+              <th class="cedis-num">Δ%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in week_comparison_rows %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td class="cedis-num">{{ row.current|floatformat:1 }}</td>
+              <td class="cedis-num">{{ row.previous|floatformat:1 }}</td>
+              <td class="cedis-num">
+                {% if row.delta_pct is None %}
+                  -
+                {% else %}
+                  <span class="{% if row.delta_pct > 0 %}cedis-tone-success{% elif row.delta_pct < 0 %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">
+                    {{ row.delta_pct|floatformat:1 }}%
+                  </span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Comparativa 3 semanas</h2>
+          <p class="cedis-panel-subtitle">Vista corta para detectar pendiente de aceleración, merma o desacoplamiento de flujo central.</p>
+        </div>
+        <span class="cedis-pill">W actual + 2 previas</span>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Semana</th>
+              <th class="cedis-num">Ventas ($)</th>
+              <th class="cedis-num">Unidades</th>
+              <th class="cedis-num">Producción</th>
+              <th class="cedis-num">Transfer.</th>
+              <th class="cedis-num">Merma ($)</th>
+              <th class="cedis-num">Cobertura</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in weekly_rows %}
+            <tr>
+              <td>{{ row.week_label }}</td>
+              <td class="cedis-num">${{ row.sales_amount|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.sales_units|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.production_units|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.transfer_units|floatformat:0 }}</td>
+              <td class="cedis-num">${{ row.waste_cost|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.coverage_ratio|floatformat:2 }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="cedis-grid-3">
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Top 10 ventas $ por producto</h2>
+          <p class="cedis-panel-subtitle">Semana actual.</p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th class="cedis-num">Venta total</th>
+              <th class="cedis-num">% participación</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in top_sales_rows %}
+            <tr>
+              <td>{{ row.product }}</td>
+              <td class="cedis-num">${{ row.amount|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.share_pct|floatformat:1 }}%</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3">Sin ventas para mostrar.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Top 10 merma $ por producto</h2>
+          <p class="cedis-panel-subtitle">Semana actual.</p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th class="cedis-num">Merma total</th>
+              <th class="cedis-num">% participación</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in top_waste_rows %}
+            <tr>
+              <td>{{ row.product }}</td>
+              <td class="cedis-num">${{ row.amount|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.share_pct|floatformat:1 }}%</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3">Sin merma monetizada para mostrar.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Merma por sucursal</h2>
+          <p class="cedis-panel-subtitle">Participación semanal por costo y piezas.</p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Sucursal</th>
+              <th class="cedis-num">Merma ($)</th>
+              <th class="cedis-num">Merma (pzas)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in waste_branch_rows %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td class="cedis-num">${{ row.cost|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.qty|floatformat:0 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3">Sin mermas por sucursal.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="cedis-grid-2">
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Producción CEDIS vs ventas por categoría</h2>
+          <p class="cedis-panel-subtitle">
+            Semana actual con buckets operativos normalizados. Transferencias quedan fuera de este comparativo para no mezclar logística con producción propia.
+            {% if category_mapping_quality.unclassified_sales_qty or category_mapping_quality.unclassified_production_qty %}
+              Queda pendiente de clasificar venta {{ category_mapping_quality.unclassified_sales_qty|floatformat:0 }} pzas y producción {{ category_mapping_quality.unclassified_production_qty|floatformat:0 }} pzas.
+            {% endif %}
+          </p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th class="cedis-num">Entradas</th>
+              <th class="cedis-num">Ventas</th>
+              <th class="cedis-num">Diferencia</th>
+              <th>Estatus</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in category_balance_rows %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td class="cedis-num">{{ row.production_qty|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.sales_qty|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.delta|floatformat:0 }}</td>
+              <td><span class="{% if row.tone == 'success' %}cedis-tone-success{% elif row.tone == 'danger' %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">{{ row.status }}</span></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">Sin categorías para comparar.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Pronóstico orientativo por categoría</h2>
+          <p class="cedis-panel-subtitle">Promedio simple de las últimas 3 semanas. Sirve como señal, no sustituye planeación fina.</p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th class="cedis-num">Pron. prod.</th>
+              <th class="cedis-num">Pron. ventas ($)</th>
+              <th class="cedis-num">Pron. ventas (pzas)</th>
+              <th class="cedis-num">Tendencia</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in forecast_rows %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td class="cedis-num">{{ row.forecast_production_qty|floatformat:0 }}</td>
+              <td class="cedis-num">${{ row.forecast_sales_amount|floatformat:0 }}</td>
+              <td class="cedis-num">{{ row.forecast_sales_qty|floatformat:0 }}</td>
+              <td class="cedis-num">{% if row.trend == "up" %}↑{% else %}↓{% endif %}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">Sin categorías suficientes para pronóstico.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="cedis-chart-grid">
+    <article class="cedis-chart cedis-chart--wide">
+      <h3>Ventas $ por semana</h3>
+      <p>Gráfica protagonista del tablero semanal. Úsala para leer velocidad comercial y compararla con la capacidad central.</p>
+      <canvas id="cedis-chart-sales"></canvas>
+      <div class="cedis-chart-legend">
+        <span><i class="cedis-dot" style="background:#d65a71;"></i>Ventas $</span>
+      </div>
+    </article>
+    <article class="cedis-chart">
+      <h3>Merma $ por sucursal</h3>
+      <p>Distribución semanal de pérdida monetizada.</p>
+      <canvas id="cedis-chart-waste"></canvas>
+    </article>
+    <article class="cedis-chart">
+      <h3>Entradas actuales vs pronóstico próximo</h3>
+      <p>Categorías líderes de la semana contra la próxima referencia operativa.</p>
+      <canvas id="cedis-chart-forecast"></canvas>
+      <div class="cedis-chart-legend">
+        <span><i class="cedis-dot" style="background:#214f9b;"></i>Entradas actuales</span>
+        <span><i class="cedis-dot" style="background:#2eb495;"></i>Pronóstico próximo</span>
+      </div>
+    </article>
+  </section>
+</div>
+{% endblock %}
+{% block extra_js %}
+{{ chart_bundle|json_script:"cedis-weekly-chart-bundle" }}
+<script>
+  (() => {
+    const source = document.getElementById("cedis-weekly-chart-bundle");
+    if (!source) return;
+    const bundle = JSON.parse(source.textContent || "{}");
+    const palette = {
+      rose: "#d65a71",
+      blue: "#214f9b",
+      green: "#2eb495",
+      cyan: "#53a7c2",
+      amber: "#d27a27",
+      red: "#b14b4b",
+      axis: "#7e665d",
+      grid: "rgba(98, 74, 64, 0.12)",
+    };
+
+    function setupCanvas(canvas) {
+      if (!canvas) return null;
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth || 360;
+      const height = canvas.clientHeight || 260;
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(ratio, ratio);
+      return { ctx, width, height };
+    }
+
+    function formatNumber(value) {
+      return new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(value || 0);
+    }
+
+    function drawLine(canvas, labels, values, color) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const pad = { top: 16, right: 16, bottom: 34, left: 54 };
+      const chartW = width - pad.left - pad.right;
+      const chartH = height - pad.top - pad.bottom;
+      const max = Math.max(...values, 1);
+      ctx.clearRect(0, 0, width, height);
+      ctx.strokeStyle = palette.grid;
+      for (let i = 0; i < 4; i += 1) {
+        const y = pad.top + (chartH / 3) * i;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+      }
+      const points = values.map((value, index) => ({
+        x: pad.left + (chartW * index) / Math.max(labels.length - 1, 1),
+        y: pad.top + chartH - (value / max) * chartH,
+      }));
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      points.forEach((point) => {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+      });
+      ctx.fillStyle = palette.axis;
+      ctx.font = '12px Inter, sans-serif';
+      labels.forEach((label, index) => {
+        const x = pad.left + (chartW * index) / Math.max(labels.length - 1, 1);
+        ctx.fillText(label, x - 14, height - 10);
+      });
+      ctx.fillText(formatNumber(max), 8, pad.top + 4);
+    }
+
+    function drawDonut(canvas, labels, values) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const total = values.reduce((acc, value) => acc + Number(value || 0), 0);
+      if (!total) return;
+      const colors = ["#214f9b", "#d65a71", "#53a7c2", "#d27a27", "#2eb495", "#7d66b1", "#b14b4b", "#9e7a57"];
+      const cx = width * 0.32;
+      const cy = height * 0.5;
+      const radius = Math.min(width, height) * 0.25;
+      let start = -Math.PI / 2;
+      ctx.clearRect(0, 0, width, height);
+      values.forEach((rawValue, index) => {
+        const value = Number(rawValue || 0);
+        const slice = (value / total) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, start + slice);
+        ctx.closePath();
+        ctx.fillStyle = colors[index % colors.length];
+        ctx.fill();
+        start += slice;
+      });
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.58, 0, Math.PI * 2);
+      ctx.fillStyle = "#fffaf7";
+      ctx.fill();
+      ctx.fillStyle = "#41271d";
+      ctx.font = '700 20px Inter, sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText(formatNumber(total), cx, cy + 6);
+      ctx.font = '12px Inter, sans-serif';
+      ctx.fillStyle = palette.axis;
+      ctx.fillText("Merma $", cx, cy - 16);
+      ctx.textAlign = "left";
+      labels.forEach((label, index) => {
+        const y = 26 + index * 22;
+        ctx.fillStyle = colors[index % colors.length];
+        ctx.fillRect(width * 0.62, y - 10, 10, 10);
+        ctx.fillStyle = "#5e4a41";
+        ctx.fillText(`${label} · ${formatNumber(values[index])}`, width * 0.62 + 18, y);
+      });
+    }
+
+    function drawHorizontalBars(canvas, labels, leftValues, rightValues) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const pad = { top: 18, right: 18, bottom: 12, left: 120 };
+      const chartW = width - pad.left - pad.right;
+      const chartH = height - pad.top - pad.bottom;
+      const rowH = chartH / Math.max(labels.length, 1);
+      const max = Math.max(1, ...leftValues, ...rightValues);
+      ctx.clearRect(0, 0, width, height);
+      ctx.font = '12px Inter, sans-serif';
+      labels.forEach((label, index) => {
+        const y = pad.top + rowH * index + rowH / 2;
+        const leftW = (Number(leftValues[index] || 0) / max) * chartW;
+        const rightW = (Number(rightValues[index] || 0) / max) * chartW;
+        ctx.fillStyle = "#5d4c43";
+        ctx.fillText(label, 10, y + 4);
+        ctx.fillStyle = palette.blue;
+        ctx.fillRect(pad.left, y - 10, leftW, 8);
+        ctx.fillStyle = palette.green;
+        ctx.fillRect(pad.left, y + 2, rightW, 8);
+      });
+    }
+
+    drawLine(
+      document.getElementById("cedis-chart-sales"),
+      bundle.weekly_labels || [],
+      bundle.weekly_sales_amount || [],
+      palette.rose
+    );
+    drawDonut(
+      document.getElementById("cedis-chart-waste"),
+      bundle.waste_branch_labels || [],
+      bundle.waste_branch_values || []
+    );
+    drawHorizontalBars(
+      document.getElementById("cedis-chart-forecast"),
+      bundle.forecast_labels || [],
+      bundle.forecast_current_production || [],
+      bundle.forecast_next_production || []
+    );
+  })();
+</script>
+{% endblock %}

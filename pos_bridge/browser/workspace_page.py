@@ -54,14 +54,16 @@ class PointWorkspacePage:
             selected = workspaces[0]
 
         onclick = selected["onclick"]
+        previous_url = self.page.url
         self.page.evaluate(
             """(targetOnclick) => {
-                const el = Array.from(document.querySelectorAll('[onclick*="selWS"]'))
-                    .find((node) => (node.getAttribute('onclick') || '') === targetOnclick);
-                if (!el) {
-                    throw new Error(`workspace_not_found:${targetOnclick}`);
+                const fn = window.selWS;
+                if (typeof fn !== 'function') {
+                    throw new Error('workspace_function_not_found');
                 }
-                el.click();
+                // Point publica la navegación real dentro del onclick de la tarjeta.
+                // Ejecutarla directamente es más estable que depender del click del nodo.
+                eval(targetOnclick);
             }""",
             onclick,
         )
@@ -69,6 +71,19 @@ class PointWorkspacePage:
             self.page.wait_for_load_state("networkidle", timeout=self.settings.timeout_ms)
         except Exception:
             pass
+        try:
+            self.page.wait_for_function(
+                """(initialUrl) => window.location.href !== initialUrl && !window.location.href.includes('/Account/workSpaces')""",
+                arg=previous_url,
+                timeout=self.settings.timeout_ms,
+            )
+        except Exception:
+            current_url = self.page.url
+            if current_url == previous_url or "/Account/workSpaces" in current_url:
+                raise NavigationError(
+                    "Point no cambió al workspace seleccionado.",
+                    context={"workspace_onclick": onclick, "current_url": current_url},
+                )
         return {
             "workspace_onclick": onclick,
             "workspace_label": selected.get("containerText") or selected.get("text") or "",

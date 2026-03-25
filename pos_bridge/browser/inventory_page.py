@@ -20,6 +20,28 @@ class PointInventoryPage:
         self.settings = bridge_settings
 
     def open_inventory_module(self) -> None:
+        ready_selectors = (
+            select_candidates(self.settings.selector_overrides, "inventory.table", INVENTORY_TABLE_CANDIDATES)
+            + select_candidates(self.settings.selector_overrides, "inventory.branch_select", BRANCH_SELECT_CANDIDATES)
+        )
+        base_url = (self.settings.base_url or "").rstrip("/")
+        if base_url:
+            try:
+                self.page.goto(f"{base_url}/Stock/Index", wait_until="domcontentloaded")
+                try:
+                    self.page.wait_for_load_state("networkidle", timeout=self.settings.timeout_ms)
+                except Exception:
+                    pass
+                wait_for_any(
+                    self.page,
+                    ready_selectors,
+                    "módulo de inventario",
+                    timeout_ms=self.settings.timeout_ms,
+                )
+                return
+            except Exception:
+                pass
+
         click_first(
             self.page,
             select_candidates(self.settings.selector_overrides, "menu.inventory", INVENTORY_MENU_CANDIDATES),
@@ -38,8 +60,8 @@ class PointInventoryPage:
             pass
         wait_for_any(
             self.page,
-            select_candidates(self.settings.selector_overrides, "inventory.table", INVENTORY_TABLE_CANDIDATES),
-            "tabla de inventario",
+            ready_selectors,
+            "módulo de inventario",
             timeout_ms=self.settings.timeout_ms,
         )
 

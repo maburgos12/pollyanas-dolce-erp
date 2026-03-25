@@ -8,42 +8,185 @@
   <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
   <a class="module-tab" href="{% url 'inventario:alertas' %}">Alertas</a>
-  <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Aliases</a>
-  <a class="module-tab active" href="{% url 'inventario:importar_archivos' %}">Carga Almacén</a>
+  <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Referencias ERP</a>
+  <a class="module-tab active" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
 </nav>
+
+<section class="card mb-3">
+  <div class="module-note">
+    <strong>Centro ERP Enterprise activo</strong> · Esta pantalla ya se usa como puerta documental de inventario: origen operativo → artículo ERP → existencia aplicada → reabasto.
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Workflow ERP de carga de almacén</div>
+  <div class="enterprise-flow-grid">
+    {% for row in sync_workflow_rows %}
+    <article class="enterprise-flow-card">
+      <div class="enterprise-flow-step">{{ row.step }}</div>
+      <div class="enterprise-flow-title">{{ row.title }}</div>
+      <div class="enterprise-flow-metrics">
+        <span class="badge {% if row.status == 'Liberada' or row.status == 'Cerrada' or row.status == 'Aplicada' or row.status == 'Ejecutada' %}bg-success{% elif row.status == 'Sin movimiento' %}bg-secondary{% else %}bg-warning text-dark{% endif %}">{{ row.status }}</span>
+      </div>
+      <div class="enterprise-flow-text">{{ row.detail }}</div>
+    </article>
+    {% endfor %}
+  </div>
+  <div class="enterprise-release-banner {% if sync_release_summary.tone == 'success' %}is-success{% else %}is-warning{% endif %}">
+    <strong>{{ sync_release_summary.title }}.</strong> {{ sync_release_summary.detail }}
+  </div>
+</section>
+
+{% if executive_radar_rows %}
+<section class="card">
+  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Bloqueo dominante</th>
+          <th>Depende de</th>
+          <th>Cierre</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in executive_radar_rows %}
+        <tr>
+          <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.dominant_blocker }}</td>
+          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+          <td>{{ row.progress_pct }}%</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Frente</th>
+          <th>Responsable</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in erp_governance_rows %}
+        <tr>
+          <td>{{ row.front }}</td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 
 {% if can_manage_inventario %}
 <section class="card">
   <div class="card-header">Sincronizar Desde Google Drive</div>
-  <p class="muted">Conecta con la carpeta mensual de almacén (por ejemplo: <code>ALMACEN ENERO 2026</code>) y procesa archivos automáticamente.</p>
+  {% if pending_focus %}
+  <div class="alert enterprise-focus-alert enterprise-focus-alert-{{ pending_focus.tone }} mb-3">
+    <div class="enterprise-focus-alert-copy">
+      <div class="enterprise-focus-alert-title">Bloqueo de catálogo prioritario</div>
+      <div class="enterprise-focus-alert-summary">{{ pending_focus.summary }}</div>
+      <div class="enterprise-focus-alert-detail">{{ pending_focus.action_detail }}</div>
+    </div>
+    <div class="enterprise-focus-alert-actions">
+      <span class="badge {% if pending_focus.tone == 'success' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+        {{ pending_focus.label }}
+      </span>
+      <a class="btn btn-primary btn-sm" href="{{ pending_focus.action_url }}">{{ pending_focus.action_label }}</a>
+    </div>
+  </div>
+  {% endif %}
+  {% if pending_source_cards %}
+  <div class="kpi-mini mb-3">
+    {% for card in pending_source_cards %}
+    <div class="kpi-card">
+      <div class="kpi-number is-warning">{{ card.count }}</div>
+      <div class="kpi-label">{{ card.source|title }}</div>
+      <div class="muted mt-1">{{ card.top_name }}</div>
+      <div class="muted mt-1">Confianza máx: {{ card.top_score|floatformat:0 }}</div>
+      <div class="mt-2">
+        <a class="btn btn-secondary btn-sm" href="{% url 'inventario:aliases_catalog' %}">Abrir gobierno de catálogo</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <p class="muted">Conecta con el corte mensual de almacén (por ejemplo: <code>ALMACEN ENERO 2026</code>) y procesa el periodo automáticamente.</p>
 
   <form method="post" class="form-grid-2">
     {% csrf_token %}
     <input type="hidden" name="action" value="drive">
+    {% if drive_sync_mode.forced %}
+    <input type="hidden" name="month" value="{{ drive_sync_mode.forced_month }}">
+    {% endif %}
 
     <div class="form-group">
       <label>Mes objetivo</label>
+      {% if drive_sync_mode.forced %}
+      <input class="input-field" type="month" value="{{ drive_sync_mode.forced_month }}" disabled>
+      {% else %}
       <input class="input-field" type="month" name="month" value="{{ current_month }}">
+      {% endif %}
     </div>
 
     <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end;">
+      {% if drive_sync_mode.forced %}
+      <small class="muted"><strong>Modo temporal activo:</strong> solo se lee marzo 2026 (inventario).</small>
+      {% else %}
       <small class="muted">Si no existe ese mes, se usa fallback al mes anterior.</small>
+      {% endif %}
     </div>
 
     <div class="form-group" style="grid-column: 1 / -1;">
       <label>Fuentes a importar</label>
       <div class="quick-actions">
-        {% for value, label in sources %}
-          <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
-            <input type="checkbox" name="sources" value="{{ value }}" checked>
-            <span>{{ label }}</span>
-          </label>
-        {% endfor %}
+        {% if drive_sync_mode.forced %}
+          {% for value, label in sources %}
+            {% if value == "inventario" %}
+            <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" name="sources" value="{{ value }}" checked readonly onclick="return false;">
+              <span>{{ label }} (fijo)</span>
+            </label>
+            {% endif %}
+          {% endfor %}
+        {% else %}
+          {% for value, label in sources %}
+            <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" name="sources" value="{{ value }}" checked>
+              <span>{{ label }}</span>
+            </label>
+          {% endfor %}
+        {% endif %}
       </div>
     </div>
 
     <div class="form-group">
-      <label>Fuzzy threshold</label>
+      <label>Umbral de confianza</label>
       <input class="input-field" type="number" name="fuzzy_threshold" min="80" max="100" value="{{ defaults.fuzzy_threshold }}">
     </div>
 
@@ -54,7 +197,7 @@
       </label>
       <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
         <input type="checkbox" name="create_aliases" {% if defaults.create_aliases %}checked{% endif %}>
-        <span>Crear aliases automáticos</span>
+        <span>Crear alias automáticos</span>
       </label>
     </div>
 
@@ -65,8 +208,8 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Subir Archivos Manualmente (XLSX)</div>
-  <p class="muted">Sube uno o varios archivos desde tu computadora. El sistema detecta Inventario, Entradas, Salidas y Merma por nombre.</p>
+  <div class="card-header">Carga Operativa de Archivos (XLSX)</div>
+  <p class="muted">Sube uno o varios cortes desde tu computadora. El sistema detecta Inventario, Entradas, Salidas y Merma por nombre.</p>
 
   <form method="post" enctype="multipart/form-data" class="form-grid-2">
     {% csrf_token %}
@@ -90,7 +233,7 @@
     </div>
 
     <div class="form-group">
-      <label>Fuzzy threshold</label>
+      <label>Umbral de confianza</label>
       <input class="input-field" type="number" name="fuzzy_threshold" min="80" max="100" value="{{ defaults.fuzzy_threshold }}">
     </div>
 
@@ -101,12 +244,12 @@
       </label>
       <label class="btn btn-secondary" style="display:flex; gap:8px; align-items:center;">
         <input type="checkbox" name="create_aliases" {% if defaults.create_aliases %}checked{% endif %}>
-        <span>Crear aliases automáticos</span>
+        <span>Crear alias automáticos</span>
       </label>
     </div>
 
     <div style="grid-column: 1 / -1; display:flex; justify-content:flex-end;">
-      <button class="btn btn-secondary" type="submit">Procesar carga manual</button>
+      <button class="btn btn-secondary" type="submit">Procesar carga externa</button>
     </div>
   </form>
 </section>
@@ -114,7 +257,7 @@
 <section class="card">
   <div class="card-header">Nombres Esperados</div>
   <div class="toolbar mb-2">
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Abrir catálogo de aliases</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Abrir gobierno de catálogo</a>
   </div>
   <ul>
     {% for n in expected_names %}
@@ -124,7 +267,7 @@
   {% if drive_info %}
   <hr>
   <p class="muted">
-    Último sync Drive:
+    Última corrida Drive:
     carpeta <strong>{{ drive_info.folder_name }}</strong>,
     mes objetivo {{ drive_info.target_month }},
     fuentes descargadas: {{ drive_info.downloaded_sources|join:", " }}.
@@ -146,13 +289,13 @@
       <tbody>
         <tr><th>Filas inventario leídas</th><td class="text-end">{{ summary.rows_stock_read }}</td></tr>
         <tr><th>Filas movimientos leídas</th><td class="text-end">{{ summary.rows_mov_read }}</td></tr>
-        <tr><th>Matches</th><td class="text-end">{{ summary.matched }}</td></tr>
-        <tr><th>Sin match</th><td class="text-end">{{ summary.unmatched }}</td></tr>
+        <tr><th>Artículos estándar resueltos</th><td class="text-end">{{ summary.matched }}</td></tr>
+        <tr><th>Artículos maestros por completar</th><td class="text-end">{{ summary.unmatched }}</td></tr>
         <tr><th>Insumos creados</th><td class="text-end">{{ summary.insumos_created }}</td></tr>
         <tr><th>Existencias actualizadas</th><td class="text-end">{{ summary.existencias_updated }}</td></tr>
         <tr><th>Movimientos creados</th><td class="text-end">{{ summary.movimientos_created }}</td></tr>
         <tr><th>Duplicados omitidos</th><td class="text-end">{{ summary.movimientos_skipped_duplicate }}</td></tr>
-        <tr><th>Aliases creados</th><td class="text-end">{{ summary.aliases_created }}</td></tr>
+        <tr><th>Referencias creadas</th><td class="text-end">{{ summary.aliases_created }}</td></tr>
       </tbody>
     </table>
   </div>
@@ -192,7 +335,7 @@
           </td>
           <td>
             <div>Existencias: {{ run.existencias_updated }} · Movimientos: {{ run.movimientos_created }}</div>
-            <div>Matches: {{ run.matched }} · Sin match: {{ run.unmatched }}</div>
+            <div>Artículos maestros validados: {{ run.matched }} · Artículos maestros por completar: {{ run.unmatched }}</div>
           </td>
           <td>{{ run.triggered_by.username|default:"Sistema" }}</td>
         </tr>
@@ -205,7 +348,35 @@
 
 {% if pendientes_preview %}
 <section class="card">
-  <div class="card-header">Pendientes de match (muestra)</div>
+  <div class="card-header">Referencias de catálogo en revisión (muestra)</div>
+  {% if pending_focus_rows %}
+  <div class="table-responsive mb-3">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Nombre origen</th>
+          <th>Fuentes</th>
+          <th>Repeticiones</th>
+          <th>Sugerencia</th>
+          <th class="text-end">Confianza máx</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in pending_focus_rows %}
+        <tr>
+          <td>{{ row.nombre_origen }}</td>
+          <td>{{ row.sources }}</td>
+          <td>{{ row.count }}</td>
+          <td>{{ row.sugerencia|default:"-" }}</td>
+          <td class="text-end">{{ row.score_max|floatformat:0 }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{% url 'inventario:aliases_catalog' %}?q={{ row.nombre_origen|urlencode }}">Resolver</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -227,7 +398,7 @@
           <td>{{ p.sugerencia|default:"-" }}</td>
           <td class="text-end">{{ p.score }}</td>
           <td>
-            <button type="button" class="btn btn-secondary use-alias-name" data-name="{{ p.nombre_origen|escape }}">Usar en alias</button>
+            <button type="button" class="btn btn-secondary use-alias-name" data-name="{{ p.nombre_origen|escape }}">Usar en alta</button>
           </td>
         </tr>
         {% endfor %}
@@ -236,7 +407,7 @@
   </div>
   {% if can_manage_inventario %}
   <hr>
-  <div class="card-header">Crear Alias Manual (Unificar Nombre)</div>
+  <div class="card-header">Crear referencia directa</div>
   <p class="muted">Usa este formulario para decirle al sistema que un nombre de almacén corresponde a un insumo oficial.</p>
   <form method="post" class="form-grid-2">
     {% csrf_token %}
@@ -250,12 +421,12 @@
       <select class="input-field" name="insumo_id" required>
         <option value="">Selecciona insumo...</option>
         {% for i in insumo_alias_targets %}
-        <option value="{{ i.id }}">{{ i.nombre }}</option>
+        <option value="{{ i.id }}">{{ i.nombre }}{% if i.canonical_variant_count > 1 %} · Maestro ({{ i.canonical_variant_count }} variantes){% endif %}</option>
         {% endfor %}
       </select>
     </div>
     <div style="grid-column:1/-1; display:flex; justify-content:flex-end;">
-      <button class="btn btn-primary" type="submit">Guardar alias</button>
+      <button class="btn btn-primary" type="submit">Guardar referencia</button>
     </div>
   </form>
   {% endif %}

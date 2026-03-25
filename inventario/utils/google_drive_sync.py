@@ -23,6 +23,17 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
 XLS_MIME = "application/vnd.ms-excel"
 
+# Temporary operational lock:
+# Until branch process changes are finalized, Drive sync reads only March inventory file.
+FORCE_DRIVE_SINGLE_MARCH_MODE = os.getenv("GOOGLE_DRIVE_FORCE_MARCH_ONLY", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+FORCED_DRIVE_MONTH = (os.getenv("GOOGLE_DRIVE_FORCED_MONTH", "2026-03") or "2026-03").strip()
+FORCED_DRIVE_SOURCES = {"inventario"}
+
 
 MONTH_WORDS = {
     "enero": 1,
@@ -70,6 +81,14 @@ class DriveFolderCandidate:
     name: str
     month: int | None
     year: int | None
+
+
+def get_drive_sync_mode() -> dict[str, Any]:
+    return {
+        "forced": FORCE_DRIVE_SINGLE_MARCH_MODE,
+        "forced_month": FORCED_DRIVE_MONTH,
+        "forced_sources": sorted(FORCED_DRIVE_SOURCES),
+    }
 
 
 def _month_back(target: date) -> date:
@@ -366,6 +385,11 @@ def sync_almacen_from_drive(
     dry_run: bool = False,
 ) -> DriveSyncResult:
     include_sources = include_sources or {"inventario", "entradas", "salidas", "merma"}
+
+    if FORCE_DRIVE_SINGLE_MARCH_MODE:
+        include_sources = set(FORCED_DRIVE_SOURCES)
+        month_override = FORCED_DRIVE_MONTH
+        fallback_previous = False
 
     root_folder_id = os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID", "").strip()
     if not root_folder_id:

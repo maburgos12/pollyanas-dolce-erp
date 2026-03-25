@@ -8,6 +8,7 @@ from django.db import IntegrityError
 from django.utils import timezone
 
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
+from maestros.utils.canonical_catalog import latest_costo_canonico
 from recetas.models import Receta, RecetaPresentacion
 from recetas.utils.normalizacion import normalizar_nombre
 
@@ -83,10 +84,7 @@ def _sync_cost_snapshot(
         return False
 
     latest = (
-        CostoInsumo.objects.filter(insumo=insumo)
-        .order_by("-fecha", "-id")
-        .values_list("costo_unitario", flat=True)
-        .first()
+        latest_costo_canonico(insumo)
     )
     if latest is not None and abs(Decimal(str(latest)) - Decimal(str(costo_unitario))) < Decimal("0.000001"):
         return False

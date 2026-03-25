@@ -6,14 +6,15 @@ from core.models import Sucursal
 
 
 SUCURSALES_POINT = [
-    ("COLOSIO", "Colosio"),
-    ("CRUCERO", "Crucero"),
-    ("EL_TUNEL", "EL TUNEL"),
-    ("LAS_GLORIAS", "Las Glorias"),
-    ("LEYVA", "Leyva"),
-    ("MATRIZ", "Matriz"),
-    ("PAYAN", "Payán"),
-    ("PLAZA_NIO", "Plaza Nío"),
+    {"codigo": "COLOSIO", "nombre": "Colosio", "activa": True},
+    {"codigo": "CRUCERO", "nombre": "Crucero", "activa": True},
+    {"codigo": "EL_TUNEL", "nombre": "EL TUNEL", "activa": True},
+    {"codigo": "GUAMUCHIL", "nombre": "Guamuchil", "activa": False, "fecha_apertura": None},
+    {"codigo": "LAS_GLORIAS", "nombre": "Las Glorias", "activa": True},
+    {"codigo": "LEYVA", "nombre": "Leyva", "activa": True},
+    {"codigo": "MATRIZ", "nombre": "Matriz", "activa": True},
+    {"codigo": "PAYAN", "nombre": "Payán", "activa": True},
+    {"codigo": "PLAZA_NIO", "nombre": "Plaza Nío", "activa": True},
 ]
 
 
@@ -32,10 +33,14 @@ class Command(BaseCommand):
         created = 0
         updated = 0
 
-        for codigo, nombre in SUCURSALES_POINT:
+        for item in SUCURSALES_POINT:
+            codigo = item["codigo"]
+            nombre = item["nombre"]
+            activa = bool(item.get("activa", True))
+            fecha_apertura = item.get("fecha_apertura")
             obj, was_created = Sucursal.objects.get_or_create(
                 codigo=codigo,
-                defaults={"nombre": nombre, "activa": True},
+                defaults={"nombre": nombre, "activa": activa, "fecha_apertura": fecha_apertura},
             )
             if was_created:
                 created += 1
@@ -48,9 +53,12 @@ class Command(BaseCommand):
             if obj.nombre != nombre:
                 obj.nombre = nombre
                 changes.append("nombre")
-            if not obj.activa:
-                obj.activa = True
+            if obj.activa != activa:
+                obj.activa = activa
                 changes.append("activa")
+            if obj.fecha_apertura != fecha_apertura:
+                obj.fecha_apertura = fecha_apertura
+                changes.append("fecha_apertura")
             if changes:
                 obj.save(update_fields=changes)
                 updated += 1

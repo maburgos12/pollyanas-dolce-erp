@@ -1,39 +1,282 @@
 {% extends "base.html" %}
-{% block title %}Matching pendientes{% endblock %}
+{% block title %}Recetas · Validación BOM de artículos{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h3 class="mb-0">Matching pendientes</h3>
-  <div class="d-flex gap-2">
-    <form class="d-flex" method="get">
-      <input class="form-control me-2" name="q" placeholder="Filtrar ingrediente" value="{{ q }}">
-      <button class="btn btn-outline-primary" type="submit">Filtrar</button>
-    </form>
-    <a class="btn btn-outline-secondary" href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=csv">Exportar CSV</a>
-    <a class="btn btn-outline-secondary" href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=xlsx">Exportar XLSX</a>
+<section class="card recipes-hero-card mb-3">
+  <div class="recipes-hero-head">
+    <div>
+      <h2 class="recipes-hero-title">Validación BOM de artículos</h2>
+      <p class="recipes-hero-copy">
+        Revisa componentes que todavía no tienen artículo maestro definido o que requieren confirmar la sugerencia antes de costeo, MRP y compras.
+      </p>
+    </div>
+    <div class="recipes-hero-actions">
+      <a class="btn btn-secondary" href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if receta_filter %}receta={{ receta_filter }}&{% endif %}export=csv">Exportar CSV</a>
+      <a class="btn btn-secondary" href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if receta_filter %}receta={{ receta_filter }}&{% endif %}export=xlsx">Exportar XLSX</a>
+    </div>
+  </div>
+  <form class="recipes-filters" method="get">
+    {% if receta_filter %}<input type="hidden" name="receta" value="{{ receta_filter }}">{% endif %}
+    <input class="form-control" name="q" placeholder="Filtrar componente o artículo" value="{{ q }}">
+    <button class="btn btn-primary" type="submit">Filtrar</button>
+  </form>
+  <div class="kpi-grid kpi-mini mt-3">
+    <article class="kpi-card">
+      <div class="kpi-number">{{ stats.total }}</div>
+      <div class="kpi-label">Partidas BOM pendientes</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ stats.recetas }}</div>
+      <div class="kpi-label">Documentos afectados</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if stats.no_match > 0 %}is-danger{% else %}is-success{% endif %}">{{ stats.no_match }}</div>
+      <div class="kpi-label">Sin artículo maestro</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if stats.fuzzy > 0 %}is-warning{% else %}is-success{% endif %}">{{ stats.fuzzy }}</div>
+      <div class="kpi-label">Con propuesta sugerida</div>
+    </article>
+  </div>
+</section>
+
+<details class="erp-advanced-panel mb-3">
+  <summary class="erp-advanced-summary">
+    <span>Ver control ERP avanzado</span>
+    <span class="text-muted">Centro de mando, workflow, ruta crítica y radar</span>
+  </summary>
+  <div class="erp-advanced-body">
+
+{% if erp_command_center %}
+<section class="card mb-3">
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin-top:8px;">{{ erp_command_center.next_step }}</div>
+      <div style="margin-top:10px;">
+        <a class="btn btn-secondary" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+      </div>
+    </article>
+  </div>
+</section>
+{% endif %}
+  </div>
+</details>
+
+<div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+  <div class="enterprise-pill-card is-active">
+    <div class="enterprise-pill-title">Centro de validación BOM</div>
+      <div class="enterprise-pill-text">Esta mesa cierra la referencia maestra de componentes para costeo, planeación y compras.</div>
+  </div>
+  <div class="enterprise-pill-card">
+    <div class="enterprise-pill-title">Paso 01 · Detectar</div>
+      <div class="enterprise-pill-text">Ubica componentes sin alta maestra o con referencia abierta antes de costeo y planeación.</div>
+  </div>
+  <div class="enterprise-pill-card">
+    <div class="enterprise-pill-title">Paso 02 · Resolver</div>
+    <div class="enterprise-pill-text">Aplica el artículo sugerido o selecciona el artículo maestro correcto.</div>
+  </div>
+  <div class="enterprise-pill-card">
+    <div class="enterprise-pill-title">Paso 03 · Cerrar</div>
+    <div class="enterprise-pill-text">Al cerrar esta bandeja estabilizas costeo, abastecimiento y flujo documental.</div>
   </div>
 </div>
 
-<div class="kpi-grid mb-3">
-  <div class="kpi-card">
-    <div class="kpi-number">{{ stats.total }}</div>
-    <div class="kpi-label">Líneas pendientes</div>
+<section class="card mb-3">
+  <div class="card-header">Workflow ERP del componente</div>
+  <div class="table-responsive mb-3">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th class="text-end">Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in workflow_rows %}
+        <tr>
+          <td><strong>{{ row.step }} · {{ row.title }}</strong></td>
+          <td>{{ row.owner }}</td>
+          <td>
+            <span class="badge {% if row.tone == 'success' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+              {{ row.closed }}/{{ row.open|add:row.closed }} · {{ row.completion }}%
+            </span>
+          </td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td class="text-end"><a class="btn btn-outline-secondary btn-sm" href="{{ row.action_href }}">{{ row.action_label }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
-  <div class="kpi-card">
-    <div class="kpi-number">{{ stats.recetas }}</div>
-    <div class="kpi-label">Recetas afectadas</div>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Objetivo</th>
+          <th>Control dominante</th>
+          <th>Salida esperada</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>01 · Detectar</td>
+          <td>Ubicar componentes sin alta maestra o con referencia abierta.</td>
+          <td>Catálogo canónico y estructura BOM.</td>
+          <td>Lista de partidas BOM listas para revisión.</td>
+        </tr>
+        <tr>
+          <td>02 · Resolver</td>
+          <td>Asignar el artículo correcto o confirmar la sugerencia operativa.</td>
+          <td>Artículo maestro, unidad y costo vigente.</td>
+          <td>Componente cerrado contra el maestro estándar.</td>
+        </tr>
+        <tr>
+          <td>03 · Cerrar</td>
+          <td>Dejar el documento listo para costeo, MRP y compras.</td>
+          <td>Cobertura documental de la receta.</td>
+          <td>Receta operable sin ambigüedad.</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
-  <div class="kpi-card">
-    <div class="kpi-number {% if stats.no_match > 0 %}is-danger{% else %}is-success{% endif %}">{{ stats.no_match }}</div>
-    <div class="kpi-label">Sin match</div>
+</section>
+
+{% if critical_path_rows %}
+<section class="card mb-3">
+  <div class="card-header">Ruta crítica ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Prioridad</th>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Estatus</th>
+          <th class="text-end">Bloqueos</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in critical_path_rows %}
+        <tr>
+          <td><strong>{{ row.rank }}</strong></td>
+          <td><strong>{{ row.title }}</strong><div class="muted">{{ row.detail }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.status }}</td>
+          <td class="text-end">{{ row.count }}</td>
+          <td>{{ row.completion }}%</td>
+          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-outline-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
-  <div class="kpi-card">
-    <div class="kpi-number {% if stats.fuzzy > 0 %}is-warning{% else %}is-success{% endif %}">{{ stats.fuzzy }}</div>
-    <div class="kpi-label">Fuzzy</div>
+</section>
+{% endif %}
+
+<section class="card mb-3">
+  
+{% if executive_radar_rows %}
+<section class="card">
+  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Bloqueo dominante</th>
+          <th>Depende de</th>
+          <th>Cierre</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in executive_radar_rows %}
+        <tr>
+          <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.dominant_blocker }}</td>
+          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+          <td>{{ row.progress_pct }}%</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
+</section>
+{% endif %}
+
+<div class="card-header">Mesa de gobierno ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Frente</th>
+          <th>Responsable</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in erp_governance_rows %}
+        <tr>
+          <td>{{ row.front }}</td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-outline-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="d-flex justify-content-end mb-3">
+  <form method="post" action="{% url 'recetas:aprobar_matching_sugerido_lote' %}" class="d-flex gap-2 align-items-center">
+    {% csrf_token %}
+    <input type="hidden" name="q" value="{{ q }}">
+    <input type="hidden" name="page" value="{{ page.number }}">
+    {% if receta_filter %}<input type="hidden" name="receta" value="{{ receta_filter }}">{% endif %}
+  <button class="btn btn-primary" type="submit">Aplicar sugerencias</button>
+  </form>
 </div>
 
 <div class="alert alert-info">
-  Selecciona el insumo oficial usando búsqueda en vivo (autocomplete servidor).
+  El sistema propone el artículo maestro más consistente. Si la sugerencia es correcta, puedes aplicarla de inmediato o seleccionar otro artículo del catálogo.
 </div>
 
 <div class="table-responsive">
@@ -41,9 +284,10 @@
     <thead>
       <tr>
         <th>Receta</th>
-        <th>Ingrediente</th>
-        <th>Score</th>
-        <th>Acción</th>
+        <th>Componente</th>
+        <th>Estado operativo</th>
+        <th>Artículo sugerido</th>
+        <th>Acciones</th>
       </tr>
     </thead>
     <tbody>
@@ -51,20 +295,47 @@
       <tr>
         <td><a href="{% url 'recetas:receta_detail' l.receta.id %}">{{ l.receta.nombre }}</a></td>
         <td>{{ l.insumo_texto }}</td>
-        <td><span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span></td>
+          <td>
+            {% if l.suggested_can_approve %}
+              <span class="badge bg-success">Lista para operar</span>
+            {% elif l.suggested_insumo %}
+              <span class="badge bg-warning text-dark">Requiere validación</span>
+            {% else %}
+              <span class="badge bg-danger">Alta maestra pendiente</span>
+            {% endif %}
+          </td>
         <td>
+          {% if l.suggested_insumo %}
+            <div><strong>{{ l.suggested_insumo.nombre }}</strong></div>
+            <div class="text-muted">Nivel {{ l.suggested_score|floatformat:0 }}%</div>
+            {% if l.suggested_is_canonical %}
+              <span class="badge bg-info text-dark">Oficial</span>
+            {% endif %}
+          {% else %}
+            <span class="text-muted">Sin sugerencia</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if l.suggested_can_approve %}
+          <form method="post" action="{% url 'recetas:aprobar_matching_sugerido' l.id %}" class="mb-2">
+            {% csrf_token %}
+            {% if receta_filter %}<input type="hidden" name="next" value="{% url 'recetas:matching_pendientes' %}?receta={{ receta_filter }}{% if q %}&q={{ q|urlencode }}{% endif %}">{% endif %}
+            <button class="btn btn-sm btn-primary" type="submit">Aplicar sugerido</button>
+          </form>
+          {% endif %}
           <form method="post" action="{% url 'recetas:aprobar_matching' l.id %}" class="d-flex gap-2 align-items-start flex-column matching-form" data-search-url="{% url 'recetas:matching_insumos_search' %}">
             {% csrf_token %}
-            <input type="text" class="form-control form-control-sm insumo-filter-input" placeholder="Buscar insumo...">
+            {% if receta_filter %}<input type="hidden" name="next" value="{% url 'recetas:matching_pendientes' %}?receta={{ receta_filter }}{% if q %}&q={{ q|urlencode }}{% endif %}">{% endif %}
+            <input type="text" class="form-control form-control-sm insumo-filter-input" placeholder="Buscar artículo del maestro...">
             <select name="insumo_id" class="form-select form-select-sm insumo-filter-select" required>
               <option value="">Selecciona...</option>
             </select>
-            <button class="btn btn-sm btn-success" type="submit">Aprobar</button>
+            <button class="btn btn-sm btn-success" type="submit">Guardar resolución</button>
           </form>
         </td>
       </tr>
       {% empty %}
-      <tr><td colspan="4" class="text-muted">No hay pendientes</td></tr>
+      <tr><td colspan="5" class="text-muted">No hay partidas BOM por validar para esta vista.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -73,11 +344,11 @@
 <nav>
   <ul class="pagination">
     {% if page.has_previous %}
-      <li class="page-item"><a class="page-link" href="?q={{ q }}&page={{ page.previous_page_number }}">Anterior</a></li>
+      <li class="page-item"><a class="page-link" href="?q={{ q }}{% if receta_filter %}&receta={{ receta_filter }}{% endif %}&page={{ page.previous_page_number }}">Anterior</a></li>
     {% endif %}
     <li class="page-item disabled"><a class="page-link">Página {{ page.number }} de {{ page.paginator.num_pages }}</a></li>
     {% if page.has_next %}
-      <li class="page-item"><a class="page-link" href="?q={{ q }}&page={{ page.next_page_number }}">Siguiente</a></li>
+      <li class="page-item"><a class="page-link" href="?q={{ q }}{% if receta_filter %}&receta={{ receta_filter }}{% endif %}&page={{ page.next_page_number }}">Siguiente</a></li>
     {% endif %}
   </ul>
 </nav>
@@ -110,7 +381,7 @@
     results.forEach((item) => {
       const opt = document.createElement("option");
       opt.value = item.id;
-      opt.textContent = item.nombre;
+      opt.textContent = item.label || item.nombre;
       select.appendChild(opt);
     });
     if (previous && results.some((r) => String(r.id) === String(previous))) {

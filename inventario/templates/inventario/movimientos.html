@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Inventario - Movimientos{% endblock %}
 {% block page_title %}Inventario · Movimientos{% endblock %}
+{% block body_class %}page-inventario-movimientos{% endblock %}
 
 {% block content %}
 <nav class="module-tabs">
@@ -8,12 +9,471 @@
   <a class="module-tab active" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
   <a class="module-tab" href="{% url 'inventario:alertas' %}">Alertas</a>
-  <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Aliases</a>
-  <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Carga Almacén</a>
+  <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Referencias</a>
+  <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
 </nav>
 
 <section class="card">
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+    </article>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Expediente ERP del módulo</div>
+  <div class="table-responsive">
+    <table class="table">
+      <tbody>
+        <tr>
+          <td style="width:28%;"><strong>Documento</strong></td>
+          <td>Entradas, salidas y transferencias que afectan el kardex operativo.</td>
+        </tr>
+        <tr>
+          <td><strong>Fuente de control</strong></td>
+          <td>Artículo maestro, tipo de movimiento, cantidad, fecha y referencia de origen.</td>
+        </tr>
+        <tr>
+          <td><strong>Etapa ERP</strong></td>
+          <td>Ejecución transaccional del inventario y actualización de existencias.</td>
+        </tr>
+        <tr>
+          <td><strong>Propósito</strong></td>
+          <td>Mantener trazabilidad del movimiento real para alimentar existencias, alertas, compras y MRP.</td>
+        </tr>
+        <tr>
+          <td><strong>Regla de salida</strong></td>
+          <td>Movimiento con artículo válido, cantidad correcta y referencia suficiente para auditoría.</td>
+        </tr>
+        <tr>
+          <td><strong>Siguiente paso</strong></td>
+          <td>Registrar solo movimientos sobre artículos ERP liberados y usar ajustes cuando haya diferencia física.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Workflow ERP del módulo</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Entrada</th>
+          <th>Control</th>
+          <th>Salida</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>01 · Artículo liberado</td>
+          <td>Maestros / DG</td>
+          <td>Artículo maestro válido</td>
+          <td>Unidad, clase y gobierno del catálogo</td>
+          <td>Listo para mover</td>
+        </tr>
+        <tr>
+          <td>02 · Registro del movimiento</td>
+          <td>Inventario / Almacén</td>
+          <td>Tipo, fecha y cantidad</td>
+          <td>Referencia y signo correcto</td>
+          <td>Kardex actualizado</td>
+        </tr>
+        <tr>
+          <td>03 · Impacto operativo</td>
+          <td>Compras / Producción</td>
+          <td>Existencia nueva</td>
+          <td>Punto de reorden y alertas</td>
+          <td>Abastecimiento confiable</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if upstream_dependency_rows %}
+<section class="card">
+  <div class="card-header">Dependencias upstream ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Origen</th>
+          <th>Responsable</th>
+          <th>Estatus</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Criterio de salida</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in upstream_dependency_rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td>{{ row.owner }}</td>
+          <td><span class="{% if row.tone == 'success' %}badge-verde{% elif row.tone == 'danger' %}badge-rojo{% else %}badge-amarillo{% endif %}">{{ row.status }}</span></td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.depends_on }}</td>
+          <td>{{ row.exit_criteria }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Cadena documental ERP</div>
+  <div class="erp-chain-grid">
+    {% for step in enterprise_chain %}
+    <article class="erp-chain-card tone-{{ step.tone|default:'neutral' }}">
+      <div class="erp-chain-step">{{ step.step }}</div>
+      <div class="erp-chain-title">{{ step.title }}</div>
+      <div class="erp-chain-count">{{ step.count }}</div>
+      <div class="erp-chain-status">{{ step.status }}</div>
+      <p class="erp-chain-detail">{{ step.detail }}</p>
+      <a class="btn btn-secondary btn-sm" href="{{ step.url }}">{{ step.cta }}</a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Ruta troncal ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo ERP</th>
+          <th>Responsable</th>
+          <th>Estatus</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Criterio de salida</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in downstream_handoff_rows %}
+          <tr>
+            <td><strong>{{ row.front }}</strong><div class="muted">{{ row.detail }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td><span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">{{ row.status }}</span></td>
+            <td>{{ row.blockers }}</td>
+            <td>{{ row.completion }}%</td>
+            <td>{{ row.depends_on }}</td>
+            <td>{{ row.exit_criteria }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if critical_path_rows %}
+<section class="card">
+  <div class="card-header">Ruta crítica ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Prioridad</th>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Brechas</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Lectura ejecutiva</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in critical_path_rows %}
+        <tr>
+          <td><strong>{{ row.rank }}</strong></td>
+          <td>
+            <strong>{{ row.title }}</strong>
+            <div class="muted">{{ row.status }}</div>
+          </td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.count }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>
+            <strong>{{ row.depends_on }}</strong>
+            <div class="muted">{{ row.dependency_status }}</div>
+          </td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if executive_radar_rows %}
+<section class="card">
+  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Bloqueo dominante</th>
+          <th>Depende de</th>
+          <th>Cierre</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in executive_radar_rows %}
+        <tr>
+          <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.dominant_blocker }}</td>
+          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+          <td><span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">{{ row.progress_pct }}% · {{ row.blockers }} abiertos</span></td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Madurez ERP de inventario</div>
+  <div class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-number is-success">{{ maturity_summary.completed_steps }}</div>
+      <div class="kpi-label">Etapas controladas</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number is-warning">{{ maturity_summary.attention_steps }}</div>
+      <div class="kpi-label">Etapas en atención</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ maturity_summary.coverage_pct }}%</div>
+      <div class="kpi-label">Cobertura del módulo</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente prioridad</div>
+      <div style="font-weight:700; margin:8px 0 6px;">{{ maturity_summary.next_priority_title }}</div>
+      <div class="muted">{{ maturity_summary.next_priority_detail }}</div>
+      <div style="margin-top:10px;">
+        <a class="btn btn-secondary btn-small" href="{{ maturity_summary.next_priority_url }}">{{ maturity_summary.next_priority_cta }}</a>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Cadena de control de inventario</div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+    {% for item in handoff_map %}
+      <article class="enterprise-pill tone-{{ item.tone|default:'neutral' }}">
+        <div class="enterprise-pill-title">{{ item.label }}</div>
+        <div class="enterprise-pill-count">{{ item.count }}</div>
+        <div class="enterprise-pill-status">{{ item.status }}</div>
+        <div class="enterprise-pill-detail">{{ item.detail }}</div>
+        <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Cierre por etapa documental</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Abiertos</th>
+          <th>Cerrados</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in document_stage_rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td>{{ row.owner|default:"Operación ERP" }}</td>
+          <td>{{ row.open }}</td>
+          <td>{{ row.closed }}</td>
+          <td>{{ row.completion|default:0 }}%</td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step|default:"Revisar etapa" }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">Abrir</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Frente</th>
+          <th>Responsable</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in erp_governance_rows %}
+        <tr>
+          <td><strong>{{ row.front }}</strong></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if downstream_handoff_rows %}
+<section class="card">
+  <div class="card-header">Entrega de inventario a downstream</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Frente</th>
+          <th>Responsable</th>
+          <th>Depende de</th>
+          <th>Salida esperada</th>
+          <th>Cierre</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in downstream_handoff_rows %}
+        <tr>
+          <td><strong>{{ row.front }}</strong><div class="muted">{{ row.detail }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.depends_on }}</td>
+          <td>{{ row.exit_criteria }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Salud operativa ERP</div>
+  <div class="kpi-mini">
+    {% for card in operational_health_cards %}
+    <div class="kpi-card">
+      <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% elif card.tone == 'warning' %}is-warning{% elif card.tone == 'success' %}is-success{% endif %}">{{ card.count }}</div>
+      <div class="kpi-label">{{ card.label }}</div>
+      <div class="muted mt-1">{{ card.detail }}</div>
+      <div class="mt-2">
+        <a class="btn btn-secondary btn-sm" href="{{ card.url }}">{{ card.cta }}</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
   <div class="card-header">Nuevo Movimiento</div>
+  {% if master_focus %}
+  <div class="alert enterprise-focus-alert enterprise-focus-alert-{{ master_focus.tone }} mb-3">
+    <div class="enterprise-focus-alert-copy">
+      <div class="enterprise-focus-alert-title">Bloqueo maestro prioritario</div>
+      <div class="enterprise-focus-alert-summary">{{ master_focus.summary }}</div>
+      <div class="enterprise-focus-alert-detail">{{ master_focus.action_detail }}</div>
+    </div>
+    <div class="enterprise-focus-alert-actions">
+      <span class="badge {% if master_focus.tone == 'success' %}bg-success{% elif master_focus.tone == 'danger' %}bg-danger{% else %}bg-warning text-dark{% endif %}">
+        {{ master_focus.label }}
+      </span>
+      <a class="btn btn-primary btn-sm" href="{{ master_focus.action_url }}">{{ master_focus.action_label }}</a>
+    </div>
+  </div>
+  {% endif %}
+  {% if master_blocker_class_cards %}
+  <div class="kpi-mini mb-3">
+    {% for card in master_blocker_class_cards %}
+    <div class="kpi-card {% if card.is_active %}is-active{% endif %}">
+      <div class="kpi-number is-warning">{{ card.count }}</div>
+      <div class="kpi-label">{{ card.class_label }}</div>
+      <div class="muted mt-1">{{ card.dominant_label }} · {{ card.dominant_count }}</div>
+      <div class="muted mt-1">{{ card.action_detail }}</div>
+      <div class="mt-2">
+        <a class="btn btn-secondary btn-sm" href="{{ card.focus_url }}">Enfocar</a>
+        <a class="btn btn-secondary btn-sm" href="{{ card.action_url }}">{{ card.action_label }}</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if selected_master_focus_key %}
+  <div class="alert alert-soft mb-3">
+    <strong>Vista enfocada:</strong> estás revisando el subconjunto del maestro bloqueado para esta pantalla.
+    <a class="btn btn-secondary btn-sm" href="{% url 'inventario:movimientos' %}" style="margin-left: 8px;">Quitar foco</a>
+  </div>
+  {% endif %}
   {% if can_manage_inventario %}
   <form method="post" class="form-grid-auto">
     {% csrf_token %}
@@ -24,14 +484,14 @@
     <select class="input-field" name="insumo_id" id="mov-insumo" required>
       <option value="">Insumo</option>
       {% for i in insumo_options %}
-      <option value="{{ i.id }}" data-stock="{{ i.stock }}">{{ i.nombre }} (disp: {{ i.stock }})</option>
+      <option value="{{ i.id }}" data-stock="{{ i.stock }}" data-enterprise-status="{{ i.enterprise_status }}" data-enterprise-missing="{{ i.enterprise_missing|join:', ' }}" data-operational-blocker="{{ i.operational_blocker_label }}">{{ i.nombre }} · {{ i.enterprise_status }}{% if i.is_operational_blocker %} · {{ i.operational_blocker_label }}{% endif %}{% if i.canonical_variant_count > 1 %} · Maestro ({{ i.canonical_variant_count }} variantes){% endif %} (disp: {{ i.stock }})</option>
       {% endfor %}
     </select>
     <input class="input-field" type="number" min="0" step="0.001" name="cantidad" id="mov-cantidad" placeholder="Cantidad" required>
     <input class="input-field" name="referencia" placeholder="Referencia">
     <button class="btn btn-primary" id="mov-submit" type="submit">Registrar movimiento</button>
   </form>
-  <p class="muted mt-2" id="mov-stock-msg">Selecciona un insumo para ver stock disponible.</p>
+  <p class="muted mt-2" id="mov-stock-msg">Selecciona un insumo para ver stock disponible y estado ERP.</p>
   {% else %}
   <p class="muted">Tu perfil está en modo lectura para Inventario.</p>
   {% endif %}
@@ -39,6 +499,37 @@
 
 <section class="card">
   <div class="card-header">Bitácora de Movimientos</div>
+  {% if master_focus_rows %}
+  <div class="table-responsive mb-3">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Clase</th>
+          <th>Artículo</th>
+          <th>Faltante</th>
+          <th>Impacto</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in master_focus_rows %}
+        <tr>
+          <td>{{ row.class_label }}</td>
+          <td>{{ row.name }}</td>
+          <td>{{ row.missing }}</td>
+          <td>{{ row.action_detail }}</td>
+          <td>
+            <a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a>
+            {% if row.edit_url %}
+            <a class="btn btn-secondary btn-sm" href="{{ row.edit_url }}">Editar artículo</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -46,8 +537,10 @@
           <th>Fecha</th>
           <th>Tipo</th>
           <th>Insumo</th>
+          <th>Uso ERP</th>
           <th class="text-end">Cantidad</th>
           <th>Referencia</th>
+          <th>Maestro ERP</th>
         </tr>
       </thead>
       <tbody>
@@ -55,12 +548,41 @@
         <tr>
           <td>{{ m.fecha|date:"Y-m-d H:i" }}</td>
           <td><span class="badge bg-primary">{{ m.get_tipo_display }}</span></td>
-          <td>{{ m.insumo.nombre }}</td>
+          <td>
+            {{ m.insumo.nombre }}
+            {% if m.canonical_pending %}
+            <div class="mt-1">
+              <span class="badge bg-warning text-dark">{{ m.canonical_pending_label }}</span>
+            </div>
+            {% endif %}
+            {% if m.enterprise_missing %}
+            <div class="muted" style="margin-top: 6px;">Maestro: {{ m.enterprise_missing|join:", " }}</div>
+            {% endif %}
+          </td>
+          <td><span class="badge bg-primary">{{ m.enterprise_usage_label }}</span></td>
           <td class="text-end">{{ m.cantidad }}</td>
           <td>{{ m.referencia|default:"-" }}</td>
+          <td>
+            <span class="badge {% if m.enterprise_status == 'Lista para operar' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+              {{ m.enterprise_status }}
+            </span>
+            {% if m.enterprise_missing %}
+            <div class="muted mt-1">Falta: {{ m.enterprise_missing|join:", " }}</div>
+            <div class="mt-2">
+              <a class="btn btn-secondary btn-sm" href="{{ m.enterprise_edit_url }}">Editar</a>
+              <a class="btn btn-secondary btn-sm" href="{{ m.enterprise_list_url }}">Corregir</a>
+            </div>
+            {% endif %}
+            {% if m.canonical_pending %}
+            <div class="muted mt-1">Referencia maestra: hay variantes activas con impacto en movimientos.</div>
+            <div class="mt-2">
+              <a class="btn btn-secondary btn-sm" href="{{ m.canonical_list_url }}">Consolidar</a>
+            </div>
+            {% endif %}
+          </td>
         </tr>
         {% empty %}
-        <tr><td colspan="5" class="text-muted">Sin movimientos registrados.</td></tr>
+        <tr><td colspan="7" class="text-muted">Sin movimientos registrados.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -91,19 +613,27 @@
       const invalid = enforce && qty > 0 && qty > stock;
 
       if (!insumo.value) {
-        msg.textContent = "Selecciona un insumo para ver stock disponible.";
+        msg.textContent = "Selecciona un insumo para ver stock disponible y estado ERP.";
         submit.disabled = false;
         return;
       }
 
+      const enterpriseStatus = selected.dataset.enterpriseStatus || "-";
+      const enterpriseMissing = (selected.dataset.enterpriseMissing || "").trim();
+      const operationalBlocker = (selected.dataset.operationalBlocker || "").trim();
+      const erpSuffix =
+        " | ERP: " + enterpriseStatus +
+        (operationalBlocker ? " | Impacto: " + operationalBlocker : "") +
+        (enterpriseMissing ? " | Falta: " + enterpriseMissing : "");
+
       if (enforce) {
-        msg.textContent = "Stock disponible: " + stock + " | Tipo: " + type + ".";
+        msg.textContent = "Stock disponible: " + stock + " | Tipo: " + type + erpSuffix + ".";
       } else {
-        msg.textContent = "Stock disponible: " + stock + ".";
+        msg.textContent = "Stock disponible: " + stock + erpSuffix + ".";
       }
 
       if (invalid) {
-        msg.textContent = "Stock insuficiente: disponible " + stock + ", solicitado " + qty + ".";
+        msg.textContent = "Stock insuficiente: disponible " + stock + ", solicitado " + qty + erpSuffix + ".";
       }
       submit.disabled = invalid;
     }

@@ -2,12 +2,106 @@
 {% block title %}{% if presentacion %}Editar presentación{% else %}Nueva presentación{% endif %}{% endblock %}
 {% block content %}
 <div class="card">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <div>
-      <h3 class="mb-0">{% if presentacion %}Editar presentación{% else %}Nueva presentación{% endif %}</h3>
-      <div class="text-muted">Receta: {{ receta.nombre }}</div>
+  <section class="card recipe-hero-card mb-3">
+    <div class="recipe-hero-head">
+      <div>
+        <div class="recipe-hero-eyebrow">Derivado</div>
+        <h2 class="recipe-hero-title">{% if presentacion %}Editar presentación{% else %}Nueva presentación{% endif %}</h2>
+        <div class="recipe-hero-copy">Receta: {{ receta.nombre }}</div>
+      </div>
+      <div class="recipe-actions">
+        <a class="btn btn-outline-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Volver a receta</a>
+      </div>
     </div>
-    <a class="btn btn-outline-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Volver a receta</a>
+    <div class="kpi-grid kpi-mini">
+      <article class="kpi-card">
+        <div class="kpi-number {% if presentacion %}is-warning{% else %}is-primary{% endif %}">
+          {% if presentacion %}Ajuste derivado{% else %}Nuevo derivado{% endif %}
+        </div>
+        <div class="kpi-label">Modo</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">{% if receta.usa_presentaciones %}0{% else %}1{% endif %}</div>
+        <div class="kpi-label">Bloqueos abiertos</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-label">Siguiente paso</div>
+        <div class="muted" style="margin-top:8px;">Guardar la presentación y sincronizar el derivado para uso final.</div>
+      </article>
+    </div>
+  </section>
+
+  <details class="erp-advanced-panel mb-3">
+    <summary class="erp-advanced-summary">
+      <span>Ver control ERP avanzado</span>
+      <span class="text-muted">Centro de mando y workflow del derivado</span>
+    </summary>
+    <div class="erp-advanced-body">
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid mb-3">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">Producción / Costeo</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if presentacion %}is-warning{% else %}is-primary{% endif %}">
+        {% if presentacion %}Ajuste derivado{% else %}Nuevo derivado{% endif %}
+      </div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{% if receta.usa_presentaciones %}0{% else %}1{% endif %}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">Guardar la presentación y sincronizar subinsumos derivados para el uso final.</div>
+      <a class="btn btn-secondary btn-sm" href="{% url 'recetas:receta_detail' receta.id %}">Abrir receta</a>
+    </article>
+  </div>
+
+  <div class="card-header">Workflow ERP del derivado</div>
+  <div class="table-responsive mb-3">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>01 · Definición</strong></td>
+          <td>Producción</td>
+          <td><span class="badge bg-warning text-dark">50%</span></td>
+          <td>Nombrar la presentación y fijar su consumo por unidad.</td>
+          <td>Usar nombres operativos consistentes.</td>
+        </tr>
+        <tr>
+          <td><strong>02 · Sincronización</strong></td>
+          <td>Costeo / Maestros</td>
+          <td><span class="badge bg-secondary">Pendiente</span></td>
+          <td>El sistema genera o actualiza el subinsumo derivado para uso en producto final.</td>
+          <td>Guardar para sincronizar.</td>
+        </tr>
+        <tr>
+          <td><strong>03 · Consumo final</strong></td>
+          <td>Producción / Comercial</td>
+          <td><span class="badge bg-secondary">Pendiente</span></td>
+          <td>El derivado pasa al BOM de productos finales.</td>
+          <td>Usarlo en armado final cuando esté activo.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+    </div>
+  </details>
+
+  <div class="alert alert-info">
+    Esta pantalla solo aplica a <strong>bases con derivados</strong>. La presentación consume una cantidad fija de la base y genera un subinsumo listo para usarse en productos finales.
   </div>
 
   <form method="post">
@@ -20,6 +114,9 @@
       <div class="form-group">
         <label for="peso_por_unidad_kg">Cantidad por presentación (en unidad de rendimiento)</label>
         <input id="peso_por_unidad_kg" class="form-control" type="number" step="0.000001" min="0.000001" name="peso_por_unidad_kg" value="{{ presentacion.peso_por_unidad_kg|default:'' }}" required>
+        {% if rendimiento_unit_code %}
+        <small class="text-muted d-block mt-1">Unidad base detectada: <strong>{{ rendimiento_unit_code }}</strong></small>
+        {% endif %}
       </div>
       <div class="form-group full">
         <small class="text-muted d-block mb-2">

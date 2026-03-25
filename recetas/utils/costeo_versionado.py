@@ -10,6 +10,11 @@ from django.db import IntegrityError, transaction
 from unidecode import unidecode
 
 from recetas.models import CostoDriver, Receta, RecetaCostoVersion
+from recetas.utils.derived_product_presentations import (
+    get_active_derived_relation,
+    get_direct_components_cost,
+    get_parent_unit_cost,
+)
 
 
 Q6 = Decimal("0.000001")
@@ -123,9 +128,12 @@ def resolve_cost_driver(receta: Receta, lote_referencia: Decimal = Decimal("1"))
 
 def calcular_costeo_receta(receta: Receta, lote_referencia: Decimal = Decimal("1")) -> CostBreakdown:
     lineas = list(receta.lineas.select_related("insumo", "unidad").order_by("id"))
-    driver = resolve_cost_driver(receta, lote_referencia=lote_referencia)
+    derived_relation = get_active_derived_relation(receta)
+    parent_unit_cost = _q6(_dec(get_parent_unit_cost(receta))) if derived_relation else ZERO
+    direct_cost = _q6(_dec(get_direct_components_cost(receta)))
+    driver = None if derived_relation else resolve_cost_driver(receta, lote_referencia=lote_referencia)
 
-    costo_mp = _q6(sum((_line_cost(linea) for linea in lineas), ZERO))
+    costo_mp = _q6(direct_cost + parent_unit_cost)
 
     mo_pct = _dec(driver.mo_pct if driver else ZERO)
     indirecto_pct = _dec(driver.indirecto_pct if driver else ZERO)
@@ -160,12 +168,25 @@ def calcular_costeo_receta(receta: Receta, lote_referencia: Decimal = Decimal("1
             "ind_fijo": str(_q6(indirecto_fijo)),
         },
         "costos": {
+            "derived_parent_unit_cost": str(parent_unit_cost),
+            "direct_components_cost": str(direct_cost),
             "mp": str(costo_mp),
             "mo": str(costo_mo),
             "indirecto": str(costo_indirecto),
             "total": str(costo_total),
             "unidad": str(costo_por_unidad) if costo_por_unidad is not None else "",
         },
+        "derived_relation": (
+            {
+                "id": derived_relation.id,
+                "receta_padre_id": derived_relation.receta_padre_id,
+                "receta_padre_nombre": derived_relation.receta_padre.nombre,
+                "unidades_por_padre": str(_q6(_dec(derived_relation.unidades_por_padre))),
+                "requiere_componentes_directos": bool(derived_relation.requiere_componentes_directos),
+            }
+            if derived_relation
+            else None
+        ),
         "lineas": [_line_snapshot(linea) for linea in lineas],
     }
     hash_snapshot = hashlib.sha256(

@@ -1,10 +1,51 @@
 {% extends "base.html" %}
 
-{% block title %}Integraciones - API publica{% endblock %}
-{% block page_title %}Integraciones · API publica{% endblock %}
+{% block title %}Integraciones - Centro operativo{% endblock %}
+{% block page_title %}Integraciones · Centro operativo{% endblock %}
 
 {% block content %}
 <div class="module-shell integraciones-shell">
+    <section class="card mb-3">
+        <div class="module-note">
+            <strong>Centro ERP Enterprise activo</strong> · Este módulo ya opera con integración comercial, maestro ERP y trazabilidad documental.
+        </div>
+    </section>
+    <section class="card mb-3">
+        <div class="enterprise-focus-alert tone-{% if integraciones_maturity_summary.attention_steps %}warning{% else %}success{% endif %}">
+            <div>
+                <div class="enterprise-focus-title">Prioridad ERP actual · {{ integraciones_maturity_summary.next_priority_title }}</div>
+                <div class="enterprise-focus-text">{{ integraciones_maturity_summary.next_priority_detail }}</div>
+            </div>
+            <div class="enterprise-focus-actions">
+                <span class="module-chip {% if integraciones_maturity_summary.attention_steps %}blocked{% else %}manage{% endif %}">
+                    Cobertura {{ integraciones_maturity_summary.coverage_pct }}%
+                </span>
+                <a class="btn btn-secondary btn-sm" href="{{ integraciones_maturity_summary.next_priority_url }}">{{ integraciones_maturity_summary.next_priority_cta }}</a>
+            </div>
+        </div>
+    </section>
+    <section class="card mb-3">
+        <div class="card-header">Centro de mando ERP</div>
+        <div class="kpi-grid kpi-mini">
+            <article class="kpi-card">
+                <div class="kpi-label">Responsable principal</div>
+                <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+                <div class="kpi-label">Semáforo global</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+                <div class="kpi-label">Bloqueos abiertos</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-label">Siguiente paso</div>
+                <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+                <a class="btn btn-secondary btn-sm" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+            </article>
+        </div>
+    </section>
     <section class="kpi-mini">
         <article class="kpi-card">
             <div class="kpi-number">{{ clients|length }}</div>
@@ -43,6 +84,401 @@
     </section>
 
     <section class="card">
+        <div class="card-header">Expediente ERP del módulo</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Documento</th>
+                        <th>Fuente de control</th>
+                        <th>Etapa ERP</th>
+                        <th>Propósito</th>
+                        <th>Regla de salida</th>
+                        <th>Siguiente paso</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Integración comercial</td>
+                        <td>Integración comercial / referencias externas</td>
+                        <td>Preintegración</td>
+                        <td>Consolidar nombres y códigos externos antes de cerrar operación del maestro.</td>
+                        <td>No dejar etapas abiertas que bloqueen el maestro ERP.</td>
+                        <td>Resolver integración comercial</td>
+                    </tr>
+                    <tr>
+                        <td>Maestro ERP</td>
+                        <td>Artículo estándar, aliases y relación interna</td>
+                        <td>Alineación controlada</td>
+                        <td>Garantizar un solo artículo maestro por componente operativo.</td>
+                        <td>Unidad, proveedor, categoría y canonicidad resueltos.</td>
+                        <td>Revisar referencias ERP</td>
+                    </tr>
+                    <tr>
+                        <td>API pública</td>
+                        <td>Clientes, logs y trazabilidad</td>
+                        <td>Operación controlada</td>
+                        <td>Consumir el ERP con clientes auditables y errores visibles.</td>
+                        <td>Errores abiertos controlados y clientes activos validados.</td>
+                        <td>Supervisar API pública</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Workflow ERP del módulo</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Etapa</th>
+                        <th>Entrada</th>
+                        <th>Control</th>
+                        <th>Salida</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>01 · Integración comercial</td>
+                        <td>Referencias externas y códigos comerciales</td>
+                        <td>Resolver cierre de integración comercial</td>
+                        <td>Artículo identificado para el maestro ERP</td>
+                    </tr>
+                    <tr>
+                        <td>02 · Maestro ERP</td>
+                        <td>Artículo estándar y referencias internas</td>
+                        <td>Validar datos maestros y canonicidad</td>
+                        <td>Referencia lista para BOM, compras e inventario</td>
+                    </tr>
+                    <tr>
+                        <td>03 · Almacén y BOM</td>
+                        <td>Referencias de inventario y componentes operativos</td>
+                        <td>Consolidar artículos en recetas, almacén y sincronizaciones</td>
+                        <td>Cadena operativa consistente</td>
+                    </tr>
+                    <tr>
+                        <td>04 · API pública</td>
+                        <td>Clientes, requests y errores</td>
+                        <td>Monitorear uso, errores y auditoría</td>
+                        <td>Integración trazable y estable</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Cadena documental ERP</div>
+        <div class="erp-chain-grid">
+            {% for step in enterprise_chain %}
+            <article class="erp-chain-card tone-{{ step.tone|default:'neutral' }}">
+                <div class="erp-chain-step">{{ step.step }}</div>
+                <div class="erp-chain-title">{{ step.title }}</div>
+                <div class="erp-chain-count">{{ step.count }}</div>
+                <div class="erp-chain-status">{{ step.status }}</div>
+                <p class="erp-chain-detail">{{ step.detail }}</p>
+                <a class="btn btn-secondary btn-sm" href="{{ step.url }}">{{ step.cta }}</a>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Cadena troncal de integraciones</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Tramo</th>
+                        <th>Depende de</th>
+                        <th>Responsable</th>
+                        <th>Cierre</th>
+                        <th>Estatus</th>
+                        <th>Dependencia</th>
+                        <th>Siguiente paso</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for step in enterprise_chain %}
+                    <tr>
+                        <td><strong>{{ step.step }} · {{ step.title }}</strong></td>
+                        <td>{{ step.depends_on }}</td>
+                        <td>{{ step.owner }}</td>
+                        <td>{{ step.completion }}%</td>
+                        <td>{{ step.status }}</td>
+                        <td>{{ step.dependency_status }}</td>
+                        <td>{{ step.next_step }}</td>
+                        <td><a class="btn btn-secondary btn-sm" href="{{ step.url }}">{{ step.cta }}</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    {% if integraciones_critical_path_rows %}
+    <section class="card">
+        <div class="card-header">Ruta crítica ERP</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Prioridad</th>
+                        <th>Tramo</th>
+                        <th>Responsable</th>
+                        <th>Brechas</th>
+                        <th>Cierre</th>
+                        <th>Depende de</th>
+                        <th>Lectura ejecutiva</th>
+                        <th>Siguiente paso</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in integraciones_critical_path_rows %}
+                    <tr>
+                        <td><strong>{{ row.rank }}</strong></td>
+                        <td>
+                            <strong>{{ row.title }}</strong>
+                            <div class="muted">{{ row.status }}</div>
+                        </td>
+                        <td>{{ row.owner }}</td>
+                        <td>{{ row.count }}</td>
+                        <td>{{ row.completion }}%</td>
+                        <td>
+                            <strong>{{ row.depends_on }}</strong>
+                            <div class="muted">{{ row.dependency_status }}</div>
+                        </td>
+                        <td>{{ row.detail }}</td>
+                        <td>{{ row.next_step }}</td>
+                        <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if executive_radar_rows %}
+    <section class="card">
+        <div class="card-header">Radar ejecutivo ERP</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Tramo</th>
+                        <th>Responsable</th>
+                        <th>Bloqueo dominante</th>
+                        <th>Depende de</th>
+                        <th>Cierre</th>
+                        <th>Siguiente paso</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in executive_radar_rows %}
+                    <tr>
+                        <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+                        <td>{{ row.owner }}</td>
+                        <td>{{ row.dominant_blocker }}</td>
+                        <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+                        <td><span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">{{ row.progress_pct }}% · {{ row.blockers }} abiertos</span></td>
+                        <td>{{ row.next_step }}</td>
+                        <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="card">
+        <div class="card-header">Mesa de gobierno ERP</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Frente</th>
+                        <th>Responsable</th>
+                        <th>Bloqueos</th>
+                        <th>Cierre</th>
+                        <th>Detalle</th>
+                        <th>Siguiente paso</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in erp_governance_rows %}
+                    <tr>
+                        <td>{{ row.front }}</td>
+                        <td>{{ row.owner }}</td>
+                        <td>{{ row.blockers }}</td>
+                        <td>{{ row.completion }}%</td>
+                        <td>{{ row.detail }}</td>
+                        <td>{{ row.next_step }}</td>
+                        <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Madurez ERP de integraciones</div>
+        <div class="kpi-grid">
+            <article class="kpi-card">
+                <div class="kpi-number is-success">{{ integraciones_maturity_summary.completed_steps }}</div>
+                <div class="kpi-label">Etapas estabilizadas</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number is-warning">{{ integraciones_maturity_summary.attention_steps }}</div>
+                <div class="kpi-label">Etapas con atención</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number">{{ integraciones_maturity_summary.coverage_pct }}%</div>
+                <div class="kpi-label">Cobertura de integraciones</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-label">Siguiente prioridad</div>
+                <div style="font-weight:700; margin:8px 0 6px;">{{ integraciones_maturity_summary.next_priority_title }}</div>
+                <div class="muted">{{ integraciones_maturity_summary.next_priority_detail }}</div>
+                <div style="margin-top:10px;">
+                    <a class="btn btn-secondary btn-sm" href="{{ integraciones_maturity_summary.next_priority_url }}">{{ integraciones_maturity_summary.next_priority_cta }}</a>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Criterios de cierre ERP</div>
+        <div class="kpi-grid">
+            <article class="kpi-card">
+                <div class="kpi-number">{{ release_gate_completion.pct }}%</div>
+                <div class="kpi-label">Cierre global</div>
+                <div class="muted">{{ release_gate_completion.closed }}/{{ release_gate_completion.total }} puntos controlados</div>
+            </article>
+        </div>
+        <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+            {% for row in release_gate_rows %}
+            <article class="enterprise-pill-card {% if row.open %}is-warning{% else %}is-active{% endif %}">
+                <div class="enterprise-pill-title">{{ row.label }}</div>
+                <div class="enterprise-pill-text">{{ row.detail }}</div>
+                <div class="kpi-number {% if row.open %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ row.closed }}</div>
+                <div class="muted">Abiertos: {{ row.open }}</div>
+                <div style="margin-top:10px;">
+                    <a class="btn btn-secondary btn-sm" href="{{ row.url }}">Abrir</a>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Cadena de control de integraciones</div>
+        <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+            {% for item in integraciones_handoff_map %}
+            <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
+                <div class="enterprise-pill-title">{{ item.label }}</div>
+                <div class="enterprise-pill-text">{{ item.detail }}</div>
+                <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+                <div class="muted">{{ item.status }}</div>
+                <div style="margin-top:10px;">
+                    <a class="btn btn-secondary btn-sm" href="{{ item.url }}">{{ item.cta }}</a>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Entrega de integraciones a downstream</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Destino</th>
+                        <th>Responsable</th>
+                        <th>Estatus</th>
+                        <th>Brechas</th>
+                        <th>Cierre</th>
+                        <th>Depende de</th>
+                        <th>Criterio de salida</th>
+                        <th>Siguiente paso</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in integraciones_handoff_map %}
+                    <tr>
+                        <td>{{ item.label }}</td>
+                        <td>{{ item.owner }}</td>
+                        <td>{{ item.status }}</td>
+                        <td>{{ item.count }}</td>
+                        <td>{{ item.completion }}%</td>
+                        <td>{{ item.depends_on }}</td>
+                        <td>{{ item.exit_criteria }}</td>
+                        <td>{{ item.next_step }}</td>
+                        <td><a class="btn btn-secondary btn-sm" href="{{ item.url }}">{{ item.cta }}</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Cierre por etapa documental</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Etapa</th>
+                        <th>Responsable</th>
+                        <th>Abiertos</th>
+                        <th>Cerrados</th>
+                        <th>Cierre</th>
+                        <th>Detalle</th>
+                        <th>Siguiente paso</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in document_stage_rows %}
+                    <tr>
+                        <td>{{ row.label }}</td>
+                        <td>{{ row.owner }}</td>
+                        <td>{{ row.open }}</td>
+                        <td>{{ row.closed }}</td>
+                        <td>{{ row.completion }}%</td>
+                        <td>{{ row.detail }}</td>
+                        <td>{{ row.next_step }}</td>
+                        <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">Abrir</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">Salud operativa ERP</div>
+        <div class="kpi-grid">
+            {% for card in operational_health_cards %}
+            <article class="kpi-card">
+                <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
+                <div class="kpi-label">{{ card.label }}</div>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <div class="card-header mb-0">Alertas operativas</div>
             <a class="btn btn-outline-primary" href="?export=health_csv">Exportar estado CSV</a>
@@ -64,29 +500,44 @@
 
     <section class="card">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <div class="card-header mb-0">Homologacion Point y Match Operativo</div>
+            <div class="card-header mb-0">Centro de conexiones operativas</div>
             <div class="recipe-actions">
-                <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}">Resolver pendientes Point</a>
-                <a class="btn btn-outline-primary" href="{% url 'inventario:aliases_catalog' %}">Corregir aliases de almacen</a>
+                <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}">Abrir integración comercial</a>
+                <a class="btn btn-outline-primary" href="{% url 'inventario:aliases_catalog' %}">Abrir cierre de referencias</a>
+            </div>
+        </div>
+
+        <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+            <div class="enterprise-pill-card is-active">
+                <div class="enterprise-pill-title">01 · Integración comercial</div>
+                <div class="enterprise-pill-text">Consolida códigos y nombres comerciales antes de cerrar la operación.</div>
+            </div>
+            <div class="enterprise-pill-card">
+                <div class="enterprise-pill-title">02 · Maestro central</div>
+                <div class="enterprise-pill-text">Valida unidad, categoría, proveedor y artículo canónico antes de cerrar la operación.</div>
+            </div>
+            <div class="enterprise-pill-card">
+                <div class="enterprise-pill-title">03 · BOM y almacén</div>
+                <div class="enterprise-pill-text">Consolida componentes de recetas y nombres de almacén hacia un solo artículo maestro.</div>
             </div>
         </div>
 
         <div class="integraciones-homologacion-grid mb-3">
             <article class="kpi-card">
                 <div class="kpi-number">{{ integracion_point.insumos.cobertura_pct|floatformat:2 }}%</div>
-                <div class="kpi-label">Cobertura Point en insumos</div>
+                <div class="kpi-label">Cobertura comercial en insumos</div>
                 <div class="muted">{{ integracion_point.insumos.con_codigo_point }}/{{ integracion_point.insumos.activos }}</div>
             </article>
             <article class="kpi-card">
                 <div class="kpi-number is-warning">{{ integracion_point.recetas.cobertura_pct|floatformat:2 }}%</div>
-                <div class="kpi-label">Cobertura Point en recetas</div>
+                <div class="kpi-label">Cobertura comercial en productos finales</div>
                 <div class="muted">{{ integracion_point.recetas.homologadas }}/{{ integracion_point.recetas.total }}</div>
             </article>
             <article class="kpi-card">
                 <div class="kpi-number {% if integracion_point.point_pending.total %}is-danger{% else %}is-success{% endif %}">
                     {{ integracion_point.point_pending.total }}
                 </div>
-                <div class="kpi-label">Pendientes Point</div>
+                <div class="kpi-label">Observaciones de catálogo comercial</div>
                 <div class="muted">
                     Insumos {{ point_pending_insumo }} · Productos {{ point_pending_producto }} · Proveedores {{ point_pending_proveedor }}
                 </div>
@@ -95,31 +546,31 @@
                 <div class="kpi-number {% if integracion_point.inventario.recetas_pending_match %}is-danger{% else %}is-success{% endif %}">
                     {{ integracion_point.inventario.recetas_pending_match }}
                 </div>
-                <div class="kpi-label">Líneas receta sin match</div>
-                <div class="muted">Pendientes de homologación interna</div>
+                <div class="kpi-label">Componentes de receta en revisión</div>
+                <div class="muted">Requieren artículo maestro antes de cerrar la operación</div>
             </article>
             <article class="kpi-card">
                 <div class="kpi-number {% if integracion_point.inventario.almacen_pending_preview %}is-warning{% else %}is-success{% endif %}">
                     {{ integracion_point.inventario.almacen_pending_preview }}
                 </div>
-                <div class="kpi-label">Pendientes recientes almacén</div>
+                <div class="kpi-label">Referencias recientes de almacén</div>
                 <div class="muted">
                     {% if integracion_point.inventario.almacen_latest_run_at %}
-                    Run {{ integracion_point.inventario.almacen_latest_run_at|date:"Y-m-d H:i" }}
+                    Corte {{ integracion_point.inventario.almacen_latest_run_at|date:"Y-m-d H:i" }}
                     {% else %}
-                    Sin run registrado
+                    Sin corte registrado
                     {% endif %}
                 </div>
             </article>
         </div>
 
         <div class="card-subtle mb-3">
-            <h3 class="integraciones-subtitle">Resolución masiva Point (insumos)</h3>
+            <h3 class="integraciones-subtitle">Resolución asistida de catálogo comercial</h3>
             <form method="post" class="form-grid-auto">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="resolve_point_sugerencias_insumos">
                 <div class="form-group">
-                    <label class="form-label" for="id_auto_score_min">Score mínimo</label>
+                    <label class="form-label" for="id_auto_score_min">Confianza mínima</label>
                     <input
                         id="id_auto_score_min"
                         name="auto_score_min"
@@ -151,17 +602,17 @@
                     </label>
                 </div>
                 <div class="form-group" style="display:flex;align-items:flex-end;">
-                    <button type="submit" class="btn btn-primary w-100">Auto-resolver pendientes de insumos</button>
+                    <button type="submit" class="btn btn-primary w-100">Aplicar resoluciones sugeridas</button>
                 </div>
             </form>
             <p class="muted mb-0">
-                Aplica sugerencias de nombre con score mínimo, actualiza código/nombre Point del insumo y opcionalmente crea alias.
+                Aplica resoluciones con confianza mínima, actualiza el código comercial externo y opcionalmente crea alias operativos.
             </p>
         </div>
 
         <div class="integraciones-columns">
             <div>
-                <h3 class="integraciones-subtitle">Point pendientes (recientes)</h3>
+                <h3 class="integraciones-subtitle">Observaciones recientes del catálogo comercial</h3>
                 <div class="table-responsive">
                     <table class="table">
                         <thead>
@@ -169,7 +620,7 @@
                                 <th>Tipo</th>
                                 <th>Código</th>
                                 <th>Nombre</th>
-                                <th>Score</th>
+                                <th>Confianza</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -181,7 +632,7 @@
                                 <td>{{ p.fuzzy_score|floatformat:1 }}</td>
                             </tr>
                         {% empty %}
-                            <tr><td colspan="4" class="muted">Sin pendientes Point.</td></tr>
+                            <tr><td colspan="4" class="muted">Sin observaciones abiertas del catálogo comercial.</td></tr>
                         {% endfor %}
                         </tbody>
                     </table>
@@ -189,15 +640,15 @@
             </div>
 
             <div>
-                <h3 class="integraciones-subtitle">Recetas sin match (recientes)</h3>
+                <h3 class="integraciones-subtitle">Componentes de receta en revisión</h3>
                 <div class="table-responsive">
                     <table class="table">
                         <thead>
                             <tr>
                                 <th>Receta</th>
                                 <th>Ingrediente</th>
-                                <th>Método</th>
-                                <th>Score</th>
+                                <th>Artículo sugerido</th>
+                                <th>Confianza</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -209,7 +660,7 @@
                                 <td>{{ l.match_score|floatformat:1 }}</td>
                             </tr>
                         {% empty %}
-                            <tr><td colspan="4" class="muted">Sin líneas pendientes de receta.</td></tr>
+                            <tr><td colspan="4" class="muted">Sin componentes abiertos por validar dentro de recetas.</td></tr>
                         {% endfor %}
                         </tbody>
                     </table>
@@ -218,15 +669,15 @@
         </div>
 
         <div>
-            <h3 class="integraciones-subtitle">Almacén pendientes (último run)</h3>
+            <h3 class="integraciones-subtitle">Referencias de almacén recientes (último corte)</h3>
             <div class="table-responsive">
                 <table class="table">
                     <thead>
                         <tr>
                             <th>Nombre origen</th>
-                            <th>Normalizado</th>
-                            <th>Sugerencia</th>
-                            <th>Score</th>
+                            <th>Referencia maestra</th>
+                            <th>Artículo sugerido</th>
+                            <th>Confianza</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -238,7 +689,7 @@
                             <td>{{ r.score|default:"0" }}</td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="4" class="muted">Sin pendientes en el último run de almacén.</td></tr>
+                        <tr><td colspan="4" class="muted">Sin observaciones abiertas en el último corte de almacén.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

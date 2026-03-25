@@ -2,97 +2,236 @@
 {% block title %}{% if linea %}Editar línea{% else %}Nueva línea{% endif %}{% endblock %}
 {% block content %}
 <div class="card">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <div>
-      <h3 class="mb-0">
-        {% if quick_mode %}
-          {% if linea %}Editar componente{% else %}Nuevo componente{% endif %}
-        {% else %}
-          {% if linea %}Editar línea{% else %}Nueva línea{% endif %}
-        {% endif %}
-      </h3>
-      <div class="text-muted">Receta: {{ receta.nombre }}</div>
+  <section class="card recipe-hero-card mb-3">
+    <div class="recipe-hero-head">
+      <div>
+        <div class="recipe-hero-eyebrow">Componente de receta</div>
+        <h2 class="recipe-hero-title">
+          {% if linea %}
+            Editar componente
+          {% elif default_component_filter == "INSUMO_INTERNO" %}
+            Agregar insumo interno
+          {% elif default_component_filter == "MATERIA_PRIMA" %}
+            Agregar materia prima
+          {% elif default_component_filter == "EMPAQUE" %}
+            Agregar empaque
+          {% else %}
+            Agregar componente
+          {% endif %}
+        </h2>
+        <div class="recipe-hero-copy">{{ receta.nombre }}</div>
+      </div>
+      <div class="recipe-actions">
+        <a id="create_insumo_link" class="btn btn-secondary" href="{% url 'maestros:insumo_create' %}?next={{ request.path|urlencode }}" target="_blank" rel="noopener">Crear artículo</a>
+        <a class="btn btn-outline-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Volver</a>
+      </div>
     </div>
-    <a class="btn btn-outline-secondary" href="{% url 'recetas:receta_detail' receta.id %}">Volver a receta</a>
+  </section>
+
+  <div class="module-note mb-3">
+    Busca el artículo correcto, captura la cantidad y guarda. Si el artículo no existe, créalo primero. No se hará sustitución automática a otro sabor o presentación.
   </div>
-  <div class="alert alert-info">
-    {% if quick_mode %}
-      Modo rápido de <strong>producto final</strong>: busca el insumo, captura cantidad y guarda.
-      La unidad y costo se toman automáticamente del catálogo.
-    {% elif receta.tipo == "PRODUCTO_FINAL" %}
-      Esta receta es <strong>producto final</strong>: selecciona insumo/subinsumo y captura la cantidad.
-      El sistema toma la unidad y costo del catálogo automáticamente.
-    {% else %}
-      Esta receta es <strong>insumo interno</strong>: agrega materia prima o insumos base con cantidad.
-      La unidad y costo se detectan desde el catálogo.
-    {% endif %}
+
+  {% if receta.tipo == "PRODUCTO_FINAL" %}
+  <div class="module-note mb-3">
+    <strong>Bloque: {{ component_context_meta.title|lower }}</strong>. {{ component_context_meta.description }}
   </div>
-  <div class="toolbar mb-3">
-    {% if receta.tipo == "PRODUCTO_FINAL" %}
-      {% if quick_mode %}
-        <a class="btn btn-secondary" href="?advanced=1">Opciones avanzadas</a>
-      {% else %}
-        <a class="btn btn-secondary" href="?">Modo rápido</a>
+  {% endif %}
+
+    <div class="recipe-component-class mb-3">
+      <div class="recipe-component-class-head">
+        <h4 class="mb-0">Clase de componente</h4>
+      <span class="text-muted">Primero filtra el catálogo y luego busca el artículo correcto.</span>
+      </div>
+    <div class="recipe-component-class-grid" role="tablist" aria-label="Clase de componente">
+      {% if "ALL" in component_filter_choices %}
+      <button type="button" class="recipe-component-chip is-active" data-component-filter="ALL">Todo el catálogo</button>
       {% endif %}
-    {% endif %}
-    <a class="btn btn-secondary" href="{% url 'maestros:insumo_create' %}" target="_blank" rel="noopener">+ Crear insumo nuevo</a>
-    <span class="text-muted">Si no encuentras un insumo, créalo y vuelve a esta pantalla.</span>
+      {% if "INSUMO_INTERNO" in component_filter_choices %}
+      <button type="button" class="recipe-component-chip" data-component-filter="INSUMO_INTERNO">Insumos internos</button>
+      {% endif %}
+      {% if "MATERIA_PRIMA" in component_filter_choices %}
+      <button type="button" class="recipe-component-chip" data-component-filter="MATERIA_PRIMA">Materia prima</button>
+      {% endif %}
+      {% if "EMPAQUE" in component_filter_choices %}
+      <button type="button" class="recipe-component-chip" data-component-filter="EMPAQUE">Empaques</button>
+      {% endif %}
+    </div>
+    <div class="module-note mt-2" id="component_filter_summary">
+      Catálogo activo:
+      {% if default_component_filter == "MATERIA_PRIMA" %}
+        <strong>{{ component_filter_meta.MATERIA_PRIMA.title }}</strong>. {{ component_filter_meta.MATERIA_PRIMA.description }}
+      {% elif default_component_filter == "EMPAQUE" %}
+        <strong>{{ component_filter_meta.EMPAQUE.title }}</strong>. {{ component_filter_meta.EMPAQUE.description }}
+      {% elif default_component_filter == "ALL" %}
+        <strong>{{ component_filter_meta.ALL.title }}</strong>. {{ component_filter_meta.ALL.description }}
+      {% else %}
+        <strong>{{ component_filter_meta.INSUMO_INTERNO.title }}</strong>. {{ component_filter_meta.INSUMO_INTERNO.description }}
+      {% endif %}
+    </div>
+    <label class="table-toggle mt-2">
+      <input type="checkbox" id="show_incomplete_items">
+      <span>Mostrar artículos incompletos</span>
+    </label>
   </div>
 
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="advanced_mode" value="{% if advanced_mode %}1{% else %}0{% endif %}">
+    <input type="hidden" name="component_filter" id="component_filter_input" value="{{ default_component_filter }}">
+    <input type="hidden" name="component_context" value="{{ component_context }}">
+    {% if quick_mode %}
+    <input id="insumo_texto" class="form-control" type="hidden" name="insumo_texto" value="{% if linea %}{{ linea.insumo_texto|default:'' }}{% endif %}">
+    {% endif %}
     <div class="kpi-grid">
       <div class="form-group">
-        <label for="insumo_autocomplete">Buscar insumo (autocompletar)</label>
-        <input id="insumo_autocomplete" class="form-control" type="text" placeholder="Escribe para buscar el insumo..." autocomplete="off">
+        <label for="insumo_autocomplete">Buscar artículo (autocompletar)</label>
+        <input id="insumo_autocomplete" class="form-control" type="text" placeholder="{% if receta.tipo == 'PRODUCTO_FINAL' %}Escribe pan, relleno, cobertura, empaque...{% else %}Escribe harina, huevo, mezcla, empaque...{% endif %}" autocomplete="off">
         <div id="insumo_autocomplete_suggestions" class="autocomplete-suggestions" role="listbox" aria-label="Sugerencias de insumo"></div>
       </div>
       <div class="form-group">
         <label for="cantidad">Cantidad requerida</label>
-        <input id="cantidad" class="form-control" type="number" step="0.000001" min="0" name="cantidad" value="{{ linea.cantidad|default:'' }}" required>
-        <div class="text-muted mt-1">Si está vacía, se sugiere automáticamente según la unidad del insumo.</div>
+        <input id="cantidad" class="form-control" type="number" step="0.000001" min="0" name="cantidad" value="{% if linea %}{{ linea.cantidad|default:'' }}{% endif %}" required>
+        <div class="text-muted mt-1" id="cantidad_unit_hint">
+          {% if receta.tipo == "PRODUCTO_FINAL" %}
+            Captura cuánta cantidad de ese componente consume el producto final.
+          {% else %}
+            Captura la cantidad real consumida por la batida o mezcla base.
+          {% endif %}
+        </div>
       </div>
+      {% if quick_mode %}
       <div class="form-group">
-        <label for="insumo_texto">Ingrediente (texto)</label>
-        <input id="insumo_texto" class="form-control" type="text" name="insumo_texto" value="{{ linea.insumo_texto|default:'' }}" placeholder="Se autocompleta al seleccionar insumo" {% if quick_mode %}readonly{% endif %}>
+        <label for="selected_insumo_preview">Artículo seleccionado</label>
+        <input id="selected_insumo_preview" class="form-control" type="text" value="{% if linea and linea.insumo %}{{ linea.insumo.nombre_point|default:linea.insumo.nombre }}{% elif linea %}{{ linea.insumo_texto|default:'-' }}{% else %}-{% endif %}" readonly>
+        <div class="text-muted mt-1">El nombre se toma del catálogo. Solo selecciona artículo y captura cantidad.</div>
       </div>
+      {% else %}
+      <div class="form-group">
+        <label for="selected_insumo_preview">Artículo seleccionado</label>
+        <input id="selected_insumo_preview" class="form-control" type="text" value="{% if linea and linea.insumo %}{{ linea.insumo.nombre_point|default:linea.insumo.nombre }}{% elif linea %}{{ linea.insumo_texto|default:'-' }}{% else %}-{% endif %}" readonly>
+        <div class="text-muted mt-1">Si el artículo ya existe en catálogo, no necesitas capturar texto libre.</div>
+      </div>
+      {% endif %}
     </div>
 
     <div class="kpi-grid">
       {% if quick_mode %}
       <input type="hidden" name="modo_rapido" value="1">
       <input type="hidden" name="tipo_linea" value="NORMAL">
-      <input type="hidden" name="etapa" value="{{ linea.etapa|default:'' }}">
+      <input type="hidden" name="etapa" value="{% if linea %}{{ linea.etapa|default:'' }}{% endif %}">
+      <div class="form-group">
+        <label for="insumo_origen">Origen de insumo</label>
+        <input id="insumo_origen" class="form-control" type="text" value="-" readonly>
+      </div>
       {% else %}
-      <div class="form-group">
-        <label for="etapa">Etapa / Sección</label>
-        <input id="etapa" class="form-control" type="text" name="etapa" value="{{ linea.etapa|default:'' }}" placeholder="Ej. Dream Whip, Fresa fresca">
-      </div>
-      <div class="form-group">
-        <label for="tipo_linea">Tipo de línea</label>
-        <select id="tipo_linea" class="form-select" name="tipo_linea">
-          {% for value, label in linea_tipo_choices %}
-          <option value="{{ value }}"
-            {% if linea %}
-              {% if linea.tipo_linea == value %}selected{% endif %}
-            {% else %}
-              {% if value == "NORMAL" %}selected{% endif %}
-            {% endif %}
-          >{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
       {% endif %}
       <div class="form-group">
         <label for="unidad_detectada_preview">Unidad detectada</label>
-        <input id="unidad_detectada_preview" class="form-control" type="text" value="{{ linea.unidad_texto|default:'-' }}" readonly>
+        <input id="unidad_detectada_preview" class="form-control" type="text" value="{% if linea %}{{ linea.unidad_texto|default:'-' }}{% else %}-{% endif %}" readonly>
       </div>
+      {% if quick_mode %}
+      <div class="form-group">
+        <label for="costo_unitario_preview">Costo unitario vigente</label>
+        <input id="costo_unitario_preview" class="form-control" type="text" value="-" readonly>
+      </div>
+      {% endif %}
     </div>
 
+    {% if quick_mode %}
     <div class="kpi-grid">
       <div class="form-group">
-        <label for="insumo_id">Insumo ligado</label>
+        <label for="costo_estimado_preview">Costo estimado (cantidad x costo unitario)</label>
+        <input id="costo_estimado_preview" class="form-control" type="text" value="-" readonly>
+      </div>
+      <div class="form-group">
+        <label for="quick_mode_summary">Resumen operativo</label>
+        <input id="quick_mode_summary" class="form-control" type="text" value="Selecciona un artículo y captura cantidad" readonly>
+      </div>
+    </div>
+    <div id="selection_quality_notice" class="module-note mt-2" style="display:none;"></div>
+    {% endif %}
+
+    {% if not quick_mode %}
+    <details class="capture-notes" {% if not linea or not linea.insumo_id or linea.etapa or linea.tipo_linea == "SUBSECCION" %}open{% endif %}>
+      <summary>Captura complementaria y estructura opcional</summary>
+      <div class="module-note mt-3 mb-3">
+        Esta sección es excepcional. Úsala solo cuando el artículo aún no exista en catálogo o cuando la línea represente una subsección como relleno, cobertura o decorado.
+      </div>
+      <div class="kpi-grid">
+        <div class="form-group">
+          <label for="insumo_texto">Ingrediente (texto)</label>
+          <input id="insumo_texto" class="form-control" type="text" name="insumo_texto" value="{% if linea %}{{ linea.insumo_texto|default:'' }}{% endif %}" placeholder="Solo úsalo si todavía no existe un artículo ERP">
+        </div>
+        <div class="form-group">
+          <label for="selected_insumo_preview_manual">Artículo seleccionado</label>
+          <input id="selected_insumo_preview_manual" class="form-control" type="text" value="{% if linea and linea.insumo %}{{ linea.insumo.nombre }}{% elif linea %}{{ linea.insumo_texto|default:'-' }}{% else %}-{% endif %}" readonly>
+          <div class="text-muted mt-1">Si ya seleccionaste un artículo arriba, no necesitas escribir aquí.</div>
+        </div>
+      </div>
+      {% if show_subsection_controls %}
+      <div class="kpi-grid mt-3">
+        <div class="form-group">
+          <label for="etapa">Etapa / Sección</label>
+          <input id="etapa" class="form-control" type="text" name="etapa" value="{% if linea %}{{ linea.etapa|default:'' }}{% endif %}" placeholder="Ej. Dream Whip, Fresa fresca">
+        </div>
+        <div class="form-group">
+          <label for="tipo_linea">Tipo de línea</label>
+          <select id="tipo_linea" class="form-select" name="tipo_linea">
+            {% for value, label in linea_tipo_choices %}
+            <option value="{{ value }}"
+              {% if linea %}
+                {% if linea and linea.tipo_linea == value %}selected{% endif %}
+              {% else %}
+                {% if value == "NORMAL" %}selected{% endif %}
+              {% endif %}
+            >{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      {% else %}
+      <details class="capture-notes mt-3">
+        <summary>Opciones de estructura (subsección)</summary>
+        <div class="text-muted mt-2 mb-3">Actívalo solo si esta línea representa un bloque lógico como relleno, cobertura o decorado.</div>
+        <div class="kpi-grid">
+          <div class="form-group">
+            <label for="etapa">Etapa / Sección</label>
+            <input id="etapa" class="form-control" type="text" name="etapa" value="{% if linea %}{{ linea.etapa|default:'' }}{% endif %}" placeholder="Ej. Dream Whip, Fresa fresca">
+          </div>
+          <div class="form-group">
+            <label for="tipo_linea">Tipo de línea</label>
+            <select id="tipo_linea" class="form-select" name="tipo_linea">
+              {% for value, label in linea_tipo_choices %}
+              <option value="{{ value }}"
+                {% if linea %}
+                  {% if linea and linea.tipo_linea == value %}selected{% endif %}
+                {% else %}
+                  {% if value == "NORMAL" %}selected{% endif %}
+                {% endif %}
+              >{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </details>
+      {% endif %}
+    </details>
+    {% endif %}
+
+    <details class="erp-advanced-panel mb-3">
+      <summary class="erp-advanced-summary">
+        <span>Ver datos calculados del artículo</span>
+        <span class="text-muted">Origen, costo, unidad y vínculo interno del maestro</span>
+      </summary>
+      <div class="erp-advanced-body">
+    <div class="kpi-grid">
+      <div class="form-group">
+        <label for="linked_catalog_item_preview">Artículo maestro</label>
+        <input id="linked_catalog_item_preview" class="form-control" type="text" value="{% if linea and linea.insumo %}{{ linea.insumo.nombre_point|default:linea.insumo.nombre }}{% elif linea %}{{ linea.insumo_texto|default:'Se asigna desde la búsqueda superior' }}{% else %}Se asigna desde la búsqueda superior{% endif %}" readonly>
+        <div class="text-muted mt-1">
+          El sistema liga internamente el artículo correcto. No necesitas capturar este vínculo; el ERP lo resuelve automáticamente.
+        </div>
         <select id="insumo_id" class="form-select" name="insumo_id" style="display:none;">
           <option value="">Sin ligar</option>
           <optgroup label="Insumos internos (producidos)">
@@ -100,13 +239,17 @@
               <option
                 value="{{ i.id }}"
                 data-origin="INSUMO_INTERNO"
-                data-nombre="{{ i.nombre }}"
+                data-nombre="{{ i.nombre_point|default:i.nombre }}"
+                data-context-score="{{ i.recipe_context_score|default:0 }}"
+                data-has-cost="{% if i.latest_costo_unitario and i.latest_costo_unitario > 0 %}1{% else %}0{% endif %}"
+                data-erp-ready="{% if i.erp_profile.ready %}1{% else %}0{% endif %}"
+                data-erp-missing="{{ i.erp_profile.missing|join:', ' }}"
                 data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
                 data-unidad-tipo="{% if i.unidad_base %}{{ i.unidad_base.tipo }}{% endif %}"
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
-                {% if linea.insumo_id == i.id %}selected{% endif %}
-              >{% if i.codigo %}[{{ i.codigo }}] {% elif i.codigo_point %}[{{ i.codigo_point }}] {% endif %}{{ i.nombre }} [Interno]</option>
+                {% if linea and linea.insumo_id == i.id %}selected{% endif %}
+              >{{ i.nombre_point|default:i.nombre }}</option>
             {% endfor %}
           </optgroup>
           {% if insumos_empaque %}
@@ -115,13 +258,17 @@
               <option
                 value="{{ i.id }}"
                 data-origin="EMPAQUE"
-                data-nombre="{{ i.nombre }}"
+                data-nombre="{{ i.nombre_point|default:i.nombre }}"
+                data-context-score="{{ i.recipe_context_score|default:0 }}"
+                data-has-cost="{% if i.latest_costo_unitario and i.latest_costo_unitario > 0 %}1{% else %}0{% endif %}"
+                data-erp-ready="{% if i.erp_profile.ready %}1{% else %}0{% endif %}"
+                data-erp-missing="{{ i.erp_profile.missing|join:', ' }}"
                 data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
                 data-unidad-tipo="{% if i.unidad_base %}{{ i.unidad_base.tipo }}{% endif %}"
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
-                {% if linea.insumo_id == i.id %}selected{% endif %}
-              >{% if i.codigo %}[{{ i.codigo }}] {% elif i.codigo_point %}[{{ i.codigo_point }}] {% endif %}{{ i.nombre }} [Empaque]</option>
+                {% if linea and linea.insumo_id == i.id %}selected{% endif %}
+              >{{ i.nombre_point|default:i.nombre }}</option>
             {% endfor %}
           </optgroup>
           {% endif %}
@@ -130,33 +277,35 @@
               <option
                 value="{{ i.id }}"
                 data-origin="MATERIA_PRIMA"
-                data-nombre="{{ i.nombre }}"
+                data-nombre="{{ i.nombre_point|default:i.nombre }}"
+                data-context-score="{{ i.recipe_context_score|default:0 }}"
+                data-has-cost="{% if i.latest_costo_unitario and i.latest_costo_unitario > 0 %}1{% else %}0{% endif %}"
+                data-erp-ready="{% if i.erp_profile.ready %}1{% else %}0{% endif %}"
+                data-erp-missing="{{ i.erp_profile.missing|join:', ' }}"
                 data-unidad-id="{% if i.unidad_base_id %}{{ i.unidad_base_id }}{% endif %}"
                 data-unidad-codigo="{% if i.unidad_base %}{{ i.unidad_base.codigo }}{% endif %}"
                 data-unidad-tipo="{% if i.unidad_base %}{{ i.unidad_base.tipo }}{% endif %}"
                 data-costo-unitario="{% if i.latest_costo_unitario %}{{ i.latest_costo_unitario }}{% endif %}"
-                {% if linea.insumo_id == i.id %}selected{% endif %}
-              >{% if i.codigo %}[{{ i.codigo }}] {% elif i.codigo_point %}[{{ i.codigo_point }}] {% endif %}{{ i.nombre }} [Materia prima]</option>
+                {% if linea and linea.insumo_id == i.id %}selected{% endif %}
+              >{{ i.nombre_point|default:i.nombre }}</option>
             {% endfor %}
           </optgroup>
         </select>
-        <div class="text-muted mt-1">
-          Escribe para buscar y presiona Enter para elegir la mejor coincidencia.
-        </div>
       </div>
       <div class="form-group">
-        <label for="unidad_id">Unidad normalizada (automática)</label>
+        <label for="unidad_id">Unidad del artículo</label>
         <select id="unidad_id" class="form-select" name="unidad_id" style="display:none;">
           <option value="">Sin unidad</option>
           {% for u in unidades %}
-          <option value="{{ u.id }}" {% if linea.unidad_id == u.id %}selected{% endif %}>{{ u.codigo }} - {{ u.nombre }}</option>
+          <option value="{{ u.id }}" {% if linea and linea.unidad_id == u.id %}selected{% endif %}>{{ u.codigo }} - {{ u.nombre }}</option>
           {% endfor %}
         </select>
-        <input id="unidad_texto" class="form-control" type="hidden" name="unidad_texto" value="{{ linea.unidad_texto|default:'' }}">
+        <input id="unidad_texto" class="form-control" type="hidden" name="unidad_texto" value="{% if linea %}{{ linea.unidad_texto|default:'' }}{% endif %}">
         <div class="text-muted mt-1">La unidad se toma del insumo seleccionado para evitar errores de captura.</div>
       </div>
     </div>
 
+    {% if not quick_mode %}
     <div class="kpi-grid">
       <div class="form-group">
         <label for="insumo_origen">Origen de insumo</label>
@@ -171,6 +320,9 @@
         <input id="costo_estimado_preview" class="form-control" type="text" value="-" readonly>
       </div>
     </div>
+    {% endif %}
+      </div>
+    </details>
 
     <div class="recipe-actions">
       <button type="submit" class="btn btn-primary">
@@ -194,11 +346,74 @@
   const origenInput = document.getElementById("insumo_origen");
   const costoUnitarioInput = document.getElementById("costo_unitario_preview");
   const costoEstimadoInput = document.getElementById("costo_estimado_preview");
+  const selectedInsumoPreview = document.getElementById("selected_insumo_preview");
+  const linkedCatalogItemPreview = document.getElementById("linked_catalog_item_preview");
+  const quickModeSummary = document.getElementById("quick_mode_summary");
+  const selectionQualityNotice = document.getElementById("selection_quality_notice");
+  const cantidadUnitHint = document.getElementById("cantidad_unit_hint");
+  const createInsumoLink = document.getElementById("create_insumo_link");
+  const componentFilterInput = document.getElementById("component_filter_input");
+  const guidanceCards = Array.from(document.querySelectorAll("[data-guidance-filter]"));
+  const showIncompleteItemsToggle = document.getElementById("show_incomplete_items");
   const recetaNameNorm = normalizeText("{{ receta.nombre|escapejs }}");
   const isBolloRecipe = recetaNameNorm.includes(" bollo") || recetaNameNorm.startsWith("bollo") || recetaNameNorm.includes(" bollos") || recetaNameNorm.includes(" bollito");
+  const classButtons = Array.from(document.querySelectorAll("[data-component-filter]"));
+  const componentFilterSummary = document.getElementById("component_filter_summary");
+  const defaultFilter = "{{ default_component_filter|default:'ALL'|escapejs }}" || ("{{ receta.tipo }}" === "PRODUCTO_FINAL" ? "INSUMO_INTERNO" : "MATERIA_PRIMA");
+  const componentContext = "{{ component_context|default:'general'|escapejs }}";
+  const availableFilters = new Set([{% for key in component_filter_choices %}"{{ key }}"{% if not forloop.last %}, {% endif %}{% endfor %}]);
+  const filterMeta = {
+    ALL: {
+      title: "{{ component_filter_meta.ALL.title|escapejs }}",
+      description: "{{ component_filter_meta.ALL.description|escapejs }}",
+      count: {{ component_filter_meta.ALL.count|default:0 }},
+      placeholder: "Escribe nombre, código o referencia del artículo...",
+      quantityHint: "Captura la cantidad exacta que consume esta receta. La unidad se define al elegir el artículo.",
+      emptySummary: "Selecciona un artículo y captura cantidad",
+      createLabel: "Crear artículo nuevo",
+    },
+    INSUMO_INTERNO: {
+      title: "{{ component_filter_meta.INSUMO_INTERNO.title|escapejs }}",
+      description: "{{ component_filter_meta.INSUMO_INTERNO.description|escapejs }}",
+      count: {{ component_filter_meta.INSUMO_INTERNO.count|default:0 }},
+      placeholder: "Busca pan, relleno, cobertura, batida o subinsumo...",
+      quantityHint: "Captura cuánta cantidad de este insumo interno usa la receta final.",
+      emptySummary: "Selecciona un insumo interno y captura cantidad",
+      createLabel: "Crear insumo interno",
+    },
+    MATERIA_PRIMA: {
+      title: "{{ component_filter_meta.MATERIA_PRIMA.title|escapejs }}",
+      description: "{{ component_filter_meta.MATERIA_PRIMA.description|escapejs }}",
+      count: {{ component_filter_meta.MATERIA_PRIMA.count|default:0 }},
+      placeholder: "Busca harina, fruta, chocolate, topping o MP puntual...",
+      quantityHint: "Úsala solo cuando la materia prima entra directo a la receta sin pasar por una batida interna.",
+      emptySummary: "Selecciona materia prima puntual y captura cantidad",
+      createLabel: "Crear materia prima",
+    },
+    EMPAQUE: {
+      title: "{{ component_filter_meta.EMPAQUE.title|escapejs }}",
+      description: "{{ component_filter_meta.EMPAQUE.description|escapejs }}",
+      count: {{ component_filter_meta.EMPAQUE.count|default:0 }},
+      placeholder: "Busca caja, domo, etiqueta, vaso o accesorio final...",
+      quantityHint: "Captura solo el empaque real que acompaña al producto final.",
+      emptySummary: "Selecciona empaque y captura cantidad",
+      createLabel: "Crear empaque",
+    },
+  };
+  let activeFilter = availableFilters.has("ALL")
+    ? "ALL"
+    : (availableFilters.has("INSUMO_INTERNO") ? "INSUMO_INTERNO" : "MATERIA_PRIMA");
   const insumoOptions = Array.from(insumoSelect.querySelectorAll("option"))
     .filter((opt) => !!opt.value)
-    .map((opt) => ({ value: opt.value, label: opt.textContent.trim() }));
+    .map((opt) => ({
+      value: opt.value,
+      label: opt.textContent.trim(),
+      origin: opt.dataset.origin || "",
+      contextScore: parseInt(opt.dataset.contextScore || "0", 10) || 0,
+      hasCost: opt.dataset.hasCost === "1",
+      erpReady: opt.dataset.erpReady === "1",
+      erpMissing: opt.dataset.erpMissing || "",
+    }));
   let currentSuggestions = [];
   let highlightedSuggestionIndex = -1;
 
@@ -265,12 +480,23 @@
     return (2 * overlap) / (a2.length + b2.length);
   }
 
+  function filteredInsumoOptions() {
+    const includeIncomplete = !!(showIncompleteItemsToggle && showIncompleteItemsToggle.checked);
+    const filtered = (!activeFilter || activeFilter === "ALL")
+      ? insumoOptions
+      : insumoOptions.filter((item) => item.origin === activeFilter);
+    if (includeIncomplete) {
+      return filtered;
+    }
+    return filtered.filter((item) => item.erpReady);
+  }
+
   function suggestionsFor(query) {
     const q = normalizeText(query);
     if (!q) return [];
     const qLooksLikePan = q.startsWith("pan ") || q === "pan" || q.includes("pan chocolate") || q.includes("pan vainilla");
     const tokens = q.split(/\s+/).filter(Boolean);
-    return insumoOptions
+    return filteredInsumoOptions()
       .map((item) => {
         const norm = normalizeText(item.label);
         const idx = norm.indexOf(q);
@@ -289,6 +515,15 @@
           }
           score += Math.round(diceCoefficient(q, norm) * 220);
         }
+        score += (item.contextScore || 0) * 60;
+        if (item.erpReady) {
+          score += 120;
+        } else {
+          score -= 180;
+        }
+        if ("{{ receta.tipo }}" === "PRODUCTO_FINAL" && !item.hasCost) {
+          score -= 220;
+        }
         if (isBolloRecipe && qLooksLikePan) {
           if (norm.includes("derivado:receta:") && norm.includes("preparacion")) {
             score += 260;
@@ -302,6 +537,66 @@
       .filter((item) => item.score >= 80)
       .sort((a, b) => (b.score - a.score) || (a.label.length - b.label.length))
       .slice(0, 12);
+  }
+
+  function setComponentFilter(filterValue) {
+    if (filterValue && availableFilters.has(filterValue)) {
+      activeFilter = filterValue;
+    } else if (availableFilters.has("INSUMO_INTERNO")) {
+      activeFilter = "INSUMO_INTERNO";
+    } else if (availableFilters.has("MATERIA_PRIMA")) {
+      activeFilter = "MATERIA_PRIMA";
+    } else if (availableFilters.has("EMPAQUE")) {
+      activeFilter = "EMPAQUE";
+    } else {
+      activeFilter = "ALL";
+    }
+    const meta = filterMeta[activeFilter] || filterMeta.ALL;
+    if (componentFilterInput) {
+      componentFilterInput.value = activeFilter;
+    }
+    classButtons.forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.componentFilter === activeFilter);
+    });
+    guidanceCards.forEach((card) => {
+      const match = card.dataset.guidanceFilter === activeFilter;
+      card.classList.toggle("is-active", match);
+    });
+    if (componentFilterSummary) {
+      componentFilterSummary.innerHTML = "Catálogo activo: <strong>" + meta.title + "</strong> (" + meta.count + "). " + meta.description;
+    }
+    if (insumoAutocomplete) {
+      insumoAutocomplete.placeholder = meta.placeholder || filterMeta.ALL.placeholder;
+    }
+    if (cantidadUnitHint) {
+      cantidadUnitHint.textContent = meta.quantityHint || filterMeta.ALL.quantityHint;
+    }
+    if (quickModeSummary && (!insumoSelect.value || !insumoSelect.options[insumoSelect.selectedIndex] || !insumoSelect.options[insumoSelect.selectedIndex].value)) {
+      quickModeSummary.value = meta.emptySummary || filterMeta.ALL.emptySummary;
+    }
+    updateCreateInsumoLink();
+    updateSuggestions();
+  }
+
+  function updateCreateInsumoLink() {
+    if (!createInsumoLink) return;
+    const params = new URLSearchParams();
+    const query = String(insumoAutocomplete.value || "").trim();
+    const currentPath = "{{ request.path|escapejs }}";
+    const meta = filterMeta[activeFilter] || filterMeta.ALL;
+    params.set("next", currentPath);
+    if (activeFilter === "INSUMO_INTERNO" || activeFilter === "MATERIA_PRIMA" || activeFilter === "EMPAQUE") {
+      params.set("tipo_item", activeFilter);
+    } else if ("{{ receta.tipo }}" === "PRODUCTO_FINAL") {
+      params.set("tipo_item", "INSUMO_INTERNO");
+    } else {
+      params.set("tipo_item", "MATERIA_PRIMA");
+    }
+    if (query) {
+      params.set("nombre", query);
+    }
+    createInsumoLink.href = "{% url 'maestros:insumo_create' %}?" + params.toString();
+    createInsumoLink.textContent = "+ " + (meta.createLabel || "Crear artículo nuevo");
   }
 
   function selectInsumoByValue(value) {
@@ -375,11 +670,20 @@
   function recalc() {
     const option = insumoSelect.options[insumoSelect.selectedIndex];
     if (!option || !option.value) {
+      const activeMeta = filterMeta[activeFilter] || filterMeta.ALL;
       origenInput.value = "-";
       costoUnitarioInput.value = "-";
       costoEstimadoInput.value = "-";
       unidadSelect.removeAttribute("disabled");
       if (unidadDetectadaPreview) unidadDetectadaPreview.value = "-";
+      if (selectedInsumoPreview) selectedInsumoPreview.value = "-";
+      if (linkedCatalogItemPreview) linkedCatalogItemPreview.value = "Se asigna desde la búsqueda superior";
+      if (quickModeSummary) quickModeSummary.value = activeMeta.emptySummary || "Selecciona un artículo y captura cantidad";
+      if (cantidadUnitHint) cantidadUnitHint.textContent = activeMeta.quantityHint || "La unidad se define automáticamente al elegir el artículo.";
+      if (selectionQualityNotice) {
+        selectionQualityNotice.style.display = "none";
+        selectionQualityNotice.textContent = "";
+      }
       return;
     }
     const origin = option.dataset.origin || "-";
@@ -388,6 +692,8 @@
     const unitCode = option.dataset.unidadCodigo || "";
     const unitType = option.dataset.unidadTipo || "";
     const unitCost = toNum(option.dataset.costoUnitario || "");
+    const erpReady = option.dataset.erpReady === "1";
+    const erpMissing = String(option.dataset.erpMissing || "").trim();
     const qty = toNum(cantidadInput.value);
     const qtyRaw = String(cantidadInput.value || "").trim();
 
@@ -414,6 +720,17 @@
     if (insumoNombre && insumoTextoInput) {
       insumoTextoInput.value = insumoNombre;
     }
+    if (selectedInsumoPreview) {
+      selectedInsumoPreview.value = insumoNombre || option.textContent.trim();
+    }
+    if (linkedCatalogItemPreview) {
+      linkedCatalogItemPreview.value = insumoNombre || option.textContent.trim();
+    }
+    if (cantidadUnitHint) {
+      cantidadUnitHint.textContent = unitCode
+        ? "Cantidad capturada en " + unitCode + "."
+        : "La unidad se define automáticamente al elegir el artículo.";
+    }
 
     if (!qtyRaw) {
       const suggested = suggestedQtyByUnit(unitType, unitCode);
@@ -428,18 +745,66 @@
       costoUnitarioInput.value = formatMoney(unitCost);
       if (Number.isFinite(qtyForCalc) && qtyForCalc > 0) {
         costoEstimadoInput.value = formatMoney(unitCost * qtyForCalc);
+        if (quickModeSummary) {
+          quickModeSummary.value = (filterMeta[activeFilter]?.title || "Artículo") + ": " + (insumoNombre || option.textContent.trim()) + " | " + qtyForCalc + " " + (unitCode || "") + " | " + formatMoney(unitCost * qtyForCalc);
+        }
       } else {
         costoEstimadoInput.value = "-";
+        if (quickModeSummary) {
+          quickModeSummary.value = (filterMeta[activeFilter]?.title || "Artículo") + ": " + (insumoNombre || option.textContent.trim()) + " | Unidad " + (unitCode || "-");
+        }
       }
     } else {
       costoUnitarioInput.value = "-";
       costoEstimadoInput.value = "-";
+      if (quickModeSummary) {
+        quickModeSummary.value = (filterMeta[activeFilter]?.title || "Artículo") + ": " + (insumoNombre || option.textContent.trim()) + " | Sin costo vigente";
+      }
+    }
+
+    if (selectionQualityNotice) {
+      const notices = [];
+      if (!unitCode) {
+        notices.push("Este artículo no tiene unidad base configurada.");
+      }
+      if (!erpReady && erpMissing) {
+        notices.push("No está listo para operar: " + erpMissing + ".");
+      }
+      if (!(Number.isFinite(unitCost) && unitCost > 0)) {
+        notices.push("No tiene costo vigente; el costeo de la receta quedará incompleto.");
+      }
+      if (notices.length) {
+        selectionQualityNotice.textContent = notices.join(" ");
+        selectionQualityNotice.style.display = "block";
+      } else {
+        selectionQualityNotice.style.display = "none";
+        selectionQualityNotice.textContent = "";
+      }
+    }
+    if (quickModeSummary && componentContext && componentContext !== "general" && quickModeSummary.value) {
+      const contextTitles = {
+        internos: "Bloque internos",
+        materia_prima: "Bloque MP puntual",
+        empaques: "Bloque empaque",
+        subsecciones: "Bloque subsección",
+      };
+      quickModeSummary.value = (contextTitles[componentContext] || "Bloque") + " | " + quickModeSummary.value;
     }
   }
 
   insumoSelect.addEventListener("change", recalc);
   cantidadInput.addEventListener("input", recalc);
   insumoAutocomplete.addEventListener("input", updateSuggestions);
+  insumoAutocomplete.addEventListener("input", updateCreateInsumoLink);
+  if (showIncompleteItemsToggle) {
+    showIncompleteItemsToggle.addEventListener("change", updateSuggestions);
+  }
+  classButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setComponentFilter(btn.dataset.componentFilter);
+      insumoAutocomplete.focus();
+    });
+  });
   insumoAutocomplete.addEventListener("keydown", (ev) => {
     if (ev.key === "ArrowDown") {
       ev.preventDefault();
@@ -488,6 +853,15 @@
   // Si ya hay un insumo seleccionado (pantalla de edición), mostrarlo en el input.
   if (insumoSelect.value) {
     selectInsumoByValue(insumoSelect.value);
+    const option = insumoSelect.options[insumoSelect.selectedIndex];
+    if (option && option.value && option.dataset.origin) {
+      setComponentFilter(option.dataset.origin);
+    } else {
+  setComponentFilter(defaultFilter);
+  updateCreateInsumoLink();
+    }
+  } else {
+    setComponentFilter(defaultFilter);
   }
 
   recalc();
@@ -521,6 +895,43 @@
 .autocomplete-item.is-active {
   background: #f0d0dc;
   border-color: #e8b4c8;
+}
+
+.recipe-component-class {
+  border: 1px solid rgba(168, 54, 95, 0.14);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: rgba(255, 250, 245, 0.76);
+}
+
+.recipe-component-class-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.recipe-component-class-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.recipe-component-chip {
+  border: 1px solid #e8b4c8;
+  background: #fff;
+  color: #8b2252;
+  padding: 9px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.recipe-component-chip.is-active {
+  background: #8b2252;
+  border-color: #8b2252;
+  color: #fff;
 }
 </style>
 {% endblock %}

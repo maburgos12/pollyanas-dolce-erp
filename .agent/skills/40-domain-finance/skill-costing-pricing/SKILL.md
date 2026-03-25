@@ -35,3 +35,7 @@ Model costing and pricing governance for recipes, presentations, indirect costs,
 - Prioritize: ledger-based inventory movements, audit trail, RBAC, idempotent jobs, deterministic exports, KPI dictionary consistency.
 - Reconcile system data vs Excel/internal controls where processes still coexist.
 - Prefer stable naming standards and canonical catalogs across Point/ERP/sucursales.
+
+## Related playbooks
+- `playbooks/costeo_por_rendimiento_y_presentacion.md`
+- `playbooks/costeo_mp_con_addons_point.md`

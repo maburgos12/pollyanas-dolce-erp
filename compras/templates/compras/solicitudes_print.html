@@ -65,6 +65,34 @@
     .meta-box strong {
       color: var(--vino);
     }
+    .workflow {
+      border: 1px solid var(--borde);
+      padding: 10px;
+      margin: 10px 0 14px;
+      background: #fff;
+    }
+    .workflow-title {
+      font-size: 13px;
+      color: var(--vino);
+      font-weight: 700;
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+    .workflow-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .workflow-step {
+      border: 1px solid var(--borde);
+      padding: 8px;
+      font-size: 11px;
+    }
+    .workflow-step strong {
+      color: var(--vino);
+      display: block;
+      margin-bottom: 4px;
+    }
     .notes-box {
       border: 1px solid var(--borde);
       min-height: 52px;
@@ -189,7 +217,7 @@
   <section class="page">
     <div class="header">
       <h1 class="title">Solicitud de Compras</h1>
-      <p class="subtitle">Pollyana's Dolce · Documento interno de abastecimiento</p>
+      <p class="subtitle">Pollyana's Dolce · Documento ERP de abastecimiento</p>
     </div>
 
     <div class="meta">
@@ -197,6 +225,8 @@
       <div class="meta-box"><strong>Generado:</strong> {{ generated_at|date:"Y-m-d H:i" }}</div>
       <div class="meta-box"><strong>Usuario:</strong> {{ generated_by }}</div>
       <div class="meta-box"><strong>Estatus autorización:</strong> {{ status_autorizacion }}</div>
+      <div class="meta-box"><strong>Responsable principal:</strong> Compras / DG</div>
+      <div class="meta-box"><strong>Etapa documental:</strong> Solicitud consolidada</div>
       <div class="meta-box"><strong>Origen:</strong> {{ source_filter|upper }}</div>
       <div class="meta-box"><strong>Plan:</strong> {{ plan_filter }}</div>
       <div class="meta-box"><strong>Categoría:</strong> {{ categoria_filter }}</div>
@@ -204,6 +234,23 @@
       <div class="meta-box"><strong>Periodo:</strong> {{ periodo_label }}</div>
       <div class="meta-box"><strong>Mes base:</strong> {{ periodo_mes }}</div>
       <div class="meta-box"><strong>Solicitudes:</strong> {{ solicitudes|length }}</div>
+    </div>
+    <div class="workflow">
+      <div class="workflow-title">Workflow ERP del documento</div>
+      <div class="workflow-grid">
+        <div class="workflow-step">
+          <strong>01 · Solicitud</strong>
+          Consolidación de necesidades por plan, periodo o reabasto.
+        </div>
+        <div class="workflow-step">
+          <strong>02 · Orden</strong>
+          Conversión documental a orden de compra contra proveedor.
+        </div>
+        <div class="workflow-step">
+          <strong>03 · Recepción</strong>
+          Recepción, validación y cierre del abastecimiento en inventario.
+        </div>
+      </div>
     </div>
     <div class="notes-box"><strong>Observaciones:</strong><br><br></div>
 

@@ -56,6 +56,8 @@ class PointBridgeSettings:
     max_branches: int
     max_pages_per_branch: int
     sales_excluded_branches: list[str]
+    production_storage_branches: list[str]
+    transfer_storage_branches: list[str]
     storage_root: Path
     logs_dir: Path
     screenshots_dir: Path
@@ -80,6 +82,8 @@ class PointBridgeSettings:
             "max_branches": self.max_branches,
             "max_pages_per_branch": self.max_pages_per_branch,
             "sales_excluded_branches": self.sales_excluded_branches,
+            "production_storage_branches": self.production_storage_branches,
+            "transfer_storage_branches": self.transfer_storage_branches,
             "storage_root": str(self.storage_root),
         }
 
@@ -112,6 +116,8 @@ def load_point_bridge_settings() -> PointBridgeSettings:
         max_branches=_env_int("POINT_SYNC_MAX_BRANCHES", 8, minimum=1),
         max_pages_per_branch=_env_int("POINT_SYNC_MAX_PAGES_PER_BRANCH", 50, minimum=1),
         sales_excluded_branches=_env_list("POINT_SALES_EXCLUDED_BRANCHES"),
+        production_storage_branches=_env_list("POINT_PRODUCTION_STORAGE_BRANCHES") or ["CEDIS"],
+        transfer_storage_branches=_env_list("POINT_TRANSFER_STORAGE_BRANCHES") or ["CEDIS"],
         storage_root=storage_root,
         logs_dir=storage_root / "logs",
         screenshots_dir=storage_root / "screenshots",

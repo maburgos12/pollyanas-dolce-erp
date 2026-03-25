@@ -4,9 +4,80 @@
 
 {% block content %}
 <section class="card">
-  <div class="card-header">Eliminar insumo</div>
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid mb-3">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% else %}is-success{% endif %}">
+        {{ erp_command_center.status }}
+      </div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+    </article>
+  </div>
+
+  <div class="card-header">Workflow ERP del retiro</div>
+  <div class="table-responsive mb-3">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in workflow_rows %}
+        <tr>
+          <td><strong>{{ row.step }} · {{ row.title }}</strong></td>
+          <td>{{ row.owner }}</td>
+          <td><span class="badge {% if row.tone == 'success' %}bg-success{% else %}bg-danger{% endif %}">{{ row.completion }}%</span></td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card table-card mb-3">
+    <div class="card-header">Checklist de baja ERP</div>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Criterio</th>
+            <th>Estatus</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in delete_checklist %}
+          <tr>
+            <td>{{ item.label }}</td>
+            <td><span class="badge {% if item.ok %}bg-success{% else %}bg-danger{% endif %}">{% if item.ok %}Listo{% else %}Bloqueado{% endif %}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card-header">Retirar artículo del maestro</div>
   <div class="danger-box">
-    ¿Confirmas eliminar a <strong>{{ object.nombre }}</strong>? Esta acción no se puede deshacer.
+    ¿Confirmas eliminar a <strong>{{ object.nombre }}</strong>? Esta acción retira el artículo del maestro y no se puede deshacer.
   </div>
   <form method="post">
     {% csrf_token %}

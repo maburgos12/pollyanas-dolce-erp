@@ -1,8 +1,10 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
+from types import SimpleNamespace
 
 from pos_bridge.models import PointBranch, PointExtractionLog, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.services.inventory_extractor import PointInventoryExtractor
 from pos_bridge.services.inventory_extractor import ExtractedBranchInventory
 from pos_bridge.services.sync_service import PointSyncService
 
@@ -57,3 +59,22 @@ class PointSyncServiceTests(TestCase):
 
         self.assertEqual(sync_job.status, PointSyncJob.STATUS_FAILED)
         self.assertIn("no devolvió", sync_job.error_message.lower())
+
+    def test_branch_filter_prefers_exact_match_before_partial(self):
+        extractor = PointInventoryExtractor(
+            bridge_settings=SimpleNamespace(
+                base_url="https://app.pointmeup.com",
+                username="demo",
+                password="demo",
+                timeout_ms=30000,
+                raw_exports_dir="/tmp",
+            )
+        )
+        branches = [
+            {"value": "2", "label": "Crucero"},
+            {"value": "10", "label": "Produccion Crucero"},
+        ]
+
+        filtered = extractor._apply_branch_filter(branches, "Crucero")
+
+        self.assertEqual(filtered, [{"value": "2", "label": "Crucero"}])

@@ -1,6 +1,17 @@
-version: "3.8"
-
 services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   db:
     image: postgres:16-alpine
     environment:
@@ -10,7 +21,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${DB_HOST_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
       interval: 10s
@@ -21,16 +32,72 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
+      REDIS_URL: redis://redis:6379/0
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app
     ports:
-      - "8000:8000"
+      - "${WEB_HOST_PORT:-8011}:8000"
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      default:
+      erp_bridge:
+        aliases:
+          - pollyanas-erp
     stdin_open: true
     tty: true
 
+  worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      C_FORCE_ROOT: "1"
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
+      REDIS_URL: redis://redis:6379/0
+    command: python -m celery -A config worker -l info --pool=solo --concurrency=1
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+    restart: unless-stopped
+
+  beat:
+    build: .
+    env_file:
+      - .env
+    environment:
+      C_FORCE_ROOT: "1"
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
+      REDIS_URL: redis://redis:6379/0
+    command: bash -lc "python manage.py setup_celery_schedules && python -m celery -A config beat -l info"
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  redis_data:
+
+networks:
+  erp_bridge:
+    external: true
+    name: pollyanas_erp_bridge

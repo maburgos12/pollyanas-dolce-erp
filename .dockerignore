@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+.pytest_cache
+.playwright-cli
+.agent
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+db.sqlite3
+logs
+output
+storage
+backups
+staticfiles

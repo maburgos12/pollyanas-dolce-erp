@@ -9,6 +9,7 @@ from django.db.models import Q
 from rapidfuzz import fuzz
 
 from maestros.models import CostoInsumo, Insumo, Proveedor
+from maestros.utils.canonical_catalog import latest_costo_canonico
 from recetas.models import LineaReceta
 
 
@@ -77,12 +78,7 @@ class Command(BaseCommand):
             if (best_score - second_score) < min_gap:
                 continue
 
-            latest = (
-                CostoInsumo.objects.filter(insumo_id=best_id)
-                .order_by("-fecha", "-id")
-                .values_list("costo_unitario", flat=True)
-                .first()
-            )
+            latest = latest_costo_canonico(insumo_id=best_id)
             if latest is None:
                 continue
             proposals.append((insumo, best_id, best_name, best_score, Decimal(str(latest))))

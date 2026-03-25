@@ -1,275 +1,1075 @@
 {% extends "base.html" %}
+{% load humanize %}
 
 {% block title %}Dashboard - Pollyanas Dolce ERP{% endblock %}
 {% block page_title %}Dashboard Ejecutivo{% endblock %}
+{% block body_class %}page-dashboard{% endblock %}
+{% block extra_css %}
+<style>
+    .executive-shell-dashboard {
+        gap: 16px;
+    }
+
+    .executive-shell-dashboard .executive-hero {
+        padding: 18px 22px;
+        min-height: 0;
+        align-items: flex-start;
+    }
+
+    .executive-shell-dashboard .dashboard-hero-copy {
+        max-width: 680px;
+    }
+
+    .executive-shell-dashboard .dashboard-hero-title {
+        font-size: clamp(1.9rem, 2.4vw, 2.8rem);
+        line-height: 1.02;
+        margin-bottom: 6px;
+    }
+
+    .executive-shell-dashboard .dashboard-hero-subtitle {
+        max-width: 56ch;
+        margin-bottom: 0;
+    }
+
+    .executive-shell-dashboard .dashboard-hero-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-left: auto;
+    }
+
+    .executive-shell-dashboard .executive-section-highlight {
+        padding-top: 16px;
+    }
+
+    .executive-shell-dashboard .executive-section-head {
+        gap: 10px;
+        margin-bottom: 12px;
+    }
+
+    .dashboard-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .dashboard-summary-grid .executive-kpi-card {
+        min-height: 0;
+        padding: 16px 18px;
+        border-radius: 18px;
+    }
+
+    .dashboard-summary-grid .kpi-number {
+        font-size: clamp(1.65rem, 2vw, 2.35rem);
+        line-height: 1;
+        margin-bottom: 6px;
+    }
+
+    .dashboard-summary-grid .kpi-label {
+        margin-bottom: 4px;
+    }
+
+    .dashboard-summary-grid .executive-kpi-note {
+        font-size: 0.92rem;
+        line-height: 1.35;
+    }
+
+    .dashboard-summary-grid.dashboard-summary-grid-secondary {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .dashboard-summary-grid .executive-kpi-card.executive-kpi-card-soft {
+        background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,248,250,0.94));
+    }
+
+    @media (max-width: 1180px) {
+        .dashboard-summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .dashboard-summary-grid.dashboard-summary-grid-secondary {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 760px) {
+        .executive-shell-dashboard .executive-hero {
+            padding: 18px;
+        }
+
+        .dashboard-summary-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .executive-shell-dashboard .dashboard-hero-badges {
+            margin-left: 0;
+            justify-content: flex-start;
+        }
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<section class="card dashboard-hero">
-    <div>
-        <div class="dashboard-hero-title">Operación General</div>
-        <div class="dashboard-hero-subtitle">Vista rápida de módulos y estado del sistema para la jornada.</div>
+<div class="executive-shell executive-shell-dashboard">
+<section class="card dashboard-hero executive-hero">
+    <div class="executive-hero-copy">
+        <div class="executive-eyebrow">Dirección general</div>
+        <div class="dashboard-hero-title">Pulso operativo del día</div>
+        <div class="dashboard-hero-subtitle">Corte comercial confirmado por Point, presión operativa y riesgos que sí requieren decisión hoy.</div>
     </div>
     <div class="dashboard-hero-badges">
-        <span class="badge bg-success">Inventario crítico: {{ criticos_count }}</span>
-        <span class="badge bg-warning">Bajo reorden: {{ bajo_reorden_count }}</span>
-        <span class="badge bg-primary">Alertas total: {{ alertas_count }}</span>
-        <span class="badge {% if budget_alerts_active > 0 %}bg-danger{% else %}bg-success{% endif %}">
-            Alertas presupuesto: {{ budget_alerts_active }}
+        {% if daily_sales_snapshot %}
+        <span class="badge bg-primary">Corte ventas: {{ daily_sales_snapshot.date_label }}</span>
+        {% endif %}
+        {% if production_snapshot %}
+        <span class="badge {% if production_snapshot.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">
+            Producción: {{ production_snapshot.plan_hoy_estado }}
         </span>
+        {% endif %}
+        {% if purchase_snapshot %}
+        <span class="badge {% if purchase_snapshot.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">
+            Compras abiertas: {{ purchase_snapshot.ordenes_abiertas }}
+        </span>
+        {% endif %}
+        <span class="badge {% if criticos_count > 0 %}bg-danger{% else %}bg-success{% endif %}">Stock crítico: {{ criticos_count }}</span>
     </div>
 </section>
 
-{% if budget_semaforo_mes and budget_semaforo_quincena %}
-<section class="card">
-    <div class="card-header">Semáforo Presupuesto Compras (Periodo Actual)</div>
-    <div class="kpi-mini">
-        <article class="kpi-card">
-            <div class="kpi-label">{{ budget_semaforo_mes.periodo_label }}</div>
-            <div style="margin-top:8px;">
-                <span class="badge {{ budget_semaforo_mes.estado_badge }}">{{ budget_semaforo_mes.estado_label }}</span>
-            </div>
-            <div class="muted" style="margin-top:10px;">
-                Objetivo: ${{ budget_semaforo_mes.objetivo|floatformat:2 }}<br>
-                Estimado: ${{ budget_semaforo_mes.estimado|floatformat:2 }}<br>
-                Ejecutado: ${{ budget_semaforo_mes.ejecutado|floatformat:2 }}
-            </div>
-            <div style="margin-top:10px;">
-                <a class="btn btn-secondary" href="{% url 'compras:solicitudes' %}?periodo_tipo=mes&periodo_mes={{ budget_semaforo_mes.periodo_mes }}">Ver detalle</a>
+<section class="card executive-section executive-section-highlight">
+    <div class="executive-section-head">
+        <div>
+            <div class="executive-section-kicker">Resumen</div>
+            <div class="card-header">Resumen ejecutivo del corte</div>
+            <p class="executive-section-copy">Primero el frente comercial real de Point. Después solo el contexto mínimo de producción, compras e inventario.</p>
+        </div>
+        {% if daily_sales_snapshot %}
+        <div class="executive-meta-pill">{{ daily_sales_snapshot.month_label }}</div>
+        {% endif %}
+    </div>
+    <div class="dashboard-summary-grid">
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number is-primary">{% if daily_sales_snapshot %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}$0.00{% endif %}</div>
+            <div class="kpi-label">Venta del último corte</div>
+            <div class="muted executive-kpi-note">
+                {% if daily_sales_snapshot %}
+                    {{ daily_sales_snapshot.date_label }} · {{ daily_sales_snapshot.source_label }}
+                    {% if daily_sales_snapshot.mapping_coverage_pct is not None %}
+                        · Cobertura ERP {{ daily_sales_snapshot.mapping_coverage_pct|floatformat:1 }}%
+                    {% endif %}
+                {% else %}
+                    Sin corte disponible
+                {% endif %}
             </div>
         </article>
-        <article class="kpi-card">
-            <div class="kpi-label">{{ budget_semaforo_quincena.periodo_label }}</div>
-            <div style="margin-top:8px;">
-                <span class="badge {{ budget_semaforo_quincena.estado_badge }}">{{ budget_semaforo_quincena.estado_label }}</span>
-            </div>
-            <div class="muted" style="margin-top:10px;">
-                Objetivo: ${{ budget_semaforo_quincena.objetivo|floatformat:2 }}<br>
-                Estimado: ${{ budget_semaforo_quincena.estimado|floatformat:2 }}<br>
-                Ejecutado: ${{ budget_semaforo_quincena.ejecutado|floatformat:2 }}
-            </div>
-            <div style="margin-top:10px;">
-                <a class="btn btn-secondary" href="{% url 'compras:solicitudes' %}?periodo_tipo={{ budget_semaforo_quincena.periodo_tipo }}&periodo_mes={{ budget_semaforo_quincena.periodo_mes }}">Ver detalle</a>
-            </div>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number {% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}is-primary{% else %}is-warning{% endif %}">{% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}${{ daily_sales_snapshot.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
+            <div class="kpi-label">Ticket promedio</div>
+            <div class="muted executive-kpi-note">{% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}{{ daily_sales_snapshot.total_tickets }} tickets confirmados para el último corte{% else %}Point todavía no entregó tickets válidos para este corte.{% endif %}</div>
         </article>
-    </div>
-    {% if latest_budget_alert %}
-    <div class="alert {% if budget_alerts_active > 0 %}alert-danger{% else %}alert-success{% endif %}" style="margin-top:10px;">
-        Última alerta bitácora: {{ latest_budget_alert.timestamp|date:"Y-m-d H:i" }} · {{ latest_budget_alert.object_id }}
-        <a href="{% url 'audit_log' %}?model=compras.PresupuestoCompraPeriodo&action=ALERT" class="btn btn-secondary" style="margin-left: 10px;">Ver bitácora</a>
-    </div>
-    {% endif %}
-</section>
-{% endif %}
-
-{% if latest_almacen_sync %}
-<section class="card">
-    <div class="card-header">Último Sync de Almacén</div>
-    <div class="table-responsive">
-        <table class="table table-striped">
-            <tbody>
-                <tr>
-                    <th>Estatus</th>
-                    <td class="text-end">
-                        {% if latest_almacen_sync.status == "OK" %}
-                        <span class="badge bg-success">OK</span>
-                        {% else %}
-                        <span class="badge bg-danger">ERROR</span>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number {% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}is-primary{% else %}is-warning{% endif %}">{% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}{{ daily_sales_snapshot.total_tickets|intcomma }}{% else %}0{% endif %}</div>
+            <div class="kpi-label">Tickets del corte</div>
+            <div class="muted executive-kpi-note">{% if daily_sales_snapshot %}Promedio por sucursal: ${{ daily_sales_snapshot.avg_branch_amount|floatformat:2|intcomma }}{% else %}Sin corte operativo{% endif %}</div>
+        </article>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number is-primary">{% if daily_sales_snapshot %}${{ daily_sales_snapshot.month_amount|floatformat:2|intcomma }}{% else %}$0.00{% endif %}</div>
+            <div class="kpi-label">Venta acumulada del mes</div>
+            <div class="muted executive-kpi-note">
+                {% if daily_sales_snapshot %}
+                    {{ daily_sales_snapshot.month_units|floatformat:0 }} unidades
+                    {% if daily_sales_snapshot.month_tickets_available %}
+                        · {{ daily_sales_snapshot.month_tickets|intcomma }} tickets
+                        {% if daily_sales_snapshot.month_avg_ticket %}
+                            · ticket medio ${{ daily_sales_snapshot.month_avg_ticket|floatformat:2|intcomma }}
                         {% endif %}
-                    </td>
-                </tr>
-                <tr>
-                    <th>Fecha</th>
-                    <td class="text-end">{{ latest_almacen_sync.started_at|date:"Y-m-d H:i" }}</td>
-                </tr>
-                <tr>
-                    <th>Origen</th>
-                    <td class="text-end">{{ latest_almacen_sync.get_source_display }}</td>
-                </tr>
-                <tr>
-                    <th>Carpeta / Mes</th>
-                    <td class="text-end">
-                        {{ latest_almacen_sync.folder_name|default:"-" }}
-                        {% if latest_almacen_sync.target_month %} · {{ latest_almacen_sync.target_month }}{% endif %}
-                        {% if latest_almacen_sync.fallback_used %} (fallback){% endif %}
-                    </td>
-                </tr>
-                <tr>
-                    <th>Resultado</th>
-                    <td class="text-end">
-                        Existencias {{ latest_almacen_sync.existencias_updated }} · Movimientos {{ latest_almacen_sync.movimientos_created }} ·
-                        Sin match {{ latest_almacen_sync.unmatched }}
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+                    {% else %}
+                        · tickets N/D
+                    {% endif %}
+                    {% if daily_sales_snapshot.unmapped_amount > 0 %}
+                        · ${{ daily_sales_snapshot.unmapped_amount|floatformat:2|intcomma }} sin mapear al ERP
+                    {% endif %}
+                {% else %}
+                    Sin mes operativo
+                {% endif %}
+            </div>
+        </article>
+    <div class="dashboard-summary-grid dashboard-summary-grid-secondary mt-3">
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number {% if production_snapshot and production_snapshot.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{% if production_snapshot %}{{ production_snapshot.plan_hoy_estado }}{% else %}Sin plan{% endif %}</div>
+            <div class="kpi-label">Producción del día</div>
+            <div class="muted executive-kpi-note">{% if production_snapshot %}{{ production_snapshot.plan_hoy_nombre }}{% else %}No hay plan operativo registrado para hoy{% endif %}</div>
+        </article>
+        <article class="kpi-card executive-kpi-card executive-kpi-card-soft">
+            <div class="kpi-number {% if purchase_snapshot and purchase_snapshot.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{% if purchase_snapshot %}{{ purchase_snapshot.ordenes_abiertas }}{% else %}0{% endif %}</div>
+            <div class="kpi-label">Órdenes abiertas</div>
+            <div class="muted executive-kpi-note">{% if purchase_snapshot %}{{ purchase_snapshot.recepciones_abiertas }} recepciones pendientes por cerrar{% else %}Sin documentos abiertos{% endif %}</div>
+        </article>
+        <article class="kpi-card executive-kpi-card executive-kpi-card-soft">
+            <div class="kpi-number {% if criticos_count > 0 %}is-danger{% elif alertas_count > 0 %}is-warning{% else %}is-success{% endif %}">{{ criticos_count }}</div>
+            <div class="kpi-label">Insumos en crítico</div>
+            <div class="muted executive-kpi-note">{{ bajo_reorden_count }} bajo reorden · {{ alertas_count }} alertas activas en el inventario central</div>
+        </article>
     </div>
-    <div class="quick-actions">
-        <a href="{% url 'inventario:importar_archivos' %}" class="btn btn-secondary">Ver historial de sync</a>
+</section>
+
+{% if daily_decision_rows %}
+<section class="card executive-section executive-section-spotlight">
+    <div class="executive-section-head">
+        <div>
+            <div class="executive-section-kicker">Acción</div>
+            <div class="card-header">Top decisiones del día</div>
+            <p class="executive-section-copy">Prioridades concretas para Dirección y operación en una rejilla simétrica, sin carriles laterales ni scroll horizontal.</p>
+        </div>
+    </div>
+    <div class="executive-decision-list">
+        {% for row in daily_decision_rows %}
+        <article class="executive-decision-item tone-{{ row.tone }}">
+            <div class="executive-decision-rank">{{ forloop.counter }}</div>
+            <div class="executive-decision-copy">
+                <div class="executive-decision-title">{{ row.title }}</div>
+                <div class="executive-decision-detail">{{ row.detail }}</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a>
+        </article>
+        {% endfor %}
     </div>
 </section>
 {% endif %}
 
-<div class="kpi-grid">
-    <article class="kpi-card">
-        <div class="kpi-number">{{ insumos_count }}</div>
-        <div class="kpi-label">Insumos Activos</div>
-    </article>
-    <article class="kpi-card">
-        <div class="kpi-number is-success">{{ recetas_count }}</div>
-        <div class="kpi-label">Recetas Activas</div>
-    </article>
-    <article class="kpi-card">
-        <div class="kpi-number is-warning">{{ proveedores_count }}</div>
-        <div class="kpi-label">Proveedores Vigentes</div>
-    </article>
-    <article class="kpi-card">
-        <div class="kpi-number is-danger">{{ alertas_count }}</div>
-        <div class="kpi-label">Alertas de Stock</div>
-    </article>
-</div>
-
-<section class="card">
-    <div class="card-header">Control de Homologación y Matching</div>
-    <div class="kpi-grid kpi-mini">
-        <article class="kpi-card">
-            <div class="kpi-number {% if homologacion_total_pending > 0 %}is-danger{% else %}is-success{% endif %}">
-                {{ homologacion_total_pending }}
-            </div>
-            <div class="kpi-label">Pendientes totales</div>
-        </article>
-        <article class="kpi-card">
-            <div class="kpi-number {% if point_pending_total > 0 %}is-warning{% else %}is-success{% endif %}">
-                {{ point_pending_total }}
-            </div>
-            <div class="kpi-label">Pendientes Point</div>
-            <div class="muted" style="margin-top:6px;">
-                Insumos {{ point_pending_insumos }} · Productos {{ point_pending_productos }} · Proveedores {{ point_pending_proveedores }}
-            </div>
-        </article>
-        <article class="kpi-card">
-            <div class="kpi-number {% if recetas_pending_matching_count > 0 %}is-warning{% else %}is-success{% endif %}">
-                {{ recetas_pending_matching_count }}
-            </div>
-            <div class="kpi-label">Líneas recetas por revisar</div>
-        </article>
-        <article class="kpi-card">
-            <div class="kpi-number {% if inventario_last_unmatched_count > 0 %}is-warning{% else %}is-success{% endif %}">
-                {{ inventario_last_unmatched_count }}
-            </div>
-            <div class="kpi-label">Sin match último sync almacén</div>
-        </article>
+{% if master_demand_critical_focus or master_demand_critical_queue %}
+<section class="card executive-section executive-section-alert executive-section-alert-wide">
+    <div class="executive-section-head">
+        <div>
+            <div class="executive-section-kicker">Bloqueo dominante</div>
+            <div class="card-header">Bloqueos que frenan la operación</div>
+            <p class="executive-section-copy">Resumen corto de artículos del maestro que hoy siguen afectando venta, producción o compras.</p>
+        </div>
     </div>
-    <div class="quick-actions" style="margin-top: 10px;">
-        <a href="{% url 'maestros:point_pending_review' %}" class="btn btn-secondary">Pendientes Point</a>
-        <a href="{% url 'recetas:matching_pendientes' %}" class="btn btn-secondary">Matching Recetas</a>
-        <a href="{% url 'inventario:aliases_catalog' %}" class="btn btn-secondary">Aliases Inventario</a>
+    <div class="kpi-mini executive-kpi-grid">
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number {% if master_demand_critical_focus and master_demand_critical_focus.tone == 'danger' %}is-danger{% elif master_demand_critical_focus and master_demand_critical_focus.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">
+                {% if master_demand_critical_focus %}{{ master_demand_critical_focus.count }}{% else %}0{% endif %}
+            </div>
+            <div class="kpi-label">Artículos bloqueando</div>
+            <div class="muted executive-kpi-note">Cantidad total de artículos maestros que hoy frenan la operación.</div>
+        </article>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number executive-kpi-number-text">
+                {% if master_demand_critical_queue %}{{ master_demand_critical_queue.0.nombre }}{% else %}Sin bloqueo{% endif %}
+            </div>
+            <div class="kpi-label">Artículo principal</div>
+            <div class="muted executive-kpi-note">
+                {% if master_demand_critical_queue %}
+                Bloquea {{ master_demand_critical_queue.0.final_recipe_count }} producto{{ master_demand_critical_queue.0.final_recipe_count|pluralize }} final{{ master_demand_critical_queue.0.final_recipe_count|pluralize:"es" }}.
+                {% else %}
+                Sin artículo bloqueando hoy.
+                {% endif %}
+            </div>
+        </article>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number executive-kpi-number-text">
+                {% if master_demand_critical_queue and master_demand_critical_queue.0.missing %}{{ master_demand_critical_queue.0.missing|join:", " }}{% else %}Sin faltantes{% endif %}
+            </div>
+            <div class="kpi-label">Qué falta corregir</div>
+            <div class="muted executive-kpi-note">
+                {% if master_demand_critical_focus %}{{ master_demand_critical_focus.detail }}{% else %}No hay bloqueo dominante abierto.{% endif %}
+            </div>
+        </article>
+        <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+            <div class="kpi-label">Acción</div>
+            <div class="muted executive-kpi-note">El detalle completo queda en Maestros para cerrar el artículo correcto.</div>
+            <div class="executive-inline-actions">
+                <a class="btn btn-secondary btn-sm" href="{% if master_demand_critical_focus %}{{ master_demand_critical_focus.url }}{% else %}{% url 'maestros:insumo_list' %}{% endif %}">
+                    {% if master_demand_critical_focus %}{{ master_demand_critical_focus.cta }}{% else %}Abrir maestro{% endif %}
+                </a>
+            </div>
+        </article>
     </div>
 </section>
+{% endif %}
 
-<section class="card">
-    <div class="card-header">Indicadores de Inventario (Control de Almacén)</div>
-    <div class="kpi-grid">
-        <article class="kpi-card">
-            <div class="kpi-number">{{ inventario_total_count }}</div>
-            <div class="kpi-label">Insumos con existencia</div>
-        </article>
-        <article class="kpi-card">
-            <div class="kpi-number is-danger">{{ stock_bajo_min_count }}</div>
-            <div class="kpi-label">Abajo de stock mínimo</div>
-        </article>
-        <article class="kpi-card">
-            <div class="kpi-number is-warning">{{ stock_sobre_max_count }}</div>
-            <div class="kpi-label">Arriba de stock máximo</div>
-        </article>
-        <article class="kpi-card">
-            <div class="kpi-number is-danger">{{ lead_time_risk_count }}</div>
-            <div class="kpi-label">Riesgo por lead time</div>
-        </article>
+{% if supply_watchlist and supply_watchlist.rows %}
+<section class="card executive-section">
+    <div class="executive-section-head">
+        <div>
+            <div class="executive-section-kicker">Riesgo inmediato</div>
+            <div class="card-header">Insumos críticos del plan</div>
+            <p class="executive-section-copy">Materiales que hoy condicionan producción, compra o capacidad de surtido.</p>
+        </div>
+        <div class="executive-meta-pill">{{ supply_watchlist.plan_nombre }} · {{ supply_watchlist.plan_fecha }}</div>
     </div>
-    <div class="table-responsive">
-        <table class="table table-striped">
+    <div class="table-responsive executive-table-shell">
+        <table class="table table-striped align-middle">
             <thead>
                 <tr>
-                    <th>Indicador</th>
-                    <th class="text-end">Valor</th>
+                    <th>Artículo</th>
+                    <th>Productos</th>
+                    <th class="text-end">Histórico</th>
+                    <th class="text-end">Requerido</th>
+                    <th class="text-end">Stock</th>
+                    <th class="text-end">Brecha</th>
+                    <th>Faltante maestro</th>
+                    <th>Acción</th>
                 </tr>
             </thead>
             <tbody>
+                {% for row in supply_watchlist.rows %}
                 <tr>
-                    <td>Stock mínimo configurado</td>
-                    <td class="text-end">{{ stock_min_config_count }} / {{ inventario_total_count }}</td>
+                    <td><strong>{{ row.insumo_nombre }}</strong></td>
+                    <td>{{ row.recipe_names|join:", " }}</td>
+                    <td class="text-end">{{ row.historico_units|floatformat:0 }}</td>
+                    <td class="text-end">{{ row.required_qty|floatformat:2 }}</td>
+                    <td class="text-end">{{ row.stock_actual|floatformat:2 }}</td>
+                    <td class="text-end">{{ row.shortage|floatformat:2 }}</td>
+                    <td>{% if row.master_missing %}{{ row.master_missing|join:", " }}{% elif row.missing_cost %}Costo pendiente{% else %}Listo{% endif %}</td>
+                    <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
                 </tr>
-                <tr>
-                    <td>Stock máximo configurado</td>
-                    <td class="text-end">{{ stock_max_config_count }} / {{ inventario_total_count }}</td>
-                </tr>
-                <tr>
-                    <td>Inventario promedio configurado</td>
-                    <td class="text-end">{{ inv_prom_config_count }} / {{ inventario_total_count }}</td>
-                </tr>
-                <tr>
-                    <td>Punto de reorden configurado</td>
-                    <td class="text-end">{{ punto_reorden_config_count }} / {{ inventario_total_count }}</td>
-                </tr>
-                <tr>
-                    <td>Días promedio de llegada de pedido</td>
-                    <td class="text-end">{{ avg_dias_llegada|floatformat:1 }}</td>
-                </tr>
-                <tr>
-                    <td>Consumo diario promedio por insumo</td>
-                    <td class="text-end">{{ avg_consumo_diario|floatformat:2 }}</td>
-                </tr>
-                <tr>
-                    <td>Consumo diario total estimado</td>
-                    <td class="text-end">{{ total_consumo_diario|floatformat:2 }}</td>
-                </tr>
-                <tr>
-                    <td>Cobertura promedio (días)</td>
-                    <td class="text-end">{{ cobertura_promedio_dias|floatformat:2 }}</td>
-                </tr>
+                {% endfor %}
             </tbody>
         </table>
     </div>
 </section>
+{% endif %}
 
-<div class="dashboard-grid">
-    <section class="card">
-        <div class="card-header">Accesos Operativos</div>
-        <div class="quick-actions">
-            {% if can_view_maestros %}
-                <a href="{% url 'maestros:insumo_list' %}" class="btn btn-secondary">📦 Catálogo de insumos</a>
-                <a href="{% url 'maestros:proveedor_list' %}" class="btn btn-secondary">🏢 Catálogo de proveedores</a>
-            {% endif %}
-            {% if can_view_compras %}
-                <a href="{% url 'compras:solicitudes' %}" class="btn btn-primary">🛒 Flujo de compras</a>
-            {% endif %}
-            {% if can_view_crm %}
-                <a href="{% url 'crm:pedidos' %}" class="btn btn-secondary">🤝 CRM pedidos</a>
-            {% endif %}
-            {% if can_view_logistica %}
-                <a href="{% url 'logistica:rutas' %}" class="btn btn-secondary">🚚 Logística entregas</a>
-            {% endif %}
-            {% if can_view_rrhh %}
-                <a href="{% url 'rrhh:empleados' %}" class="btn btn-secondary">👥 RRHH nómina</a>
-            {% endif %}
-            {% if can_view_inventario %}
-                <a href="{% url 'inventario:existencias' %}" class="btn btn-primary">📚 Control de inventario</a>
-                <a href="{% url 'inventario:importar_archivos' %}" class="btn btn-secondary">📤 Cargar archivos almacén</a>
-                <a href="{% url 'activos:dashboard' %}" class="btn btn-secondary">🛠️ Activos y mantenimiento</a>
-            {% endif %}
-            {% if can_view_reportes %}
-                <a href="{% url 'reportes:costo_receta' %}" class="btn btn-secondary">📈 Reportes ejecutivos</a>
-                <a href="{% url 'reportes:bi' %}" class="btn btn-secondary">📊 BI ejecutivo</a>
-                <a href="{% url 'control:discrepancias' %}" class="btn btn-secondary">🧭 Control discrepancias</a>
-            {% endif %}
-            {% if can_view_recetas %}
-                <a href="{% url 'recetas:recetas_list' %}" class="btn btn-secondary">🧁 Recetas y costeo</a>
-            {% endif %}
-            {% if can_review_matching %}
-                <a href="{% url 'recetas:matching_pendientes' %}" class="btn btn-secondary">🔎 Revisar matching</a>
-            {% endif %}
+<div class="executive-grid executive-grid-two">
+    {% if daily_sales_snapshot %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Comercial</div>
+                <div class="card-header">Ventas recientes</div>
+                <p class="executive-section-copy">Magnitud del último corte y referencia rápida de desempeño comercial.</p>
+            </div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number">{{ daily_sales_snapshot.total_units|floatformat:0 }}</div>
+                <div class="kpi-label">Unidades vendidas</div>
+                <div class="muted executive-kpi-note">{{ daily_sales_snapshot.branch_count }} sucursales · {{ daily_sales_snapshot.recipe_count }} productos</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if daily_sales_snapshot.comparison_tone == 'success' %}is-success{% else %}is-warning{% endif %}">{{ daily_sales_snapshot.comparison_label }}</div>
+                <div class="kpi-label">Vs corte previo</div>
+                <div class="muted executive-kpi-note">{{ daily_sales_snapshot.comparison_basis }} · {{ daily_sales_snapshot.comparison_detail }}</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if daily_sales_snapshot.tickets_available %}{% else %}is-warning{% endif %}">{% if daily_sales_snapshot.tickets_available %}{{ daily_sales_snapshot.total_tickets }}{% else %}N/D{% endif %}</div>
+                <div class="kpi-label">Tickets</div>
+                <div class="muted executive-kpi-note">{% if daily_sales_snapshot.tickets_available %}Último corte disponible{% else %}El endpoint actual no devuelve tickets.{% endif %}</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-primary">${{ daily_sales_snapshot.avg_branch_amount|floatformat:2|intcomma }}</div>
+                <div class="kpi-label">Venta promedio por sucursal</div>
+                <div class="muted executive-kpi-note">Promedio del último corte disponible.</div>
+            </article>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if daily_sales_snapshot %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Ranking</div>
+                <div class="card-header">Ranking comercial del corte</div>
+                <p class="executive-section-copy">Quién lidera el día y qué productos están empujando el resultado.</p>
+            </div>
+        </div>
+        <div class="executive-chart-grid">
+            <section class="executive-chart-card">
+                <div class="executive-chart-title">Sucursales líderes</div>
+                {% if sales_branch_bar_rows %}
+                <div class="executive-bar-list">
+                    {% for row in sales_branch_bar_rows %}
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">{{ row.label }}</div>
+                            <div class="executive-bar-meta">{{ row.secondary }}</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        </div>
+                        <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="muted">Sin sucursales con corte reciente.</div>
+                {% endif %}
+            </section>
+            <section class="executive-chart-card">
+                <div class="executive-chart-title">Productos líderes</div>
+                {% if sales_product_bar_rows %}
+                <div class="executive-bar-list">
+                    {% for row in sales_product_bar_rows %}
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">{{ row.label }}</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-accent" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        </div>
+                        <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="muted">Sin productos con corte reciente.</div>
+                {% endif %}
+            </section>
+        </div>
+    </section>
+    {% endif %}
+</div>
+
+<div class="executive-grid executive-grid-two">
+    {% if branch_daily_exception_bar_rows %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Excepciones</div>
+                <div class="card-header">Excepciones por sucursal</div>
+                <p class="executive-section-copy">Sucursales que se salen del comportamiento esperado del corte inmediato.</p>
+            </div>
+        </div>
+        <div class="executive-chart-card">
+            <div class="executive-bar-list">
+                {% for row in branch_daily_exception_bar_rows %}
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">{{ row.label }}</div>
+                        <div class="executive-bar-meta">{{ row.secondary }}</div>
+                        <div class="executive-bar-detail">{{ row.detail }}</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-{{ row.tone }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ row.delta_label }}</span>
+                        <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if product_daily_exception_bar_rows %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Productos</div>
+                <div class="card-header">Productos con variación fuerte</div>
+                <p class="executive-section-copy">Productos que subieron o cayeron con fuerza frente al corte inmediato.</p>
+            </div>
+        </div>
+        <div class="executive-chart-card">
+            <div class="executive-bar-list">
+                {% for row in product_daily_exception_bar_rows %}
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">{{ row.label }}</div>
+                        <div class="executive-bar-detail">{{ row.detail }}</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-{{ row.tone }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ row.delta_label }}</span>
+                        <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+    {% endif %}
+</div>
+
+<div class="executive-grid executive-grid-two">
+    {% if branch_weekday_comparison_bar_rows %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Comparable</div>
+                <div class="card-header">Sucursales vs mismo día de semana</div>
+                <p class="executive-section-copy">Lectura más limpia para separar una caída real de una variación normal del patrón semanal.</p>
+            </div>
+        </div>
+        <div class="executive-chart-card">
+            <div class="executive-bar-list">
+                {% for row in branch_weekday_comparison_bar_rows %}
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">{{ row.label }}</div>
+                        <div class="executive-bar-meta">{{ row.secondary }}</div>
+                        <div class="executive-bar-detail">{{ row.detail }}</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-{{ row.tone }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ row.delta_label }}</span>
+                        <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if product_weekday_comparison_bar_rows %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Comparable</div>
+                <div class="card-header">Productos vs mismo día de semana</div>
+                <p class="executive-section-copy">Validación semanal para detectar si el movimiento del producto es normal o exige ajuste hoy.</p>
+            </div>
+        </div>
+        <div class="executive-chart-card">
+            <div class="executive-bar-list">
+                {% for row in product_weekday_comparison_bar_rows %}
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">{{ row.label }}</div>
+                        <div class="executive-bar-detail">{{ row.detail }}</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-{{ row.tone }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge {% if row.tone == 'danger' %}bg-danger{% elif row.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ row.delta_label }}</span>
+                        <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+    {% endif %}
+</div>
+
+<div class="executive-grid executive-grid-two">
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Operación</div>
+                <div class="card-header">Abasto e inventario</div>
+                <p class="executive-section-copy">Cobertura disponible y presión de reabasto para sostener la venta y la producción.</p>
+            </div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if criticos_count > 0 %}is-danger{% else %}is-success{% endif %}">{{ criticos_count }}</div>
+                <div class="kpi-label">Sin stock o crítico</div>
+                <div class="muted executive-kpi-note">Artículos que requieren atención inmediata.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if bajo_reorden_count > 0 %}is-warning{% else %}is-success{% endif %}">{{ bajo_reorden_count }}</div>
+                <div class="kpi-label">Bajo reorden</div>
+                <div class="muted executive-kpi-note">Materiales que ya piden reabasto.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number">{{ cobertura_promedio_dias|floatformat:1 }}</div>
+                <div class="kpi-label">Cobertura promedio</div>
+                <div class="muted executive-kpi-note">Lectura agregada del inventario activo.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Acción inmediata</div>
+                <div class="muted executive-kpi-note">Atender críticos, después bajo reorden y luego validar máximos y mínimos.</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="{% url 'inventario:alertas' %}">Abrir alertas</a>
+                    <a class="btn btn-secondary btn-sm" href="{% url 'inventario:existencias' %}">Ver existencias</a>
+                </div>
+            </article>
         </div>
     </section>
 
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Flujo</div>
+                <div class="card-header">Compras y producción</div>
+                <p class="executive-section-copy">Plan, solicitudes y recepciones activas para sostener el servicio de la jornada.</p>
+            </div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if production_snapshot and production_snapshot.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{% if production_snapshot %}{{ production_snapshot.planes_abiertos }}{% else %}0{% endif %}</div>
+                <div class="kpi-label">Planes abiertos</div>
+                <div class="muted executive-kpi-note">{% if production_snapshot %}{{ production_snapshot.solicitudes_venta_activas }} solicitudes de venta activas{% else %}Sin lectura{% endif %}</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if purchase_snapshot and purchase_snapshot.solicitudes_vencidas > 0 %}is-danger{% else %}is-success{% endif %}">{% if purchase_snapshot %}{{ purchase_snapshot.solicitudes_vencidas }}{% else %}0{% endif %}</div>
+                <div class="kpi-label">Solicitudes vencidas</div>
+                <div class="muted executive-kpi-note">Lo que ya debería estar resuelto o liberado.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if purchase_snapshot and purchase_snapshot.ordenes_proximas > 0 %}is-warning{% else %}is-success{% endif %}">{% if purchase_snapshot %}{{ purchase_snapshot.ordenes_proximas }}{% else %}0{% endif %}</div>
+                <div class="kpi-label">Órdenes por recibir</div>
+                <div class="muted executive-kpi-note">Entrega estimada dentro de 3 días.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Acción inmediata</div>
+                <div class="muted executive-kpi-note">Ir al cuello de botella del día: plan o compras.</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="{% url 'recetas:plan_produccion' %}">Abrir plan</a>
+                    <a class="btn btn-secondary btn-sm" href="{% url 'compras:solicitudes' %}">Abrir compras</a>
+                </div>
+            </article>
+        </div>
+    </section>
+</div>
+
+<div class="executive-grid executive-grid-two">
+    {% if production_summary %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Producción</div>
+                <div class="card-header">Producción CEDIS y cobertura</div>
+                <p class="executive-section-copy">Volumen producido, costo estimado y cobertura contra venta final comparable de la semana.</p>
+            </div>
+            <div class="executive-meta-pill">{{ production_summary.period_label }}</div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if production_summary.tone == 'danger' %}is-danger{% elif production_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ production_summary.total_units|floatformat:0|intcomma }}</div>
+                <div class="kpi-label">Unidades producidas</div>
+                <div class="muted executive-kpi-note">{{ production_summary.plan_count }} planes · {{ production_summary.open_plan_count }} abiertos</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-primary">${{ production_summary.total_cost|floatformat:2|intcomma }}</div>
+                <div class="kpi-label">Costo estimado</div>
+                <div class="muted executive-kpi-note">Costo total estimado de la producción registrada.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if production_summary.tone == 'danger' %}is-danger{% elif production_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ production_summary.status }}</div>
+                <div class="kpi-label">Cobertura vs venta</div>
+                <div class="muted executive-kpi-note">
+                    {% if production_summary.coverage_pct is not None %}
+                    {{ production_summary.coverage_pct|floatformat:1 }}% · {{ production_summary.detail }}
+                    {% else %}
+                    {{ production_summary.detail }}
+                    {% endif %}
+                </div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Conversión</div>
+                <div class="muted executive-kpi-note">{{ production_summary.conversion_note }}</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="{{ production_summary.url }}">{{ production_summary.cta }}</a>
+                </div>
+            </article>
+        </div>
+        {% if production_product_bar_rows %}
+        <div class="executive-chart-card" style="margin-top: 16px;">
+            <div class="executive-chart-title">Productos más producidos</div>
+            <div class="executive-bar-list">
+                {% for row in production_product_bar_rows %}
+                <div class="executive-bar-row">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">{{ row.label }}</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-accent" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                    </div>
+                    <div class="executive-bar-value">{{ row.value|floatformat:1|intcomma }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    {% if forecast_summary %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Forecast</div>
+                <div class="card-header">Forecast de venta y producción</div>
+                <p class="executive-section-copy">Alineación entre forecast mensual cargado y producción planificada del periodo.</p>
+            </div>
+            <div class="executive-meta-pill">{{ forecast_summary.period_label }}</div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-primary">{{ forecast_summary.forecast_units|floatformat:0|intcomma }}</div>
+                <div class="kpi-label">Forecast de venta</div>
+                <div class="muted executive-kpi-note">{{ forecast_summary.recipes_total }} recetas con forecast/plan</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-primary">{{ forecast_summary.plan_units|floatformat:0|intcomma }}</div>
+                <div class="kpi-label">Producción planificada</div>
+                <div class="muted executive-kpi-note">{{ forecast_summary.recipes_with_gap }} recetas con desviación</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if forecast_summary.tone == 'danger' %}is-danger{% elif forecast_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ forecast_summary.status }}</div>
+                <div class="kpi-label">Semáforo forecast</div>
+                <div class="muted executive-kpi-note">
+                    {% if forecast_summary.deviation_pct is not None %}
+                    Desviación {{ forecast_summary.deviation_pct|floatformat:1 }}% · {{ forecast_summary.detail }}
+                    {% else %}
+                    {{ forecast_summary.detail }}
+                    {% endif %}
+                </div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Dato faltante</div>
+                <div class="muted executive-kpi-note">{{ forecast_summary.basis_note }}</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="{{ forecast_summary.url }}">{{ forecast_summary.cta }}</a>
+                </div>
+            </article>
+        </div>
+        {% if forecast_gap_bar_rows %}
+        <div class="executive-chart-card" style="margin-top: 16px;">
+            <div class="executive-chart-title">Recetas con mayor brecha forecast vs plan</div>
+            <div class="executive-bar-list">
+                {% for row in forecast_gap_bar_rows %}
+                <div class="executive-bar-row">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">{{ row.label }}</div>
+                        <div class="executive-bar-meta">{{ row.secondary }}</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-{{ row.tone|default:'warning' }}" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                    </div>
+                    <div class="executive-bar-value">{{ row.value|floatformat:1|intcomma }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+</div>
+
+<div class="executive-grid executive-grid-two">
+    {% if waste_executive_summary %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Control</div>
+                <div class="card-header">Merma sucursal y CEDIS</div>
+                <p class="executive-section-copy">Merma consolidada de sucursales y producción CEDIS en la última ventana operativa disponible.</p>
+            </div>
+            <div class="executive-meta-pill">{{ waste_executive_summary.period_label }}</div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if waste_executive_summary.branch_available %}{% if waste_executive_summary.comparison_tone == 'warning' %}is-warning{% else %}is-success{% endif %}{% else %}is-warning{% endif %}">{% if waste_executive_summary.branch_available %}{{ waste_executive_summary.branch_units|floatformat:0|intcomma }}{% else %}N/D{% endif %}</div>
+                <div class="kpi-label">Merma sucursal</div>
+                <div class="muted executive-kpi-note">{% if waste_executive_summary.branch_available %}${{ waste_executive_summary.branch_cost_est|floatformat:2|intcomma }} estimados · {{ waste_executive_summary.branch_branch_count }} sucursales · captura ERP{% else %}No hay captura de merma sucursal integrada en la base. Point merma no está conectado.{% endif %}</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if waste_executive_summary.cedis_units > 0 %}is-warning{% else %}is-success{% endif %}">{{ waste_executive_summary.cedis_units|floatformat:0|intcomma }}</div>
+                <div class="kpi-label">Merma CEDIS</div>
+                <div class="muted executive-kpi-note">${{ waste_executive_summary.cedis_cost_est|floatformat:2|intcomma }} estimados · {{ waste_executive_summary.cedis_row_count }} movimientos de inventario</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if waste_executive_summary.comparison_tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ waste_executive_summary.comparison_label }}</div>
+                <div class="kpi-label">Vs ventana previa</div>
+                <div class="muted executive-kpi-note">{{ waste_executive_summary.comparison_detail }}</div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Costo estimado</div>
+                <div class="muted executive-kpi-note">{{ waste_executive_summary.branch_cost_note }} {{ waste_executive_summary.cedis_cost_note }}</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="{{ waste_executive_summary.url }}">{{ waste_executive_summary.cta }}</a>
+                </div>
+            </article>
+        </div>
+        <div class="executive-chart-grid" style="margin-top: 16px;">
+            <section class="executive-chart-card">
+                <div class="executive-chart-title">Sucursales con más merma</div>
+                {% if waste_branch_bar_rows %}
+                <div class="executive-bar-list">
+                    {% for row in waste_branch_bar_rows %}
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">{{ row.label }}</div>
+                            <div class="executive-bar-meta">{{ row.secondary }}</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-warning" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        </div>
+                        <div class="executive-bar-value">{{ row.value|floatformat:1|intcomma }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="muted">Sin merma sucursal en la ventana.</div>
+                {% endif %}
+            </section>
+            <section class="executive-chart-card">
+                <div class="executive-chart-title">Insumos con más merma CEDIS</div>
+                {% if waste_cedis_bar_rows %}
+                <div class="executive-bar-list">
+                    {% for row in waste_cedis_bar_rows %}
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">{{ row.label }}</div>
+                            <div class="executive-bar-meta">{{ row.secondary }}</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-danger" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                        </div>
+                        <div class="executive-bar-value">{{ row.value|floatformat:1|intcomma }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="muted">Sin merma CEDIS en la ventana.</div>
+                {% endif %}
+            </section>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if sales_history_summary %}
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Base</div>
+                <div class="card-header">Base histórica de ventas</div>
+                <p class="executive-section-copy">Profundidad de serie para leer comparables, construir pronóstico y validar decisiones.</p>
+            </div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number {% if sales_history_summary.tone == 'danger' %}is-danger{% elif sales_history_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ sales_history_summary.status }}</div>
+                <div class="kpi-label">Cobertura histórica</div>
+                <div class="muted executive-kpi-note">{{ sales_history_summary.detail }}</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number">{{ sales_history_summary.total_rows }}</div>
+                <div class="kpi-label">Registros cargados</div>
+                <div class="muted executive-kpi-note">{{ sales_history_summary.date_label }}</div>
+            </article>
+            {% if sales_history_summary.official_ready %}
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number">{{ sales_history_summary.branch_count }}</div>
+                <div class="kpi-label">Sucursales con histórico</div>
+                <div class="muted executive-kpi-note">{{ sales_history_summary.recipe_count }} productos con histórico</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number">{{ sales_history_summary.total_units|floatformat:0 }}</div>
+                <div class="kpi-label">Unidades históricas</div>
+                <div class="muted executive-kpi-note">${{ sales_history_summary.total_amount|floatformat:2|intcomma }} acumulados</div>
+            </article>
+            {% else %}
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Serie oficial</div>
+                <div class="muted executive-kpi-note">No se muestran acumulados ni tendencia mensual porque el histórico todavía no está conciliado completo contra Point.</div>
+            </article>
+            {% endif %}
+        </div>
+        {% if monthly_sales_rows and sales_history_summary.official_ready %}
+        <div class="executive-chart-card">
+            <div class="executive-chart-title">Tendencia mensual de ventas Point</div>
+            <div class="executive-bar-list executive-bar-list-monthly">
+                {% for row in monthly_sales_rows %}
+                <div class="executive-bar-row">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">{{ row.label }}</div>
+                        <div class="executive-bar-secondary">{{ row.source_label }}</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-neutral" style="width: {{ row.pct|floatformat:0 }}%;"></div>
+                    </div>
+                    <div class="executive-bar-value">${{ row.value|floatformat:2|intcomma }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="executive-chart-card executive-chart-card-muted">
+            <div class="executive-chart-title">Tendencia mensual de ventas Point</div>
+            <div class="muted">No se muestra la tendencia mensual porque la serie oficial de Point sigue incompleta o sin conciliación continua.</div>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+</div>
+
+{% if master_demand_priority_rows %}
+<section class="card executive-section">
+    <div class="executive-section-head">
+        <div>
+            <div class="executive-section-kicker">Maestro</div>
+            <div class="card-header">Bloqueos del maestro con impacto comercial</div>
+            <p class="executive-section-copy">Detalle de artículos incompletos que hoy sí pegan a venta, plan o compra.</p>
+        </div>
+    </div>
+    <div class="executive-master-block-grid">
+        {% for item in master_demand_priority_rows %}
+        <article class="executive-master-block-card">
+            <div class="executive-master-block-head">
+                <div>
+                    <div class="executive-master-block-title">{{ item.nombre }}</div>
+                    <div class="executive-master-block-meta">{{ item.final_recipe_count }} productos finales impactados</div>
+                </div>
+                <span class="module-chip {% if item.priority_tone == 'danger' %}blocked{% elif item.priority_tone == 'warning' %}pending{% else %}manage{% endif %}">{{ item.priority_label }}</span>
+            </div>
+            <div class="executive-master-block-metrics">
+                <div class="executive-critical-stat">
+                    <span class="executive-critical-stat-label">Demanda</span>
+                    <strong>{{ item.historico_units|floatformat:1 }}</strong>
+                </div>
+                <div class="executive-master-block-gap">
+                    <span class="executive-critical-stat-label">Faltante maestro</span>
+                    <div>{{ item.missing|join:", " }}</div>
+                </div>
+            </div>
+            <div class="executive-master-block-products">
+                <span class="executive-critical-stat-label">Productos afectados</span>
+                <div>{% if item.recipe_names %}{{ item.recipe_names|join:", " }}{% else %}<span class="muted">Sin producto líder</span>{% endif %}</div>
+            </div>
+            <div class="executive-master-block-actions">
+                <a class="btn btn-secondary btn-sm" href="{{ item.url }}">Cerrar artículo</a>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<details class="erp-advanced-panel executive-advanced-panel">
+    <summary class="erp-advanced-summary">Control interno y navegación</summary>
+    <div class="erp-advanced-body executive-advanced-body">
+        <div class="executive-grid executive-grid-two">
+            {% if budget_semaforo_mes and budget_semaforo_quincena %}
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Finanzas</div>
+                        <div class="card-header">Presupuesto de compras</div>
+                    </div>
+                </div>
+                <div class="kpi-mini executive-kpi-grid">
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-label">{{ budget_semaforo_mes.periodo_label }}</div>
+                        <div class="executive-inline-actions"><span class="badge {{ budget_semaforo_mes.estado_badge }}">{{ budget_semaforo_mes.estado_label }}</span></div>
+                        <div class="muted executive-kpi-note">Objetivo ${{ budget_semaforo_mes.objetivo|floatformat:2|intcomma }} · Estimado ${{ budget_semaforo_mes.estimado|floatformat:2|intcomma }}</div>
+                    </article>
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-label">{{ budget_semaforo_quincena.periodo_label }}</div>
+                        <div class="executive-inline-actions"><span class="badge {{ budget_semaforo_quincena.estado_badge }}">{{ budget_semaforo_quincena.estado_label }}</span></div>
+                        <div class="muted executive-kpi-note">Objetivo ${{ budget_semaforo_quincena.objetivo|floatformat:2|intcomma }} · Estimado ${{ budget_semaforo_quincena.estimado|floatformat:2|intcomma }}</div>
+                    </article>
+                </div>
+                {% if latest_budget_alert %}
+                <div class="executive-note">Última alerta: {{ latest_budget_alert.timestamp|date:"Y-m-d H:i" }} · {{ latest_budget_alert.object_id }}</div>
+                {% endif %}
+            </section>
+            {% endif %}
+
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Maestro</div>
+                        <div class="card-header">Integridad del maestro</div>
+                    </div>
+                </div>
+                <div class="kpi-mini executive-kpi-grid">
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-number {% if homologacion_total_pending > 0 %}is-danger{% else %}is-success{% endif %}">{{ homologacion_total_pending }}</div>
+                        <div class="kpi-label">Bloqueos del maestro</div>
+                    </article>
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-number {% if point_pending_total > 0 %}is-warning{% else %}is-success{% endif %}">{{ point_pending_total }}</div>
+                        <div class="kpi-label">Integración comercial pendiente</div>
+                        <div class="muted executive-kpi-note">Insumos {{ point_pending_insumos }} · Productos {{ point_pending_productos }} · Proveedores {{ point_pending_proveedores }}</div>
+                    </article>
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-number {% if recetas_pending_matching_count > 0 %}is-warning{% else %}is-success{% endif %}">{{ recetas_pending_matching_count }}</div>
+                        <div class="kpi-label">Partidas BOM por validar</div>
+                    </article>
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-number {% if inventario_last_unmatched_count > 0 %}is-warning{% else %}is-success{% endif %}">{{ inventario_last_unmatched_count }}</div>
+                        <div class="kpi-label">Brechas de almacén</div>
+                    </article>
+                </div>
+                <div class="executive-inline-actions">
+                    <a href="{% url 'maestros:point_pending_review' %}" class="btn btn-secondary btn-sm">Integración comercial</a>
+                    <a href="{% url 'recetas:matching_pendientes' %}" class="btn btn-secondary btn-sm">Validación BOM</a>
+                    <a href="{% url 'inventario:aliases_catalog' %}" class="btn btn-secondary btn-sm">Gobierno maestro</a>
+                </div>
+            </section>
+
+            {% if latest_almacen_sync %}
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Datos</div>
+                        <div class="card-header">Cortes de almacén</div>
+                    </div>
+                </div>
+                <div class="executive-fact-list">
+                    <div><strong>Estatus:</strong> {% if latest_almacen_sync.status == "OK" %}OK{% else %}Error{% endif %}</div>
+                    <div><strong>Fecha:</strong> {{ latest_almacen_sync.started_at|date:"Y-m-d H:i" }}</div>
+                    <div><strong>Origen:</strong> {{ latest_almacen_sync.get_source_display }}</div>
+                    <div><strong>Resultado:</strong> Existencias {{ latest_almacen_sync.existencias_updated }} · Movimientos {{ latest_almacen_sync.movimientos_created }} · Pendientes {{ latest_almacen_sync.unmatched }}</div>
+                </div>
+                <div class="executive-inline-actions">
+                    <a href="{% url 'inventario:importar_archivos' %}" class="btn btn-secondary btn-sm">Ver cortes operativos</a>
+                </div>
+            </section>
+            {% endif %}
+
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Inventario</div>
+                        <div class="card-header">Salud detallada de inventario</div>
+                    </div>
+                </div>
+                <div class="executive-fact-list">
+                    <div><strong>Insumos con existencia:</strong> {{ inventario_total_count }}</div>
+                    <div><strong>Abajo de stock mínimo:</strong> {{ stock_bajo_min_count }}</div>
+                    <div><strong>Arriba de stock máximo:</strong> {{ stock_sobre_max_count }}</div>
+                    <div><strong>Riesgo por lead time:</strong> {{ lead_time_risk_count }}</div>
+                    <div><strong>Días promedio de llegada:</strong> {{ avg_dias_llegada|floatformat:1 }}</div>
+                    <div><strong>Consumo diario total:</strong> {{ total_consumo_diario|floatformat:2 }}</div>
+                </div>
+            </section>
+
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Acceso</div>
+                        <div class="card-header">Navegación operativa</div>
+                    </div>
+                </div>
+                <div class="executive-inline-actions executive-inline-actions-wrap">
+                    {% if can_view_maestros %}
+                    <a href="{% url 'maestros:insumo_list' %}" class="btn btn-secondary btn-sm">Insumos</a>
+                    <a href="{% url 'maestros:proveedor_list' %}" class="btn btn-secondary btn-sm">Proveedores</a>
+                    {% endif %}
+                    {% if can_view_compras %}
+                    <a href="{% url 'compras:solicitudes' %}" class="btn btn-secondary btn-sm">Compras</a>
+                    {% endif %}
+                    {% if can_view_inventario %}
+                    <a href="{% url 'inventario:existencias' %}" class="btn btn-secondary btn-sm">Inventario</a>
+                    <a href="{% url 'activos:dashboard' %}" class="btn btn-secondary btn-sm">Activos</a>
+                    {% endif %}
+                    {% if can_view_reportes %}
+                    <a href="{% url 'reportes:bi' %}" class="btn btn-secondary btn-sm">BI</a>
+                    <a href="{% url 'control:discrepancias' %}" class="btn btn-secondary btn-sm">Control</a>
+                    {% endif %}
+                    {% if can_view_recetas %}
+                    <a href="{% url 'recetas:recetas_list' %}" class="btn btn-secondary btn-sm">Recetas</a>
+                    {% endif %}
+                </div>
+            </section>
+        </div>
+    </div>
+</details>
 </div>
 {% endblock %}

@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Costeo semanal{% endblock %}
+{% block page_title %}Costeo semanal{% endblock %}
+{% block body_class %}page-costeo-dashboard{% endblock %}
+{% block content %}
+<style>
+  .costeo-shell { display: grid; gap: 18px; }
+  .costeo-hero { display: grid; gap: 16px; grid-template-columns: 1.8fr 1fr; align-items: start; }
+  .costeo-kpis { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .costeo-kpi { padding: 18px; border: 1px solid rgba(131, 24, 67, 0.08); border-radius: 18px; background: #fff; }
+  .costeo-kpi .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #7b6871; margin-bottom: 10px; }
+  .costeo-kpi .value { font-size: 2rem; font-weight: 700; color: #5a2132; line-height: 1.1; }
+  .costeo-kpi .note { color: #7a6870; margin-top: 8px; }
+  .costeo-filters { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: end; }
+  .costeo-grid { display: grid; gap: 18px; grid-template-columns: 1.2fr .8fr; }
+  .costeo-panel { padding: 20px; border-radius: 20px; background: #fff; border: 1px solid rgba(131, 24, 67, 0.08); }
+  .costeo-panel h3 { margin: 0 0 6px; font-size: 1.35rem; }
+  .costeo-panel p { margin: 0; color: #73656d; }
+  .costeo-table { width: 100%; margin-top: 16px; border-collapse: collapse; }
+  .costeo-table th, .costeo-table td { padding: 10px 12px; border-bottom: 1px solid rgba(131, 24, 67, 0.08); vertical-align: top; }
+  .costeo-table th { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #7b6871; }
+  .delta-up { color: #b4334c; font-weight: 700; }
+  .delta-down { color: #2e8b57; font-weight: 700; }
+  .delta-flat { color: #7b6871; font-weight: 700; }
+  .history-bars { display: grid; gap: 10px; margin-top: 18px; }
+  .history-row { display: grid; grid-template-columns: 96px 1fr 110px 100px; gap: 12px; align-items: center; }
+  .history-track { height: 12px; background: #f6ebef; border-radius: 999px; overflow: hidden; }
+  .history-fill { height: 100%; background: linear-gradient(90deg, #8b274d 0%, #d3a13a 100%); border-radius: 999px; }
+  .split-grid { display: grid; gap: 18px; grid-template-columns: 1fr 1fr; }
+  .scope-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .scope-tab { padding: 9px 14px; border-radius: 999px; background: #f7eef1; color: #7a3550; text-decoration: none; font-weight: 600; }
+  .scope-tab.active { background: #8b274d; color: #fff; }
+  @media (max-width: 1200px) {
+    .costeo-hero, .costeo-grid, .split-grid { grid-template-columns: 1fr; }
+    .costeo-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .costeo-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 720px) {
+    .costeo-kpis, .costeo-filters { grid-template-columns: 1fr; }
+    .history-row { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="module-shell costeo-shell">
+  <section class="card costeo-hero">
+    <div>
+      <div class="eyebrow text-uppercase text-muted" style="letter-spacing:.12em;">Dirección General · Costeo</div>
+      <h2 style="margin:0 0 8px;">Variación semanal de costo de producción</h2>
+      <p class="text-muted mb-0">
+        Historial auditable de costo por receta y por agrupación base + add-on. La lectura principal es materia prima;
+        mano de obra e indirectos siguen pendientes de capturar.
+      </p>
+      <div class="scope-tabs">
+        <a class="scope-tab {% if scope == 'productos' %}active{% endif %}" href="?scope=productos{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Productos finales</a>
+        <a class="scope-tab {% if scope == 'bases' %}active{% endif %}" href="?scope=bases{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Bases internas</a>
+        <a class="scope-tab {% if scope == 'addons' %}active{% endif %}" href="?scope=addons{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Base + add-on</a>
+        <a class="scope-tab {% if scope == 'todo' %}active{% endif %}" href="?scope=todo{% if selected_week %}&week_start={{ selected_week|date:'Y-m-d' }}{% endif %}">Todo</a>
+      </div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap justify-content-end">
+      <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Abrir recetas</a>
+      <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Drivers de costeo</a>
+      <form method="post" action="{% url 'recetas:costeo_dashboard_snapshot' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button class="btn btn-primary" type="submit">Actualizar corte semanal</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="card costeo-panel">
+    <form method="get" class="costeo-filters">
+      <div>
+        <label class="form-label">Semana</label>
+        <select class="form-select" name="week_start">
+          {% for week in week_values %}
+          <option value="{{ week|date:'Y-m-d' }}" {% if selected_week == week %}selected{% endif %}>{{ week|date:'Y-m-d' }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Familia</label>
+        <select class="form-select" name="familia">
+          <option value="">Todas</option>
+          {% for item in familias_catalogo %}
+          <option value="{{ item }}" {% if familia == item %}selected{% endif %}>{{ item }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Temporalidad</label>
+        <select class="form-select" name="temporalidad">
+          <option value="">Todas</option>
+          <option value="PERMANENTE" {% if temporalidad == 'PERMANENTE' %}selected{% endif %}>Permanente</option>
+          <option value="TEMPORAL" {% if temporalidad == 'TEMPORAL' %}selected{% endif %}>Temporal</option>
+          <option value="FECHA_ESPECIAL" {% if temporalidad == 'FECHA_ESPECIAL' %}selected{% endif %}>Fecha especial</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Buscar</label>
+        <input class="form-control" name="q" value="{{ q }}" placeholder="Producto, receta o add-on">
+      </div>
+      <input type="hidden" name="scope" value="{{ scope }}">
+      <input type="hidden" name="identity" value="{{ selected_identity }}">
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Aplicar</button>
+        <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}?scope={{ scope }}">Limpiar</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="costeo-kpis">
+    <article class="costeo-kpi">
+      <div class="eyebrow">Semana analizada</div>
+      <div class="value">{{ selected_week|date:"Y-m-d"|default:"Sin corte" }}</div>
+      <div class="note">Anterior: {% if previous_week %}{{ previous_week|date:"Y-m-d" }}{% else %}N/D{% endif %}</div>
+    </article>
+    <article class="costeo-kpi">
+      <div class="eyebrow">Costo total actual</div>
+      <div class="value">${{ total_cost|floatformat:2|intcomma }}</div>
+      <div class="note">{{ rows|length }} registros visibles</div>
+    </article>
+    <article class="costeo-kpi">
+      <div class="eyebrow">Variación agregada</div>
+      <div class="value {% if total_delta > 0 %}delta-up{% elif total_delta < 0 %}delta-down{% else %}delta-flat{% endif %}">
+        {% if total_delta > 0 %}+{% endif %}${{ total_delta|floatformat:2|intcomma }}
+      </div>
+      <div class="note">{{ increase_rows|length }} alzas · {{ decrease_rows|length }} bajas · {{ stable_rows }} sin cambio</div>
+    </article>
+    <article class="costeo-kpi">
+      <div class="eyebrow">Foco ejecutivo</div>
+      <div class="value">{{ selected_row.label|default:"Sin selección" }}</div>
+      <div class="note">{% if selected_row %}{{ selected_row.familia|default:"Sin familia" }} · {{ selected_row.categoria|default:"Sin categoría" }}{% else %}Selecciona un registro para ver historial{% endif %}</div>
+    </article>
+  </section>
+
+  <section class="costeo-grid">
+    <article class="costeo-panel">
+      <h3>Productos con mayor aumento o disminución</h3>
+      <p>El criterio principal es variación contra el corte semanal anterior del mismo producto o agrupación.</p>
+      <div class="split-grid">
+        <div>
+          <table class="costeo-table">
+            <thead>
+              <tr><th colspan="3">Top alzas</th></tr>
+            </thead>
+            <tbody>
+              {% for row in increase_rows %}
+              <tr>
+                <td><a href="?scope={{ scope }}&week_start={{ selected_week|date:'Y-m-d' }}&identity={{ row.identity_key }}">{{ row.label }}</a></td>
+                <td class="delta-up">+${{ row.delta_total|floatformat:2|intcomma }}</td>
+                <td class="delta-up">{% if row.delta_pct is not None %}+{{ row.delta_pct|floatformat:2 }}%{% else %}N/D{% endif %}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="3" class="text-muted">Sin alzas registradas.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <table class="costeo-table">
+            <thead>
+              <tr><th colspan="3">Top bajas</th></tr>
+            </thead>
+            <tbody>
+              {% for row in decrease_rows %}
+              <tr>
+                <td><a href="?scope={{ scope }}&week_start={{ selected_week|date:'Y-m-d' }}&identity={{ row.identity_key }}">{{ row.label }}</a></td>
+                <td class="delta-down">${{ row.delta_total|floatformat:2|intcomma }}</td>
+                <td class="delta-down">{% if row.delta_pct is not None %}{{ row.delta_pct|floatformat:2 }}%{% else %}N/D{% endif %}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="3" class="text-muted">Sin bajas registradas.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </article>
+
+    <article class="costeo-panel">
+      <h3>Historial del registro seleccionado</h3>
+      <p>{% if selected_row %}{{ selected_row.label }}{% else %}No hay selección actual.{% endif %}</p>
+      <div class="history-bars">
+        {% for item in history_rows %}
+        <div class="history-row">
+          <div>{{ item.week_start|date:"Y-m-d" }}</div>
+          <div class="history-track">
+            <div class="history-fill" style="width:{{ item.history_pct|floatformat:2 }}%"></div>
+          </div>
+          <div>${{ item.costo_total|floatformat:2|intcomma }}</div>
+          <div class="{% if item.delta_total > 0 %}delta-up{% elif item.delta_total < 0 %}delta-down{% else %}delta-flat{% endif %}">
+            {% if item.delta_total is None %}Base{% else %}{% if item.delta_total > 0 %}+{% endif %}${{ item.delta_total|floatformat:2|intcomma }}{% endif %}
+          </div>
+        </div>
+        {% empty %}
+        <div class="text-muted">Todavía no hay historial semanal para mostrar.</div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="costeo-panel">
+    <h3>Registro semanal visible</h3>
+    <p>Costo total de producción por producto/agrupación, con variación semanal y señalización temporal.</p>
+    <div class="table-responsive">
+      <table class="costeo-table">
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th>Scope</th>
+            <th>Familia</th>
+            <th>Temporalidad</th>
+            <th>Costo MP</th>
+            <th>Costo total</th>
+            <th>Δ $</th>
+            <th>Δ %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>
+              <a href="?scope={{ scope }}&week_start={{ selected_week|date:'Y-m-d' }}&identity={{ row.identity_key }}">{{ row.label }}</a>
+              {% if row.scope_type == "GROUPED_ADDON" and row.addon_rule_id %}
+              <div class="text-muted">Base + add-on zero revenue Point</div>
+              {% endif %}
+            </td>
+            <td>{% if row.scope_type == "GROUPED_ADDON" %}Agrupado{% else %}Receta{% endif %}</td>
+            <td>{{ row.familia|default:"Sin familia" }}</td>
+            <td>{{ row.get_temporalidad_display }}</td>
+            <td>${{ row.costo_mp|floatformat:2|intcomma }}</td>
+            <td>${{ row.costo_total|floatformat:2|intcomma }}</td>
+            <td class="{% if row.delta_total > 0 %}delta-up{% elif row.delta_total < 0 %}delta-down{% else %}delta-flat{% endif %}">
+              {% if row.delta_total is None %}Base{% else %}{% if row.delta_total > 0 %}+{% endif %}${{ row.delta_total|floatformat:2|intcomma }}{% endif %}
+            </td>
+            <td class="{% if row.delta_pct > 0 %}delta-up{% elif row.delta_pct < 0 %}delta-down{% else %}delta-flat{% endif %}">
+              {% if row.delta_pct is None %}N/D{% else %}{% if row.delta_pct > 0 %}+{% endif %}{{ row.delta_pct|floatformat:2 }}%{% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="8" class="text-muted">Todavía no hay snapshots semanales de costeo. Usa “Actualizar corte semanal”.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

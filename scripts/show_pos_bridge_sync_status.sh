@@ -19,5 +19,8 @@ echo
 echo "== Launchd inventario =="
 launchctl print "gui/$(id -u)/com.pollyanasdolce.pos-bridge-inventory" 2>/dev/null | sed -n '1,40p' || echo "No instalado"
 echo
+echo "== Docker Celery local =="
+docker compose ps redis worker beat 2>/dev/null || echo "Docker/Celery no levantado"
+echo
 echo "== Ultimos jobs pos_bridge =="
 DJANGO_SETTINGS_MODULE=config.settings "$PYTHON_BIN" manage.py shell -c "from pos_bridge.models import PointSyncJob; import json; jobs=list(PointSyncJob.objects.order_by('-id')[:6].values('id','job_type','status','started_at','finished_at','error_message')); print(json.dumps(jobs, ensure_ascii=False, indent=2, default=str))"

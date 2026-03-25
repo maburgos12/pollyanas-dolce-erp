@@ -3,9 +3,15 @@ from .models import Sucursal, Departamento, UserProfile, AuditLog
 
 @admin.register(Sucursal)
 class SucursalAdmin(admin.ModelAdmin):
-    list_display = ("codigo", "nombre", "activa")
+    list_display = ("codigo", "nombre", "activa", "fecha_apertura", "operativa_hoy")
     search_fields = ("codigo", "nombre")
-    list_filter = ("activa",)
+    list_filter = ("activa", "fecha_apertura")
+
+    def operativa_hoy(self, obj):
+        return obj.esta_operativa()
+
+    operativa_hoy.boolean = True
+    operativa_hoy.short_description = "Operativa hoy"
 
 @admin.register(Departamento)
 class DepartamentoAdmin(admin.ModelAdmin):

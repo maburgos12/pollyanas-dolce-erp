@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from typing import Iterable
 
 
@@ -16,6 +18,20 @@ POINT_FAMILIAS_BASE = [
     "Pie",
     "Vasos preparados",
 ]
+
+FAMILIA_CATEGORIAS_PRESETS = {
+    "Accesorios": ["Velas", "Cubiertos", "Complementos"],
+    "Bebidas": ["Café", "Frías", "Especiales"],
+    "Bollo": ["Chocolate", "Vainilla", "Canela", "Especial"],
+    "Cheesecakes": ["Frutales", "Chocolate", "Especiales"],
+    "Dona": ["Glaseadas", "Rellenas", "Especiales"],
+    "Empanadas": ["Dulces", "Saladas", "Especiales"],
+    "Flan": ["Clásico", "Especial"],
+    "Galletas": ["Clásicas", "Rellenas", "Especiales"],
+    "Pastel": ["Chocolate", "Frutales", "Tres leches", "Especiales"],
+    "Pie": ["Queso", "Frutales", "Especiales"],
+    "Vasos preparados": ["Fresas", "Chocolate", "Especiales"],
+}
 
 
 def familias_producto_catalogo(extra_values: Iterable[str] | None = None) -> list[str]:
@@ -39,3 +55,19 @@ def familias_producto_catalogo(extra_values: Iterable[str] | None = None) -> lis
         _add(item)
     return result
 
+
+def familia_categoria_catalogo(extra_values: Iterable[str] | None = None) -> dict[str, list[str]]:
+    result = {key: list(values) for key, values in FAMILIA_CATEGORIAS_PRESETS.items()}
+    for item in extra_values or []:
+        txt = (item or "").strip()
+        if not txt:
+            continue
+        for family, values in result.items():
+            if txt not in values:
+                continue
+            break
+    return result
+
+
+def familia_categoria_catalogo_json(extra_values: Iterable[str] | None = None) -> str:
+    return json.dumps(familia_categoria_catalogo(extra_values), ensure_ascii=False)

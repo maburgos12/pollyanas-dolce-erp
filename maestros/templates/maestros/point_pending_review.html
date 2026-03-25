@@ -1,17 +1,284 @@
 {% extends "base.html" %}
-{% block title %}Maestros - Pendientes Point{% endblock %}
-{% block page_title %}Maestros · Pendientes Point{% endblock %}
+{% block title %}Maestros - Integración comercial{% endblock %}
+{% block page_title %}Maestros · Integración comercial{% endblock %}
 
 {% block content %}
 <nav class="module-tabs">
   <a class="module-tab" href="{% url 'maestros:proveedor_list' %}">Proveedores</a>
   <a class="module-tab" href="{% url 'maestros:insumo_list' %}">Insumos</a>
-  <a class="module-tab active" href="{% url 'maestros:point_pending_review' %}">Pendientes Point</a>
+  <a class="module-tab active" href="{% url 'maestros:point_pending_review' %}">Integración comercial</a>
 </nav>
 
 <section class="card">
-  <div class="card-header">Bandeja de No-Match Point</div>
-  <p class="muted">Revisa y corrige pendientes no homologados. Puedes resolver en lote por tipo.</p>
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">Comercial / Administración</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if page.paginator.count %}is-warning{% else %}is-success{% endif %}">
+        {% if page.paginator.count %}En atención{% else %}Listo para operar{% endif %}
+      </div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ page.paginator.count }}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">{{ next_step_summary.detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ next_step_summary.action_href }}">{{ next_step_summary.action_label }}</a>
+    </article>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Workflow ERP de integración comercial</div>
+  <div class="dashboard-kpis mb-3">
+    <div class="dashboard-kpi">
+      <span class="dashboard-kpi-number">{{ erp_progress_pct|floatformat:1 }}%</span>
+      <span class="dashboard-kpi-label">Avance ERP de integración</span>
+    </div>
+    <div class="dashboard-kpi">
+      <span class="dashboard-kpi-number">{{ erp_closed_stage_count }}/4</span>
+      <span class="dashboard-kpi-label">Etapas cerradas</span>
+    </div>
+    <div class="dashboard-kpi">
+      <span class="dashboard-kpi-number">{{ total_pending }}</span>
+      <span class="dashboard-kpi-label">Registros en revisión</span>
+    </div>
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    {% for card in erp_progress_cards %}
+    <div class="enterprise-pill-card {% if card.tone == 'warning' %}is-active{% endif %}">
+      <div class="enterprise-pill-title">{{ card.title }}</div>
+      <div class="enterprise-pill-text">{{ card.detail }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="enterprise-flow-grid mb-3">
+    {% for row in workflow_rows %}
+    <article class="enterprise-flow-card">
+      <div class="enterprise-flow-step">Paso {{ row.step }}</div>
+      <div class="enterprise-flow-title">{{ row.title }}</div>
+      <div class="enterprise-flow-text">{{ row.detail }}</div>
+      <div class="enterprise-flow-metrics">
+        <span class="badge {% if row.tone == 'success' %}badge-success{% else %}badge-warning{% endif %}">
+          {% if row.tone == 'success' %}Cerrado{% else %}Abierto{% endif %}
+        </span>
+        <span class="muted">Responsable {{ row.owner }} · Cierre {{ row.completion }}% · Abiertos {{ row.open }} · Cerrados {{ row.closed }}</span>
+      </div>
+      <div class="muted" style="margin-top:8px;">Siguiente paso: {{ row.next_step }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ row.action_href }}">{{ row.action_label }}</a>
+    </article>
+    {% endfor %}
+  </div>
+  <div class="enterprise-release-banner mb-3 {% if release_summary.tone == 'success' %}is-success{% else %}is-warning{% endif %}">
+    <div>
+      <strong>{{ release_summary.label }}</strong>
+      <div class="muted">{{ release_summary.detail }}</div>
+    </div>
+  </div>
+  <div class="kpi-grid mb-3">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">Comercial / Administración</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if page.paginator.count %}is-warning{% else %}is-success{% endif %}">
+        {% if page.paginator.count %}En atención{% else %}Listo para operar{% endif %}
+      </div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ page.paginator.count }}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">{{ next_step_summary.detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ next_step_summary.action_href }}">{{ next_step_summary.action_label }}</a>
+    </article>
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+    <div class="enterprise-pill-card is-active">
+      <div class="enterprise-pill-title">Siguiente paso ERP</div>
+      <div class="enterprise-pill-text">{{ next_step_summary }}</div>
+    </div>
+    {% for card in type_release_cards %}
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">{{ card.title }}</div>
+      <div class="enterprise-pill-text">{{ card.detail }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Expediente ERP de integración comercial</div>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <tbody>
+        <tr>
+          <th style="width:22%;">Documento</th>
+          <td style="width:28%;">Integración comercial</td>
+          <th style="width:22%;">Fuente de control</th>
+          <td style="width:28%;">Registros comerciales, artículo maestro, proveedor oficial y cierre del catálogo ERP.</td>
+        </tr>
+        <tr>
+          <th>Etapa ERP</th>
+          <td>Integración y cierre comercial</td>
+          <th>Propósito</th>
+          <td>Dejar artículos, productos y proveedores listos para operar en costeo, compras e inventario.</td>
+        </tr>
+        <tr>
+          <th>Regla de salida</th>
+          <td>Todos los registros comerciales deben quedar resueltos contra el catálogo ERP.</td>
+          <th>Siguiente paso</th>
+          <td>{{ next_step_summary }}</td>
+        </tr>
+        <tr>
+          <th>Responsable</th>
+          <td>Maestros / Comercial / Operaciones</td>
+          <th>Indicador de cierre</th>
+          <td>{{ erp_progress_pct|floatformat:1 }}% del circuito comercial estabilizado.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if critical_path_rows %}
+<section class="card">
+  <div class="card-header">Ruta crítica ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Prioridad</th>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Brechas</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Lectura ejecutiva</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in critical_path_rows %}
+        <tr>
+          <td><strong>{{ row.rank }}</strong></td>
+          <td>
+            <strong>{{ row.title }}</strong>
+            <div class="muted">{{ row.status }}</div>
+          </td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.count }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>
+            <strong>{{ row.depends_on }}</strong>
+            <div class="muted">{{ row.dependency_status }}</div>
+          </td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if executive_radar_rows %}
+<section class="card">
+  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Bloqueo dominante</th>
+          <th>Depende de</th>
+          <th>Cierre</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in executive_radar_rows %}
+        <tr>
+          <td>
+            <strong>{{ row.phase }}</strong>
+            <div class="muted">{{ row.status }}</div>
+          </td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.dominant_blocker }}</td>
+          <td>
+            <strong>{{ row.depends_on }}</strong>
+            <div class="muted">{{ row.dependency_status }}</div>
+          </td>
+          <td>{{ row.progress_pct }}%</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Frente</th>
+          <th>Responsable</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in erp_governance_rows %}
+        <tr>
+          <td>{{ row.front }}</td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Impacto ERP por módulo</div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    {% for card in module_release_cards %}
+    <div class="enterprise-pill-card {% if card.tone == 'warning' %}is-active{% endif %}">
+      <div class="enterprise-pill-title">{{ card.title }}</div>
+      <div class="enterprise-pill-text">{{ card.detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ card.href }}">{{ card.action }}</a>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="card-header">Mesa ERP de integración comercial</div>
+  <p class="muted">Revisa y cierra registros comerciales abiertos. Puedes consolidar en lote por tipo de registro y dejar artículos oficiales listos en el catálogo maestro.</p>
 
   <div class="toolbar mb-2">
     <a class="btn {% if tipo == 'INSUMO' %}btn-primary{% else %}btn-secondary{% endif %}" href="?tipo=INSUMO">Insumos ({{ counts.INSUMO }})</a>
@@ -21,12 +288,23 @@
 
   <form method="get" class="form-grid-auto mb-3">
     <input type="hidden" name="tipo" value="{{ tipo }}">
-    <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por nombre, código o sugerencia...">
-    <input class="input-field" type="number" name="score_min" min="0" max="100" step="0.1" value="{{ score_min|default:0 }}" placeholder="Score mínimo">
+    <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por nombre, código o artículo propuesto...">
+    <input class="input-field" type="number" name="score_min" min="0" max="100" step="0.1" value="{{ score_min|default:0 }}" placeholder="Nivel mínimo de propuesta">
+    <select class="input-field" name="clasificacion_operativa">
+      <option value="">Solo visibles en operación</option>
+      <option value="ACTIVE" {% if clasificacion_operativa == 'ACTIVE' %}selected{% endif %}>Operativo actual</option>
+      <option value="SEASONAL" {% if clasificacion_operativa == 'SEASONAL' %}selected{% endif %}>Temporada</option>
+      <option value="HISTORICAL" {% if clasificacion_operativa == 'HISTORICAL' %}selected{% endif %}>Solo histórico</option>
+      <option value="HIDDEN" {% if clasificacion_operativa == 'HIDDEN' %}selected{% endif %}>Oculto catálogo actual</option>
+    </select>
+    <label class="field-check">
+      <input type="checkbox" name="show_hidden" value="1" {% if show_hidden %}checked{% endif %}>
+      <span>Incluir ocultos</span>
+    </label>
     <button class="btn btn-primary" type="submit">Buscar</button>
     <a class="btn btn-secondary" href="?tipo={{ tipo }}">Limpiar</a>
-    <a class="btn btn-secondary" href="?tipo={{ tipo }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if score_min %}&score_min={{ score_min }}{% endif %}&export=csv">Exportar CSV</a>
-    <a class="btn btn-secondary" href="?tipo={{ tipo }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if score_min %}&score_min={{ score_min }}{% endif %}&export=xlsx">Exportar XLSX</a>
+    <a class="btn btn-secondary" href="?tipo={{ tipo }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if score_min %}&score_min={{ score_min }}{% endif %}{% if clasificacion_operativa %}&clasificacion_operativa={{ clasificacion_operativa }}{% endif %}{% if show_hidden %}&show_hidden=1{% endif %}&export=csv">Exportar CSV</a>
+    <a class="btn btn-secondary" href="?tipo={{ tipo }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if score_min %}&score_min={{ score_min }}{% endif %}{% if clasificacion_operativa %}&clasificacion_operativa={{ clasificacion_operativa }}{% endif %}{% if show_hidden %}&show_hidden=1{% endif %}&export=xlsx">Exportar XLSX</a>
   </form>
 
   {% if can_manage and page.object_list %}
@@ -35,6 +313,9 @@
     <input type="hidden" name="tipo" value="{{ tipo }}">
     <input type="hidden" name="q" value="{{ q }}">
     <input type="hidden" name="score_min" value="{{ score_min|default:0 }}">
+    <input type="hidden" name="show_hidden" value="{% if show_hidden %}1{% else %}0{% endif %}">
+    <input type="hidden" name="clasificacion_operativa" value="{{ clasificacion_operativa }}">
+    <input type="hidden" name="page" value="{{ page.number }}">
 
     <div class="table-responsive">
       <table class="table table-striped">
@@ -42,11 +323,11 @@
           <tr>
             <th><input id="check-all" type="checkbox"></th>
             <th>Tipo</th>
-            <th>Código Point</th>
-            <th>Nombre Point</th>
-            <th>Sugerencia</th>
-            <th class="text-end">Score</th>
-            <th>Método</th>
+            <th>Codigo externo</th>
+            <th>Nombre externo</th>
+            <th>Artículo propuesto</th>
+            <th class="text-end">Nivel</th>
+            <th>Base de propuesta</th>
           </tr>
         </thead>
         <tbody>
@@ -56,7 +337,19 @@
             <td>{{ p.get_tipo_display }}</td>
             <td>{{ p.point_codigo|default:"-" }}</td>
             <td>{{ p.point_nombre }}</td>
-            <td>{{ p.fuzzy_sugerencia|default:"-" }}</td>
+            <td>
+              <div>{{ p.fuzzy_sugerencia|default:"-" }}</div>
+              {% if p.canonical_target %}
+              <div class="muted mt-1">
+                Artículo maestro propuesto: <strong>{{ p.canonical_target.nombre }}</strong>
+                {% if p.canonical_target_variants > 1 %}
+                <span class="badge badge-warning">Oficial ({{ p.canonical_target_variants }} variantes)</span>
+                {% else %}
+                <span class="badge badge-success">Oficial</span>
+                {% endif %}
+              </div>
+              {% endif %}
+            </td>
             <td class="text-end">{{ p.fuzzy_score|floatformat:1 }}</td>
             <td>{{ p.method|default:"-" }}</td>
           </tr>
@@ -68,45 +361,56 @@
     {% if tipo == "INSUMO" %}
     <div class="form-grid-auto" style="margin-top:12px;">
       <select class="input-field" name="insumo_id">
-        <option value="">Resolver seleccionados contra insumo...</option>
+        <option value="">Liberar seleccionados contra artículo maestro...</option>
         {% for i in insumos %}
-        <option value="{{ i.id }}">{{ i.nombre }}</option>
+        <option value="{{ i.id }}">
+          {{ i.nombre }}{% if i.canonical_variant_count > 1 %} · Oficial ({{ i.canonical_variant_count }} variantes){% endif %}
+        </option>
         {% endfor %}
       </select>
       <label class="field-check">
         <input type="checkbox" name="create_aliases" checked>
-        <span>Crear alias automáticamente</span>
+        <span>Crear equivalencia automática</span>
       </label>
-      <button class="btn btn-primary" type="submit" name="action" value="resolve_insumos">Resolver insumos</button>
-      <input class="input-field" type="number" name="auto_score_min" min="0" max="100" step="0.1" value="90" placeholder="Score auto">
-      <button class="btn btn-secondary" type="submit" name="action" value="resolve_sugerencias_insumos">Auto-resolver (selección o filtro)</button>
-      <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar pendientes seleccionados?');">Descartar seleccionados</button>
+      <button class="btn btn-primary" type="submit" name="action" value="resolve_insumos">Liberar insumos</button>
+      <input class="input-field" type="number" name="auto_score_min" min="0" max="100" step="0.1" value="90" placeholder="Nivel auto">
+      <button class="btn btn-secondary" type="submit" name="action" value="resolve_sugerencias_insumos">Liberar propuestas</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="mark_historical_selected">Marcar histórico</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="mark_seasonal_selected">Marcar temporada</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="restore_operational_selected">Volver operativo</button>
+      <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar registros abiertos seleccionados?');">Descartar seleccionados</button>
     </div>
     {% elif tipo == "PRODUCTO" %}
     <div class="form-grid-auto" style="margin-top:12px;">
       <select class="input-field" name="receta_id">
-        <option value="">Resolver seleccionados contra receta...</option>
+        <option value="">Liberar seleccionados contra receta...</option>
         {% for r in recetas %}
         <option value="{{ r.id }}">{{ r.nombre }}</option>
         {% endfor %}
       </select>
       <label class="field-check">
         <input type="checkbox" name="create_aliases" checked>
-        <span>Crear alias de código Point si la receta ya tiene otro código</span>
+                <span>Crear referencia externa adicional si la receta ya tiene otro código</span>
       </label>
-      <button class="btn btn-primary" type="submit" name="action" value="resolve_productos">Resolver productos</button>
-      <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar pendientes seleccionados?');">Descartar seleccionados</button>
+      <button class="btn btn-primary" type="submit" name="action" value="resolve_productos">Liberar productos</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="mark_historical_selected">Marcar histórico</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="mark_seasonal_selected">Marcar temporada</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="restore_operational_selected">Volver operativo</button>
+      <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar registros abiertos seleccionados?');">Descartar seleccionados</button>
     </div>
     {% else %}
     <div class="form-grid-auto" style="margin-top:12px;">
       <select class="input-field" name="proveedor_id">
-        <option value="">(Opcional) Asignar a proveedor existente...</option>
+        <option value="">(Opcional) Liberar con proveedor existente...</option>
         {% for pr in proveedores %}
         <option value="{{ pr.id }}">{{ pr.nombre }}</option>
         {% endfor %}
       </select>
-      <button class="btn btn-primary" type="submit" name="action" value="resolve_proveedores">Resolver proveedores</button>
-      <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar pendientes seleccionados?');">Descartar seleccionados</button>
+      <button class="btn btn-primary" type="submit" name="action" value="resolve_proveedores">Liberar proveedores</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="mark_historical_selected">Marcar histórico</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="mark_seasonal_selected">Marcar temporada</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="restore_operational_selected">Volver operativo</button>
+      <button class="btn btn-danger" type="submit" name="action" value="discard_selected" onclick="return confirm('¿Descartar registros abiertos seleccionados?');">Descartar seleccionados</button>
     </div>
     {% endif %}
   </form>
@@ -116,11 +420,11 @@
       <thead>
         <tr>
           <th>Tipo</th>
-          <th>Código Point</th>
-          <th>Nombre Point</th>
-          <th>Sugerencia</th>
-          <th class="text-end">Score</th>
-          <th>Método</th>
+          <th>Codigo externo</th>
+          <th>Nombre externo</th>
+          <th>Artículo propuesto</th>
+          <th class="text-end">Nivel</th>
+          <th>Base de propuesta</th>
         </tr>
       </thead>
       <tbody>
@@ -129,12 +433,24 @@
           <td>{{ p.get_tipo_display }}</td>
           <td>{{ p.point_codigo|default:"-" }}</td>
           <td>{{ p.point_nombre }}</td>
-          <td>{{ p.fuzzy_sugerencia|default:"-" }}</td>
+          <td>
+            <div>{{ p.fuzzy_sugerencia|default:"-" }}</div>
+            {% if p.canonical_target %}
+            <div class="muted mt-1">
+                Artículo maestro propuesto: <strong>{{ p.canonical_target.nombre }}</strong>
+              {% if p.canonical_target_variants > 1 %}
+              <span class="badge badge-warning">Oficial ({{ p.canonical_target_variants }} variantes)</span>
+              {% else %}
+              <span class="badge badge-success">Oficial</span>
+              {% endif %}
+            </div>
+            {% endif %}
+          </td>
           <td class="text-end">{{ p.fuzzy_score|floatformat:1 }}</td>
           <td>{{ p.method|default:"-" }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="6" class="text-muted">No hay pendientes para este tipo.</td></tr>
+        <tr><td colspan="6" class="text-muted">No hay registros por resolver para este tipo.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -144,11 +460,11 @@
   {% if page.paginator.num_pages > 1 %}
   <div class="toolbar mt-2">
     {% if page.has_previous %}
-    <a class="btn btn-secondary" href="?tipo={{ tipo }}&q={{ q|urlencode }}&page={{ page.previous_page_number }}">Anterior</a>
+    <a class="btn btn-secondary" href="?tipo={{ tipo }}&q={{ q|urlencode }}{% if score_min %}&score_min={{ score_min }}{% endif %}{% if clasificacion_operativa %}&clasificacion_operativa={{ clasificacion_operativa }}{% endif %}{% if show_hidden %}&show_hidden=1{% endif %}&page={{ page.previous_page_number }}">Anterior</a>
     {% endif %}
     <span class="muted">Página {{ page.number }} de {{ page.paginator.num_pages }}</span>
     {% if page.has_next %}
-    <a class="btn btn-secondary" href="?tipo={{ tipo }}&q={{ q|urlencode }}&page={{ page.next_page_number }}">Siguiente</a>
+    <a class="btn btn-secondary" href="?tipo={{ tipo }}&q={{ q|urlencode }}{% if score_min %}&score_min={{ score_min }}{% endif %}{% if clasificacion_operativa %}&clasificacion_operativa={{ clasificacion_operativa }}{% endif %}{% if show_hidden %}&show_hidden=1{% endif %}&page={{ page.next_page_number }}">Siguiente</a>
     {% endif %}
   </div>
   {% endif %}

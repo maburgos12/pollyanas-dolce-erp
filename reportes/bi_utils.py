@@ -11,6 +11,7 @@ from compras.models import OrdenCompra
 from crm.models import PedidoCliente
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from logistica.models import EntregaRuta, RutaEntrega
+from pos_bridge.models import PointDailySale
 from rrhh.models import Empleado, NominaPeriodo
 
 
@@ -45,9 +46,9 @@ def compute_bi_snapshot(period_days: int = 90, months_window: int = 6) -> dict:
         fecha_emision__gte=date_from,
         fecha_emision__lte=today,
     )
-    ventas_qs = PedidoCliente.objects.exclude(estatus=PedidoCliente.ESTATUS_CANCELADO).filter(
-        created_at__date__gte=date_from,
-        created_at__date__lte=today,
+    ventas_qs = PointDailySale.objects.filter(
+        sale_date__gte=date_from,
+        sale_date__lte=today,
     )
     nomina_qs = NominaPeriodo.objects.filter(
         fecha_fin__gte=date_from,
@@ -63,12 +64,15 @@ def compute_bi_snapshot(period_days: int = 90, months_window: int = 6) -> dict:
     )
 
     compras_total = compras_qs.aggregate(total=Sum("monto_estimado")).get("total") or Decimal("0")
-    ventas_total = ventas_qs.aggregate(total=Sum("monto_estimado")).get("total") or Decimal("0")
+    ventas_total = ventas_qs.aggregate(total=Sum("total_amount")).get("total") or Decimal("0")
     nomina_total = nomina_qs.aggregate(total=Sum("total_neto")).get("total") or Decimal("0")
+    compras_ready = compras_qs.exists()
+    nomina_ready = nomina_qs.exists()
 
     margen_bruto = ventas_total - compras_total
     margen_operativo = ventas_total - compras_total - nomina_total
-    margen_operativo_pct = (margen_operativo * Decimal("100") / ventas_total) if ventas_total > 0 else None
+    margin_ready = bool(ventas_total > 0 and compras_ready and nomina_ready)
+    margen_operativo_pct = (margen_operativo * Decimal("100") / ventas_total) if (margin_ready and ventas_total > 0) else None
 
     monthly_rows = []
     for y, m in _recent_month_pairs(months_window):
@@ -81,9 +85,8 @@ def compute_bi_snapshot(period_days: int = 90, months_window: int = 6) -> dict:
             or Decimal("0")
         )
         ventas_m = (
-            PedidoCliente.objects.exclude(estatus=PedidoCliente.ESTATUS_CANCELADO)
-            .filter(created_at__date__gte=m_from, created_at__date__lte=m_to)
-            .aggregate(total=Sum("monto_estimado"))
+            PointDailySale.objects.filter(sale_date__gte=m_from, sale_date__lte=m_to)
+            .aggregate(total=Sum("total_amount"))
             .get("total")
             or Decimal("0")
         )
@@ -105,10 +108,13 @@ def compute_bi_snapshot(period_days: int = 90, months_window: int = 6) -> dict:
                 "compras": compras_m,
                 "ventas": ventas_m,
                 "nomina": nomina_m,
-                "margen": ventas_m - compras_m - nomina_m,
+                "margen": (ventas_m - compras_m - nomina_m) if margin_ready else None,
                 "entregas": entregas_m,
             }
         )
+
+    closed_months = [row for row in monthly_rows if row["periodo"] != f"{today.year:04d}-{today.month:02d}"]
+    official_sales_series_ready = bool(closed_months) and all(_row.get("ventas", Decimal("0")) > 0 for _row in closed_months)
 
     top_proveedores = list(
         compras_qs.values("proveedor__nombre")
@@ -145,8 +151,12 @@ def compute_bi_snapshot(period_days: int = 90, months_window: int = 6) -> dict:
             "margen_bruto": margen_bruto,
             "margen_operativo": margen_operativo,
             "margen_operativo_pct": margen_operativo_pct,
+            "margin_ready": margin_ready,
+            "compras_ready": compras_ready,
+            "nomina_ready": nomina_ready,
+            "official_sales_series_ready": official_sales_series_ready,
             "ordenes_compra": compras_qs.count(),
-            "pedidos_venta": ventas_qs.count(),
+            "pedidos_venta": ventas_qs.values("sale_date").distinct().count(),
             "rutas": rutas_qs.count(),
             "entregas": entregas_qs.count(),
             "entregas_completadas": entregas_qs.filter(estatus=EntregaRuta.ESTATUS_ENTREGADA).count(),

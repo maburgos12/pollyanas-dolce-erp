@@ -2,6 +2,14 @@ from django.db import models
 from django.utils import timezone
 from unidecode import unidecode
 
+
+class PointPendingMatchQuerySet(models.QuerySet):
+    def visible_en_operacion(self):
+        return self.filter(visible_en_operacion=True)
+
+    def ocultos_en_operacion(self):
+        return self.filter(visible_en_operacion=False)
+
 class UnidadMedida(models.Model):
     TIPO_MASA = "MASS"
     TIPO_VOLUMEN = "VOLUME"
@@ -132,15 +140,35 @@ class PointPendingMatch(models.Model):
         (TIPO_PRODUCTO, "Producto"),
     ]
 
+    CLASIFICACION_OPERATIVA_ACTIVO = "ACTIVE"
+    CLASIFICACION_OPERATIVA_TEMPORADA = "SEASONAL"
+    CLASIFICACION_OPERATIVA_HISTORICO = "HISTORICAL"
+    CLASIFICACION_OPERATIVA_OCULTO = "HIDDEN"
+    CLASIFICACION_OPERATIVA_CHOICES = [
+        (CLASIFICACION_OPERATIVA_ACTIVO, "Operativo actual"),
+        (CLASIFICACION_OPERATIVA_TEMPORADA, "Temporada"),
+        (CLASIFICACION_OPERATIVA_HISTORICO, "Solo histórico"),
+        (CLASIFICACION_OPERATIVA_OCULTO, "Oculto del catálogo actual"),
+    ]
+
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, db_index=True)
     point_codigo = models.CharField(max_length=80, blank=True, default="", db_index=True)
     point_nombre = models.CharField(max_length=250, db_index=True)
     payload = models.JSONField(default=dict, blank=True)
     method = models.CharField(max_length=32, blank=True, default="")
+    clasificacion_operativa = models.CharField(
+        max_length=20,
+        choices=CLASIFICACION_OPERATIVA_CHOICES,
+        default=CLASIFICACION_OPERATIVA_ACTIVO,
+        db_index=True,
+    )
+    visible_en_operacion = models.BooleanField(default=True, db_index=True)
     fuzzy_score = models.FloatField(default=0.0)
     fuzzy_sugerencia = models.CharField(max_length=250, blank=True, default="")
     creado_en = models.DateTimeField(default=timezone.now)
     actualizado_en = models.DateTimeField(auto_now=True)
+
+    objects = PointPendingMatchQuerySet.as_manager()
 
     class Meta:
         verbose_name = "Pendiente de homologación Point"
@@ -150,11 +178,29 @@ class PointPendingMatch(models.Model):
         indexes = [
             models.Index(fields=["tipo", "point_nombre"]),
             models.Index(fields=["tipo", "point_codigo"]),
+            models.Index(fields=["tipo", "visible_en_operacion"], name="maestros_po_tipo_visible_idx"),
+            models.Index(fields=["clasificacion_operativa", "visible_en_operacion"], name="maestros_po_class_visible_idx"),
         ]
 
     def __str__(self) -> str:
         code = f"[{self.point_codigo}] " if self.point_codigo else ""
         return f"{self.tipo}: {code}{self.point_nombre}"
+
+    @classmethod
+    def qs_operativos(cls):
+        return cls.objects.visible_en_operacion()
+
+    def marcar_historico(self):
+        self.clasificacion_operativa = self.CLASIFICACION_OPERATIVA_HISTORICO
+        self.visible_en_operacion = False
+
+    def marcar_temporada(self):
+        self.clasificacion_operativa = self.CLASIFICACION_OPERATIVA_TEMPORADA
+        self.visible_en_operacion = False
+
+    def marcar_operativo_actual(self):
+        self.clasificacion_operativa = self.CLASIFICACION_OPERATIVA_ACTIVO
+        self.visible_en_operacion = True
 
 def seed_unidades_basicas():
     # Crea unidades base típicas (safe to call multiple times)

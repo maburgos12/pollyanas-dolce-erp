@@ -334,7 +334,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  - modo: {'DRY-RUN (rollback)' if options['dry_run'] else 'APLICADO'}")
 
     def _replace_point_pending(self, tipo: str, entries: list[dict]) -> None:
-        PointPendingMatch.objects.filter(tipo=tipo).delete()
+        PointPendingMatch.objects.filter(tipo=tipo).exclude(method="POINT_BRIDGE_MOVEMENTS").delete()
         if not entries:
             return
 

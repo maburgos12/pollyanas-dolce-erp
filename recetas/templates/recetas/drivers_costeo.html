@@ -3,7 +3,76 @@
 {% block page_title %}Recetas · Drivers de Costeo{% endblock %}
 {% block content %}
 <div class="card">
-  <div class="card-header">Drivers de Costeo (Fase 2)</div>
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid mb-3">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">Costeo / DG</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if drivers_unavailable %}is-danger{% elif drivers %}is-success{% else %}is-warning{% endif %}">
+        {% if drivers_unavailable %}No disponible{% elif drivers %}Operativo{% else %}Pendiente{% endif %}
+      </div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{% if drivers_unavailable %}1{% else %}0{% endif %}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">
+        {% if drivers_unavailable %}
+          Habilitar tablas del módulo para capturar drivers de mano de obra e indirectos.
+        {% elif edit_driver %}
+          Ajustar el driver seleccionado y validar su impacto en la versión de costo.
+        {% else %}
+          Mantener drivers por producto, familia, lote o global según el alcance del costeo.
+        {% endif %}
+      </div>
+      <a class="btn btn-secondary btn-sm" href="{% url 'recetas:recetas_list' %}">Abrir recetas</a>
+    </article>
+  </div>
+
+  <div class="card-header">Workflow ERP del costeo</div>
+  <div class="table-responsive mb-3">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>01 · Alcance</strong></td>
+          <td>Costeo</td>
+          <td><span class="badge {% if drivers %}bg-success{% else %}bg-warning text-dark{% endif %}">{% if drivers %}100%{% else %}50%{% endif %}</span></td>
+          <td>Definir si el driver aplica a producto, familia, lote o global.</td>
+          <td>Escoger el scope correcto para evitar distorsiones.</td>
+        </tr>
+        <tr>
+          <td><strong>02 · Carga</strong></td>
+          <td>Costeo / Operación</td>
+          <td><span class="badge {% if drivers_unavailable %}bg-danger{% else %}bg-warning text-dark{% endif %}">{% if drivers_unavailable %}0%{% else %}60%{% endif %}</span></td>
+          <td>Capturar porcentajes y montos fijos de MO e indirectos.</td>
+          <td>Guardar o importar drivers consistentes.</td>
+        </tr>
+        <tr>
+          <td><strong>03 · Aplicación</strong></td>
+          <td>Costeo / DG</td>
+          <td><span class="badge {% if drivers %}bg-success{% else %}bg-secondary{% endif %}">{% if drivers %}Listo{% else %}Pendiente{% endif %}</span></td>
+          <td>Los drivers alimentan versiones de costo y reportes ejecutivos.</td>
+          <td>Revisar el impacto en las recetas objetivo.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card-header">Drivers de costeo</div>
   <p class="muted mb-3">
     Configura mano de obra e indirectos por alcance (producto, familia, lote o global).
   </p>

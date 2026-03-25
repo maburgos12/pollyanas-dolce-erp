@@ -13,6 +13,9 @@ RUNNER_PATH="${ROOT_DIR}/scripts/run_pos_bridge_daily_sales_close.sh"
 
 mkdir -p "${LAUNCH_AGENTS_DIR}"
 mkdir -p "${ROOT_DIR}/storage/pos_bridge/logs"
+chmod 755 "${RUNNER_PATH}"
+xattr -d com.apple.provenance "${RUNNER_PATH}" >/dev/null 2>&1 || true
+xattr -d com.apple.quarantine "${RUNNER_PATH}" >/dev/null 2>&1 || true
 
 cat > "${PLIST_PATH}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

@@ -361,6 +361,25 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload_q2["planes_count"], 1)
         self.assertEqual(Decimal(payload_q2["items"][0]["cantidad_requerida"]), Decimal("6"))
 
+    def test_endpoint_mrp_explode_muestra_canonico_para_variante_historica(self):
+        self.insumo.codigo_point = "MRP-CAN-001"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+        self.linea.insumo = variante
+        self.linea.insumo_texto = variante.nombre
+        self.linea.save(update_fields=["insumo", "insumo_texto"])
+
+        resp = self.client.post(
+            reverse("api_mrp_explode"),
+            {"receta_id": self.receta.id, "multiplicador": "1"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["items"][0]["insumo_id"], self.insumo.id)
+        self.assertEqual(payload["items"][0]["nombre"], self.insumo.nombre)
+        self.assertTrue(payload["items"][0]["insumo_canonical"])
+
     def test_endpoint_mrp_calcular_requerimientos_rechaza_fuentes_combinadas(self):
         plan = PlanProduccion.objects.create(nombre="Plan API combinado", fecha_produccion=date(2026, 2, 21))
         PlanProduccionItem.objects.create(plan=plan, receta=self.receta, cantidad=Decimal("1"))
@@ -579,6 +598,32 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp_reasignar.status_code, 200)
         payload_reasignar = resp_reasignar.json()
         self.assertEqual(payload_reasignar["updated"], 1)
+        self.assertEqual(payload_reasignar["target_insumo"]["id"], self.insumo.id)
+
+    def test_endpoint_inventario_aliases_normaliza_variante_al_canonico(self):
+        self.insumo.codigo_point = "AZU-API-001"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+
+        url_aliases = reverse("api_inventario_aliases")
+        resp_create = self.client.post(
+            url_aliases,
+            {"alias": "Azucar cristal API", "insumo_id": variante.id, "resolver_cross_source": False},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_create.status_code, 201)
+        payload_create = resp_create.json()
+        self.assertEqual(payload_create["alias"]["insumo_id"], self.insumo.id)
+
+        alias_id = payload_create["alias"]["id"]
+        url_reasignar = reverse("api_inventario_aliases_reasignar")
+        resp_reasignar = self.client.post(
+            url_reasignar,
+            {"alias_ids": [alias_id], "insumo_id": variante.id, "resolver_cross_source": False},
+            content_type="application/json",
+        )
+        self.assertEqual(resp_reasignar.status_code, 200)
+        payload_reasignar = resp_reasignar.json()
         self.assertEqual(payload_reasignar["target_insumo"]["id"], self.insumo.id)
 
     def test_endpoint_inventario_aliases_pendientes_summary(self):
@@ -2014,6 +2059,35 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(self.insumo.nombre_point, "Azucar cristal Point")
         self.assertTrue(InsumoAlias.objects.filter(insumo=self.insumo, nombre_normalizado="azucar cristal point").exists())
 
+    def test_endpoint_inventario_point_pendientes_resolver_normaliza_variante_al_canonico(self):
+        self.insumo.codigo_point = "PT-CANON-API"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+        pending = PointPendingMatch.objects.create(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo="PT-IN-001B",
+            point_nombre="Azucar cristal Point 2",
+            method="FUZZY",
+            fuzzy_score=95.0,
+            fuzzy_sugerencia=self.insumo.nombre,
+        )
+
+        url = reverse("api_inventario_point_pendientes_resolver")
+        resp = self.client.post(
+            url,
+            {
+                "action": "resolve_insumos",
+                "tipo": "INSUMO",
+                "pending_ids": [pending.id],
+                "insumo_id": variante.id,
+                "create_aliases": True,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["target"]["insumo_id"], self.insumo.id)
+
     def test_endpoint_inventario_point_pendientes_resolver_auto_sugerencias(self):
         target = Insumo.objects.create(nombre="Harina Point API", unidad_base=self.unidad, activo=True)
         pending_ok = PointPendingMatch.objects.create(
@@ -2211,6 +2285,36 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(resp_all.status_code, 200)
         self.assertEqual(resp_all.json()["totales"]["insumos"], 1)
 
+    def test_endpoint_inventario_sugerencias_compra_agrupa_variantes_en_canonico(self):
+        self.insumo.codigo_point = "SUG-CANON-001"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            stock_actual=Decimal("2"),
+            punto_reorden=Decimal("8"),
+            stock_minimo=Decimal("2"),
+            dias_llegada_pedido=2,
+            consumo_diario_promedio=Decimal("3"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=variante,
+            stock_actual=Decimal("1"),
+            punto_reorden=Decimal("0"),
+            stock_minimo=Decimal("0"),
+            dias_llegada_pedido=0,
+            consumo_diario_promedio=Decimal("0"),
+        )
+        CostoInsumo.objects.create(insumo=self.insumo, costo_unitario=Decimal("10"), source_hash="sug-canon-1")
+        url = reverse("api_inventario_sugerencias_compra")
+        resp = self.client.get(url, {"include_all": 1})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["totales"]["insumos"], 1)
+        row = payload["items"][0]
+        self.assertEqual(int(row["insumo_id"]), self.insumo.id)
+        self.assertEqual(Decimal(row["stock_actual"]), Decimal("3"))
+
     def test_endpoint_compras_solicitud_crea(self):
         url = reverse("api_compras_solicitud")
         resp = self.client.post(
@@ -2230,6 +2334,26 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["insumo_id"], self.insumo.id)
         self.assertEqual(payload["cantidad"], "3.500")
         self.assertTrue(payload["folio"].startswith("SOL-"))
+
+    def test_endpoint_compras_solicitud_normaliza_variante_al_canonico(self):
+        self.insumo.codigo_point = "SOL-CANON-001"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+        url = reverse("api_compras_solicitud")
+        resp = self.client.post(
+            url,
+            {
+                "area": "Produccion",
+                "solicitante": "coordinador",
+                "insumo_id": variante.id,
+                "cantidad": "3.500",
+                "fecha_requerida": "2026-02-25",
+            },
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertEqual(payload["insumo_id"], self.insumo.id)
+        self.assertEqual(SolicitudCompra.objects.get(pk=payload["id"]).insumo_id, self.insumo.id)
 
     def test_endpoint_compras_solicitud_auto_crea_orden(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor auto OC", activo=True)
@@ -2263,6 +2387,39 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(orden.solicitud_id, payload["id"])
         self.assertEqual(orden.estatus, OrdenCompra.STATUS_ENVIADA)
         self.assertEqual(orden.monto_estimado, Decimal("50.00"))
+
+    def test_endpoint_compras_solicitud_auto_crea_orden_usa_costo_canonico_de_variante(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor auto OC canon", activo=True)
+        self.insumo.codigo_point = "API-SOL-CAN-001"
+        self.insumo.proveedor_principal = proveedor
+        self.insumo.save(update_fields=["codigo_point", "proveedor_principal"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+        CostoInsumo.objects.create(
+            insumo=variante,
+            proveedor=proveedor,
+            costo_unitario=Decimal("13.25"),
+            source_hash="api-oc-auto-canonical-variant",
+        )
+        url = reverse("api_compras_solicitud")
+        resp = self.client.post(
+            url,
+            {
+                "area": "Compras",
+                "solicitante": "api-auto",
+                "insumo_id": variante.id,
+                "cantidad": "2",
+                "estatus": SolicitudCompra.STATUS_APROBADA,
+                "auto_crear_orden": True,
+                "orden_estatus": OrdenCompra.STATUS_ENVIADA,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertEqual(payload["insumo_id"], self.insumo.id)
+        orden = OrdenCompra.objects.get(pk=payload["orden_id"])
+        self.assertEqual(orden.monto_estimado, Decimal("26.50"))
+        self.assertEqual(orden.proveedor_id, proveedor.id)
 
     def test_endpoint_compras_solicitud_auto_crear_orden_requiere_aprobada(self):
         url = reverse("api_compras_solicitud")
@@ -2348,6 +2505,58 @@ class RecetasCosteoApiTests(TestCase):
         confirm_dup_payload = confirm_dup_resp.json()
         self.assertEqual(confirm_dup_payload["totales"]["created"], 0)
         self.assertEqual(confirm_dup_payload["totales"]["skipped_duplicate"], 1)
+
+    def test_endpoint_compras_solicitudes_import_normaliza_variante_al_canonico(self):
+        self.insumo.codigo_point = "IMP-CANON-001"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+        proveedor = Proveedor.objects.create(nombre="Proveedor Import Canon", activo=True)
+        self.insumo.proveedor_principal = proveedor
+        self.insumo.save(update_fields=["proveedor_principal"])
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("25.5"),
+            source_hash="api-import-preview-canon-1",
+        )
+
+        preview_url = reverse("api_compras_solicitudes_import_preview")
+        preview_resp = self.client.post(
+            preview_url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": "2026-02",
+                "evitar_duplicados": True,
+                "score_min": 90,
+                "rows": [
+                    {
+                        "insumo": variante.nombre,
+                        "cantidad": "3.000",
+                        "area": "Compras",
+                        "solicitante": "api-import",
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(preview_resp.status_code, 200)
+        row = preview_resp.json()["preview"]["rows"][0]
+        self.assertEqual(int(row["insumo_id"]), self.insumo.id)
+
+        confirm_url = reverse("api_compras_solicitudes_import_confirm")
+        confirm_resp = self.client.post(
+            confirm_url,
+            {
+                "periodo_tipo": "mes",
+                "periodo_mes": "2026-02",
+                "evitar_duplicados": True,
+                "rows": [dict(row, insumo_id=variante.id)],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(confirm_resp.status_code, 200)
+        solicitud = SolicitudCompra.objects.latest("id")
+        self.assertEqual(solicitud.insumo_id, self.insumo.id)
 
     def test_endpoint_compras_solicitud_requiere_rol(self):
         user_model = get_user_model()
@@ -2448,6 +2657,33 @@ class RecetasCosteoApiTests(TestCase):
         payload_existing = resp_existing.json()
         self.assertFalse(payload_existing["created"])
         self.assertEqual(payload_existing["id"], orden.id)
+
+    def test_endpoint_compras_solicitud_crear_orden_usa_canonico_para_variante_historica(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor flujo API canon", activo=True)
+        self.insumo.codigo_point = "API-ORDER-CAN-001"
+        self.insumo.proveedor_principal = proveedor
+        self.insumo.save(update_fields=["codigo_point", "proveedor_principal"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("18.00"),
+            source_hash="api-crear-orden-canonico",
+        )
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=variante,
+            cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+
+        url = reverse("api_compras_solicitud_crear_orden", args=[solicitud.id])
+        resp = self.client.post(url, {"estatus": OrdenCompra.STATUS_ENVIADA}, content_type="application/json")
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertEqual(payload["proveedor"], proveedor.nombre)
+        self.assertEqual(Decimal(payload["monto_estimado"]), Decimal("36.00"))
 
     def test_endpoint_compras_solicitud_crear_orden_requires_perm(self):
         solicitud = SolicitudCompra.objects.create(
@@ -2723,6 +2959,30 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["items"][0]["cantidad"], "2.000")
         self.assertEqual(payload["items"][1]["cantidad"], "5.000")
 
+    def test_endpoint_compras_solicitudes_list_muestra_canonico_para_variante_historica(self):
+        self.insumo.codigo_point = "LIST-CANON-001"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+        CostoInsumo.objects.create(
+            insumo=self.insumo,
+            costo_unitario=Decimal("10.00"),
+            source_hash="api-list-sol-canon-1",
+        )
+        SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="uno",
+            insumo=variante,
+            cantidad=Decimal("5"),
+            fecha_requerida=date(2026, 2, 10),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+        resp = self.client.get(reverse("api_compras_solicitudes"), {"mes": "2026-02"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["items"][0]["insumo_id"], self.insumo.id)
+        self.assertEqual(payload["items"][0]["insumo"], self.insumo.nombre)
+        self.assertEqual(payload["items"][0]["costo_unitario"], "10.00")
+
     def test_endpoint_compras_solicitudes_list_sort_invalido(self):
         resp = self.client.get(reverse("api_compras_solicitudes"), {"sort_by": "ruido"})
         self.assertEqual(resp.status_code, 400)
@@ -2789,6 +3049,34 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(payload["totales"]["by_status"][OrdenCompra.STATUS_ENVIADA], 1)
         self.assertEqual(len(payload["items"]), 1)
         self.assertEqual(payload["items"][0]["proveedor_id"], proveedor_a.id)
+
+    def test_endpoint_compras_ordenes_list_muestra_insumo_canonico_para_variante_historica(self):
+        self.insumo.codigo_point = "API-LIST-CAN-001"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
+        proveedor = Proveedor.objects.create(nombre="Proveedor orden list canon", activo=True)
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="api",
+            insumo=variante,
+            proveedor_sugerido=proveedor,
+            cantidad=Decimal("1"),
+            fecha_requerida=date(2026, 2, 10),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=proveedor,
+            fecha_emision=date(2026, 2, 13),
+            monto_estimado=Decimal("40.00"),
+            estatus=OrdenCompra.STATUS_ENVIADA,
+        )
+
+        resp = self.client.get(reverse("api_compras_ordenes"), {"mes": "2026-02"})
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        row = next(item for item in payload["items"] if item["solicitud_id"] == solicitud.id)
+        self.assertEqual(row["insumo"], self.insumo.nombre)
 
     def test_endpoint_compras_ordenes_list_offset_and_totales_filtrados(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor orden offset", activo=True)
@@ -5682,11 +5970,43 @@ class RecetasCosteoApiTests(TestCase):
         self.assertEqual(alias.nombre_normalizado, normalizar_nombre(alias.nombre))
         self.assertEqual(point_alias.codigo_point_normalizado, normalizar_codigo_point(point_alias.codigo_point))
 
+    def test_endpoint_master_normalize_aliases_muestra_canonico(self):
+        canonical = Insumo.objects.create(
+            nombre="Mantequilla Canonica",
+            unidad_base=self.unidad,
+            activo=True,
+            codigo_point="MANT-CAN-001",
+        )
+        variante = Insumo.objects.create(
+            nombre="MANTEQUILLA CANONICA",
+            unidad_base=self.unidad,
+            activo=True,
+        )
+        alias = InsumoAlias.objects.create(nombre="Mantequilla Alt", insumo=variante)
+
+        resp = self.client.post(
+            reverse("api_master_normalize"),
+            {"scope": "aliases_insumo", "dry_run": True, "limit": 50},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        row = next(item for item in payload["items"] if item["id"] == alias.id)
+        self.assertEqual(row["insumo_id"], canonical.id)
+        self.assertEqual(row["insumo"], canonical.nombre)
+        self.assertTrue(row["insumo_canonical"])
+
     def test_endpoint_master_duplicates(self):
-        Proveedor.objects.create(nombre="Proveedor Demo", activo=True)
+        proveedor = Proveedor.objects.create(nombre="Proveedor Demo", activo=True)
         Proveedor.objects.create(nombre="  proveedor   demo ", activo=True)
 
-        Insumo.objects.create(nombre="Mantequilla Salted", unidad_base=self.unidad, activo=True, codigo_point="MP-001")
+        canonical_insumo = Insumo.objects.create(
+            nombre="Mantequilla Salted",
+            unidad_base=self.unidad,
+            activo=True,
+            codigo_point="MP-001",
+            proveedor_principal=proveedor,
+        )
         Insumo.objects.create(nombre="Mantequilla  Salted", unidad_base=self.unidad, activo=True, codigo_point=" mp 001 ")
 
         Receta.objects.create(
@@ -5714,6 +6034,10 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("recetas", group_types)
         self.assertIn("proveedores", group_types)
         self.assertIn("codigos_point", group_types)
+        insumo_group = next(item for item in payload["items"] if item["group_type"] == "insumos")
+        self.assertEqual(insumo_group["canonical_member_id"], canonical_insumo.id)
+        self.assertEqual(insumo_group["canonical_member"]["id"], canonical_insumo.id)
+        self.assertTrue(any(member["is_canonical"] for member in insumo_group["members"]))
 
         resp_csv = self.client.get(url, {"scope": "all", "min_count": 2, "export": "csv"})
         self.assertEqual(resp_csv.status_code, 200)
@@ -5804,6 +6128,26 @@ class InventarioAjustesApiTests(TestCase):
         self.existencia.refresh_from_db()
         self.assertEqual(self.existencia.stock_actual, Decimal("10"))
 
+    def test_almacen_can_create_pending_ajuste_normaliza_variante_al_canonico(self):
+        self.insumo.codigo_point = "AJ-CANON-001"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="HARINA API AJUSTES", unidad_base=self.unidad, activo=True)
+        self.client.force_login(self.almacen)
+        resp = self.client.post(
+            reverse("api_inventario_ajustes"),
+            {
+                "insumo_id": variante.id,
+                "cantidad_sistema": "10",
+                "cantidad_fisica": "8",
+                "motivo": "Conteo semanal",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertEqual(payload["insumo_id"], self.insumo.id)
+        self.assertEqual(AjusteInventario.objects.get(pk=payload["id"]).insumo_id, self.insumo.id)
+
     def test_almacen_cannot_apply_inmediato(self):
         self.client.force_login(self.almacen)
         resp = self.client.post(
@@ -5843,6 +6187,26 @@ class InventarioAjustesApiTests(TestCase):
         mov = MovimientoInventario.objects.get(referencia=payload["folio"])
         self.assertEqual(mov.tipo, MovimientoInventario.TIPO_ENTRADA)
         self.assertEqual(mov.cantidad, Decimal("3"))
+
+    def test_list_ajustes_muestra_canonico_para_variante_historica(self):
+        self.insumo.codigo_point = "AJ-LIST-CAN-001"
+        self.insumo.save(update_fields=["codigo_point"])
+        variante = Insumo.objects.create(nombre="HARINA API AJUSTES", unidad_base=self.unidad, activo=True)
+        AjusteInventario.objects.create(
+            insumo=variante,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("9"),
+            motivo="Conteo",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse("api_inventario_ajustes"))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["items"][0]["insumo_id"], self.insumo.id)
+        self.assertEqual(payload["items"][0]["insumo"], self.insumo.nombre)
+        self.assertTrue(payload["items"][0]["insumo_canonical"])
 
     def test_admin_can_decide_approve(self):
         ajuste = AjusteInventario.objects.create(

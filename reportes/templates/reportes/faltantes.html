@@ -12,6 +12,422 @@
   <a class="module-tab" href="{% url 'reportes:bi' %}">BI</a>
 </nav>
 
+<section class="card enterprise-focus-alert {% if maturity_summary.attention_steps %}enterprise-focus-alert-warning{% else %}enterprise-focus-alert-success{% endif %}">
+  <div class="enterprise-focus-alert-copy">
+    <div class="enterprise-focus-alert-title">Prioridad ERP actual</div>
+    <div class="enterprise-focus-alert-summary">{{ maturity_summary.next_priority_title }}</div>
+    <div class="enterprise-focus-alert-detail">{{ maturity_summary.next_priority_detail }}</div>
+    <div class="muted">Cobertura {{ maturity_summary.coverage_pct }}% · Etapas controladas {{ maturity_summary.completed_steps }} · Etapas con atención {{ maturity_summary.attention_steps }}</div>
+  </div>
+  <div class="enterprise-focus-alert-actions">
+    <a class="btn btn-primary" href="{{ maturity_summary.next_priority_url }}">{{ maturity_summary.next_priority_cta }}</a>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-mini">
+    <div class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+      <div class="kpi-label">Semáforo global</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Expediente ERP del módulo</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Documento</th>
+          <th>Fuente de control</th>
+          <th>Etapa ERP</th>
+          <th>Propósito</th>
+          <th>Regla de salida</th>
+          <th>Siguiente paso</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Faltantes críticos y bajo mínimo</td>
+          <td>Existencias, puntos de reorden y stock operativo</td>
+          <td>Monitoreo de abastecimiento</td>
+          <td>Identificar artículos que requieren acción inmediata de compra o corrección de maestro.</td>
+          <td>Cada faltante queda clasificado por criticidad y listo para escalarse a compras.</td>
+          <td>Emitir solicitud, corregir maestro o ajustar stock mínimo.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Workflow ERP del módulo</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Entrada</th>
+          <th>Control</th>
+          <th>Salida</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>01 Stock evaluado</td>
+          <td>Existencia actual, mínimo y sugerencia de compra</td>
+          <td>Clasificación crítico / bajo mínimo / alerta</td>
+          <td>Lista priorizada de faltantes</td>
+        </tr>
+        <tr>
+          <td>02 Gobierno maestro</td>
+          <td>Uso ERP, unidad, proveedor y categoría</td>
+          <td>Validación de artículo listo ERP</td>
+          <td>Faltantes operables o artículos a corregir</td>
+        </tr>
+        <tr>
+          <td>03 Escalamiento documental</td>
+          <td>Faltantes listos y criticidad definida</td>
+          <td>Enlace a compras y corrección de catálogo</td>
+          <td>Surtido o regularización del artículo</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Cadena documental ERP</div>
+  <div class="erp-chain-grid">
+    {% for step in enterprise_chain %}
+    <article class="erp-chain-card tone-{{ step.tone|default:'neutral' }}">
+      <div class="erp-chain-step">{{ step.step }}</div>
+      <div class="erp-chain-title">{{ step.title }}</div>
+      <div class="erp-chain-count">{{ step.count }}</div>
+      <div class="erp-chain-status">{{ step.status }}</div>
+      <p class="erp-chain-detail">{{ step.detail }}</p>
+      <a class="btn btn-secondary btn-sm" href="{{ step.url }}">{{ step.cta }}</a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Ruta troncal ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Depende de</th>
+          <th>Responsable</th>
+          <th>Cierre</th>
+          <th>Estatus</th>
+          <th>Dependencia</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in enterprise_chain %}
+        <tr>
+          <td>{{ item.title }}</td>
+          <td>{{ item.depends_on }}</td>
+          <td>{{ item.owner }}</td>
+          <td>{{ item.completion }}%</td>
+          <td>{{ item.status }}</td>
+          <td>{{ item.dependency_status }}</td>
+          <td>{{ item.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ item.url }}">{{ item.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if critical_path_rows %}
+<section class="card">
+  <div class="card-header">Ruta crítica ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Prioridad</th>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Brechas</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Lectura ejecutiva</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in critical_path_rows %}
+        <tr>
+          <td><strong>{{ row.rank }}</strong></td>
+          <td>
+            <strong>{{ row.title }}</strong>
+            <div class="muted">{{ row.status }}</div>
+          </td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.count }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>
+            <strong>{{ row.depends_on }}</strong>
+            <div class="muted">{{ row.dependency_status }}</div>
+          </td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if executive_radar_rows %}
+<section class="card">
+  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Bloqueo dominante</th>
+          <th>Depende de</th>
+          <th>Cierre</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in executive_radar_rows %}
+        <tr>
+          <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.dominant_blocker }}</td>
+          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+          <td><span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">{{ row.progress_pct }}% · {{ row.blockers }} abiertos</span></td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Frente</th>
+          <th>Responsable</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in erp_governance_rows %}
+        <tr>
+          <td>{{ row.front }}</td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Madurez ERP de reportes</div>
+  <div class="kpi-mini">
+    <div class="kpi-card">
+      <div class="kpi-number is-success">{{ maturity_summary.completed_steps }}</div>
+      <div class="kpi-label">Etapas controladas</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number is-warning">{{ maturity_summary.attention_steps }}</div>
+      <div class="kpi-label">Etapas en atención</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">{{ maturity_summary.coverage_pct }}%</div>
+      <div class="kpi-label">Cobertura del módulo</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Siguiente prioridad</div>
+      <div style="font-weight:700; margin:8px 0 6px;">{{ maturity_summary.next_priority_title }}</div>
+      <div class="muted">{{ maturity_summary.next_priority_detail }}</div>
+      <div style="margin-top:10px;">
+        <a class="btn btn-secondary btn-sm" href="{{ maturity_summary.next_priority_url }}">{{ maturity_summary.next_priority_cta }}</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Criterios de cierre ERP</div>
+  <div class="kpi-mini">
+    <div class="kpi-card">
+      <div class="kpi-number">{{ release_gate_completion.pct }}%</div>
+      <div class="kpi-label">Cierre global</div>
+      <div class="muted mt-1">{{ release_gate_completion.closed }}/{{ release_gate_completion.total }} puntos controlados</div>
+    </div>
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+    {% for row in release_gate_rows %}
+      <article class="enterprise-pill {% if row.open %}tone-warning{% else %}tone-success{% endif %}">
+        <div class="enterprise-pill-title">{{ row.label }}</div>
+        <div class="enterprise-pill-count">{{ row.closed }}</div>
+        <div class="enterprise-pill-status">Cerrados</div>
+        <div class="enterprise-pill-detail">{{ row.detail }}</div>
+        <div class="muted mt-1">Abiertos: {{ row.open }}</div>
+        <a class="btn btn-secondary btn-sm" href="{{ row.url }}">Abrir</a>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Cadena de control de reportes</div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+    {% for item in handoff_map %}
+      <article class="enterprise-pill tone-{{ item.tone|default:'neutral' }}">
+        <div class="enterprise-pill-title">{{ item.label }}</div>
+        <div class="enterprise-pill-count">{{ item.count }}</div>
+        <div class="enterprise-pill-status">{{ item.status }}</div>
+        <div class="enterprise-pill-detail">{{ item.detail }}</div>
+        <a class="btn btn-secondary btn-sm" href="{{ item.url }}">{{ item.cta }}</a>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+{% if handoff_map %}
+<section class="card">
+  <div class="card-header">Entrega de reportes a downstream</div>
+  <p class="muted mb-2">
+    Expone si este tablero ya puede bajar con control hacia decisión operativa, compras o lectura ejecutiva, junto con el criterio de salida documental de cada tramo.
+  </p>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Destino</th>
+          <th>Responsable</th>
+          <th>Estatus</th>
+          <th class="text-end">Brechas</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Criterio de salida</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in handoff_map %}
+          <tr>
+            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.status }}</td>
+            <td class="text-end">{{ row.count }}</td>
+            <td style="min-width:160px;">
+              <div class="erp-progress">
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+              </div>
+              <div class="muted mt-1">{{ row.completion }}%</div>
+            </td>
+            <td>{{ row.depends_on }}</td>
+            <td>{{ row.exit_criteria }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Cierre por etapa documental</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Abiertos</th>
+          <th>Cerrados</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in document_stage_rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.open }}</td>
+          <td>{{ row.closed }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">Abrir</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Salud operativa ERP</div>
+  <div class="kpi-mini">
+    {% for card in operational_health_cards %}
+    <div class="kpi-card">
+      <div class="kpi-number {% if card.tone == 'success' %}is-success{% elif card.tone == 'warning' %}is-warning{% elif card.tone == 'danger' %}is-danger{% endif %}">{{ card.value }}</div>
+      <div class="kpi-label">{{ card.label }}</div>
+      <div class="muted mt-1">{{ card.detail }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
 <section class="card">
   <div class="card-header">Insumos Debajo de Mínimo</div>
   <div class="toolbar">
@@ -24,6 +440,8 @@
     <div class="kpi-card"><div class="kpi-number is-danger">{{ criticos_count }}</div><div class="kpi-label">Críticos</div></div>
     <div class="kpi-card"><div class="kpi-number is-warning">{{ bajo_count }}</div><div class="kpi-label">Bajo mínimo</div></div>
     <div class="kpi-card"><div class="kpi-number">{{ alertas_count }}</div><div class="kpi-label">Alertas</div></div>
+    <div class="kpi-card"><div class="kpi-number is-success">{{ governance_ready }}</div><div class="kpi-label">Maestro listo</div></div>
+    <div class="kpi-card"><div class="kpi-number is-warning">{{ governance_blocked }}</div><div class="kpi-label">Maestro bloqueado</div></div>
   </div>
   <div class="toolbar">
     <a class="btn btn-secondary" href="{% url 'reportes:faltantes' %}?nivel={{ nivel }}&export=csv">Descargar CSV</a>
@@ -34,10 +452,12 @@
       <thead>
         <tr>
           <th>Insumo</th>
-          <th>Unidad</th>
+          <th>Unid.</th>
+          <th>Uso ERP</th>
           <th class="text-end">Stock actual</th>
           <th class="text-end">Mínimo</th>
           <th class="text-end">Sugerencia compra</th>
+          <th>Maestro ERP</th>
           <th>Criticidad</th>
         </tr>
       </thead>
@@ -46,13 +466,26 @@
         <tr>
           <td>{{ row.insumo.nombre }}</td>
           <td>{% if row.insumo.unidad_base %}{{ row.insumo.unidad_base.codigo }}{% else %}-{% endif %}</td>
+          <td><span class="badge bg-primary">{{ row.enterprise_usage_label }}</span></td>
           <td class="text-end">{{ row.stock_actual }}</td>
           <td class="text-end">{{ row.punto_reorden }}</td>
           <td class="text-end">{{ row.sugerencia_compra }}</td>
+          <td>
+            <span class="badge {% if row.enterprise_status == 'Listo ERP' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+              {{ row.enterprise_status }}
+            </span>
+            {% if row.enterprise_missing %}
+            <div class="muted mt-1">Falta: {{ row.enterprise_missing|join:", " }}</div>
+            <div class="mt-2">
+              <a class="btn btn-secondary btn-sm" href="{{ row.enterprise_edit_url }}">Editar</a>
+              <a class="btn btn-secondary btn-sm" href="{{ row.enterprise_list_url }}">Corregir</a>
+            </div>
+            {% endif %}
+          </td>
           <td><span class="badge {{ row.criticidad_badge }}">{{ row.criticidad }}</span></td>
         </tr>
         {% empty %}
-        <tr><td colspan="6" class="text-muted">Sin faltantes para el filtro seleccionado.</td></tr>
+        <tr><td colspan="8" class="text-muted">Sin faltantes para el filtro seleccionado.</td></tr>
         {% endfor %}
       </tbody>
     </table>

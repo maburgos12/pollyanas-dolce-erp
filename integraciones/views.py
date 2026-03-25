@@ -25,6 +25,394 @@ from recetas.utils.normalizacion import normalizar_nombre
 from .models import PublicApiAccessLog, PublicApiClient
 
 
+def _integraciones_enterprise_chain(
+    *,
+    point_pending_total: int,
+    recetas_pending_total: int,
+    almacen_pending_count: int,
+    errors_24h: int,
+) -> list[dict]:
+    chain = [
+        {
+            "step": "01",
+            "title": "Catálogo externo",
+            "detail": "Catálogo comercial y referencias externas pendientes por resolver antes de cerrar la operación.",
+            "count": point_pending_total,
+            "status": "Pendientes abiertos" if point_pending_total else "Catálogo listo para operar",
+            "tone": "warning" if point_pending_total else "success",
+            "url": reverse("maestros:point_pending_review"),
+            "cta": "Abrir catálogo externo",
+            "owner": "Comercial / Maestros",
+            "next_step": "Cerrar referencias externas antes de liberar maestro ERP.",
+        },
+        {
+            "step": "02",
+            "title": "Maestro ERP",
+            "detail": "Artículo estándar, aliases y referencia interna ya consolidados.",
+            "count": recetas_pending_total,
+            "status": "Con referencias por resolver" if recetas_pending_total else "Maestro consistente",
+            "tone": "warning" if recetas_pending_total else "success",
+            "url": reverse("inventario:aliases_catalog"),
+            "cta": "Abrir referencias ERP",
+            "owner": "Maestros / Inventario",
+            "next_step": "Consolidar artículo estándar y canonicidad interna.",
+        },
+        {
+            "step": "03",
+            "title": "BOM y almacén",
+            "detail": "Recetas e inventario ya amarrados al mismo artículo estándar.",
+            "count": almacen_pending_count,
+            "status": "Con referencias recientes" if almacen_pending_count else "Sin diferencias recientes",
+            "tone": "warning" if almacen_pending_count else "success",
+            "url": reverse("inventario:carga_almacen"),
+            "cta": "Abrir carga almacén",
+            "owner": "Inventario / Producción",
+            "next_step": "Alinear recetas y almacén al mismo artículo maestro.",
+        },
+        {
+            "step": "04",
+            "title": "API pública",
+            "detail": "Clientes externos operando con errores controlados y trazabilidad.",
+            "count": errors_24h,
+            "status": "Con errores" if errors_24h else "Operación estable",
+            "tone": "danger" if errors_24h else "success",
+            "url": reverse("integraciones:panel"),
+            "cta": "Revisar integraciones",
+            "owner": "TI / DG",
+            "next_step": "Controlar errores, clientes y trazabilidad de consumo externo.",
+        },
+    ]
+    for index, item in enumerate(chain):
+        previous = chain[index - 1] if index else None
+        item["completion"] = 100 if item.get("tone") == "success" else (60 if item.get("tone") == "warning" else 25)
+        item["depends_on"] = previous["title"] if previous else "Origen del módulo"
+        if previous:
+            item["dependency_status"] = (
+                f"Condicionado por {previous['title'].lower()}"
+                if previous.get("tone") != "success"
+                else f"Listo desde {previous['title'].lower()}"
+            )
+        else:
+            item["dependency_status"] = "Punto de arranque del módulo"
+    return chain
+
+
+def _integraciones_document_stage_rows(
+    *,
+    point_pending_total: int,
+    recetas_pending_total: int,
+    almacen_pending_count: int,
+    errors_24h: int,
+    requests_24h: int,
+) -> list[dict]:
+    rows = [
+        {
+            "label": "Catálogo comercial",
+            "open": point_pending_total,
+            "closed": max(requests_24h - point_pending_total, 0),
+            "detail": "Pendientes externos frente a consumo operativo del periodo.",
+            "url": reverse("maestros:point_pending_review"),
+            "owner": "Comercial / Maestros",
+            "next_step": "Resolver catálogo externo",
+        },
+        {
+            "label": "Referencias ERP",
+            "open": recetas_pending_total,
+            "closed": max(point_pending_total - recetas_pending_total, 0),
+            "detail": "Artículos y partidas de BOM aún por resolver.",
+            "url": reverse("inventario:aliases_catalog"),
+            "owner": "Maestros / Inventario",
+            "next_step": "Consolidar artículo maestro",
+        },
+        {
+            "label": "Sincronización almacén",
+            "open": almacen_pending_count,
+            "closed": max(requests_24h - almacen_pending_count, 0),
+            "detail": "Referencias recientes detectadas por la sincronización de almacén.",
+            "url": reverse("inventario:carga_almacen"),
+            "owner": "Inventario / Producción",
+            "next_step": "Cerrar referencias recientes",
+        },
+        {
+            "label": "API y monitoreo",
+            "open": errors_24h,
+            "closed": max(requests_24h - errors_24h, 0),
+            "detail": "Errores frente a requests completados del periodo actual.",
+            "url": reverse("integraciones:panel"),
+            "owner": "TI / DG",
+            "next_step": "Controlar errores y clientes",
+        },
+    ]
+    for row in rows:
+        total = int(row["open"] or 0) + int(row["closed"] or 0)
+        row["completion"] = int(round((int(row["closed"] or 0) / total) * 100)) if total else 0
+    return rows
+
+
+def _integraciones_operational_health_cards(
+    *,
+    point_pending_total: int,
+    recetas_pending_total: int,
+    almacen_pending_count: int,
+    errors_24h: int,
+) -> list[dict]:
+    return [
+        {
+            "label": "Catálogo externo por resolver",
+            "count": point_pending_total,
+            "tone": "warning",
+        },
+        {
+            "label": "Referencias ERP por resolver",
+            "count": recetas_pending_total + almacen_pending_count,
+            "tone": "warning",
+        },
+        {
+            "label": "Errores críticos de integración",
+            "count": errors_24h,
+            "tone": "danger",
+        },
+    ]
+
+
+def _integraciones_governance_rows(
+    rows: list[dict],
+    owner_default: str = "Integraciones / Operación",
+) -> list[dict]:
+    governance_rows: list[dict] = []
+    for row in rows:
+        governance_rows.append(
+            {
+                "front": row.get("label", "Integraciones"),
+                "owner": row.get("owner") or owner_default,
+                "blockers": int(row.get("open") or 0),
+                "completion": int(row.get("completion") or 0),
+                "detail": row.get("detail", ""),
+                "next_step": row.get("next_step") or "Revisar frente operativo",
+                "url": row.get("url") or reverse("integraciones:panel"),
+                "cta": row.get("cta") or "Abrir",
+            }
+        )
+    return governance_rows
+
+
+def _integraciones_command_center(
+    *,
+    governance_rows: list[dict],
+    maturity_summary: dict[str, object],
+    default_url: str,
+    default_cta: str,
+) -> dict[str, object]:
+    blockers = sum(int(row.get("blockers", 0) or 0) for row in governance_rows)
+    attention_steps = int(maturity_summary.get("attention_steps") or 0)
+    if blockers > 0:
+        status = "Con bloqueos"
+        tone = "danger"
+    elif attention_steps > 0:
+        status = "En seguimiento"
+        tone = "warning"
+    else:
+        status = "Estable"
+        tone = "success"
+    return {
+        "owner": governance_rows[0].get("owner", "Integraciones / Operación") if governance_rows else "Integraciones / Operación",
+        "status": status,
+        "tone": tone,
+        "blockers": blockers,
+        "next_step": maturity_summary.get("next_priority_detail", "Sin acciones pendientes."),
+        "url": maturity_summary.get("next_priority_url", default_url),
+        "cta": maturity_summary.get("next_priority_cta", default_cta),
+    }
+
+
+def _integraciones_maturity_summary(*, chain: list[dict], default_url: str) -> dict:
+    total_steps = len(chain)
+    completed_steps = sum(1 for item in chain if item.get("tone") == "success")
+    attention_steps = max(total_steps - completed_steps, 0)
+    coverage_pct = int(round((completed_steps / total_steps) * 100)) if total_steps else 0
+    next_priority = next((item for item in chain if item.get("tone") != "success"), None)
+    return {
+        "completed_steps": completed_steps,
+        "attention_steps": attention_steps,
+        "coverage_pct": coverage_pct,
+        "next_priority_title": next_priority.get("title", "Cadena de integraciones estabilizada") if next_priority else "Cadena de integraciones estabilizada",
+        "next_priority_detail": next_priority.get("detail", "Sin brechas abiertas en referencias, almacén ni API.") if next_priority else "Sin brechas abiertas en referencias, almacén ni API.",
+        "next_priority_url": next_priority.get("url", default_url) if next_priority else default_url,
+        "next_priority_cta": next_priority.get("cta", "Abrir integraciones") if next_priority else "Abrir integraciones",
+    }
+
+
+def _integraciones_critical_path_rows(chain: list[dict]) -> list[dict]:
+    severity_order = {"danger": 0, "warning": 1, "success": 2}
+    ranked = sorted(
+        chain,
+        key=lambda item: (
+            severity_order.get(str(item.get("tone") or "warning"), 9),
+            -int(item.get("count") or 0),
+            int(item.get("completion") or 0),
+        ),
+    )
+    rows: list[dict] = []
+    for index, item in enumerate(ranked[:4], start=1):
+        rows.append(
+            {
+                "rank": f"R{index}",
+                "title": item.get("title", "Integración"),
+                "owner": item.get("owner", "Integraciones / Operación"),
+                "status": item.get("status", "En seguimiento"),
+                "tone": item.get("tone", "warning"),
+                "count": int(item.get("count") or 0),
+                "completion": int(item.get("completion") or 0),
+                "depends_on": item.get("depends_on", "Origen del módulo"),
+                "dependency_status": item.get("dependency_status", "Punto de arranque del módulo"),
+                "detail": item.get("detail", ""),
+                "next_step": item.get("next_step", "Continuar flujo"),
+                "url": item.get("url", reverse("integraciones:panel")),
+                "cta": item.get("cta", "Abrir"),
+            }
+        )
+    return rows
+
+
+def _integraciones_executive_radar_rows(
+    governance_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for row in governance_rows[:4]:
+        completion = int(row.get("completion") or 0)
+        blockers = int(row.get("blockers") or 0)
+        if blockers <= 0 and completion >= 90:
+            tone = "success"
+            status = "Controlado"
+            dominant_blocker = "Sin bloqueo activo"
+        elif completion >= 50:
+            tone = "warning"
+            status = "En seguimiento"
+            dominant_blocker = row.get("detail", "") or "Brecha operativa en seguimiento"
+        else:
+            tone = "danger"
+            status = "Con bloqueo"
+            dominant_blocker = row.get("detail", "") or "Bloqueo operativo abierto"
+        rows.append(
+            {
+                "phase": row.get("front", "Frente de integraciones"),
+                "owner": row.get("owner", "Integraciones / Operación"),
+                "status": status,
+                "tone": tone,
+                "blockers": blockers,
+                "progress_pct": completion,
+                "dominant_blocker": dominant_blocker,
+                "depends_on": row.get("front", "Origen del módulo"),
+                "dependency_status": row.get("next_step", "Sin dependencia registrada"),
+                "next_step": row.get("next_step", "Abrir frente"),
+                "url": row.get("url", reverse("integraciones:panel")),
+                "cta": row.get("cta", "Abrir"),
+            }
+        )
+    return rows
+
+
+def _integraciones_handoff_map(
+    *,
+    point_pending_total: int,
+    recetas_pending_total: int,
+    almacen_pending_count: int,
+    errors_24h: int,
+) -> list[dict]:
+    return [
+        {
+            "label": "Catálogo externo -> Maestro ERP",
+            "detail": "Los artículos externos deben resolverse antes de liberar el artículo estándar.",
+            "count": point_pending_total,
+            "tone": "success" if point_pending_total == 0 else "warning",
+            "status": "Controlado" if point_pending_total == 0 else "Pendiente",
+            "url": reverse("maestros:point_pending_review"),
+            "cta": "Abrir catálogo externo",
+            "owner": "Comercial / Maestros",
+            "depends_on": "Catálogo externo consistente",
+            "exit_criteria": "No dejar artículos externos pendientes de integración.",
+            "next_step": "Resolver catálogo comercial y liberar artículo maestro.",
+            "completion": 100 if point_pending_total == 0 else 55,
+        },
+        {
+            "label": "Maestro ERP -> BOM / Almacén",
+            "detail": "Las referencias maestras deben coincidir con recetas y almacén para evitar ruido operativo.",
+            "count": recetas_pending_total + almacen_pending_count,
+            "tone": "success" if (recetas_pending_total + almacen_pending_count) == 0 else "warning",
+            "status": "Controlado" if (recetas_pending_total + almacen_pending_count) == 0 else "Con brecha",
+            "url": reverse("inventario:aliases_catalog"),
+            "cta": "Abrir referencias ERP",
+            "owner": "Maestros / Inventario",
+            "depends_on": "Artículo maestro canónico",
+            "exit_criteria": "Recetas y almacén deben operar con el mismo artículo maestro.",
+            "next_step": "Cerrar diferencias de referencias entre maestro, BOM y almacén.",
+            "completion": 100 if (recetas_pending_total + almacen_pending_count) == 0 else 50,
+        },
+        {
+            "label": "BOM / Almacén -> API pública",
+            "detail": "La operación externa debe correr sobre referencias ya estables y sin errores críticos.",
+            "count": errors_24h,
+            "tone": "success" if errors_24h == 0 else "danger",
+            "status": "Controlado" if errors_24h == 0 else "Errores abiertos",
+            "url": reverse("integraciones:panel"),
+            "cta": "Revisar integraciones",
+            "owner": "TI / DG",
+            "depends_on": "Cadena BOM y almacén estabilizada",
+            "exit_criteria": "Errores críticos controlados y trazabilidad auditada.",
+            "next_step": "Monitorear clientes, errores y consumo externo del ERP.",
+            "completion": 100 if errors_24h == 0 else 25,
+        },
+    ]
+
+
+def _integraciones_release_gate_rows(
+    *,
+    point_pending_total: int,
+    recetas_pending_total: int,
+    almacen_pending_count: int,
+    errors_24h: int,
+    requests_24h: int,
+) -> list[dict]:
+    resolved_requests = max(requests_24h - errors_24h, 0)
+    return [
+        {
+            "label": "Catálogo externo listo para operar",
+            "open": point_pending_total,
+            "closed": max(requests_24h - point_pending_total, 0),
+            "detail": "Referencias externas resueltas antes de cerrar el catálogo operativo.",
+            "url": reverse("maestros:point_pending_review"),
+        },
+        {
+            "label": "Referencias ERP consistentes",
+            "open": recetas_pending_total,
+            "closed": max(requests_24h - recetas_pending_total, 0),
+            "detail": "Partidas de receta y artículo estándar alineados al maestro ERP.",
+            "url": reverse("inventario:aliases_catalog"),
+        },
+        {
+            "label": "Sync de almacén estable",
+            "open": almacen_pending_count,
+            "closed": max(requests_24h - almacen_pending_count, 0),
+            "detail": "Sincronización reciente sin referencias abiertas de almacén.",
+            "url": reverse("inventario:carga_almacen"),
+        },
+        {
+            "label": "API pública controlada",
+            "open": errors_24h,
+            "closed": resolved_requests,
+            "detail": "Errores críticos de integración controlados dentro del periodo.",
+            "url": reverse("integraciones:panel"),
+        },
+    ]
+
+
+def _integraciones_release_gate_completion(rows: list[dict[str, object]]) -> dict[str, int]:
+    total = sum(int(row.get("open", 0)) + int(row.get("closed", 0)) for row in rows)
+    closed = sum(int(row.get("closed", 0)) for row in rows)
+    pct = int(round((closed / total) * 100)) if total else 0
+    return {"closed": closed, "total": total, "pct": pct}
+
+
 def _export_logs_csv(logs_qs) -> HttpResponse:
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="integraciones_api_logs.csv"'
@@ -796,6 +1184,38 @@ def panel(request):
             }
         )
 
+    enterprise_chain = _integraciones_enterprise_chain(
+        point_pending_total=point_pending_total,
+        recetas_pending_total=recetas_pending_total,
+        almacen_pending_count=almacen_pending_count,
+        errors_24h=errors_24h,
+    )
+    integraciones_maturity_summary = _integraciones_maturity_summary(
+        chain=enterprise_chain,
+        default_url=reverse("integraciones:panel"),
+    )
+    integraciones_handoff_map = _integraciones_handoff_map(
+        point_pending_total=point_pending_total,
+        recetas_pending_total=recetas_pending_total,
+        almacen_pending_count=almacen_pending_count,
+        errors_24h=errors_24h,
+    )
+    document_stage_rows = _integraciones_document_stage_rows(
+        point_pending_total=point_pending_total,
+        recetas_pending_total=recetas_pending_total,
+        almacen_pending_count=almacen_pending_count,
+        errors_24h=errors_24h,
+        requests_24h=requests_24h,
+    )
+    release_gate_rows = _integraciones_release_gate_rows(
+        point_pending_total=point_pending_total,
+        recetas_pending_total=recetas_pending_total,
+        almacen_pending_count=almacen_pending_count,
+        errors_24h=errors_24h,
+        requests_24h=requests_24h,
+    )
+    governance_rows = _integraciones_governance_rows(document_stage_rows)
+
     context = {
         "clients": clients,
         "client_metrics": client_metrics,
@@ -849,6 +1269,27 @@ def panel(request):
         "point_pending_producto": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PRODUCTO, 0)),
         "point_pending_proveedor": int(point_pending_by_tipo.get(PointPendingMatch.TIPO_PROVEEDOR, 0)),
         "alertas_operativas": alertas_operativas,
+        "enterprise_chain": enterprise_chain,
+        "integraciones_critical_path_rows": _integraciones_critical_path_rows(enterprise_chain),
+        "integraciones_maturity_summary": integraciones_maturity_summary,
+        "integraciones_handoff_map": integraciones_handoff_map,
+        "document_stage_rows": document_stage_rows,
+        "erp_governance_rows": governance_rows,
+        "executive_radar_rows": _integraciones_executive_radar_rows(governance_rows),
+        "erp_command_center": _integraciones_command_center(
+            governance_rows=governance_rows,
+            maturity_summary=integraciones_maturity_summary,
+            default_url=reverse("integraciones:panel"),
+            default_cta="Abrir integraciones",
+        ),
+        "release_gate_rows": release_gate_rows,
+        "release_gate_completion": _integraciones_release_gate_completion(release_gate_rows),
+        "operational_health_cards": _integraciones_operational_health_cards(
+            point_pending_total=point_pending_total,
+            recetas_pending_total=recetas_pending_total,
+            almacen_pending_count=almacen_pending_count,
+            errors_24h=errors_24h,
+        ),
         "errors_by_endpoint_24h": errors_by_endpoint_24h,
         "errors_by_client_24h": errors_by_client_24h,
         "api_daily_trend": api_daily_trend,

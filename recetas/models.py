@@ -65,14 +65,15 @@ class Receta(models.Model):
 
     @property
     def costo_total_estimado(self):
-        return sum((l.costo_total_estimado or 0) for l in self.lineas.all())
+        from recetas.utils.derived_product_presentations import get_total_cost
+
+        return float(get_total_cost(self))
 
     @property
     def costo_total_estimado_decimal(self) -> Decimal:
-        total = Decimal("0")
-        for linea in self.lineas.all():
-            total += Decimal(str(linea.costo_total_estimado or 0))
-        return total
+        from recetas.utils.derived_product_presentations import get_total_cost
+
+        return get_total_cost(self)
 
     @property
     def rendimiento_kg(self) -> Decimal | None:
@@ -319,6 +320,170 @@ class RecetaPresentacion(models.Model):
         return f"{self.receta.nombre} - {self.nombre}"
 
 
+class RecetaPresentacionDerivada(models.Model):
+    TIPO_REBANADA = "REBANADA"
+    TIPO_CHOICES = [
+        (TIPO_REBANADA, "Rebanada"),
+    ]
+
+    receta_padre = models.ForeignKey(Receta, related_name="presentaciones_derivadas_padre", on_delete=models.CASCADE)
+    receta_derivada = models.ForeignKey(
+        Receta,
+        related_name="presentaciones_derivadas_hija",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    codigo_point_derivado = models.CharField(max_length=80, db_index=True, unique=True)
+    nombre_derivado = models.CharField(max_length=250)
+    tipo_derivado = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_REBANADA)
+    unidades_por_padre = models.DecimalField(max_digits=18, decimal_places=6)
+    padre_size_hint = models.CharField(max_length=40, blank=True, default="")
+    requiere_componentes_directos = models.BooleanField(default=True)
+    fuente = models.CharField(max_length=40, blank=True, default="POINT_AUDIT")
+    notas = models.TextField(blank=True, default="")
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Presentación derivada de producto"
+        verbose_name_plural = "Presentaciones derivadas de producto"
+        ordering = ["receta_padre__nombre", "nombre_derivado"]
+
+    def __str__(self) -> str:
+        return f"{self.receta_padre.nombre} -> {self.nombre_derivado}"
+
+
+class RecetaAgrupacionAddon(models.Model):
+    STATUS_DETECTED = "DETECTED"
+    STATUS_APPROVED = "APPROVED"
+    STATUS_REJECTED = "REJECTED"
+    STATUS_CHOICES = [
+        (STATUS_DETECTED, "Detectado"),
+        (STATUS_APPROVED, "Aprobado"),
+        (STATUS_REJECTED, "Rechazado"),
+    ]
+
+    SOURCE_POINT_ZERO_REVENUE = "POINT_ZERO_REVENUE_ADDON"
+    SOURCE_CHOICES = [
+        (SOURCE_POINT_ZERO_REVENUE, "Add-on Point sin ingreso"),
+    ]
+
+    base_receta = models.ForeignKey(
+        Receta,
+        related_name="addons_aplicados",
+        on_delete=models.CASCADE,
+    )
+    addon_receta = models.ForeignKey(
+        Receta,
+        related_name="base_addon_para",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    addon_codigo_point = models.CharField(max_length=80, db_index=True)
+    addon_nombre_point = models.CharField(max_length=250)
+    addon_familia = models.CharField(max_length=120, blank=True, default="")
+    addon_categoria = models.CharField(max_length=120, blank=True, default="")
+    source = models.CharField(max_length=40, choices=SOURCE_CHOICES, default=SOURCE_POINT_ZERO_REVENUE)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DETECTED, db_index=True)
+    cooccurrence_days = models.PositiveIntegerField(default=0)
+    cooccurrence_branches = models.PositiveIntegerField(default=0)
+    cooccurrence_qty = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    confidence_score = models.DecimalField(max_digits=8, decimal_places=4, default=0)
+    notas = models.TextField(blank=True, default="")
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Agrupación add-on de receta"
+        verbose_name_plural = "Agrupaciones add-on de recetas"
+        ordering = ["base_receta__nombre", "addon_nombre_point"]
+        unique_together = [("base_receta", "addon_codigo_point")]
+
+    def __str__(self) -> str:
+        return f"{self.base_receta.nombre} + {self.addon_nombre_point}"
+
+
+class RecetaCostoSemanal(models.Model):
+    SCOPE_RECIPE = "RECIPE"
+    SCOPE_GROUPED_ADDON = "GROUPED_ADDON"
+    SCOPE_CHOICES = [
+        (SCOPE_RECIPE, "Receta"),
+        (SCOPE_GROUPED_ADDON, "Receta agrupada con add-on"),
+    ]
+
+    scope_type = models.CharField(max_length=20, choices=SCOPE_CHOICES, db_index=True)
+    identity_key = models.CharField(max_length=120, db_index=True)
+    label = models.CharField(max_length=260)
+    week_start = models.DateField(db_index=True)
+    week_end = models.DateField(db_index=True)
+
+    receta = models.ForeignKey(
+        Receta,
+        related_name="snapshots_costeo_semanal",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    addon_rule = models.ForeignKey(
+        RecetaAgrupacionAddon,
+        related_name="snapshots_costeo_semanal",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    base_receta = models.ForeignKey(
+        Receta,
+        related_name="snapshots_costeo_base",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    addon_receta = models.ForeignKey(
+        Receta,
+        related_name="snapshots_costeo_addon",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+
+    temporalidad = models.CharField(
+        max_length=20,
+        choices=Receta.TEMPORALIDAD_CHOICES,
+        default=Receta.TEMPORALIDAD_PERMANENTE,
+        db_index=True,
+    )
+    temporalidad_detalle = models.CharField(max_length=120, blank=True, default="")
+    familia = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    categoria = models.CharField(max_length=120, blank=True, default="", db_index=True)
+
+    costo_mp = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    costo_mo = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    costo_indirecto = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    costo_total = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    delta_total = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    delta_pct = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+
+    version_receta = models.PositiveIntegerField(null=True, blank=True)
+    version_base = models.PositiveIntegerField(null=True, blank=True)
+    version_addon = models.PositiveIntegerField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Snapshot semanal de costeo"
+        verbose_name_plural = "Snapshots semanales de costeo"
+        ordering = ["-week_start", "label", "id"]
+        unique_together = [("identity_key", "week_start")]
+
+    def __str__(self) -> str:
+        return f"{self.label} · {self.week_start}"
+
+
 class VentaHistorica(models.Model):
     receta = models.ForeignKey(Receta, related_name="ventas_historicas", on_delete=models.CASCADE)
     sucursal = models.ForeignKey("core.Sucursal", null=True, blank=True, on_delete=models.SET_NULL)
@@ -391,6 +556,15 @@ class PronosticoVenta(models.Model):
 
 
 class PlanProduccion(models.Model):
+    ESTADO_BORRADOR = "BORRADOR"
+    ESTADO_CONSUMO_APLICADO = "CONSUMO_APLICADO"
+    ESTADO_CERRADO = "CERRADO"
+    ESTADO_CHOICES = [
+        (ESTADO_BORRADOR, "Borrador"),
+        (ESTADO_CONSUMO_APLICADO, "Consumo aplicado"),
+        (ESTADO_CERRADO, "Cerrado"),
+    ]
+
     nombre = models.CharField(max_length=140)
     fecha_produccion = models.DateField(default=timezone.localdate)
     notas = models.TextField(blank=True, default="")
@@ -400,6 +574,24 @@ class PlanProduccion(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         related_name="planes_produccion_creados",
+    )
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR, db_index=True)
+    consumo_aplicado = models.BooleanField(default=False)
+    consumo_aplicado_en = models.DateTimeField(null=True, blank=True)
+    consumo_aplicado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="planes_produccion_consumo_aplicado",
+    )
+    cerrado_en = models.DateTimeField(null=True, blank=True)
+    cerrado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="planes_produccion_cerrados",
     )
     creado_en = models.DateTimeField(default=timezone.now)
     actualizado_en = models.DateTimeField(auto_now=True)
@@ -481,6 +673,34 @@ class InventarioCedisProducto(models.Model):
 
     def __str__(self) -> str:
         return f"CEDIS · {self.receta.nombre}"
+
+
+class MovimientoProductoCedis(models.Model):
+    TIPO_ENTRADA = "ENTRADA"
+    TIPO_SALIDA = "SALIDA"
+    TIPO_CONSUMO = "CONSUMO"
+    TIPO_AJUSTE = "AJUSTE"
+    TIPO_CHOICES = [
+        (TIPO_ENTRADA, "Entrada"),
+        (TIPO_SALIDA, "Salida"),
+        (TIPO_CONSUMO, "Consumo"),
+        (TIPO_AJUSTE, "Ajuste"),
+    ]
+
+    fecha = models.DateTimeField(default=timezone.now)
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    receta = models.ForeignKey(Receta, on_delete=models.PROTECT, related_name="movimientos_cedis")
+    cantidad = models.DecimalField(max_digits=18, decimal_places=3)
+    referencia = models.CharField(max_length=120, blank=True, default="")
+    source_hash = models.CharField(max_length=64, unique=True, null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Movimiento producto CEDIS"
+        verbose_name_plural = "Movimientos producto CEDIS"
+        ordering = ["-fecha"]
+
+    def __str__(self) -> str:
+        return f"{self.tipo} {self.receta.nombre} {self.cantidad}"
 
 
 class SolicitudReabastoCedis(models.Model):

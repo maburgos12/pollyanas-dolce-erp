@@ -69,6 +69,7 @@ from inventario.views import (
     _resolve_cross_source_with_alias,
 )
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor
+from maestros.utils.canonical_catalog import canonical_insumo, canonical_insumo_by_id, canonicalized_active_insumos, latest_costo_canonico
 from recetas.models import (
     LineaReceta,
     PlanProduccion,
@@ -149,6 +150,28 @@ def _to_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return default
+
+
+def _canonical_member_ids(insumo_id: int | str | None) -> tuple[Insumo | None, list[int]]:
+    canonical = canonical_insumo_by_id(insumo_id)
+    if canonical is None:
+        return None, []
+    for row in canonicalized_active_insumos(limit=5000):
+        if canonical.id in row["member_ids"]:
+            return canonical, list(row["member_ids"])
+    return canonical, [canonical.id]
+
+
+def _latest_cost_for_canonical(insumo_id: int | str | None, proveedor: Proveedor | None = None) -> tuple[Insumo | None, CostoInsumo | None]:
+    canonical, member_ids = _canonical_member_ids(insumo_id)
+    if canonical is None:
+        return None, None
+    costo_qs = CostoInsumo.objects.filter(insumo_id__in=member_ids).order_by("-fecha", "-id")
+    if proveedor is not None:
+        preferred = costo_qs.filter(proveedor=proveedor).first()
+        if preferred is not None:
+            return canonical, preferred
+    return canonical, costo_qs.first()
 
 
 def _parse_bool(value: str | None, default: bool = False) -> bool:
@@ -514,8 +537,13 @@ class MasterDataNormalizeView(APIView):
             extra = {"codigo_point": obj.codigo_point or ""}
             model_name = "recetas.Receta"
         elif scope == "aliases_insumo":
+            canonical = canonical_insumo(obj.insumo) if obj.insumo_id else None
             label = obj.nombre
-            extra = {"insumo_id": obj.insumo_id, "insumo": obj.insumo.nombre if obj.insumo_id else ""}
+            extra = {
+                "insumo_id": canonical.id if canonical else obj.insumo_id,
+                "insumo": canonical.nombre if canonical else (obj.insumo.nombre if obj.insumo_id else ""),
+                "insumo_canonical": bool(canonical and canonical.id != obj.insumo_id),
+            }
             model_name = "maestros.InsumoAlias"
         else:
             label = obj.codigo_point or ""
@@ -653,7 +681,13 @@ class MasterDataDuplicatesView(APIView):
     permission_classes = [IsAuthenticated]
 
     @staticmethod
-    def _build_group(group_type: str, key: str, members: list[dict[str, Any]]) -> dict[str, Any]:
+    def _build_group(
+        group_type: str,
+        key: str,
+        members: list[dict[str, Any]],
+        *,
+        canonical_member_id: int | None = None,
+    ) -> dict[str, Any]:
         members_sorted = sorted(
             members,
             key=lambda item: (
@@ -661,10 +695,23 @@ class MasterDataDuplicatesView(APIView):
                 int(item.get("id") or 0),
             ),
         )
+        canonical_member = None
+        if canonical_member_id:
+            for member in members_sorted:
+                if int(member.get("id") or 0) == int(canonical_member_id):
+                    canonical_member = {
+                        "id": int(member.get("id") or 0),
+                        "nombre": member.get("nombre") or "",
+                        "codigo_point": member.get("codigo_point") or "",
+                        "model": member.get("model") or "",
+                    }
+                    break
         return {
             "group_type": group_type,
             "duplicate_key": key,
             "count": len(members_sorted),
+            "canonical_member_id": canonical_member_id,
+            "canonical_member": canonical_member,
             "members": members_sorted,
         }
 
@@ -761,6 +808,9 @@ class MasterDataDuplicatesView(APIView):
                     | Q(codigo_point__icontains=q)
                 )
 
+            canonical_map = {
+                row["normalized_name"]: row for row in canonicalized_active_insumos(limit=5000)
+            }
             grouped = (
                 qs.values("nombre_normalizado")
                 .annotate(total=Count("id"))
@@ -769,17 +819,28 @@ class MasterDataDuplicatesView(APIView):
             )
             for row in grouped:
                 dup_key = str(row.get("nombre_normalizado") or "")
-                members = [
-                    {
-                        "model": "maestros.Insumo",
-                        "id": int(obj.id),
-                        "nombre": obj.nombre,
-                        "activo": bool(obj.activo),
-                        "codigo_point": obj.codigo_point or "",
-                    }
-                    for obj in qs.filter(nombre_normalizado=dup_key).order_by("id")
-                ]
-                groups.append(self._build_group("insumos", dup_key, members))
+                canonical_row = canonical_map.get(dup_key)
+                canonical_member_id = int(canonical_row["canonical"].id) if canonical_row else None
+                members = []
+                for obj in qs.filter(nombre_normalizado=dup_key).order_by("id"):
+                    members.append(
+                        {
+                            "model": "maestros.Insumo",
+                            "id": int(obj.id),
+                            "nombre": obj.nombre,
+                            "activo": bool(obj.activo),
+                            "codigo_point": obj.codigo_point or "",
+                            "is_canonical": bool(canonical_member_id and int(obj.id) == canonical_member_id),
+                        }
+                    )
+                groups.append(
+                    self._build_group(
+                        "insumos",
+                        dup_key,
+                        members,
+                        canonical_member_id=canonical_member_id,
+                    )
+                )
             by_scope_totals["insumos"] = len([g for g in groups if g["group_type"] == "insumos"])
 
         if "recetas" in selected_scopes:
@@ -919,11 +980,14 @@ def _can_approve_ajustes(user) -> bool:
 
 
 def _serialize_ajuste_row(ajuste: AjusteInventario) -> dict:
+    canonical = canonical_insumo(ajuste.insumo) if ajuste.insumo_id else None
+    display_insumo = canonical or ajuste.insumo
     return {
         "id": ajuste.id,
         "folio": ajuste.folio,
-        "insumo_id": ajuste.insumo_id,
-        "insumo": ajuste.insumo.nombre if ajuste.insumo_id else "",
+        "insumo_id": display_insumo.id if display_insumo else ajuste.insumo_id,
+        "insumo": display_insumo.nombre if display_insumo else "",
+        "insumo_canonical": bool(canonical and canonical.id != ajuste.insumo_id),
         "cantidad_sistema": str(ajuste.cantidad_sistema),
         "cantidad_fisica": str(ajuste.cantidad_fisica),
         "delta": str(_to_decimal(ajuste.cantidad_fisica) - _to_decimal(ajuste.cantidad_sistema)),
@@ -2581,9 +2645,22 @@ class MRPExplodeView(APIView):
         agregados = {}
 
         for l in receta.lineas.select_related("insumo").all():
-            key = l.insumo.nombre if l.insumo else f"(NO MATCH) {l.insumo_texto}"
+            canonical = canonical_insumo(l.insumo) if l.insumo_id else None
+            display_insumo = canonical or l.insumo
+            key = display_insumo.nombre if display_insumo else f"(NO MATCH) {l.insumo_texto}"
             if key not in agregados:
-                agregados[key] = {"insumo_id": l.insumo.id if l.insumo else None, "nombre": key, "cantidad": Decimal("0"), "unidad": l.unidad_texto, "costo": 0.0}
+                agregados[key] = {
+                    "insumo_id": display_insumo.id if display_insumo else None,
+                    "nombre": key,
+                    "cantidad": Decimal("0"),
+                    "unidad": (
+                        display_insumo.unidad_base.codigo
+                        if display_insumo and display_insumo.unidad_base_id and display_insumo.unidad_base
+                        else l.unidad_texto
+                    ),
+                    "costo": 0.0,
+                    "insumo_canonical": bool(canonical and l.insumo_id and canonical.id != l.insumo_id),
+                }
             qty = Decimal(str(l.cantidad or 0)) * multiplicador
             agregados[key]["cantidad"] += qty
             agregados[key]["costo"] += float(l.costo_total_estimado) * float(multiplicador)
@@ -2603,6 +2680,7 @@ class MRPExplodeView(APIView):
                     "cantidad": str(i["cantidad"]),
                     "unidad": i["unidad"],
                     "costo": i["costo"],
+                    "insumo_canonical": bool(i.get("insumo_canonical")),
                 } for i in items
             ],
         }, status=status.HTTP_200_OK)
@@ -2788,7 +2866,10 @@ class InventarioSugerenciasCompraView(APIView):
             if factor <= 0:
                 continue
             for linea in lineas_by_receta.get(item.receta_id, []):
-                requerimientos[linea.insumo_id] += _to_decimal(linea.cantidad) * factor
+                canonical = canonical_insumo_by_id(linea.insumo_id)
+                if not canonical:
+                    continue
+                requerimientos[canonical.id] += _to_decimal(linea.cantidad) * factor
         return requerimientos
 
     def _en_transito_por_insumo(self) -> dict[int, Decimal]:
@@ -2809,7 +2890,10 @@ class InventarioSugerenciasCompraView(APIView):
                 continue
             qty = _to_decimal(solicitud.cantidad)
             if qty > 0:
-                totals[solicitud.insumo_id] += qty
+                canonical = canonical_insumo_by_id(solicitud.insumo_id)
+                if not canonical:
+                    continue
+                totals[canonical.id] += qty
         return totals
 
     def get(self, request):
@@ -2827,7 +2911,31 @@ class InventarioSugerenciasCompraView(APIView):
         existencias_qs = ExistenciaInsumo.objects.select_related("insumo__unidad_base", "insumo__proveedor_principal").filter(
             insumo__activo=True
         )
-        existencias_map = {e.insumo_id: e for e in existencias_qs}
+        existencias_map: dict[int, dict[str, Any]] = {}
+        for ex in existencias_qs:
+            canonical = canonical_insumo(ex.insumo)
+            if not canonical:
+                continue
+            row = existencias_map.setdefault(
+                canonical.id,
+                {
+                    "canonical": canonical,
+                    "stock_actual": Decimal("0"),
+                    "stock_seguridad": None,
+                    "punto_reorden": None,
+                    "consumo_diario": None,
+                    "lead_time": None,
+                },
+            )
+            row["stock_actual"] += _to_decimal(ex.stock_actual or 0)
+            if row["stock_seguridad"] is None:
+                row["stock_seguridad"] = _to_decimal(ex.stock_minimo or 0)
+            if row["punto_reorden"] is None:
+                row["punto_reorden"] = _to_decimal(ex.punto_reorden or 0)
+            if row["consumo_diario"] is None:
+                row["consumo_diario"] = _to_decimal(ex.consumo_diario_promedio or 0)
+            if row["lead_time"] is None:
+                row["lead_time"] = int(ex.dias_llegada_pedido or 0)
 
         insumo_ids = set(existencias_map.keys()) | set(requerimientos.keys()) | set(en_transito.keys())
         if not insumo_ids:
@@ -2847,10 +2955,11 @@ class InventarioSugerenciasCompraView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        insumos = {
-            i.id: i
-            for i in Insumo.objects.filter(id__in=insumo_ids, activo=True).select_related("unidad_base", "proveedor_principal")
-        }
+        insumos = {}
+        for i in Insumo.objects.filter(id__in=insumo_ids, activo=True).select_related("unidad_base", "proveedor_principal"):
+            canonical = canonical_insumo(i)
+            if canonical:
+                insumos[canonical.id] = canonical
         if not insumos:
             return Response(
                 {
@@ -2869,13 +2978,10 @@ class InventarioSugerenciasCompraView(APIView):
             )
 
         latest_cost: dict[int, Decimal] = {}
-        for costo in (
-            CostoInsumo.objects.filter(insumo_id__in=list(insumos.keys()))
-            .only("insumo_id", "costo_unitario", "fecha", "id")
-            .order_by("insumo_id", "-fecha", "-id")
-        ):
-            if costo.insumo_id not in latest_cost:
-                latest_cost[costo.insumo_id] = _to_decimal(costo.costo_unitario)
+        for canonical_id in insumos.keys():
+            latest = latest_costo_canonico(insumo_id=canonical_id)
+            if latest is not None:
+                latest_cost[canonical_id] = _to_decimal(latest)
 
         rows = []
         total_sugerido = Decimal("0")
@@ -2887,11 +2993,11 @@ class InventarioSugerenciasCompraView(APIView):
             insumo = insumos[insumo_id]
             ex = existencias_map.get(insumo_id)
 
-            stock_actual = _to_decimal(ex.stock_actual if ex else 0)
-            stock_seguridad = _to_decimal(ex.stock_minimo if ex else 0)
-            punto_reorden = _to_decimal(ex.punto_reorden if ex else 0)
-            consumo_diario = _to_decimal(ex.consumo_diario_promedio if ex else 0)
-            lead_time = int(ex.dias_llegada_pedido or 0) if ex else 0
+            stock_actual = _to_decimal(ex["stock_actual"] if ex else 0)
+            stock_seguridad = _to_decimal(ex["stock_seguridad"] if ex and ex["stock_seguridad"] is not None else 0)
+            punto_reorden = _to_decimal(ex["punto_reorden"] if ex and ex["punto_reorden"] is not None else 0)
+            consumo_diario = _to_decimal(ex["consumo_diario"] if ex and ex["consumo_diario"] is not None else 0)
+            lead_time = int(ex["lead_time"] or 0) if ex else 0
             if lead_time <= 0 and insumo.proveedor_principal_id:
                 lead_time = int(insumo.proveedor_principal.lead_time_dias or 0)
             lead_time = max(lead_time, 0)
@@ -2976,14 +3082,15 @@ class InventarioAliasesListCreateView(APIView):
 
     @staticmethod
     def _serialize_alias(alias: InsumoAlias) -> dict:
+        insumo = canonical_insumo(alias.insumo) if alias.insumo_id else None
         return {
             "id": alias.id,
             "alias": alias.nombre,
             "normalizado": alias.nombre_normalizado,
-            "insumo_id": alias.insumo_id,
-            "insumo": alias.insumo.nombre if alias.insumo_id else "",
-            "unidad": alias.insumo.unidad_base.codigo if alias.insumo_id and alias.insumo.unidad_base_id else "",
-            "categoria": alias.insumo.categoria if alias.insumo_id else "",
+            "insumo_id": insumo.id if insumo else alias.insumo_id,
+            "insumo": insumo.nombre if insumo else "",
+            "unidad": insumo.unidad_base.codigo if insumo and insumo.unidad_base_id else "",
+            "categoria": insumo.categoria if insumo else "",
         }
 
     def get(self, request):
@@ -3016,6 +3123,13 @@ class InventarioAliasesListCreateView(APIView):
                     {"detail": "insumo_id inválido."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            insumo_target = canonical_insumo_by_id(insumo_id)
+            if not insumo_target:
+                return Response(
+                    {"detail": "insumo_id no encontrado o inactivo."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            insumo_id = insumo_target.id
             qs = qs.filter(insumo_id=insumo_id)
 
         total_rows = qs.count()
@@ -3048,7 +3162,7 @@ class InventarioAliasesListCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        insumo = Insumo.objects.filter(pk=data["insumo_id"], activo=True).select_related("unidad_base").first()
+        insumo = canonical_insumo_by_id(data["insumo_id"])
         if insumo is None:
             return Response(
                 {"detail": "insumo_id no encontrado o inactivo."},
@@ -3107,7 +3221,7 @@ class InventarioAliasesMassReassignView(APIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
 
-        insumo = Insumo.objects.filter(pk=data["insumo_id"], activo=True).select_related("unidad_base").first()
+        insumo = canonical_insumo_by_id(data["insumo_id"])
         if insumo is None:
             return Response(
                 {"detail": "insumo_id no encontrado o inactivo."},
@@ -3401,6 +3515,8 @@ class InventarioAliasesPendientesView(APIView):
         almacen_total = len(almacen_rows_all)
 
         point_qs = PointPendingMatch.objects.order_by("-fuzzy_score", "point_nombre")
+        if not q_norm:
+            point_qs = point_qs.visible_en_operacion()
         if point_tipo not in {"TODOS", "ALL"}:
             point_qs = point_qs.filter(tipo=point_tipo)
         if q_norm:
@@ -4355,7 +4471,7 @@ class IntegracionPointResumenView(APIView):
         point_pending_by_tipo = {
             row["tipo"]: row["count"]
             for row in (
-                PointPendingMatch.objects.values("tipo")
+                PointPendingMatch.qs_operativos().values("tipo")
                 .annotate(count=Count("id"))
                 .order_by("tipo")
             )
@@ -4677,7 +4793,7 @@ class InventarioPointPendingResolveView(APIView):
         proveedores_created = 0
 
         if action == InventarioPointPendingResolveSerializer.ACTION_RESOLVE_INSUMOS:
-            insumo_target = Insumo.objects.filter(pk=data.get("insumo_id"), activo=True).first()
+            insumo_target = canonical_insumo_by_id(data.get("insumo_id"))
             if insumo_target is None:
                 return Response(
                     {"detail": "insumo_id no encontrado o inactivo."},
@@ -4732,6 +4848,7 @@ class InventarioPointPendingResolveView(APIView):
                     .only("id", "codigo_point", "nombre_point", "nombre_normalizado")
                     .first()
                 )
+                insumo_target = canonical_insumo(insumo_target)
                 if not insumo_target:
                     skipped_no_target += 1
                     continue
@@ -4941,7 +5058,12 @@ class InventarioAjustesView(APIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
 
-        insumo = get_object_or_404(Insumo, pk=data["insumo_id"])
+        insumo = canonical_insumo_by_id(data["insumo_id"])
+        if insumo is None:
+            return Response(
+                {"detail": "insumo_id no encontrado o inactivo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         aplicar_inmediato = bool(data.get("aplicar_inmediato"))
         comentario = data.get("comentario_revision") or ""
         if aplicar_inmediato and not _can_approve_ajustes(request.user):
@@ -5351,6 +5473,7 @@ class ComprasSolicitudesImportPreviewView(APIView):
                 insumo_match, score, method = match_cache.get(cache_key, (None, 0.0, "sin_match"))
                 if cache_key not in match_cache:
                     insumo_match, score, method = match_insumo(insumo_raw)
+                    insumo_match = canonical_insumo(insumo_match)
                     match_cache[cache_key] = (insumo_match, score, method)
             else:
                 insumo_match, score, method = (None, 0.0, "sin_match")
@@ -5520,7 +5643,15 @@ class ComprasSolicitudesImportConfirmView(APIView):
         default_fecha = _default_fecha_requerida(periodo_tipo, periodo_mes)
         valid_status = {x[0] for x in SolicitudCompra.STATUS_CHOICES}
 
-        included_rows = [row for row in rows if bool(row.get("include", True))]
+        normalized_rows: list[dict] = []
+        for row in rows:
+            row_copy = dict(row)
+            canonical = canonical_insumo_by_id(row_copy.get("insumo_id"))
+            if canonical:
+                row_copy["insumo_id"] = canonical.id
+            normalized_rows.append(row_copy)
+
+        included_rows = [row for row in normalized_rows if bool(row.get("include", True))]
         insumo_ids = sorted({int(row.get("insumo_id") or 0) for row in included_rows if int(row.get("insumo_id") or 0) > 0})
         proveedor_ids = sorted(
             {
@@ -5530,7 +5661,11 @@ class ComprasSolicitudesImportConfirmView(APIView):
             }
         )
 
-        insumos_map = Insumo.objects.select_related("proveedor_principal").in_bulk(insumo_ids)
+        insumos_map = {}
+        for insumo in Insumo.objects.filter(id__in=insumo_ids, activo=True).select_related("proveedor_principal"):
+            canonical = canonical_insumo(insumo)
+            if canonical:
+                insumos_map[canonical.id] = canonical
         proveedores_map = Proveedor.objects.filter(activo=True, id__in=proveedor_ids).in_bulk()
 
         existing_duplicate_keys: set[tuple[str, int, date]] = set()
@@ -5565,7 +5700,7 @@ class ComprasSolicitudesImportConfirmView(APIView):
         created_items: list[dict] = []
 
         with transaction.atomic():
-            for row in rows:
+            for row in normalized_rows:
                 if not bool(row.get("include", True)):
                     continue
 
@@ -5616,11 +5751,12 @@ class ComprasSolicitudesImportConfirmView(APIView):
                     created_duplicate_keys.add(duplicate_key)
                 created += 1
                 if len(created_items) < 80:
+                    canonical_created = canonical_insumo_by_id(solicitud.insumo_id) or solicitud.insumo
                     created_items.append(
                         {
                             "id": solicitud.id,
                             "folio": solicitud.folio,
-                            "insumo": solicitud.insumo.nombre,
+                            "insumo": canonical_created.nombre if canonical_created else solicitud.insumo.nombre,
                             "cantidad": str(solicitud.cantidad),
                             "fecha_requerida": solicitud.fecha_requerida.isoformat(),
                             "estatus": solicitud.estatus,
@@ -5726,27 +5862,51 @@ class ComprasSolicitudesListView(APIView):
             if key in by_status:
                 by_status[key] = int(row.get("rows") or 0)
 
-        insumo_totals = list(qs.order_by().values("insumo_id").annotate(total_qty=Sum("cantidad")))
         rows = list(qs[offset : offset + limit])
-        insumo_ids = [r.insumo_id for r in rows]
-        insumo_ids_totales = [int(x["insumo_id"]) for x in insumo_totals if x.get("insumo_id")]
-        costo_ids = sorted(set(insumo_ids) | set(insumo_ids_totales))
+        canonical_rows = []
+        insumo_ids = set()
+        total_qty_by_canonical: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+        for r in rows:
+            canonical = canonical_insumo(r.insumo)
+            canonical_rows.append((r, canonical))
+            if canonical:
+                insumo_ids.add(canonical.id)
+        for row in qs:
+            canonical = canonical_insumo(row.insumo)
+            if not canonical:
+                continue
+            insumo_ids.add(canonical.id)
+            total_qty_by_canonical[canonical.id] += _to_decimal(row.cantidad)
+        canonical_catalog_rows = {
+            row["canonical"].id: row
+            for row in canonicalized_active_insumos(limit=5000)
+            if row["canonical"].id in insumo_ids
+        }
+        costo_ids = sorted(
+            {
+                member.id
+                for row in canonical_catalog_rows.values()
+                for member in row["items"]
+            }
+        )
         latest_cost_by_insumo: dict[int, Decimal] = {}
         if costo_ids:
             for c in CostoInsumo.objects.filter(insumo_id__in=costo_ids).order_by("insumo_id", "-fecha", "-id"):
-                if c.insumo_id not in latest_cost_by_insumo:
-                    latest_cost_by_insumo[c.insumo_id] = _to_decimal(c.costo_unitario)
+                canonical = canonical_insumo_by_id(c.insumo_id)
+                if canonical and canonical.id not in latest_cost_by_insumo:
+                    latest_cost_by_insumo[canonical.id] = _to_decimal(c.costo_unitario)
 
         items = []
         presupuesto_total = Decimal("0")
         presupuesto_total_filtered = Decimal("0")
-        for row in insumo_totals:
-            insumo_id = int(row.get("insumo_id") or 0)
-            qty = _to_decimal(row.get("total_qty"))
-            costo_unitario = _to_decimal(latest_cost_by_insumo.get(insumo_id, 0))
+        for insumo_id, qty in total_qty_by_canonical.items():
+            costo_unitario = _to_decimal(latest_cost_by_insumo.get(insumo_id, 0)).quantize(Decimal("0.01"))
             presupuesto_total_filtered += (qty * costo_unitario).quantize(Decimal("0.01"))
-        for r in rows:
-            costo_unitario = _to_decimal(latest_cost_by_insumo.get(r.insumo_id, 0))
+        for r, canonical in canonical_rows:
+            display_insumo = canonical or r.insumo
+            costo_unitario = _to_decimal(latest_cost_by_insumo.get(display_insumo.id, 0)).quantize(
+                Decimal("0.01")
+            )
             presupuesto = (_to_decimal(r.cantidad) * costo_unitario).quantize(Decimal("0.01"))
             presupuesto_total += presupuesto
             items.append(
@@ -5756,9 +5916,13 @@ class ComprasSolicitudesListView(APIView):
                     "estatus": r.estatus,
                     "area": r.area,
                     "solicitante": r.solicitante,
-                    "insumo_id": r.insumo_id,
-                    "insumo": r.insumo.nombre,
-                    "unidad": r.insumo.unidad_base.codigo if r.insumo.unidad_base_id and r.insumo.unidad_base else "",
+                    "insumo_id": display_insumo.id,
+                    "insumo": display_insumo.nombre,
+                    "unidad": (
+                        display_insumo.unidad_base.codigo
+                        if display_insumo.unidad_base_id and display_insumo.unidad_base
+                        else ""
+                    ),
                     "cantidad": str(r.cantidad),
                     "fecha_requerida": str(r.fecha_requerida),
                     "proveedor_sugerido": r.proveedor_sugerido.nombre if r.proveedor_sugerido_id else "",
@@ -5883,6 +6047,11 @@ class ComprasOrdenesListView(APIView):
         for r in rows:
             monto = _to_decimal(r.monto_estimado)
             monto_total += monto
+            canonical_row_insumo = (
+                canonical_insumo_by_id(r.solicitud.insumo_id)
+                if r.solicitud_id and getattr(r.solicitud, "insumo_id", None) and r.solicitud
+                else None
+            )
             items.append(
                 {
                     "id": r.id,
@@ -5893,8 +6062,8 @@ class ComprasOrdenesListView(APIView):
                     "solicitud_id": r.solicitud_id,
                     "solicitud_folio": r.solicitud.folio if r.solicitud_id and r.solicitud else "",
                     "insumo": (
-                        r.solicitud.insumo.nombre
-                        if r.solicitud_id and getattr(r.solicitud, "insumo_id", None) and r.solicitud.insumo
+                        canonical_row_insumo.nombre
+                        if canonical_row_insumo
                         else ""
                     ),
                     "referencia": r.referencia,
@@ -6074,7 +6243,12 @@ class ComprasSolicitudCreateView(APIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
 
-        insumo = get_object_or_404(Insumo, pk=data["insumo_id"])
+        insumo = canonical_insumo_by_id(data["insumo_id"])
+        if insumo is None:
+            return Response(
+                {"detail": "insumo_id no encontrado o inactivo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         solicitante = (data.get("solicitante") or request.user.username or "").strip() or request.user.username
         area = (data["area"] or "").strip() or "General"
         auto_crear_orden = bool(data.get("auto_crear_orden"))
@@ -6104,8 +6278,7 @@ class ComprasSolicitudCreateView(APIView):
             orden = None
             if auto_crear_orden:
                 proveedor = solicitud.proveedor_sugerido or insumo.proveedor_principal
-                costo_qs = CostoInsumo.objects.filter(insumo=insumo).order_by("-fecha", "-id")
-                costo = costo_qs.filter(proveedor=proveedor).first() or costo_qs.first()
+                _, costo = _latest_cost_for_canonical(insumo.id, proveedor)
                 costo_unitario = _to_decimal(costo.costo_unitario if costo else 0)
                 monto_estimado = (data["cantidad"] * costo_unitario).quantize(Decimal("0.01"))
                 orden = OrdenCompra.objects.create(
@@ -6238,6 +6411,7 @@ class ComprasSolicitudCrearOrdenView(APIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
         estatus = data.get("estatus") or OrdenCompra.STATUS_BORRADOR
+        canonical_solicitud_insumo = canonical_insumo_by_id(solicitud.insumo_id) or solicitud.insumo
         if estatus not in {OrdenCompra.STATUS_BORRADOR, OrdenCompra.STATUS_ENVIADA}:
             return Response(
                 {
@@ -6254,7 +6428,7 @@ class ComprasSolicitudCrearOrdenView(APIView):
         if proveedor_id:
             proveedor = get_object_or_404(Proveedor, pk=proveedor_id, activo=True)
         if proveedor is None:
-            proveedor = solicitud.proveedor_sugerido or solicitud.insumo.proveedor_principal
+            proveedor = solicitud.proveedor_sugerido or canonical_solicitud_insumo.proveedor_principal or solicitud.insumo.proveedor_principal
         if proveedor is None:
             return Response(
                 {
@@ -6266,8 +6440,7 @@ class ComprasSolicitudCrearOrdenView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        costo_qs = CostoInsumo.objects.filter(insumo=solicitud.insumo).order_by("-fecha", "-id")
-        costo = costo_qs.filter(proveedor=proveedor).first() or costo_qs.first()
+        _, costo = _latest_cost_for_canonical(solicitud.insumo_id, proveedor)
         costo_unitario = _to_decimal(costo.costo_unitario if costo else 0)
         monto_estimado = ((solicitud.cantidad or Decimal("0")) * costo_unitario).quantize(Decimal("0.01"))
 

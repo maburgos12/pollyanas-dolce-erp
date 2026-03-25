@@ -16,6 +16,7 @@ from django.utils import timezone
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from inventario.utils.reorder import calcular_punto_reorden
 from maestros.models import Insumo, InsumoAlias, UnidadMedida
+from maestros.utils.canonical_catalog import canonical_insumo
 from recetas.utils.normalizacion import normalizar_nombre
 
 
@@ -121,11 +122,11 @@ class CatalogMatcher:
 
         exact = self.by_norm.get(norm)
         if exact:
-            return MatchResult(insumo=exact, metodo="EXACT", score=100.0, nombre_normalizado=norm)
+            return MatchResult(insumo=canonical_insumo(exact), metodo="EXACT", score=100.0, nombre_normalizado=norm)
 
         aliased = self.by_alias.get(norm)
         if aliased:
-            return MatchResult(insumo=aliased, metodo="ALIAS", score=100.0, nombre_normalizado=norm)
+            return MatchResult(insumo=canonical_insumo(aliased), metodo="ALIAS", score=100.0, nombre_normalizado=norm)
 
         if not self.norm_choices:
             return MatchResult(insumo=None, metodo="NO_CATALOG", score=0, nombre_normalizado=norm)
@@ -138,7 +139,7 @@ class CatalogMatcher:
         candidate = self.by_norm.get(best_norm)
         if candidate and score >= fuzzy_threshold:
             return MatchResult(
-                insumo=candidate,
+                insumo=canonical_insumo(candidate),
                 metodo="FUZZY",
                 score=float(score),
                 nombre_normalizado=norm,

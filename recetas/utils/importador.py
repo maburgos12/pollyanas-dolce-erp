@@ -12,6 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from maestros.models import Insumo, CostoInsumo, Proveedor, UnidadMedida, seed_unidades_basicas
+from maestros.utils.canonical_catalog import canonical_insumo, latest_costo_canonico
 from .matching import match_insumo, clasificar_match
 from .normalizacion import normalizar_nombre
 from .subsection_costing import find_parent_cost_for_stage
@@ -196,8 +197,8 @@ def _get_unit(code: str) -> Optional[UnidadMedida]:
     return UnidadMedida.objects.filter(codigo=code2).first()
 
 def _latest_cost_unitario(insumo: Insumo) -> Optional[float]:
-    ci = CostoInsumo.objects.filter(insumo=insumo).order_by("-fecha", "-id").first()
-    return float(ci.costo_unitario) if ci else None
+    latest = latest_costo_canonico(insumo)
+    return float(latest) if latest is not None else None
 
 
 def _is_presentation_header(text: Any) -> bool:
@@ -1206,6 +1207,7 @@ class ImportadorCosteo:
 
         for l in lineas:
             insumo, score, method = match_insumo(l["ingrediente"])
+            insumo = canonical_insumo(insumo)
             status = clasificar_match(score)
             unidad = _get_unit(l.get("unidad",""))
             tipo_linea = l.get("tipo_linea", LineaReceta.TIPO_NORMAL)

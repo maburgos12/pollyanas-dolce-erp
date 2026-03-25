@@ -44,11 +44,20 @@ class PointInventoryExtractor:
     def _apply_branch_filter(self, branches: list[dict], branch_filter: str | None) -> list[dict]:
         if not branch_filter:
             return branches
-        branch_filter = branch_filter.strip().lower()
+        branch_filter_norm = branch_filter.strip().lower()
+        exact_matches = [
+            branch
+            for branch in branches
+            if branch_filter_norm == str(branch.get("value", "")).strip().lower()
+            or branch_filter_norm == str(branch.get("label", "")).strip().lower()
+        ]
+        if exact_matches:
+            return exact_matches
         return [
             branch
             for branch in branches
-            if branch_filter in str(branch.get("value", "")).lower() or branch_filter in str(branch.get("label", "")).lower()
+            if branch_filter_norm in str(branch.get("value", "")).lower()
+            or branch_filter_norm in str(branch.get("label", "")).lower()
         ]
 
     def _extract_product_rows_by_category(self, inventory_page: PointInventoryPage) -> tuple[list[dict], list[dict]]:
@@ -89,7 +98,7 @@ class PointInventoryExtractor:
             with BrowserSessionManager(client) as session:
                 # El workspace inicial solo habilita la sesión.
                 # La sucursal objetivo se controla desde el dropdown de inventario.
-                self.auth_service.login(session)
+                self.auth_service.login(session, branch_hint=branch_filter)
                 inventory_page = PointInventoryPage(session.page, self.settings)
                 inventory_page.open_inventory_module()
                 branches = inventory_page.list_branches()

@@ -14,7 +14,9 @@ from .models import (
     Receta,
     RecetaCodigoPointAlias,
     RecetaCostoVersion,
+    RecetaPresentacionDerivada,
     InventarioCedisProducto,
+    MovimientoProductoCedis,
     PoliticaStockSucursalProducto,
     SolicitudReabastoCedis,
     SolicitudReabastoCedisLinea,
@@ -187,6 +189,28 @@ class RecetaCodigoPointAliasAdmin(admin.ModelAdmin):
     list_filter = ("activo",)
 
 
+@admin.register(RecetaPresentacionDerivada)
+class RecetaPresentacionDerivadaAdmin(admin.ModelAdmin):
+    list_display = (
+        "receta_padre",
+        "receta_derivada",
+        "codigo_point_derivado",
+        "tipo_derivado",
+        "unidades_por_padre",
+        "padre_size_hint",
+        "requiere_componentes_directos",
+        "activo",
+    )
+    search_fields = (
+        "receta_padre__nombre",
+        "receta_derivada__nombre",
+        "codigo_point_derivado",
+        "nombre_derivado",
+    )
+    list_filter = ("tipo_derivado", "padre_size_hint", "requiere_componentes_directos", "activo")
+    autocomplete_fields = ("receta_padre", "receta_derivada")
+
+
 @admin.register(CostoDriver)
 class CostoDriverAdmin(admin.ModelAdmin):
     list_display = (
@@ -272,6 +296,14 @@ class InventarioCedisProductoAdmin(admin.ModelAdmin):
     @admin.display(description="Disponible")
     def disponible_admin(self, obj):
         return obj.disponible
+
+
+@admin.register(MovimientoProductoCedis)
+class MovimientoProductoCedisAdmin(admin.ModelAdmin):
+    list_display = ("fecha", "tipo", "receta", "cantidad", "referencia")
+    search_fields = ("receta__nombre", "referencia")
+    list_filter = ("tipo", "fecha")
+    autocomplete_fields = ("receta",)
 
 
 class SolicitudReabastoCedisLineaInline(admin.TabularInline):

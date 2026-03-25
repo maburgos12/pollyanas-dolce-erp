@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}Nueva receta{% endblock %}
+{% block page_title %}Recetas · Nueva receta{% endblock %}
+
+{% block content %}
+<div class="card">
+  <section class="card recipe-hero-card mb-3">
+    <div class="recipe-hero-head">
+      <div>
+        <div class="recipe-hero-eyebrow">Alta guiada</div>
+        <h2 class="recipe-hero-title">Nueva receta</h2>
+        <div class="recipe-hero-copy"><strong>Alta guiada de receta</strong>. Crea una base, un derivado o un producto final con el mínimo necesario y continúa el resto desde el detalle.</div>
+      </div>
+      <div class="recipe-actions">
+        <a class="btn btn-outline-secondary" href="{% url 'recetas:recetas_list' %}">Volver a recetas</a>
+      </div>
+    </div>
+    <div class="enterprise-pill-grid mb-0">
+      {% for item in recipe_modes %}
+      <div class="enterprise-pill-card {% if values.recipe_mode == item.code %}is-active{% endif %}">
+        <div class="enterprise-pill-title">{{ item.title }}</div>
+        <div class="enterprise-pill-text">{{ item.description }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <details class="erp-advanced-panel mb-3">
+    <summary class="erp-advanced-summary">
+      <span>Ver control ERP avanzado</span>
+      <span class="text-muted">Centro de mando y workflow del alta</span>
+    </summary>
+    <div class="erp-advanced-body">
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid mb-3">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">Producción / Costeo</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if values.recipe_mode == 'FINAL' %}is-success{% else %}is-warning{% endif %}">
+        {% if values.recipe_mode == "FINAL" %}Documento final{% else %}Base en diseño{% endif %}
+      </div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{% if values.recipe_mode == 'FINAL' %}1{% else %}2{% endif %}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">
+        {% if values.recipe_mode == "FINAL" %}
+          Definir familia comercial y luego capturar componentes finales.
+        {% elif values.recipe_mode == "BASE_DERIVADOS" %}
+          Cerrar rendimiento y después generar presentaciones derivadas.
+        {% else %}
+          Cerrar rendimiento y capturar la batida base antes de usarla en otros documentos.
+        {% endif %}
+      </div>
+      <a class="btn btn-secondary btn-sm" href="{% url 'recetas:recetas_list' %}">Abrir catálogo</a>
+    </article>
+  </div>
+
+  <div class="card-header">Workflow ERP del alta</div>
+  <div class="table-responsive mb-3">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>01 · Identidad</strong></td>
+          <td>Producción / Maestros</td>
+          <td><span class="badge bg-warning text-dark">40%</span></td>
+          <td>Nombre, categoría y referencia ERP del documento.</td>
+          <td>Definir el tipo correcto de receta.</td>
+        </tr>
+        <tr>
+          <td><strong>02 · Estructura</strong></td>
+          <td>Producción / Costeo</td>
+          <td><span class="badge bg-warning text-dark">50%</span></td>
+          <td>Rendimiento para bases o familia comercial para producto final.</td>
+          <td>Cerrar los datos mínimos para habilitar BOM.</td>
+        </tr>
+        <tr>
+          <td><strong>03 · Uso operativo</strong></td>
+          <td>Producción / Compras</td>
+          <td><span class="badge bg-secondary">Pendiente</span></td>
+          <td>El documento entra a costeo, MRP y consumo final una vez guardado.</td>
+          <td>Guardar la receta y continuar en el detalle.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+    </div>
+  </details>
+
+  <div class="module-note mb-3">
+    Regla operativa: primero crea la <strong>batida o mezcla base</strong>, luego sus <strong>presentaciones derivadas</strong> si aplica,
+    y al final arma el <strong>producto final</strong> usando esos componentes.
+  </div>
+
+  <div class="info-grid mb-3">
+    <div class="info-card">
+      <div class="info-title">Base simple</div>
+      <div class="info-text">Debe llevar rendimiento y unidad de rendimiento para costear la batida correctamente.</div>
+    </div>
+    <div class="info-card">
+      <div class="info-title">Base con presentaciones</div>
+      <div class="info-text">Debe llevar rendimiento y luego generar presentaciones derivadas para usarlas como subinsumos.</div>
+    </div>
+    <div class="info-card">
+      <div class="info-title">Producto final</div>
+      <div class="info-text">Debe llevar familia. No usa rendimiento ni presentaciones derivadas porque es una receta de armado.</div>
+    </div>
+  </div>
+
+  <div class="module-note mb-3">
+    Taxonomía enterprise: el <strong>producto final</strong> debe quedar en una familia comercial y usar una categoría consistente.
+    Las <strong>bases internas</strong> pueden trabajar sin familia y enfocarse en categoría operativa.
+  </div>
+
+  {% if source_base_receta and values.recipe_mode == "FINAL" %}
+  <div class="module-note mb-3">
+    Cierre de cadena operativo desde la base <strong>{{ source_base_receta.nombre }}</strong>.
+    {% if values.familia %}Se precargó la familia (<strong>{{ values.familia }}</strong>) y {% endif %}
+    Se precargó la categoría{% if source_base_receta.categoria %} (<strong>{{ source_base_receta.categoria }}</strong>){% endif %}
+    y el grupo operativo para acelerar el alta del producto final.
+  </div>
+  {% if source_base_context %}
+  <div class="info-grid mb-3">
+    <div class="info-card">
+      <div class="info-title">Base lista</div>
+      <div class="info-text">
+        {% if source_base_context.base_ready %}Sí{% else %}No{% endif %}
+      </div>
+    </div>
+    <div class="info-card">
+      <div class="info-title">Presentaciones activas</div>
+      <div class="info-text">{{ source_base_context.active_presentaciones }}</div>
+    </div>
+    <div class="info-card">
+      <div class="info-title">Derivados activos</div>
+      <div class="info-text">{{ source_base_context.derived_presentaciones }}</div>
+    </div>
+  </div>
+  <div class="module-note mb-3">
+    {{ source_base_context.next_step_label }}
+    <div class="mt-2 inline-actions">
+      <a class="btn btn-secondary btn-sm" href="{{ source_base_context.detail_url }}">Abrir base</a>
+      {% if source_base_context.sync_missing_count > 0 %}
+      <a class="btn btn-secondary btn-sm" href="{{ source_base_context.sync_url }}">Sincronizar derivados</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
+
+  <form method="post" class="form-grid-auto">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="recipe_mode">Tipo de receta</label>
+      <select id="recipe_mode" class="form-select" name="recipe_mode">
+        {% for item in recipe_modes %}
+        <option value="{{ item.code }}" {% if values.recipe_mode == item.code %}selected{% endif %}>{{ item.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="nombre">Nombre</label>
+      <input id="nombre" class="form-control" type="text" name="nombre" value="{{ values.nombre }}" placeholder="Ej. Pan Vainilla Dawn / Pastel Fresas con Crema - Chico" required>
+    </div>
+
+    <div class="form-group">
+      <label for="codigo_point">Código Point (opcional)</label>
+      <input id="codigo_point" class="form-control" type="text" name="codigo_point" value="{{ values.codigo_point }}" placeholder="Solo si ya existe para venta u operación">
+    </div>
+
+    <div class="form-group">
+      <label for="familia">Familia</label>
+      <select id="familia" class="form-select" name="familia" data-current="{{ values.familia }}">
+        <option value="">Selecciona familia</option>
+        {% for item in familias_catalogo %}
+        <option value="{{ item }}" {% if values.familia == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="categoria">Categoría</label>
+      <select id="categoria" class="form-select" name="categoria" data-current="{{ values.categoria }}">
+        <option value="">Selecciona categoría</option>
+        {% for item in categorias_catalogo %}
+        <option value="{{ item }}" {% if values.categoria == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="sheet_name">Referencia ERP</label>
+      <input id="sheet_name" class="form-control" type="text" name="sheet_name" value="{{ values.sheet_name }}" placeholder="Ej. Batidas base / Pasteles temporada">
+    </div>
+
+    <div class="form-group">
+      <label for="rendimiento_cantidad">Rendimiento (opcional)</label>
+      <input id="rendimiento_cantidad" class="form-control" type="number" step="0.000001" min="0" name="rendimiento_cantidad" value="{{ values.rendimiento_cantidad }}" placeholder="Ej. 10.400000">
+    </div>
+
+    <div class="form-group">
+      <label for="rendimiento_unidad_id">Unidad de rendimiento</label>
+      <select id="rendimiento_unidad_id" class="form-select" name="rendimiento_unidad_id">
+        <option value="">Selecciona unidad</option>
+        {% for u in unidades %}
+        <option value="{{ u.id }}" {% if values.rendimiento_unidad_id == u.id|stringformat:"s" %}selected{% endif %}>{{ u.codigo }} - {{ u.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="quick-actions">
+      <button class="btn btn-primary" type="submit">Crear receta</button>
+      <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    const modeSelect = document.getElementById("recipe_mode");
+    const familySelect = document.getElementById("familia");
+    const categorySelect = document.getElementById("categoria");
+    const familyCategoryMap = {{ familia_categoria_catalogo_json|safe }};
+    if (!modeSelect || !familySelect || !categorySelect) return;
+
+    const allCategoryOptions = Array.from(categorySelect.options).map((opt) => ({
+      value: opt.value,
+      text: opt.textContent,
+    }));
+
+    function rebuildCategoryOptions() {
+      const mode = modeSelect.value || "BASE";
+      const family = familySelect.value || "";
+      const selectedCategory = categorySelect.value || categorySelect.dataset.current || "";
+      categorySelect.innerHTML = '<option value="">Selecciona categoría</option>';
+
+      let allowedValues = [];
+      if (mode === "FINAL" && family && familyCategoryMap[family]) {
+        allowedValues = familyCategoryMap[family];
+      } else {
+        allowedValues = allCategoryOptions
+          .map((item) => item.value)
+          .filter((value) => value);
+      }
+
+      const seen = new Set();
+      allowedValues.forEach((value) => {
+        const trimmed = (value || "").trim();
+        if (!trimmed || seen.has(trimmed.toLowerCase())) return;
+        seen.add(trimmed.toLowerCase());
+        const opt = document.createElement("option");
+        opt.value = trimmed;
+        opt.textContent = trimmed;
+        if (trimmed === selectedCategory) {
+          opt.selected = true;
+        }
+        categorySelect.appendChild(opt);
+      });
+
+      if (mode !== "FINAL") {
+        familySelect.value = "";
+      }
+    }
+
+    modeSelect.addEventListener("change", rebuildCategoryOptions);
+    familySelect.addEventListener("change", rebuildCategoryOptions);
+    rebuildCategoryOptions();
+  })();
+</script>
+{% endblock %}

@@ -1,167 +1,125 @@
-# Mini-ERP Pollyana's Dolce (Sprint 1 ejecutable)
+# Pollyana's Dolce — ERP Operativo
 
-Sprint 1 entrega:
-- Importación desde Excel: catálogo de costos (Costo Materia Prima) + recetas (hojas con “Ingredientes”)
-- Matching de insumos (EXACT / CONTAINS / FUZZY) con cola “Needs review”
-- UI web (Django) para ver recetas, detalle, pendientes y MRP básico
-- Historial de ventas (CSV/XLSX) por sucursal + pronóstico estadístico (mes / semana / fin de semana)
-- Recomendación automática subir/bajar solicitud de Ventas según histórico
-- Backtest estadístico visible en Plan Producción (MAPE/Bias por ventana)
-- Ajustes de inventario con flujo de aprobación/rechazo (ADMIN) y trazabilidad
-- Recepciones de compra cerradas impactan inventario automáticamente (entrada + bitácora)
-- API: POST /api/mrp/explode/
-- API: GET/POST /api/mrp/planes/ (listado y creación manual de planes de producción)
-- API: GET/PATCH/DELETE /api/mrp/planes/{id}/ (detalle y edición/eliminación de plan)
-- API: POST /api/mrp/planes/{id}/items/ (agrega renglón al plan)
-- API: PATCH/DELETE /api/mrp/planes/items/{id}/ (edita/elimina renglón del plan)
-- API: POST /api/mrp/calcular-requerimientos/ (por plan, por periodo o por lista manual)
-- API: POST /api/mrp/generar-plan-pronostico/ (crea plan de producción desde pronóstico)
-- API: POST /api/ventas/pronostico-backtest/ (mide precisión histórica: MAPE/Bias por ventana, con escenario `base/bajo/alto` y `min_confianza_pct`; soporta `?export=csv|xlsx`)
-- API: GET /api/ventas/pronostico-insights/ (perfil estacional por mes/día, top recetas y participación; soporta `top`/`offset_top` y `?export=csv|xlsx`)
-- API: GET /api/ventas/historial/ (histórico de ventas filtrable por sucursal/receta/fecha; soporta paginación `limit`/`offset` y `?export=csv|xlsx`)
-- API: GET /api/ventas/pronostico/ (pronósticos filtrables por periodo/rango/receta; soporta paginación `limit`/`offset` y `?export=csv|xlsx`)
-- API: GET /api/ventas/pipeline/resumen/ (resumen ejecutivo + detalle por receta y por sucursal: historial vs pronóstico vs solicitud; filtros `q`/`status`/`delta_min`, paginación `top`/`offset` y `top_sucursales`/`offset_sucursales`, ordenamiento `sort_by|sort_dir|sort_sucursales_by|sort_sucursales_dir` y soporte `?export=csv|xlsx`)
-- API: GET /api/ventas/solicitud/list/ (solicitudes de ventas filtrables por alcance/sucursal/periodo; paginación `limit`/`offset`, opcional `include_forecast_ref=1` para comparar contra pronóstico, filtros `forecast_status`/`forecast_delta_min`, ordenamiento `sort_by`/`sort_dir` y soporte `?export=csv|xlsx`)
-- API: POST /api/ventas/pronostico/bulk/ (carga masiva de pronóstico con dry_run)
-- API: POST /api/ventas/pronostico/import-preview/ (previsualiza carga de pronóstico sin aplicar cambios)
-- API: POST /api/ventas/pronostico/import-confirm/ (confirma y aplica carga de pronóstico)
-- API: POST /api/ventas/pronostico-estadistico/ (forecast por sucursal con banda inferior/superior + comparativo contra solicitud en escenario `base/bajo/alto` y filtro opcional `min_confianza_pct`; soporta `?export=csv|xlsx`)
-- API: POST /api/ventas/pronostico-estadistico/guardar/ (persiste forecast estadístico en Pronóstico de venta por escenario base/bajo/alto, con filtro opcional `min_confianza_pct` y soporte `?export=csv|xlsx`)
-- API: POST /api/ventas/historial/bulk/ (carga masiva de historial de ventas con dry_run)
-- API: POST /api/ventas/historial/import-preview/ (previsualiza carga de historial de ventas sin aplicar cambios)
-- API: POST /api/ventas/historial/import-confirm/ (confirma y aplica carga de historial de ventas)
-- API: POST /api/ventas/solicitud/ (alta/actualización de solicitud de ventas; incluye `forecast_ref` opcional y permite desactivar validación con `?validate_forecast=0`)
-- API: POST /api/ventas/solicitud/bulk/ (carga masiva de solicitudes de ventas con dry_run)
-- API: POST /api/ventas/solicitud/import-preview/ (previsualiza carga de solicitudes de venta sin aplicar cambios)
-- API: POST /api/ventas/solicitud/import-confirm/ (confirma y aplica carga de solicitudes de venta)
-- API: POST /api/ventas/solicitud/aplicar-forecast/ (ajuste automático desde escenario `base/bajo/alto`, con `dry_run`, tope opcional `max_variacion_pct`, filtro opcional `min_confianza_pct` y soporte `?export=csv|xlsx`)
-- API: GET/POST /api/inventario/ajustes/ (consulta y alta de ajustes en pendiente / aplicado)
-- API: POST /api/inventario/ajustes/{id}/decision/ (aprobar/aplicar/rechazar ajuste)
-- API: GET/POST /api/inventario/aliases/ (catálogo de alias y alta/actualización)
-- API: POST /api/inventario/aliases/reasignar/ (reasignación masiva de alias a insumo oficial)
-- API: GET /api/inventario/aliases/pendientes/ (pendientes de homologación: almacén, Point y recetas, con filtros `q`/`source`/`point_tipo`, `limit`/`offset`, `recent_runs`, paginación por sección y export `csv|xlsx`)
-- API: GET /api/inventario/aliases/pendientes-unificados/ (tablero unificado de pendientes cross-fuente con filtros `q`/`source`/`point_tipo`/`min_sources`, `limit`/`offset`, `sort_by`/`sort_dir` y export `csv|xlsx`)
-- API: POST /api/inventario/aliases/pendientes-unificados/resolver/ (auto-resuelve alias cross-fuente con dry_run/commit, filtros `source`/`point_tipo`, ventana `limit`/`offset`, orden `sort_by`/`sort_dir` y totales `*_preview`)
-- API: GET /api/integraciones/point/resumen/ (KPI de homologación Point: insumos, recetas, proveedores y pendientes)
-- API: POST /api/integraciones/point/clientes/desactivar-inactivos/ (operación de clientes API inactivos; soporta `dry_run`)
-- API: POST /api/integraciones/point/logs/purgar/ (limpieza de logs API por retención; soporta `dry_run`)
-- API: POST /api/integraciones/point/mantenimiento/ejecutar/ (operación combinada: desactivación + purga; soporta `dry_run`)
-- API: GET /api/integraciones/point/operaciones/historial/ (bitácora operativa de integraciones con filtros `action`, `user`, `model`, `q`, `date_from`, `date_to`, paginación `limit`/`offset`, ordenamiento `sort_by`/`sort_dir` y `export=csv|xlsx`)
-- API: POST /api/inventario/point-pendientes/resolver/ (resolver/descartar pendientes Point por insumo, producto o proveedor)
-- API: GET /api/compras/solicitudes/ (listado de solicitudes con filtros, estatus y presupuesto estimado; soporta `limit`/`offset`, `sort_by`/`sort_dir` y totales filtrados)
-- API: POST /api/compras/solicitudes/import-preview/ (vista previa de carga masiva de solicitudes en JSON)
-- API: POST /api/compras/solicitudes/import-confirm/ (confirmación de carga masiva usando filas de preview)
-- API: GET /api/compras/ordenes/ (listado de órdenes con filtros y monto total estimado; soporta `limit`/`offset`, `sort_by`/`sort_dir` y totales filtrados)
-- API: GET /api/compras/recepciones/ (listado de recepciones con filtros y totales por estatus; soporta `limit`/`offset` y `sort_by`/`sort_dir`)
-- API: GET /api/presupuestos/consolidado/{YYYY-MM}/ (consolidado de presupuesto/ejecución con tablero `consumo_vs_plan`; soporta `periodo_tipo=mes|q1|q2`, `source`, `plan_id`, `categoria`, `reabasto`, `consumo_ref`, y paginación/ordenamiento en consumo con `limit`/`offset` + `sort_by`/`sort_dir`)
-- API: POST /api/compras/solicitud/{id}/estatus/ (cambio de estado con reglas de transición)
-- API: POST /api/compras/solicitud/{id}/crear-orden/ (genera OC desde solicitud aprobada, idempotente)
-- API: POST /api/compras/orden/{id}/estatus/ (cambio de estado de OC con validaciones)
-- API: POST /api/compras/orden/{id}/recepciones/ (registra recepción y puede cerrar OC)
-- API: POST /api/compras/recepcion/{id}/estatus/ (actualiza recepción y cierra OC automáticamente si aplica)
-- API: POST /api/auth/token/ (obtiene token para integraciones API)
-- API: POST /api/auth/token/rotate/ (rota token del usuario autenticado)
-- API: POST /api/auth/token/revoke/ (revoca el token del usuario autenticado)
-- API: GET /api/auth/me/ (perfil + roles/capacidades del usuario autenticado)
-- API: GET /api/audit/logs/ (bitácora operativa filtrable para ADMIN/DG; soporta `limit`/`offset` y `sort_by`/`sort_dir`)
+Sistema integral de gestión empresarial para la operación de Pollyana's Dolce.
+Administración, Ventas, Compras, Inventario, Producción, CRM, RRHH, Logística y Reportes.
 
-## Requisitos
-- Docker Desktop (Mac/Windows) **o** Python 3.12 + Postgres 16
+## Módulos
 
-## Opción A (recomendada): correr con Docker
-1) Copia `.env.example` a `.env`
-2) En la carpeta del proyecto:
-   ```bash
-   docker compose up --build
-   ```
-3) En otra terminal:
-   ```bash
-   docker compose exec web python manage.py migrate
-   docker compose exec web python manage.py createsuperuser
-   docker compose exec web python manage.py bootstrap_roles
-   docker compose exec web python manage.py import_costeo test_data/COSTEO_Prueba.xlsx
-   ```
-4) Abre:
-   - UI: http://localhost:8000/
-   - Admin: http://localhost:8000/admin/
-5) (Opcional) generar token API para integraciones:
-   ```bash
-   docker compose exec web python manage.py generar_token_api --username admin
-   ```
-6) Smoke operativo de integraciones API:
-   ```bash
-   BASE_URL=https://pollyanas-dolce-erp-production.up.railway.app \
-   TOKEN=<TOKEN_DRF> \
-   ./scripts/smoke_integraciones_api.sh
-   ```
-   Si tu Python local falla por certificados TLS en macOS, agrega `--insecure`.
-   Opcional live (con efectos reales, requiere confirmación explícita):
-   ```bash
-   BASE_URL=https://pollyanas-dolce-erp-production.up.railway.app \
-   TOKEN=<TOKEN_DRF> \
-   ./scripts/smoke_integraciones_api.sh --live --confirm-live YES
-   ```
-7) Smoke operativo de aliases/homologación inventario:
-   ```bash
-   BASE_URL=https://pollyanas-dolce-erp-production.up.railway.app \
-   TOKEN=<TOKEN_DRF> \
-   ./scripts/smoke_aliases_api.sh
-   ```
-   También soporta `--insecure` para diagnóstico TLS.
-8) Mantenimiento operativo por comando (sin API, apto para cron):
-   ```bash
-   # Preview (sin cambios)
-   .venv/bin/python manage.py run_integraciones_maintenance --dry-run
+| Módulo | Descripción |
+|--------|-------------|
+| Dashboard | Panel ejecutivo con KPIs operativos |
+| Maestros | Insumos, proveedores, unidades de medida, productos |
+| Recetas y Costeo | Gestión de recetas, costeo MP/MO/indirectos, versionado |
+| Plan de Producción | MRP, pronósticos, plan desde forecast estadístico |
+| Compras | Solicitudes, órdenes de compra, recepciones, workflow de aprobación |
+| Inventario | Existencias, movimientos, ajustes, punto de reorden, importación almacén |
+| CRM | Clientes, pedidos, seguimiento multicanal |
+| Logística | Rutas y entregas |
+| RRHH | Empleados y nómina |
+| Activos | Equipos, mantenimiento preventivo/correctivo |
+| Reportes | Costeo por receta, BI, exports CSV/XLSX |
+| Control | Discrepancias ventas vs producción, captura móvil |
+| Integraciones | API pública, POS Point, homologación |
+| Auditoría | Bitácora completa de operaciones |
 
-   # Live (con cambios)
-   .venv/bin/python manage.py run_integraciones_maintenance --confirm-live YES
-   ```
+## Tecnología
 
-## Opción B: correr sin Docker (dev)
-- Configura un Postgres local y variables de entorno similares a `.env.example`
-- Instala dependencias:
-  ```bash
-  pip install -r requirements.txt
-  python manage.py migrate
-  python manage.py createsuperuser
-  python manage.py bootstrap_roles
-  python manage.py generar_token_api --username admin
-  python manage.py runserver
-  ```
+- Django 5.0 + Django REST Framework
+- PostgreSQL 16
+- Docker + Railway
+- API REST con 80+ endpoints
 
-## Archivos importantes
-- `recetas/management/commands/import_costeo.py` (comando de importación)
-- `recetas/management/commands/importar_ventas_point_archivos.py` (sincroniza historial de ventas desde exportes Point CSV/XLSX/XLSM/XLS)
-- `recetas/management/commands/inferir_cantidad_lineas_desde_costo.py` (infiere cantidad en líneas ligadas usando costo línea Excel / costo unitario snapshot; soporta `--only-auto`, `--min-match-score`, `--relax-piece-rule`, `--use-linecost-as-qty-when-tiny`)
-- `recetas/management/commands/backfill_linea_snapshots_from_linecost.py` (reconstruye snapshot faltante con costo_linea_excel/cantidad)
-- `recetas/management/commands/rematch_lineas_receta.py` (reintenta matching masivo en líneas REJECTED/NO_MATCH con motor actual)
-- `recetas/management/commands/auditar_insumos_sin_costo_recetas.py` (lista insumos de recetas sin costo base y sugiere homologaciones)
-- `maestros/management/commands/bootstrap_costos_desde_recetas.py` (genera costos base por mediana usando evidencia de recetas con cantidad/costo)
-- `maestros/management/commands/bootstrap_costos_por_homologacion.py` (clona costo de insumo homologado por similitud estricta para casos sin costo)
-- `maestros/management/commands/bootstrap_costos_mapa_operativo.py` (aplica homologación explícita destino→fuente para costos faltantes críticos)
-- `core/management/commands/bootstrap_sucursales_point.py` (alta/actualización de sucursales base Point)
-- `recetas/utils/importador.py` (parser de Excel)
-- `recetas/utils/matching.py` (matching)
-- `activos/management/commands/importar_activos_bitacora.py` (importación masiva de activos/servicios desde bitácora XLSX/CSV)
-- `activos/utils/bitacora_import.py` (parser unificado de bitácora con soporte XLSX/CSV, `;`, `,` y decimales con coma)
-- `logs/` (reportes CSV del import)
-- `scripts/smoke_integraciones_api.sh` (smoke operacional de endpoints de integraciones)
-- `scripts/smoke_aliases_api.sh` (smoke operacional de endpoints de aliases/homologación inventario)
-- `integraciones/management/commands/smoke_integraciones_api.py` (comando smoke con salida JSON)
-- `inventario/management/commands/smoke_aliases_api.py` (comando smoke para pendientes/pendientes-unificados)
-- `core/management/commands/auditar_flujo_erp.py` (auditoría integral de consistencia: duplicados, match/costos en recetas y cobertura de inventario)
-- `core/management/commands/ejecutar_rutina_diaria_erp.py` (orquesta sync Drive + sync Point + hardening + auditoría con resumen en logs)
-- `inventario/management/commands/backfill_existencias_insumos.py` (crea existencias faltantes para insumos activos en modo seguro dry-run/apply)
-- `integraciones/management/commands/run_integraciones_maintenance.py` (mantenimiento operativo CLI con bitácora)
-- `scripts/auto_maintenance_integraciones.sh` (scheduler opcional para mantenimiento periódico)
-- `docs/OPERACION_ALIASES_API.md` (runbook operativo de aliases API)
-- `docs/OPERACION_RUTINA_DIARIA_ERP.md` (runbook de ejecución diaria/diagnóstico con `--continue-on-error`)
+## Instalación rápida
 
-## Notas
-- El matching y captura operativa en UI ya incluyen búsqueda/autocomplete para insumos.
-- El importador es idempotente por `source_hash` en costos y por `hash_contenido` en recetas.
-- En `Activos > Catálogo` ya hay carga masiva de bitácora con modo simulación y descarga de plantilla (`CSV`/`XLSX`).
-- Para ventas Point sin credenciales API directas: exporta reportes desde Point a carpeta/Drive y corre `python manage.py importar_ventas_point_archivos <ruta> --recursive --dry-run` antes de confirmar sin `--dry-run`.
-- El importador de ventas prioriza identidad de producto de Point (`codigo_point` + `nombre_point`) y sincroniza alias de receta al importar sin `--dry-run`.
-- En deploy (`start.sh`) se corre `bootstrap_sucursales_point --only-missing` para mantener catálogo base de sucursales Point.
-- El nuevo módulo `pos_bridge` agrega browser automation determinística para Point sin API, incluyendo inventario y backfill histórico de ventas por producto/sucursal. Ver [`pos_bridge/README.md`](pos_bridge/README.md) para variables, comandos y calibración inicial.
+### Paso 1: Requisitos
+
+- Docker y Docker Compose instalados
+- 4GB RAM disponible
+
+### Paso 2: Descomprimir
+
+```bash
+unzip pastelerias_erp_sprint1.zip
+cd pastelerias_erp
+```
+
+### Paso 3: Configurar
+
+```bash
+cp .env.example .env
+# Los valores por defecto funcionan, no necesitas editarlo
+```
+
+### Paso 4: Levantar
+
+```bash
+docker-compose up -d --build
+```
+
+### Paso 5: Inicializar
+
+```bash
+# Esperar 30 segundos a que inicie PostgreSQL
+sleep 30
+
+# Crear tablas
+docker-compose exec web python manage.py migrate
+
+# Crear usuario admin
+docker-compose exec web python manage.py createsuperuser
+# Usuario: admin
+# Email: admin@pastelerias.mx
+# Password: (el que quieras)
+```
+
+### Paso 6: Importar datos
+
+```bash
+docker-compose exec web python manage.py import_costeo test_data/COSTEO_Prueba.xlsx
+```
+
+### Listo
+
+Abre http://localhost:8000/admin
+
+**Usuario**: admin
+**Password**: (el que pusiste)
+
+### Ver reportes de importación
+
+```bash
+ls -lh logs/import_*
+cat logs/import_summary_*.csv
+```
+
+### Probar API MRP
+
+```bash
+# Primero obtén un receta_id del admin
+# Luego:
+curl -X POST http://localhost:8000/api/mrp/explode/ \
+  -H "Content-Type: application/json" \
+  -d '{"receta_id": 1, "multiplicador": 5}'
+
+# Requerimientos agregados por periodo (mes completo)
+curl -X POST http://localhost:8000/api/mrp/calcular-requerimientos/ \
+  -H "Content-Type: application/json" \
+  -d '{"periodo":"2026-02","periodo_tipo":"mes"}'
+
+# Crear plan de producción desde pronóstico mensual
+curl -X POST http://localhost:8000/api/mrp/generar-plan-pronostico/ \
+  -H "Content-Type: application/json" \
+  -d '{"periodo":"2026-02","fecha_produccion":"2026-02-20","incluir_preparaciones":false}'
+```
+
+## API
+
+La documentación completa de endpoints está en la sección API del sistema.
+Base URL: `https://pollyanas-dolce-erp-production.up.railway.app/api/`
+
+## Operación
+
+- [Guía de rutina diaria](docs/OPERACION_RUTINA_DIARIA_ERP.md)
+- [Plantilla operativa semanal](docs/PLANTILLA_OPERATIVA_DIARIA_SEMANAL.md)
+- [Operación de integraciones API](docs/OPERACION_INTEGRACIONES_API.md)
+- [Operación de aliases](docs/OPERACION_ALIASES_API.md)

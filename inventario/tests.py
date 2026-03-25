@@ -4,6 +4,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from datetime import timedelta
 from decimal import Decimal
 from openpyxl import load_workbook
 from io import BytesIO
@@ -12,7 +13,7 @@ from core.models import AuditLog
 from compras.models import SolicitudCompra
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
-from recetas.models import LineaReceta, Receta
+from recetas.models import LineaReceta, Receta, VentaHistorica
 
 
 class InventarioAliasesPendingTests(TestCase):
@@ -187,6 +188,965 @@ class InventarioAliasesPendingTests(TestCase):
             ],
         )
         self.assertEqual(ws.cell(row=2, column=1).value, "Mantequilla Barra")
+
+    def test_carga_almacen_shows_pending_homologation_focus(self):
+        session = self.client.session
+        session["inventario_pending_preview"] = [
+            {
+                "source": "inventario",
+                "row": 12,
+                "nombre_origen": "Harina pastelera 25kg",
+                "nombre_normalizado": "harina pastelera 25kg",
+                "sugerencia": "Harina Pastelera",
+                "score": 94.0,
+            },
+            {
+                "source": "entradas",
+                "row": 7,
+                "nombre_origen": "Harina pastelera 25kg",
+                "nombre_normalizado": "harina pastelera 25kg",
+                "sugerencia": "Harina Pastelera",
+                "score": 91.0,
+            },
+            {
+                "source": "inventario",
+                "row": 14,
+                "nombre_origen": "Azucar glass premium",
+                "nombre_normalizado": "azucar glass premium",
+                "sugerencia": "Azucar Glass",
+                "score": 89.0,
+            },
+        ]
+        session.save()
+
+        response = self.client.get(reverse("inventario:carga_almacen"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Bloqueo de catálogo prioritario")
+        self.assertIn("pending_focus", response.context)
+        self.assertEqual(response.context["pending_focus"]["tone"], "warning")
+        self.assertEqual(response.context["pending_focus"]["label"], "2 filas · entradas, inventario")
+        self.assertEqual(len(response.context["pending_source_cards"]), 2)
+        self.assertGreaterEqual(len(response.context["pending_focus_rows"]), 2)
+        first_row = response.context["pending_focus_rows"][0]
+        self.assertEqual(first_row["nombre_origen"], "Harina pastelera 25kg")
+        self.assertContains(response, reverse("inventario:aliases_catalog"))
+        self.assertContains(response, "Harina pastelera 25kg")
+
+    def test_aliases_catalog_shows_pending_homologation_focus(self):
+        session = self.client.session
+        session["inventario_pending_preview"] = [
+            {
+                "source": "inventario",
+                "row": 9,
+                "nombre_origen": "Mermelada fresa premium",
+                "nombre_normalizado": "mermelada fresa premium",
+                "sugerencia": "Mermelada de Fresa",
+                "score": 93.0,
+            },
+            {
+                "source": "recetas",
+                "row": 4,
+                "nombre_origen": "Mermelada fresa premium",
+                "nombre_normalizado": "mermelada fresa premium",
+                "sugerencia": "Mermelada de Fresa",
+                "score": 89.0,
+            },
+        ]
+        session.save()
+
+        response = self.client.get(reverse("inventario:aliases_catalog"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Bloqueo ERP prioritario")
+        self.assertEqual(response.context["pending_focus"]["tone"], "warning")
+        self.assertEqual(response.context["pending_focus"]["label"], "2 filas · inventario, recetas")
+        self.assertEqual(len(response.context["pending_source_cards"]), 2)
+        self.assertEqual(response.context["pending_focus_rows"][0]["nombre_origen"], "Mermelada fresa premium")
+        self.assertContains(response, "Mermelada fresa premium")
+
+    def test_alias_targets_uses_canonicalized_insumos(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Canon", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-can",
+            nombre="Kilogramo Canon",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Harina Canonica Inventario",
+            categoria="Masa",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+            codigo_point="INV-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="Harina Canonica Inventario ",
+            categoria="Masa",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=canonical,
+            proveedor=proveedor,
+            costo_unitario=Decimal("12"),
+            source_hash="inv-canonical-cost",
+        )
+        CostoInsumo.objects.create(
+            insumo=variant,
+            proveedor=proveedor,
+            costo_unitario=Decimal("11"),
+            source_hash="inv-variant-cost",
+        )
+
+        response = self.client.get(reverse("inventario:aliases_catalog"))
+        self.assertEqual(response.status_code, 200)
+        targets = response.context["insumo_alias_targets"]
+        ids = {item.id for item in targets}
+        self.assertIn(canonical.id, ids)
+        self.assertNotIn(variant.id, ids)
+        selected = next(item for item in targets if item.id == canonical.id)
+        self.assertEqual(selected.canonical_variant_count, 2)
+
+    def test_movimientos_uses_canonicalized_insumos_and_aggregated_stock(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Mov Canon", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-can-mov",
+            nombre="Pieza Mov Canon",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Caja Canonica Inventario",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+            codigo_point="INV-MOV-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="Caja Canonica Inventario ",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(insumo=canonical, stock_actual=Decimal("4"))
+        ExistenciaInsumo.objects.create(insumo=variant, stock_actual=Decimal("6"))
+
+        response = self.client.get(reverse("inventario:movimientos"))
+        self.assertEqual(response.status_code, 200)
+        options = response.context["insumo_options"]
+        ids = {item["id"] for item in options}
+        self.assertIn(canonical.id, ids)
+        self.assertNotIn(variant.id, ids)
+        selected = next(item for item in options if item["id"] == canonical.id)
+        self.assertEqual(selected["stock"], Decimal("10"))
+        self.assertEqual(selected["canonical_variant_count"], 2)
+        self.assertEqual(selected["enterprise_status"], "Lista para operar")
+        self.assertEqual(selected["enterprise_missing"], [])
+        self.assertFalse(selected["is_operational_blocker"])
+        self.assertContains(response, "estado ERP")
+
+    def test_movimientos_shows_master_focus_for_operational_blockers(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-mov-focus",
+            nombre="Pieza Mov Focus",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Caja Focus Movimientos",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            stock_actual=Decimal("7"),
+            stock_minimo=Decimal("2"),
+            stock_maximo=Decimal("9"),
+            punto_reorden=Decimal("3"),
+        )
+
+        response = self.client.get(reverse("inventario:movimientos"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["master_focus"]["class_label"], "Empaque")
+        self.assertEqual(response.context["master_focus"]["missing_field"], "maestro")
+        self.assertTrue(response.context["master_focus_rows"])
+        self.assertTrue(response.context["master_blocker_class_cards"])
+        focus_row = response.context["master_focus_rows"][0]
+        self.assertIn(f"insumo_id={insumo.id}", focus_row["action_url"])
+        self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[insumo.id]))
+        self.assertContains(response, "Editar artículo")
+        self.assertContains(response, "Bloqueo maestro prioritario")
+
+    def test_movimientos_shows_enterprise_row_summary_and_actions(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-mov-row",
+            nombre="Pieza Mov Row",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Empaque Row Movimiento",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        MovimientoInventario.objects.create(
+            fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=insumo,
+            cantidad=Decimal("5"),
+            referencia="ROW-ERP",
+        )
+
+        response = self.client.get(reverse("inventario:movimientos"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Uso ERP")
+        self.assertContains(response, "Maestro ERP")
+        self.assertContains(response, "Empaque final")
+        self.assertContains(response, "Incompleto")
+        self.assertContains(response, "Falta: código Point")
+        self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
+        self.assertContains(response, f"insumo_id={insumo.id}")
+        self.assertContains(response, "Ruta troncal ERP")
+        self.assertContains(response, "Dependencias upstream ERP")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Tramo ERP")
+        self.assertContains(response, "Con bloqueo")
+        self.assertContains(response, "Dependencia")
+        self.assertContains(response, "Salud operativa")
+        self.assertIn("enterprise_chain", response.context)
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("upstream_dependency_rows", response.context)
+        self.assertIn("dependency_status", response.context["enterprise_chain"][0])
+        self.assertIn("operational_health_cards", response.context)
+
+    def test_movimientos_shows_canonical_consolidation_action_for_variant_rows(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Movimiento Canon", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-mov-can",
+            nombre="Pieza Movimiento Canon",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Caja Canonica Movimientos",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+            codigo_point="MOV-CAN-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="CAJA CANONICA MOVIMIENTOS",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        MovimientoInventario.objects.create(
+            fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=variant,
+            cantidad=Decimal("3"),
+            referencia="CANON-MOV",
+        )
+
+        response = self.client.get(reverse("inventario:movimientos"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Referencia maestra: hay variantes activas con impacto en movimientos.")
+        self.assertContains(response, "Consolidar")
+        self.assertContains(response, canonical.nombre)
+        self.assertContains(response, f"q={canonical.nombre.replace(' ', '+')}")
+
+    def test_movimiento_post_normaliza_variante_al_canonico(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Mov Post Canon", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-post-can",
+            nombre="Pieza Post Canon",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Caja Canonica Movimiento",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+            codigo_point="INV-MOV-POST-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="CAJA CANONICA MOVIMIENTO",
+            categoria="Empaque",
+            unidad_base=unidad,
+            activo=True,
+        )
+
+        response = self.client.post(
+            reverse("inventario:movimientos"),
+            {
+                "insumo_id": str(variant.id),
+                "tipo": MovimientoInventario.TIPO_ENTRADA,
+                "cantidad": "4",
+                "fecha": timezone.now().isoformat(),
+                "referencia": "POST-CANON",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        movimiento = MovimientoInventario.objects.order_by("-id").first()
+        self.assertEqual(movimiento.insumo_id, canonical.id)
+
+    def test_alias_resolution_usa_costo_canonico_del_grupo(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Alias Canon", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-alias-can",
+            nombre="Kilogramo Alias Canon",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Ganache Canonico",
+            categoria="Relleno",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+            codigo_point="INV-ALIAS-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="GANACHE CANONICO",
+            categoria="Relleno",
+            unidad_base=unidad,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=variant,
+            proveedor=proveedor,
+            costo_unitario=Decimal("41.750000"),
+            source_hash="hash-alias-canonical-cost",
+        )
+        receta = Receta.objects.create(nombre="Receta Alias Canon", hash_contenido="hash-alias-can-001")
+        linea = LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=None,
+            insumo_texto="Ganache Canonico",
+            cantidad=Decimal("1"),
+            unidad=None,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("0"),
+            match_status=LineaReceta.STATUS_REJECTED,
+        )
+
+        response = self.client.post(
+            reverse("inventario:aliases_catalog"),
+            {
+                "action": "create",
+                "alias_name": "Ganache Canonico",
+                "insumo_id": str(canonical.id),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.insumo_id, canonical.id)
+        self.assertEqual(linea.match_status, LineaReceta.STATUS_AUTO)
+        self.assertEqual(linea.costo_unitario_snapshot, Decimal("41.750000"))
+
+    def test_existencias_uses_canonicalized_insumo_selector(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Exist Canon", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="lt-can-ex",
+            nombre="Litro Canon Exist",
+            tipo=UnidadMedida.TIPO_VOLUMEN,
+            factor_to_base=Decimal("1000"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Leche Canonica Inventario",
+            categoria="Volumen",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+            codigo_point="INV-EX-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="Leche Canonica Inventario ",
+            categoria="Volumen",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+        )
+
+        response = self.client.get(reverse("inventario:existencias"))
+        self.assertEqual(response.status_code, 200)
+        insumos = response.context["insumos"]
+        ids = {item.id for item in insumos}
+        self.assertIn(canonical.id, ids)
+        self.assertNotIn(variant.id, ids)
+
+    def test_existencias_aggregates_duplicate_variants_into_one_canonical_row(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Existencias Canon", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-ex-can",
+            nombre="Pieza Existencias Canon",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Caja Canonica Existencias",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+            codigo_point="INV-EX-CAN-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="CAJA CANONICA EXISTENCIAS",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=canonical,
+            stock_actual=Decimal("4"),
+            stock_minimo=Decimal("2"),
+            stock_maximo=Decimal("10"),
+            punto_reorden=Decimal("3"),
+            inventario_promedio=Decimal("5"),
+            dias_llegada_pedido=2,
+            consumo_diario_promedio=Decimal("1"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=variant,
+            stock_actual=Decimal("6"),
+            stock_minimo=Decimal("1"),
+            stock_maximo=Decimal("7"),
+            punto_reorden=Decimal("2"),
+            inventario_promedio=Decimal("4"),
+            dias_llegada_pedido=1,
+            consumo_diario_promedio=Decimal("2"),
+        )
+
+        response = self.client.get(reverse("inventario:existencias"))
+        self.assertEqual(response.status_code, 200)
+        existencias = response.context["existencias"]
+        filtered = [row for row in existencias if row.insumo.id == canonical.id]
+        self.assertEqual(len(filtered), 1)
+        row = filtered[0]
+        self.assertEqual(row.stock_actual, Decimal("10"))
+        self.assertEqual(row.stock_minimo, Decimal("2"))
+        self.assertEqual(row.stock_maximo, Decimal("10"))
+        self.assertEqual(row.punto_reorden, Decimal("3"))
+        self.assertEqual(row.inventario_promedio, Decimal("5"))
+        self.assertEqual(row.dias_llegada_pedido, 2)
+        self.assertEqual(row.consumo_diario_promedio, Decimal("1"))
+        self.assertEqual(row.canonical_variant_count, 2)
+
+    def test_existencias_shows_master_focus_for_operational_blockers(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-ex-focus",
+            nombre="Pieza Exist Focus",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Caja Focus Inventario",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            stock_actual=Decimal("8"),
+            stock_minimo=Decimal("2"),
+            stock_maximo=Decimal("10"),
+            punto_reorden=Decimal("3"),
+        )
+
+        response = self.client.get(reverse("inventario:existencias"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["master_focus"]["class_label"], "Empaque")
+        self.assertEqual(response.context["master_focus"]["missing_field"], "maestro")
+        self.assertTrue(response.context["master_focus_rows"])
+        self.assertTrue(response.context["master_blocker_class_cards"])
+        focus_row = response.context["master_focus_rows"][0]
+        self.assertIn(f"insumo_id={insumo.id}", focus_row["action_url"])
+        self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[insumo.id]))
+        self.assertContains(response, "Editar artículo")
+        self.assertContains(response, "Bloqueo maestro prioritario")
+        self.assertContains(response, "Bloquea inventario")
+
+    def test_existencias_shows_enterprise_row_summary_and_actions(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-ex-row",
+            nombre="Pieza Exist Row",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Empaque Row Inventario",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            stock_actual=Decimal("3"),
+            stock_minimo=Decimal("2"),
+            punto_reorden=Decimal("2"),
+        )
+
+        response = self.client.get(reverse("inventario:existencias"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Uso ERP")
+        self.assertContains(response, "Maestro ERP")
+        self.assertContains(response, "Empaque final")
+        self.assertContains(response, "Incompleto")
+        self.assertContains(response, "Editar artículo")
+        self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
+        self.assertContains(response, f"insumo_id={insumo.id}")
+        self.assertContains(response, "Cadena documental ERP")
+        self.assertContains(response, "Ruta troncal ERP")
+        self.assertContains(response, "Dependencias upstream ERP")
+        self.assertContains(response, "Dependencia")
+        self.assertContains(response, "Resumen de seguimiento")
+        self.assertContains(response, "Cierre por etapa documental")
+        self.assertContains(response, "Control por frente")
+        self.assertContains(response, "Entrega de inventario a downstream")
+        self.assertContains(response, "Tramo ERP")
+        self.assertContains(response, "Con bloqueo")
+        self.assertContains(response, "Salud operativa")
+        self.assertIn("enterprise_chain", response.context)
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
+        self.assertIn("upstream_dependency_rows", response.context)
+        self.assertIn("dependency_status", response.context["enterprise_chain"][0])
+        self.assertIn("document_stage_rows", response.context)
+        self.assertIn("erp_governance_rows", response.context)
+        self.assertIn("downstream_handoff_rows", response.context)
+        self.assertIn("operational_health_cards", response.context)
+
+    def test_existencias_and_alertas_show_sales_demand_signal(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-inv-demand",
+            nombre="Kg Inv Demand",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Harina Demanda Inventario",
+            categoria="Masa",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            activo=True,
+        )
+        receta = Receta.objects.create(
+            nombre="Pastel Demanda Inventario",
+            hash_contenido="hash-demand-inventario-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=insumo,
+            insumo_texto=insumo.nombre,
+            cantidad=Decimal("2"),
+            unidad=unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("10"),
+            match_method=LineaReceta.MATCH_EXACT,
+            match_score=100,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            stock_actual=Decimal("1"),
+            stock_minimo=Decimal("2"),
+            punto_reorden=Decimal("3"),
+        )
+        VentaHistorica.objects.create(
+            receta=receta,
+            fecha=timezone.localdate() - timedelta(days=2),
+            cantidad=Decimal("85"),
+            tickets=5,
+            monto_total=Decimal("900"),
+        )
+
+        response_exist = self.client.get(reverse("inventario:existencias"))
+        self.assertEqual(response_exist.status_code, 200)
+        self.assertContains(response_exist, "Señal histórica de demanda")
+        self.assertContains(response_exist, "Semáforo comercial")
+        self.assertContains(response_exist, "Años observados")
+        self.assertContains(response_exist, "Temporadas comparables")
+        self.assertContains(response_exist, "Control de demanda comercial")
+        self.assertContains(response_exist, "Artículos prioritarios por demanda")
+        self.assertContains(response_exist, "Aseguramiento comercial prioritario")
+        self.assertContains(response_exist, "Demanda crítica bloqueada por maestro")
+        self.assertContains(response_exist, "Liberación operativa retenida")
+        self.assertContains(response_exist, "Faltante maestro")
+        self.assertContains(response_exist, "Pastel Demanda Inventario")
+        self.assertIn("sales_demand_signal", response_exist.context)
+        self.assertIn("years_observed", response_exist.context["sales_demand_signal"])
+        self.assertIn("comparable_years", response_exist.context["sales_demand_signal"])
+        self.assertIn("sales_demand_gate", response_exist.context)
+        self.assertIn("commercial_priority_rows", response_exist.context)
+        self.assertTrue(response_exist.context["commercial_priority_rows"])
+        self.assertIn("critical_master_demand_rows", response_exist.context)
+        self.assertTrue(response_exist.context["critical_master_demand_rows"])
+        self.assertIn("supply_focus_rows", response_exist.context)
+        self.assertTrue(response_exist.context["supply_focus_rows"])
+        self.assertIn("daily_critical_close_focus", response_exist.context)
+        self.assertIsNotNone(response_exist.context["daily_critical_close_focus"])
+        self.assertContains(response_exist, "Cierre prioritario del día")
+
+        response_alert = self.client.get(reverse("inventario:alertas"))
+        self.assertEqual(response_alert.status_code, 200)
+        self.assertContains(response_alert, "Señal histórica de demanda")
+        self.assertContains(response_alert, "Semáforo comercial")
+        self.assertContains(response_alert, "Años observados")
+        self.assertContains(response_alert, "Temporadas comparables")
+        self.assertContains(response_alert, "Control de demanda comercial")
+        self.assertContains(response_alert, "Artículos prioritarios por demanda")
+        self.assertContains(response_alert, "Aseguramiento comercial prioritario")
+        self.assertContains(response_alert, "Demanda crítica bloqueada por maestro")
+        self.assertContains(response_alert, "Liberación operativa retenida")
+        self.assertContains(response_alert, "Faltante maestro")
+        self.assertContains(response_alert, insumo.nombre)
+        self.assertIn("sales_demand_signal", response_alert.context)
+        self.assertIn("years_observed", response_alert.context["sales_demand_signal"])
+        self.assertIn("comparable_years", response_alert.context["sales_demand_signal"])
+        self.assertIn("sales_demand_gate", response_alert.context)
+        self.assertIn("critical_master_demand_rows", response_alert.context)
+        self.assertTrue(response_alert.context["critical_master_demand_rows"])
+        self.assertIn("supply_focus_rows", response_alert.context)
+        self.assertTrue(response_alert.context["supply_focus_rows"])
+        self.assertIn("daily_critical_close_focus", response_alert.context)
+        self.assertIsNotNone(response_alert.context["daily_critical_close_focus"])
+        self.assertContains(response_alert, "Cierre prioritario del día")
+
+    def test_existencias_shows_canonical_consolidation_action_when_variants_have_inventory_impact(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Exist Canon Ops", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-ex-can-ops",
+            nombre="Pieza Exist Can Ops",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Caja Canonica Operativa Inventario",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+            codigo_point="INV-CAN-OPS-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="CAJA CANONICA OPERATIVA INVENTARIO",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=canonical,
+            stock_actual=Decimal("4"),
+            stock_minimo=Decimal("2"),
+            punto_reorden=Decimal("2"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=variant,
+            stock_actual=Decimal("6"),
+            stock_minimo=Decimal("2"),
+            punto_reorden=Decimal("2"),
+        )
+
+        response = self.client.get(reverse("inventario:existencias"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Referencia maestra: existen variantes activas con impacto en inventario.")
+        self.assertContains(response, "Consolidar")
+        self.assertContains(response, "canonical_status=variantes")
+
+    def test_existencias_can_focus_master_blocker_group(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-ex-focus-group",
+            nombre="Pieza Exist Focus Group",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        empaque = Insumo.objects.create(
+            nombre="Caja Focus Group",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        mp = Insumo.objects.create(
+            nombre="Azucar Focus Group",
+            categoria="Azucar",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(insumo=empaque, stock_actual=Decimal("2"), stock_minimo=Decimal("1"), punto_reorden=Decimal("1"))
+        ExistenciaInsumo.objects.create(insumo=mp, stock_actual=Decimal("2"), stock_minimo=Decimal("1"), punto_reorden=Decimal("1"))
+
+        response = self.client.get(reverse("inventario:existencias"), {"master_focus_key": "EMPAQUE:codigo_point"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_master_focus_key"], "EMPAQUE:codigo_point")
+        self.assertTrue(response.context["master_focus_rows"])
+        self.assertTrue(any(row["class_label"] == "Empaque" for row in response.context["master_focus_rows"]))
+        self.assertContains(response, "Vista enfocada")
+
+    def test_alertas_shows_master_focus_for_operational_blockers(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-alert-focus",
+            nombre="Pieza Alert Focus",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Caja Focus Alertas",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            stock_actual=Decimal("0"),
+            stock_minimo=Decimal("2"),
+            stock_maximo=Decimal("10"),
+            punto_reorden=Decimal("3"),
+        )
+
+        response = self.client.get(reverse("inventario:alertas"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["master_focus"]["class_label"], "Empaque")
+        self.assertEqual(response.context["master_focus"]["missing_field"], "maestro")
+        self.assertTrue(response.context["master_focus_rows"])
+        self.assertTrue(response.context["master_blocker_class_cards"])
+        focus_row = response.context["master_focus_rows"][0]
+        self.assertIn(f"insumo_id={insumo.id}", focus_row["action_url"])
+        self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[insumo.id]))
+        self.assertContains(response, "Editar artículo")
+        self.assertContains(response, "Bloqueo maestro prioritario")
+        self.assertContains(response, "Bloquea inventario")
+
+    def test_alertas_shows_enterprise_row_summary_and_actions(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-alert-row",
+            nombre="Pieza Alert Row",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Empaque Row Alerta",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            stock_actual=Decimal("0"),
+            stock_minimo=Decimal("2"),
+            punto_reorden=Decimal("1"),
+        )
+
+        response = self.client.get(reverse("inventario:alertas"), {"nivel": "all"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Uso ERP")
+        self.assertContains(response, "Maestro ERP")
+        self.assertContains(response, "Empaque final")
+        self.assertContains(response, "Incompleto")
+        self.assertContains(response, "Editar artículo")
+        self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
+        self.assertContains(response, f"insumo_id={insumo.id}")
+        self.assertContains(response, "Cadena documental ERP")
+        self.assertContains(response, "Ruta troncal ERP")
+        self.assertContains(response, "Dependencias upstream ERP")
+        self.assertContains(response, "Prioridades de atención")
+        self.assertContains(response, "Resumen de seguimiento")
+        self.assertContains(response, "Dependencia")
+        self.assertContains(response, "Cierre por etapa documental")
+        self.assertContains(response, "Entrega de inventario a downstream")
+        self.assertContains(response, "Tramo ERP")
+        self.assertContains(response, "Con bloqueo")
+        self.assertContains(response, "Salud operativa ERP")
+        self.assertIn("enterprise_chain", response.context)
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
+        self.assertIn("upstream_dependency_rows", response.context)
+        self.assertIn("dependency_status", response.context["enterprise_chain"][0])
+        self.assertIn("document_stage_rows", response.context)
+        self.assertIn("downstream_handoff_rows", response.context)
+        self.assertIn("operational_health_cards", response.context)
+
+    def test_alertas_preserves_level_when_master_focus_is_applied(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-alert-focus-group",
+            nombre="Pieza Alert Focus Group",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Caja Focus Alertas Group",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            stock_actual=Decimal("0"),
+            stock_minimo=Decimal("2"),
+            stock_maximo=Decimal("5"),
+            punto_reorden=Decimal("3"),
+        )
+
+        response = self.client.get(reverse("inventario:alertas"), {"nivel": "critico", "master_focus_key": "EMPAQUE:codigo_point"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_master_focus_key"], "EMPAQUE:codigo_point")
+        self.assertContains(response, "Vista enfocada")
+        self.assertContains(response, "?nivel=critico")
+
+    def test_ajustes_shows_master_focus_for_operational_blockers(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-aj-focus",
+            nombre="Pieza Ajuste Focus",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Caja Focus Ajustes",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            stock_actual=Decimal("5"),
+            stock_minimo=Decimal("2"),
+            stock_maximo=Decimal("8"),
+            punto_reorden=Decimal("3"),
+        )
+
+        response = self.client.get(reverse("inventario:ajustes"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["master_focus"]["class_label"], "Empaque")
+        self.assertEqual(response.context["master_focus"]["missing_field"], "maestro")
+        self.assertTrue(response.context["master_focus_rows"])
+        self.assertTrue(response.context["master_blocker_class_cards"])
+        focus_row = response.context["master_focus_rows"][0]
+        self.assertIn(f"insumo_id={insumo.id}", focus_row["action_url"])
+        self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[insumo.id]))
+        self.assertContains(response, "Editar artículo")
+        self.assertContains(response, "Bloqueo maestro prioritario")
+
+    def test_ajustes_shows_enterprise_row_summary_and_actions(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-aj-row",
+            nombre="Pieza Aj Row",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Empaque Row Ajuste",
+            categoria="Empaque",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ajuste = AjusteInventario.objects.create(
+            insumo=insumo,
+            cantidad_sistema=Decimal("5"),
+            cantidad_fisica=Decimal("4"),
+            motivo="ROW-ERP",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.user,
+        )
+
+        response = self.client.get(reverse("inventario:ajustes"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Uso ERP")
+        self.assertContains(response, "Maestro ERP")
+        self.assertContains(response, "Empaque final")
+        self.assertContains(response, "Incompleto")
+        self.assertContains(response, "Falta: código Point")
+        self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
+        self.assertContains(response, f"insumo_id={ajuste.insumo_id}")
+        self.assertContains(response, "Cadena documental ERP")
+        self.assertContains(response, "Ruta troncal ERP")
+        self.assertContains(response, "Dependencias upstream ERP")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Radar ejecutivo ERP")
+        self.assertContains(response, "Dependencia")
+        self.assertContains(response, "Cierre por etapa documental")
+        self.assertContains(response, "Entrega de inventario a downstream")
+        self.assertContains(response, "Tramo ERP")
+        self.assertContains(response, "Con bloqueo")
+        self.assertContains(response, "Salud operativa ERP")
+        self.assertIn("enterprise_chain", response.context)
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
+        self.assertIn("upstream_dependency_rows", response.context)
+        self.assertIn("dependency_status", response.context["enterprise_chain"][0])
+        self.assertIn("document_stage_rows", response.context)
+        self.assertIn("downstream_handoff_rows", response.context)
+        self.assertIn("operational_health_cards", response.context)
+
+    def test_ajustes_shows_canonical_consolidation_action_for_variant_rows(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Ajuste Canon", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-aj-can",
+            nombre="Pieza Ajuste Canon",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Caja Canonica Ajustes",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+            codigo_point="AJ-CAN-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="CAJA CANONICA AJUSTES",
+            categoria="Empaque",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            activo=True,
+        )
+        ajuste = AjusteInventario.objects.create(
+            insumo=variant,
+            cantidad_sistema=Decimal("5"),
+            cantidad_fisica=Decimal("4"),
+            motivo="CANON",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.user,
+        )
+
+        response = self.client.get(reverse("inventario:ajustes"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Consolidar")
+        self.assertContains(response, "Consolidar")
+        self.assertContains(response, canonical.nombre)
+        self.assertContains(response, f"q={canonical.nombre.replace(' ', '+')}")
 
     def test_export_cross_pending_csv_with_filters(self):
         PointPendingMatch.objects.create(
@@ -924,7 +1884,13 @@ class InventarioAliasesPendingTests(TestCase):
         Insumo.objects.create(nombre="Azucar Normal", unidad_base=unidad)
         response = self.client.get(reverse("inventario:aliases_catalog"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Datos Maestros · Normalización y Duplicados")
+        self.assertContains(response, "Centro de mando ERP")
+        self.assertContains(response, "Workflow ERP de referencias")
+        self.assertContains(response, "Mesa de gobierno ERP")
+        self.assertContains(response, "Gobierno operativo de referencias")
+        self.assertContains(response, "Siguiente paso ERP")
+        self.assertIn("erp_command_center", response.context)
+        self.assertIn("erp_governance_rows", response.context)
         self.assertIn("master_normalize", response.context)
         self.assertIn("master_duplicates", response.context)
         self.assertIn("totales", response.context["master_normalize"])
@@ -1165,6 +2131,39 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(log.payload.get("target_id"), insumo_b.id)
         self.assertEqual(int(log.payload.get("sources_resolved", 0)), 2)
 
+    def test_inventory_core_views_render_maturity_and_handoff_sections(self):
+        for url in (
+            reverse("inventario:existencias"),
+            reverse("inventario:movimientos"),
+            reverse("inventario:ajustes"),
+            reverse("inventario:alertas"),
+        ):
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("maturity_summary", response.context)
+            self.assertIn("handoff_map", response.context)
+            self.assertIn("erp_governance_rows", response.context)
+            self.assertIn("downstream_handoff_rows", response.context)
+            self.assertIn("executive_radar_rows", response.context)
+            self.assertIn("erp_command_center", response.context)
+
+    def test_importar_archivos_view_renders_governance_table(self):
+        response = self.client.get(reverse("inventario:importar_archivos"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Workflow ERP de carga de almacén")
+        self.assertContains(response, "Radar ejecutivo ERP")
+        self.assertContains(response, "Mesa de gobierno ERP")
+        self.assertIn("executive_radar_rows", response.context)
+        self.assertIn("erp_governance_rows", response.context)
+
+    def test_existencias_view_shows_release_gate_enterprise_block(self):
+        response = self.client.get(reverse("inventario:existencias"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Criterios de cierre")
+        self.assertContains(response, "Cierre global")
+        self.assertIn("release_gate_rows", response.context)
+        self.assertIn("release_gate_completion", response.context)
+
 
 class InventarioAjustesApprovalTests(TestCase):
     def setUp(self):
@@ -1243,6 +2242,58 @@ class InventarioAjustesApprovalTests(TestCase):
         self.assertIsNotNone(movimiento)
         self.assertEqual(movimiento.cantidad, Decimal("2"))
         self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_SALIDA)
+
+    def test_admin_aprueba_ajuste_de_variante_y_aplica_en_canonico(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Ajuste Canon", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-aj-can",
+            nombre="Kilogramo Ajuste Canon",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        canonical = Insumo.objects.create(
+            nombre="Azucar Canonica Ajuste",
+            categoria="Masa",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+            codigo_point="AJ-CAN-001",
+        )
+        variant = Insumo.objects.create(
+            nombre="AZUCAR CANONICA AJUSTE",
+            categoria="Masa",
+            unidad_base=unidad,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(insumo=canonical, stock_actual=Decimal("10"))
+        ExistenciaInsumo.objects.create(insumo=variant, stock_actual=Decimal("6"))
+        ajuste = AjusteInventario.objects.create(
+            insumo=variant,
+            cantidad_sistema=Decimal("6"),
+            cantidad_fisica=Decimal("4"),
+            motivo="Conteo canonico",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse("inventario:ajustes"),
+            {
+                "action": "approve",
+                "ajuste_id": ajuste.id,
+                "comentario_revision": "Aprobado usando canonico",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        canonical_ex = ExistenciaInsumo.objects.get(insumo=canonical)
+        variant_ex = ExistenciaInsumo.objects.get(insumo=variant)
+        self.assertEqual(canonical_ex.stock_actual, Decimal("8"))
+        self.assertEqual(variant_ex.stock_actual, Decimal("6"))
+        movimiento = MovimientoInventario.objects.filter(referencia=ajuste.folio).first()
+        self.assertIsNotNone(movimiento)
+        self.assertEqual(movimiento.insumo_id, canonical.id)
 
     def test_admin_rechaza_ajuste_sin_afectar_stock(self):
         ajuste = AjusteInventario.objects.create(

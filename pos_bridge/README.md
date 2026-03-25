@@ -51,17 +51,87 @@ Variables operativas:
 - `POINT_SYNC_MAX_BRANCHES`
 - `POINT_SYNC_MAX_PAGES_PER_BRANCH`
 - `POINT_SALES_EXCLUDED_BRANCHES`
+- `POINT_PRODUCTION_STORAGE_BRANCHES`
+- `POINT_TRANSFER_STORAGE_BRANCHES`
 - `POINT_BRIDGE_STORAGE_ROOT`
 - `POINT_SELECTOR_OVERRIDES_JSON`
+- `POS_BRIDGE_REALTIME_INTERVAL_MINUTES` (`10` recomendado cuando recorre todas las sucursales)
+- `POS_BRIDGE_REALTIME_BRANCHES`
+- `POS_BRIDGE_ECOMMERCE_WEBHOOK_URL`
 - `AUTO_SYNC_POS_BRIDGE_INCLUDE_INVENTORY`
 - `AUTO_SYNC_POS_BRIDGE_INCLUDE_SALES`
 - `AUTO_SYNC_POS_BRIDGE_SALES_LOOKBACK_DAYS`
 - `AUTO_SYNC_POS_BRIDGE_SALES_LAG_DAYS`
 
+## API interna DRF
+
+`pos_bridge` ahora expone una capa interna autenticada bajo:
+
+```bash
+/api/pos-bridge/
+```
+
+Endpoints principales:
+
+- `GET /api/pos-bridge/sales/`
+- `GET /api/pos-bridge/sales/summary/`
+- `GET /api/pos-bridge/sales/by-branch/`
+- `GET /api/pos-bridge/sales/by-product/`
+- `GET /api/pos-bridge/sales/trends/`
+- `GET /api/pos-bridge/inventory/`
+- `GET /api/pos-bridge/inventory/current/`
+- `GET /api/pos-bridge/inventory/availability/`
+- `GET /api/pos-bridge/inventory/low-stock/`
+- `GET /api/pos-bridge/products/`
+- `GET /api/pos-bridge/products/<id>/recipe/`
+- `GET /api/pos-bridge/sync-jobs/`
+- `POST /api/pos-bridge/sync-jobs/trigger/`
+- `POST /api/pos-bridge/agent/query/`
+
+Notas:
+
+- Esta capa es interna y autenticada; la tienda en línea debe seguir usando la API pública de pickup ya existente.
+- `inventory/availability/` es un agregado interno de snapshots; no reemplaza `pickup-availability`.
+- `sync-jobs/trigger/` ejecuta sincronización de forma síncrona sobre los wrappers actuales de `pos_bridge`.
+- `agent/query/` es privado y queda restringido a usuarios staff o con permiso operativo de `pos_bridge`.
+
+## Agente conversacional interno
+
+Comando de terminal:
+
+```bash
+python manage.py ask_agent "Cuanto vendimos en Matriz en febrero"
+python manage.py ask_agent "Dame la receta de Tres Leches" --json
+```
+
+Endpoint interno:
+
+```bash
+POST /api/pos-bridge/agent/query/
+```
+
+Body:
+
+```json
+{
+  "query": "Cuanto vendimos en Matriz en febrero",
+  "context": {}
+}
+```
+
+Comportamiento:
+
+- primero intenta clasificar por reglas y keywords locales
+- si la consulta es ambigua y existe `OPENAI_API_KEY`, usa OpenAI solo como fallback de clasificacion
+- deja traza en `core.AuditLog`
+- no expone esta capacidad en la API publica de tienda
+
 Para Pollyana's Dolce, `POINT_SALES_EXCLUDED_BRANCHES` debe incluir sucursales operativas sin venta al público, por ejemplo:
 
 ```bash
 POINT_SALES_EXCLUDED_BRANCHES=CEDIS,ALMACEN,PRODUCCION CRUCERO,DEVOLUCIONES
+POINT_PRODUCTION_STORAGE_BRANCHES=CEDIS
+POINT_TRANSFER_STORAGE_BRANCHES=CEDIS
 ```
 
 ## Instalación
@@ -76,7 +146,16 @@ python manage.py migrate
 
 ```bash
 python manage.py run_inventory_sync
+python manage.py run_realtime_inventory --force
 python manage.py run_inventory_sync --branch SUC-01
+python manage.py run_waste_sync --start-date 2026-03-20 --end-date 2026-03-20
+python manage.py run_production_entry_sync --start-date 2026-03-20 --end-date 2026-03-20
+python manage.py run_transfer_sync --start-date 2026-03-20 --end-date 2026-03-20
+python manage.py run_movement_history_backfill --start-date 2026-01-01 --end-date 2026-01-31
+python manage.py run_product_recipe_sync --branch-hint MATRIZ --product-code 01BLN01
+python manage.py run_product_recipe_sync --branch-hint MATRIZ --product-code 00445 --product-code 00446 --include-without-recipe
+python manage.py run_recipe_gap_audit --branch-hint MATRIZ --product-code 00445 --product-code 00446
+python manage.py sync_point_derived_presentations
 python manage.py run_daily_sales_sync --days 3 --lag-days 1
 python manage.py run_sales_history_sync --start-date 2022-01-01 --end-date 2025-12-31
 python manage.py run_sales_history_sync --start-date 2025-12-31 --end-date 2025-12-31 --branch MATRIZ
@@ -86,6 +165,102 @@ python manage.py export_unresolved_sales_matches --start-date 2022-01-01 --end-d
 python manage.py retry_failed_jobs --limit 3
 python manage.py run_pos_bridge_scheduler --once --run-inventory --run-sales
 ```
+
+## Sync de inventario en alta frecuencia
+
+Comando manual:
+
+```bash
+python manage.py run_realtime_inventory --force
+```
+
+Comportamiento:
+
+- reutiliza `PointSyncService`
+- si `POS_BRIDGE_REALTIME_BRANCHES` está vacío, recorre todas las sucursales activas detectadas en Point
+- permite filtrar sucursales prioritarias con `POS_BRIDGE_REALTIME_BRANCHES`
+- si no se usa `--force`, solo corre dentro del horario operativo configurado en el servicio
+- puede notificar al frontend con `POS_BRIDGE_ECOMMERCE_WEBHOOK_URL` después de jobs exitosos
+
+## Mermas y entrada por producción
+
+Comandos:
+
+```bash
+python manage.py run_waste_sync --start-date 2026-03-20 --end-date 2026-03-20
+python manage.py run_production_entry_sync --start-date 2026-03-20 --end-date 2026-03-20
+python manage.py run_transfer_sync --start-date 2026-03-20 --end-date 2026-03-20
+```
+
+Comportamiento:
+
+- `run_waste_sync` consume `Mermas/get_mermas`, `Mermas/get_detalle` y `Mermas/get_justificacion`.
+- Cada línea queda auditada en `PointWasteLine` y se materializa idempotentemente a `control.MermaPOS`.
+- La merma cubre sucursales de venta, `CEDIS` y, cuando exista en Point, `Devoluciones`.
+- `run_production_entry_sync` consume `Produccion/getProduccionGeneral` y `Produccion/getProduccionDetalle`.
+- Cada línea queda auditada en `PointProductionLine`.
+- Si la línea producida se homologa a `Insumo`, se registra como `MovimientoInventario` tipo `ENTRADA`.
+- Si la línea producida se homologa a `Receta` y la sucursal pertenece a `POINT_PRODUCTION_STORAGE_BRANCHES`, se registra como `MovimientoProductoCedis` tipo `ENTRADA`.
+- `run_transfer_sync` consume `Transfer/GetTransfer` y `Transfer/GetDetalle`.
+- Cada línea recibida queda auditada en `PointTransferLine`.
+- Si la transferencia recibida llega a una sucursal incluida en `POINT_TRANSFER_STORAGE_BRANCHES`, se registra como entrada a inventario central:
+  - `MovimientoInventario` para insumos
+  - `MovimientoProductoCedis` para producto terminado homologado
+- `Produccion Crucero` no debe agregarse a `POINT_PRODUCTION_STORAGE_BRANCHES`; su impacto en `CEDIS` debe entrar por `Transferencias` para no duplicar stock.
+
+## Backfill histórico de movimientos
+
+Comando:
+
+```bash
+python manage.py run_movement_history_backfill \
+  --start-date 2026-01-01 \
+  --end-date 2026-01-31
+```
+
+Opciones:
+
+- `--waste`
+- `--production`
+- `--transfers`
+- `--branch`
+
+Notas:
+
+- Si no indicas ningún flag, procesa los tres dominios.
+- Corre por día y deja un reporte JSON bajo `storage/pos_bridge/reports/`.
+- Está pensado para cerrar históricos por bloques, no para reprocesar ciegamente todo `2022-2025`.
+
+## Celery/Beat para local o servidor
+
+La recomendación operativa actual ya no es depender de `launchd` si el repo vive en carpetas protegidas de macOS como `Downloads`. Para local y para servidor queda listo el camino con Celery:
+
+```bash
+REDIS_URL=redis://localhost:6379/0
+python manage.py migrate
+python manage.py setup_celery_schedules
+celery -A config worker -l info
+celery -A config beat -l info
+```
+
+Notas:
+
+- `django_celery_beat` registra el calendario en base de datos; el comando `setup_celery_schedules` es idempotente.
+- La recomendación es usar una sola estrategia por entorno:
+  - local actual de este repo: Celery + Beat + Redis
+  - Linux/servidor: Celery + Beat + Redis
+- guía local: [POS_BRIDGE_LOCAL_CELERY.md](/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/docs/POS_BRIDGE_LOCAL_CELERY.md)
+- guía Railway: [POS_BRIDGE_RAILWAY_REDIS.md](/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/docs/POS_BRIDGE_RAILWAY_REDIS.md)
+- Schedules registrados por defecto:
+  - ventas cerradas `01:30`
+  - inventario completo `02:15`
+  - mermas `02:45`
+  - producción `03:00`
+  - transferencias `03:15`
+  - inventario realtime cada `5` minutos
+  - retry de jobs fallidos cada `6` horas
+  - sync de recetas semanal
+  - auditoría de recetas semanal
 
 ## Backfill de ventas históricas
 
@@ -177,6 +352,91 @@ Para reclasificar temporalidad de las recetas `AUTO_POINT_SALES` ya existentes:
 ```bash
 python manage.py classify_auto_point_sales_recipes
 ```
+
+## Sync de recetas de productos
+
+Point expone la receta/BOM de productos desde el flujo:
+
+- `Configuración`
+- `Productos`
+- `Editar`
+- `Siguiente`
+- `Siguiente`
+- `Receta`
+
+Para no depender del navegador en ese caso, `pos_bridge` usa endpoints internos autenticados y determinísticos:
+
+- `POST /Account/SignIn_click`
+- `POST /Account/get_workSpaces`
+- `POST /Account/get_acctok`
+- `GET /Catalogos/get_productos`
+- `GET /Catalogos/get_producto_byID`
+- `GET /Catalogos/getBomsByProducts`
+
+Comando:
+
+```bash
+python manage.py run_product_recipe_sync --branch-hint MATRIZ
+```
+
+Notas operativas:
+
+- Solo sincroniza productos que en Point vienen con `hasReceta=true`, a menos que uses `--include-without-recipe`.
+- No crea recetas vacías en ERP cuando Point no trae BOM.
+- Guarda raw export en `storage/pos_bridge/raw_exports/`.
+- Crea o actualiza `Receta` con `sheet_name=POINT_PRODUCT_BOM`.
+- Reconstruye `LineaReceta` desde el BOM de Point.
+- Hace matching automático de insumos por `Insumo.codigo_point`; si no existe, cae a alias/nombre/fuzzy del ERP.
+- Si un producto sigue sin receta en Point, aparecerá en el summary como `products_without_recipe_in_point`.
+
+## Auditoría de recetas faltantes contra catálogos de insumos
+
+Cuando un producto no trae BOM en `Configuración -> Productos`, Point todavía puede exponer evidencia en:
+
+- `Catálogos`
+- `Insumos`
+- `Editar`
+- `Receta`
+
+`pos_bridge` audita esos casos buscando candidatos internos en `Catalogos/get_articulos` y corroborando su `BOM` vía `Catalogos/ArticuloGetbyid`.
+
+Comando:
+
+```bash
+python manage.py run_recipe_gap_audit --branch-hint MATRIZ
+```
+
+Notas operativas:
+
+- Solo audita productos cuyo BOM de producto viene vacío en Point.
+- Genera un CSV resumido y un JSON detallado bajo `storage/pos_bridge/reports/`.
+- Clasifica cada faltante como:
+  - `DERIVED_PRESENTATION`
+  - `CORROBORATED_FROM_INSUMO_CATALOG`
+  - `POSSIBLE_MATCH_REQUIRES_REVIEW`
+  - `INTERNAL_CANDIDATE_WITHOUT_BOM`
+  - `MISSING_IN_POINT`
+- `DERIVED_PRESENTATION` se usa para SKUs como `rebanadas`: se ligan a la receta padre y aún pueden requerir componentes directos como empaque o etiqueta.
+- No modifica recetas del ERP; sirve para corroborar qué falta realmente en origen antes de capturar o sincronizar más datos.
+
+## Sync de presentaciones derivadas de producto
+
+Para convertir los hallazgos `DERIVED_PRESENTATION` en relaciones persistidas dentro del ERP:
+
+```bash
+python manage.py sync_point_derived_presentations
+```
+
+Notas operativas:
+
+- Lee el último `*_point_recipe_gap_audit.json` por default; puedes pasar `--report-path` para fijar uno específico.
+- Crea relaciones `receta padre -> receta derivada` para rebanadas.
+- Si la receta derivada no existe todavía en ERP, crea un placeholder `PRODUCTO_FINAL` con `sheet_name=AUTO_POINT_DERIVED_PRESENTATION`.
+- Marca `requiere_componentes_directos=true` para recordar que el SKU derivado puede llevar empaque, etiqueta u otros componentes de salida además de la conversión desde el padre.
+- Hoy quedan precargadas estas reglas de negocio:
+  - pays grandes: `8` rebanadas por entero
+  - pasteles medianos: `10` rebanadas por entero
+  - `3 leches` mediano: `6` rebanadas por entero
 
 Ejemplo de validación controlada:
 

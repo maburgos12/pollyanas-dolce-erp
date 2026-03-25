@@ -5,102 +5,910 @@
 {% block content %}
 <div class="module-shell recipe-detail recipe-detail-shell">
 <div class="card">
-  <div class="d-flex justify-content-between align-items-center mb-3 recipe-head">
-    <div>
-      <h3 class="mb-0">{{ receta.nombre }}</h3>
-      <div class="text-muted">Hoja: {{ receta.sheet_name }}</div>
+  <section class="card recipe-hero-card mb-3">
+    <div class="recipe-hero-head">
+      <div>
+        <div class="recipe-hero-eyebrow">{{ receta_rol_label }}</div>
+        <h2 class="recipe-hero-title">{{ receta.nombre }}</h2>
+        <div class="recipe-hero-copy">
+          {% if receta.codigo_point %}
+            Código Point: {{ receta.codigo_point }}
+          {% else %}
+            Documento ERP sin código Point
+          {% endif %}
+          {% if receta.sheet_name %} · Referencia interna: {{ receta.sheet_name }}{% endif %}
+          {% if receta.familia %} · Familia: {{ receta.familia }}{% endif %}
+          {% if receta.categoria %} · Categoría: {{ receta.categoria }}{% endif %}
+        </div>
+      </div>
+      <div class="recipe-actions">
+        {% if non_canonical_count %}
+        <form method="post" action="{% url 'recetas:receta_repoint_canonical' receta.id %}">
+          {% csrf_token %}
+          <button class="btn btn-secondary" type="submit">Alinear artículos del maestro</button>
+        </form>
+        {% endif %}
+        {% if direct_base_suggested_count %}
+        <form method="post" action="{% url 'recetas:receta_apply_direct_base_replacements' receta.id %}">
+          {% csrf_token %}
+          <button class="btn btn-secondary" type="submit">Aplicar derivados sugeridos</button>
+        </form>
+        {% endif %}
+        {% for action in chain_actions %}
+        <a class="btn btn-secondary" href="{{ action.url }}">{{ action.label }}</a>
+        {% endfor %}
+        {% if perms.recetas.change_receta and receta.codigo_point %}
+        <form method="post" action="{% url 'recetas:receta_sync_point' receta.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-secondary" type="submit">Actualizar desde Point</button>
+        </form>
+        {% endif %}
+        <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}?q={{ receta.codigo_point|default:receta.nombre }}">Histórico de costeo</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Parámetros de costeo</a>
+        <a class="btn btn-primary" href="{% url 'recetas:linea_create' receta.id %}">{{ add_line_label }}</a>
+        {% if perms.recetas.delete_receta %}
+        <form method="post" action="{% url 'recetas:receta_delete' receta.id %}" onsubmit="return confirm('Esta receta solo se eliminará si no tiene ventas, planes, inventario ni otra huella operativa. ¿Continuar?');">
+          {% csrf_token %}
+          <button class="btn btn-outline-danger" type="submit">Eliminar receta</button>
+        </form>
+        {% endif %}
+        <a class="btn btn-outline-secondary" href="{% url 'recetas:recetas_list' %}">Volver</a>
+      </div>
     </div>
-    <div class="recipe-actions">
-      <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Ver pendientes</a>
-      <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Drivers costeo</a>
-      <a class="btn btn-primary" href="{% url 'recetas:linea_create' receta.id %}">Agregar línea</a>
-      <a class="btn btn-outline-secondary" href="{% url 'recetas:recetas_list' %}">Volver</a>
+    <div class="kpi-grid kpi-mini mb-3">
+      <article class="kpi-card">
+        <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+        <div class="kpi-label">Estado del documento</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">{{ total_lineas }}</div>
+        <div class="kpi-label">Componentes BOM</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">{{ recipe_master_gap_totals.total }}</div>
+        <div class="kpi-label">Brechas del maestro</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">${{ total_costo_estimado|floatformat:2 }}</div>
+        <div class="kpi-label">Costo total estimado</div>
+      </article>
+    </div>
+    <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+      <div class="enterprise-pill-card is-active">
+        <div class="enterprise-pill-title">Tipo de receta</div>
+        <div class="enterprise-pill-text">{{ receta_rol_label }}</div>
+      </div>
+      <div class="enterprise-pill-card">
+        <div class="enterprise-pill-title">Etapa</div>
+        <div class="enterprise-pill-text">{{ enterprise_stage.label }}</div>
+      </div>
+      <div class="enterprise-pill-card">
+        <div class="enterprise-pill-title">Cadena</div>
+        <div class="enterprise-pill-text">{{ recipe_chain_status.label }}</div>
+      </div>
+      <div class="enterprise-pill-card">
+        <div class="enterprise-pill-title">Siguiente paso</div>
+        <div class="enterprise-pill-text">{{ erp_command_center.next_step }}</div>
+      </div>
+    </div>
+  </section>
+  <div class="recipe-jump-nav mb-3">
+    <a class="recipe-jump-link" href="#recipe_edit_form">Editar receta</a>
+    <a class="recipe-jump-link" href="#recipe_structure_alerts">Bloqueos</a>
+    <a class="recipe-jump-link" href="#recipe_bom_groups">Partidas BOM</a>
+    <a class="recipe-jump-link" href="#recipe_secondary_analysis">Costos y cadena</a>
+  </div>
+  <details class="erp-advanced-panel mb-3">
+    <summary class="erp-advanced-summary">
+      <span>Ver control ERP avanzado</span>
+      <span class="text-muted">Centro de mando, workflow, radar y trazabilidad ejecutiva</span>
+    </summary>
+    <div class="erp-advanced-body">
+  <section class="card mb-3">
+    <div class="card-header">Centro de mando ERP</div>
+    <div class="kpi-grid kpi-mini">
+      <article class="kpi-card">
+        <div class="kpi-label">Responsable principal</div>
+        <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+        <div class="kpi-label">Semáforo global</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+        <div class="kpi-label">Bloqueos abiertos</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-label">Siguiente paso</div>
+        <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+        <a class="btn btn-secondary btn-sm" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+      </article>
+    </div>
+  </section>
+  <div class="card table-card mb-3">
+    <div class="card-header">Workflow ERP del documento</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Tramo</th>
+            <th>Lectura del documento</th>
+            <th>Control clave</th>
+            <th>Efecto operativo</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>01 · Maestro</td>
+            <td>Los artículos ligados deben ser estándar y canónicos</td>
+            <td>Unidad, categoría, proveedor y código de venta</td>
+            <td>Evita bloqueos en costeo, compras e inventario</td>
+          </tr>
+          <tr>
+            <td>02 · Estructura BOM</td>
+            <td>La receta se gobierna por componentes y no por captura libre</td>
+            <td>Internos, MP puntual, empaques y subsecciones</td>
+            <td>Garantiza trazabilidad del costo</td>
+          </tr>
+          <tr>
+            <td>03 · Costeo</td>
+            <td>El costo sale del maestro y del rendimiento operativo</td>
+            <td>Snapshot vigente y derivados sincronizados</td>
+            <td>Entrega costo repetible y auditable</td>
+          </tr>
+          <tr>
+            <td>04 · Consumo</td>
+            <td>La receta debe alimentar MRP y documentos de abastecimiento</td>
+            <td>Cadena base → derivado → final cerrada</td>
+            <td>Permite producción y compras sin ambigüedad</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    <div class="enterprise-pill-card is-active">
+      <div class="enterprise-pill-title">Documento ERP</div>
+      <div class="enterprise-pill-text">{{ receta_rol_label }} listo para gobierno, costeo y trazabilidad.</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Etapa de cierre</div>
+      <div class="enterprise-pill-text">{{ enterprise_stage.label }}</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Estado de preparación</div>
+      <div class="enterprise-pill-text">{{ recipe_health.label }}</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Trazabilidad ERP</div>
+      <div class="enterprise-pill-text">{{ recipe_chain_status.label }}</div>
     </div>
   </div>
 
-  <form method="post" action="{% url 'recetas:receta_update' receta.id %}" class="recipe-main-form mb-3">
+  <div class="card table-card mb-3">
+    <div class="card-header">Ficha documental ERP</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <tbody>
+          <tr>
+            <th style="width:22%;">Tipo documental</th>
+            <td style="width:28%;">{{ receta_rol_label }}</td>
+            <th style="width:22%;">Referencia ERP</th>
+            <td style="width:28%;">{% if receta.codigo_point %}{{ receta.codigo_point }}{% else %}<span class="text-muted">Sin código Point</span>{% endif %}</td>
+          </tr>
+          <tr>
+            <th>Familia operativa</th>
+            <td>{% if receta.familia %}{{ receta.familia }}{% else %}<span class="text-muted">Sin familia</span>{% endif %}</td>
+            <th>Categoría operativa</th>
+            <td>{% if receta.categoria %}{{ receta.categoria }}{% else %}<span class="text-muted">Sin categoría</span>{% endif %}</td>
+          </tr>
+          <tr>
+            <th>Estado del documento</th>
+            <td>{{ enterprise_stage.label }}</td>
+            <th>Trazabilidad ERP</th>
+            <td>{{ recipe_chain_status.label }}</td>
+          </tr>
+          <tr>
+            <th>Creado</th>
+            <td>{{ receta.creado_en|date:"Y-m-d H:i" }}</td>
+            <th>Hash documental</th>
+            <td><code>{{ receta.hash_contenido }}</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-header">Madurez ERP del documento</div>
+    <p class="muted mb-2">Avance real del documento sobre gobierno maestro, estructura BOM, trazabilidad y cierre operativo.</p>
+    <div class="kpi-grid kpi-mini">
+      <article class="kpi-card">
+        <div class="kpi-number {% if enterprise_stage_progress.pct >= 100 %}is-success{% elif enterprise_stage_progress.pct >= 50 %}is-warning{% else %}is-danger{% endif %}">{{ enterprise_stage_progress.pct }}%</div>
+        <div class="kpi-label">Cierre de etapa ERP</div>
+        <div class="muted mt-2">{{ enterprise_stage_progress.completed }}/{{ enterprise_stage_progress.total }} criterios cerrados</div>
+        <div class="erp-progress mt-2">
+          <div class="erp-progress-fill {% if enterprise_stage_progress.pct >= 100 %}is-success{% elif enterprise_stage_progress.pct >= 50 %}is-warning{% else %}is-danger{% endif %}" style="width: {{ enterprise_stage_progress.pct }}%;"></div>
+        </div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number {% if release_gate_progress.pct >= 100 %}is-success{% elif release_gate_progress.pct >= 50 %}is-warning{% else %}is-danger{% endif %}">{{ release_gate_progress.pct }}%</div>
+        <div class="kpi-label">Cierre del documento</div>
+        <div class="muted mt-2">{{ release_gate_progress.completed }}/{{ release_gate_progress.total }} criterios de salida cerrados</div>
+        <div class="erp-progress mt-2">
+          <div class="erp-progress-fill {% if release_gate_progress.pct >= 100 %}is-success{% elif release_gate_progress.pct >= 50 %}is-warning{% else %}is-danger{% endif %}" style="width: {{ release_gate_progress.pct }}%;"></div>
+        </div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number {% if recipe_master_gap_totals.total > 0 %}is-warning{% else %}is-success{% endif %}">{{ recipe_master_gap_totals.total }}</div>
+        <div class="kpi-label">Brechas del maestro</div>
+        <div class="muted mt-2">{% if recipe_master_gap_totals.total > 0 %}Artículos aún requieren cierre para operar{% else %}El maestro ya está listo para este documento{% endif %}</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number {% if total_revision > 0 or total_sin_match > 0 %}is-warning{% else %}is-success{% endif %}">{{ total_lineas }}</div>
+        <div class="kpi-label">Componentes BOM</div>
+        <div class="muted mt-2">{{ total_revision }} por validar · {{ total_sin_match }} sin artículo maestro</div>
+      </article>
+    </div>
+  </div>
+
+  <div class="card table-card mb-3">
+    <div class="card-header">Cadena de control ERP</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Etapa</th>
+            <th>Estatus</th>
+            <th>Lectura ejecutiva</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in erp_control_chain %}
+          <tr>
+            <td>{{ item.label }}</td>
+            <td>
+              <span class="badge bg-{% if item.tone == 'success' %}success{% elif item.tone == 'warning' %}warning text-dark{% else %}danger{% endif %}">
+                {{ item.status }}
+              </span>
+            </td>
+            <td>{{ item.detail }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if module_handoff_rows %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Salida operativa del documento</div>
+    <p class="muted mb-2">
+      Esta tabla deja explícito si el documento ya puede avanzar a costeo, MRP, compras, inventario o venta final, junto con el criterio de salida de cada frente.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Destino</th>
+            <th>Responsable</th>
+            <th>Estatus</th>
+            <th class="text-end">Bloqueos</th>
+            <th>Cierre</th>
+            <th>Depende de</th>
+            <th>Criterio de salida</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in module_handoff_rows %}
+          <tr>
+            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.status }}</td>
+            <td class="text-end">{{ row.blockers }}</td>
+            <td style="min-width: 160px;">
+              <div class="erp-progress">
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' %}is-primary{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+              </div>
+              <div class="muted mt-1">{{ row.completion }}%</div>
+            </td>
+            <td>{{ row.depends_on }}</td>
+            <td>{{ row.exit_criteria }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if trunk_handoff_rows %}
+  {% if trunk_handoff_summary %}
+  <section class="card mb-3">
+    <div class="card-header">Cierre troncal ERP consolidado</div>
+    <div class="kpi-grid kpi-mini">
+      <article class="kpi-card">
+        <div class="kpi-label">Responsable troncal</div>
+        <div style="font-weight:700; margin-top:8px;">{{ trunk_handoff_summary.owner }}</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number {% if trunk_handoff_summary.tone == 'danger' %}is-danger{% elif trunk_handoff_summary.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ trunk_handoff_summary.status }}</div>
+        <div class="kpi-label">Semáforo troncal</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">{{ trunk_handoff_summary.completion }}%</div>
+        <div class="kpi-label">Cierre promedio</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">{{ trunk_handoff_summary.blockers }}</div>
+        <div class="kpi-label">Bloqueos abiertos</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-label">Prioridad actual</div>
+        <div class="muted" style="margin-top:8px;">{{ trunk_handoff_summary.priority_label }}</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-label">Siguiente paso</div>
+        <div class="muted" style="margin-top:8px;">{{ trunk_handoff_summary.next_step }}</div>
+        <div style="margin-top:10px;">
+          <a class="btn btn-secondary" href="{{ trunk_handoff_summary.url }}">{{ trunk_handoff_summary.cta }}</a>
+        </div>
+      </article>
+    </div>
+  </section>
+  {% endif %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Ruta troncal ERP</div>
+    <p class="muted mb-2">
+      Expone cómo este documento conecta con el flujo troncal del ERP: estructura BOM, compras documentales e inventario/reabasto.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Tramo ERP</th>
+            <th>Responsable</th>
+            <th>Estatus</th>
+            <th class="text-end">Bloqueos</th>
+            <th>Cierre</th>
+            <th>Depende de</th>
+            <th>Criterio de salida</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in trunk_handoff_rows %}
+          <tr>
+            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.status }}</td>
+            <td class="text-end">{{ row.blockers }}</td>
+            <td style="min-width: 160px;">
+              <div class="erp-progress">
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' %}is-primary{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+              </div>
+              <div class="muted mt-1">{{ row.completion }}%</div>
+            </td>
+            <td>{{ row.depends_on }}</td>
+            <td>{{ row.exit_criteria }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="recipe-next-steps mb-3">
+    <div class="recipe-next-steps-head">
+      <h4 class="mb-0">Documento ERP en operación</h4>
+      <span class="text-muted">Esta receta ya se interpreta como documento formal para costeo, MRP, producción y abastecimiento.</span>
+    </div>
+    <div class="recipe-next-steps-list">
+      <div class="recipe-next-step"><span class="recipe-next-step-index">A</span><span><strong>Gobierno maestro:</strong> valida que los artículos ligados estén completos y canónicos.</span></div>
+      <div class="recipe-next-step"><span class="recipe-next-step-index">B</span><span><strong>Estructura:</strong> separa internos, materia prima puntual, empaques y subsecciones.</span></div>
+      <div class="recipe-next-step"><span class="recipe-next-step-index">C</span><span><strong>Costeo:</strong> usa rendimiento, derivados y costo maestro para evitar capturas ambiguas.</span></div>
+      <div class="recipe-next-step"><span class="recipe-next-step-index">D</span><span><strong>Cadena ERP:</strong> conecta base, derivados, producto final, MRP y compras.</span></div>
+    </div>
+  </div>
+
+  {% if erp_governance_rows %}
+  {% if critical_path_rows %}
+  <section class="card mb-3">
+    <div class="card-header">Ruta crítica ERP</div>
+    <p class="muted mb-2">
+      Tramos prioritarios del documento según bloqueos, avance de cierre y dependencia operativa.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Prioridad</th>
+            <th>Tramo</th>
+            <th>Responsable</th>
+            <th>Estatus</th>
+            <th class="text-end">Bloqueos</th>
+            <th>Cierre</th>
+            <th>Depende de</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in critical_path_rows %}
+          <tr>
+            <td><strong>{{ row.rank }}</strong></td>
+            <td><strong>{{ row.title }}</strong><div class="muted">{{ row.detail }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.status }}</td>
+            <td class="text-end">{{ row.count }}</td>
+            <td style="min-width: 160px;">
+              <div class="erp-progress">
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% elif row.tone == 'primary' %}is-primary{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+              </div>
+              <div class="muted mt-1">{{ row.completion }}%</div>
+            </td>
+            <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+  {% if executive_radar_rows %}
+  <section class="card mb-3">
+    <div class="card-header">Radar ejecutivo ERP</div>
+    <p class="muted mb-2">
+      Lectura directiva del frente: responsable, bloqueo dominante, dependencia y avance de cierre operativo.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Tramo</th>
+            <th>Responsable</th>
+            <th>Bloqueo dominante</th>
+            <th>Depende de</th>
+            <th>Cierre</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in executive_radar_rows %}
+          <tr>
+            <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.dominant_blocker }}</td>
+            <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+            <td><span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">{{ row.progress_pct }}% · {{ row.blockers }} abiertos</span></td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+  <section class="card mb-3">
+    <div class="card-header">Mesa de gobierno ERP</div>
+    <p class="muted mb-2">
+      Vista resumida del documento. Muestra frente, responsable, bloqueos, porcentaje de cierre y siguiente paso para liberar costeo, MRP y abastecimiento.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Frente</th>
+            <th>Responsable</th>
+            <th class="text-end">Bloqueos</th>
+            <th>Cierre</th>
+            <th>Detalle</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in erp_governance_rows %}
+          <tr>
+            <td><strong>{{ row.label }}</strong></td>
+            <td>{{ row.owner|default:"Operación ERP" }}</td>
+            <td class="text-end">{{ row.open_count }}</td>
+            <td style="min-width: 180px;">
+              <div class="erp-progress">
+                <div class="erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %}" style="width: {{ row.progress_pct }}%;"></div>
+              </div>
+              <div class="muted mt-1">{{ row.progress_pct }}%</div>
+            </td>
+            <td>{{ row.detail }}</td>
+            <td>{{ row.next_step|default:"Seguir cierre operativo" }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    <div class="enterprise-pill-card is-active">
+      <div class="enterprise-pill-title">{{ receta_rol_label }}</div>
+      <div class="enterprise-pill-text">{{ receta_rol_description }}</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Materia prima</div>
+      <div class="enterprise-pill-text">{{ total_materia_prima }} componentes directos de proveedor.</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Insumos internos</div>
+      <div class="enterprise-pill-text">{{ total_internos }} componentes producidos internamente.</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Empaques / subbloques</div>
+      <div class="enterprise-pill-text">{{ total_empaques }} empaques y {{ total_subsecciones }} subsecciones operativas.</div>
+    </div>
+  </div>
+
+  <div class="card table-card mb-3">
+    <div class="card-header">Cockpit ERP del documento</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Capa</th>
+            <th>Estatus</th>
+            <th>Lectura operativa</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Maestro de artículos</td>
+            <td>
+              <span class="badge {% if recipe_master_gap_totals.total > 0 %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                {% if recipe_master_gap_totals.total > 0 %}Con brechas{% else %}Listo{% endif %}
+              </span>
+            </td>
+            <td>
+              {% if recipe_master_gap_totals.total > 0 %}
+                {{ recipe_master_gap_totals.total }} artículo(s) ligados aún requieren validación de datos maestros.
+              {% else %}
+                Los artículos ligados ya están listos para costeo y operación.
+              {% endif %}
+            </td>
+            <td><a class="btn btn-secondary btn-sm" href="{% url 'maestros:insumo_list' %}">Abrir maestro</a></td>
+          </tr>
+          <tr>
+            <td>Estructura BOM</td>
+            <td>
+              <span class="badge {% if total_revision > 0 or total_sin_match > 0 %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                {% if total_revision > 0 or total_sin_match > 0 %}Por validar{% else %}Listo{% endif %}
+              </span>
+            </td>
+            <td>
+                {{ total_lineas }} partida(s) BOM · {{ total_revision }} por validar · {{ total_sin_match }} sin artículo maestro.
+            </td>
+            <td><a class="btn btn-secondary btn-sm" href="{% url 'recetas:linea_create' receta.id %}">{{ add_line_label }}</a></td>
+          </tr>
+          <tr>
+            <td>Trazabilidad ERP</td>
+            <td>
+              <span class="badge {% if recipe_chain_status.tone == 'danger' %}bg-danger{% elif recipe_chain_status.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                {{ recipe_chain_status.label }}
+              </span>
+            </td>
+            <td>{{ recipe_chain_status.detail }}</td>
+            <td>
+              {% if chain_actions %}
+                <a class="btn btn-secondary btn-sm" href="{{ chain_actions.0.url }}">{{ chain_actions.0.label }}</a>
+              {% else %}
+                <span class="text-muted">Sin acción</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td>Costeo operativo</td>
+            <td>
+              <span class="badge {% if total_costo_estimado > 0 %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                {% if total_costo_estimado > 0 %}Calculado{% else %}Abierto{% endif %}
+              </span>
+            </td>
+            <td>Total operativo actual: ${{ total_costo_estimado|floatformat:2 }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{% url 'recetas:drivers_costeo' %}">Abrir costeo</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card table-card mb-3">
+    <div class="card-header">Habilitación por módulo ERP</div>
+    <div class="module-note mb-3">
+      Esta lectura muestra si el documento ya puede operar aguas abajo y cuál es el bloqueo principal que sigue abierto.
+    </div>
+    <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+      {% for row in module_enablement_cards %}
+      <div class="enterprise-pill-card {% if row.status %}is-active{% else %}is-warning{% endif %}">
+        <div class="enterprise-pill-title">{{ row.label }}</div>
+        <div class="enterprise-pill-text">{{ row.detail }}</div>
+        <div class="muted mt-2">{% if row.status %}Habilitado{% else %}Bloqueado{% endif %}</div>
+        <div class="recipe-actions recipe-actions-compact mt-2">
+          <a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Módulo</th>
+            <th>Estatus</th>
+            <th>Lectura ejecutiva</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in module_enablement_cards %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td>
+              <span class="badge {% if row.status %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                {% if row.status %}Habilitado{% else %}Bloqueado{% endif %}
+              </span>
+            </td>
+            <td>{{ row.detail }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card table-card mb-3">
+    <div class="card-header">Criterios de cierre ERP</div>
+    <div class="module-note mb-3">
+      Cierre actual: <strong>{{ release_gate_progress.completed }}/{{ release_gate_progress.total }}</strong>.
+      El documento solo debe considerarse liberado cuando todos los criterios estén cerrados.
+    </div>
+    <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+      {% for row in release_gate_rows %}
+      <div class="enterprise-pill-card {% if row.status %}is-active{% else %}is-warning{% endif %}">
+        <div class="enterprise-pill-title">{{ row.label }}</div>
+        <div class="enterprise-pill-text">
+          {% if row.status %}
+            Criterio cerrado para habilitar la siguiente etapa del documento.
+          {% else %}
+            {{ row.detail }}
+          {% endif %}
+        </div>
+        <div class="muted mt-2">{% if row.status %}Cerrado{% else %}Abierto{% endif %}</div>
+        <div class="recipe-actions recipe-actions-compact mt-2">
+          <a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Criterio</th>
+            <th>Estatus</th>
+            <th>Lectura ejecutiva</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in release_gate_rows %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td>
+              <span class="badge {% if row.status %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                {% if row.status %}Cerrado{% else %}Abierto{% endif %}
+              </span>
+            </td>
+            <td>{{ row.detail }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="recipe-next-steps mb-3">
+    <div class="recipe-next-steps-head">
+      <h4 class="mb-0">
+        {% if is_producto_final %}
+          Flujo de armado final
+        {% elif is_base_con_presentaciones %}
+          Flujo de insumo con derivados
+        {% else %}
+          Flujo de batida base
+        {% endif %}
+      </h4>
+      <span class="text-muted">
+        {% if is_producto_final %}
+          El costo se construye desde componentes ya estandarizados.
+        {% elif is_base_con_presentaciones %}
+          Mantén esta receta como fuente maestra de costo y rendimiento.
+        {% else %}
+          Esta receta alimenta costo interno y puede escalar a presentaciones después.
+        {% endif %}
+      </span>
+    </div>
+    <div class="recipe-next-steps-list">
+      {% for step in next_steps %}
+      <div class="recipe-next-step">
+        <span class="recipe-next-step-index">{{ forloop.counter }}</span>
+        <span>{{ step }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+    </div>
+  </details>
+
+  {% if is_producto_final %}
+  <div class="module-tabs mb-3">
+    <a class="module-tab" href="{% url 'recetas:linea_create' receta.id %}?component_kind=INSUMO_INTERNO&component_context=internos">+ Insumo interno</a>
+    <a class="module-tab" href="{% url 'recetas:linea_create' receta.id %}?component_kind=MATERIA_PRIMA&component_context=materia_prima">+ Materia prima puntual</a>
+    <a class="module-tab" href="{% url 'recetas:linea_create' receta.id %}?component_kind=EMPAQUE&component_context=empaques">+ Empaque</a>
+  </div>
+  {% endif %}
+
+  <details class="erp-advanced-panel mb-3">
+    <summary class="erp-advanced-summary">
+      <span>Herramientas de estructura</span>
+      <span class="text-muted">Copiar estructura desde otra receta o preparar una variante similar</span>
+    </summary>
+    <div class="erp-advanced-body">
+      <form method="post" action="{% url 'recetas:receta_copy_lineas' receta.id %}" class="recipes-filters recipe-copy-form mb-3">
+        {% csrf_token %}
+        <div class="compare-field">
+          <label class="form-label">Copiar ingredientes desde</label>
+          <select class="form-select" name="source_receta_id" required>
+            <option value="">Selecciona receta origen</option>
+            {% for item in recetas_copiables %}
+            <option value="{{ item.id }}">{{ item.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="compare-field">
+          <label class="form-label">Modo</label>
+          <select class="form-select" name="copy_mode">
+            <option value="append">Agregar al final</option>
+            <option value="replace">Reemplazar ingredientes actuales</option>
+          </select>
+        </div>
+        <div class="form-action compare-action">
+          <button class="btn btn-secondary w-100" type="submit">{{ copy_label }}</button>
+        </div>
+      </form>
+      <div class="text-muted">
+        {% if is_producto_final %}
+          Uso recomendado: copia una estructura de armado similar y ajusta solo cantidades finales, empaques o componentes específicos.
+        {% else %}
+          Uso recomendado: copia una receta base similar y luego corrige rendimiento, materias primas o derivados según aplique.
+        {% endif %}
+      </div>
+    </div>
+  </details>
+
+  <form id="recipe_edit_form" method="post" action="{% url 'recetas:receta_update' receta.id %}" class="recipe-main-form mb-3">
     {% csrf_token %}
+    <div class="module-note mb-3">
+      Corrige solo nombre, código, familia y categoría. El resto de la estructura se administra en los componentes de abajo.
+    </div>
     <div class="recipe-main-grid">
       <input class="form-control" type="text" name="nombre" value="{{ receta.nombre }}" placeholder="Nombre de receta" required>
       <input class="form-control" type="text" name="codigo_point" value="{{ receta.codigo_point }}" placeholder="Código Point (opcional)">
-      <select class="form-select" name="familia">
-        <option value="">Familia Point (seleccionar)</option>
+      <select class="form-select" id="receta-familia" name="familia" data-current="{{ receta.familia }}">
+        <option value="">Familia comercial (seleccionar)</option>
         {% for item in familias_catalogo %}
         <option value="{{ item }}" {% if receta.familia == item %}selected{% endif %}>{{ item }}</option>
         {% endfor %}
       </select>
-      <input class="form-control" type="text" name="categoria" value="{{ receta.categoria }}" placeholder="Categoría (ej. Chocolate / Frutales / Empaque)">
-      <select class="form-select" name="tipo">
+      <select class="form-select" id="receta-categoria" name="categoria" data-current="{{ receta.categoria }}">
+        <option value="">Categoría (seleccionar)</option>
+        {% for item in categorias_catalogo %}
+        <option value="{{ item }}" {% if receta.categoria == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
+      <select class="form-select" id="receta-tipo" name="tipo">
         {% for value, label in tipo_choices %}
         <option value="{{ value }}" {% if receta.tipo == value %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
-      <input class="form-control" type="number" name="rendimiento_cantidad" step="0.000001" min="0" value="{{ receta.rendimiento_cantidad|default:'' }}" placeholder="Rendimiento">
-      <select class="form-select" name="rendimiento_unidad_id">
+      <input class="form-control" type="number" name="rendimiento_cantidad" step="0.000001" min="0" value="{{ receta.rendimiento_cantidad|default:'' }}" placeholder="{% if is_producto_final %}No aplica a producto final{% else %}Rendimiento{% endif %}" {% if is_producto_final %}disabled{% endif %}>
+      <select class="form-select" name="rendimiento_unidad_id" {% if is_producto_final %}disabled{% endif %}>
         <option value="">Unidad rendimiento</option>
         {% for u in unidades %}
         <option value="{{ u.id }}" {% if receta.rendimiento_unidad_id == u.id %}selected{% endif %}>{{ u.codigo }} - {{ u.nombre }}</option>
         {% endfor %}
       </select>
-      <input class="form-control" type="text" name="sheet_name" value="{{ receta.sheet_name }}" placeholder="Hoja / categoría">
+      <input class="form-control" type="text" name="sheet_name" value="{{ receta.sheet_name }}" placeholder="Referencia ERP (opcional)">
     </div>
     <div class="recipe-main-controls">
       <label class="field-check field-check-compact" title="Aplica presentaciones/tamaños (mini, chico, mediano, etc.)">
-        <input type="checkbox" name="usa_presentaciones" {% if receta.usa_presentaciones %}checked{% endif %}>
+        <input type="checkbox" name="usa_presentaciones" {% if receta.usa_presentaciones %}checked{% endif %} {% if is_producto_final %}disabled{% endif %}>
         <span>Aplica presentaciones/tamaños</span>
       </label>
       <button class="btn btn-primary recipe-main-submit" type="submit">Guardar receta</button>
     </div>
   </form>
 
-  {% if receta.tipo == "PREPARACION" and not receta.rendimiento_cantidad %}
+  {% if is_base_simple and not receta.rendimiento_cantidad %}
   <div class="alert alert-info mt-2">
     Para costeo interno de este insumo, captura el rendimiento (ej. <strong>10.400 kg</strong>).
     El costo unitario se calcula como <strong>costo total / rendimiento</strong>.
   </div>
   {% endif %}
-  {% if receta.tipo == "PRODUCTO_FINAL" %}
+  {% if is_base_con_presentaciones %}
+  <div class="alert alert-info mt-2">
+    Este insumo genera subinsumos derivados. Mantén actualizados rendimiento y presentaciones para que los tamaños aparezcan correctamente en productos finales.
+  </div>
+  {% endif %}
+  {% if is_producto_final %}
   <div class="alert alert-info mt-2">
     Producto final: arma el costo como rompecabezas de componentes ligados (panes, rellenos, coberturas, empaques).
     Cada línea usa la unidad fija del insumo/subinsumo seleccionado.
   </div>
   {% endif %}
 
-  <div class="kpi-grid mb-3">
-    <div class="kpi-card">
-      <div class="kpi-number">{{ total_lineas }}</div>
-      <div class="kpi-label">Líneas</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-number is-success">{{ total_match }}</div>
-      <div class="kpi-label">Auto/OK</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-number {% if total_revision > 0 %}is-danger{% else %}is-success{% endif %}">{{ total_revision }}</div>
-      <div class="kpi-label">Por Revisar</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-number {% if total_sin_match > 0 %}is-danger{% else %}is-success{% endif %}">{{ total_sin_match }}</div>
-      <div class="kpi-label">Sin Match</div>
-    </div>
-  </div>
 </div>
 
 <div class="kpi-mini">
   <div class="kpi-card">
-    <div class="kpi-number">{{ receta.rendimiento_cantidad|default:0|floatformat:2 }}</div>
-    <div class="kpi-label">Rendimiento{% if receta.rendimiento_unidad %} ({{ receta.rendimiento_unidad.codigo }}){% endif %}</div>
+    <div class="kpi-number">
+      {% if is_producto_final %}
+        -
+      {% else %}
+        {{ receta.rendimiento_cantidad|default:0|floatformat:2 }}
+      {% endif %}
+    </div>
+    <div class="kpi-label">
+      {% if is_producto_final %}
+        Rendimiento no aplica
+      {% else %}
+        Rendimiento{% if receta.rendimiento_unidad %} ({{ receta.rendimiento_unidad.codigo }}){% endif %}
+      {% endif %}
+    </div>
   </div>
   <div class="kpi-card">
     <div class="kpi-number">
-      {% if receta.costo_por_unidad_rendimiento %}
+      {% if is_producto_final %}
+        -
+      {% elif receta.costo_por_unidad_rendimiento %}
         ${{ receta.costo_por_unidad_rendimiento|floatformat:2 }}
       {% else %}
         0
       {% endif %}
     </div>
     <div class="kpi-label">
-      Costo por unidad de rendimiento{% if receta.rendimiento_unidad %} ({{ receta.rendimiento_unidad.codigo }}){% endif %}
+      {% if is_producto_final %}
+        Costo por rendimiento no aplica
+      {% else %}
+        Costo por unidad de rendimiento{% if receta.rendimiento_unidad %} ({{ receta.rendimiento_unidad.codigo }}){% endif %}
+      {% endif %}
     </div>
   </div>
   <div class="kpi-card">
@@ -108,6 +916,188 @@
     <div class="kpi-label">Costo total del producto</div>
   </div>
 </div>
+
+<div id="recipe_structure_alerts">
+{% if bom_integrity_alerts %}
+<div class="card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Control operativo de la estructura</h3>
+      <div class="text-muted">Validaciones de estructura para mantener costeo, compras y planeación estables.</div>
+    </div>
+  </div>
+  <div class="recipe-integrity-list">
+    {% for alert in bom_integrity_alerts %}
+    <div class="recipe-integrity-item is-{{ alert.level }}">
+      <div class="recipe-integrity-title">{{ alert.title }}</div>
+      <div class="recipe-integrity-description">{{ alert.description }}</div>
+      {% if alert.action_url and alert.action_label %}
+      <div class="recipe-integrity-actions">
+        <a class="btn btn-secondary btn-sm" href="{{ alert.action_url }}">{{ alert.action_label }}</a>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if recipe_master_blockers %}
+<div class="card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Bloqueos del catálogo ERP</h3>
+      <div class="text-muted">Artículos ligados a esta receta que todavía no cumplen datos mínimos para operar con consistencia.</div>
+    </div>
+    <span class="badge {% if recipe_master_gap_totals.critical %}bg-danger{% else %}bg-warning text-dark{% endif %}">
+      {{ recipe_master_blockers|length }} artículo(s)
+    </span>
+  </div>
+  <div class="recipe-actions recipe-actions-compact mb-3">
+    {% if recipe_master_gap_totals.critical %}
+    <a class="btn btn-secondary btn-sm" href="{% url 'maestros:insumo_list' %}?usage_scope=recipes&enterprise_status=incompletos&impact_scope=finales&linked_recipe_id={{ receta.id }}">Demanda crítica: {{ recipe_master_gap_totals.critical }}</a>
+    {% endif %}
+    {% if recipe_master_gap_totals.unidad %}
+    <a class="btn btn-secondary btn-sm" href="{% url 'maestros:insumo_list' %}?usage_scope=recipes&enterprise_status=incompletos&missing_field=unidad&impact_scope=finales&linked_recipe_id={{ receta.id }}">Unidad base: {{ recipe_master_gap_totals.unidad }}</a>
+    {% endif %}
+    {% if recipe_master_gap_totals.proveedor %}
+    <a class="btn btn-secondary btn-sm" href="{% url 'maestros:insumo_list' %}?usage_scope=recipes&enterprise_status=incompletos&missing_field=proveedor&impact_scope=finales&linked_recipe_id={{ receta.id }}">Proveedor: {{ recipe_master_gap_totals.proveedor }}</a>
+    {% endif %}
+    {% if recipe_master_gap_totals.categoria %}
+    <a class="btn btn-secondary btn-sm" href="{% url 'maestros:insumo_list' %}?usage_scope=recipes&enterprise_status=incompletos&missing_field=categoria&impact_scope=finales&linked_recipe_id={{ receta.id }}">Categoría: {{ recipe_master_gap_totals.categoria }}</a>
+    {% endif %}
+    {% if recipe_master_gap_totals.codigo_point %}
+    <a class="btn btn-secondary btn-sm" href="{% url 'maestros:insumo_list' %}?usage_scope=recipes&enterprise_status=incompletos&missing_field=codigo_point&impact_scope=finales&linked_recipe_id={{ receta.id }}">Código de venta: {{ recipe_master_gap_totals.codigo_point }}</a>
+    {% endif %}
+    {% if recipe_master_gap_totals.inactivo %}
+    <a class="btn btn-secondary btn-sm" href="{% url 'maestros:insumo_list' %}?usage_scope=recipes&enterprise_status=incompletos&impact_scope=finales&linked_recipe_id={{ receta.id }}">Inactivos: {{ recipe_master_gap_totals.inactivo }}</a>
+    {% endif %}
+  </div>
+  <div class="recipe-integrity-list">
+    {% for item in recipe_master_blockers %}
+    <div class="recipe-integrity-item {% if item.priority_tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">
+      <div class="recipe-integrity-title">{{ item.insumo.nombre }}</div>
+      <div class="recipe-integrity-description">
+        Falta: {{ item.missing|join:", " }}.
+        Impacta {{ item.line_count }} componente(s) de la estructura
+        {% if item.line_positions %}· posiciones {{ item.line_positions|join:", " }}{% endif %}.
+        {% if item.historico_units > 0 %}
+        <br>{{ item.priority_label }} · {{ item.historico_units|floatformat:1 }} unidades observadas en {{ item.demand_days_count }} día(s).
+        {% endif %}
+      </div>
+      <div class="recipe-integrity-actions">
+        <a class="btn btn-secondary btn-sm" href="{{ item.edit_url }}">Abrir artículo</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+</div>
+
+<div id="recipe_secondary_analysis">
+  <details class="erp-advanced-panel mb-3">
+    <summary class="erp-advanced-summary">
+      <span>Ver costos, cadena y presentaciones</span>
+      <span class="text-muted">Costeo, derivados, histórico y trazabilidad extendida</span>
+    </summary>
+    <div class="erp-advanced-body">
+{% if is_producto_final and component_breakdown %}
+<div class="card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Composición del costo</h3>
+      <div class="text-muted">Incluye base padre prorrateada cuando la presentación deriva de un entero y suma solo los componentes directos del SKU.</div>
+    </div>
+  </div>
+  <div class="kpi-grid mb-0">
+    {% for item in component_breakdown %}
+    <div class="kpi-card">
+      <div class="kpi-number {{ item.accent }}">${{ item.subtotal|floatformat:2 }}</div>
+      <div class="kpi-label">{{ item.title }}</div>
+      <div class="text-muted mt-1">{{ item.count }} componentes · {{ item.percentage|floatformat:1 }}%</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if product_upstream_snapshot %}
+<div class="card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Dependencia operativa</h3>
+      <div class="text-muted">Bases internas y clases de componente que alimentan este producto final.</div>
+    </div>
+    <span class="badge bg-{% if product_upstream_snapshot.upstream_base_count %}success{% else %}warning text-dark{% endif %}">
+      {% if product_upstream_snapshot.upstream_base_count %}Con bases ligadas{% else %}Sin trazabilidad de base{% endif %}
+    </span>
+  </div>
+  {% if derived_parent_snapshot %}
+  <div class="kpi-grid mb-3">
+    <div class="kpi-card">
+      <div class="kpi-number is-primary">${{ derived_parent_snapshot.parent_unit_cost|floatformat:2 }}</div>
+      <div class="kpi-label">Costo heredado del padre</div>
+      <div class="text-muted mt-1">
+        {{ derived_parent_snapshot.parent_recipe_name }} · {{ derived_parent_snapshot.units_per_parent|floatformat:0 }} por padre
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number is-info">${{ derived_parent_snapshot.direct_components_cost|floatformat:2 }}</div>
+      <div class="kpi-label">Componentes directos del SKU</div>
+      <div class="text-muted mt-1">
+        {% if derived_parent_snapshot.requires_direct_components %}
+        Incluye empaque, etiqueta u otros consumos de salida.
+        {% else %}
+        Esta presentación no requiere componentes adicionales.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+  <div class="kpi-grid mb-3">
+    <div class="kpi-card">
+      <div class="kpi-number {% if product_upstream_snapshot.upstream_base_count %}is-success{% else %}is-warning{% endif %}">
+        {{ product_upstream_snapshot.upstream_base_count }}
+      </div>
+      <div class="kpi-label">Bases internas origen</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if product_upstream_snapshot.internal_count %}is-success{% else %}is-warning{% endif %}">
+        {{ product_upstream_snapshot.internal_count }}
+      </div>
+      <div class="kpi-label">Componentes internos</div>
+      {% if product_upstream_snapshot.internal_without_source_count %}
+      <div class="text-muted mt-1">{{ product_upstream_snapshot.internal_without_source_count }} sin trazabilidad de base</div>
+      {% endif %}
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if product_upstream_snapshot.mp_count %}is-warning{% else %}is-success{% endif %}">
+        {{ product_upstream_snapshot.mp_count }}
+      </div>
+      <div class="kpi-label">MP puntual</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if product_upstream_snapshot.empaque_count %}is-success{% else %}is-warning{% endif %}">
+        {{ product_upstream_snapshot.empaque_count }}
+      </div>
+      <div class="kpi-label">Componentes de empaque</div>
+    </div>
+  </div>
+  {% if product_upstream_snapshot.upstream_bases %}
+  <div class="recipe-flow-section">
+    <div class="recipe-flow-section-title">Bases internas ligadas</div>
+    <div class="recipe-flow-list">
+      {% for item in product_upstream_snapshot.upstream_bases %}
+        <a class="recipe-flow-chip" href="{% url 'recetas:receta_detail' item.id %}">
+          {{ item.nombre }} · {{ item.line_count }} componente(s){% if item.derived_parent_link %} · padre prorrateado{% endif %}
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 
 {% if receta.tipo == "PREPARACION" %}
 <div class="card">
@@ -179,20 +1169,270 @@
 </div>
 {% endif %}
 
+{% if presentacion_health %}
+<div class="card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Estado de derivados</h3>
+      <div class="text-muted">Preparación operativa de la base para alimentar subinsumos y productos finales.</div>
+    </div>
+    <span class="badge bg-{% if presentacion_health.readiness_level == 'success' %}success{% elif presentacion_health.readiness_level == 'warning' %}warning text-dark{% else %}danger{% endif %}">
+      {{ presentacion_health.readiness_label }}
+    </span>
+  </div>
+  <div class="text-muted mb-3">{{ presentacion_health.readiness_note }}</div>
+  {% if presentacion_health.sync_recommended %}
+  <div class="alert alert-warning mb-3">
+    Sincronizar derivados para que todas las presentaciones activas queden listas como subinsumos operativos.
+  </div>
+  {% endif %}
+  {% if base_chain_actions %}
+  <div class="recipe-flow-list mb-3">
+    {% for action in base_chain_actions %}
+    <a class="btn btn-secondary" href="{{ action.url }}">{{ action.label }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="kpi-grid mb-0">
+    <div class="kpi-card">
+      <div class="kpi-number {% if presentacion_health.has_rendimiento %}is-success{% else %}is-danger{% endif %}">
+        {% if presentacion_health.has_rendimiento %}OK{% else %}Falta{% endif %}
+      </div>
+      <div class="kpi-label">Rendimiento base</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if presentacion_health.has_rendimiento_unidad %}is-success{% else %}is-danger{% endif %}">
+        {% if presentacion_health.has_rendimiento_unidad %}OK{% else %}Falta{% endif %}
+      </div>
+      <div class="kpi-label">Unidad de rendimiento</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if presentacion_health.prep_insumo_ready %}is-success{% else %}is-warning{% endif %}">
+        {% if presentacion_health.prep_insumo_ready %}Activo{% else %}Por validar{% endif %}
+      </div>
+      <div class="kpi-label">Insumo base derivado</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if presentacion_health.active_presentaciones_count %}is-success{% else %}is-warning{% endif %}">
+        {{ presentacion_health.active_presentaciones_count }}
+      </div>
+      <div class="kpi-label">Presentaciones activas</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if presentacion_health.derived_presentaciones_count >= presentacion_health.active_presentaciones_count and presentacion_health.active_presentaciones_count > 0 %}is-success{% else %}is-warning{% endif %}">
+        {{ presentacion_health.derived_presentaciones_count }}
+      </div>
+      <div class="kpi-label">Derivados activos</div>
+    </div>
+  </div>
+  {% if base_chain_checkpoints %}
+  <div class="recipe-flow-section mt-3">
+      <div class="recipe-flow-section-title">Controles de la cadena</div>
+    <div class="recipe-flow-list">
+      {% for item in base_chain_checkpoints %}
+      <span class="recipe-flow-chip {% if not item.ok %}is-muted{% endif %}">
+        {{ item.label }} · {% if item.ok %}OK{% else %}Por validar{% endif %} · {{ item.detail }}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if supply_chain_snapshot %}
+<div class="card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Cadena ERP</h3>
+      <div class="text-muted">Relación de esta base con sus derivados operativos y los productos finales que ya la consumen.</div>
+    </div>
+    <span class="badge bg-{% if supply_chain_snapshot.has_downstream_usage %}success{% else %}warning text-dark{% endif %}">
+      {% if supply_chain_snapshot.has_downstream_usage %}En uso{% else %}Aún sin consumo final{% endif %}
+    </span>
+  </div>
+  <div class="kpi-grid mb-3">
+    <div class="kpi-card">
+      <div class="kpi-number {% if supply_chain_snapshot.prep_insumo %}is-success{% else %}is-warning{% endif %}">
+        {% if supply_chain_snapshot.prep_insumo %}Activo{% else %}Por validar{% endif %}
+      </div>
+      <div class="kpi-label">Insumo base derivado</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if supply_chain_snapshot.presentacion_count %}is-success{% else %}is-warning{% endif %}">
+        {{ supply_chain_snapshot.presentacion_count }}
+      </div>
+      <div class="kpi-label">Presentaciones derivadas</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if supply_chain_snapshot.downstream_recipe_count %}is-success{% else %}is-warning{% endif %}">
+        {{ supply_chain_snapshot.downstream_recipe_count }}
+      </div>
+      <div class="kpi-label">Productos finales que lo consumen</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if supply_chain_snapshot.downstream_line_count %}is-success{% else %}is-warning{% endif %}">
+        {{ supply_chain_snapshot.downstream_line_count }}
+      </div>
+      <div class="kpi-label">Componentes activos en producto final</div>
+    </div>
+  </div>
+  <div class="recipe-flow-section">
+    <div class="recipe-flow-section-title">Componentes derivados operativos</div>
+    <div class="recipe-flow-list">
+      {% if supply_chain_snapshot.prep_insumo_item %}
+        <a class="recipe-flow-chip" href="{% url 'maestros:insumo_update' supply_chain_snapshot.prep_insumo_item.id %}">{{ supply_chain_snapshot.prep_insumo_item.nombre }}</a>
+      {% else %}
+        <span class="recipe-flow-chip is-muted">Sin insumo base derivado aún</span>
+      {% endif %}
+      {% for item in supply_chain_snapshot.presentacion_items %}
+        <a class="recipe-flow-chip" href="{% url 'maestros:insumo_update' item.id %}">{{ item.nombre }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  {% if supply_chain_snapshot.downstream_recipes %}
+  <div class="recipe-flow-section">
+    <div class="recipe-flow-section-title">Productos finales ligados</div>
+    <div class="recipe-flow-list">
+    {% for item in supply_chain_snapshot.downstream_recipes %}
+      <a class="recipe-flow-chip" href="{% url 'recetas:receta_detail' item.id %}">{{ item.nombre }}</a>
+    {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="text-muted">Todavía no hay productos finales ligados a esta base o a sus presentaciones derivadas.</div>
+  {% endif %}
+  <div class="recipe-flow-list">
+    {% if base_chain_actions %}
+      {% for action in base_chain_actions %}
+      <a class="btn btn-secondary" href="{{ action.url }}">{{ action.label }}</a>
+      {% endfor %}
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if enterprise_stage %}
+<div class="card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Hito operativo</h3>
+      <div class="text-muted">Lectura ejecutiva de la posición actual de esta receta dentro de la cadena operativa.</div>
+    </div>
+    <span class="badge bg-{% if enterprise_stage.tone == 'success' %}success{% elif enterprise_stage.tone == 'warning' %}warning text-dark{% else %}danger{% endif %}">
+      {{ enterprise_stage.label }}
+    </span>
+  </div>
+  <div class="alert {% if enterprise_stage.tone == 'success' %}alert-success{% elif enterprise_stage.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}">
+    {{ enterprise_stage.summary }}
+  </div>
+  {% if enterprise_stage_playbook %}
+  <div class="enterprise-stage-playbook">
+    {% for item in enterprise_stage_playbook %}
+    <div class="enterprise-stage-step">
+      <div class="enterprise-stage-step-head">
+        <span class="badge bg-{% if item.done %}success{% else %}warning text-dark{% endif %}">{% if item.done %}OK{% else %}Por validar{% endif %}</span>
+        <strong>{{ item.label }}</strong>
+      </div>
+      <div class="text-muted">{{ item.detail }}</div>
+      {% if item.action_url and item.action_label %}
+      <div class="mt-2">
+        <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if enterprise_stage_playbook %}
+<div class="card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Matriz de cierre operativo</h3>
+      <div class="text-muted">Controles clave para habilitar esta receta hacia costeo, planeación y operación diaria.</div>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Control</th>
+          <th>Estatus</th>
+          <th>Detalle</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in enterprise_stage_playbook %}
+        <tr>
+          <td><strong>{{ item.label }}</strong></td>
+          <td>
+            <span class="badge bg-{% if item.done %}success{% else %}warning text-dark{% endif %}">
+              {% if item.done %}Cerrado{% else %}Abierto{% endif %}
+            </span>
+          </td>
+          <td>{{ item.detail }}</td>
+          <td>
+            {% if item.action_url and item.action_label %}
+            <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
+            {% else %}
+            <span class="text-muted">Sin acción operativa</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if chain_focus_summary %}
+<div class="card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Bloqueo dominante de cadena</h3>
+      <div class="text-muted">Resumen ejecutivo del siguiente paso para cerrar la cadena operativa de esta receta.</div>
+    </div>
+    <span class="badge bg-{% if chain_focus_summary.tone == 'success' %}success{% elif chain_focus_summary.tone == 'warning' %}warning text-dark{% else %}danger{% endif %}">
+      {{ chain_focus_summary.label }}
+    </span>
+  </div>
+  <div class="alert {% if chain_focus_summary.tone == 'success' %}alert-success{% elif chain_focus_summary.tone == 'warning' %}alert-warning{% else %}alert-danger{% endif %}">
+    {{ chain_focus_summary.summary }}
+  </div>
+  {% if chain_focus_summary.action %}
+  <div class="recipe-flow-list">
+    {% if chain_focus_summary.action.label == "Aplicar derivados sugeridos" %}
+    <form method="post" action="{% url 'recetas:receta_apply_direct_base_replacements' receta.id %}">
+      {% csrf_token %}
+      <button class="btn btn-secondary" type="submit">{{ chain_focus_summary.action.label }}</button>
+    </form>
+    {% else %}
+    <a class="btn btn-secondary" href="{{ chain_focus_summary.action.url }}">{{ chain_focus_summary.action.label }}</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
   <div class="d-flex justify-content-between align-items-center mb-3 recipe-head">
-    <h3 class="mb-0">Costeo Completo (Fase 2)</h3>
-    <span class="badge bg-primary">Driver: {{ costeo_actual.driver.scope|default:"GLOBAL" }}{% if costeo_actual.driver %} · {{ costeo_actual.driver.nombre }}{% endif %}</span>
+    <h3 class="mb-0">Costeo operativo</h3>
+    <span class="badge bg-primary">Parámetro: {{ costeo_actual.driver.scope|default:"GLOBAL" }}{% if costeo_actual.driver %} · {{ costeo_actual.driver.nombre }}{% endif %}</span>
   </div>
   {% if costeo_unavailable %}
   <div class="alert alert-warning mt-2">
-    El costeo avanzado por drivers no está disponible en este entorno.
+    El costeo avanzado por parámetros no está disponible en este entorno.
   </div>
   {% endif %}
   <div class="toolbar">
-    <a class="btn btn-secondary" href="{% url 'recetas:receta_versiones_export' receta.id %}?format=csv">Exportar versiones CSV</a>
-    <a class="btn btn-secondary" href="{% url 'recetas:receta_versiones_export' receta.id %}?format=xlsx">Exportar versiones XLSX</a>
-    <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Administrar drivers</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:receta_versiones_export' receta.id %}?format=csv">Exportar historial CSV</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:receta_versiones_export' receta.id %}?format=xlsx">Exportar historial XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:drivers_costeo' %}">Administrar parámetros</a>
   </div>
   <div class="kpi-mini">
     <div class="kpi-card">
@@ -209,7 +1449,7 @@
     </div>
     <div class="kpi-card">
       <div class="kpi-number">${{ costeo_actual.costo_total|floatformat:2 }}</div>
-      <div class="kpi-label">Total MP+MO+IND</div>
+      <div class="kpi-label">Total operativo</div>
     </div>
   </div>
   {% if versiones_comparativo %}
@@ -223,12 +1463,12 @@
 
 <div class="card">
   <div class="d-flex justify-content-between align-items-center mb-3 recipe-head">
-    <h3 class="mb-0">Histórico de Versiones de Costo</h3>
+    <h3 class="mb-0">Histórico de costos</h3>
     <span class="text-muted">Total {{ versiones_all|length }} versiones</span>
   </div>
   {% if versiones_unavailable %}
   <div class="alert alert-warning mt-2">
-    El histórico de versiones de costo no está disponible en este entorno.
+    El histórico de costos no está disponible en este entorno.
   </div>
   {% endif %}
   <form class="recipes-filters recipes-filters-compare mb-3" method="get">
@@ -287,12 +1527,12 @@
           <th>Versión</th>
           <th>Fecha</th>
           <th>Fuente</th>
-          <th>Driver</th>
+          <th>Parámetro</th>
           <th class="text-end">MP</th>
           <th class="text-end">MO</th>
           <th class="text-end">Indirectos</th>
           <th class="text-end">Total</th>
-          <th class="text-end">Costo / Rend.</th>
+          <th class="text-end">Costo / rendimiento</th>
         </tr>
       </thead>
       <tbody>
@@ -381,118 +1621,248 @@
     </p>
   </div>
 {% endif %}
+    </div>
+  </details>
+</div>
 
-<div class="card">
-  <div class="table-scroll-controls">
-    <button type="button" class="btn btn-secondary btn-sm js-scroll-left" aria-label="Desplazar tabla a la izquierda">←</button>
-    <button type="button" class="btn btn-secondary btn-sm js-scroll-right" aria-label="Desplazar tabla a la derecha">→</button>
+<div id="recipe_bom_groups">
+{% for group in line_groups %}
+<div class="card recipe-line-group-card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">{{ group.title }}</h3>
+      <div class="text-muted">{{ group.description }}</div>
+    </div>
+    <div class="recipe-line-group-meta">
+      {% if group.key == "internos" %}
+        <a class="btn btn-secondary btn-sm" href="{% url 'recetas:linea_create' receta.id %}?component_kind=INSUMO_INTERNO&component_context=internos">+ Agregar interno</a>
+      {% elif group.key == "materia_prima" %}
+        <a class="btn btn-secondary btn-sm" href="{% url 'recetas:linea_create' receta.id %}?component_kind=MATERIA_PRIMA&component_context=materia_prima">+ Agregar MP</a>
+      {% elif group.key == "empaques" %}
+        <a class="btn btn-secondary btn-sm" href="{% url 'recetas:linea_create' receta.id %}?component_kind=EMPAQUE&component_context=empaques">+ Agregar empaque</a>
+      {% elif group.key == "subsecciones" %}
+        <a class="btn btn-secondary btn-sm" href="{% url 'recetas:linea_create' receta.id %}?component_context=subsecciones">+ Agregar bloque</a>
+      {% endif %}
+      <span class="badge bg-secondary">{{ group.count }} componentes</span>
+      {% if group.erp_ready_count %}
+        <span class="badge bg-success">{{ group.erp_ready_count }} listas</span>
+      {% endif %}
+      {% if group.erp_incomplete_count %}
+        <span class="badge bg-warning text-dark">{{ group.erp_incomplete_count }} incompletas</span>
+      {% endif %}
+      <span class="recipe-line-group-subtotal">Subtotal: ${{ group.subtotal|floatformat:2 }}</span>
+    </div>
   </div>
-  <div class="table-responsive recipe-lines-scroll js-drag-scroll">
-    <table class="table align-middle recipe-lines-table">
-    <colgroup>
-      <col class="col-pos">
-      <col class="col-type">
-      <col class="col-stage">
-      <col class="col-ingredient">
-      <col class="col-linked">
-      <col class="col-origin">
-      <col class="col-qty">
-      <col class="col-unit">
-      <col class="col-cost">
-      <col class="col-match">
-      <col class="col-actions">
-    </colgroup>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Tipo</th>
-        <th>Etapa</th>
-        <th>Ingrediente (texto)</th>
-        <th>Insumo ligado</th>
-        <th>Origen</th>
-        <th class="text-end">Cantidad</th>
-        <th>Unidad</th>
-        <th class="text-end">Costo estimado</th>
-        <th>Match</th>
-        <th>Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for l in lineas %}
-      <tr>
-        <td class="text-end">{{ l.posicion }}</td>
-        <td>
+  <div class="recipe-line-card-grid">
+    {% for l in group.lineas %}
+    <article class="recipe-line-card">
+      <div class="recipe-line-card-head">
+        <div class="recipe-line-card-index">#{{ l.posicion }}</div>
+        <div class="recipe-line-card-badges">
           {% if l.tipo_linea == "SUBSECCION" %}
             <span class="badge bg-info text-dark">Subsección</span>
           {% else %}
             <span class="badge bg-secondary">Principal</span>
           {% endif %}
-        </td>
-        <td class="cell-stage">{{ l.etapa|default:"-" }}</td>
-        <td class="cell-ingredient">{{ l.insumo_texto }}</td>
-        <td>
           {% if l.insumo %}
-            {{ l.insumo.nombre }}
-          {% elif l.tipo_linea == "SUBSECCION" %}
-            <span class="badge bg-info text-dark">Subsección de {{ l.etapa|default:"componente" }}</span>
-          {% else %}
-            <span class="badge bg-danger">Sin match</span>
-          {% endif %}
-        </td>
-        <td class="cell-origin">
-          {% if l.insumo %}
-            {% if l.insumo.codigo|default:""|slice:":16" == "DERIVADO:RECETA:" %}
+            {% if l.insumo.tipo_item == "EMPAQUE" %}
+              <span class="badge bg-warning text-dark">Empaque</span>
+            {% elif l.insumo.codigo|default:""|slice:":16" == "DERIVADO:RECETA:" or l.insumo.tipo_item == "INSUMO_INTERNO" %}
               <span class="badge bg-success">Interno</span>
             {% else %}
               <span class="badge bg-secondary">Materia prima</span>
             {% endif %}
-          {% else %}
-            -
           {% endif %}
-        </td>
-        <td class="text-end cell-qty">{% if l.cantidad is not None %}{{ l.cantidad|floatformat:2 }}{% else %}-{% endif %}</td>
-        <td class="cell-unit">{{ l.unidad_texto }}</td>
-        <td class="text-end cell-cost">{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% else %}-{% endif %}</td>
-        <td>
-          {% if l.match_status == "AUTO_APPROVED" %}
-            <span class="badge bg-success">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span>
-          {% elif l.match_status == "NEEDS_REVIEW" %}
-            <span class="badge bg-warning text-dark">{{ l.match_method }} {{ l.match_score|floatformat:0 }}</span>
-          {% else %}
-            <span class="badge bg-danger">NO_MATCH</span>
+          {% if l.etapa %}
+            <span class="badge bg-light text-dark">{{ l.etapa }}</span>
           {% endif %}
-        </td>
-        <td>
-          <div class="recipe-actions recipe-actions-compact">
-            <a class="btn btn-secondary" href="{% url 'recetas:linea_edit' receta.id l.id %}">Editar</a>
-            <form method="post" action="{% url 'recetas:linea_delete' receta.id l.id %}" onsubmit="return confirm('¿Eliminar esta línea?');">
-              {% csrf_token %}
-              <button class="btn btn-danger" type="submit">Eliminar</button>
-            </form>
+        </div>
+      </div>
+
+      <div class="recipe-line-card-title">
+        {% if l.insumo %}
+          {{ l.insumo.nombre_point|default:l.insumo.nombre }}
+        {% else %}
+          {{ l.insumo_texto }}
+        {% endif %}
+      </div>
+
+      {% if l.insumo_texto and l.insumo and l.insumo_texto != l.insumo.nombre and l.insumo_texto != l.insumo.nombre_point %}
+      <div class="recipe-line-card-note">Capturado: {{ l.insumo_texto }}</div>
+      {% endif %}
+
+      <div class="recipe-line-card-metrics">
+        <div class="recipe-line-metric">
+          <span class="recipe-line-metric-label">Cantidad</span>
+          <strong>{% if l.cantidad is not None %}{{ l.cantidad|floatformat:2 }}{% else %}-{% endif %} {{ l.unidad_texto }}</strong>
+        </div>
+        <div class="recipe-line-metric">
+          <span class="recipe-line-metric-label">Costo</span>
+          <strong>{% if l.costo_total_estimado %}${{ l.costo_total_estimado|floatformat:2 }}{% else %}-{% endif %}</strong>
+        </div>
+      </div>
+
+      <div class="recipe-line-card-body">
+        {% if l.insumo %}
+          <div class="text-muted">
+            Artículo ligado:
+            <a class="recipe-inline-link" href="{% url 'maestros:insumo_update' l.insumo.id %}">{{ l.insumo.nombre_point|default:l.insumo.nombre }}</a>
           </div>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="11" class="text-muted">Esta receta no tiene líneas.</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-    <tfoot>
-      <tr>
-        <th colspan="8" class="text-end">Total</th>
-        <th class="text-end">${{ total_costo_estimado|floatformat:2 }}</th>
-        <th colspan="2"></th>
-      </tr>
-    </tfoot>
-    </table>
+          {% if l.erp_profile %}
+            <div class="mt-1">
+              {% if l.erp_profile.ready %}
+                <span class="badge bg-success">Lista para operar</span>
+              {% else %}
+                <span class="badge bg-warning text-dark">Incompleta</span>
+              {% endif %}
+            </div>
+          {% endif %}
+          {% if l.erp_profile and not l.erp_profile.ready %}
+            <div class="text-muted mt-1">Falta: {{ l.erp_profile.missing|join:", " }}</div>
+          {% endif %}
+          {% if l.source_recipe %}
+            <div class="text-muted mt-1">
+              Base origen:
+              <a class="recipe-inline-link" href="{% url 'recetas:receta_detail' l.source_recipe.id %}">{{ l.source_recipe.nombre }}</a>
+            </div>
+          {% endif %}
+          {% if l.uses_direct_base_in_final %}
+            <div class="mt-2">
+              <span class="badge bg-danger">Usa base sin presentación</span>
+            </div>
+            {% if l.direct_base_replacement %}
+              <div class="text-muted mt-1">
+                Sugerido: <strong>{{ l.direct_base_replacement.insumo.nombre_point|default:l.direct_base_replacement.insumo.nombre }}</strong>
+              </div>
+              <div class="text-muted">{{ l.direct_base_replacement.reason }}</div>
+              <div class="text-muted">
+                Conversión sugerida: {{ l.direct_base_replacement.replacement_quantity|floatformat:2 }} {{ l.direct_base_replacement.insumo.unidad_base.codigo }}
+              </div>
+            {% endif %}
+          {% endif %}
+          {% if l.canonical_needs_repoint and l.canonical_target %}
+            <div class="text-muted mt-1">
+              Artículo propuesto: <strong>{{ l.canonical_target.nombre_point|default:l.canonical_target.nombre }}</strong>
+            </div>
+          {% endif %}
+        {% elif l.tipo_linea == "SUBSECCION" %}
+          <span class="badge bg-info text-dark">Subsección de {{ l.etapa|default:"componente" }}</span>
+        {% else %}
+          <span class="badge bg-danger">Alta maestra pendiente</span>
+          {% if l.suggested_insumo %}
+            <div class="text-muted mt-1">
+              Artículo propuesto: <strong>{{ l.suggested_insumo.nombre_point|default:l.suggested_insumo.nombre }}</strong>
+            </div>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="recipe-line-card-actions">
+        {% if l.canonical_needs_repoint and l.canonical_target %}
+        <form method="post" action="{% url 'recetas:linea_repoint_canonical' l.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{% url 'recetas:receta_detail' receta.id %}">
+          <button class="btn btn-secondary btn-sm" type="submit">Usar artículo ERP</button>
+        </form>
+        {% endif %}
+        {% if l.direct_base_replacement %}
+        <form method="post" action="{% url 'recetas:linea_apply_direct_base_replacement' receta.id l.id %}">
+          {% csrf_token %}
+          <button class="btn btn-secondary btn-sm" type="submit">Usar derivado sugerido</button>
+        </form>
+        {% endif %}
+        <a class="btn btn-secondary btn-sm" href="{% url 'recetas:linea_edit' receta.id l.id %}?{% if group.key == 'internos' %}component_kind=INSUMO_INTERNO&component_context=internos{% elif group.key == 'materia_prima' %}component_kind=MATERIA_PRIMA&component_context=materia_prima{% elif group.key == 'empaques' %}component_kind=EMPAQUE&component_context=empaques{% elif group.key == 'subsecciones' %}component_context=subsecciones{% else %}component_context=general{% endif %}">Editar</a>
+        <form method="post" action="{% url 'recetas:linea_delete' receta.id l.id %}" onsubmit="return confirm('¿Eliminar este componente?');">
+          {% csrf_token %}
+          <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+        </form>
+      </div>
+    </article>
+    {% endfor %}
   </div>
+  <div class="recipe-line-group-footer">
+    <span class="badge bg-secondary">{{ group.badge }}</span>
+    <strong>Subtotal: ${{ group.subtotal|floatformat:2 }}</strong>
+  </div>
+</div>
+{% empty %}
+<div class="card">
+  <div class="text-muted">Esta receta no tiene componentes.</div>
+</div>
+{% endfor %}
+</div>
+
+<div class="card recipe-line-group-card">
+  <div class="recipe-line-group-head">
+    <div>
+      <h3 class="mb-0">Total general de estructura</h3>
+      <div class="text-muted">
+        {% if derived_parent_snapshot %}
+        Suma componentes directos del SKU más la porción heredada de {{ derived_parent_snapshot.parent_recipe_name }}.
+        {% else %}
+        Suma consolidada de todos los componentes y bloques de la receta.
+        {% endif %}
+      </div>
+    </div>
+    <div class="recipe-line-group-meta">
+      <span class="badge bg-primary">{{ total_lineas }} componentes</span>
+      <span class="recipe-line-group-subtotal">Total: ${{ total_costo_estimado|floatformat:2 }}</span>
+    </div>
+  </div>
+  {% if derived_parent_snapshot %}
+  <div class="text-muted mt-2">
+    Directos del SKU: ${{ total_costo_directo|floatformat:2 }} · Base padre prorrateada: ${{ derived_parent_snapshot.parent_unit_cost|floatformat:2 }}.
+  </div>
+  {% endif %}
 </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+(() => {
+  const typeSelect = document.getElementById("receta-tipo");
+  const familySelect = document.getElementById("receta-familia");
+  const categorySelect = document.getElementById("receta-categoria");
+  const familyCategoryMap = {{ familia_categoria_catalogo_json|safe }};
+  if (!typeSelect || !familySelect || !categorySelect) return;
+
+  const allCategoryOptions = Array.from(categorySelect.options).map((opt) => ({
+    value: opt.value,
+    text: opt.textContent,
+  }));
+
+  function rebuildRecipeCategories() {
+    const recipeType = typeSelect.value || "";
+    const family = familySelect.value || "";
+    const selectedCategory = categorySelect.value || categorySelect.dataset.current || "";
+    categorySelect.innerHTML = '<option value="">Categoría (seleccionar)</option>';
+
+    let allowed = [];
+    if (recipeType === "PRODUCTO_FINAL" && family && familyCategoryMap[family]) {
+      allowed = familyCategoryMap[family];
+    } else {
+      allowed = allCategoryOptions.map((item) => item.value).filter((value) => value);
+    }
+
+    const seen = new Set();
+    allowed.forEach((value) => {
+      const trimmed = (value || "").trim();
+      if (!trimmed || seen.has(trimmed.toLowerCase())) return;
+      seen.add(trimmed.toLowerCase());
+      const opt = document.createElement("option");
+      opt.value = trimmed;
+      opt.textContent = trimmed;
+      if (trimmed === selectedCategory) opt.selected = true;
+      categorySelect.appendChild(opt);
+    });
+  }
+
+  typeSelect.addEventListener("change", rebuildRecipeCategories);
+  familySelect.addEventListener("change", rebuildRecipeCategories);
+  rebuildRecipeCategories();
+})();
+
 (() => {
   const scrollers = Array.from(document.querySelectorAll(".js-drag-scroll"));
   if (!scrollers.length) return;

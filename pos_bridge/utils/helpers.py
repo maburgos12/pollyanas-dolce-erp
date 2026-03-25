@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable
@@ -50,6 +51,10 @@ def sanitize_sensitive_data(value: Any) -> Any:
         return [sanitize_sensitive_data(item) for item in value]
     if isinstance(value, tuple):
         return tuple(sanitize_sensitive_data(item) for item in value)
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
     return value
 
 

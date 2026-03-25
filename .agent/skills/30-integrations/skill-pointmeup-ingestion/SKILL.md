@@ -35,3 +35,6 @@ Standardize PointMeUp ingestion pipelines (xls/xlsx/csv/pdf) into canonical ERP 
 - Prioritize: ledger-based inventory movements, audit trail, RBAC, idempotent jobs, deterministic exports, KPI dictionary consistency.
 - Reconcile system data vs Excel/internal controls where processes still coexist.
 - Prefer stable naming standards and canonical catalogs across Point/ERP/sucursales.
+
+## Related playbooks
+- `playbooks/point_recetas_multinivel_y_addons.md`

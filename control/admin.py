@@ -14,9 +14,9 @@ class VentaPOSAdmin(admin.ModelAdmin):
 
 @admin.register(MermaPOS)
 class MermaPOSAdmin(admin.ModelAdmin):
-    list_display = ("fecha", "sucursal", "receta", "codigo_point", "cantidad", "motivo", "fuente")
-    list_filter = ("fecha", "sucursal", "fuente")
-    search_fields = ("codigo_point", "producto_texto", "motivo", "receta__nombre", "sucursal__nombre")
+    list_display = ("fecha", "sucursal", "receta", "codigo_point", "cantidad", "responsable_texto", "motivo", "fuente")
+    list_filter = ("fecha", "sucursal", "fuente", "responsable_texto")
+    search_fields = ("codigo_point", "producto_texto", "motivo", "responsable_texto", "receta__nombre", "sucursal__nombre")
     autocomplete_fields = ("receta", "sucursal")
     ordering = ("-fecha", "-id")
 

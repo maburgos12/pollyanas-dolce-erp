@@ -57,6 +57,34 @@
     .meta-box strong {
       color: var(--vino);
     }
+    .workflow {
+      border: 1px solid var(--borde);
+      padding: 10px;
+      margin: 10px 0 14px;
+      background: #fff;
+    }
+    .workflow-title {
+      font-size: 13px;
+      color: var(--vino);
+      font-weight: 700;
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+    .workflow-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .workflow-step {
+      border: 1px solid var(--borde);
+      padding: 8px;
+      font-size: 11px;
+    }
+    .workflow-step strong {
+      color: var(--vino);
+      display: block;
+      margin-bottom: 4px;
+    }
     h2 {
       font-size: 14px;
       margin: 14px 0 6px;
@@ -158,7 +186,7 @@
   <section class="page">
     <div class="header">
       <h1 class="title">{{ titulo_documento|default:"Orden de Solicitud de Insumos" }}</h1>
-      <p class="subtitle">Pollyana's Dolce · {{ subtitulo_documento|default:"Documento interno de abastecimiento" }}</p>
+      <p class="subtitle">Pollyana's Dolce · {{ subtitulo_documento|default:"Documento ERP de abastecimiento para producción" }}</p>
     </div>
 
     <div class="meta">
@@ -168,6 +196,23 @@
       <div class="meta-box"><strong>Generado:</strong> {% now "Y-m-d H:i" %}</div>
       <div class="meta-box"><strong>Solicitado por:</strong> {{ request.user.username|default:"-" }}</div>
       <div class="meta-box"><strong>Área:</strong> Producción</div>
+    </div>
+    <div class="workflow">
+      <div class="workflow-title">Workflow ERP del plan</div>
+      <div class="workflow-grid">
+        <div class="workflow-step">
+          <strong>01 · Explosión BOM</strong>
+          El plan consolida productos y calcula materia prima e internos requeridos.
+        </div>
+        <div class="workflow-step">
+          <strong>02 · Solicitud</strong>
+          Producción emite el requerimiento formal para compras y almacén.
+        </div>
+        <div class="workflow-step">
+          <strong>03 · Abastecimiento</strong>
+          Compras, recepción y consumo cierran el ciclo documental del plan.
+        </div>
+      </div>
     </div>
 
     <h2>Materia Prima a Solicitar</h2>

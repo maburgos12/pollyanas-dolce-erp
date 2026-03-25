@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Inventario - Aliases{% endblock %}
-{% block page_title %}Inventario · Aliases{% endblock %}
+{% block title %}Inventario - Referencias ERP{% endblock %}
+{% block page_title %}Inventario · Referencias ERP{% endblock %}
 
 {% block content %}
 <nav class="module-tabs">
@@ -8,38 +8,189 @@
   <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
   <a class="module-tab" href="{% url 'inventario:alertas' %}">Alertas</a>
-  <a class="module-tab active" href="{% url 'inventario:aliases_catalog' %}">Aliases</a>
-  <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Carga Almacén</a>
+  <a class="module-tab active" href="{% url 'inventario:aliases_catalog' %}">Referencias ERP</a>
+  <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
 </nav>
 
+{% if erp_command_center %}
 <section class="card">
-  <div class="card-header">Resumen de Matching (Almacén)</div>
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin-top:8px;">{{ erp_command_center.next_step }}</div>
+      <div style="margin-top:10px;">
+        <a class="btn btn-secondary" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+      </div>
+    </article>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Puerta de cierre ERP de referencias</div>
+  <div class="enterprise-flow-grid mb-3">
+    {% for row in references_workflow_rows %}
+    <article class="enterprise-flow-card">
+      <div class="enterprise-flow-step">Paso {{ row.step }}</div>
+      <div class="enterprise-flow-title">{{ row.title }}</div>
+      <div class="enterprise-flow-text">{{ row.detail }}</div>
+      <div class="enterprise-flow-metrics">
+        <span class="badge {% if row.tone == 'success' %}badge-success{% else %}badge-warning{% endif %}">
+          {% if row.tone == 'success' %}Cerrado{% else %}Abierto{% endif %}
+        </span>
+        <span class="muted">Responsable {{ row.owner }} · Cierre {{ row.completion }}% · Abiertos {{ row.open }} · Cerrados {{ row.closed }}</span>
+      </div>
+      <div class="muted" style="margin-top:8px;">Siguiente paso: {{ row.next_step }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ row.action_href }}">{{ row.action_label }}</a>
+    </article>
+    {% endfor %}
+  </div>
+  <div class="enterprise-release-banner mb-3 {% if references_release_summary.tone == 'success' %}is-success{% else %}is-warning{% endif %}">
+    <div>
+      <strong>{{ references_release_summary.label }}</strong>
+      <div class="muted">{{ references_release_summary.detail }}</div>
+    </div>
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+    <div class="enterprise-pill-card is-active">
+      <div class="enterprise-pill-title">Siguiente paso ERP</div>
+      <div class="enterprise-pill-text">{{ references_next_step_summary }}</div>
+    </div>
+    {% for card in reference_module_cards %}
+    <div class="enterprise-pill-card {% if card.tone == 'warning' %}is-active{% endif %}">
+      <div class="enterprise-pill-title">{{ card.title }}</div>
+      <div class="enterprise-pill-text">{{ card.detail }}</div>
+      <a class="btn btn-secondary btn-sm" href="{{ card.href }}">{{ card.action }}</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Workflow ERP de referencias</div>
+  <div class="enterprise-pill-grid">
+    <div class="enterprise-pill-card is-active">
+      <div class="enterprise-pill-title">01 Fuente operativa</div>
+      <div class="enterprise-pill-text">Almacén, recetas y fuente comercial externa alimentan nombres y códigos desde operación real.</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">02 Artículo maestro</div>
+      <div class="enterprise-pill-text">Cada referencia debe consolidarse en un solo artículo maestro activo.</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">03 Cierre operativo</div>
+      <div class="enterprise-pill-text">Solo artículos consolidados pasan a inventario, compras, costeo y reabasto.</div>
+    </div>
+  </div>
+</section>
+
+{% if executive_radar_rows %}
+<section class="card">
+  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Bloqueo dominante</th>
+          <th>Depende de</th>
+          <th>Cierre</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in executive_radar_rows %}
+        <tr>
+          <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.dominant_blocker }}</td>
+          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+          <td>{{ row.progress_pct }}%</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Frente</th>
+          <th>Responsable</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in erp_governance_rows %}
+        <tr>
+          <td>{{ row.front }}</td>
+          <td>{{ row.owner }}</td>
+          <td>{{ row.blockers }}</td>
+          <td>{{ row.completion }}%</td>
+          <td>{{ row.detail }}</td>
+          <td>{{ row.next_step }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Centro operativo de referencias</div>
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-number is-success">{{ matching_summary.total_matched }}</div>
-      <div class="kpi-label">Matches (últimos {{ matching_summary.runs_count }} syncs)</div>
+      <div class="kpi-label">Referencias consolidadas (últimos {{ matching_summary.runs_count }} cortes)</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if matching_summary.total_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ matching_summary.total_unmatched }}</div>
-      <div class="kpi-label">Sin match (últimos {{ matching_summary.runs_count }} syncs)</div>
+      <div class="kpi-label">Referencias por validar (últimos {{ matching_summary.runs_count }} cortes)</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if matching_summary.match_rate >= 98 %}is-success{% elif matching_summary.match_rate >= 95 %}is-warning{% else %}is-danger{% endif %}">
         {{ matching_summary.match_rate|floatformat:2 }}%
       </div>
-      <div class="kpi-label">Tasa de match</div>
+      <div class="kpi-label">Cobertura ERP</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number">{{ matching_summary.ok_runs }}/{{ matching_summary.runs_count }}</div>
-      <div class="kpi-label">Sync OK</div>
+      <div class="kpi-label">Cortes cerrados</div>
     </article>
   </div>
   {% if latest_sync %}
   <p class="muted" style="margin-top:10px;">
-    Último sync: {{ latest_sync.started_at|date:"Y-m-d H:i" }} ·
+    Última corrida: {{ latest_sync.started_at|date:"Y-m-d H:i" }} ·
     Origen {{ latest_sync.get_source_display }} ·
-    Match {{ latest_sync.matched }} ·
-    Sin match {{ latest_sync.unmatched }} ·
+    Consolidadas {{ latest_sync.matched }} ·
+    Pendientes {{ latest_sync.unmatched }} ·
     Filas inventario {{ latest_sync.rows_stock_read }} ·
     Filas movimientos {{ latest_sync.rows_mov_read }}.
   </p>
@@ -47,15 +198,15 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Datos Maestros · Normalización y Duplicados</div>
-  <p class="muted">Herramientas de higiene de catálogo para evitar drift en nombres/códigos y prevenir duplicados en operaciones.</p>
+      <div class="card-header">Gobierno operativo de referencias</div>
+  <p class="muted">Herramientas para revisar referencias, consolidar artículos maestros y cerrar duplicados operativos dentro del catálogo.</p>
 
   <div class="table-responsive" style="margin-top:8px;">
     <table class="table table-striped">
       <thead>
         <tr>
-          <th style="width:50%;">Normalización</th>
-          <th style="width:50%;">Duplicados</th>
+            <th style="width:50%;">Cierre del maestro</th>
+          <th style="width:50%;">Gobierno del catálogo</th>
         </tr>
       </thead>
       <tbody>
@@ -65,36 +216,36 @@
               {% csrf_token %}
               <input type="hidden" name="action" value="master_normalize">
               <select class="input-field" name="master_scope">
-                <option value="all" {% if master_scope == "all" %}selected{% endif %}>Scope · Todos</option>
-                <option value="insumos" {% if master_scope == "insumos" %}selected{% endif %}>Scope · Insumos</option>
-                <option value="recetas" {% if master_scope == "recetas" %}selected{% endif %}>Scope · Recetas</option>
-                <option value="aliases_insumo" {% if master_scope == "aliases_insumo" %}selected{% endif %}>Scope · Aliases insumo</option>
-                <option value="receta_codigos_point" {% if master_scope == "receta_codigos_point" %}selected{% endif %}>Scope · Códigos Point (receta)</option>
+                <option value="all" {% if master_scope == "all" %}selected{% endif %}>Ámbito · Todos</option>
+                <option value="insumos" {% if master_scope == "insumos" %}selected{% endif %}>Ámbito · Insumos</option>
+                <option value="recetas" {% if master_scope == "recetas" %}selected{% endif %}>Ámbito · Recetas</option>
+                <option value="aliases_insumo" {% if master_scope == "aliases_insumo" %}selected{% endif %}>Ámbito · Referencias de catálogo</option>
+                <option value="receta_codigos_point" {% if master_scope == "receta_codigos_point" %}selected{% endif %}>Ámbito · Códigos externos (receta)</option>
               </select>
               <input class="input-field" type="text" name="master_q" value="{{ master_q }}" placeholder="Filtro opcional...">
               <input class="input-field" type="number" name="master_limit" min="1" max="5000" value="{{ master_limit }}">
               <input class="input-field" type="number" name="master_offset" min="0" max="100000" value="{{ master_offset }}">
-              <button class="btn btn-secondary" type="submit" name="master_mode" value="preview">Vista previa</button>
+              <button class="btn btn-secondary" type="submit" name="master_mode" value="preview">Revisar cambios</button>
               {% if can_manage_inventario %}
-              <button class="btn btn-primary" type="submit" name="master_mode" value="apply">Aplicar</button>
+              <button class="btn btn-primary" type="submit" name="master_mode" value="apply">Aplicar cierre</button>
               {% endif %}
             </form>
 
             <div class="toolbar" style="margin-top:10px;">
-              <span class="badge badge-primary">Candidatos: {{ master_normalize.totales.candidates }}</span>
-              <span class="badge badge-warning">Cambios: {{ master_normalize.totales.changed }}</span>
-              <span class="badge badge-success">Actualizados: {{ master_normalize.totales.updated }}</span>
+              <span class="badge badge-primary">Registros revisados: {{ master_normalize.totales.candidates }}</span>
+              <span class="badge badge-warning">Cambios listos: {{ master_normalize.totales.changed }}</span>
+              <span class="badge badge-success">Resueltos: {{ master_normalize.totales.updated }}</span>
             </div>
 
             <div class="table-responsive" style="margin-top:10px;">
               <table class="table table-striped">
                 <thead>
                   <tr>
-                    <th>Scope</th>
-                    <th class="text-end">Candidatos</th>
-                    <th class="text-end">Retornados</th>
-                    <th class="text-end">Cambios</th>
-                    <th class="text-end">Actualizados</th>
+                    <th>Ámbito</th>
+                    <th class="text-end">Revisados</th>
+                    <th class="text-end">Mostrados</th>
+                    <th class="text-end">Sugeridos</th>
+                    <th class="text-end">Aplicados</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -107,7 +258,7 @@
                     <td class="text-end">{{ v.updated }}</td>
                   </tr>
                   {% empty %}
-                  <tr><td colspan="5" class="text-muted">Sin datos por scope.</td></tr>
+                  <tr><td colspan="5" class="text-muted">Sin datos para el ámbito actual.</td></tr>
                   {% endfor %}
                 </tbody>
               </table>
@@ -117,11 +268,11 @@
           <td>
             <form method="get" class="form-grid-auto">
               <select class="input-field" name="master_dup_scope">
-                <option value="all" {% if master_dup_scope == "all" %}selected{% endif %}>Scope · Todos</option>
-                <option value="insumos" {% if master_dup_scope == "insumos" %}selected{% endif %}>Scope · Insumos</option>
-                <option value="recetas" {% if master_dup_scope == "recetas" %}selected{% endif %}>Scope · Recetas</option>
-                <option value="proveedores" {% if master_dup_scope == "proveedores" %}selected{% endif %}>Scope · Proveedores</option>
-                <option value="codigos_point" {% if master_dup_scope == "codigos_point" %}selected{% endif %}>Scope · Códigos Point</option>
+                <option value="all" {% if master_dup_scope == "all" %}selected{% endif %}>Ámbito · Todos</option>
+                <option value="insumos" {% if master_dup_scope == "insumos" %}selected{% endif %}>Ámbito · Insumos</option>
+                <option value="recetas" {% if master_dup_scope == "recetas" %}selected{% endif %}>Ámbito · Recetas</option>
+                <option value="proveedores" {% if master_dup_scope == "proveedores" %}selected{% endif %}>Ámbito · Proveedores</option>
+                <option value="codigos_point" {% if master_dup_scope == "codigos_point" %}selected{% endif %}>Ámbito · Códigos comerciales</option>
               </select>
               <input class="input-field" type="text" name="master_dup_q" value="{{ master_dup_q }}" placeholder="Filtro opcional...">
               <input class="input-field" type="number" name="master_dup_min_count" min="2" max="200" value="{{ master_dup_min_count }}">
@@ -143,11 +294,11 @@
               <table class="table table-striped">
                 <thead>
                   <tr>
-                    <th>Tipo</th>
-                    <th>Llave</th>
+                    <th>Grupo</th>
+                    <th>Clave consolidada</th>
                     <th class="text-end">Count</th>
-                    <th>Miembros</th>
-                    {% if can_manage_inventario %}<th>Resolver</th>{% endif %}
+                    <th>Artículos involucrados</th>
+                    {% if can_manage_inventario %}<th>Acción</th>{% endif %}
                   </tr>
                 </thead>
                 <tbody>
@@ -178,13 +329,13 @@
                         <input type="hidden" name="master_dup_offset" value="{{ master_dup_offset }}">
                         <select class="input-field" name="target_insumo_id">
                           {% for m in row.members %}
-                          <option value="{{ m.id }}">{{ m.nombre }}{% if forloop.first %} (canon sugerido){% endif %}</option>
+                          <option value="{{ m.id }}">{{ m.nombre }}{% if forloop.first %} (oficial sugerido){% endif %}</option>
                           {% endfor %}
                         </select>
-                        <button class="btn btn-primary" type="submit">Consolidar grupo</button>
+                        <button class="btn btn-primary" type="submit">Unificar grupo</button>
                       </form>
                       {% else %}
-                      <span class="text-muted">N/A</span>
+                      <span class="text-muted">No aplica</span>
                       {% endif %}
                     </td>
                     {% endif %}
@@ -198,7 +349,7 @@
 
             {% if can_manage_inventario %}
             <div class="card" style="margin-top:10px; padding:12px;">
-              <div class="card-header" style="font-size:16px; margin-bottom:8px;">Resolver duplicado puntual de insumo</div>
+              <div class="card-header" style="font-size:16px; margin-bottom:8px;">Unificar artículo puntual</div>
               <form method="post" class="form-grid-auto">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="resolve_duplicate_insumo">
@@ -208,7 +359,7 @@
                 <input type="hidden" name="master_dup_limit" value="{{ master_dup_limit }}">
                 <input type="hidden" name="master_dup_offset" value="{{ master_dup_offset }}">
                 <select class="input-field" name="source_insumo_id" required>
-                  <option value="">Insumo origen (duplicado)...</option>
+                  <option value="">Artículo origen...</option>
                   {% for g in master_duplicate_insumo_groups %}
                     {% for m in g.members %}
                     <option value="{{ m.id }}">{{ m.nombre }} · {{ g.duplicate_key }}</option>
@@ -216,12 +367,12 @@
                   {% endfor %}
                 </select>
                 <select class="input-field" name="target_insumo_id" required>
-                  <option value="">Insumo destino (canon)...</option>
+                  <option value="">Artículo oficial destino...</option>
                   {% for i in insumo_alias_targets %}
-                  <option value="{{ i.id }}">{{ i.nombre }}</option>
+                  <option value="{{ i.id }}">{{ i.nombre }}{% if i.canonical_variant_count > 1 %} · Oficial ({{ i.canonical_variant_count }} variantes){% endif %}</option>
                   {% endfor %}
                 </select>
-                <button class="btn btn-primary" type="submit">Resolver duplicado puntual</button>
+                <button class="btn btn-primary" type="submit">Unificar artículo puntual</button>
               </form>
             </div>
             {% endif %}
@@ -233,41 +384,106 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Homologación Cruzada (Point + Almacén + Recetas)</div>
-  <p class="muted">Prioriza nombres que aparezcan en 2 o 3 fuentes para normalizar todo el ecosistema con un solo alias.</p>
+  <div class="card-header">Mesa ERP de referencias abiertas</div>
+  <p class="muted">Prioriza nombres repetidos entre fuentes para consolidar un solo artículo ERP por operación real.</p>
+
+  {% if pending_focus %}
+  <div class="alert enterprise-focus-alert enterprise-focus-alert-{{ pending_focus.tone }} mb-3">
+    <div class="enterprise-focus-alert-copy">
+      <div class="enterprise-focus-alert-title">Bloqueo ERP prioritario</div>
+      <div class="enterprise-focus-alert-summary">{{ pending_focus.summary }}</div>
+      <div class="enterprise-focus-alert-detail">{{ pending_focus.action_detail }}</div>
+    </div>
+    <div class="enterprise-focus-alert-actions">
+      <span class="badge {% if pending_focus.tone == 'success' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+        {{ pending_focus.label }}
+      </span>
+      <a class="btn btn-primary btn-sm" href="{{ pending_focus.action_url }}">{{ pending_focus.action_label }}</a>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if pending_source_cards %}
+  <div class="kpi-mini mb-3">
+    {% for card in pending_source_cards %}
+    <div class="kpi-card">
+      <div class="kpi-number is-warning">{{ card.count }}</div>
+      <div class="kpi-label">{{ card.source|title }}</div>
+      <div class="muted mt-1">{{ card.top_name }}</div>
+      <div class="muted mt-1">Confianza máx: {{ card.top_score|floatformat:0 }}</div>
+      <div class="mt-2">
+        <a class="btn btn-secondary btn-sm" href="{% url 'inventario:aliases_catalog' %}?q={{ card.top_name|urlencode }}">{{ card.source|title }}</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-number {% if cross_summary.point_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ cross_summary.point_unmatched }}</div>
-      <div class="kpi-label">Pendientes Point ({{ cross_point_tipo|lower }})</div>
+      <div class="kpi-label">Integración comercial en revisión ({{ cross_point_tipo|lower }})</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if cross_summary.almacen_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ cross_summary.almacen_unmatched }}</div>
-      <div class="kpi-label">Pendientes Almacén</div>
+      <div class="kpi-label">Almacén en revisión</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if cross_summary.recetas_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ cross_summary.recetas_unmatched }}</div>
-      <div class="kpi-label">Líneas recetas sin match</div>
+      <div class="kpi-label">Recetas en revisión</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if cross_summary.overlaps > 0 %}is-warning{% else %}is-success{% endif %}">{{ cross_summary.overlaps }}</div>
-      <div class="kpi-label">Nombres en 2+ fuentes</div>
+      <div class="kpi-label">Referencias en 2+ fuentes</div>
     </article>
   </div>
 
   <div class="toolbar" style="margin-top:10px;">
-    <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}?tipo=INSUMO">Revisar pendientes Point</a>
-    <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Revisar pendientes Recetas</a>
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_csv&cross_q={{ cross_q|urlencode }}&cross_source={{ cross_source }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}&cross_sort_by={{ cross_sort_by }}&cross_sort_dir={{ cross_sort_dir }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes CSV</a>
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_xlsx&cross_q={{ cross_q|urlencode }}&cross_source={{ cross_source }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}&cross_sort_by={{ cross_sort_by }}&cross_sort_dir={{ cross_sort_dir }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar pendientes XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'maestros:point_pending_review' %}?tipo=INSUMO">Revisar integración comercial</a>
+    <a class="btn btn-secondary" href="{% url 'recetas:matching_pendientes' %}">Revisar BOM de recetas</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_csv&cross_q={{ cross_q|urlencode }}&cross_source={{ cross_source }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}&cross_sort_by={{ cross_sort_by }}&cross_sort_dir={{ cross_sort_dir }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar cierre CSV</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=cross_pending_xlsx&cross_q={{ cross_q|urlencode }}&cross_source={{ cross_source }}&cross_min_sources={{ cross_min_sources }}&cross_score_min={{ cross_score_min }}&cross_point_tipo={{ cross_point_tipo }}&cross_sort_by={{ cross_sort_by }}&cross_sort_dir={{ cross_sort_dir }}{% if cross_only_suggested %}&cross_only_suggested=1{% endif %}">Exportar cierre XLSX</a>
     {% if can_manage_inventario %}
     <form method="post" class="inline-form">
       {% csrf_token %}
       <input type="hidden" name="action" value="reprocess_recetas_pending">
-      <button class="btn btn-primary" type="submit">Reprocesar pendientes recetas</button>
+      <button class="btn btn-primary" type="submit">Recalcular artículos ERP de recetas</button>
     </form>
     {% endif %}
   </div>
+
+  {% if pending_focus_rows %}
+  <div class="table-responsive" style="margin-top:10px;">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Nombre origen</th>
+          <th>Fuentes</th>
+          <th class="text-end">Repeticiones</th>
+          <th>Artículo sugerido</th>
+          <th class="text-end">Confianza máx</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in pending_focus_rows %}
+        <tr>
+          <td>{{ row.nombre_origen }}</td>
+          <td>{{ row.sources }}</td>
+          <td class="text-end">{{ row.count }}</td>
+          <td>{{ row.sugerencia|default:"-" }}</td>
+          <td class="text-end">{{ row.score_max|floatformat:0 }}</td>
+          <td>
+            <a class="btn btn-secondary btn-sm" href="{% url 'inventario:aliases_catalog' %}?q={{ row.nombre_origen|urlencode }}">
+              Revisar referencia
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 
   {% if can_manage_inventario and cross_unified_rows %}
   <form method="post" class="form-grid-auto" style="margin-top:10px; margin-bottom:10px;">
@@ -286,40 +502,40 @@
     {% if cross_only_suggested %}
     <input type="hidden" name="cross_only_suggested" value="1">
     {% endif %}
-    <label class="muted" for="auto_min_score">Score mínimo</label>
+    <label class="muted" for="auto_min_score">Nivel mínimo</label>
     <input id="auto_min_score" class="input-field" type="number" name="auto_min_score" min="0" max="100" step="0.1" value="{{ auto_default_score|floatformat:1 }}">
     <label class="muted" for="auto_min_sources">Fuentes mínimas</label>
     <input id="auto_min_sources" class="input-field" type="number" name="auto_min_sources" min="1" max="3" step="1" value="{{ auto_default_min_sources }}">
     <label class="muted" for="auto_max_rows">Máx. filas a aplicar</label>
     <input id="auto_max_rows" class="input-field" type="number" name="auto_max_rows" min="1" max="500" step="1" value="{{ auto_default_limit }}">
-    <button class="btn btn-primary" type="submit">Auto-aplicar sugerencias</button>
+    <button class="btn btn-primary" type="submit">Liberar propuestas ERP</button>
     <span class="muted">Candidatos estimados: {{ auto_apply_candidates }}</span>
   </form>
   {% endif %}
 
   <form method="get" class="form-grid-auto" style="margin-top:6px; margin-bottom:10px;">
     <input type="hidden" name="cross_offset" value="0">
-    <input class="input-field" type="text" name="cross_q" value="{{ cross_q }}" placeholder="Buscar nombre/sugerencia...">
+    <input class="input-field" type="text" name="cross_q" value="{{ cross_q }}" placeholder="Buscar nombre o propuesta...">
     <select class="input-field" name="cross_source">
       <option value="TODOS" {% if cross_source == "TODOS" or cross_source == "ALL" %}selected{% endif %}>Origen · Todos</option>
       <option value="ALMACEN" {% if cross_source == "ALMACEN" %}selected{% endif %}>Origen · Almacén</option>
-      <option value="POINT" {% if cross_source == "POINT" %}selected{% endif %}>Origen · Point</option>
+      <option value="POINT" {% if cross_source == "POINT" %}selected{% endif %}>Origen · Comercial</option>
       <option value="RECETAS" {% if cross_source == "RECETAS" %}selected{% endif %}>Origen · Recetas</option>
     </select>
     <input class="input-field" type="number" name="cross_min_sources" min="1" max="3" step="1" value="{{ cross_min_sources }}">
     <input class="input-field" type="number" name="cross_score_min" min="0" max="100" step="0.1" value="{{ cross_score_min }}">
     <select class="input-field" name="cross_point_tipo">
-      <option value="INSUMO" {% if cross_point_tipo == "INSUMO" %}selected{% endif %}>Point · Insumos</option>
-      <option value="PROVEEDOR" {% if cross_point_tipo == "PROVEEDOR" %}selected{% endif %}>Point · Proveedores</option>
-      <option value="PRODUCTO" {% if cross_point_tipo == "PRODUCTO" %}selected{% endif %}>Point · Productos</option>
-      <option value="TODOS" {% if cross_point_tipo == "TODOS" or cross_point_tipo == "ALL" %}selected{% endif %}>Point · Todos</option>
+      <option value="INSUMO" {% if cross_point_tipo == "INSUMO" %}selected{% endif %}>Externo · Insumos</option>
+      <option value="PROVEEDOR" {% if cross_point_tipo == "PROVEEDOR" %}selected{% endif %}>Externo · Proveedores</option>
+      <option value="PRODUCTO" {% if cross_point_tipo == "PRODUCTO" %}selected{% endif %}>Externo · Productos</option>
+      <option value="TODOS" {% if cross_point_tipo == "TODOS" or cross_point_tipo == "ALL" %}selected{% endif %}>Externo · Todos</option>
     </select>
     <select class="input-field" name="cross_sort_by">
       <option value="sources_active" {% if cross_sort_by == "sources_active" %}selected{% endif %}>Orden · Fuentes activas</option>
-      <option value="score_max" {% if cross_sort_by == "score_max" %}selected{% endif %}>Orden · Score máximo</option>
+      <option value="score_max" {% if cross_sort_by == "score_max" %}selected{% endif %}>Orden · Nivel máximo</option>
       <option value="total_count" {% if cross_sort_by == "total_count" %}selected{% endif %}>Orden · Repeticiones</option>
       <option value="nombre_muestra" {% if cross_sort_by == "nombre_muestra" %}selected{% endif %}>Orden · Nombre</option>
-      <option value="point_count" {% if cross_sort_by == "point_count" %}selected{% endif %}>Orden · Point</option>
+      <option value="point_count" {% if cross_sort_by == "point_count" %}selected{% endif %}>Orden · Fuente externa</option>
       <option value="almacen_count" {% if cross_sort_by == "almacen_count" %}selected{% endif %}>Orden · Almacén</option>
       <option value="receta_count" {% if cross_sort_by == "receta_count" %}selected{% endif %}>Orden · Recetas</option>
     </select>
@@ -333,13 +549,13 @@
       <option value="250" {% if cross_limit == 250 %}selected{% endif %}>250 filas</option>
       <option value="500" {% if cross_limit == 500 %}selected{% endif %}>500 filas</option>
     </select>
-    <label class="inline-check"><input type="checkbox" name="cross_only_suggested" {% if cross_only_suggested %}checked{% endif %}>Solo con sugerencia</label>
-    <button class="btn btn-secondary" type="submit">Filtrar homologación</button>
+    <label class="inline-check"><input type="checkbox" name="cross_only_suggested" {% if cross_only_suggested %}checked{% endif %}>Solo con propuesta</label>
+    <button class="btn btn-secondary" type="submit">Aplicar filtros</button>
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}">Limpiar filtros</a>
   </form>
   <p class="muted">Mostrando {{ cross_returned_count }} de {{ cross_filtered_count }} filtrados (total cruzado: {{ cross_total_count }}).</p>
   <div class="toolbar" style="margin-top:6px; margin-bottom:4px;">
-    <span class="badge badge-primary">Point: {{ cross_source_stats.point_rows }}</span>
+    <span class="badge badge-primary">Externo: {{ cross_source_stats.point_rows }}</span>
     <span class="badge badge-primary">Almacén: {{ cross_source_stats.almacen_rows }}</span>
     <span class="badge badge-primary">Recetas: {{ cross_source_stats.receta_rows }}</span>
     <span class="badge badge-warning">Multifuente: {{ cross_source_stats.multi_source_rows }}</span>
@@ -347,7 +563,7 @@
   <div class="toolbar" style="margin-top:4px; margin-bottom:8px;">
     <a class="btn btn-small {% if cross_source == 'TODOS' or cross_source == 'ALL' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_todos }}">Origen: Todos</a>
     <a class="btn btn-small {% if cross_source == 'ALMACEN' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_almacen }}">Origen: Almacén</a>
-    <a class="btn btn-small {% if cross_source == 'POINT' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_point }}">Origen: Point</a>
+    <a class="btn btn-small {% if cross_source == 'POINT' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_point }}">Origen: Comercial</a>
     <a class="btn btn-small {% if cross_source == 'RECETAS' %}btn-primary{% else %}btn-secondary{% endif %}" href="{% url 'inventario:aliases_catalog' %}?{{ cross_query_source_recetas }}">Origen: Recetas</a>
   </div>
   <div class="toolbar" style="margin-top:6px; margin-bottom:10px;">
@@ -366,8 +582,8 @@
       <thead>
         <tr>
           <th>Nombre</th>
-          <th>Normalizado</th>
-          <th class="text-end">Point</th>
+          <th>Clave consolidada</th>
+          <th class="text-end">Externo</th>
           <th class="text-end">Almacén</th>
           <th class="text-end">Recetas</th>
           <th class="text-end">Fuentes</th>
@@ -411,7 +627,7 @@
                 <input type="hidden" name="alias_name" value="{{ row.nombre_muestra }}">
                 <input type="hidden" name="suggestion" value="{{ row.suggestion }}">
                 <input type="hidden" name="score_min" value="90">
-                <button class="btn btn-primary" type="submit">Aplicar sugerencia</button>
+              <button class="btn btn-primary" type="submit">Liberar propuesta</button>
               </form>
               {% endif %}
             </div>
@@ -423,14 +639,14 @@
     </table>
   </div>
   {% else %}
-  <p class="muted" style="margin-top:10px;">Sin pendientes cruzados para homologar.</p>
+  <p class="muted" style="margin-top:10px;">Sin cruces operativos abiertos.</p>
   {% endif %}
 </section>
 
 {% if can_manage_inventario %}
 <section class="card">
-  <div class="card-header">Crear Alias</div>
-  <p class="muted">Unifica nombres de almacén contra el catálogo oficial de insumos para evitar errores en cálculos, compras y reportes.</p>
+  <div class="card-header">Crear referencia ERP</div>
+  <p class="muted">Vincula nombres de almacén contra el catálogo oficial de insumos para evitar errores en cálculos, compras y reportes.</p>
   <form method="post" class="form-grid-2">
     {% csrf_token %}
     <input type="hidden" name="action" value="create">
@@ -440,16 +656,16 @@
       <input id="alias_name_input" class="input-field" type="text" name="alias_name" required placeholder="Ej. Harina pastelera 25kg">
     </div>
     <div class="form-group">
-      <label>Insumo oficial</label>
+      <label>Artículo maestro</label>
       <select class="input-field" name="insumo_id" required>
         <option value="">Selecciona insumo...</option>
         {% for i in insumo_alias_targets %}
-        <option value="{{ i.id }}">{{ i.nombre }}</option>
-        {% endfor %}
+        <option value="{{ i.id }}">{{ i.nombre }}{% if i.canonical_variant_count > 1 %} · Oficial ({{ i.canonical_variant_count }} variantes){% endif %}</option>
+      {% endfor %}
       </select>
     </div>
     <div style="grid-column:1/-1; display:flex; justify-content:flex-end;">
-      <button class="btn btn-primary" type="submit">Guardar alias</button>
+      <button class="btn btn-primary" type="submit">Guardar equivalencia</button>
     </div>
   </form>
 </section>
@@ -457,8 +673,8 @@
 
 {% if can_manage_inventario %}
 <section class="card">
-  <div class="card-header">Carga Masiva de Aliases (CSV/XLSX)</div>
-  <p class="muted">Columnas sugeridas: <code>alias</code>, <code>insumo</code>. Si no mandas <code>insumo</code>, se intentará resolver por el alias con score mínimo.</p>
+  <div class="card-header">Carga masiva de referencias ERP (CSV/XLSX)</div>
+  <p class="muted">Columnas sugeridas: <code>referencia</code>, <code>insumo</code>. Si no mandas <code>insumo</code>, el sistema intentará detectar el mejor artículo ERP disponible.</p>
   <div class="toolbar" style="margin-top:8px; margin-bottom:8px;">
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_template_csv">Descargar plantilla CSV</a>
     <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_template_xlsx">Descargar plantilla XLSX</a>
@@ -469,33 +685,33 @@
     <input type="hidden" name="next_q" value="{{ q }}">
     <input class="input-field" type="file" name="archivo_aliases" accept=".csv,.xlsx,.xlsm" required>
     <input class="input-field" type="number" name="score_min" min="0" max="100" step="0.1" value="{% if alias_import_stats.score_min %}{{ alias_import_stats.score_min }}{% else %}90{% endif %}">
-    <button class="btn btn-primary" type="submit">Importar aliases</button>
+    <button class="btn btn-primary" type="submit">Importar referencias ERP</button>
   </form>
 
   {% if alias_import_stats.rows_total %}
   <div class="kpi-grid kpi-mini" style="margin-top:12px;">
     <article class="kpi-card">
       <div class="kpi-number">{{ alias_import_stats.rows_total }}</div>
-      <div class="kpi-label">Filas archivo</div>
+      <div class="kpi-label">Filas del corte</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number is-success">{{ alias_import_stats.created }}</div>
-      <div class="kpi-label">Aliases creados</div>
+      <div class="kpi-label">Equivalencias creadas</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number is-warning">{{ alias_import_stats.updated }}</div>
-      <div class="kpi-label">Aliases actualizados</div>
+      <div class="kpi-label">Equivalencias actualizadas</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if alias_import_stats.unresolved %}is-danger{% else %}is-success{% endif %}">{{ alias_import_stats.unresolved }}</div>
-      <div class="kpi-label">Sin resolver</div>
+      <div class="kpi-label">Por validar</div>
     </article>
   </div>
   <p class="muted" style="margin-top:8px;">
-    Archivo: {{ alias_import_stats.file_name }} ·
-    Score mínimo: {{ alias_import_stats.score_min|floatformat:1 }} ·
-    Point resueltos: {{ alias_import_stats.point_resolved }} ·
-    Recetas resueltas: {{ alias_import_stats.recetas_resolved }}.
+    Corte: {{ alias_import_stats.file_name }} ·
+    Confianza mínima: {{ alias_import_stats.score_min|floatformat:1 }} ·
+    Integración comercial liberado: {{ alias_import_stats.point_resolved }} ·
+    Recetas liberadas: {{ alias_import_stats.recetas_resolved }}.
   </p>
   {% endif %}
 </section>
@@ -503,22 +719,22 @@
 
 {% if can_manage_inventario and alias_import_preview %}
 <section class="card">
-  <div class="card-header">Pendientes de Importación (Alias)</div>
-  <p class="muted">Filas que no se pudieron aplicar automáticamente. Corrige el nombre de insumo o usa "Usar en alta".</p>
+  <div class="card-header">Equivalencias por validar</div>
+  <p class="muted">Filas que no se pudieron aplicar automáticamente. Corrige el nombre del artículo o usa "Usar en alta".</p>
   <div class="toolbar" style="margin-bottom:8px;">
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_import_preview_csv">Exportar pendientes CSV</a>
-    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_import_preview_xlsx">Exportar pendientes XLSX</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_import_preview_csv">Exportar revisión CSV</a>
+    <a class="btn btn-secondary" href="{% url 'inventario:aliases_catalog' %}?export=alias_import_preview_xlsx">Exportar revisión XLSX</a>
   </div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
         <tr>
           <th>Fila</th>
-          <th>Alias archivo</th>
-          <th>Insumo archivo</th>
-          <th>Sugerencia</th>
-          <th class="text-end">Score</th>
-          <th>Método</th>
+          <th>Referencia del corte</th>
+          <th>Artículo del corte</th>
+          <th>Artículo sugerido</th>
+          <th class="text-end">Confianza</th>
+          <th>Propuesta</th>
           <th>Motivo</th>
           <th>Acción</th>
         </tr>
@@ -542,21 +758,21 @@
   <form method="post" style="display:flex; justify-content:flex-end; margin-top:8px;">
     {% csrf_token %}
     <input type="hidden" name="action" value="clear_import_preview">
-    <button class="btn btn-secondary" type="submit">Limpiar pendientes de importación</button>
+      <button class="btn btn-secondary" type="submit">Limpiar revisión</button>
   </form>
 </section>
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Pendientes Recientes de Match (Almacén)</div>
+  <div class="card-header">Revisión reciente de referencias (Almacén)</div>
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-number {% if pending_visible_count > 0 %}is-danger{% else %}is-success{% endif %}">{{ pending_visible_count }}</div>
-      <div class="kpi-label">Pendientes en pantalla</div>
+      <div class="kpi-label">Registros en pantalla</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if pending_unique_count > 0 %}is-warning{% else %}is-success{% endif %}">{{ pending_unique_count }}</div>
-      <div class="kpi-label">Pendientes únicos</div>
+      <div class="kpi-label">Equivalencias únicas por validar</div>
     </article>
     <article class="kpi-card">
       <div class="kpi-number">{{ matching_summary.runs_count }}</div>
@@ -564,28 +780,28 @@
     </article>
     <article class="kpi-card">
       <div class="kpi-number {% if matching_summary.total_unmatched > 0 %}is-danger{% else %}is-success{% endif %}">{{ matching_summary.total_unmatched }}</div>
-      <div class="kpi-label">Sin match acumulado</div>
+      <div class="kpi-label">Pendiente acumulado</div>
     </article>
   </div>
   {% if pending_source == "session" %}
-  <p class="muted">Fuente: sesión actual (última importación manual en este navegador).</p>
+  <p class="muted">Fuente: sesión actual (último corte cargado en esta sesión).</p>
   {% elif pending_source == "persisted" and latest_pending_run %}
-  <p class="muted">Fuente: último sync con pendientes ({{ latest_pending_run.started_at|date:"Y-m-d H:i" }}).</p>
+  <p class="muted">Fuente: último corte con validación abierta ({{ latest_pending_run.started_at|date:"Y-m-d H:i" }}).</p>
   {% else %}
   <p class="muted">
-    No hay pendientes recientes en pantalla.
-    {% if latest_sync %}Último sync: {{ latest_sync.started_at|date:"Y-m-d H:i" }} · Sin match: {{ latest_sync.unmatched }}.{% endif %}
+    No hay validaciones recientes en pantalla.
+    {% if latest_sync %}Último corte: {{ latest_sync.started_at|date:"Y-m-d H:i" }} · Pendientes: {{ latest_sync.unmatched }}.{% endif %}
   </p>
   {% endif %}
   {% if hidden_pending_run and can_manage_inventario %}
   <div class="toolbar" style="margin-top:10px;">
     <span class="muted">
-      Hay un run oculto: #{{ hidden_pending_run.id }} ({{ hidden_pending_run.started_at|date:"Y-m-d H:i" }}).
+      Hay un corte oculto: #{{ hidden_pending_run.id }} ({{ hidden_pending_run.started_at|date:"Y-m-d H:i" }}).
     </span>
     <form method="post" class="inline-form">
       {% csrf_token %}
       <input type="hidden" name="action" value="reset_hidden_pending">
-      <button class="btn btn-secondary" type="submit">Restaurar visibilidad</button>
+      <button class="btn btn-secondary" type="submit">Restaurar corte</button>
     </form>
   </div>
   {% endif %}
@@ -598,8 +814,8 @@
           <th>Fecha</th>
           <th>Origen</th>
           <th>Estatus</th>
-          <th class="text-end">Match</th>
-          <th class="text-end">Sin match</th>
+          <th class="text-end">Consolidados</th>
+          <th class="text-end">Por validar</th>
           <th>Detalle</th>
           {% if can_manage_inventario %}<th>Acción</th>{% endif %}
         </tr>
@@ -614,9 +830,9 @@
           <td class="text-end">{{ run.unmatched }}</td>
           <td>
             {% if run.has_preview %}
-              {% if run.is_hidden %}<span class="badge-amarillo">Oculto</span>{% else %}<span class="badge-verde">Con preview</span>{% endif %}
+              {% if run.is_hidden %}<span class="badge-amarillo">Oculto</span>{% else %}<span class="badge-verde">Con validación</span>{% endif %}
             {% else %}
-              <span class="text-muted">Sin preview</span>
+              <span class="text-muted">Sin validación</span>
             {% endif %}
           </td>
           {% if can_manage_inventario %}
@@ -626,7 +842,7 @@
               {% csrf_token %}
               <input type="hidden" name="action" value="load_pending_run">
               <input type="hidden" name="run_id" value="{{ run.id }}">
-              <button class="btn btn-secondary" type="submit">Cargar pendientes</button>
+              <button class="btn btn-secondary" type="submit">Cargar validación</button>
             </form>
             {% else %}
               <span class="text-muted">-</span>
@@ -649,7 +865,7 @@
   {% endif %}
 
   {% if pending_preview %}
-    <p class="muted">Da clic en "Usar en alta" para copiar el nombre origen y crear el alias rápido.</p>
+    <p class="muted">Da clic en "Usar en alta" para copiar el nombre origen y crear la referencia rápidamente.</p>
     <div class="table-responsive">
       <table class="table table-striped">
         <thead>
@@ -685,7 +901,7 @@
       {% csrf_token %}
       <input type="hidden" name="action" value="clear_pending">
       {% if latest_pending_run %}<input type="hidden" name="hide_run_id" value="{{ latest_pending_run.id }}">{% endif %}
-      <button class="btn btn-secondary" type="submit">Limpiar pendientes en pantalla</button>
+      <button class="btn btn-secondary" type="submit">Limpiar revisión en pantalla</button>
     </form>
     {% endif %}
   {% endif %}
@@ -693,14 +909,14 @@
 
 {% if pending_grouped %}
 <section class="card">
-  <div class="card-header">Pendientes Agrupados Para Corrección</div>
-  <p class="muted">Prioriza los de mayor frecuencia para corregir más rápido.</p>
+  <div class="card-header">Referencias agrupadas para consolidación</div>
+  <p class="muted">Prioriza las equivalencias de mayor frecuencia para corregir el catálogo ERP más rápido.</p>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
         <tr>
           <th>Nombre origen</th>
-          <th>Normalizado</th>
+          <th>Clave consolidada</th>
           <th>Fuentes</th>
           <th class="text-end">Repeticiones</th>
           <th>Sugerencia</th>
@@ -741,7 +957,7 @@
                 <input type="hidden" name="alias_name" value="{{ p.nombre_origen }}">
                 <input type="hidden" name="suggestion" value="{{ p.sugerencia }}">
                 <input type="hidden" name="score_min" value="90">
-                <button class="btn btn-primary" type="submit">Aplicar sugerencia</button>
+                <button class="btn btn-primary" type="submit">Liberar propuesta</button>
               </form>
               {% endif %}
             </div>
@@ -756,13 +972,13 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Catálogo de Aliases</div>
+  <div class="card-header">Catálogo de equivalencias ERP</div>
   <form method="get" class="form-grid-auto mb-3">
-    <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por alias o insumo...">
+    <input class="input-field" type="text" name="q" value="{{ q }}" placeholder="Buscar por referencia o artículo...">
     <button class="btn btn-primary" type="submit">Buscar</button>
     <a href="{% url 'inventario:aliases_catalog' %}" class="btn btn-secondary">Limpiar</a>
-    <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=aliases_csv" class="btn btn-secondary">Exportar aliases CSV</a>
-    <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=aliases_xlsx" class="btn btn-secondary">Exportar aliases XLSX</a>
+    <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=aliases_csv" class="btn btn-secondary">Exportar catálogo CSV</a>
+    <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}export=aliases_xlsx" class="btn btn-secondary">Exportar catálogo XLSX</a>
   </form>
 
   <div class="table-responsive">
@@ -770,9 +986,9 @@
       <thead>
         <tr>
           {% if can_manage_inventario %}<th><input id="check-all-aliases" type="checkbox" form="bulk-form"></th>{% endif %}
-          <th>Alias</th>
-          <th>Normalizado</th>
-          <th>Insumo oficial</th>
+          <th>Nombre origen</th>
+          <th>Clave consolidada</th>
+          <th>Artículo maestro</th>
           {% if can_manage_inventario %}<th>Acción</th>{% endif %}
         </tr>
       </thead>
@@ -787,7 +1003,7 @@
           <td>{{ a.insumo.nombre }}</td>
           {% if can_manage_inventario %}
           <td>
-            <form method="post" class="inline-form" onsubmit="return confirm('¿Eliminar alias {{ a.nombre|escapejs }}?');">
+            <form method="post" class="inline-form" onsubmit="return confirm('¿Eliminar referencia {{ a.nombre|escapejs }}?');">
               {% csrf_token %}
               <input type="hidden" name="action" value="delete">
               <input type="hidden" name="alias_id" value="{{ a.id }}">
@@ -799,7 +1015,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="{% if can_manage_inventario %}5{% else %}3{% endif %}" class="text-muted">Sin aliases para el filtro actual.</td>
+          <td colspan="{% if can_manage_inventario %}5{% else %}3{% endif %}" class="text-muted">Sin registros para el filtro actual.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -814,7 +1030,7 @@
     <select class="input-field" name="insumo_id" required>
       <option value="">Reasignar seleccionados a...</option>
       {% for i in insumo_alias_targets %}
-      <option value="{{ i.id }}">{{ i.nombre }}</option>
+      <option value="{{ i.id }}">{{ i.nombre }}{% if i.canonical_variant_count > 1 %} · Oficial ({{ i.canonical_variant_count }} variantes){% endif %}</option>
       {% endfor %}
     </select>
     <button class="btn btn-primary" type="submit">Aplicar reasignación masiva</button>

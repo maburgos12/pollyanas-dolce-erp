@@ -1,0 +1,1071 @@
+{% extends "base.html" %}
+{% block title %}DG · Operación Integrada{% endblock %}
+{% block page_title %}Dirección General · Operación Integrada{% endblock %}
+{% block body_class %}page-dg-operacion-dashboard{% endblock %}
+{% block extra_css %}
+<style>
+  .dg-shell {
+    display: grid;
+    gap: 12px;
+    width: min(100%, 1360px);
+    margin: 0 auto;
+  }
+  .dg-topbar,
+  .dg-panel,
+  .dg-kpi-card,
+  .dg-status-card {
+    border: 1px solid rgba(167, 113, 95, 0.14);
+    background: linear-gradient(180deg, #fff 0%, #fffaf7 100%);
+    box-shadow: 0 10px 24px rgba(104, 70, 58, 0.08);
+  }
+  .dg-topbar,
+  .dg-panel {
+    border-radius: 22px;
+    padding: 15px 17px;
+  }
+  .dg-topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+    gap: 12px;
+    align-items: start;
+  }
+  .dg-eyebrow {
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #8d6555;
+    margin-bottom: 8px;
+  }
+  .dg-title {
+    margin: 0 0 6px;
+    font-family: "Playfair Display", serif;
+    font-size: 1.72rem;
+    line-height: 1.05;
+    color: #351f17;
+  }
+  .dg-subtitle {
+    margin: 0;
+    color: #6d5a52;
+    max-width: 70ch;
+  }
+  .dg-topbar-meta {
+    display: grid;
+    gap: 10px;
+    justify-items: end;
+  }
+  .dg-topbar-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    align-items: center;
+  }
+  .dg-date-pill,
+  .dg-chip,
+  .dg-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    border: 1px solid rgba(115, 81, 66, 0.12);
+    background: rgba(255, 255, 255, 0.9);
+    color: #4b3128;
+  }
+  .dg-date-pill {
+    color: #7b4b5c;
+    background: #f9eef2;
+  }
+  .dg-chip.is-success,
+  .dg-pill.is-success { color: #22634d; background: #edf9f2; }
+  .dg-chip.is-warning,
+  .dg-pill.is-warning { color: #8a5a17; background: #fff6df; }
+  .dg-chip.is-danger,
+  .dg-pill.is-danger { color: #9c2f2f; background: #fff1f1; }
+  .dg-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+  .dg-action-row .btn {
+    min-height: 36px;
+    padding-inline: 12px;
+  }
+  .dg-filters {
+    display: grid;
+    grid-template-columns: 150px 150px 170px 150px minmax(220px, 1fr) auto;
+    gap: 8px;
+    align-items: end;
+  }
+  .dg-filters input,
+  .dg-filters select {
+    width: 100%;
+    min-height: 40px !important;
+    height: 40px !important;
+    padding: 0 12px !important;
+    border-radius: 14px;
+    background: #fff;
+  }
+  .dg-filter-meta {
+    min-height: 44px;
+    padding: 8px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(167, 113, 95, 0.12);
+    color: #6d5a52;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: rgba(255,255,255,0.88);
+  }
+  .dg-filter-meta strong {
+    color: #3d261d;
+    font-size: 0.9rem;
+  }
+  .dg-filter-meta span {
+    font-size: 0.8rem;
+  }
+  .dg-kpi-grid,
+  .dg-status-grid,
+  .dg-grid-2,
+  .dg-grid-3 {
+    display: grid;
+    gap: 12px;
+  }
+  .dg-kpi-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .dg-status-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .dg-grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dg-grid-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .dg-kpi-card,
+  .dg-status-card {
+    border-radius: 18px;
+    padding: 13px 14px;
+  }
+  .dg-metric-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #927265;
+    margin-bottom: 8px;
+  }
+  .dg-metric-value {
+    font-family: "Playfair Display", serif;
+    font-size: 1.58rem;
+    line-height: 1;
+    color: #2f1d18;
+  }
+  .dg-metric-value.is-success { color: #1d6a51; }
+  .dg-metric-value.is-warning { color: #915d15; }
+  .dg-metric-value.is-danger { color: #992f2f; }
+  .dg-metric-foot {
+    margin-top: 8px;
+    color: #6c5951;
+    font-size: 0.88rem;
+  }
+  .dg-status-card strong {
+    display: block;
+    font-family: "Playfair Display", serif;
+    font-size: 1.45rem;
+    line-height: 1.05;
+    color: #2f1d18;
+    margin-bottom: 6px;
+  }
+  .dg-status-card p {
+    margin: 0;
+    color: #705d54;
+    font-size: 0.9rem;
+  }
+  .dg-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .dg-panel-title {
+    margin: 0;
+    font-family: "Playfair Display", serif;
+    font-size: 1.08rem;
+    color: #3b241a;
+  }
+  .dg-panel-subtitle {
+    margin: 4px 0 0;
+    color: #78655b;
+    font-size: 0.88rem;
+  }
+  .dg-list {
+    display: grid;
+    gap: 8px;
+  }
+  .dg-list.is-scroll {
+    max-height: 320px;
+    overflow: auto;
+    padding-right: 2px;
+  }
+  .dg-list-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(255, 249, 245, 0.92);
+    border: 1px solid rgba(170, 121, 96, 0.1);
+  }
+  .dg-list-item-label {
+    font-weight: 700;
+    color: #42271d;
+  }
+  .dg-list-item-meta {
+    color: #7a6459;
+    font-size: 0.88rem;
+  }
+  .dg-table-wrap {
+    overflow: auto;
+    border-radius: 16px;
+    border: 1px solid rgba(175, 126, 101, 0.12);
+  }
+  .dg-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 860px;
+    background: #fff;
+  }
+  .dg-table th,
+  .dg-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid rgba(177, 132, 111, 0.12);
+    vertical-align: middle;
+  }
+  .dg-table th {
+    font-size: 0.77rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #8c6a59;
+    background: #fff8f4;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .dg-table td {
+    color: #463127;
+  }
+  .dg-table tr:last-child td { border-bottom: 0; }
+  .dg-num { text-align: right; font-variant-numeric: tabular-nums; }
+  .dg-tone-success { color: #1f7056; font-weight: 700; }
+  .dg-tone-warning { color: #8b5f1b; font-weight: 700; }
+  .dg-tone-danger { color: #9a2f2f; font-weight: 700; }
+  .dg-tone-neutral { color: #85756d; font-weight: 700; }
+  .dg-story,
+  .dg-note {
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #fff7f2 0%, #fff 100%);
+    border: 1px solid rgba(160, 110, 89, 0.12);
+  }
+  .dg-story h4 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+    color: #41261d;
+  }
+  .dg-story p {
+    margin: 0;
+    color: #715b51;
+  }
+  .dg-chart-card {
+    padding: 14px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, #fff 0%, #fff9f5 100%);
+    border: 1px solid rgba(170, 121, 96, 0.12);
+  }
+  .dg-chart-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .dg-chart-title {
+    margin: 0;
+    font-size: 1.02rem;
+    color: #41261d;
+  }
+  .dg-chart-note {
+    color: #83685e;
+    font-size: 0.88rem;
+  }
+  .dg-chart-surface {
+    width: 100%;
+    min-height: 180px;
+  }
+  .dg-chart-surface.is-short {
+    min-height: 150px;
+  }
+  .dg-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin-top: 12px;
+  }
+  .dg-chart-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.86rem;
+    color: #745d53;
+  }
+  .dg-chart-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    display: inline-block;
+  }
+  .dg-small-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .dg-compact-grid {
+    display: grid;
+    gap: 8px;
+  }
+  .dg-compact-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 10px;
+    border-radius: 14px;
+    background: rgba(255, 249, 245, 0.92);
+    border: 1px solid rgba(170, 121, 96, 0.1);
+  }
+  .dg-compact-row-value {
+    font-weight: 700;
+    color: #2f1d18;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .dg-small-table td {
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(177, 132, 111, 0.12);
+    color: #4a342a;
+    vertical-align: top;
+  }
+  .dg-small-table tr:last-child td {
+    border-bottom: 0;
+  }
+  .dg-small-table td:last-child {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: #2f1d18;
+  }
+  .dg-topbar {
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 0.95fr);
+    padding: 14px 16px;
+  }
+  .dg-title {
+    font-size: 1.62rem;
+  }
+  .dg-subtitle {
+    font-size: 0.98rem;
+    max-width: 62ch;
+  }
+  .dg-kpi-grid--4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .dg-metric-value.is-neutral {
+    color: #4a342a;
+  }
+  .dg-panel-tight {
+    padding: 14px 16px;
+  }
+  .dg-section-title {
+    margin: 0 0 12px;
+    font-size: 0.78rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #8c6a59;
+  }
+  .dg-kpi-foot-strong {
+    font-weight: 700;
+    color: #3d261d;
+  }
+  .dg-grid-3--compact {
+    grid-template-columns: 1.15fr 1fr 0.95fr;
+  }
+  .dg-grid-2--compact {
+    grid-template-columns: 1.2fr 0.8fr;
+  }
+  .dg-filters-compact {
+    grid-template-columns: repeat(4, minmax(120px, 1fr)) auto;
+    gap: 8px;
+  }
+  .dg-filters-compact .dg-filter-meta {
+    display: none;
+  }
+  .dg-mini-stack {
+    display: grid;
+    gap: 8px;
+  }
+  .dg-mini-card {
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(170, 121, 96, 0.12);
+    background: rgba(255, 249, 245, 0.88);
+  }
+  .dg-mini-card strong {
+    display: block;
+    font-size: 1.12rem;
+    color: #352019;
+    margin-bottom: 4px;
+  }
+  .dg-mini-card span {
+    color: #755f56;
+    font-size: 0.9rem;
+  }
+  .dg-headline-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .dg-note {
+    font-size: 0.92rem;
+  }
+  .dg-chart-surface {
+    min-height: 170px;
+  }
+  .dg-chart-surface.is-short {
+    min-height: 145px;
+  }
+  @media (max-width: 1200px) {
+    .dg-topbar,
+    .dg-kpi-grid,
+    .dg-status-grid,
+    .dg-filters,
+    .dg-grid-2,
+    .dg-grid-3 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .dg-topbar {
+      grid-template-columns: 1fr;
+    }
+    .dg-topbar-meta,
+    .dg-topbar-meta-line,
+    .dg-action-row {
+      justify-items: start;
+      justify-content: flex-start;
+    }
+    .dg-kpi-grid--4,
+    .dg-grid-3--compact,
+    .dg-grid-2--compact,
+    .dg-filters-compact {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 720px) {
+    .dg-kpi-grid,
+    .dg-status-grid,
+    .dg-grid-2,
+    .dg-grid-3,
+    .dg-filters {
+      grid-template-columns: 1fr;
+    }
+    .dg-kpi-grid--4,
+    .dg-grid-3--compact,
+    .dg-grid-2--compact,
+    .dg-filters-compact {
+      grid-template-columns: 1fr;
+    }
+    .dg-title {
+      font-size: 1.5rem;
+    }
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="module-shell dg-shell">
+  <section class="dg-topbar">
+    <div>
+      <div class="dg-eyebrow">Dirección General · Cockpit DG consolidado</div>
+      <h1 class="dg-title">Operación diaria con fuente Point</h1>
+      <p class="dg-subtitle">Primero lectura comercial real de Point. Después contexto ERP. Producción directa, transferencias y merma quedan separadas para no contaminar la lectura ejecutiva.</p>
+      <div class="dg-headline-row">
+        <span class="dg-date-pill">Corte Point {{ point_exec_summary.closure_date|date:"Y-m-d" }}</span>
+        <span class="dg-chip {% if point_exec_summary.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
+          {% if point_exec_summary.ticket_data_available %}Tickets confirmados{% else %}Tickets incompletos{% endif %}
+        </span>
+        <span class="dg-chip {% if point_waste_summary.available %}is-success{% else %}is-warning{% endif %}">
+          Mermas {{ point_waste_summary.source_label }}
+        </span>
+      </div>
+    </div>
+    <div class="dg-topbar-meta">
+      <div class="dg-action-row">
+        <a class="btn btn-secondary" href="{% url 'recetas:produccion_cedis_weekly_dashboard' %}">Producción CEDIS semanal</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Reabasto CEDIS</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:dg_operacion_dashboard_export' %}?format=xlsx&dg_start_date={{ dg_start_date }}&dg_end_date={{ dg_end_date }}&dg_group_by={{ dg_group_by }}&fecha_operacion={{ fecha_operacion|date:'Y-m-d' }}">Exportar XLSX</a>
+      </div>
+      <form method="get" class="dg-filters dg-filters-compact">
+        <input type="date" name="dg_start_date" value="{{ dg_start_date }}" aria-label="Fecha inicial planes">
+        <input type="date" name="dg_end_date" value="{{ dg_end_date }}" aria-label="Fecha final planes">
+        <select name="dg_group_by" aria-label="Agrupación planes">
+          <option value="day" {% if dg_group_by == "day" %}selected{% endif %}>Plan por día</option>
+          <option value="week" {% if dg_group_by == "week" %}selected{% endif %}>Plan por semana</option>
+          <option value="month" {% if dg_group_by == "month" %}selected{% endif %}>Plan por mes</option>
+        </select>
+        <input type="date" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}" aria-label="Fecha operación Point">
+        <button class="btn btn-primary" type="submit">Actualizar</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="dg-panel dg-panel-tight">
+    <div class="dg-section-title">Bloque 1 · Comercial Point</div>
+    <div class="dg-kpi-grid dg-kpi-grid--4">
+      <article class="dg-kpi-card">
+        <div class="dg-metric-label">Venta último corte</div>
+        <div class="dg-metric-value">${{ point_exec_summary.latest_sales_amount|floatformat:2 }}</div>
+        <div class="dg-metric-foot">{{ point_exec_summary.latest_units|floatformat:0 }} unidades · {{ point_exec_summary.closure_date|date:"d/m/Y" }}</div>
+      </article>
+      <article class="dg-kpi-card">
+        <div class="dg-metric-label">Tickets último corte</div>
+        <div class="dg-metric-value is-neutral">{{ point_exec_summary.latest_tickets }}</div>
+        <div class="dg-metric-foot">Sucursales con tickets: {{ point_exec_summary.ticket_branch_count }}/{{ point_exec_summary.active_branch_count }}</div>
+      </article>
+      <article class="dg-kpi-card">
+        <div class="dg-metric-label">Ticket promedio</div>
+        <div class="dg-metric-value {% if point_exec_summary.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
+          {% if point_exec_summary.ticket_data_available %}${{ point_exec_summary.latest_avg_ticket|floatformat:2 }}{% else %}N/D{% endif %}
+        </div>
+        <div class="dg-metric-foot">{% if point_exec_summary.ticket_data_available %}Promedio real de Point del último corte{% else %}Point no entregó tickets válidos{% endif %}</div>
+      </article>
+      <article class="dg-kpi-card">
+        <div class="dg-metric-label">Venta acumulada del mes</div>
+        <div class="dg-metric-value">${{ point_exec_summary.month_sales_amount|floatformat:2 }}</div>
+        <div class="dg-metric-foot">{{ point_exec_summary.month_units|floatformat:0 }} unidades · {{ point_exec_summary.month_tickets }} tickets</div>
+      </article>
+    </div>
+  </section>
+
+  <section class="dg-panel dg-panel-tight">
+    <div class="dg-section-title">Bloque 2 · Flujo central y pérdida Point</div>
+    <div class="dg-kpi-grid dg-kpi-grid--4">
+      <article class="dg-kpi-card">
+        <div class="dg-metric-label">Producción directa a CEDIS</div>
+        <div class="dg-metric-value">{{ point_central_flow_summary.production_total_qty|floatformat:2 }}</div>
+        <div class="dg-metric-foot">{{ point_central_flow_summary.production_rows }} líneas · {{ point_central_flow_summary.production_item_count }} items</div>
+      </article>
+      <article class="dg-kpi-card">
+        <div class="dg-metric-label">Transferencias recibidas en CEDIS</div>
+        <div class="dg-metric-value">{{ point_central_flow_summary.transfer_total_qty|floatformat:2 }}</div>
+        <div class="dg-metric-foot">{{ point_central_flow_summary.transfer_rows }} líneas · {{ point_central_flow_summary.transfer_item_count }} items</div>
+      </article>
+      <article class="dg-kpi-card">
+        <div class="dg-metric-label">Merma Point del corte</div>
+        <div class="dg-metric-value {% if point_waste_summary.total_qty > 0 %}is-danger{% else %}is-success{% endif %}">{{ point_waste_summary.total_qty|floatformat:2 }}</div>
+        <div class="dg-metric-foot">${{ point_waste_summary.total_cost|floatformat:2 }} · {{ point_waste_summary.branch_count }} sucursales / frentes</div>
+      </article>
+      <article class="dg-kpi-card">
+        <div class="dg-metric-label">Sucursales con excepción</div>
+        <div class="dg-metric-value {% if point_closure_summary.critical > 0 %}is-danger{% elif point_closure_summary.without_closure > 0 or point_closure_summary.minor > 0 %}is-warning{% else %}is-success{% endif %}">
+          {{ point_closure_summary.critical|add:point_closure_summary.without_closure|add:point_closure_summary.minor }}
+        </div>
+        <div class="dg-metric-foot">{{ point_closure_summary.status }}</div>
+      </article>
+    </div>
+  </section>
+
+  <section class="dg-grid-3 dg-grid-3--compact">
+    <article class="dg-panel">
+      <div class="dg-panel-header">
+        <div>
+          <h2 class="dg-panel-title">Top sucursales del último corte</h2>
+          <p class="dg-panel-subtitle">La primera lectura comercial debe empezar por monto, tickets y ticket promedio por sucursal.</p>
+        </div>
+        <span class="dg-pill">{{ point_exec_summary.source_label }}</span>
+      </div>
+      {% if point_exec_summary.top_branches %}
+      <div class="dg-compact-grid">
+        {% for row in point_exec_summary.top_branches %}
+        <div class="dg-compact-row">
+          <div>
+            <div class="dg-list-item-label">{{ row.branch__erp_branch__codigo }} · {{ row.branch__erp_branch__nombre }}</div>
+            <div class="dg-list-item-meta">{{ row.total_tickets }} tickets · ticket promedio ${{ row.avg_ticket|floatformat:2 }}</div>
+          </div>
+          <div class="dg-compact-row-value">${{ row.total_amount|floatformat:2 }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="dg-note">No hay sucursales con tickets válidos en el corte seleccionado.</div>
+      {% endif %}
+    </article>
+
+    <article class="dg-panel">
+      <div class="dg-panel-header">
+        <div>
+          <h2 class="dg-panel-title">Mermas Point del día operativo</h2>
+          <p class="dg-panel-subtitle">Pérdida real capturada en Point, incluyendo frentes como CEDIS si así aparecen en la plataforma.</p>
+        </div>
+        <span class="dg-pill {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">{{ point_waste_summary.source_label }}</span>
+      </div>
+      {% if point_waste_summary.top_branches %}
+      <div class="dg-compact-grid">
+        {% for row in point_waste_summary.top_branches %}
+        <div class="dg-compact-row">
+          <div>
+            <div class="dg-list-item-label">{{ row.branch_code }} · {{ row.branch_name }}</div>
+            <div class="dg-list-item-meta">{{ row.total_rows }} registros · ${{ row.total_cost|floatformat:2 }}</div>
+          </div>
+          <div class="dg-compact-row-value">{{ row.total_qty|floatformat:2 }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="dg-note">Point no reportó mermas en el último corte operativo.</div>
+      {% endif %}
+      <div class="dg-mini-stack" style="margin-top:12px;">
+        {% for row in point_waste_summary.top_responsibles|slice:":3" %}
+        <div class="dg-mini-card">
+          <strong>{{ row.responsable_texto }}</strong>
+          <span>{{ row.total_qty|floatformat:2 }} pzas · ${{ row.total_cost|floatformat:2 }}</span>
+        </div>
+        {% empty %}
+        <div class="dg-note">Sin responsables con merma visible en este corte.</div>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="dg-panel">
+      <div class="dg-panel-header">
+        <div>
+          <h2 class="dg-panel-title">Flujo central Point y contexto ERP</h2>
+          <p class="dg-panel-subtitle">Esto acompaña la lectura de Point, pero no la sustituye ni la mezcla.</p>
+        </div>
+        <span class="dg-pill">ERP</span>
+      </div>
+      <div class="dg-mini-stack">
+        <div class="dg-mini-card">
+          <strong>{{ plan_status_dashboard.status }}</strong>
+          <span>Plan de producción · {{ plan_status_dashboard.detail }}</span>
+        </div>
+        <div class="dg-mini-card">
+          <strong>{{ reabasto_stage }}</strong>
+          <span>Reabasto CEDIS · {{ reabasto_detail }}</span>
+        </div>
+        <div class="dg-mini-card">
+          <strong>{{ ventas_historicas_summary.status }}</strong>
+          <span>Histórico de ventas · {{ ventas_historicas_summary.detail }}</span>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="dg-grid-2 dg-grid-2--compact">
+    <article class="dg-panel dg-chart-card">
+      <div class="dg-panel-header">
+        <div>
+          <h2 class="dg-panel-title">Ventas Point últimas 6 semanas</h2>
+          <p class="dg-panel-subtitle">Gráfica principal para la lectura comercial del dueño.</p>
+        </div>
+        <span class="dg-pill">{{ point_exec_summary.source_label }}</span>
+      </div>
+      <canvas id="dg-chart-sales-trend" class="dg-chart-surface is-short"></canvas>
+      <div class="dg-chart-legend">
+        <span><i class="dg-chart-dot" style="background:#d65a71;"></i>Ventas $</span>
+      </div>
+    </article>
+
+    <article class="dg-panel">
+      <div class="dg-panel-header">
+        <div>
+          <h2 class="dg-panel-title">Cuadre operativo Point</h2>
+          <p class="dg-panel-subtitle">Solo las sucursales que requieren atención por cierre pendiente o desviación.</p>
+        </div>
+        <span class="dg-pill {% if point_closure_summary.tone == 'danger' %}is-danger{% elif point_closure_summary.tone == 'success' %}is-success{% else %}is-warning{% endif %}">
+          {{ point_closure_summary.status }}
+        </span>
+      </div>
+      <div class="dg-list is-scroll">
+        {% for row in point_closure_summary.rows %}
+          {% if row.tone != 'success' %}
+          <div class="dg-list-item">
+            <div>
+              <div class="dg-list-item-label">{{ row.branch_label }}</div>
+              <div class="dg-list-item-meta">Ventas {{ row.sold_units|floatformat:0 }} · tickets {{ row.sold_tickets }} · cierre {{ row.closing_units|floatformat:0 }}</div>
+            </div>
+            <div class="{% if row.tone == 'danger' %}dg-tone-danger{% elif row.tone == 'warning' %}dg-tone-warning{% else %}dg-tone-neutral{% endif %}">{{ row.status }}</div>
+          </div>
+          {% endif %}
+        {% empty %}
+        <div class="dg-note">No hay sucursales con excepciones de cuadre en este corte.</div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="dg-grid-2 dg-grid-2--compact">
+    <article class="dg-panel dg-chart-card">
+      <div class="dg-panel-header">
+        <div>
+          <h2 class="dg-panel-title">Ticket promedio por sucursal</h2>
+          <p class="dg-panel-subtitle">Ranking para identificar dónde se monetiza mejor el tráfico del día.</p>
+        </div>
+        <span class="dg-pill {% if point_chart_bundle.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
+          {% if point_chart_bundle.ticket_data_available %}Cobertura {{ point_chart_bundle.ticket_branch_count }} sucursales{% else %}Sin tickets válidos{% endif %}
+        </span>
+      </div>
+      <canvas id="dg-chart-ticket-ranking" class="dg-chart-surface is-short"></canvas>
+      <div class="dg-chart-legend">
+        <span><i class="dg-chart-dot" style="background:#3f8d5e;"></i>Ticket promedio</span>
+      </div>
+    </article>
+
+    <article class="dg-panel dg-chart-card">
+      <div class="dg-panel-header">
+        <div>
+          <h2 class="dg-panel-title">Merma por sucursal / frente</h2>
+          <p class="dg-panel-subtitle">Distribución del corte para ubicar dónde se concentra la pérdida.</p>
+        </div>
+        <span class="dg-pill {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">
+          {{ point_waste_summary.total_rows }} registros
+        </span>
+      </div>
+      {% if point_waste_summary.total_rows %}
+      <canvas id="dg-chart-waste-share" class="dg-chart-surface is-short"></canvas>
+      <div class="dg-chart-legend">
+        <span><i class="dg-chart-dot" style="background:#b14b4b;"></i>Participación por sucursal / frente</span>
+      </div>
+      {% else %}
+      <div class="dg-note">Point no reportó mermas en el último corte operativo.</div>
+      {% endif %}
+    </article>
+  </section>
+</div>
+{% endblock %}
+{% block extra_js %}
+{{ point_chart_bundle|json_script:"dg-point-chart-bundle" }}
+<script>
+  (() => {
+    const source = document.getElementById("dg-point-chart-bundle");
+    if (!source) return;
+    const bundle = JSON.parse(source.textContent || "{}");
+    if (!bundle.available) return;
+
+    const palette = {
+      rose: "#d65a71",
+      blue: "#214f9b",
+      cyan: "#53a7c2",
+      amber: "#d27a27",
+      red: "#b14b4b",
+      green: "#3f8d5e",
+      slate: "#7a6459",
+      grid: "rgba(88, 58, 49, 0.12)",
+      axis: "#8e7569",
+      fill: "rgba(214, 90, 113, 0.14)",
+    };
+
+    function setupCanvas(canvas) {
+      if (!canvas) return null;
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth || 640;
+      const height = canvas.clientHeight || 260;
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(ratio, ratio);
+      return { ctx, width, height };
+    }
+
+    function formatNumber(value) {
+      return new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(value || 0);
+    }
+
+    function formatMoney(value) {
+      return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 }).format(value || 0);
+    }
+
+    function drawLineChart(canvas, labels, values, color, formatter) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const pad = { top: 20, right: 18, bottom: 34, left: 56 };
+      const chartW = width - pad.left - pad.right;
+      const chartH = height - pad.top - pad.bottom;
+      const max = Math.max(...values, 1);
+      const points = values.map((value, index) => ({
+        x: pad.left + (chartW * index) / Math.max(labels.length - 1, 1),
+        y: pad.top + chartH - (value / max) * chartH,
+        value,
+      }));
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.strokeStyle = palette.grid;
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 4; i += 1) {
+        const y = pad.top + (chartH / 3) * i;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = palette.axis;
+      ctx.font = '12px Inter, sans-serif';
+      labels.forEach((label, index) => {
+        const x = pad.left + (chartW * index) / Math.max(labels.length - 1, 1);
+        ctx.fillText(label, x - 12, height - 10);
+      });
+
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, height - pad.bottom);
+      points.forEach((point) => ctx.lineTo(point.x, point.y));
+      ctx.lineTo(points[points.length - 1].x, height - pad.bottom);
+      ctx.closePath();
+      ctx.fillStyle = palette.fill;
+      ctx.fill();
+
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      points.forEach((point) => {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff";
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      });
+
+      ctx.fillStyle = color;
+      ctx.font = '600 12px Inter, sans-serif';
+      ctx.fillText(formatter(max), 8, pad.top + 4);
+      ctx.fillText(formatter(values[values.length - 1] || 0), width - 90, pad.top + 4);
+    }
+
+    function drawGroupedBars(canvas, labels, series, colors, horizontal = false) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const pad = horizontal
+        ? { top: 16, right: 22, bottom: 16, left: 140 }
+        : { top: 18, right: 18, bottom: 44, left: 52 };
+      const chartW = width - pad.left - pad.right;
+      const chartH = height - pad.top - pad.bottom;
+      const seriesKeys = Object.keys(series);
+      const max = Math.max(
+        1,
+        ...seriesKeys.flatMap((key) => series[key]).map((value) => Number(value || 0))
+      );
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.font = '12px Inter, sans-serif';
+      ctx.fillStyle = palette.axis;
+      ctx.strokeStyle = palette.grid;
+      ctx.lineWidth = 1;
+
+      if (horizontal) {
+        const rowH = chartH / Math.max(labels.length, 1);
+        labels.forEach((label, rowIndex) => {
+          const y = pad.top + rowH * rowIndex + rowH / 2;
+          ctx.fillText(label, 10, y + 4);
+          ctx.beginPath();
+          ctx.moveTo(pad.left, y + rowH / 2 - 8);
+          ctx.lineTo(width - pad.right, y + rowH / 2 - 8);
+          ctx.stroke();
+          const bandH = Math.min(16, rowH / Math.max(seriesKeys.length, 1) - 3);
+          seriesKeys.forEach((key, seriesIndex) => {
+            const value = Number(series[key][rowIndex] || 0);
+            const barW = (value / max) * chartW;
+            const barY = y - (seriesKeys.length * bandH) / 2 + seriesIndex * (bandH + 2);
+            ctx.fillStyle = colors[seriesIndex];
+            ctx.fillRect(pad.left, barY, barW, bandH);
+          });
+        });
+      } else {
+        const groupW = chartW / Math.max(labels.length, 1);
+        const barW = Math.min(20, (groupW - 14) / Math.max(seriesKeys.length, 1));
+        labels.forEach((label, groupIndex) => {
+          const x = pad.left + groupW * groupIndex + groupW / 2;
+          ctx.fillStyle = palette.axis;
+          ctx.fillText(label, x - 14, height - 14);
+          ctx.beginPath();
+          ctx.moveTo(x - groupW / 2 + 4, pad.top);
+          ctx.lineTo(x - groupW / 2 + 4, height - pad.bottom);
+          ctx.strokeStyle = "rgba(0,0,0,0.02)";
+          ctx.stroke();
+          seriesKeys.forEach((key, seriesIndex) => {
+            const value = Number(series[key][groupIndex] || 0);
+            const barH = (value / max) * chartH;
+            const barX = x - (seriesKeys.length * barW) / 2 + seriesIndex * barW;
+            const barY = height - pad.bottom - barH;
+            ctx.fillStyle = colors[seriesIndex];
+            ctx.fillRect(barX, barY, barW - 3, barH);
+          });
+        });
+      }
+    }
+
+    function drawDonut(canvas, labels, values) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const total = values.reduce((acc, value) => acc + Number(value || 0), 0);
+      if (!total) return;
+      const colors = ["#214f9b", "#d65a71", "#53a7c2", "#d27a27", "#3f8d5e", "#7d66b1", "#b14b4b", "#9e7a57"];
+      const cx = width * 0.32;
+      const cy = height * 0.5;
+      const radius = Math.min(width, height) * 0.26;
+      let start = -Math.PI / 2;
+
+      ctx.clearRect(0, 0, width, height);
+      values.forEach((rawValue, index) => {
+        const value = Number(rawValue || 0);
+        const slice = (value / total) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, start + slice);
+        ctx.closePath();
+        ctx.fillStyle = colors[index % colors.length];
+        ctx.fill();
+        start += slice;
+      });
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.58, 0, Math.PI * 2);
+      ctx.fillStyle = "#fffaf7";
+      ctx.fill();
+      ctx.fillStyle = "#3e281f";
+      ctx.font = '700 22px Inter, sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText(formatNumber(total), cx, cy + 6);
+      ctx.font = '12px Inter, sans-serif';
+      ctx.fillStyle = palette.axis;
+      ctx.fillText("Merma", cx, cy - 16);
+
+      ctx.textAlign = "left";
+      labels.forEach((label, index) => {
+        const y = 28 + index * 22;
+        ctx.fillStyle = colors[index % colors.length];
+        ctx.fillRect(width * 0.62, y - 10, 10, 10);
+        ctx.fillStyle = "#5a463e";
+        ctx.fillText(`${label} · ${formatNumber(values[index])}`, width * 0.62 + 18, y);
+      });
+    }
+
+    function drawVariance(canvas, labels, values) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const pad = { top: 18, right: 24, bottom: 22, left: 110 };
+      const chartW = width - pad.left - pad.right;
+      const chartH = height - pad.top - pad.bottom;
+      const max = Math.max(1, ...values.map((value) => Math.abs(Number(value || 0))));
+      const midX = pad.left + chartW / 2;
+      const rowH = chartH / Math.max(labels.length, 1);
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.strokeStyle = palette.grid;
+      ctx.beginPath();
+      ctx.moveTo(midX, pad.top);
+      ctx.lineTo(midX, height - pad.bottom);
+      ctx.stroke();
+
+      labels.forEach((label, index) => {
+        const value = Number(values[index] || 0);
+        const y = pad.top + rowH * index + rowH / 2;
+        const barW = (Math.abs(value) / max) * (chartW / 2 - 12);
+        ctx.fillStyle = value >= 0 ? "#3f8d5e" : "#b14b4b";
+        const x = value >= 0 ? midX : midX - barW;
+        ctx.fillRect(x, y - 7, barW, 14);
+        ctx.fillStyle = "#5f4a41";
+        ctx.fillText(label, 10, y + 4);
+        ctx.fillText(formatNumber(value), value >= 0 ? x + barW + 8 : x - 42, y + 4);
+      });
+    }
+
+    drawLineChart(
+      document.getElementById("dg-chart-sales-trend"),
+      bundle.weekly_sales_amount.labels,
+      bundle.weekly_sales_amount.values,
+      palette.rose,
+      formatMoney
+    );
+    drawGroupedBars(
+      document.getElementById("dg-chart-ops-weekly"),
+      bundle.weekly_ops_units.labels,
+      {
+        production: bundle.weekly_ops_units.production,
+        sales: bundle.weekly_ops_units.sales,
+        waste: bundle.weekly_ops_units.waste,
+      },
+      [palette.blue, palette.amber, palette.red]
+    );
+    drawGroupedBars(
+      document.getElementById("dg-chart-transfer-weekly"),
+      bundle.weekly_ops_units.labels,
+      {
+        transfers: bundle.weekly_ops_units.transfers,
+      },
+      [palette.cyan]
+    );
+    drawGroupedBars(
+      document.getElementById("dg-chart-category-balance"),
+      bundle.category_balance.labels,
+      {
+        production: bundle.category_balance.production,
+        sales: bundle.category_balance.sales,
+      },
+      [palette.blue, palette.amber],
+      true
+    );
+    drawGroupedBars(
+      document.getElementById("dg-chart-ticket-ranking"),
+      bundle.ticket_ranking.labels,
+      {
+        avgTicket: bundle.ticket_ranking.values,
+      },
+      [palette.green],
+      true
+    );
+    drawDonut(
+      document.getElementById("dg-chart-waste-share"),
+      bundle.waste_share.labels,
+      bundle.waste_share.values
+    );
+    drawGroupedBars(
+      document.getElementById("dg-chart-branch-balance"),
+      bundle.branch_balance.labels,
+      {
+        inflow: bundle.branch_balance.inflow,
+        sales: bundle.branch_balance.sales,
+        waste: bundle.branch_balance.waste,
+      },
+      [palette.blue, palette.amber, palette.red],
+      true
+    );
+    drawVariance(
+      document.getElementById("dg-chart-variance-map"),
+      bundle.variance_map.labels,
+      bundle.variance_map.values
+    );
+  })();
+</script>
+{% endblock %}

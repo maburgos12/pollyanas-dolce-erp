@@ -35,6 +35,43 @@ class InsumoAliasAdmin(admin.ModelAdmin):
 
 @admin.register(PointPendingMatch)
 class PointPendingMatchAdmin(admin.ModelAdmin):
-    list_display = ("tipo", "point_codigo", "point_nombre", "method", "fuzzy_score", "actualizado_en")
+    list_display = (
+        "tipo",
+        "point_codigo",
+        "point_nombre",
+        "clasificacion_operativa",
+        "visible_en_operacion",
+        "method",
+        "fuzzy_score",
+        "actualizado_en",
+    )
     search_fields = ("point_codigo", "point_nombre", "fuzzy_sugerencia")
-    list_filter = ("tipo", "method")
+    list_filter = ("tipo", "method", "clasificacion_operativa", "visible_en_operacion")
+    actions = ("mark_historical_only", "mark_seasonal_hidden", "mark_operational_visible")
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.GET.get("q") or request.GET.get("clasificacion_operativa") or request.GET.get("visible_en_operacion"):
+            return qs
+        return qs.visible_en_operacion()
+
+    @admin.action(description="Marcar como solo histórico y ocultar de operación")
+    def mark_historical_only(self, request, queryset):
+        queryset.update(
+            clasificacion_operativa=PointPendingMatch.CLASIFICACION_OPERATIVA_HISTORICO,
+            visible_en_operacion=False,
+        )
+
+    @admin.action(description="Marcar como temporada y ocultar de operación")
+    def mark_seasonal_hidden(self, request, queryset):
+        queryset.update(
+            clasificacion_operativa=PointPendingMatch.CLASIFICACION_OPERATIVA_TEMPORADA,
+            visible_en_operacion=False,
+        )
+
+    @admin.action(description="Restaurar como operativo actual")
+    def mark_operational_visible(self, request, queryset):
+        queryset.update(
+            clasificacion_operativa=PointPendingMatch.CLASIFICACION_OPERATIVA_ACTIVO,
+            visible_en_operacion=True,
+        )

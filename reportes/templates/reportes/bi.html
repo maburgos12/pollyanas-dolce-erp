@@ -1,128 +1,963 @@
 {% extends "base.html" %}
+{% load static humanize %}
+
 {% block title %}Reportes - BI Ejecutivo{% endblock %}
 {% block page_title %}Reportes · BI Ejecutivo{% endblock %}
 {% block body_class %}page-reportes-bi{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}">
+{% endblock %}
+
 {% block content %}
-<div class="module-shell reportes-shell">
-<nav class="module-tabs">
-  <a class="module-tab" href="{% url 'reportes:costo_receta' %}">Costo receta</a>
-  <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
-  <a class="module-tab" href="{% url 'reportes:faltantes' %}">Faltantes</a>
-  <a class="module-tab active" href="{% url 'reportes:bi' %}">BI</a>
-</nav>
+<div class="module-shell bi-shell">
+  <nav class="module-tabs">
+    <a class="module-tab" href="{% url 'reportes:costo_receta' %}">Costo receta</a>
+    <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
+    <a class="module-tab" href="{% url 'reportes:faltantes' %}">Faltantes</a>
+    <a class="module-tab active" href="{% url 'reportes:bi' %}">BI</a>
+  </nav>
 
-<section class="card">
-  <div class="card-header">BI Ejecutivo (Compras · Ventas · Nómina · Logística)</div>
-  <form method="get" class="form-grid-auto mb-3">
+  <section class="bi-hero">
     <div>
-      <label for="period_days">Rango (días)</label>
-      <input class="input-field" id="period_days" type="number" min="7" max="365" name="period_days" value="{{ period_days }}">
+      <div class="bi-kicker">Dirección general</div>
+      <h1 class="bi-hero-title">Tablero ejecutivo del negocio</h1>
+      <p class="bi-copy">Lectura ejecutiva compacta con fuente real Point/ERP: venta, tendencia, rentabilidad, producción y flujo central. Lo detallado queda como auditoría desplegable.</p>
     </div>
-    <div>
-      <label for="months">Serie mensual</label>
-      <input class="input-field" id="months" type="number" min="3" max="24" name="months" value="{{ months_window }}">
+    <div class="bi-hero-side">
+      <div class="bi-pill-row">
+        <span class="bi-pill">Corte ventas: {{ daily_sales_snapshot.date_label }}</span>
+        <span class="bi-pill">Costeo MP: {{ profitability_panel.latest_week|default:"Sin corte" }}</span>
+        <span class="bi-pill">Comparativo: {{ yoy_panel.hero_note }}</span>
+      </div>
+      <form class="bi-filterbar" method="get">
+        <div class="bi-control">
+          <label for="period_days">Horizonte venta</label>
+          <select id="period_days" name="period_days">
+            <option value="30" {% if request.GET.period_days == "30" %}selected{% endif %}>30 días</option>
+            <option value="60" {% if request.GET.period_days == "60" %}selected{% endif %}>60 días</option>
+            <option value="90" {% if request.GET.period_days == "90" or not request.GET.period_days %}selected{% endif %}>90 días</option>
+            <option value="180" {% if request.GET.period_days == "180" %}selected{% endif %}>180 días</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="months">Meses visibles</label>
+          <select id="months" name="months">
+            <option value="6" {% if request.GET.months == "6" or not request.GET.months %}selected{% endif %}>6 meses</option>
+            <option value="9" {% if request.GET.months == "9" %}selected{% endif %}>9 meses</option>
+            <option value="12" {% if request.GET.months == "12" %}selected{% endif %}>12 meses</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label>Estado venta</label>
+          <div class="bi-pill {{ daily_sales_snapshot.comparison_tone|default:'warning' }}">{{ daily_sales_snapshot.comparison_label }}</div>
+        </div>
+        <div class="bi-control">
+          <label>Base</label>
+          <div class="bi-pill {% if forecast_panel.has_atypical_history %}warning{% else %}success{% endif %}">
+            {{ forecast_panel.baseline_label }}
+          </div>
+        </div>
+        <div class="bi-control">
+          <button type="submit">Actualizar BI</button>
+        </div>
+      </form>
     </div>
-    <div class="align-items-end d-flex">
-      <button class="btn btn-primary" type="submit">Actualizar tablero</button>
+  </section>
+
+  <section class="bi-kpi-grid">
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value">${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Venta último corte</div>
+      <div class="bi-kpi-note">{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }} piezas · {{ daily_sales_snapshot.branch_count|intcomma }} sucursales · {{ daily_sales_snapshot.source_label }}</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if not daily_sales_snapshot.tickets_available %}warning{% endif %}">
+        {% if daily_sales_snapshot.tickets_available %}${{ daily_sales_snapshot.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
+      </div>
+      <div class="bi-kpi-label">Ticket promedio</div>
+      <div class="bi-kpi-note">
+        {% if daily_sales_snapshot.tickets_available %}
+          {{ daily_sales_snapshot.total_tickets|intcomma }} tickets confirmados
+        {% else %}
+          Point no trajo tickets válidos en este corte
+        {% endif %}
+      </div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value success">${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Pronóstico próxima semana</div>
+      <div class="bi-kpi-note">{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas · {{ forecast_panel.target_week_label }}</div>
+    </article>
+    <article class="bi-kpi-card">
+      {% with hero=yoy_panel.hero_row %}
+      <div class="bi-kpi-value {% if hero and hero.amount_delta_pct is not None and hero.amount_delta_pct < 0 %}danger{% elif hero and hero.amount_delta_pct is not None %}success{% else %}warning{% endif %}">
+        {% if hero and hero.amount_delta_pct is not None %}
+          {{ hero.amount_delta_pct|floatformat:1 }}%
+        {% else %}
+          N/D
+        {% endif %}
+      </div>
+      <div class="bi-kpi-label">Mes vs año anterior</div>
+      <div class="bi-kpi-note">{{ yoy_panel.hero_note }}</div>
+      {% endwith %}
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Pronóstico</div>
+          <h2 class="bi-panel-title">Tendencia semanal de venta</h2>
+          <p class="bi-panel-copy">Venta y piezas recientes para anticipar la próxima semana. Los picos fuera de patrón quedan marcados, no promediados.</p>
+        </div>
+        <span class="bi-pill {% if forecast_panel.has_atypical_history %}warning{% else %}success{% endif %}">
+          {% if forecast_panel.has_atypical_history %}Con semanas atípicas{% else %}Tendencia estable{% endif %}
+        </span>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-chart-stage">
+          <canvas id="forecastTrendChart" aria-label="Tendencia semanal de ventas y piezas" role="img"></canvas>
+        </div>
+        <div class="bi-metric-strip">
+          <div class="bi-metric">
+            <div class="bi-metric-label">Escenario base</div>
+            <div class="bi-metric-value">${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Escenario alto</div>
+            <div class="bi-metric-value">${{ forecast_panel.high_scenario_amount|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">{{ forecast_panel.high_scenario_quantity|floatformat:0|intcomma }} piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Ticket esperado</div>
+            <div class="bi-metric-value">${{ forecast_panel.forecast_avg_ticket|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">{{ forecast_panel.forecast_tickets|intcomma }} tickets</div>
+          </div>
+        </div>
+        {% if forecast_panel.atypical_rows %}
+        <div class="bi-note pending">
+          Semanas atípicas detectadas:
+          {% for row in forecast_panel.atypical_rows %}
+            {{ row.label }} ({{ row.reason }}){% if not forloop.last %}, {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+        <details class="bi-details">
+          <summary>Ver detalle auditable del pronóstico</summary>
+          <div class="bi-details-body table-responsive">
+            <table class="bi-table">
+              <thead>
+                <tr>
+                  <th>Semana</th>
+                  <th class="text-end">Venta $</th>
+                  <th class="text-end">Piezas</th>
+                  <th class="text-end">Tickets</th>
+                  <th class="text-end">Ticket prom.</th>
+                  <th>Lectura</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in forecast_panel.weekly_rows %}
+                <tr>
+                  <td>{{ row.week_label }}</td>
+                  <td class="text-end">${{ row.amount|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{{ row.quantity|floatformat:0|intcomma }}</td>
+                  <td class="text-end">{{ row.tickets|intcomma }}</td>
+                  <td class="text-end">${{ row.avg_ticket|floatformat:2|intcomma }}</td>
+                  <td>
+                    {% if row.atypical %}
+                      <span class="bi-tone warning">Atípica</span>
+                      <div class="bi-subtle">{{ row.atypical_reason }}</div>
+                    {% else %}
+                      <span class="bi-tone success">Base normal</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Comparativo</div>
+          <h2 class="bi-panel-title">Mes contra mismo mes del año anterior</h2>
+          <p class="bi-panel-copy">Meses cerrados contra meses cerrados. Si el mes actual sigue abierto, se compara al mismo corte del año previo.</p>
+        </div>
+        {% with hero=yoy_panel.hero_row %}
+        <span class="bi-pill {% if hero and hero.amount_delta_pct is not None and hero.amount_delta_pct < 0 %}danger{% elif hero and hero.amount_delta_pct is not None %}success{% else %}warning{% endif %}">
+          {{ yoy_panel.hero_note }}
+        </span>
+        {% endwith %}
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-chart-stage">
+          <canvas id="yoyMonthlyChart" aria-label="Comparativo mensual contra año anterior" role="img"></canvas>
+        </div>
+        {% with hero=yoy_panel.hero_row %}
+        <div class="bi-metric-strip">
+          <div class="bi-metric">
+            <div class="bi-metric-label">Mes visible</div>
+            <div class="bi-metric-value">{{ hero.month_label|default:"Sin mes" }}</div>
+            <div class="bi-subtle">{% if hero and hero.is_partial %}Mismo corte del año previo{% else %}Mes cerrado comparable{% endif %}</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Venta actual</div>
+            <div class="bi-metric-value">{% if hero %}${{ hero.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
+            <div class="bi-subtle">{% if hero %}{{ hero.quantity|floatformat:0|intcomma }} piezas{% else %}Sin fila{% endif %}</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Año anterior</div>
+            <div class="bi-metric-value">
+              {% if hero and hero.prev_amount is not None %}${{ hero.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}
+            </div>
+            <div class="bi-subtle">
+              {% if hero and hero.amount_delta_pct is not None %}Variación {{ hero.amount_delta_pct|floatformat:1 }}%{% else %}Comparativo pendiente{% endif %}
+            </div>
+          </div>
+        </div>
+        {% endwith %}
+        <details class="bi-details">
+          <summary>Ver detalle auditable mensual</summary>
+          <div class="bi-details-body table-responsive">
+            <table class="bi-table">
+              <thead>
+                <tr>
+                  <th>Mes</th>
+                  <th class="text-end">Venta $</th>
+                  <th class="text-end">Año anterior $</th>
+                  <th class="text-end">Dif. %</th>
+                  <th class="text-end">Piezas</th>
+                  <th class="text-end">Año anterior pzas</th>
+                  <th class="text-end">Dif. %</th>
+                  <th class="text-end">Ticket prom.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in yoy_panel.rows %}
+                <tr>
+                  <td>
+                    {{ row.month_label }}
+                    {% if row.is_partial %}
+                      <div class="bi-subtle">Mes parcial</div>
+                    {% endif %}
+                  </td>
+                  <td class="text-end">${{ row.amount|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{% if row.prev_amount is not None %}${{ row.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.amount_delta_pct is not None %}{{ row.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{{ row.quantity|floatformat:0|intcomma }}</td>
+                  <td class="text-end">{% if row.prev_quantity is not None %}{{ row.prev_quantity|floatformat:0|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.qty_delta_pct is not None %}{{ row.qty_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                  <td class="text-end">${{ row.avg_ticket|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Rentabilidad</div>
+          <h2 class="bi-panel-title">Margen vs volumen por producto</h2>
+          <p class="bi-panel-copy">Qué defender, qué promover y qué revisar según margen de MP y volumen real.</p>
+        </div>
+        <span class="bi-pill">Ventana {{ profitability_panel.lookback_days }} días</span>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-chart-stage compact">
+          <canvas id="profitabilityScatterChart" aria-label="Rentabilidad por producto" role="img"></canvas>
+        </div>
+        <div class="bi-grid-2 bi-grid-tight">
+          <div class="bi-list bi-list-compact">
+            {% for row in profitability_panel.promo_candidates %}
+            <article class="bi-list-item">
+              <strong>{{ row.label }}</strong>
+              <div class="bi-subtle">{{ row.categoria|default:row.familia }}</div>
+              <div>Margen {{ row.margin_pct|floatformat:1 }}% · {{ row.quantity|floatformat:0|intcomma }} piezas</div>
+              <div class="bi-subtle">{{ row.recommendation }}</div>
+            </article>
+            {% empty %}
+            <article class="bi-list-item">
+              <strong>Sin promoción sugerida</strong>
+              <div class="bi-subtle">No hay productos con margen suficiente y demanda floja bajo el criterio actual.</div>
+            </article>
+            {% endfor %}
+          </div>
+          <div class="bi-note bi-note-compact">{{ profitability_panel.basis_note }}</div>
+        </div>
+        <details class="bi-details">
+          <summary>Ver ranking auditable de rentabilidad</summary>
+          <div class="bi-details-body table-responsive">
+            <table class="bi-table">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th class="text-end">Venta $</th>
+                  <th class="text-end">Piezas</th>
+                  <th class="text-end">Costo MP</th>
+                  <th class="text-end">Margen $</th>
+                  <th class="text-end">Margen %</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in profitability_panel.rows %}
+                <tr>
+                  <td><strong>{{ row.label }}</strong><div class="bi-subtle">{{ row.categoria|default:row.familia }}</div></td>
+                  <td class="text-end">${{ row.revenue|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{{ row.quantity|floatformat:0|intcomma }}</td>
+                  <td class="text-end">${{ row.cost_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">${{ row.margin|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{% if row.margin_pct is not None %}{{ row.margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                  <td>
+                    <span class="bi-tone {% if row.bucket == 'Defender' %}success{% elif row.bucket == 'Promocionar' %}warning{% elif row.bucket == 'Ajustar margen' %}danger{% else %}neutral{% endif %}">
+                      {{ row.bucket }}
+                    </span>
+                    <div class="bi-subtle">{{ row.recommendation }}</div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Producción</div>
+          <h2 class="bi-panel-title">Producido contra vendido</h2>
+          <p class="bi-panel-copy">Gap semanal y categorías donde ya se ve sobreproducción o déficit.</p>
+        </div>
+        <span class="bi-pill">{{ production_sales_panel.week_label }}</span>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-grid-2">
+          <div class="bi-chart-stage compact">
+            <canvas id="productionWeeklyChart" aria-label="Producción contra venta por semana" role="img"></canvas>
+          </div>
+          <div class="bi-chart-stage compact">
+            <canvas id="productionCategoryChart" aria-label="Producción contra venta por categoría" role="img"></canvas>
+          </div>
+        </div>
+        {% with latest_row=production_sales_panel.weekly_rows|last %}
+        <div class="bi-metric-strip">
+          <div class="bi-metric">
+            <div class="bi-metric-label">Producción semana</div>
+            <div class="bi-metric-value">{% if latest_row %}{{ latest_row.produced_units|floatformat:0|intcomma }}{% else %}N/D{% endif %}</div>
+            <div class="bi-subtle">piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Venta semana</div>
+            <div class="bi-metric-value">{% if latest_row %}{{ latest_row.sold_units|floatformat:0|intcomma }}{% else %}N/D{% endif %}</div>
+            <div class="bi-subtle">piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Gap</div>
+            <div class="bi-metric-value {% if latest_row and latest_row.delta_units < 0 %}danger{% elif latest_row and latest_row.delta_units > 0 %}warning{% elif latest_row %}success{% endif %}">
+              {% if latest_row %}{{ latest_row.delta_units|floatformat:0|intcomma }}{% else %}N/D{% endif %}
+            </div>
+            <div class="bi-subtle">producción menos venta</div>
+          </div>
+        </div>
+        {% endwith %}
+        <div class="bi-note bi-note-compact">{{ production_sales_panel.basis_note }}</div>
+        <details class="bi-details">
+          <summary>Ver detalle auditable de producción y categorías</summary>
+          <div class="bi-details-body bi-grid-2">
+            <div class="table-responsive">
+              <table class="bi-table">
+                <thead>
+                  <tr>
+                    <th>Semana</th>
+                    <th class="text-end">Producción</th>
+                    <th class="text-end">Venta</th>
+                    <th class="text-end">Diferencia</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in production_sales_panel.weekly_rows %}
+                  <tr>
+                    <td>{{ row.week_label }}</td>
+                    <td class="text-end">{{ row.produced_units|floatformat:0|intcomma }}</td>
+                    <td class="text-end">{{ row.sold_units|floatformat:0|intcomma }}</td>
+                    <td class="text-end">{{ row.delta_units|floatformat:0|intcomma }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="table-responsive">
+              <table class="bi-table">
+                <thead>
+                  <tr>
+                    <th>Categoría</th>
+                    <th class="text-end">Producción</th>
+                    <th class="text-end">Venta</th>
+                    <th class="text-end">Diferencia</th>
+                    <th>Estatus</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in production_sales_panel.category_rows %}
+                  <tr>
+                    <td>{{ row.label }}</td>
+                    <td class="text-end">{{ row.produced_units|floatformat:0|intcomma }}</td>
+                    <td class="text-end">{{ row.sold_units|floatformat:0|intcomma }}</td>
+                    <td class="text-end">{{ row.delta_units|floatformat:0|intcomma }}</td>
+                    <td><span class="bi-tone {{ row.tone }}">{{ row.status }}</span></td>
+                  </tr>
+                  {% empty %}
+                  <tr><td colspan="5">Sin categorías suficientes para el corte actual.</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Flujo central</div>
+          <h2 class="bi-panel-title">Flujo histórico mensual del centro</h2>
+          <p class="bi-panel-copy">Abasto central disponible contra venta y merma. Si no existe snapshot real, el sistema lo declara y no inventa saldos.</p>
+        </div>
+        <span class="bi-pill">Corte común {{ central_flow_panel.cutoff_date }}</span>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-chart-stage compact">
+          <canvas id="centralFlowChart" aria-label="Flujo central histórico mensual" role="img"></canvas>
+        </div>
+      <div class="bi-grid-4">
+        {% with flow_row=central_flow_panel.rows|last %}
+        <div class="bi-metric">
+          <div class="bi-metric-label">Fuente central</div>
+          <div class="bi-metric-value">{{ flow_row.central_source|default:"N/D" }}</div>
+          <div class="bi-subtle">según etapa operativa</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Abasto total</div>
+          <div class="bi-metric-value">{% if flow_row %}{{ flow_row.supply_units|floatformat:0|intcomma }}{% else %}N/D{% endif %}</div>
+          <div class="bi-subtle">producción + transferencias</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Venta</div>
+          <div class="bi-metric-value">{% if flow_row %}{{ flow_row.sold_units|floatformat:0|intcomma }}{% else %}N/D{% endif %}</div>
+          <div class="bi-subtle">piezas Point</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Neto del mes</div>
+          <div class="bi-metric-value {% if flow_row and flow_row.net_units < 0 %}danger{% elif flow_row and flow_row.net_units > 0 %}warning{% elif flow_row %}success{% endif %}">
+            {% if flow_row %}{{ flow_row.net_units|floatformat:0|intcomma }}{% else %}N/D{% endif %}
+          </div>
+          <div class="bi-subtle">abasto menos venta y merma</div>
+        </div>
+        {% endwith %}
+      </div>
+      {% if inventory_ledger_panel.omitted_months %}
+      <div class="bi-note pending">
+        Datos pendientes por solicitar al usuario:
+        Puente real de inventario antes de {{ inventory_ledger_panel.snapshot_coverage_start|date:"Y-m" }} requiere snapshots históricos o ledger completo con salidas. Meses omitidos: {{ inventory_ledger_panel.omitted_months|join:", " }}.
+      </div>
+      {% endif %}
+      <div class="bi-note bi-note-compact">{{ central_flow_panel.basis_note }}</div>
+      <details class="bi-details">
+        <summary>Ver detalle auditable del flujo central</summary>
+        <div class="bi-details-body table-responsive">
+          {% if central_flow_panel.rows %}
+          <table class="bi-table">
+            <thead>
+              <tr>
+                <th>Mes</th>
+                <th>Fuente central</th>
+                <th class="text-end">Prod. directa</th>
+                <th class="text-end">Transfer. a CEDIS</th>
+                <th class="text-end">Abasto total</th>
+                <th class="text-end">Venta</th>
+                <th class="text-end">Merma</th>
+                <th class="text-end">Neto</th>
+                <th class="text-end">Cierre real</th>
+                <th class="text-end">Brecha vs cierre</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in central_flow_panel.rows %}
+              <tr>
+                <td>{{ row.month_label }}{% if row.is_partial %}<div class="bi-subtle">Mes parcial</div>{% endif %}</td>
+                <td>{{ row.central_source }}</td>
+                <td class="text-end">{{ row.production_units|floatformat:0|intcomma }}</td>
+                <td class="text-end">{{ row.transfer_units|floatformat:0|intcomma }}</td>
+                <td class="text-end">{{ row.supply_units|floatformat:0|intcomma }}</td>
+                <td class="text-end">{{ row.sold_units|floatformat:0|intcomma }}</td>
+                <td class="text-end">{{ row.waste_units|floatformat:0|intcomma }}</td>
+                <td class="text-end">{{ row.net_units|floatformat:0|intcomma }}</td>
+                <td class="text-end">{% if row.has_snapshot and row.actual_closing is not None %}{{ row.actual_closing|floatformat:0|intcomma }}{% else %}<span class="bi-subtle">Sin snapshot</span>{% endif %}</td>
+                <td class="text-end">{% if row.has_snapshot and row.variance_units is not None %}{{ row.variance_units|floatformat:0|intcomma }}{% else %}<span class="bi-subtle">N/D</span>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <div class="bi-empty">
+            <strong>Sin flujo central confiable todavía</strong>
+            <div class="bi-subtle">No hay registros diarios suficientes para construir el flujo central mensual.</div>
+          </div>
+          {% endif %}
+        </div>
+      </details>
     </div>
-  </form>
+  </section>
 
-  <div class="kpi-mini">
-    <div class="kpi-card"><div class="kpi-number">${{ snapshot.kpis.compras_total|floatformat:2 }}</div><div class="kpi-label">Compras</div></div>
-    <div class="kpi-card"><div class="kpi-number is-success">${{ snapshot.kpis.ventas_total|floatformat:2 }}</div><div class="kpi-label">Ventas</div></div>
-    <div class="kpi-card"><div class="kpi-number is-warning">${{ snapshot.kpis.nomina_total|floatformat:2 }}</div><div class="kpi-label">Nómina</div></div>
-    <div class="kpi-card"><div class="kpi-number {% if snapshot.kpis.margen_operativo >= 0 %}is-success{% else %}is-danger{% endif %}">${{ snapshot.kpis.margen_operativo|floatformat:2 }}</div><div class="kpi-label">Margen operativo</div></div>
-    <div class="kpi-card"><div class="kpi-number is-danger">{{ snapshot.kpis.alertas_stock }}</div><div class="kpi-label">Alertas stock</div></div>
-  </div>
-
-  <div class="toolbar">
-    <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&export=csv">Descargar CSV</a>
-    <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&export=xlsx">Descargar Excel</a>
-  </div>
-
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Periodo</th>
-          <th class="text-end">Compras</th>
-          <th class="text-end">Ventas</th>
-          <th class="text-end">Nómina</th>
-          <th class="text-end">Margen</th>
-          <th class="text-end">Entregas</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in snapshot.series_mensual %}
-        <tr>
-          <td>{{ row.periodo }}</td>
-          <td class="text-end">${{ row.compras|floatformat:2 }}</td>
-          <td class="text-end">${{ row.ventas|floatformat:2 }}</td>
-          <td class="text-end">${{ row.nomina|floatformat:2 }}</td>
-          <td class="text-end {% if row.margen < 0 %}text-danger{% else %}text-success{% endif %}">${{ row.margen|floatformat:2 }}</td>
-          <td class="text-end">{{ row.entregas }}</td>
-        </tr>
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Lectura diaria</div>
+          <h2 class="bi-panel-title">Sucursales que se salen del comparable</h2>
+          <p class="bi-panel-copy">Lectura rápida contra el último día equivalente de semana.</p>
+        </div>
+      </div>
+      <div class="bi-list bi-list-tight">
+        {% for row in branch_weekday_rows %}
+        <article class="bi-list-item">
+          <strong>{{ row.branch_code }}</strong>
+          <div class="bi-subtle">{{ row.branch_name }}</div>
+          <div>${{ row.amount|floatformat:2|intcomma }} · {{ row.units|floatformat:0|intcomma }} piezas · {{ row.tickets|intcomma }} tickets</div>
+          <div class="bi-subtle"><span class="bi-tone {{ row.tone }}">{{ row.status }}</span> {{ row.detail }}</div>
+        </article>
         {% empty %}
-        <tr><td colspan="6" class="text-muted">Sin datos del periodo.</td></tr>
+        <article class="bi-list-item"><strong>Sin alertas de sucursal</strong><div class="bi-subtle">No hay suficiente referencia comparable reciente.</div></article>
         {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+      </div>
+    </article>
 
-<div class="dashboard-grid">
-  <section class="card">
-    <div class="card-header">Top proveedores (monto comprado)</div>
-    <div class="table-responsive">
-      <table class="table table-striped">
-        <thead>
-          <tr>
-            <th>Proveedor</th>
-            <th class="text-end">Órdenes</th>
-            <th class="text-end">Monto</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in snapshot.top_proveedores %}
-          <tr>
-            <td>{{ row.proveedor__nombre|default:"-" }}</td>
-            <td class="text-end">{{ row.ordenes }}</td>
-            <td class="text-end">${{ row.total|floatformat:2 }}</td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="3" class="text-muted">Sin órdenes para el rango.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card-header">Top insumos (consumo/salida)</div>
-    <div class="table-responsive">
-      <table class="table table-striped">
-        <thead>
-          <tr>
-            <th>Insumo</th>
-            <th class="text-end">Movimientos</th>
-            <th class="text-end">Cantidad</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in snapshot.top_insumos_consumo %}
-          <tr>
-            <td>{{ row.insumo__nombre }}</td>
-            <td class="text-end">{{ row.movimientos }}</td>
-            <td class="text-end">{{ row.total|floatformat:3 }}</td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="3" class="text-muted">Sin consumo en el rango.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Lectura diaria</div>
+          <h2 class="bi-panel-title">Productos que se desvían del patrón</h2>
+          <p class="bi-panel-copy">Productos relevantes arriba o abajo contra su referencia comparable más reciente.</p>
+        </div>
+      </div>
+      <div class="bi-list bi-list-tight">
+        {% for row in product_weekday_rows %}
+        <article class="bi-list-item">
+          <strong>{{ row.recipe_name }}</strong>
+          <div>{{ row.units|floatformat:0|intcomma }} piezas · ${{ row.amount|floatformat:2|intcomma }} · {{ row.branch_count|intcomma }} sucursales</div>
+          <div class="bi-subtle"><span class="bi-tone {{ row.tone }}">{{ row.status }}</span> {{ row.detail }}</div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin alertas de producto</strong><div class="bi-subtle">No hay suficiente referencia comparable reciente.</div></article>
+        {% endfor %}
+      </div>
+    </article>
   </section>
 </div>
-</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ forecast_panel.weekly_rows|json_script:"forecast-weekly-data" }}
+{{ yoy_panel.rows|json_script:"yoy-monthly-data" }}
+{{ profitability_panel.rows|json_script:"profitability-data" }}
+{{ production_sales_panel.weekly_rows|json_script:"production-weekly-data" }}
+{{ production_sales_panel.category_rows|json_script:"production-category-data" }}
+{{ central_flow_panel.rows|json_script:"central-flow-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  (() => {
+    const parse = (id) => {
+      const node = document.getElementById(id);
+      return node ? JSON.parse(node.textContent) : [];
+    };
+    const asNumber = (value) => {
+      if (value === null || value === undefined || value === "") return 0;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const moneyTick = (value) => {
+      if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+      if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(0)}k`;
+      return `$${value.toFixed(0)}`;
+    };
+    const intTick = (value) => {
+      if (Math.abs(value) >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+      if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(0)}k`;
+      return `${value.toFixed(0)}`;
+    };
+    const theme = {
+      wine: "#922456",
+      forest: "#236d53",
+      amber: "#b38a25",
+      slate: "#6f6170",
+      blush: "rgba(146, 36, 86, 0.14)",
+      greenSoft: "rgba(35, 109, 83, 0.16)",
+      amberSoft: "rgba(179, 138, 37, 0.18)",
+      red: "#bc3b3b",
+      border: "rgba(145, 36, 86, 0.10)"
+    };
+    const renderFallbackBarList = (canvas, rows) => {
+      if (!canvas || !rows.length) return;
+      const host = canvas.parentElement;
+      canvas.style.display = "none";
+      const max = Math.max(...rows.map((row) => Math.abs(asNumber(row.value))), 1);
+      host.innerHTML = `
+        <div class="bi-chart-fallback">
+          <div class="bi-bar-list">
+            ${rows.map((row) => `
+              <div class="bi-bar-row">
+                <span>${row.label}</span>
+                <div class="bi-bar-track">
+                  <div class="bi-bar-fill ${row.tone || "is-wine"}" style="width:${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%"></div>
+                </div>
+                <strong>${row.display}</strong>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    };
+
+    const baseOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          labels: {
+            usePointStyle: true,
+            boxWidth: 10,
+            color: "#6f6170",
+            font: { size: 12, weight: "600" }
+          }
+        },
+        tooltip: {
+          backgroundColor: "rgba(49, 28, 38, 0.96)",
+          titleColor: "#fff5f8",
+          bodyColor: "#fff5f8",
+          padding: 12,
+          cornerRadius: 12
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: "rgba(145, 36, 86, 0.06)" },
+          ticks: { color: "#7c6971" }
+        },
+        y: {
+          grid: { color: "rgba(145, 36, 86, 0.06)" },
+          ticks: { color: "#7c6971" }
+        }
+      }
+    };
+
+    const forecastRows = parse("forecast-weekly-data");
+    const yoyRows = parse("yoy-monthly-data");
+    const profitabilityRows = parse("profitability-data");
+    const productionWeeklyRows = parse("production-weekly-data");
+    const productionCategoryRows = parse("production-category-data");
+    const centralFlowRows = parse("central-flow-data");
+    const hasChartJs = typeof window.Chart === "function";
+
+    const forecastCtx = document.getElementById("forecastTrendChart");
+    if (forecastCtx && forecastRows.length && hasChartJs) {
+      new Chart(forecastCtx, {
+        type: "line",
+        data: {
+          labels: forecastRows.map((row) => row.week_label),
+          datasets: [
+            {
+              label: "Venta $",
+              type: "line",
+              data: forecastRows.map((row) => asNumber(row.amount)),
+              borderColor: theme.wine,
+              backgroundColor: theme.blush,
+              tension: 0.32,
+              borderWidth: 3,
+              pointRadius: forecastRows.map((row) => row.atypical ? 5 : 3),
+              pointBackgroundColor: forecastRows.map((row) => row.atypical ? theme.amber : theme.wine),
+              fill: true,
+              yAxisID: "yMoney"
+            },
+            {
+              label: "Piezas",
+              type: "bar",
+              data: forecastRows.map((row) => asNumber(row.quantity)),
+              backgroundColor: theme.greenSoft,
+              borderColor: theme.forest,
+              borderWidth: 1,
+              yAxisID: "yUnits"
+            }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          plugins: {
+            ...baseOptions.plugins,
+            tooltip: {
+              ...baseOptions.plugins.tooltip,
+              callbacks: {
+                label(context) {
+                  const label = context.dataset.label || "";
+                  const value = context.parsed.y || 0;
+                  return label.includes("$") ? `${label}: ${moneyTick(value)}` : `${label}: ${intTick(value)}`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: baseOptions.scales.x,
+            yMoney: {
+              ...baseOptions.scales.y,
+              position: "left",
+              ticks: { color: "#7c6971", callback(value) { return moneyTick(Number(value)); } }
+            },
+            yUnits: {
+              ...baseOptions.scales.y,
+              position: "right",
+              grid: { display: false },
+              ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } }
+            }
+          }
+        }
+      });
+    } else if (forecastCtx && forecastRows.length) {
+      renderFallbackBarList(forecastCtx, forecastRows.map((row) => ({
+        label: row.week_label,
+        value: asNumber(row.amount),
+        display: `${moneyTick(asNumber(row.amount))} · ${intTick(asNumber(row.quantity))} pzas`,
+        tone: row.atypical ? "is-amber" : "is-wine",
+      })));
+    }
+
+    const yoyCtx = document.getElementById("yoyMonthlyChart");
+    if (yoyCtx && yoyRows.length && hasChartJs) {
+      new Chart(yoyCtx, {
+        type: "bar",
+        data: {
+          labels: yoyRows.map((row) => row.month_label),
+          datasets: [
+            {
+              label: "Venta actual",
+              data: yoyRows.map((row) => asNumber(row.amount)),
+              backgroundColor: theme.blush,
+              borderColor: theme.wine,
+              borderWidth: 1.2
+            },
+            {
+              label: "Año anterior",
+              data: yoyRows.map((row) => asNumber(row.prev_amount)),
+              backgroundColor: theme.greenSoft,
+              borderColor: theme.forest,
+              borderWidth: 1.2
+            }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          plugins: {
+            ...baseOptions.plugins,
+            tooltip: {
+              ...baseOptions.plugins.tooltip,
+              callbacks: {
+                label(context) {
+                  return `${context.dataset.label}: ${moneyTick(context.parsed.y || 0)}`;
+                },
+                afterBody(items) {
+                  const row = yoyRows[items[0].dataIndex];
+                  const delta = row.amount_delta_pct;
+                  return delta === null || delta === undefined ? [] : [`Diferencia: ${Number(delta).toFixed(1)}%`];
+                }
+              }
+            }
+          },
+          scales: {
+            ...baseOptions.scales,
+            y: {
+              ...baseOptions.scales.y,
+              ticks: { color: "#7c6971", callback(value) { return moneyTick(Number(value)); } }
+            }
+          }
+        }
+      });
+    } else if (yoyCtx && yoyRows.length) {
+      renderFallbackBarList(yoyCtx, yoyRows.map((row) => ({
+        label: row.month_label,
+        value: asNumber(row.amount),
+        display: `${moneyTick(asNumber(row.amount))} vs ${row.prev_amount ? moneyTick(asNumber(row.prev_amount)) : "N/D"}`,
+        tone: (row.amount_delta_pct || 0) >= 0 ? "is-green" : "is-red",
+      })));
+    }
+
+    const profitabilityCtx = document.getElementById("profitabilityScatterChart");
+    if (profitabilityCtx && profitabilityRows.length && hasChartJs) {
+      new Chart(profitabilityCtx, {
+        type: "bubble",
+        data: {
+          datasets: [
+            {
+              label: "Defender",
+              data: profitabilityRows.filter((row) => row.bucket === "Defender").map((row) => ({
+                x: asNumber(row.quantity), y: asNumber(row.margin_pct), r: Math.max(6, Math.min(18, asNumber(row.revenue) / 15000)), label: row.label
+              })),
+              backgroundColor: "rgba(35, 109, 83, 0.24)", borderColor: theme.forest
+            },
+            {
+              label: "Promocionar",
+              data: profitabilityRows.filter((row) => row.bucket === "Promocionar").map((row) => ({
+                x: asNumber(row.quantity), y: asNumber(row.margin_pct), r: Math.max(6, Math.min(18, asNumber(row.revenue) / 15000)), label: row.label
+              })),
+              backgroundColor: "rgba(179, 138, 37, 0.24)", borderColor: theme.amber
+            },
+            {
+              label: "Revisar",
+              data: profitabilityRows.filter((row) => row.bucket !== "Defender" && row.bucket !== "Promocionar").map((row) => ({
+                x: asNumber(row.quantity), y: asNumber(row.margin_pct), r: Math.max(6, Math.min(18, asNumber(row.revenue) / 15000)), label: row.label
+              })),
+              backgroundColor: "rgba(188, 59, 59, 0.22)", borderColor: theme.red
+            }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          plugins: {
+            ...baseOptions.plugins,
+            tooltip: {
+              ...baseOptions.plugins.tooltip,
+              callbacks: {
+                label(context) {
+                  const point = context.raw;
+                  return `${point.label}: ${intTick(point.x)} piezas · ${point.y.toFixed(1)}% margen`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              ...baseOptions.scales.x,
+              title: { display: true, text: "Volumen (piezas)", color: "#7c6971" },
+              ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } }
+            },
+            y: {
+              ...baseOptions.scales.y,
+              title: { display: true, text: "Margen %", color: "#7c6971" },
+              ticks: { color: "#7c6971", callback(value) { return `${Number(value).toFixed(0)}%`; } }
+            }
+          }
+        }
+      });
+    } else if (profitabilityCtx && profitabilityRows.length) {
+      renderFallbackBarList(profitabilityCtx, profitabilityRows.slice(0, 8).map((row) => ({
+        label: row.label,
+        value: asNumber(row.margin_pct),
+        display: `${Number(row.margin_pct || 0).toFixed(1)}% · ${intTick(asNumber(row.quantity))}`,
+        tone: row.bucket === "Promocionar" ? "is-amber" : row.bucket === "Defender" ? "is-green" : "is-red",
+      })));
+    }
+
+    const productionWeeklyCtx = document.getElementById("productionWeeklyChart");
+    if (productionWeeklyCtx && productionWeeklyRows.length && hasChartJs) {
+      new Chart(productionWeeklyCtx, {
+        type: "bar",
+        data: {
+          labels: productionWeeklyRows.map((row) => row.week_label),
+          datasets: [
+            { label: "Producción", data: productionWeeklyRows.map((row) => asNumber(row.produced_units)), backgroundColor: theme.greenSoft, borderColor: theme.forest, borderWidth: 1.1 },
+            { label: "Venta", data: productionWeeklyRows.map((row) => asNumber(row.sold_units)), backgroundColor: theme.blush, borderColor: theme.wine, borderWidth: 1.1 }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          scales: {
+            ...baseOptions.scales,
+            y: { ...baseOptions.scales.y, ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } } }
+          }
+        }
+      });
+    } else if (productionWeeklyCtx && productionWeeklyRows.length) {
+      renderFallbackBarList(productionWeeklyCtx, productionWeeklyRows.map((row) => ({
+        label: row.week_label,
+        value: asNumber(row.delta_units),
+        display: `${intTick(asNumber(row.produced_units))} prod / ${intTick(asNumber(row.sold_units))} vend`,
+        tone: asNumber(row.delta_units) >= 0 ? "is-green" : "is-red",
+      })));
+    }
+
+    const productionCategoryCtx = document.getElementById("productionCategoryChart");
+    if (productionCategoryCtx && productionCategoryRows.length && hasChartJs) {
+      new Chart(productionCategoryCtx, {
+        type: "bar",
+        data: {
+          labels: productionCategoryRows.map((row) => row.label),
+          datasets: [
+            { label: "Producción", data: productionCategoryRows.map((row) => asNumber(row.produced_units)), backgroundColor: theme.greenSoft, borderColor: theme.forest, borderWidth: 1.1 },
+            { label: "Venta", data: productionCategoryRows.map((row) => asNumber(row.sold_units)), backgroundColor: theme.blush, borderColor: theme.wine, borderWidth: 1.1 }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          indexAxis: "y",
+          scales: {
+            x: { ...baseOptions.scales.x, ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } } },
+            y: { ...baseOptions.scales.y, ticks: { color: "#7c6971" } }
+          }
+        }
+      });
+    } else if (productionCategoryCtx && productionCategoryRows.length) {
+      renderFallbackBarList(productionCategoryCtx, productionCategoryRows.slice(0, 10).map((row) => ({
+        label: row.label,
+        value: asNumber(row.delta_units),
+        display: `${intTick(asNumber(row.delta_units))} delta`,
+        tone: row.tone === "danger" ? "is-red" : row.tone === "warning" ? "is-amber" : "is-green",
+      })));
+    }
+
+    const centralCtx = document.getElementById("centralFlowChart");
+    if (centralCtx && centralFlowRows.length && hasChartJs) {
+      new Chart(centralCtx, {
+        type: "bar",
+        data: {
+          labels: centralFlowRows.map((row) => row.month_label),
+          datasets: [
+            { type: "bar", label: "Abasto total", data: centralFlowRows.map((row) => asNumber(row.supply_units)), backgroundColor: theme.greenSoft, borderColor: theme.forest, borderWidth: 1.1 },
+            { type: "bar", label: "Venta", data: centralFlowRows.map((row) => asNumber(row.sold_units)), backgroundColor: theme.blush, borderColor: theme.wine, borderWidth: 1.1 },
+            { type: "line", label: "Neto", data: centralFlowRows.map((row) => asNumber(row.net_units)), borderColor: theme.amber, backgroundColor: "rgba(179, 138, 37, 0.18)", borderWidth: 3, tension: 0.2 }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          scales: {
+            ...baseOptions.scales,
+            y: { ...baseOptions.scales.y, ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } } }
+          }
+        }
+      });
+    } else if (centralCtx && centralFlowRows.length) {
+      renderFallbackBarList(centralCtx, centralFlowRows.map((row) => ({
+        label: row.month_label,
+        value: asNumber(row.net_units),
+        display: `${intTick(asNumber(row.supply_units))} abasto / ${intTick(asNumber(row.sold_units))} venta`,
+        tone: asNumber(row.net_units) >= 0 ? "is-green" : "is-red",
+      })));
+    }
+  })();
+</script>
 {% endblock %}

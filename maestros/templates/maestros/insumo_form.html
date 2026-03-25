@@ -9,43 +9,758 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">{% if object %}Editar insumo{% else %}Nuevo insumo{% endif %}</div>
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">Maestros / DG</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if object and usage_profile and usage_profile.is_operational_blocker %}is-danger{% elif operational_profile.missing %}is-warning{% else %}is-success{% endif %}">
+        {% if object and usage_profile and usage_profile.is_operational_blocker %}Crítico{% elif operational_profile.missing %}En atención{% else %}Listo para operar{% endif %}
+      </div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">
+        {% if object and usage_profile and usage_profile.is_operational_blocker %}
+          {{ module_blocker_cards|length }}
+        {% else %}
+          {{ operational_profile.missing|length }}
+        {% endif %}
+      </div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">{% if object and next_action %}{{ next_action.detail }}{% else %}{{ operational_profile.readiness_hint }}{% endif %}</div>
+      <a class="btn btn-secondary btn-sm" href="{% if object and next_action %}{{ next_action.action_url }}{% else %}{% url 'maestros:insumo_list' %}{% endif %}">{% if object and next_action %}{{ next_action.action_label }}{% else %}Abrir maestro{% endif %}</a>
+    </article>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">{% if object %}Editar insumo{% else %}{{ form_mode_title|default:"Nuevo insumo" }}{% endif %}</div>
+  <div class="module-note mb-3">
+    <strong>Documento ERP Enterprise activo</strong> · Esta ficha define la identidad, clasificación, control maestro y habilitación operativa del artículo en costeo, compras e inventario.
+  </div>
+  <div class="kpi-grid mb-3">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">Maestros / DG</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if object and usage_profile and usage_profile.is_operational_blocker %}is-danger{% elif operational_profile.missing %}is-warning{% else %}is-success{% endif %}">
+        {% if object and usage_profile and usage_profile.is_operational_blocker %}Crítico{% elif operational_profile.missing %}En atención{% else %}Listo para operar{% endif %}
+      </div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">
+        {% if object and usage_profile and usage_profile.is_operational_blocker %}
+          {{ module_blocker_cards|length }}
+        {% else %}
+          {{ operational_profile.missing|length }}
+        {% endif %}
+      </div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">{% if object and next_action %}{{ next_action.detail }}{% else %}{{ operational_profile.readiness_hint }}{% endif %}</div>
+      <a class="btn btn-secondary btn-sm" href="{% if object and next_action %}{{ next_action.action_url }}{% else %}{% url 'maestros:insumo_list' %}{% endif %}">{% if object and next_action %}{{ next_action.action_label }}{% else %}Abrir maestro{% endif %}</a>
+    </article>
+  </div>
+  <div class="card table-card mb-3">
+    <div class="card-header">Workflow ERP del artículo</div>
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Tramo</th>
+            <th>Responsable</th>
+            <th>Objetivo</th>
+            <th>Control dominante</th>
+            <th>Salida esperada</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>01 · Identidad</strong></td>
+            <td>Maestros / DG</td>
+            <td>Definir nombre, código interno y código comercial.</td>
+            <td>Gobierno del artículo estándar.</td>
+            <td>Artículo identificable en todo el ERP.</td>
+          </tr>
+          <tr>
+            <td><strong>02 · Clase</strong></td>
+            <td>Maestros / Producción</td>
+            <td>Determinar si es materia prima, insumo interno o empaque.</td>
+            <td>Taxonomía operativa.</td>
+            <td>Uso correcto en recetas, compras e inventario.</td>
+          </tr>
+          <tr>
+            <td><strong>03 · Datos maestros</strong></td>
+            <td>Maestros / Compras</td>
+            <td>Cerrar unidad base, categoría y proveedor según la clase.</td>
+            <td>Readiness del catálogo ERP.</td>
+            <td>Artículo listo para costeo y abastecimiento.</td>
+          </tr>
+          <tr>
+            <td><strong>04 · Impacto</strong></td>
+            <td>DG / Operación</td>
+            <td>Confirmar dónde bloquea o habilita el flujo.</td>
+            <td>Cockpit operativo por módulo.</td>
+            <td>Uso trazable en finales, compras e inventario.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    <div class="enterprise-pill-card is-active">
+      <div class="enterprise-pill-title">01 Maestro</div>
+      <div class="enterprise-pill-text">Nombre, unidad, categoría y proveedor deben quedar consistentes.</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">02 Costeo</div>
+      <div class="enterprise-pill-text">El artículo debe quedar listo para costo vigente y consumo trazable.</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">03 Operación</div>
+      <div class="enterprise-pill-text">Una vez cerrado, el artículo participa en BOM, MRP, compras e inventario.</div>
+    </div>
+  </div>
+  {% if not object and selected_type_card %}
+  <div class="module-note mb-3">
+    <strong>Alta guiada:</strong> {{ form_mode_hint }}
+  </div>
+  {% endif %}
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    {% for item in item_type_cards %}
+    <div class="enterprise-pill-card {% if selected_type_card.code == item.code %}is-active{% endif %}">
+      <div class="enterprise-pill-title">{{ item.title }}</div>
+      <div class="enterprise-pill-text">{{ item.description }}</div>
+      {% if not object %}
+      <a class="btn btn-secondary btn-sm" href="{% url 'maestros:insumo_create' %}?tipo_item={{ item.code }}">Usar esta clase</a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="module-note mb-3">
+    Usa <strong>Materia prima</strong> para compra directa, <strong>Insumo interno</strong> para batidas/mezclas que se producen en planta, y
+    <strong>Empaque</strong> para domos, cajas, etiquetas y materiales de presentación.
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">{{ operational_profile.usage_label }}</div>
+      <div class="enterprise-pill-text">{{ operational_profile.usage_hint }}</div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Estado maestro</div>
+      <div class="enterprise-pill-text">
+        {{ operational_profile.readiness_label }}. {{ operational_profile.readiness_hint }}
+        {% if operational_profile.missing %}
+        Falta: {{ operational_profile.missing|join:", " }}.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="card table-card mb-3">
+    <div class="card-header">Criterios de cierre ERP del artículo</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Criterio</th>
+            <th>Estatus</th>
+            <th>Lectura operativa</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Identidad estándar</td>
+            <td>
+              <span class="badge {% if form.instance.nombre or form.nombre.value %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                {% if form.instance.nombre or form.nombre.value %}Listo{% else %}Por validar{% endif %}
+              </span>
+            </td>
+            <td>Nombre maestro y clase operativa definidos para evitar artículos ambiguos.</td>
+          </tr>
+          <tr>
+            <td>Unidad base</td>
+            <td>
+              <span class="badge {% if form.instance.unidad_base_id or form.unidad_base.value %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                {% if form.instance.unidad_base_id or form.unidad_base.value %}Listo{% else %}Por validar{% endif %}
+              </span>
+            </td>
+            <td>La unidad base debe quedar cerrada antes de costeo, compras e inventario.</td>
+          </tr>
+          <tr>
+            <td>Datos obligatorios por clase</td>
+            <td>
+              <span class="badge {% if not operational_profile.missing %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                {% if not operational_profile.missing %}Listo{% else %}Por validar{% endif %}
+              </span>
+            </td>
+            <td>
+              {% if operational_profile.missing %}
+                Falta: {{ operational_profile.missing|join:", " }}.
+              {% else %}
+                El artículo cumple los datos mínimos para operar en el ERP.
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td>Impacto multi-módulo</td>
+            <td>
+              <span class="badge {% if object and usage_profile and usage_profile.impact_profile.is_critical %}bg-danger{% elif object and usage_profile and usage_profile.impact_profile.is_multimodule %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                {% if object and usage_profile and usage_profile.impact_profile.is_critical %}Crítico{% elif object and usage_profile and usage_profile.impact_profile.is_multimodule %}Vigilar{% else %}Controlado{% endif %}
+              </span>
+            </td>
+            <td>
+              {% if object and usage_profile %}
+                {{ usage_profile.impact_profile.detail }}
+              {% else %}
+                El impacto operativo se mostrará cuando el artículo ya esté guardado y ligado a módulos.
+              {% endif %}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Requisitos ERP por clase</div>
+      <div class="enterprise-pill-text" id="erp_requirements_list">
+        {% for item in selected_type_requirements %}
+          <div>{{ item }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Categorías sugeridas</div>
+      <div class="enterprise-pill-text">
+        {% if selected_type_category_examples %}
+          {{ selected_type_category_examples|join:", " }}
+        {% else %}
+          Aún no hay categorías sugeridas para esta clase. Usa una categoría consistente.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    <div class="enterprise-pill-card enterprise-readiness-card" id="erp_readiness_card">
+      <div class="enterprise-pill-title">Checklist ERP en vivo</div>
+      <div class="enterprise-pill-text" id="erp_readiness_summary">
+        {{ operational_profile.readiness_label }}. {{ operational_profile.readiness_hint }}
+      </div>
+      <div class="enterprise-checklist" id="erp_readiness_checklist">
+        <div class="enterprise-checklist-item" data-check-key="nombre">
+          <span class="enterprise-check-icon">•</span>
+          <span>Nombre maestro</span>
+        </div>
+        <div class="enterprise-checklist-item" data-check-key="unidad_base">
+          <span class="enterprise-check-icon">•</span>
+          <span>Unidad base</span>
+        </div>
+        <div class="enterprise-checklist-item" data-check-key="activo">
+          <span class="enterprise-check-icon">•</span>
+          <span>Estatus activo/inactivo</span>
+        </div>
+        <div class="enterprise-checklist-item" data-check-key="proveedor_principal">
+          <span class="enterprise-check-icon">•</span>
+          <span>Proveedor principal</span>
+        </div>
+        <div class="enterprise-checklist-item" data-check-key="categoria">
+          <span class="enterprise-check-icon">•</span>
+          <span>Categoría operativa</span>
+        </div>
+        <div class="enterprise-checklist-item" data-check-key="codigo_point">
+          <span class="enterprise-check-icon">•</span>
+          <span>Código de venta recomendado</span>
+        </div>
+      </div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Bloqueos actuales</div>
+      <div class="enterprise-pill-text" id="erp_readiness_missing">
+        {% if operational_profile.missing %}
+          Falta: {{ operational_profile.missing|join:", " }}.
+        {% else %}
+          Sin bloqueos de datos para esta clase.
+        {% endif %}
+      </div>
+      <div class="module-note mt-2" id="erp_readiness_hint">
+        Completa los campos obligatorios de esta clase para dejar el artículo listo para compras, recetas e inventario.
+      </div>
+    </div>
+  </div>
+  {% if object and usage_profile %}
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Siguiente paso recomendado</div>
+      <div class="enterprise-pill-text">
+        <strong>{{ next_action_recommendation.title }}</strong><br>
+        {{ next_action_recommendation.detail }}
+      </div>
+      <div class="recipe-actions recipe-actions-compact mt-2">
+        <a class="btn btn-primary btn-sm" href="{{ next_action_recommendation.action_url }}">{{ next_action_recommendation.action_label }}</a>
+      </div>
+    </div>
+  </div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Impacto operativo</div>
+      <div class="enterprise-pill-text">
+        Recetas: {{ usage_profile.recipe_count }} · Finales: {{ usage_profile.final_recipe_count }} ·
+        Bases: {{ usage_profile.base_recipe_count }}
+      </div>
+      <div class="enterprise-pill-text">
+        Compras: {{ usage_profile.purchase_count }} · Inventario: {{ usage_profile.inventory_refs }}
+      </div>
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Impacto ERP</div>
+      <div class="enterprise-pill-text">
+        <strong>{{ usage_profile.impact_profile.level }}</strong> · {{ usage_profile.impact_profile.detail }}
+      </div>
+      <div class="enterprise-pill-text">
+        {% if usage_profile.impact_profile.is_critical %}
+          Este artículo está frenando al menos un producto final.
+        {% elif usage_profile.impact_profile.used_in_final_products %}
+          Impacta producto final, aunque todavía no sea bloqueo crítico.
+        {% elif usage_profile.impact_profile.is_multimodule %}
+          Se usa en más de un módulo operativo.
+        {% else %}
+          Uso acotado dentro del ERP.
+        {% endif %}
+      </div>
+      {% if usage_profile.final_recipe_examples %}
+      <div class="enterprise-pill-text">Finales: {{ usage_profile.final_recipe_examples|join:", " }}</div>
+      {% endif %}
+      {% if usage_profile.base_recipe_examples %}
+      <div class="enterprise-pill-text">Bases: {{ usage_profile.base_recipe_examples|join:", " }}</div>
+      {% endif %}
+    </div>
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">Navegación rápida</div>
+      <div class="recipe-actions recipe-actions-compact">
+        <a class="btn btn-secondary btn-sm" href="{{ usage_profile.recipes_url }}">Ver recetas</a>
+        <a class="btn btn-secondary btn-sm" href="{{ usage_profile.final_products_url }}">Ver finales</a>
+        <a class="btn btn-secondary btn-sm" href="{{ usage_profile.purchases_url }}">Ver compras</a>
+        <a class="btn btn-secondary btn-sm" href="{{ usage_profile.inventory_url }}">Ver inventario</a>
+      </div>
+    </div>
+  </div>
+  {% if commercial_signal %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Impacto comercial reciente</div>
+    <div class="kpi-grid kpi-mini">
+      <article class="kpi-card">
+        <div class="kpi-number {% if commercial_signal.tone == 'danger' %}is-danger{% elif commercial_signal.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ commercial_signal.status }}</div>
+        <div class="kpi-label">Señal comercial</div>
+        <div class="muted" style="margin-top:8px;">{{ commercial_signal.detail }}</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">{{ commercial_signal.days_count }}</div>
+        <div class="kpi-label">Días observados</div>
+        <div class="muted" style="margin-top:8px;">{{ commercial_signal.branch_count }} sucursales · {{ commercial_signal.scope_label }}</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">{{ commercial_signal.total_units|floatformat:0 }}</div>
+        <div class="kpi-label">Unidades recientes</div>
+        <div class="muted" style="margin-top:8px;">{{ commercial_signal.recipe_count }} productos finales impactados</div>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-number">{{ commercial_signal.avg_daily|floatformat:1 }}</div>
+        <div class="kpi-label">Promedio diario</div>
+        <div class="muted" style="margin-top:8px;">Ayuda a priorizar este artículo dentro del maestro.</div>
+      </article>
+      <article class="kpi-card" style="grid-column: span 2;">
+        <div class="kpi-label">Productos líderes</div>
+        {% for row in commercial_signal.top_recipes %}
+        <div class="muted" style="margin-top:6px;">{{ row.receta__nombre }} · {{ row.total|floatformat:0 }}</div>
+        {% empty %}
+        <div class="muted" style="margin-top:6px;">Todavía no hay productos finales con demanda reciente para este artículo.</div>
+        {% endfor %}
+      </article>
+    </div>
+  </div>
+  {% endif %}
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+    {% for card in module_blocker_cards %}
+    <div class="enterprise-pill-card">
+      <div class="enterprise-pill-title">{{ card.title }}</div>
+      <div class="enterprise-pill-text">
+        <strong class="status-{{ card.tone }}">{{ card.count }}</strong>
+        · {{ card.detail }}
+      </div>
+      <div class="recipe-actions recipe-actions-compact mt-2">
+        <span class="badge bg-light text-dark">Responsable: {{ card.owner }}</span>
+        <span class="badge badge-{% if card.is_blocked %}danger{% else %}success{% endif %}">
+          {% if card.is_blocked %}Bloqueado{% else %}OK{% endif %}
+        </span>
+        <a class="btn btn-secondary btn-sm" href="{{ card.action_url }}">{{ card.action_label }}</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="card table-card mb-3">
+    <div class="card-header">Puerta ERP por módulo</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Módulo</th>
+            <th>Responsable</th>
+            <th>Estatus</th>
+            <th>Lectura operativa</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for card in module_blocker_cards %}
+          <tr>
+            <td>{{ card.title }}</td>
+            <td>{{ card.owner }}</td>
+            <td>
+              <span class="badge {% if card.is_blocked %}bg-danger{% else %}bg-success{% endif %}">
+                {% if card.is_blocked %}Bloqueado{% else %}Liberado{% endif %}
+              </span>
+            </td>
+            <td>{{ card.detail }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ card.action_url }}">{{ card.action_label }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if downstream_handoff_rows %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Entrega del maestro a downstream</div>
+    <p class="muted mb-2">
+      Deja explícito si este artículo ya puede bajar con control hacia producto final, costeo, compras e inventario, junto con el criterio de salida de cada frente.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Destino</th>
+            <th>Responsable</th>
+            <th>Estatus</th>
+            <th class="text-end">Bloqueos</th>
+            <th>Cierre</th>
+            <th>Depende de</th>
+            <th>Criterio de salida</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in downstream_handoff_rows %}
+          <tr>
+            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.status }}</td>
+            <td class="text-end">{{ row.blockers }}</td>
+            <td style="min-width: 160px;">
+              <div class="erp-progress">
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+              </div>
+              <div class="muted mt-1">{{ row.completion }}%</div>
+            </td>
+            <td>{{ row.depends_on }}</td>
+            <td>{{ row.exit_criteria }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  {% if trunk_handoff_rows %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Ruta troncal ERP</div>
+    <p class="muted mb-2">
+      Muestra si este artículo ya puede bajar formalmente al flujo troncal del ERP: recetas/BOM, compras documentales e inventario/reabasto.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Tramo ERP</th>
+            <th>Responsable</th>
+            <th>Estatus</th>
+            <th class="text-end">Bloqueos</th>
+            <th>Cierre</th>
+            <th>Depende de</th>
+            <th>Criterio de salida</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in trunk_handoff_rows %}
+          <tr>
+            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.status }}</td>
+            <td class="text-end">{{ row.blockers }}</td>
+            <td style="min-width: 160px;">
+              <div class="erp-progress">
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+              </div>
+              <div class="muted mt-1">{{ row.completion }}%</div>
+            </td>
+            <td>{{ row.depends_on }}</td>
+            <td>{{ row.exit_criteria }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  {% if executive_radar_rows %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Radar ejecutivo ERP</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Tramo</th>
+            <th>Responsable</th>
+            <th>Bloqueo dominante</th>
+            <th>Depende de</th>
+            <th>Cierre</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in executive_radar_rows %}
+          <tr>
+            <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.dominant_blocker }}</td>
+            <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+            <td>{{ row.progress_pct }}%</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  {% if erp_critical_path_rows %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Ruta crítica ERP del artículo</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Prioridad</th>
+            <th>Tramo</th>
+            <th>Responsable</th>
+            <th>Bloqueo</th>
+            <th>Depende de</th>
+            <th>Cierre</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in erp_critical_path_rows %}
+          <tr>
+            <td><strong>{{ row.rank }}</strong></td>
+            <td><strong>{{ row.title }}</strong><div class="muted">{{ row.detail }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.status }}</td>
+            <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+            <td>{{ row.completion }}%</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  {% if erp_release_rows %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Cierre multi-módulo del artículo</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Módulo</th>
+            <th>Responsable</th>
+            <th>Abiertos</th>
+            <th>Cerrados</th>
+            <th>Cierre</th>
+            <th>Detalle</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in erp_release_rows %}
+          <tr>
+            <td><strong>{{ row.module }}</strong><div class="muted">{{ row.status }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.open }}</td>
+            <td>{{ row.closed }}</td>
+            <td>{{ row.completion }}%</td>
+            <td>{{ row.detail }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Mesa de gobierno ERP</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Frente</th>
+            <th>Responsable</th>
+            <th>Bloqueos</th>
+            <th>Cierre</th>
+            <th>Detalle</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in erp_governance_rows %}
+          <tr>
+            <td>{{ row.front }}</td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.blockers }}</td>
+            <td>{{ row.completion }}%</td>
+            <td>{{ row.detail }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if erp_article_chain_rows %}
+  <div class="card table-card mb-3">
+    <div class="card-header">Cadena troncal del artículo</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Tramo</th>
+            <th>Responsable</th>
+            <th>Estatus</th>
+            <th>Dependencia</th>
+            <th>Siguiente paso</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in erp_article_chain_rows %}
+          <tr>
+            <td>
+              <strong>{{ row.step }} · {{ row.title }}</strong>
+              <div class="text-muted">{{ row.detail }}</div>
+            </td>
+            <td>{{ row.owner }}</td>
+            <td>
+              <span class="badge {% if row.tone == 'success' %}bg-success{% else %}bg-danger{% endif %}">
+                {{ row.status }}
+              </span>
+            </td>
+            <td>
+              <span class="badge {% if row.dependency_status == 'Listo para avanzar' %}bg-success{% elif row.dependency_status|slice:':13' == 'Condicionado ' %}bg-danger{% else %}bg-warning text-dark{% endif %}">
+                {{ row.dependency_status }}
+              </span>
+            </td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">Abrir</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
+  {% if return_to %}
+  <div class="module-note mb-3">
+    Esta alta fue iniciada desde otra pantalla del ERP. Al guardar regresarás automáticamente al flujo anterior.
+  </div>
+  {% endif %}
+  {% if form.errors %}
+  <div class="alert alert-danger mb-3">
+    Corrige los datos marcados para que el artículo quede listo para operar en el ERP.
+    {% for field in form %}
+      {% for error in field.errors %}
+        <div>{{ error }}</div>
+      {% endfor %}
+    {% endfor %}
+    {% for error in form.non_field_errors %}
+      <div>{{ error }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <form method="post">
     {% csrf_token %}
     <div class="form-grid-2 form-section">
-      <div class="form-group">
+      <div class="form-group" data-field-wrap="codigo">
         <label for="id_codigo">Código</label>
         {{ form.codigo }}
       </div>
-      <div class="form-group">
-        <label for="id_codigo_point">Código Point</label>
+      <div class="form-group" data-field-wrap="codigo_point">
+        <label for="id_codigo_point">Código de venta</label>
         {{ form.codigo_point }}
       </div>
-      <div class="form-group">
+      <div class="form-group" data-field-wrap="nombre">
         <label for="id_nombre">Nombre</label>
         {{ form.nombre }}
       </div>
-      <div class="form-group">
-        <label for="id_nombre_point">Nombre Point</label>
+      <div class="form-group" data-field-wrap="nombre_point">
+        <label for="id_nombre_point">Nombre comercial</label>
         {{ form.nombre_point }}
       </div>
-      <div class="form-group">
-        <label for="id_tipo_item">Tipo de ítem</label>
+      <div class="form-group" data-field-wrap="tipo_item">
+        <label for="id_tipo_item">Clase operativa del artículo</label>
         {{ form.tipo_item }}
       </div>
-      <div class="form-group">
+      <div class="form-group" data-field-wrap="categoria">
         <label for="id_categoria">Categoría</label>
         {{ form.categoria }}
+        <div class="text-muted mt-1">Usa una categoría consistente para agrupar artículos del mismo flujo operativo.</div>
+        <div class="recipe-actions recipe-actions-compact mt-2" id="category_suggestion_chips"></div>
       </div>
-      <div class="form-group">
+      <div class="form-group" data-field-wrap="unidad_base">
         <label for="id_unidad_base">Unidad base</label>
         {{ form.unidad_base }}
       </div>
-      <div class="form-group">
+      <div class="form-group" data-field-wrap="proveedor_principal">
         <label for="id_proveedor_principal">Proveedor principal</label>
         {{ form.proveedor_principal }}
       </div>
-      <div class="form-group full">
+      <div class="form-group full" data-field-wrap="activo">
         <label for="id_activo">Estatus</label>
         <div class="field-check">
           {{ form.activo }}
@@ -55,9 +770,153 @@
     </div>
 
     <div class="quick-actions">
-      <button class="btn btn-primary" type="submit">Guardar</button>
+      <button class="btn btn-primary" type="submit">{{ submit_label|default:"Guardar" }}</button>
       <a class="btn btn-secondary" href="{% url 'maestros:insumo_list' %}">Cancelar</a>
     </div>
   </form>
 </section>
+{{ category_suggestions|json_script:"category-suggestions-data" }}
+{{ selected_type_requirements_map|json_script:"erp-type-requirements-data" }}
+{{ type_titles_map|json_script:"erp-type-titles-data" }}
+<script>
+(function () {
+  const typeSelect = document.getElementById("id_tipo_item");
+  const categoryInput = document.getElementById("id_categoria");
+  const chipsWrap = document.getElementById("category_suggestion_chips");
+  const raw = document.getElementById("category-suggestions-data");
+  const requirementsRaw = document.getElementById("erp-type-requirements-data");
+  const titlesRaw = document.getElementById("erp-type-titles-data");
+  const readinessCard = document.getElementById("erp_readiness_card");
+  const readinessSummary = document.getElementById("erp_readiness_summary");
+  const readinessMissing = document.getElementById("erp_readiness_missing");
+  const requirementsList = document.getElementById("erp_requirements_list");
+  if (!typeSelect || !categoryInput || !chipsWrap || !raw || !requirementsRaw || !titlesRaw || !readinessCard || !readinessSummary || !readinessMissing || !requirementsList) return;
+  const suggestions = JSON.parse(raw.textContent || "{}");
+  const typeRequirements = JSON.parse(requirementsRaw.textContent || "{}");
+  const typeTitles = JSON.parse(titlesRaw.textContent || "{}");
+  const nombreInput = document.getElementById("id_nombre");
+  const codigoPointInput = document.getElementById("id_codigo_point");
+  const unidadSelect = document.getElementById("id_unidad_base");
+  const proveedorSelect = document.getElementById("id_proveedor_principal");
+  const activoInput = document.getElementById("id_activo");
+  const checkItems = Array.from(document.querySelectorAll(".enterprise-checklist-item"));
+
+  const typeRules = {
+    MATERIA_PRIMA: ["nombre", "unidad_base", "activo", "proveedor_principal", "codigo_point"],
+    INSUMO_INTERNO: ["nombre", "unidad_base", "activo", "categoria", "codigo_point"],
+    EMPAQUE: ["nombre", "unidad_base", "activo", "categoria", "codigo_point"]
+  };
+
+  function renderCategoryChips() {
+    const currentType = typeSelect.value || "MATERIA_PRIMA";
+    const items = suggestions[currentType] || [];
+    chipsWrap.innerHTML = "";
+    items.forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn btn-secondary btn-sm";
+      button.textContent = item;
+      button.addEventListener("click", () => {
+        categoryInput.value = item;
+      });
+      chipsWrap.appendChild(button);
+    });
+  }
+
+  function setFieldRequired(fieldKey, isRequired) {
+    const fieldWrap = document.querySelector(`[data-field-wrap="${fieldKey}"]`);
+    if (!fieldWrap) return;
+    fieldWrap.classList.toggle("is-required-by-type", isRequired);
+  }
+
+  function renderRequirementList() {
+    const currentType = typeSelect.value || "MATERIA_PRIMA";
+    const items = typeRequirements[currentType] || [];
+    requirementsList.innerHTML = "";
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.textContent = item;
+      requirementsList.appendChild(row);
+    });
+    const required = new Set(typeRules[currentType] || []);
+    ["nombre", "unidad_base", "activo", "proveedor_principal", "categoria", "codigo_point"].forEach((fieldKey) => {
+      setFieldRequired(fieldKey, required.has(fieldKey));
+    });
+  }
+
+  function currentMissing() {
+    const currentType = typeSelect.value || "MATERIA_PRIMA";
+    const missing = [];
+    if (!((nombreInput && nombreInput.value) || "").trim()) missing.push("nombre");
+    if (!((unidadSelect && unidadSelect.value) || "").trim()) missing.push("unidad base");
+    if (activoInput && activoInput.checked) {
+      if (currentType === "MATERIA_PRIMA" && !((proveedorSelect && proveedorSelect.value) || "").trim()) {
+        missing.push("proveedor principal");
+      }
+      if ((currentType === "INSUMO_INTERNO" || currentType === "EMPAQUE") && !((categoryInput && categoryInput.value) || "").trim()) {
+        missing.push("categoría");
+      }
+      if (!((codigoPointInput && codigoPointInput.value) || "").trim()) {
+        missing.push("código comercial");
+      }
+    }
+    return missing;
+  }
+
+  function renderReadiness() {
+    const currentType = typeSelect.value || "MATERIA_PRIMA";
+    const currentTitle = typeTitles[currentType] || "artículo";
+    const missing = currentMissing();
+    const activeRequired = new Set(typeRules[currentType] || []);
+
+    checkItems.forEach((item) => {
+      const key = item.dataset.checkKey;
+      const isRelevant = activeRequired.has(key) || key === "activo";
+      const isComplete = !missing.includes(
+        key === "unidad_base" ? "unidad base" :
+        key === "proveedor_principal" ? "proveedor principal" :
+        key === "codigo_point" ? "código comercial" :
+        key
+      );
+      item.classList.toggle("is-muted", !isRelevant);
+      item.classList.toggle("is-ok", isRelevant && isComplete);
+      item.classList.toggle("is-pending", isRelevant && !isComplete);
+    });
+
+    readinessCard.classList.remove("is-success", "is-warning", "is-danger");
+    if (activoInput && !activoInput.checked) {
+      readinessCard.classList.add("is-danger");
+      readinessSummary.textContent = `${currentTitle}: Inactivo. El registro queda fuera de operación hasta activarlo.`;
+      readinessMissing.textContent = "Sin bloqueo de captura, pero el artículo no estará disponible en operación.";
+      return;
+    }
+    if (missing.length) {
+      readinessCard.classList.add("is-warning");
+      readinessSummary.textContent = `${currentTitle}: Incompleto. Falta información para dejarlo listo en ERP.`;
+      readinessMissing.textContent = `Falta: ${missing.join(", ")}.`;
+      return;
+    }
+    readinessCard.classList.add("is-success");
+    readinessSummary.textContent = `${currentTitle}: Lista para operar. Cumple datos mínimos para compras, recetas e inventario.`;
+    readinessMissing.textContent = "Sin bloqueos de datos para esta clase.";
+  }
+
+  [typeSelect, categoryInput, nombreInput, codigoPointInput, unidadSelect, proveedorSelect, activoInput].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("change", () => {
+      renderCategoryChips();
+      renderRequirementList();
+      renderReadiness();
+    });
+    if (el.tagName === "INPUT") {
+      el.addEventListener("input", renderReadiness);
+    }
+  });
+
+  typeSelect.addEventListener("change", renderCategoryChips);
+  renderCategoryChips();
+  renderRequirementList();
+  renderReadiness();
+})();
+</script>
 {% endblock %}

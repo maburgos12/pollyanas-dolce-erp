@@ -11,6 +11,7 @@ from openpyxl import load_workbook
 from django.db import transaction
 
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
+from maestros.utils.canonical_catalog import latest_costo_canonico
 from recetas.models import LineaReceta, Receta
 from recetas.utils.costeo_versionado import asegurar_version_costeo
 from recetas.utils.matching import clasificar_match, match_insumo
@@ -141,29 +142,13 @@ def _build_unit_cache(unit_texts: set[str]) -> dict[str, UnidadMedida | None]:
 
 
 def _latest_cost_by_insumo(insumo_id: int) -> Decimal | None:
-    cost = (
-        CostoInsumo.objects.filter(insumo_id=insumo_id)
-        .order_by("-fecha", "-id")
-        .values_list("costo_unitario", flat=True)
-        .first()
-    )
-    return Decimal(str(cost)) if cost is not None else None
+    return latest_costo_canonico(insumo_id=insumo_id)
 
 
 def _latest_cost_by_insumos(insumo_ids: set[int]) -> dict[int, Decimal | None]:
     if not insumo_ids:
         return {}
-    latest_costs: dict[int, Decimal | None] = {insumo_id: None for insumo_id in insumo_ids}
-    rows = (
-        CostoInsumo.objects.filter(insumo_id__in=insumo_ids)
-        .order_by("insumo_id", "-fecha", "-id")
-        .values_list("insumo_id", "costo_unitario")
-    )
-    for insumo_id, costo in rows:
-        if latest_costs.get(insumo_id) is not None:
-            continue
-        latest_costs[insumo_id] = Decimal(str(costo)) if costo is not None else None
-    return latest_costs
+    return {insumo_id: latest_costo_canonico(insumo_id=insumo_id) for insumo_id in insumo_ids}
 
 
 def _should_autocreate_component(

@@ -111,3 +111,55 @@ class PointSalesSyncServiceTests(TestCase):
 
         self.assertEqual(PointDailySale.objects.count(), 2)
         self.assertEqual(VentaHistorica.objects.filter(fuente=PointSyncService.SALES_HISTORY_SOURCE).count(), 1)
+
+    def test_run_sales_sync_aggregates_multiple_point_rows_into_one_historical_row(self):
+        class DuplicateRecipeExtractor(FakeSalesExtractor):
+            def iter_extract(self, *, start_date, end_date, branch_filter=None, excluded_ranges=None, max_days=None):
+                del start_date, end_date, branch_filter, excluded_ranges, max_days
+                yield ExtractedBranchDailySales(
+                    branch={"external_id": "9", "name": "Almacen", "status": "ACTIVE", "metadata": {}},
+                    sale_date=date(2025, 12, 31),
+                    sales_rows=[
+                        {
+                            "external_id": "2",
+                            "sku": "0002",
+                            "name": "Pay de Queso Mediano",
+                            "category": "Pay Mediano",
+                            "family": "Pay",
+                            "quantity": Decimal("40"),
+                            "tickets": 0,
+                            "gross_amount": Decimal("15800"),
+                            "discount_amount": Decimal("30.02"),
+                            "total_amount": Decimal("15769.98"),
+                            "tax_amount": Decimal("0"),
+                            "net_amount": Decimal("15769.98"),
+                            "raw_payload": {"Codigo": "0002"},
+                        },
+                        {
+                            "external_id": "3",
+                            "sku": "0002-A",
+                            "name": "Pay de Queso Mediano Rebanada",
+                            "category": "Pay Mediano",
+                            "family": "Pay",
+                            "quantity": Decimal("5"),
+                            "tickets": 0,
+                            "gross_amount": Decimal("1000"),
+                            "discount_amount": Decimal("0"),
+                            "total_amount": Decimal("1000"),
+                            "tax_amount": Decimal("0"),
+                            "net_amount": Decimal("1000"),
+                            "raw_payload": {"Codigo": "0002-A"},
+                        },
+                    ],
+                    captured_at=timezone.now(),
+                    raw_export_path="/tmp/point_sales.json",
+                    metadata={"row_count": 2},
+                )
+
+        self.receta.codigos_point_aliases.create(codigo_point="0002-A", nombre_point="Pay de Queso Mediano Rebanada")
+        service = PointSyncService(sales_extractor=DuplicateRecipeExtractor())
+        sync_job = service.run_sales_sync(start_date=date(2025, 12, 31), end_date=date(2025, 12, 31), triggered_by=self.user)
+        self.assertEqual(sync_job.status, PointSyncJob.STATUS_SUCCESS)
+        historial = VentaHistorica.objects.get(fuente=PointSyncService.SALES_HISTORY_SOURCE)
+        self.assertEqual(historial.cantidad, Decimal("45"))
+        self.assertEqual(historial.monto_total, Decimal("16769.98"))

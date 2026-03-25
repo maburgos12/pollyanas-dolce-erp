@@ -11,6 +11,344 @@
 </div>
 
 <section class="card">
+  <div class="card-header">Centro de mando ERP</div>
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card">
+      <div class="kpi-label">Responsable principal</div>
+      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+      <div class="kpi-label">Semáforo global</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+      <div class="kpi-label">Bloqueos abiertos</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente paso</div>
+      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+      <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+    </article>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Expediente ERP del módulo</div>
+  <div class="table-responsive">
+    <table class="table">
+      <tbody>
+        <tr>
+          <td style="width:28%;"><strong>Documento</strong></td>
+          <td>Calendario operativo de planes, órdenes y eventos técnicos programados.</td>
+        </tr>
+        <tr>
+          <td><strong>Fuente de control</strong></td>
+          <td>Próximas ejecuciones, órdenes abiertas y ventana temporal seleccionada por operación.</td>
+        </tr>
+        <tr>
+          <td><strong>Etapa ERP</strong></td>
+          <td>Programación y visibilidad anticipada del mantenimiento.</td>
+        </tr>
+        <tr>
+          <td><strong>Propósito</strong></td>
+          <td>Dar visibilidad de carga futura y evitar vencimientos o choques de capacidad técnica.</td>
+        </tr>
+        <tr>
+          <td><strong>Regla de salida</strong></td>
+          <td>La ventana debe mostrar eventos con responsables y órdenes en seguimiento para sostener la planeación.</td>
+        </tr>
+        <tr>
+          <td><strong>Siguiente paso</strong></td>
+          <td>Usa esta vista para anticipar saturación, regularizar planes vencidos y cerrar órdenes abiertas en fecha.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Workflow ERP del módulo</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Entrada</th>
+          <th>Control</th>
+          <th>Salida</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>01 · Ventana de control</td>
+          <td>Planeación / Operación</td>
+          <td>Rango de fechas</td>
+          <td>Capacidad y saturación técnica</td>
+          <td>Calendario filtrado</td>
+        </tr>
+        <tr>
+          <td>02 · Programación visible</td>
+          <td>Mantenimiento / Ejecución</td>
+          <td>Planes y órdenes en rango</td>
+          <td>Prioridad y estado</td>
+          <td>Agenda operativa</td>
+        </tr>
+        <tr>
+          <td>03 · Cierre por ventana</td>
+          <td>DG / Auditoría</td>
+          <td>Eventos atendidos</td>
+          <td>Órdenes cerradas y pendientes</td>
+          <td>Semáforo documental</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Cadena documental ERP</div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+    {% for item in enterprise_chain %}
+      <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
+        <div class="enterprise-pill-title">{{ item.step }} · {{ item.title }}</div>
+        <div class="enterprise-pill-text">{{ item.detail }}</div>
+        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+        <div class="muted">{{ item.status }}</div>
+        <div style="margin-top:10px;">
+          <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Cadena troncal del mantenimiento</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Depende de</th>
+          <th>Responsable</th>
+          <th>Cierre</th>
+          <th>Estatus</th>
+          <th>Dependencia</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in enterprise_chain %}
+          <tr>
+            <td><strong>{{ item.step }} · {{ item.title }}</strong></td>
+            <td>{{ item.depends_on }}</td>
+            <td>{{ item.owner }}</td>
+            <td>{{ item.completion }}%</td>
+            <td>{{ item.status }}</td>
+            <td>{{ item.dependency_status }}</td>
+            <td>{{ item.next_step }}</td>
+            <td><a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if critical_path_rows %}
+<section class="card">
+  <div class="card-header">Ruta crítica ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Prioridad</th>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Lectura ejecutiva</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in critical_path_rows %}
+          <tr>
+            <td>{{ row.priority }}</td>
+            <td><strong>{{ row.title }}</strong></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.blockers }}</td>
+            <td>{{ row.completion }}%</td>
+            <td>{{ row.depends_on }}</td>
+            <td>{{ row.detail }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if executive_radar_rows %}
+<section class="card">
+  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Tramo</th>
+          <th>Responsable</th>
+          <th>Bloqueo dominante</th>
+          <th>Depende de</th>
+          <th>Cierre</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in executive_radar_rows %}
+          <tr>
+            <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.dominant_blocker }}</td>
+            <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+            <td>{{ row.progress_pct }}%</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Madurez ERP de activos</div>
+  <div class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-number is-success">{{ enterprise_maturity_summary.completed_steps }}</div>
+      <div class="kpi-label">Etapas estabilizadas</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number is-warning">{{ enterprise_maturity_summary.attention_steps }}</div>
+      <div class="kpi-label">Etapas con atención</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ enterprise_maturity_summary.coverage_pct }}%</div>
+      <div class="kpi-label">Cobertura documental</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Siguiente prioridad</div>
+      <div style="font-weight:700; margin:8px 0 6px;">{{ enterprise_maturity_summary.next_priority_title }}</div>
+      <div class="muted">{{ enterprise_maturity_summary.next_priority_detail }}</div>
+      <div style="margin-top:10px;">
+        <a class="btn btn-secondary btn-small" href="{{ enterprise_maturity_summary.next_priority_url }}">{{ enterprise_maturity_summary.next_priority_cta }}</a>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Criterios de cierre ERP</div>
+  <div class="enterprise-kpi-strip enterprise-kpi-strip-compact">
+    <article class="enterprise-kpi-card">
+      <div class="enterprise-kpi-label">Cierre global</div>
+      <div class="kpi-number">{{ release_gate_completion }}%</div>
+      <div class="muted">La ventana debe mostrar planes, órdenes y bitácora con visibilidad suficiente para anticipar saturación.</div>
+    </article>
+  </div>
+  <div class="blocker-list">
+    {% for row in release_gate_rows %}
+      <article class="stage-row">
+        <div class="stage-step">{{ row.step }}</div>
+        <div class="blocker-meta">
+          <strong>{{ row.title }}</strong>
+          <small>{{ row.detail }}</small>
+        </div>
+        <div class="module-chip-list">
+          <span class="module-chip manage">Cerrados {{ row.completed }}</span>
+          <span class="module-chip {% if row.tone == 'success' %}manage{% else %}blocked{% endif %}">Abiertos {{ row.open_count }}</span>
+        </div>
+        <div class="blocker-action">
+          <a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Cadena de control ERP</div>
+  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
+    {% for item in enterprise_handoff_map %}
+      <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
+        <div class="enterprise-pill-title">{{ item.label }}</div>
+        <div class="enterprise-pill-text">{{ item.detail }}</div>
+        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
+        <div class="muted">{{ item.status }}</div>
+        <div style="margin-top:10px;">
+          <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+{% if enterprise_handoff_map %}
+<section class="card">
+  <div class="card-header">Entrega de activos a downstream</div>
+  <p class="muted mb-2">
+    Expone si el módulo ya puede bajar con control hacia planes, órdenes y bitácora, junto con el criterio de salida documental de cada tramo.
+  </p>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Destino</th>
+          <th>Responsable</th>
+          <th>Estatus</th>
+          <th class="text-end">Bloqueos</th>
+          <th>Cierre</th>
+          <th>Depende de</th>
+          <th>Criterio de salida</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in enterprise_handoff_map %}
+          <tr>
+            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.status }}</td>
+            <td class="text-end">{{ row.count }}</td>
+            <td style="min-width:160px;">
+              <div class="erp-progress">
+                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
+              </div>
+              <div class="muted mt-1">{{ row.completion }}%</div>
+            </td>
+            <td>{{ row.depends_on }}</td>
+            <td>{{ row.exit_criteria }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
   <div class="card-header">Rango calendario</div>
   <form method="get">
     <div class="row" style="display:grid;grid-template-columns:repeat(4,minmax(180px,1fr));gap:10px;align-items:end;">
@@ -73,6 +411,84 @@
   <p class="text-muted">
     Desde {{ date_from|date:"Y-m-d" }} hasta {{ date_to|date:"Y-m-d" }} ({{ days }} días).
   </p>
+</section>
+
+<section class="card">
+  <div class="card-header">Cierre por etapa documental</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Responsable</th>
+          <th>Abiertos</th>
+          <th>Cerrados</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in document_stage_rows %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td>{{ row.owner|default:"Operación ERP" }}</td>
+            <td>{{ row.open }}</td>
+            <td>{{ row.closed }}</td>
+            <td>{{ row.completion|default:0 }}%</td>
+            <td>{{ row.detail }}</td>
+            <td>{{ row.next_step|default:"Revisar etapa" }}</td>
+            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">Abrir</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Frente</th>
+          <th>Responsable</th>
+          <th>Bloqueos</th>
+          <th>Cierre</th>
+          <th>Detalle</th>
+          <th>Siguiente paso</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in erp_governance_rows %}
+          <tr>
+            <td><strong>{{ row.front }}</strong></td>
+            <td>{{ row.owner }}</td>
+            <td>{{ row.blockers }}</td>
+            <td>{{ row.completion }}%</td>
+            <td>{{ row.detail }}</td>
+            <td>{{ row.next_step }}</td>
+            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Salud operativa ERP</div>
+  <div class="kpi-grid">
+    {% for card in operational_health_cards %}
+      <article class="kpi-card">
+        <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
+        <div class="kpi-label">{{ card.label }}</div>
+      </article>
+    {% endfor %}
+  </div>
 </section>
 
 <section class="card">

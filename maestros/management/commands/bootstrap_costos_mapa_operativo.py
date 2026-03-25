@@ -7,6 +7,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 
 from maestros.models import CostoInsumo, Insumo, Proveedor
+from maestros.utils.canonical_catalog import latest_costo_canonico
 
 
 OPERATIVE_MAP = {
@@ -51,21 +52,11 @@ class Command(BaseCommand):
                     )
                 )
                 continue
-            latest = (
-                CostoInsumo.objects.filter(insumo=source)
-                .order_by("-fecha", "-id")
-                .values_list("costo_unitario", flat=True)
-                .first()
-            )
+            latest = latest_costo_canonico(source)
             if latest is None:
                 self.stdout.write(self.style.WARNING(f"Omitido sin costo fuente: {source_name}"))
                 continue
-            latest_target = (
-                CostoInsumo.objects.filter(insumo=target)
-                .order_by("-fecha", "-id")
-                .values_list("costo_unitario", flat=True)
-                .first()
-            )
+            latest_target = latest_costo_canonico(target)
             if latest_target is not None and Decimal(str(latest_target)) > 0:
                 self.stdout.write(f"Ya tiene costo: {target_name}")
                 continue

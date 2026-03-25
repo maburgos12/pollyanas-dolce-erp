@@ -42,6 +42,7 @@ class ActivosFlowsTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(Activo.objects.filter(nombre="Refrigerador Cámara 01").exists())
+        self.assertContains(response, "Cockpit operativo de activos")
 
     def test_almacen_can_raise_service_report(self):
         activo = Activo.objects.create(nombre="AA Oficina", categoria="Aire")
@@ -83,6 +84,79 @@ class ActivosFlowsTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(PlanMantenimiento.objects.filter(activo_ref=activo).exists())
+
+    def test_activos_catalog_shows_enterprise_cockpit_and_focus(self):
+        self.client.force_login(self.admin)
+        Activo.objects.create(nombre="Activo sin categoría", categoria="", activo=True)
+        response = self.client.get(reverse("activos:activos"), {"master_gap": "SIN_CATEGORIA"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Centro de mando ERP")
+        self.assertContains(response, "Cockpit operativo de activos")
+        self.assertContains(response, "Entrega de activos a downstream")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Radar ejecutivo ERP")
+        self.assertContains(response, "Quitar foco")
+        self.assertIn("erp_command_center", response.context)
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
+        self.assertTrue(response.context["enterprise_focus_cards"])
+        self.assertIsNotNone(response.context["focus_summary"])
+        self.assertEqual(response.context["focus_summary"]["label"], "Sin categoría")
+
+    def test_dashboard_shows_release_gate_enterprise_block(self):
+        self.client.force_login(self.admin)
+        Activo.objects.create(nombre="Activo QA", categoria="Frío", activo=True)
+        response = self.client.get(reverse("activos:dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Centro de mando ERP")
+        self.assertContains(response, "Criterios de cierre ERP")
+        self.assertContains(response, "Radar ejecutivo ERP")
+        self.assertContains(response, "Cierre global")
+        self.assertContains(response, "Cadena troncal del mantenimiento")
+        self.assertContains(response, "Entrega de activos a downstream")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Depende de")
+        self.assertContains(response, "Dependencia")
+        self.assertIn("erp_command_center", response.context)
+        self.assertIn("release_gate_rows", response.context)
+        self.assertIn("release_gate_completion", response.context)
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
+        self.assertEqual(len(response.context["executive_radar_rows"]), 4)
+
+    def test_planes_view_shows_enterprise_cards_and_filter(self):
+        self.client.force_login(self.admin)
+        activo = Activo.objects.create(nombre="Horno sin responsable", categoria="Hornos")
+        PlanMantenimiento.objects.create(
+            activo_ref=activo,
+            nombre="Plan sin responsable",
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            frecuencia_dias=30,
+            responsable="",
+        )
+        response = self.client.get(reverse("activos:planes"), {"enterprise_gap": "SIN_RESPONSABLE"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Centro de mando ERP")
+        self.assertTrue(response.context["enterprise_cards"])
+        self.assertTrue(response.context["enterprise_chain"])
+        self.assertTrue(response.context["operational_health_cards"])
+        self.assertTrue(response.context["document_stage_rows"])
+        self.assertIn("erp_command_center", response.context)
+        self.assertContains(response, "Cadena documental ERP")
+        self.assertContains(response, "Cadena troncal del mantenimiento")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Radar ejecutivo ERP")
+        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Cierre por etapa documental")
+        self.assertContains(response, "Mesa de gobierno ERP")
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
+        rows = response.context["planes_rows"]
+        self.assertTrue(rows)
+        self.assertEqual(rows[0]["enterprise"]["status_label"], "Pendiente")
+        self.assertTrue(response.context["enterprise_chain"])
+        self.assertIn("dependency_status", response.context["enterprise_chain"][0])
 
     def test_export_planes_csv(self):
         self.client.force_login(self.admin)
@@ -157,11 +231,61 @@ class ActivosFlowsTests(TestCase):
         self.assertEqual(str(orden.costo_otros), "120.00")
         self.assertEqual(orden.estatus, OrdenMantenimiento.ESTATUS_CERRADA)
 
+    def test_ordenes_view_shows_enterprise_cards_and_filter(self):
+        self.client.force_login(self.admin)
+        activo = Activo.objects.create(nombre="AA sin responsable", categoria="Aire")
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo,
+            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+            prioridad=OrdenMantenimiento.PRIORIDAD_MEDIA,
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            fecha_programada=timezone.localdate(),
+            responsable="",
+            descripcion="Orden sin responsable",
+        )
+        response = self.client.get(reverse("activos:ordenes"), {"enterprise_gap": "SIN_RESPONSABLE"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Centro de mando ERP")
+        self.assertTrue(response.context["enterprise_cards"])
+        self.assertTrue(response.context["enterprise_focus_cards"])
+        self.assertTrue(response.context["enterprise_chain"])
+        self.assertTrue(response.context["operational_health_cards"])
+        self.assertTrue(response.context["document_stage_rows"])
+        self.assertIn("erp_command_center", response.context)
+        self.assertContains(response, "Cadena documental ERP")
+        self.assertContains(response, "Cadena troncal del mantenimiento")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Radar ejecutivo ERP")
+        self.assertContains(response, "Cockpit documental de órdenes")
+        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Cierre por etapa documental")
+        self.assertContains(response, "Mesa de gobierno ERP")
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
+        rows = response.context["ordenes_rows"]
+        self.assertTrue(rows)
+        self.assertEqual(rows[0]["enterprise"]["status_label"], "Pendiente")
+        self.assertIsNotNone(response.context["focus_summary"])
+
     def test_calendario_days_window(self):
         self.client.force_login(self.admin)
         response = self.client.get(reverse("activos:calendario"), {"days": "15"})
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Centro de mando ERP")
         self.assertEqual(response.context["days"], 15)
+        self.assertTrue(response.context["enterprise_chain"])
+        self.assertTrue(response.context["operational_health_cards"])
+        self.assertTrue(response.context["document_stage_rows"])
+        self.assertIn("erp_command_center", response.context)
+        self.assertContains(response, "Cadena documental ERP")
+        self.assertContains(response, "Cadena troncal del mantenimiento")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Radar ejecutivo ERP")
+        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Cierre por etapa documental")
+        self.assertContains(response, "Mesa de gobierno ERP")
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
 
     def test_export_reportes_servicio_csv(self):
         self.client.force_login(self.admin)
@@ -201,9 +325,24 @@ class ActivosFlowsTests(TestCase):
             {"estatus": "ABIERTAS", "semaforo": "ROJO"},
         )
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Centro de mando ERP")
         reportes = response.context["reportes"]
         self.assertTrue(reportes)
         self.assertTrue(all(item.get("semaforo_key") == "ROJO" for item in reportes))
+        self.assertTrue(response.context["enterprise_chain"])
+        self.assertTrue(response.context["enterprise_focus_cards"])
+        self.assertTrue(response.context["operational_health_cards"])
+        self.assertTrue(response.context["document_stage_rows"])
+        self.assertIn("erp_command_center", response.context)
+        self.assertContains(response, "Cadena documental ERP")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Cockpit de incidentes ERP")
+        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Cierre por etapa documental")
+        self.assertContains(response, "Mesa de gobierno ERP")
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
+        self.assertIsNotNone(response.context["focus_summary"])
 
     def test_dashboard_alertas_criticas_context(self):
         self.client.force_login(self.admin)
@@ -228,6 +367,48 @@ class ActivosFlowsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context["planes_vencidos_rows"])
         self.assertTrue(response.context["ordenes_criticas_rows"])
+        self.assertTrue(response.context["enterprise_cards"])
+        self.assertTrue(response.context["operational_health_cards"])
+        self.assertEqual(response.context["enterprise_health_label"], "Con bloqueos")
+        self.assertTrue(response.context["activos_blocker_rows"])
+        self.assertContains(response, "Cadena documental ERP")
+        self.assertContains(response, "Madurez ERP de activos")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Radar ejecutivo ERP")
+        self.assertContains(response, "Cadena de control ERP")
+        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Cierre por etapa documental")
+        self.assertContains(response, "Mesa de gobierno ERP")
+        self.assertTrue(response.context["enterprise_chain"])
+        self.assertTrue(response.context["document_stage_rows"])
+        self.assertIn("enterprise_maturity_summary", response.context)
+        self.assertIn("enterprise_handoff_map", response.context)
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
+        self.assertEqual(len(response.context["enterprise_handoff_map"]), 3)
+
+    def test_activos_catalog_filters_by_enterprise_gap(self):
+        self.client.force_login(self.admin)
+        sin_categoria = Activo.objects.create(nombre="Activo sin categoria", categoria="", estado=Activo.ESTADO_OPERATIVO)
+        con_categoria = Activo.objects.create(nombre="Activo con categoria", categoria="Frío", estado=Activo.ESTADO_OPERATIVO)
+        response = self.client.get(reverse("activos:activos"), {"master_gap": "SIN_CATEGORIA"})
+        self.assertEqual(response.status_code, 200)
+        rows = response.context["activos_rows"]
+        self.assertTrue(any(row["activo"].id == sin_categoria.id for row in rows))
+        self.assertFalse(any(row["activo"].id == con_categoria.id for row in rows))
+        self.assertTrue(response.context["enterprise_cards"])
+        self.assertTrue(response.context["enterprise_chain"])
+        self.assertTrue(response.context["document_stage_rows"])
+        self.assertContains(response, "Cadena documental ERP")
+        self.assertContains(response, "Ruta crítica ERP")
+        self.assertContains(response, "Cierre por etapa documental")
+        self.assertContains(response, "Mesa de gobierno ERP")
+        self.assertContains(response, "Responsable")
+        self.assertContains(response, "Cierre")
+        self.assertIn("owner", response.context["document_stage_rows"][0])
+        self.assertIn("completion", response.context["document_stage_rows"][0])
+        self.assertIn("critical_path_rows", response.context)
+        self.assertIn("executive_radar_rows", response.context)
 
     def test_generar_ordenes_programadas_creates_preventive_order(self):
         self.client.force_login(self.admin)

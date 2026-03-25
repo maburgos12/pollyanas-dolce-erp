@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+{% block title %}Cierre Sucursal · Reabasto CEDIS{% endblock %}
+{% block page_title %}Cierre Sucursal · Reabasto CEDIS{% endblock %}
+{% block body_class %}page-reabasto-captura{% endblock %}
+
+{% block content %}
+<div class="module-shell plan-produccion-shell">
+  <div class="card">
+    <div class="card-header">Captura de cierre · {% if sucursal %}{{ sucursal.codigo }}{% else %}Sin sucursal{% endif %}</div>
+
+    {% if erp_command_center %}
+    <section class="card mb-3">
+      <div class="card-header">Centro de mando ERP</div>
+      <div class="kpi-grid">
+        <article class="kpi-card">
+          <div class="kpi-label">Responsable principal</div>
+          <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
+          <div class="kpi-label">Semáforo global</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-number">{{ erp_command_center.blockers }}</div>
+          <div class="kpi-label">Bloqueos abiertos</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-label">Siguiente paso</div>
+          <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
+          <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
+        </article>
+      </div>
+    </section>
+    {% endif %}
+
+    {% if sucursal %}
+    <section class="card mb-3">
+      <div class="card-header">Expediente ERP del cierre sucursal</div>
+      <div class="table-responsive">
+        <table class="table table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Documento</th>
+              <th>Fuente de control</th>
+              <th>Etapa ERP</th>
+              <th>Propósito</th>
+              <th>Regla de salida</th>
+              <th>Siguiente paso</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Cierre diario de sucursal</td>
+              <td>Stock final reportado por tienda</td>
+              <td>Entrada de demanda</td>
+              <td>Registrar el cierre operativo para calcular el reabasto requerido.</td>
+              <td>Todos los productos relevantes deben tener stock final capturado.</td>
+              <td>Enviar a CEDIS</td>
+            </tr>
+            <tr>
+              <td>Solicitud a CEDIS</td>
+              <td>Solicitud requerida calculada automáticamente</td>
+              <td>Transferencia a abastecimiento</td>
+              <td>Convertir el cierre de tienda en demanda operativa para producción y surtido.</td>
+              <td>La solicitud debe quedar enviada para entrar al plan de reabasto.</td>
+              <td>Generar plan CEDIS</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card mb-3">
+      <div class="card-header">Workflow ERP del cierre</div>
+      <div class="table-responsive">
+        <table class="table table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Etapa</th>
+              <th>Responsable</th>
+              <th>Cierre</th>
+              <th>Entrada</th>
+              <th>Control</th>
+              <th>Salida</th>
+              <th>Siguiente paso</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>01 · Captura</td>
+              <td>Sucursal / {{ sucursal.codigo }}</td>
+              <td>{% if rows_pending == 0 and rows_cierre %}100%{% elif rows_cierre %}70%{% else %}25%{% endif %}</td>
+              <td>Stock final al cierre del día</td>
+              <td>Validación por producto y sucursal</td>
+              <td>Existencia real de cierre</td>
+              <td>Completar stock final de todos los productos del surtido.</td>
+            </tr>
+            <tr>
+              <td>02 · Cálculo</td>
+              <td>ERP / Reabasto</td>
+              <td>{% if rows_pending == 0 and rows_cierre %}100%{% else %}80%{% endif %}</td>
+              <td>Stock mínimo vs stock final</td>
+              <td>Solicitud requerida calculada por el ERP</td>
+              <td>Demanda lista para CEDIS</td>
+              <td>Revisar solicitud calculada y confirmar el cierre.</td>
+            </tr>
+            <tr>
+              <td>03 · Envío</td>
+              <td>Sucursal / CEDIS</td>
+              <td>{% if rows_pending == 0 and rows_cierre %}100%{% else %}60%{% endif %}</td>
+              <td>Solicitud validada por tienda</td>
+              <td>Registro de envío a CEDIS</td>
+              <td>Entrada al flujo de abastecimiento y producción</td>
+              <td>Enviar el cierre para habilitar plan y surtido.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    {% if critical_path_rows %}
+    <section class="card mb-3">
+      <div class="card-header">Ruta crítica ERP</div>
+      <div class="table-responsive">
+        <table class="table table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Prioridad</th>
+              <th>Tramo</th>
+              <th>Responsable</th>
+              <th>Estatus</th>
+              <th class="text-end">Bloqueos</th>
+              <th>Cierre</th>
+              <th>Depende de</th>
+              <th>Siguiente paso</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in critical_path_rows %}
+            <tr>
+              <td><strong>{{ row.rank }}</strong></td>
+              <td><strong>{{ row.title }}</strong><div class="muted">{{ row.detail }}</div></td>
+              <td>{{ row.owner }}</td>
+              <td>{{ row.status }}</td>
+              <td class="text-end">{{ row.count }}</td>
+              <td>{{ row.completion }}%</td>
+              <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+              <td>{{ row.next_step }}</td>
+              <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    {% if executive_radar_rows %}
+    <section class="card mb-3">
+      <div class="card-header">Radar ejecutivo ERP</div>
+      <div class="table-responsive">
+        <table class="table table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Tramo</th>
+              <th>Responsable</th>
+              <th>Bloqueo dominante</th>
+              <th>Depende de</th>
+              <th>Cierre</th>
+              <th>Siguiente paso</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in executive_radar_rows %}
+            <tr>
+              <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
+              <td>{{ row.owner }}</td>
+              <td>{{ row.dominant_blocker }}</td>
+              <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
+              <td>{{ row.progress_pct }}%</td>
+              <td>{{ row.next_step }}</td>
+              <td><a class="btn btn-secondary btn-sm" href="{{ row.url }}">{{ row.cta }}</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    {% if erp_governance_rows %}
+    <section class="card mb-3">
+      <div class="card-header">Mesa de gobierno ERP</div>
+      <p class="muted mb-2">
+        Vista resumida del cierre de sucursal. Muestra responsable, bloqueos abiertos, porcentaje de cierre y siguiente paso antes de enviar a CEDIS.
+      </p>
+      <div class="table-responsive">
+        <table class="table table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Frente</th>
+              <th>Responsable</th>
+              <th class="text-end">Bloqueos</th>
+              <th>Cierre</th>
+              <th>Detalle</th>
+              <th>Siguiente paso</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in erp_governance_rows %}
+            <tr>
+              <td><strong>{{ row.label }}</strong></td>
+              <td>{{ row.owner|default:"Operación ERP" }}</td>
+              <td class="text-end">{{ row.open_count }}</td>
+              <td style="min-width: 180px;">
+                <div class="erp-progress">
+                  <div class="erp-progress-fill {% if row.semaphore_tone == 'danger' %}is-danger{% elif row.semaphore_tone == 'warning' %}is-warning{% elif row.semaphore_tone == 'primary' %}is-primary{% elif row.semaphore_tone == 'success' %}is-success{% endif %}" style="width: {{ row.progress_pct }}%;"></div>
+                </div>
+                <div class="muted mt-1">{{ row.progress_pct }}%</div>
+              </td>
+              <td>{{ row.detail }}</td>
+              <td>{{ row.next_step|default:"Completar y enviar a CEDIS" }}</td>
+              <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    <div class="capture-meta-row">
+      <div class="capture-meta-pill">
+        <span class="capture-meta-label">Fecha de surtido</span>
+        <strong>{{ fecha_operacion|date:"d/m/Y" }}</strong>
+      </div>
+      <div class="capture-meta-pill">
+        <span class="capture-meta-label">Sucursal</span>
+        <strong>{{ sucursal.codigo }} · {{ sucursal.nombre }}</strong>
+      </div>
+    </div>
+
+    <p class="muted mb-2">
+      Captura simple: ingresa solo <strong>stock final de cierre</strong>. El sistema calcula la <strong>solicitud requerida</strong> para reabastecer el stock mínimo.
+    </p>
+
+    <form id="captureCierreForm" method="post" action="{% url 'recetas:reabasto_cedis_cierre_guardar' %}">
+      {% csrf_token %}
+      <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+      <input type="hidden" name="sucursal_id" value="{{ sucursal.id }}">
+
+      <div class="table-responsive capture-table-wrap">
+        <table class="table capture-simple-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Stock mínimo</th>
+              <th>Stock final cierre</th>
+              <th>Solicitud requerida</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows_cierre %}
+            <tr>
+              <td>
+                {{ row.receta.nombre }}
+                <input type="hidden" name="row_receta_id" value="{{ row.receta.id }}">
+              </td>
+              <td>
+                <span class="js-stock-min" data-receta="{{ row.receta.id }}">{{ row.policy.stock_minimo|floatformat:2 }}</span>
+              </td>
+              <td>
+                <input
+                  class="form-control js-stock-final"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  name="stock_reportado_{{ row.receta.id }}"
+                  value="{{ row.stock_reportado|floatformat:3 }}"
+                  data-receta="{{ row.receta.id }}"
+                >
+              </td>
+              <td>
+                <span class="badge badge-primary js-sugerido" data-receta="{{ row.receta.id }}">{{ row.sugerido|floatformat:2 }}</span>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4">No hay políticas cargadas para esta sucursal. Contacta a Compras/Administración.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <input type="hidden" name="accion" value="ENVIAR">
+      <div class="capture-sticky-actions">
+        <button class="btn btn-primary" type="submit">Enviar a CEDIS</button>
+      </div>
+    </form>
+    {% else %}
+    <div class="alert alert-danger">Tu usuario no tiene sucursal asignada. Contacta a administración.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    const parseNumber = (raw) => {
+      if (raw === null || raw === undefined) return 0;
+      const txt = String(raw).trim().replace(",", ".");
+      if (!txt) return 0;
+      const n = Number(txt);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const fmt = (n) => n.toFixed(2);
+
+    const stockMinNodes = Array.from(document.querySelectorAll(".js-stock-min[data-receta]"));
+    const stockMinMap = {};
+    for (const node of stockMinNodes) {
+      const rid = node.dataset.receta;
+      stockMinMap[rid] = parseNumber(node.textContent);
+    }
+
+    const recalc = (rid) => {
+      const stockInput = document.querySelector(`.js-stock-final[data-receta="${rid}"]`);
+      const sugNode = document.querySelector(`.js-sugerido[data-receta="${rid}"]`);
+      if (!stockInput || !sugNode) return;
+      const stockMin = stockMinMap[rid] || 0;
+      const stockFinal = parseNumber(stockInput.value);
+      const sugerido = Math.max(stockMin - stockFinal, 0);
+      sugNode.textContent = fmt(sugerido);
+    };
+
+    const stockInputs = Array.from(document.querySelectorAll(".js-stock-final[data-receta]"));
+    for (const input of stockInputs) {
+      const rid = input.dataset.receta;
+      recalc(rid);
+      input.addEventListener("input", () => recalc(rid));
+      input.addEventListener("change", () => recalc(rid));
+    }
+  })();
+</script>
+{% endblock %}

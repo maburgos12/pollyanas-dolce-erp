@@ -147,7 +147,7 @@ class Command(BaseCommand):
             "insumos_sin_existencia": Insumo.objects.filter(activo=True, existenciainsumo__isnull=True).count(),
             "costos_sin_proveedor": CostoInsumo.objects.filter(proveedor__isnull=True).count(),
             "aliases_sin_insumo_activo": InsumoAlias.objects.filter(insumo__activo=False).count(),
-            "point_pending_total": PointPendingMatch.objects.count(),
+            "point_pending_total": PointPendingMatch.qs_operativos().count(),
         }
 
         alertas = []

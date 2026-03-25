@@ -8,9 +8,30 @@ from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 from django.utils import timezone
 
 from inventario.models import ExistenciaInsumo
+from maestros.utils.canonical_catalog import canonicalized_active_insumos
 from recetas.models import PlanProduccionItem
 
 from .models import MermaPOS, VentaPOS
+
+
+def _canonical_member_maps(limit: int = 2000) -> tuple[dict[int, int], dict[int, Any]]:
+    member_to_canonical: dict[int, int] = {}
+    canonical_rows: dict[int, Any] = {}
+    for row in canonicalized_active_insumos(limit=limit):
+        canonical = row["canonical"]
+        canonical_rows[canonical.id] = row
+        for member_id in row["member_ids"]:
+            member_to_canonical[member_id] = canonical.id
+    return member_to_canonical, canonical_rows
+
+
+def _canonicalize_totals(raw: dict[int, Decimal]) -> dict[int, Decimal]:
+    member_to_canonical, canonical_rows = _canonical_member_maps()
+    result: dict[int, Decimal] = {}
+    for insumo_id, amount in raw.items():
+        canonical_id = member_to_canonical.get(insumo_id, insumo_id)
+        result[canonical_id] = result.get(canonical_id, Decimal("0")) + Decimal(str(amount or 0))
+    return result
 
 
 def _month_bounds(year: int, month: int) -> tuple[date, date]:
@@ -87,7 +108,7 @@ def _aggregate_plan_to_insumo(date_from: date, date_to: date) -> dict[int, Decim
     for row in rows:
         insumo_id = int(row["receta__lineas__insumo_id"])
         result[insumo_id] = Decimal(str(row.get("total") or 0))
-    return result
+    return _canonicalize_totals(result)
 
 
 def _aggregate_ventas_to_insumo(date_from: date, date_to: date, sucursal_id: int | None) -> dict[int, Decimal]:
@@ -110,7 +131,7 @@ def _aggregate_ventas_to_insumo(date_from: date, date_to: date, sucursal_id: int
     for row in rows:
         insumo_id = int(row["receta__lineas__insumo_id"])
         result[insumo_id] = Decimal(str(row.get("total") or 0))
-    return result
+    return _canonicalize_totals(result)
 
 
 def _aggregate_mermas_to_insumo(date_from: date, date_to: date, sucursal_id: int | None) -> dict[int, Decimal]:
@@ -133,7 +154,7 @@ def _aggregate_mermas_to_insumo(date_from: date, date_to: date, sucursal_id: int
     for row in rows:
         insumo_id = int(row["receta__lineas__insumo_id"])
         result[insumo_id] = Decimal(str(row.get("total") or 0))
-    return result
+    return _canonicalize_totals(result)
 
 
 def build_discrepancias_report(
@@ -154,12 +175,23 @@ def build_discrepancias_report(
     plan_map = _aggregate_plan_to_insumo(date_from, date_to)
     ventas_map = _aggregate_ventas_to_insumo(date_from, date_to, sucursal_id)
     mermas_map = _aggregate_mermas_to_insumo(date_from, date_to, sucursal_id)
+    member_to_canonical, canonical_rows = _canonical_member_maps()
 
     insumo_ids = set(plan_map.keys()) | set(ventas_map.keys()) | set(mermas_map.keys())
     existencia_qs = ExistenciaInsumo.objects.select_related("insumo")
-    if insumo_ids:
-        existencia_qs = existencia_qs.filter(insumo_id__in=insumo_ids)
-    existencia_map = {e.insumo_id: e for e in existencia_qs}
+    existencia_raw = {}
+    for e in existencia_qs:
+        canonical_id = member_to_canonical.get(e.insumo_id, e.insumo_id)
+        bucket = existencia_raw.get(canonical_id)
+        canonical_insumo = canonical_rows.get(canonical_id, {}).get("canonical", e.insumo)
+        if bucket is None:
+            existencia_raw[canonical_id] = {
+                "insumo": canonical_insumo,
+                "stock_actual": Decimal(str(e.stock_actual or 0)),
+            }
+        else:
+            bucket["stock_actual"] += Decimal(str(e.stock_actual or 0))
+    existencia_map = existencia_raw
     insumo_ids |= set(existencia_map.keys())
 
     rows = []
@@ -168,13 +200,13 @@ def build_discrepancias_report(
 
     for insumo_id in sorted(insumo_ids):
         ex = existencia_map.get(insumo_id)
-        nombre = ex.insumo.nombre if ex else f"Insumo #{insumo_id}"
-        unidad = ex.insumo.unidad_base.codigo if ex and ex.insumo.unidad_base_id else ""
+        nombre = ex["insumo"].nombre if ex else f"Insumo #{insumo_id}"
+        unidad = ex["insumo"].unidad_base.codigo if ex and ex["insumo"].unidad_base_id else ""
         produccion = plan_map.get(insumo_id, Decimal("0"))
         ventas = ventas_map.get(insumo_id, Decimal("0"))
         merma = mermas_map.get(insumo_id, Decimal("0"))
         teorico = produccion - ventas - merma
-        real = Decimal(str(ex.stock_actual if ex else 0))
+        real = Decimal(str(ex["stock_actual"] if ex else 0))
         discrepancia = real - teorico
         base = abs(teorico) if abs(teorico) > Decimal("1") else Decimal("1")
         variacion_pct = (abs(discrepancia) * Decimal("100")) / base

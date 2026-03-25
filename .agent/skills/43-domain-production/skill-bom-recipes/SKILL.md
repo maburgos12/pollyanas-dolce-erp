@@ -35,3 +35,7 @@ Govern BOM/recipe structures: yields, units, derived items, substitutions, and v
 - Prioritize: ledger-based inventory movements, audit trail, RBAC, idempotent jobs, deterministic exports, KPI dictionary consistency.
 - Reconcile system data vs Excel/internal controls where processes still coexist.
 - Prefer stable naming standards and canonical catalogs across Point/ERP/sucursales.
+
+## Related playbooks
+- `playbooks/insumo_subinsumo_producto_model.md`
+- `../30-integrations/skill-pointmeup-ingestion/playbooks/point_recetas_multinivel_y_addons.md`

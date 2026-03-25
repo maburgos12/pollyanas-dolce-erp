@@ -32,15 +32,24 @@ fi
 
 BRANCH_FILTER="$(read_local_env POS_BRIDGE_INVENTORY_BRANCH_FILTER)"
 LIMIT_BRANCHES="$(read_local_env POS_BRIDGE_INVENTORY_LIMIT_BRANCHES)"
+INVENTORY_MODE="$(read_local_env POS_BRIDGE_INVENTORY_MODE)"
 
-CMD=("$PYTHON_BIN" manage.py run_inventory_sync)
-if [ -n "$BRANCH_FILTER" ]; then
-  CMD+=(--branch "$BRANCH_FILTER")
-fi
-if [ -n "$LIMIT_BRANCHES" ]; then
-  CMD+=(--limit-branches "$LIMIT_BRANCHES")
+if [ -z "$INVENTORY_MODE" ]; then
+  INVENTORY_MODE="realtime"
 fi
 
-echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] pos_bridge inventario: inicio"
+if [ "$INVENTORY_MODE" = "full" ]; then
+  CMD=("$PYTHON_BIN" manage.py run_inventory_sync)
+  if [ -n "$BRANCH_FILTER" ]; then
+    CMD+=(--branch "$BRANCH_FILTER")
+  fi
+  if [ -n "$LIMIT_BRANCHES" ]; then
+    CMD+=(--limit-branches "$LIMIT_BRANCHES")
+  fi
+else
+  CMD=("$PYTHON_BIN" manage.py run_realtime_inventory --force)
+fi
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] pos_bridge inventario (${INVENTORY_MODE}): inicio"
 "${CMD[@]}"
-echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] pos_bridge inventario: fin"
+echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] pos_bridge inventario (${INVENTORY_MODE}): fin"
