@@ -19,13 +19,10 @@ Usar esta ruta cuando:
 
 ## Supuesto local actual
 
-La base activa sigue siendo `db.sqlite3` local.  
-Para no partir el entorno ni perder datos, `worker` y `beat` montan el mismo workspace y operan sobre esa base con:
+La base oficial local debe ser PostgreSQL, igual que en el resto del ERP.  
+`worker` y `beat` montan el mismo workspace y operan contra la misma base PostgreSQL definida por `DATABASE_URL` o `DB_HOST`.
 
-- `celery --pool=solo`
-- `concurrency=1`
-
-Esto prioriza estabilidad sobre paralelismo.
+La opción SQLite queda solo como fallback explícito de laboratorio y no debe considerarse ruta normal de operación.
 
 ## Arranque
 
@@ -68,7 +65,7 @@ Definidos en [docker-compose.yml](/Users/mauricioburgos/Downloads/pastelerias_er
 - `worker`
 - `beat`
 
-El `web` puede seguir corriendo fuera de Docker sobre el mismo `db.sqlite3` mientras el equipo termina la transición visual/local.
+El `web` puede seguir corriendo fuera de Docker, pero apuntando a la misma base PostgreSQL del stack local.
 
 ## Regla operativa
 
