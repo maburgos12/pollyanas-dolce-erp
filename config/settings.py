@@ -61,20 +61,49 @@ RUNNING_ON_RAILWAY = any(
         "RAILWAY_PUBLIC_DOMAIN",
     )
 )
-DEBUG = env_bool("DEBUG", default=not RUNNING_ON_RAILWAY)
-SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-dev-key-change-me")
-if not DEBUG and SECRET_KEY == "django-insecure-dev-key-change-me":
-    raise ValueError("SECRET_KEY must be set when DEBUG=False")
+APP_ENV = os.getenv("APP_ENV", "production" if RUNNING_ON_RAILWAY else "development").strip().lower()
+IS_DEVELOPMENT_ENV = APP_ENV in {"development", "dev", "local", "test"}
+RUNNING_TESTS = "test" in sys.argv or bool(os.getenv("PYTEST_CURRENT_TEST"))
+DEBUG = env_bool("DEBUG", default=(IS_DEVELOPMENT_ENV and not RUNNING_ON_RAILWAY))
 
-CANONICAL_LOCAL_HOST = os.getenv("CANONICAL_LOCAL_HOST", "127.0.0.1:8002")
+if RUNNING_ON_RAILWAY and DEBUG:
+    raise ValueError("DEBUG must remain disabled when RUNNING_ON_RAILWAY is detected.")
+
+if APP_ENV in {"production", "staging"} and DEBUG:
+    raise ValueError("DEBUG must remain disabled when APP_ENV is production or staging.")
+
+ALLOW_INSECURE_LOCAL_SECRET_KEY = env_bool("ALLOW_INSECURE_LOCAL_SECRET_KEY", default=False)
+SECRET_KEY = (os.getenv("SECRET_KEY") or "").strip()
+if not SECRET_KEY:
+    if RUNNING_TESTS:
+        SECRET_KEY = "test-secret-key"
+    elif DEBUG and IS_DEVELOPMENT_ENV and ALLOW_INSECURE_LOCAL_SECRET_KEY:
+        SECRET_KEY = "django-insecure-local-dev-key-change-me"
+    else:
+        raise ValueError(
+            "SECRET_KEY must be set. "
+            "Use ALLOW_INSECURE_LOCAL_SECRET_KEY=1 only for temporary local development."
+        )
+
+LOCAL_DEV_HOST_PORT = os.getenv("WEB_HOST_PORT", "8011")
+CANONICAL_LOCAL_HOST = os.getenv("CANONICAL_LOCAL_HOST", f"localhost:{LOCAL_DEV_HOST_PORT}")
+AI_GATEWAY_OPENAPI_SERVER_URL = os.getenv("AI_GATEWAY_OPENAPI_SERVER_URL", "").strip()
+ONYX_PORTAL_URL = os.getenv("ONYX_PORTAL_URL", "https://ai.pollyanasdolce.com").strip()
 
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,0.0.0.0,healthcheck.railway.app,.up.railway.app",
+    "localhost,127.0.0.1,healthcheck.railway.app,.up.railway.app",
 )
 railway_public_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+railway_private_domain = os.getenv("RAILWAY_PRIVATE_DOMAIN")
 if railway_public_domain and railway_public_domain not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(railway_public_domain)
+if railway_private_domain and railway_private_domain not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(railway_private_domain)
+if RUNNING_ON_RAILWAY:
+    for railway_host in ("healthcheck.railway.app", ".up.railway.app", ".railway.internal"):
+        if railway_host not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(railway_host)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -97,16 +126,18 @@ INSTALLED_APPS = [
     "activos",
     "control",
     "crm",
+    "ventas",
     "rrhh",
     "logistica",
     "integraciones",
     "pos_bridge",
     "reportes",
+    "orquestacion",
     "api",
 ]
 
 MIDDLEWARE = [
-    "django.middleware.security.SecurityMiddleware",
+    "config.middleware.HealthCheckSecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -116,6 +147,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "core.middleware.BranchCaptureOnlyMiddleware",
+    "core.middleware.PerformanceLoggingMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -138,7 +170,10 @@ TEMPLATES = [{
     },
 }]
 
-# Database
+# Database priority:
+# 1. DATABASE_URL
+# 2. DB_HOST + DB_NAME/DB_USER/DB_PASSWORD/DB_PORT
+# SQLite no es una ruta operativa valida para este ERP.
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if DATABASE_URL:
     DATABASES = {
@@ -154,12 +189,10 @@ elif os.getenv("DB_HOST"):
         try:
             socket.getaddrinfo(db_host, None)
         except OSError:
-            DATABASES = {
-                "default": {
-                    "ENGINE": "django.db.backends.sqlite3",
-                    "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
-                }
-            }
+            raise ValueError(
+                "DB_HOST está configurado pero no resolvió a una base PostgreSQL válida. "
+                "Corrige la configuración de PostgreSQL; SQLite ya no es una ruta soportada para este ERP."
+            )
         else:
             DATABASES = {
                 "default": {
@@ -183,12 +216,10 @@ elif os.getenv("DB_HOST"):
             }
         }
 elif DEBUG:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
-        }
-    }
+    raise ValueError(
+        "Configuración de base de datos faltante. Para operar el ERP usa PostgreSQL con DATABASE_URL o DB_HOST. "
+        "SQLite ya no es una ruta soportada para este ERP."
+    )
 else:
     raise ValueError("DATABASE_URL or DB_HOST must be set when DEBUG=False")
 
@@ -215,6 +246,11 @@ else:
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 PICKUP_AVAILABILITY_FRESHNESS_MINUTES = env_int("PICKUP_AVAILABILITY_FRESHNESS_MINUTES", 20)
+PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS = env_int("PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS", 3)
+PICKUP_RESERVATION_EXPIRY_SWEEP_DEBOUNCE_SECONDS = env_int(
+    "PICKUP_RESERVATION_EXPIRY_SWEEP_DEBOUNCE_SECONDS",
+    30,
+)
 PICKUP_STOCK_BUFFER_DEFAULT = os.getenv("PICKUP_STOCK_BUFFER_DEFAULT", "1")
 PICKUP_LOW_STOCK_THRESHOLD = os.getenv("PICKUP_LOW_STOCK_THRESHOLD", "3")
 PICKUP_RESERVATION_TTL_MINUTES = env_int("PICKUP_RESERVATION_TTL_MINUTES", 15)
@@ -229,14 +265,9 @@ if railway_public_domain:
 
 CSRF_FAILURE_VIEW = "core.views.csrf_failure"
 for trusted_origin in (
-    "http://localhost",
-    "http://127.0.0.1",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "https://localhost",
-    "https://127.0.0.1",
-    "https://localhost:8000",
-    "https://127.0.0.1:8000",
+    f"http://{CANONICAL_LOCAL_HOST}",
+    f"http://localhost:{LOCAL_DEV_HOST_PORT}",
+    f"http://127.0.0.1:{LOCAL_DEV_HOST_PORT}",
 ):
     if trusted_origin not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(trusted_origin)
@@ -249,6 +280,28 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend"],
 }
 
+CACHE_DEFAULT_TIMEOUT = env_int("CACHE_DEFAULT_TIMEOUT", 300)
+CACHE_KEY_PREFIX = os.getenv("CACHE_KEY_PREFIX", "pastelerias_erp")
+CACHE_URL = (os.getenv("CACHE_URL") or os.getenv("REDIS_URL") or "").strip()
+if CACHE_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": CACHE_URL,
+            "TIMEOUT": CACHE_DEFAULT_TIMEOUT,
+            "KEY_PREFIX": CACHE_KEY_PREFIX,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "pastelerias-erp-local-cache",
+            "TIMEOUT": CACHE_DEFAULT_TIMEOUT,
+            "KEY_PREFIX": CACHE_KEY_PREFIX,
+        }
+    }
+
 CELERY_BROKER_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -256,6 +309,7 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 POS_BRIDGE_AGENT_MODEL = os.getenv("POS_BRIDGE_AGENT_MODEL", "gpt-4o-mini")
@@ -270,16 +324,29 @@ LOGGING = {
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "loggers": {
         "core": {"handlers": ["console"], "level": "INFO"},
+        "erp.performance": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
     "root": {"handlers": ["console"], "level": "INFO"},
 }
 
+ERP_PERF_LOGGING_ENABLED = env_bool("ERP_PERF_LOGGING_ENABLED", default=DEBUG and not RUNNING_TESTS)
+ERP_SLOW_ENDPOINT_MS = env_int("ERP_SLOW_ENDPOINT_MS", 1000)
+ERP_SLOW_QUERY_MS = env_int("ERP_SLOW_QUERY_MS", 200)
+ERP_AUTO_PURCHASE_ENABLED = env_bool("ERP_AUTO_PURCHASE_ENABLED", default=True)
+ERP_AUTO_PURCHASE_MIN_SHORTAGE = os.getenv("ERP_AUTO_PURCHASE_MIN_SHORTAGE", "0.001")
+ERP_OPERATION_ALERTS_ENABLED = env_bool("ERP_OPERATION_ALERTS_ENABLED", default=True)
+
+IS_SECURE_ENV = not DEBUG and (RUNNING_ON_RAILWAY or APP_ENV in {"staging", "production"})
+if RUNNING_ON_RAILWAY:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    USE_X_FORWARDED_HOST = True
+    USE_X_FORWARDED_PORT = True
 SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000" if not DEBUG else "0"))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=not DEBUG)
 SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=not DEBUG)
-SECURE_SSL_REDIRECT = False
-SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", default=(not DEBUG and RUNNING_ON_RAILWAY))
-CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=(not DEBUG and RUNNING_ON_RAILWAY))
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=IS_SECURE_ENV)
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", default=IS_SECURE_ENV)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=IS_SECURE_ENV)
 X_FRAME_OPTIONS = os.getenv("X_FRAME_OPTIONS", "DENY")
 
 # Inventario: fórmula de punto de reorden.
@@ -299,3 +366,5 @@ POINT_BRIDGE_STORAGE_ROOT = os.getenv(
 )
 POINT_BRIDGE_SYNC_INTERVAL_HOURS = int(os.getenv("POINT_BRIDGE_SYNC_INTERVAL_HOURS", "24"))
 POINT_BRIDGE_RETRY_ATTEMPTS = int(os.getenv("POINT_BRIDGE_RETRY_ATTEMPTS", "3"))
+
+ORQUESTACION_POINTDAILYSALE_GUARD_ENABLED = env_bool("ORQUESTACION_POINTDAILYSALE_GUARD_ENABLED", default=True)
