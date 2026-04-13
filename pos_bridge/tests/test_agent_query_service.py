@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from unittest.mock import patch
 
 from core.models import AuditLog, Sucursal
 from maestros.models import Insumo, UnidadMedida
@@ -17,6 +19,7 @@ from pos_bridge.models import (
     PointProduct,
     PointSyncJob,
 )
+from reportes.models import FactVentaDiaria
 from pos_bridge.services.agent_query_service import PosAgentQueryService
 from recetas.models import LineaReceta, Receta, VentaHistorica
 
@@ -146,6 +149,24 @@ class PosAgentQueryServiceTests(TestCase):
         self.assertEqual(result["query_type"], "general")
         self.assertIn("No logre clasificar", result["answer"])
 
+    @override_settings(OPENAI_API_KEY="test-key")
+    @patch("openai.OpenAI")
+    def test_general_query_with_openai_uses_safe_message_names(self, openai_cls):
+        captured = {}
+
+        class _FakeResponses:
+            def create(self, **kwargs):
+                captured.update(kwargs)
+                return SimpleNamespace(output_text='{"intent":"general"}')
+
+        openai_cls.return_value = SimpleNamespace(responses=_FakeResponses())
+
+        result = PosAgentQueryService().process_query(query="Necesito ayuda general con el ERP", user=self.user)
+
+        self.assertEqual(result["query_type"], "general")
+        self.assertEqual(captured["input"][0]["name"], "erp_classifier_system")
+        self.assertEqual(captured["input"][1]["name"], "erp_user_query")
+
     def test_sales_summary_warns_when_historical_sources_overlap(self):
         fecha = timezone.localdate().replace(day=1)
         VentaHistorica.objects.create(
@@ -213,6 +234,68 @@ class PosAgentQueryServiceTests(TestCase):
         self.assertEqual(result["query_type"], "sales_summary")
         self.assertEqual(result["data"]["source"], "PointDailySaleOfficial")
         self.assertEqual(result["data"]["total_sales"], "1000")
+
+    def test_sales_summary_prefers_canonical_fact_over_staging_pointdaily_sale(self):
+        target_day = timezone.localdate().replace(day=1)
+        FactVentaDiaria.objects.create(
+            fecha=target_day,
+            sucursal=self.sucursal,
+            receta=self.receta,
+            point_product=self.product,
+            producto_clave=self.receta.codigo_point,
+            producto_nombre=self.receta.nombre,
+            categoria="PASTEL",
+            cantidad=Decimal("12"),
+            tickets=4,
+            venta_bruta=Decimal("1200.00"),
+            descuento=Decimal("0"),
+            venta_total=Decimal("1200.00"),
+            venta_neta=Decimal("1200.00"),
+            costo_estimado=Decimal("0"),
+            margen=Decimal("0"),
+            source_kind=FactVentaDiaria.SOURCE_V2,
+        )
+
+        result = PosAgentQueryService().process_query(
+            query=f"Cuanto vendimos en Matriz del {target_day.isoformat()} al {target_day.isoformat()}",
+            user=self.user,
+        )
+
+        self.assertEqual(result["query_type"], "sales_summary")
+        self.assertEqual(result["data"]["source"], "PointSalesDailyFact")
+        self.assertEqual(result["data"]["source_status"], "OFFICIAL")
+        self.assertEqual(result["data"]["total_sales"], "1200")
+
+    def test_sales_by_branch_prefers_canonical_fact_over_staging_pointdaily_sale(self):
+        target_day = timezone.localdate().replace(day=1)
+        FactVentaDiaria.objects.create(
+            fecha=target_day,
+            sucursal=self.sucursal,
+            receta=self.receta,
+            point_product=self.product,
+            producto_clave=self.receta.codigo_point,
+            producto_nombre=self.receta.nombre,
+            categoria="PASTEL",
+            cantidad=Decimal("9"),
+            tickets=3,
+            venta_bruta=Decimal("900.00"),
+            descuento=Decimal("0"),
+            venta_total=Decimal("900.00"),
+            venta_neta=Decimal("900.00"),
+            costo_estimado=Decimal("0"),
+            margen=Decimal("0"),
+            source_kind=FactVentaDiaria.SOURCE_V2,
+        )
+
+        result = PosAgentQueryService().process_query(
+            query=f"Ranking de sucursales y tiendas branch del {target_day.isoformat()} al {target_day.isoformat()}",
+            user=self.user,
+        )
+
+        self.assertEqual(result["query_type"], "sales_by_branch")
+        self.assertEqual(result["data"]["source"], "PointSalesDailyFact")
+        self.assertEqual(result["data"]["source_status"], "OFFICIAL")
+        self.assertEqual(result["data"]["branches"][0]["total_sales"], "900.00")
 
     def test_sales_summary_prefers_official_monthly_cache_for_closed_month_without_branch(self):
         PointDailySale.objects.all().delete()

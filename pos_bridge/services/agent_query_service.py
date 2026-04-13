@@ -14,13 +14,13 @@ from django.utils import timezone
 from core.audit import log_event
 from pos_bridge.models import (
     PointBranch,
-    PointDailySale,
     PointInventorySnapshot,
     PointMonthlySalesOfficial,
     PointProduct,
     PointRecipeNode,
 )
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
+from pos_bridge.utils.helpers import safe_slug
 from pos_bridge.utils.logger import get_pos_bridge_logger
 from recetas.models import LineaReceta, Receta, VentaHistorica
 from recetas.utils.addon_grouping import (
@@ -30,6 +30,7 @@ from recetas.utils.addon_grouping import (
     resolve_receta_from_term,
 )
 from recetas.utils.normalizacion import normalizar_nombre
+from ventas.services.sales_read_service import get_sales_range, get_sales_range_grouped
 
 logger = get_pos_bridge_logger()
 
@@ -68,11 +69,30 @@ POINT_BRIDGE_SOURCE = "POINT_BRIDGE_SALES"
 OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
 
 
+def _sales_source_label(selection: dict) -> tuple[str, str]:
+    source = str(selection.get("source") or "none")
+    detail = str(selection.get("source_detail") or "")
+    if source == "authoritative":
+        return "VentaAutoritativaPoint", "OFFICIAL"
+    if source == "v2_fact":
+        return "PointSalesDailyFact", "OFFICIAL"
+    if source == "legacy" and detail == "point_daily_sale_official":
+        return "PointDailySaleOfficial", "STAGING"
+    if source == "legacy":
+        return "PointDailySale", "STAGING"
+    return "SinFuente", "EMPTY"
+
+
 def _strip_code_fences(raw: str) -> str:
     cleaned = raw.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.replace("```json", "").replace("```", "").strip()
     return cleaned
+
+
+def _safe_message_name(value: str, *, fallback: str) -> str:
+    token = safe_slug(value)
+    return token or fallback
 
 
 def classify_intent(query: str) -> str:
@@ -240,6 +260,15 @@ def _serialize_decimal(value):
     return value
 
 
+def _serialize_decimal_compact(value):
+    if not isinstance(value, Decimal):
+        return value
+    if value == value.to_integral():
+        return str(value.quantize(Decimal("1")))
+    normalized = value.normalize()
+    return format(normalized, "f")
+
+
 def _resolve_branch_codes(branch: str | None) -> set[str]:
     if not branch:
         return set()
@@ -259,6 +288,23 @@ def _resolve_branch_codes(branch: str | None) -> set[str]:
     if not codes and normalized_branch:
         codes.add(normalized_branch.upper())
     return codes
+
+
+def _resolve_branch_ids(branch: str | None) -> list[int] | None:
+    if not branch:
+        return None
+    branch_ids = list(
+        PointBranch.objects.filter(
+            Q(name__icontains=branch)
+            | Q(external_id__iexact=branch)
+            | Q(erp_branch__codigo__iexact=branch)
+            | Q(erp_branch__nombre__icontains=branch)
+        )
+        .exclude(erp_branch_id__isnull=True)
+        .values_list("erp_branch_id", flat=True)
+        .distinct()
+    )
+    return branch_ids or None
 
 
 def _month_start(day: date) -> date:
@@ -317,25 +363,19 @@ def _historical_sales_qs(*, start: date, end: date, branch: str | None = None):
     return queryset
 
 
-def _point_sales_qs(*, start: date, end: date, branch: str | None = None):
-    queryset = PointDailySale.objects.select_related("branch", "product", "receta").filter(
-        sale_date__gte=start,
-        sale_date__lte=end,
-    )
-    if branch:
-        queryset = queryset.filter(
-            Q(branch__name__icontains=branch)
-            | Q(branch__external_id__iexact=branch)
-            | Q(branch__erp_branch__codigo__iexact=branch)
-        )
-    return queryset
-
-
 def _point_sales_are_official(*, start: date, end: date, branch: str | None = None) -> bool:
-    queryset = _point_sales_qs(start=start, end=end, branch=branch)
-    if not queryset.exists():
+    branch_ids = _resolve_branch_ids(branch)
+    selection = get_sales_range(
+        start_date=start,
+        end_date=end,
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
+    )
+    if (selection.get("monto") or ZERO) <= ZERO:
         return False
-    return not queryset.exclude(source_endpoint=OFFICIAL_POINT_SOURCE).exists()
+    source = str(selection.get("source") or "")
+    source_detail = str(selection.get("source_detail") or "")
+    return source in {"authoritative", "v2_fact"} or (source == "legacy" and source_detail == "point_daily_sale_official")
 
 
 def _use_historical_sales(*, start: date, end: date, branch: str | None = None) -> bool:
@@ -461,42 +501,55 @@ def _execute_sales_summary(query: str) -> dict:
             return _reconciliation_warning_payload(start=start, end=end, branch=branch, issue=issue)
         return _recipe_linked_only_warning_payload(start=start, end=end, branch=branch)
 
-    queryset = _point_sales_qs(start=start, end=end, branch=branch)
-    source_label = "PointDailySaleOfficial" if _point_sales_are_official(start=start, end=end, branch=branch) else "PointDailySale"
-    totals = queryset.aggregate(
-        total_sales=Coalesce(Sum("total_amount"), ZERO),
-        total_quantity=Coalesce(Sum("quantity"), ZERO),
-        total_tickets=Coalesce(Sum("tickets"), 0),
-        total_discount=Coalesce(Sum("discount_amount"), ZERO),
-        total_net=Coalesce(Sum("net_amount"), ZERO),
-        branches_count=Count("branch", distinct=True),
-        products_count=Count("product", distinct=True),
-        days_count=Count("sale_date", distinct=True),
-        last_sale_date=Max("sale_date"),
+    branch_ids = _resolve_branch_ids(branch)
+    totals = get_sales_range(
+        start_date=start,
+        end_date=end,
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
     )
+    grouped_branches = get_sales_range_grouped(
+        start_date=start,
+        end_date=end,
+        dimension="branch",
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
+    )
+    grouped_products = get_sales_range_grouped(
+        start_date=start,
+        end_date=end,
+        dimension="product",
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
+    )
+    source_label, source_status = _sales_source_label(totals)
     branch_label = branch or "todas las sucursales"
     coverage_note = ""
-    last_sale_date = totals.get("last_sale_date")
+    last_sale_date = end if totals.get("rows") else None
     if last_sale_date and last_sale_date < end:
         coverage_note = f" con datos disponibles hasta el {last_sale_date:%d/%m/%Y}"
     return {
         "answer": (
             f"Del {start:%d/%m/%Y} al {end:%d/%m/%Y} en {branch_label}{coverage_note}: "
-            f"venta total ${totals['total_sales']:,.2f}, "
-            f"{totals['total_quantity']:,.0f} piezas, "
-            f"{totals['total_tickets']:,} tickets y "
-            f"venta neta ${totals['total_net']:,.2f}."
+            f"venta total ${Decimal(totals['monto']):,.2f}, "
+            f"{Decimal(totals['cantidad']):,.0f} piezas, "
+            f"{sum(int(row.get('total_tickets') or 0) for row in grouped_branches['rows']):,} tickets."
         ),
         "data": {
             "period_start": start.isoformat(),
             "period_end": end.isoformat(),
             "branch_filter": branch or "",
             "source": source_label,
-            "source_status": "OFFICIAL" if source_label == "PointDailySaleOfficial" else "STAGING",
-            **{
-                key: (value.isoformat() if isinstance(value, date) else _serialize_decimal(value))
-                for key, value in totals.items()
-            },
+            "source_status": source_status,
+            "total_sales": _serialize_decimal_compact(totals["monto"]),
+            "total_quantity": _serialize_decimal_compact(totals["cantidad"]),
+            "total_tickets": sum(int(row.get("total_tickets") or 0) for row in grouped_branches["rows"]),
+            "total_discount": None,
+            "total_net": _serialize_decimal_compact(totals["monto"]),
+            "branches_count": len(grouped_branches["rows"]),
+            "products_count": len(grouped_products["rows"]),
+            "days_count": int(totals.get("coverage_days") or 0),
+            "coverage_reason": totals.get("coverage_reason"),
         },
         "query_type": "sales_summary",
     }
@@ -510,24 +563,20 @@ def _execute_sales_by_branch(query: str) -> dict:
         if issue:
             return _reconciliation_warning_payload(start=start, end=end, branch=None, issue=issue)
         return _recipe_linked_only_warning_payload(start=start, end=end, branch=None)
-    rows = (
-        _point_sales_qs(start=start, end=end)
-        .values("branch__name", "branch__external_id")
-        .annotate(
-            total_sales=Coalesce(Sum("total_amount"), ZERO),
-            total_quantity=Coalesce(Sum("quantity"), ZERO),
-            total_tickets=Coalesce(Sum("tickets"), 0),
-        )
-        .order_by("-total_sales", "branch__name")
+    grouped = get_sales_range_grouped(
+        start_date=start,
+        end_date=end,
+        dimension="branch",
+        coverage_policy="prefer_complete",
     )
     lines = [f"Ventas por sucursal del {start:%d/%m/%Y} al {end:%d/%m/%Y}:"]
     payload = []
-    for idx, row in enumerate(rows, start=1):
-        branch_name = row["sucursal__nombre"] if using_historical else row["branch__name"]
-        branch_id = row["sucursal__codigo"] if using_historical else row["branch__external_id"]
+    for idx, row in enumerate(grouped["rows"], start=1):
+        branch_name = row["branch_name"]
+        branch_id = row["branch_code"]
         lines.append(
             f"{idx}. {branch_name}: ${row['total_sales']:,.2f} "
-            f"({row['total_quantity']:,.0f} pzs, {row['total_tickets']:,} tickets)"
+            f"({row['total_quantity']:,.0f} pzs, {int(row.get('total_tickets') or 0):,} tickets)"
         )
         payload.append(
             {
@@ -535,16 +584,17 @@ def _execute_sales_by_branch(query: str) -> dict:
                 "branch_id": branch_id,
                 "total_sales": str(row["total_sales"]),
                 "total_quantity": str(row["total_quantity"]),
-                "total_tickets": row["total_tickets"],
+                "total_tickets": int(row.get("total_tickets") or 0),
             }
         )
-    source_label = "PointDailySaleOfficial" if _point_sales_are_official(start=start, end=end, branch=None) else "PointDailySale"
+    source_label, source_status = _sales_source_label(grouped)
     return {
         "answer": "\n".join(lines),
         "data": {
             "branches": payload,
-            "source": "VentaHistorica" if using_historical else source_label,
-            "source_status": "OFFICIAL" if source_label == "PointDailySaleOfficial" else "STAGING",
+            "source": source_label,
+            "source_status": source_status,
+            "coverage_reason": grouped.get("coverage_reason"),
         },
         "query_type": "sales_by_branch",
     }
@@ -560,17 +610,21 @@ def _execute_sales_by_product(query: str) -> dict:
         if issue:
             return _reconciliation_warning_payload(start=start, end=end, branch=branch, issue=issue)
         return _recipe_linked_only_warning_payload(start=start, end=end, branch=branch)
-    queryset = _point_sales_qs(start=start, end=end, branch=branch)
-    rows = (
-        queryset.values("product__name", "product__sku")
-        .annotate(total_sales=Coalesce(Sum("total_amount"), ZERO), total_quantity=Coalesce(Sum("quantity"), ZERO))
-        .order_by("-total_sales", "product__name")[:limit]
+    branch_ids = _resolve_branch_ids(branch)
+    grouped = get_sales_range_grouped(
+        start_date=start,
+        end_date=end,
+        dimension="product",
+        sucursales=branch_ids,
+        limit=limit,
+        coverage_policy="prefer_complete",
     )
+    rows = grouped["rows"]
     lines = [f"Top {limit} productos:"]
     payload = []
     for idx, row in enumerate(rows, start=1):
-        product_name = row["receta__nombre"] if using_historical else row["product__name"]
-        sku = row["receta__codigo_point"] if using_historical else row["product__sku"]
+        product_name = row["product_name"]
+        sku = row["recipe_name"] or ""
         lines.append(
             f"{idx}. {product_name} ({sku}): "
             f"${row['total_sales']:,.2f} - {row['total_quantity']:,.0f} pzs"
@@ -583,13 +637,14 @@ def _execute_sales_by_product(query: str) -> dict:
                 "total_quantity": str(row["total_quantity"]),
             }
         )
-    source_label = "PointDailySaleOfficial" if _point_sales_are_official(start=start, end=end, branch=branch) else "PointDailySale"
+    source_label, source_status = _sales_source_label(grouped)
     return {
         "answer": "\n".join(lines),
         "data": {
             "products": payload,
             "source": source_label,
-            "source_status": "OFFICIAL" if source_label == "PointDailySaleOfficial" else "STAGING",
+            "source_status": source_status,
+            "coverage_reason": grouped.get("coverage_reason"),
         },
         "query_type": "sales_by_product",
     }
@@ -632,26 +687,23 @@ def _execute_sales_trend(query: str) -> dict:
         if issue:
             return _reconciliation_warning_payload(start=start, end=end, branch=branch, issue=issue)
         return _recipe_linked_only_warning_payload(start=start, end=end, branch=branch)
-    queryset = _point_sales_qs(start=start, end=end, branch=branch)
-    rows = (
-        queryset.annotate(month=TruncMonth("sale_date"))
-        .values("month")
-        .annotate(
-            total_sales=Coalesce(Sum("total_amount"), ZERO),
-            total_quantity=Coalesce(Sum("quantity"), ZERO),
-            total_tickets=Coalesce(Sum("tickets"), 0),
-        )
-        .order_by("month")
+    branch_ids = _resolve_branch_ids(branch)
+    grouped = get_sales_range_grouped(
+        start_date=start,
+        end_date=end,
+        dimension="month",
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
     )
     payload = []
-    for row in rows:
-        tickets = row["total_tickets"] or 1
+    for row in grouped["rows"]:
+        tickets = row.get("total_tickets") or 1
         payload.append(
             {
-                "month": row["month"].strftime("%Y-%m"),
+                "month": row["period"],
                 "total_sales": str(row["total_sales"]),
                 "total_quantity": str(row["total_quantity"]),
-                "total_tickets": row["total_tickets"],
+                "total_tickets": row.get("total_tickets") or 0,
                 "avg_ticket": str(round(row["total_sales"] / tickets, 2)),
             }
         )
@@ -660,13 +712,14 @@ def _execute_sales_trend(query: str) -> dict:
         f"{row['month']}: ${Decimal(row['total_sales']):,.2f} ({row['total_quantity']} pzs)"
         for row in payload
     )
-    source_label = "PointDailySaleOfficial" if _point_sales_are_official(start=start, end=end, branch=branch) else "PointDailySale"
+    source_label, source_status = _sales_source_label(grouped)
     return {
         "answer": "\n".join(lines),
         "data": {
             "trends": payload,
             "source": source_label,
-            "source_status": "OFFICIAL" if source_label == "PointDailySaleOfficial" else "STAGING",
+            "source_status": source_status,
+            "coverage_reason": grouped.get("coverage_reason"),
         },
         "query_type": "sales_trend",
     }
@@ -900,8 +953,16 @@ def _execute_with_llm(query: str, api_key: str) -> dict:
         response = client.responses.create(
             model=model,
             input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": query},
+                {
+                    "role": "system",
+                    "name": _safe_message_name("erp classifier system", fallback="erp_classifier_system"),
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "name": _safe_message_name("erp user query", fallback="erp_user_query"),
+                    "content": query,
+                },
             ],
             temperature=0,
             max_output_tokens=120,

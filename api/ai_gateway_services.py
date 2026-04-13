@@ -1,0 +1,1791 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from decimal import Decimal
+from typing import Any, Callable
+from uuid import uuid4
+
+from django.conf import settings
+from django.core.exceptions import PermissionDenied
+from django.db import models, transaction
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce
+from django.utils import timezone
+
+from control.services import build_discrepancias_report, resolve_period_range
+from compras.models import OrdenCompra, SolicitudCompra
+from api.serializers import ComprasSolicitudCreateSerializer
+from api.serializers import PlanProduccionCreateSerializer
+from core.access import (
+    ROLE_ADMIN,
+    ROLE_COMPRAS,
+    ROLE_DG,
+    ROLE_LECTURA,
+    ROLE_PRODUCCION,
+    ROLE_VENTAS,
+    can_view_audit,
+    can_manage_compras,
+    can_view_compras,
+    can_view_inventario,
+    can_view_recetas,
+    can_view_reportes,
+    has_any_role,
+    primary_role,
+)
+from core.audit import log_event
+from core.models import AuditLog
+from orquestacion.models import AgentDefinition, AgentExecutionLink, AgentSuggestion, AgentTask, OrchestrationRun
+from pos_bridge.models import PointBranch, PointInventorySnapshot, PointSyncJob
+from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
+from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
+from pos_bridge.tasks.run_product_recipe_sync import run_product_recipe_sync
+from pos_bridge.utils.helpers import safe_slug
+from maestros.utils.canonical_catalog import canonical_insumo_by_id
+from recetas.models import PlanProduccion, PlanProduccionItem, Receta, RecetaCostoVersion
+from reportes.bi_utils import compute_bi_snapshot, serialize_bi_for_api
+from ventas.services.sales_read_service import get_sales_range, get_sales_range_grouped
+
+ZERO = Decimal("0")
+
+
+def _safe_integration_name(value: Any, *, fallback: str) -> str:
+    token = safe_slug(str(value or "").replace(".", "_"))
+    return token or fallback
+
+
+@dataclass(frozen=True)
+class AIToolDefinition:
+    key: str
+    name: str
+    description: str
+    operation_type: str
+    data_domain: str
+    branch_scoped: bool
+    requires_approval: bool
+    access_check: Callable[[Any], bool]
+    handler: Callable[[Any, dict[str, Any]], dict[str, Any]]
+    execute_handler: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None
+    argument_schema: dict[str, Any] = field(default_factory=dict)
+    result_contract: dict[str, Any] = field(default_factory=dict)
+
+
+def _resolve_sales_period(arguments: dict[str, Any]) -> tuple[date, date]:
+    end_date = _parse_iso_date(arguments.get("end_date")) or timezone.localdate()
+    start_date = _parse_iso_date(arguments.get("start_date")) or date(2022, 1, 1)
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    return start_date, end_date
+
+
+def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(min_value, min(parsed, max_value))
+
+
+def _parse_decimal(value: Any, *, default: Decimal) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return default
+
+
+def _parse_iso_date(value: Any) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _build_scope(user, *, branch_scoped: bool, arguments: dict[str, Any]) -> dict[str, Any]:
+    profile = getattr(user, "userprofile", None)
+    branch_locked = bool(profile and getattr(profile, "modo_captura_sucursal", False) and getattr(profile, "sucursal_id", None))
+    branch_code = profile.sucursal.codigo if branch_locked else ""
+    branch_id = profile.sucursal_id if branch_locked else None
+
+    scope = {
+        "primary_role": primary_role(user),
+        "branch_capture_only": branch_locked,
+        "branch_code": branch_code,
+        "branch_id": branch_id,
+        "requested_branch": str(arguments.get("branch") or arguments.get("branch_code") or "").strip(),
+        "requested_sucursal_id": arguments.get("sucursal_id"),
+        "branch_scoped_tool": branch_scoped,
+    }
+    return scope
+
+
+def _enforce_branch_scope(user, *, branch_scoped: bool, arguments: dict[str, Any]) -> dict[str, Any]:
+    scope = _build_scope(user, branch_scoped=branch_scoped, arguments=arguments)
+    if not scope["branch_capture_only"] or not branch_scoped:
+        return scope
+
+    requested_branch = str(arguments.get("branch") or arguments.get("branch_code") or "").strip()
+    requested_sucursal_id = arguments.get("sucursal_id")
+    forced_branch = scope["branch_code"]
+    forced_sucursal_id = scope["branch_id"]
+
+    if requested_branch and requested_branch.upper() != forced_branch.upper():
+        raise PermissionDenied("La consulta excede el alcance de sucursal asignado al usuario.")
+    if requested_sucursal_id not in {None, "", forced_sucursal_id}:
+        raise PermissionDenied("La consulta excede el alcance de sucursal asignado al usuario.")
+
+    if forced_branch and not requested_branch:
+        arguments["branch"] = forced_branch
+    if forced_sucursal_id and requested_sucursal_id in {None, ""}:
+        arguments["sucursal_id"] = forced_sucursal_id
+    return scope
+
+
+def _tool_response(*, tool: AIToolDefinition, scope: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tool": {
+            "key": tool.key,
+            "name": _safe_integration_name(tool.key, fallback="erp_tool"),
+            "display_name": tool.name,
+            "operation_type": tool.operation_type,
+            "data_domain": tool.data_domain,
+            "branch_scoped": tool.branch_scoped,
+            "requires_approval": tool.requires_approval,
+        },
+        "scope": scope,
+        "result": result,
+    }
+
+
+def _serialize_tool_definition(tool: AIToolDefinition) -> dict[str, Any]:
+    return {
+        "key": tool.key,
+        "name": _safe_integration_name(tool.key, fallback="erp_tool"),
+        "display_name": tool.name,
+        "description": tool.description,
+        "operation_type": tool.operation_type,
+        "data_domain": tool.data_domain,
+        "branch_scoped": tool.branch_scoped,
+        "requires_approval": tool.requires_approval,
+        "argument_schema": tool.argument_schema,
+        "result_contract": tool.result_contract,
+    }
+
+
+def _ensure_ai_gateway_agent() -> AgentDefinition:
+    agent, _created = AgentDefinition.objects.get_or_create(
+        code="ai_gateway",
+        defaults={
+            "name": "AI Gateway",
+            "domain": "integrations",
+            "status": AgentDefinition.STATUS_ACTIVE,
+            "description": "Agente tecnico para solicitudes y ejecuciones controladas del ERP AI Gateway.",
+            "allowed_tools_json": sorted(list(TOOLS.keys())) if "TOOLS" in globals() else [],
+            "allowed_actions_json": ["request_approval", "execute_safe_action"],
+            "requires_human_approval_default": True,
+            "priority_order": 5,
+        },
+    )
+    return agent
+
+
+def _handle_dashboard(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    period_days = _parse_int(arguments.get("period_days"), default=90, min_value=7, max_value=365)
+    months_window = _parse_int(arguments.get("months"), default=6, min_value=3, max_value=24)
+    snapshot = compute_bi_snapshot(period_days=period_days, months_window=months_window)
+    return {
+        "status": "ok",
+        "sources": ["reportes.bi_utils.compute_bi_snapshot"],
+        "filters": {"period_days": period_days, "months": months_window},
+        "payload": serialize_bi_for_api(snapshot),
+    }
+
+
+def _handle_audit_logs(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    q = str(arguments.get("q") or "").strip()
+    action = str(arguments.get("action") or "").strip().upper()
+    model_name = str(arguments.get("model") or "").strip()
+    user_id_raw = arguments.get("user_id")
+    limit = _parse_int(arguments.get("limit"), default=50, min_value=1, max_value=200)
+    qs = AuditLog.objects.select_related("user").order_by("-timestamp", "-id")
+    if q:
+        qs = qs.filter(
+            Q(action__icontains=q)
+            | Q(model__icontains=q)
+            | Q(object_id__icontains=q)
+            | Q(payload__icontains=q)
+            | Q(user__username__icontains=q)
+        )
+    if action:
+        qs = qs.filter(action=action)
+    if model_name:
+        qs = qs.filter(model__icontains=model_name)
+    if user_id_raw not in {None, ""}:
+        try:
+            qs = qs.filter(user_id=int(user_id_raw))
+        except (TypeError, ValueError):
+            raise PermissionDenied("user_id inválido para consulta de auditoría.")
+    rows = []
+    for log in qs[:limit]:
+        rows.append(
+            {
+                "id": log.id,
+                "timestamp": log.timestamp.isoformat(),
+                "action": log.action,
+                "model": log.model,
+                "object_id": log.object_id,
+                "user": log.user.username if log.user_id else "",
+                "payload": log.payload or {},
+            }
+        )
+    return {
+        "status": "ok",
+        "sources": ["core.AuditLog"],
+        "filters": {"q": q, "action": action, "model": model_name, "user_id": user_id_raw, "limit": limit},
+        "payload": {"items": rows, "returned": len(rows)},
+    }
+
+
+def _resolve_sales_branch_scope(arguments: dict[str, Any]) -> list[int] | None:
+    branch = str(arguments.get("branch") or "").strip()
+    if not branch:
+        return None
+    branch_ids = list(
+        PointBranch.objects.filter(
+            Q(name__icontains=branch)
+            | Q(external_id__iexact=branch)
+            | Q(erp_branch__codigo__iexact=branch)
+            | Q(erp_branch__nombre__icontains=branch)
+        )
+        .exclude(erp_branch_id__isnull=True)
+        .values_list("erp_branch_id", flat=True)
+        .distinct()
+    )
+    return branch_ids or None
+
+
+def _sales_source_label(selection: dict[str, Any]) -> tuple[str, str]:
+    source = str(selection.get("source") or "none")
+    detail = str(selection.get("source_detail") or "")
+    if source == "authoritative":
+        return "VentaAutoritativaPoint", "OFFICIAL"
+    if source == "v2_fact":
+        return "PointSalesDailyFact", "OFFICIAL"
+    if source == "legacy" and detail == "point_daily_sale_official":
+        return "PointDailySaleOfficial", "STAGING"
+    if source == "legacy":
+        return "PointDailySale", "STAGING"
+    return "SinFuente", "EMPTY"
+
+
+def _handle_sales_summary(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    start_date, end_date = _resolve_sales_period(arguments)
+    branch_ids = _resolve_sales_branch_scope(arguments)
+    selection = get_sales_range(
+        start_date=start_date,
+        end_date=end_date,
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
+    )
+    grouped_branches = get_sales_range_grouped(
+        start_date=start_date,
+        end_date=end_date,
+        dimension="branch",
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
+    )
+    grouped_products = get_sales_range_grouped(
+        start_date=start_date,
+        end_date=end_date,
+        dimension="product",
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
+    )
+    source_label, source_status = _sales_source_label(selection)
+    return {
+        "status": "ok",
+        "sources": [f"ventas.services.sales_read_service:{source_label}"],
+        "filters": {
+            "start_date": arguments.get("start_date"),
+            "end_date": arguments.get("end_date"),
+            "branch": arguments.get("branch"),
+        },
+        "payload": {
+            "source": source_label,
+            "source_status": source_status,
+            "total_sales": float(selection["monto"]),
+            "total_quantity": float(selection["cantidad"]),
+            "total_tickets": sum(int(row.get("total_tickets") or 0) for row in grouped_branches["rows"]),
+            "branches_count": len(grouped_branches["rows"]),
+            "products_count": len(grouped_products["rows"]),
+            "days_count": int(selection.get("coverage_days") or 0),
+        },
+    }
+
+
+def _handle_sales_by_branch(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    start_date, end_date = _resolve_sales_period(arguments)
+    branch_ids = _resolve_sales_branch_scope(arguments)
+    grouped = get_sales_range_grouped(
+        start_date=start_date,
+        end_date=end_date,
+        dimension="branch",
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
+    )
+    source_label, source_status = _sales_source_label(grouped)
+    payload = []
+    grand_total = sum((row["total_sales"] for row in grouped["rows"]), ZERO)
+    for row in grouped["rows"]:
+        pct = (row["total_sales"] / grand_total * 100) if grand_total else ZERO
+        payload.append(
+            {
+                "branch_external_id": row["branch_code"],
+                "branch_name": row["branch_name"],
+                "total_sales": float(row["total_sales"]),
+                "total_quantity": float(row["total_quantity"]),
+                "total_tickets": int(row.get("total_tickets") or 0),
+                "percentage": float(round(pct, 2)),
+            }
+        )
+    return {
+        "status": "ok",
+        "sources": [f"ventas.services.sales_read_service:{source_label}"],
+        "filters": {
+            "start_date": arguments.get("start_date"),
+            "end_date": arguments.get("end_date"),
+            "branch": arguments.get("branch"),
+        },
+        "payload": {
+            "source": source_label,
+            "source_status": source_status,
+            "items": payload,
+            "returned": len(payload),
+        },
+    }
+
+
+def _handle_sales_trends(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    start_date, end_date = _resolve_sales_period(arguments)
+    branch_ids = _resolve_sales_branch_scope(arguments)
+    grouped = get_sales_range_grouped(
+        start_date=start_date,
+        end_date=end_date,
+        dimension="month",
+        sucursales=branch_ids,
+        coverage_policy="prefer_complete",
+    )
+    source_label, source_status = _sales_source_label(grouped)
+    payload = []
+    for row in grouped["rows"]:
+        tickets = int(row.get("total_tickets") or 0) or 1
+        payload.append(
+            {
+                "period": row["period"],
+                "total_sales": float(row["total_sales"]),
+                "total_quantity": float(row["total_quantity"]),
+                "total_tickets": int(row.get("total_tickets") or 0),
+                "avg_ticket": float(round(row["total_sales"] / tickets, 2)),
+            }
+        )
+    return {
+        "status": "ok",
+        "sources": [f"ventas.services.sales_read_service:{source_label}"],
+        "filters": {
+            "start_date": arguments.get("start_date"),
+            "end_date": arguments.get("end_date"),
+            "branch": arguments.get("branch"),
+        },
+        "payload": {
+            "source": source_label,
+            "source_status": source_status,
+            "items": payload,
+            "returned": len(payload),
+        },
+    }
+
+
+def _latest_inventory_qs(arguments: dict[str, Any]):
+    from django.db.models import OuterRef, Subquery
+
+    latest_snapshot_id = (
+        PointInventorySnapshot.objects.filter(
+            branch_id=OuterRef("branch_id"),
+            product_id=OuterRef("product_id"),
+        )
+        .order_by("-captured_at", "-id")
+        .values("id")[:1]
+    )
+    qs = PointInventorySnapshot.objects.select_related("branch", "branch__erp_branch", "product").filter(
+        id=Subquery(latest_snapshot_id)
+    )
+    branch = str(arguments.get("branch") or "").strip()
+    if branch:
+        qs = qs.filter(
+            Q(branch__name__icontains=branch)
+            | Q(branch__external_id__iexact=branch)
+            | Q(branch__erp_branch__codigo__iexact=branch)
+        )
+    return qs
+
+
+def _handle_inventory_low_stock(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    qs = _latest_inventory_qs(arguments).filter(stock__lt=models.F("min_stock"), min_stock__gt=0).order_by(
+        "branch__name",
+        "product__name",
+        "id",
+    )
+    limit = _parse_int(arguments.get("limit"), default=100, min_value=1, max_value=500)
+    rows = []
+    for snap in qs[:limit]:
+        rows.append(
+            {
+                "branch_name": snap.branch.name,
+                "branch_external_id": snap.branch.external_id,
+                "erp_branch_code": snap.branch.erp_branch.codigo if snap.branch.erp_branch_id else "",
+                "product_sku": snap.product.sku,
+                "product_name": snap.product.name,
+                "current_stock": float(snap.stock),
+                "min_stock": float(snap.min_stock),
+                "deficit": float(snap.min_stock - snap.stock),
+                "captured_at": snap.captured_at.isoformat(),
+            }
+        )
+    return {
+        "status": "ok",
+        "sources": ["pos_bridge.PointInventorySnapshot"],
+        "filters": {"branch": arguments.get("branch"), "limit": limit},
+        "payload": {"items": rows, "returned": len(rows)},
+    }
+
+
+def _handle_discrepancies(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    date_from, date_to, period_resolved = resolve_period_range(
+        period_raw=arguments.get("periodo"),
+        date_from_raw=arguments.get("from"),
+        date_to_raw=arguments.get("to"),
+    )
+    threshold = _parse_decimal(arguments.get("threshold_pct"), default=Decimal("10"))
+    top = _parse_int(arguments.get("top"), default=100, min_value=1, max_value=500)
+    sucursal_id = arguments.get("sucursal_id")
+    if sucursal_id not in {None, ""}:
+        try:
+            sucursal_id = int(sucursal_id)
+        except (TypeError, ValueError):
+            raise PermissionDenied("sucursal_id inválido para discrepancias.")
+    else:
+        sucursal_id = None
+    payload = build_discrepancias_report(
+        date_from=date_from,
+        date_to=date_to,
+        sucursal_id=sucursal_id,
+        threshold_pct=threshold,
+        top=top,
+    )
+    payload["scope"] = {
+        "periodo": period_resolved,
+        "sucursal_id": sucursal_id,
+        "top": top,
+    }
+    return {
+        "status": "ok",
+        "sources": ["control.services.build_discrepancias_report"],
+        "filters": {
+            "periodo": arguments.get("periodo"),
+            "from": arguments.get("from"),
+            "to": arguments.get("to"),
+            "sucursal_id": sucursal_id,
+            "threshold_pct": str(threshold),
+            "top": top,
+        },
+        "payload": payload,
+    }
+
+
+def _handle_sync_jobs(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    limit = _parse_int(arguments.get("limit"), default=20, min_value=1, max_value=100)
+    qs = PointSyncJob.objects.all().order_by("-started_at", "-id")
+    job_type = str(arguments.get("job_type") or "").strip().lower()
+    status_filter = str(arguments.get("status") or "").strip().upper()
+    if job_type:
+        qs = qs.filter(job_type=job_type)
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    items = []
+    for job in qs[:limit]:
+        items.append(
+            {
+                "id": job.id,
+                "job_type": job.job_type,
+                "status": job.status,
+                "started_at": job.started_at.isoformat() if job.started_at else "",
+                "finished_at": job.finished_at.isoformat() if job.finished_at else "",
+                "attempt_count": job.attempt_count,
+                "error_message": job.error_message,
+                "triggered_by": job.triggered_by.username if job.triggered_by_id else "",
+            }
+        )
+    return {
+        "status": "ok",
+        "sources": ["pos_bridge.PointSyncJob"],
+        "filters": {"job_type": job_type, "status": status_filter, "limit": limit},
+        "payload": {"items": items, "returned": len(items)},
+    }
+
+
+def _handle_purchase_requests(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    limit = _parse_int(arguments.get("limit"), default=50, min_value=1, max_value=200)
+    estatus = str(arguments.get("estatus") or "").strip().upper()
+    area = str(arguments.get("area") or "").strip()
+    q = str(arguments.get("q") or "").strip()
+    qs = SolicitudCompra.objects.select_related("insumo", "proveedor_sugerido").order_by("-creado_en", "-id")
+    if estatus:
+        qs = qs.filter(estatus=estatus)
+    if area:
+        qs = qs.filter(area__icontains=area)
+    if q:
+        qs = qs.filter(
+            Q(folio__icontains=q)
+            | Q(solicitante__icontains=q)
+            | Q(insumo__nombre__icontains=q)
+            | Q(proveedor_sugerido__nombre__icontains=q)
+        )
+    items = []
+    for row in qs[:limit]:
+        items.append(
+            {
+                "id": row.id,
+                "folio": row.folio,
+                "area": row.area,
+                "solicitante": row.solicitante,
+                "insumo": row.insumo.nombre,
+                "proveedor_sugerido": row.proveedor_sugerido.nombre if row.proveedor_sugerido_id else "",
+                "cantidad": float(row.cantidad),
+                "fecha_requerida": row.fecha_requerida.isoformat(),
+                "estatus": row.estatus,
+                "fuera_de_catalogo": bool(row.fuera_de_catalogo),
+                "cotizaciones_requeridas": row.cotizaciones_requeridas,
+                "cotizaciones_recibidas": row.cotizaciones_recibidas,
+                "justificacion_excepcion": row.justificacion_excepcion,
+            }
+        )
+    return {
+        "status": "ok",
+        "sources": ["compras.SolicitudCompra"],
+        "filters": {"estatus": estatus, "area": area, "q": q, "limit": limit},
+        "payload": {"items": items, "returned": len(items)},
+    }
+
+
+def _handle_purchase_orders(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    limit = _parse_int(arguments.get("limit"), default=50, min_value=1, max_value=200)
+    estatus = str(arguments.get("estatus") or "").strip().upper()
+    q = str(arguments.get("q") or "").strip()
+    qs = OrdenCompra.objects.select_related("proveedor", "solicitud").order_by("-creado_en", "-id")
+    if estatus:
+        qs = qs.filter(estatus=estatus)
+    if q:
+        qs = qs.filter(
+            Q(folio__icontains=q)
+            | Q(referencia__icontains=q)
+            | Q(proveedor__nombre__icontains=q)
+            | Q(solicitud__folio__icontains=q)
+        )
+    items = []
+    for row in qs[:limit]:
+        items.append(
+            {
+                "id": row.id,
+                "folio": row.folio,
+                "proveedor": row.proveedor.nombre,
+                "solicitud_folio": row.solicitud.folio if row.solicitud_id else "",
+                "fecha_emision": row.fecha_emision.isoformat(),
+                "fecha_entrega_estimada": row.fecha_entrega_estimada.isoformat() if row.fecha_entrega_estimada else "",
+                "monto_estimado": float(row.monto_estimado),
+                "estatus": row.estatus,
+                "referencia": row.referencia,
+            }
+        )
+    return {
+        "status": "ok",
+        "sources": ["compras.OrdenCompra"],
+        "filters": {"estatus": estatus, "q": q, "limit": limit},
+        "payload": {"items": items, "returned": len(items)},
+    }
+
+
+def _handle_recipe_cost_history(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    receta_id = arguments.get("receta_id")
+    if receta_id in {None, ""}:
+        raise PermissionDenied("receta_id es obligatorio para consultar costo historico.")
+    try:
+        receta_id = int(receta_id)
+    except (TypeError, ValueError):
+        raise PermissionDenied("receta_id invalido para costo historico.")
+    limit = _parse_int(arguments.get("limit"), default=10, min_value=1, max_value=50)
+    qs = RecetaCostoVersion.objects.select_related("receta").filter(receta_id=receta_id).order_by("-version_num", "-id")
+    items = []
+    receta_name = ""
+    for row in qs[:limit]:
+        receta_name = row.receta.nombre
+        items.append(
+            {
+                "receta_id": row.receta_id,
+                "receta": row.receta.nombre,
+                "version_num": row.version_num,
+                "costo_mp": float(row.costo_mp),
+                "costo_mo": float(row.costo_mo),
+                "costo_indirecto": float(row.costo_indirecto),
+                "costo_total": float(row.costo_total),
+                "rendimiento_cantidad": float(row.rendimiento_cantidad) if row.rendimiento_cantidad is not None else None,
+                "rendimiento_unidad": row.rendimiento_unidad,
+                "costo_por_unidad_rendimiento": (
+                    float(row.costo_por_unidad_rendimiento) if row.costo_por_unidad_rendimiento is not None else None
+                ),
+                "fuente": row.fuente,
+                "creado_en": row.creado_en.isoformat(),
+            }
+        )
+    return {
+        "status": "ok",
+        "sources": ["recetas.RecetaCostoVersion"],
+        "filters": {"receta_id": receta_id, "limit": limit},
+        "payload": {"receta": receta_name, "items": items, "returned": len(items)},
+    }
+
+
+def _handle_trigger_sync_jobs(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "approval_required",
+        "sources": ["policy.execute_safe_action"],
+        "message": (
+            "La herramienta existe pero en el piloto requiere aprobacion humana antes de ejecutar "
+            "POST /api/pos-bridge/sync-jobs/trigger/."
+        ),
+        "requested_arguments": arguments,
+    }
+
+
+def _handle_create_purchase_request_draft(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "approval_required",
+        "sources": ["policy.execute_safe_action"],
+        "message": (
+            "La creacion de borradores de solicitud de compra requiere aprobacion humana en el piloto. "
+            "Tras aprobarse, el ERP generara una SolicitudCompra en estatus BORRADOR."
+        ),
+        "requested_arguments": arguments,
+    }
+
+
+def _handle_create_production_plan_draft(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "approval_required",
+        "sources": ["policy.execute_safe_action"],
+        "message": (
+            "La creacion de borradores de plan de produccion requiere aprobacion humana en el piloto. "
+            "Tras aprobarse, el ERP generara un PlanProduccion en estado BORRADOR."
+        ),
+        "requested_arguments": arguments,
+    }
+
+
+def _execute_create_purchase_request_draft(user, arguments: dict[str, Any]) -> dict[str, Any]:
+    normalized_payload = {
+        "area": str(arguments.get("area") or "Compras").strip() or "Compras",
+        "solicitante": (
+            str(arguments.get("solicitante") or arguments.get("_approval_requested_by") or user.username or "").strip()
+            or user.username
+        )[:120],
+        "insumo_id": arguments.get("insumo_id"),
+        "cantidad": arguments.get("cantidad"),
+        "fecha_requerida": arguments.get("fecha_requerida"),
+        "estatus": SolicitudCompra.STATUS_BORRADOR,
+        "auto_crear_orden": False,
+    }
+    serializer = ComprasSolicitudCreateSerializer(data=normalized_payload)
+    if not serializer.is_valid():
+        raise PermissionDenied(f"Solicitud de compra invalida para ejecucion segura: {serializer.errors}")
+    data = serializer.validated_data
+
+    insumo = canonical_insumo_by_id(data["insumo_id"])
+    if insumo is None:
+        raise PermissionDenied("insumo_id no encontrado o inactivo para crear solicitud de compra.")
+
+    solicitud = SolicitudCompra.objects.create(
+        area=(data.get("area") or "Compras").strip() or "Compras",
+        solicitante=(data.get("solicitante") or user.username or "").strip()[:120] or user.username,
+        insumo=insumo,
+        proveedor_sugerido=insumo.proveedor_principal,
+        cantidad=data["cantidad"],
+        fecha_requerida=data.get("fecha_requerida") or timezone.localdate(),
+        estatus=SolicitudCompra.STATUS_BORRADOR,
+    )
+    return {
+        "status": "ok",
+        "sources": ["compras.SolicitudCompra", "api.serializers.ComprasSolicitudCreateSerializer"],
+        "payload": {
+            "id": solicitud.id,
+            "folio": solicitud.folio,
+            "area": solicitud.area,
+            "solicitante": solicitud.solicitante,
+            "insumo_id": solicitud.insumo_id,
+            "insumo": solicitud.insumo.nombre,
+            "cantidad": float(solicitud.cantidad),
+            "fecha_requerida": solicitud.fecha_requerida.isoformat(),
+            "estatus": solicitud.estatus,
+            "proveedor_sugerido_id": solicitud.proveedor_sugerido_id,
+            "proveedor_sugerido": solicitud.proveedor_sugerido.nombre if solicitud.proveedor_sugerido_id else "",
+        },
+    }
+
+
+def _execute_create_production_plan_draft(user, arguments: dict[str, Any]) -> dict[str, Any]:
+    normalized_payload = {
+        "nombre": str(arguments.get("nombre") or "").strip(),
+        "fecha_produccion": arguments.get("fecha_produccion"),
+        "notas": str(arguments.get("notas") or "").strip(),
+        "items": arguments.get("items") or [],
+    }
+    serializer = PlanProduccionCreateSerializer(data=normalized_payload)
+    if not serializer.is_valid():
+        raise PermissionDenied(f"Plan de produccion invalido para ejecucion segura: {serializer.errors}")
+    data = serializer.validated_data
+
+    fecha_produccion = data.get("fecha_produccion") or timezone.localdate()
+    nombre = (data.get("nombre") or "").strip()
+    notas = (data.get("notas") or "").strip()
+    rows = data["items"]
+
+    receta_ids = sorted({int(row["receta_id"]) for row in rows})
+    recetas = Receta.objects.filter(id__in=receta_ids).only("id", "nombre", "codigo_point")
+    receta_map = {r.id: r for r in recetas}
+    missing_ids = [rid for rid in receta_ids if rid not in receta_map]
+    if missing_ids:
+        raise PermissionDenied(f"Hay recetas inexistentes en items: {missing_ids}")
+
+    with transaction.atomic():
+        plan = PlanProduccion.objects.create(
+            nombre=nombre or f"Plan {fecha_produccion} #{PlanProduccion.objects.count() + 1}",
+            fecha_produccion=fecha_produccion,
+            notas=notas,
+            creado_por=user if user.is_authenticated else None,
+            estado=PlanProduccion.ESTADO_BORRADOR,
+        )
+        for row in rows:
+            receta = receta_map[int(row["receta_id"])]
+            PlanProduccionItem.objects.create(
+                plan=plan,
+                receta=receta,
+                cantidad=Decimal(str(row["cantidad"])),
+                notas=(row.get("notas") or "").strip()[:160],
+            )
+
+    created_rows = list(plan.items.select_related("receta").all().order_by("id"))
+    return {
+        "status": "ok",
+        "sources": ["recetas.PlanProduccion", "recetas.PlanProduccionItem", "api.serializers.PlanProduccionCreateSerializer"],
+        "payload": {
+            "id": plan.id,
+            "nombre": plan.nombre,
+            "fecha_produccion": plan.fecha_produccion.isoformat(),
+            "estado": plan.estado,
+            "notas": plan.notas or "",
+            "items_count": len(created_rows),
+            "items": [
+                {
+                    "id": row.id,
+                    "receta_id": row.receta_id,
+                    "receta": row.receta.nombre,
+                    "codigo_point": row.receta.codigo_point,
+                    "cantidad": float(row.cantidad),
+                    "notas": row.notas or "",
+                }
+                for row in created_rows
+            ],
+        },
+    }
+
+
+def _execute_trigger_sync_jobs(user, arguments: dict[str, Any]) -> dict[str, Any]:
+    job_type = str(arguments.get("job_type") or PointSyncJob.JOB_TYPE_INVENTORY).strip().lower()
+    branch_filter = str(arguments.get("branch_filter") or arguments.get("branch") or "").strip() or None
+
+    if job_type == PointSyncJob.JOB_TYPE_INVENTORY:
+        sync_job = run_inventory_sync(triggered_by=user, branch_filter=branch_filter)
+    elif job_type == PointSyncJob.JOB_TYPE_SALES:
+        sync_job = run_daily_sales_sync(
+            triggered_by=user,
+            branch_filter=branch_filter,
+            lookback_days=_parse_int(arguments.get("days"), default=3, min_value=1, max_value=30),
+            lag_days=_parse_int(arguments.get("lag_days"), default=1, min_value=0, max_value=7),
+        )
+    elif job_type == PointSyncJob.JOB_TYPE_RECIPES:
+        sync_job = run_product_recipe_sync(triggered_by=user, branch_hint=branch_filter)
+    else:
+        raise PermissionDenied("job_type no soportado para trigger seguro desde AI Gateway.")
+
+    return {
+        "status": "ok",
+        "sources": ["pos_bridge.tasks.run_inventory_sync|run_daily_sales_sync|run_product_recipe_sync"],
+        "payload": {
+            "job_id": sync_job.id,
+            "job_type": sync_job.job_type,
+            "status": sync_job.status,
+            "started_at": sync_job.started_at.isoformat() if sync_job.started_at else "",
+            "finished_at": sync_job.finished_at.isoformat() if sync_job.finished_at else "",
+            "attempt_count": sync_job.attempt_count,
+            "triggered_by": sync_job.triggered_by.username if sync_job.triggered_by_id else "",
+        },
+    }
+
+
+def _can_view_sync_jobs(user) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN)
+
+
+def _can_manage_purchases(user) -> bool:
+    return can_manage_compras(user) or has_any_role(user, ROLE_DG, ROLE_ADMIN)
+
+
+def _can_manage_production(user) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_PRODUCCION) and can_view_recetas(user)
+
+
+def _can_view_sales(user) -> bool:
+    return can_view_reportes(user)
+
+
+def _can_view_dashboard(user) -> bool:
+    return can_view_reportes(user)
+
+
+def _can_view_inventory(user) -> bool:
+    return can_view_inventario(user)
+
+
+def _can_view_purchases(user) -> bool:
+    return can_view_compras(user)
+
+
+def _can_view_recipe_costs(user) -> bool:
+    return can_view_recetas(user)
+
+
+TOOLS: dict[str, AIToolDefinition] = {
+    "erp.get_dashboard": AIToolDefinition(
+        key="erp.get_dashboard",
+        name="Dashboard ejecutivo ERP",
+        description="Consulta KPIs ejecutivos y snapshot BI del ERP.",
+        operation_type="read",
+        data_domain="reporting",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=_can_view_dashboard,
+        handler=_handle_dashboard,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "period_days": {"type": "integer", "minimum": 7, "maximum": 365, "default": 90},
+                "months": {"type": "integer", "minimum": 3, "maximum": 24, "default": 6},
+            },
+        },
+        result_contract={"status": "ok", "payload": "snapshot BI serializado para API"},
+    ),
+    "erp.get_audit_logs": AIToolDefinition(
+        key="erp.get_audit_logs",
+        name="Bitácora audit ERP",
+        description="Consulta registros de auditoría del ERP.",
+        operation_type="read",
+        data_domain="audit",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=can_view_audit,
+        handler=_handle_audit_logs,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "q": {"type": "string"},
+                "action": {"type": "string"},
+                "model": {"type": "string"},
+                "user_id": {"type": "integer"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+            },
+        },
+        result_contract={"status": "ok", "payload": {"items": "lista de eventos audit", "returned": "conteo"}},
+    ),
+    "erp.get_sales_summary": AIToolDefinition(
+        key="erp.get_sales_summary",
+        name="Resumen de ventas Point",
+        description="Resume ventas del POS por rango y sucursal.",
+        operation_type="read",
+        data_domain="sales",
+        branch_scoped=True,
+        requires_approval=False,
+        access_check=_can_view_sales,
+        handler=_handle_sales_summary,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "start_date": {"type": "string", "format": "date"},
+                "end_date": {"type": "string", "format": "date"},
+                "branch": {"type": "string", "description": "codigo ERP o referencia Point de sucursal"},
+            },
+        },
+        result_contract={"status": "ok", "payload": {"total_sales": "number", "total_quantity": "number"}},
+    ),
+    "erp.get_sales_by_branch": AIToolDefinition(
+        key="erp.get_sales_by_branch",
+        name="Ventas por sucursal",
+        description="Analiza ventas agregadas por sucursal.",
+        operation_type="analyze",
+        data_domain="sales",
+        branch_scoped=True,
+        requires_approval=False,
+        access_check=_can_view_sales,
+        handler=_handle_sales_by_branch,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "start_date": {"type": "string", "format": "date"},
+                "end_date": {"type": "string", "format": "date"},
+                "branch": {"type": "string"},
+            },
+        },
+        result_contract={"status": "ok", "payload": "lista agregada por sucursal"},
+    ),
+    "erp.get_sales_trends": AIToolDefinition(
+        key="erp.get_sales_trends",
+        name="Tendencias de ventas",
+        description="Analiza tendencia mensual de ventas del POS.",
+        operation_type="analyze",
+        data_domain="sales",
+        branch_scoped=True,
+        requires_approval=False,
+        access_check=_can_view_sales,
+        handler=_handle_sales_trends,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "start_date": {"type": "string", "format": "date"},
+                "end_date": {"type": "string", "format": "date"},
+                "branch": {"type": "string"},
+            },
+        },
+        result_contract={"status": "ok", "payload": "serie mensual agregada"},
+    ),
+    "erp.get_inventory_low_stock": AIToolDefinition(
+        key="erp.get_inventory_low_stock",
+        name="Alertas de stock bajo",
+        description="Consulta productos por debajo del stock mínimo.",
+        operation_type="read",
+        data_domain="inventory",
+        branch_scoped=True,
+        requires_approval=False,
+        access_check=_can_view_inventory,
+        handler=_handle_inventory_low_stock,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "branch": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+            },
+        },
+        result_contract={"status": "ok", "payload": {"items": "stock bajo", "returned": "conteo"}},
+    ),
+    "erp.get_discrepancies": AIToolDefinition(
+        key="erp.get_discrepancies",
+        name="Discrepancias operativas",
+        description="Analiza diferencias entre producción, ventas, mermas e inventario.",
+        operation_type="analyze",
+        data_domain="control",
+        branch_scoped=True,
+        requires_approval=False,
+        access_check=can_view_reportes,
+        handler=_handle_discrepancies,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "periodo": {"type": "string", "description": "alias de periodo soportado por control.services"},
+                "from": {"type": "string", "format": "date"},
+                "to": {"type": "string", "format": "date"},
+                "sucursal_id": {"type": "integer"},
+                "threshold_pct": {"type": "number", "default": 10},
+                "top": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+            },
+        },
+        result_contract={"status": "ok", "payload": "reporte de discrepancias y scope resuelto"},
+    ),
+    "erp.get_sync_jobs": AIToolDefinition(
+        key="erp.get_sync_jobs",
+        name="Jobs de sincronización Point",
+        description="Consulta estado de jobs de sincronización Point/ERP.",
+        operation_type="read",
+        data_domain="integrations",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=_can_view_sync_jobs,
+        handler=_handle_sync_jobs,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "job_type": {"type": "string", "enum": ["inventory", "sales", "recipes"]},
+                "status": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+            },
+        },
+        result_contract={"status": "ok", "payload": {"items": "jobs", "returned": "conteo"}},
+    ),
+    "erp.get_purchase_requests": AIToolDefinition(
+        key="erp.get_purchase_requests",
+        name="Solicitudes de compra",
+        description="Consulta solicitudes de compra del ERP.",
+        operation_type="read",
+        data_domain="purchasing",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=_can_view_purchases,
+        handler=_handle_purchase_requests,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "estatus": {"type": "string"},
+                "area": {"type": "string"},
+                "q": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+            },
+        },
+        result_contract={"status": "ok", "payload": {"items": "solicitudes", "returned": "conteo"}},
+    ),
+    "erp.get_purchase_orders": AIToolDefinition(
+        key="erp.get_purchase_orders",
+        name="Ordenes de compra",
+        description="Consulta ordenes de compra del ERP.",
+        operation_type="read",
+        data_domain="purchasing",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=_can_view_purchases,
+        handler=_handle_purchase_orders,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "estatus": {"type": "string"},
+                "q": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+            },
+        },
+        result_contract={"status": "ok", "payload": {"items": "ordenes", "returned": "conteo"}},
+    ),
+    "erp.get_recipe_cost_history": AIToolDefinition(
+        key="erp.get_recipe_cost_history",
+        name="Costo historico de receta",
+        description="Consulta versiones historicas de costo de una receta.",
+        operation_type="analyze",
+        data_domain="costing",
+        branch_scoped=False,
+        requires_approval=False,
+        access_check=_can_view_recipe_costs,
+        handler=_handle_recipe_cost_history,
+        argument_schema={
+            "type": "object",
+            "required": ["receta_id"],
+            "properties": {
+                "receta_id": {"type": "integer"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+            },
+        },
+        result_contract={"status": "ok", "payload": {"receta": "nombre", "items": "versiones", "returned": "conteo"}},
+    ),
+    "erp.trigger_sync_jobs": AIToolDefinition(
+        key="erp.trigger_sync_jobs",
+        name="Disparo seguro de sync jobs",
+        description="Acción segura candidata para refresh de sync jobs; requiere aprobación humana en piloto.",
+        operation_type="execute_safe_action",
+        data_domain="integrations",
+        branch_scoped=False,
+        requires_approval=True,
+        access_check=_can_view_sync_jobs,
+        handler=_handle_trigger_sync_jobs,
+        execute_handler=_execute_trigger_sync_jobs,
+        argument_schema={
+            "type": "object",
+            "properties": {
+                "job_type": {"type": "string", "enum": ["inventory", "sales", "recipes"], "default": "inventory"},
+                "branch_filter": {"type": "string"},
+                "branch": {"type": "string"},
+                "days": {"type": "integer", "minimum": 1, "maximum": 30, "default": 3},
+                "lag_days": {"type": "integer", "minimum": 0, "maximum": 7, "default": 1},
+            },
+        },
+        result_contract={"status": "approval_required|ok", "payload": "job lanzado o solicitud de aprobacion"},
+    ),
+    "erp.create_purchase_request_draft": AIToolDefinition(
+        key="erp.create_purchase_request_draft",
+        name="Crear borrador de solicitud de compra",
+        description="Genera una SolicitudCompra en BORRADOR tras aprobacion humana.",
+        operation_type="execute_safe_action",
+        data_domain="purchasing",
+        branch_scoped=False,
+        requires_approval=True,
+        access_check=_can_manage_purchases,
+        handler=_handle_create_purchase_request_draft,
+        execute_handler=_execute_create_purchase_request_draft,
+        argument_schema={
+            "type": "object",
+            "required": ["insumo_id", "cantidad"],
+            "properties": {
+                "area": {"type": "string", "default": "Compras"},
+                "solicitante": {"type": "string"},
+                "insumo_id": {"type": "integer"},
+                "cantidad": {"type": "number", "exclusiveMinimum": 0},
+                "fecha_requerida": {"type": "string", "format": "date"},
+            },
+        },
+        result_contract={"status": "approval_required|ok", "payload": "solicitud de compra creada en borrador"},
+    ),
+    "erp.create_production_plan_draft": AIToolDefinition(
+        key="erp.create_production_plan_draft",
+        name="Crear borrador de plan de produccion",
+        description="Genera un PlanProduccion en BORRADOR tras aprobacion humana.",
+        operation_type="execute_safe_action",
+        data_domain="production",
+        branch_scoped=False,
+        requires_approval=True,
+        access_check=_can_manage_production,
+        handler=_handle_create_production_plan_draft,
+        execute_handler=_execute_create_production_plan_draft,
+        argument_schema={
+            "type": "object",
+            "required": ["items"],
+            "properties": {
+                "nombre": {"type": "string"},
+                "fecha_produccion": {"type": "string", "format": "date"},
+                "notas": {"type": "string"},
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": ["receta_id", "cantidad"],
+                        "properties": {
+                            "receta_id": {"type": "integer"},
+                            "cantidad": {"type": "number", "exclusiveMinimum": 0},
+                            "notas": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+        result_contract={"status": "approval_required|ok", "payload": "plan de produccion creado en borrador"},
+    ),
+}
+
+
+def list_allowed_tools(user) -> list[dict[str, Any]]:
+    allowed = []
+    for tool in TOOLS.values():
+        if tool.access_check(user):
+            allowed.append(_serialize_tool_definition(tool))
+    return sorted(allowed, key=lambda item: (item["operation_type"], item["key"]))
+
+
+def get_tool_definition(*, user, tool_key: str) -> dict[str, Any]:
+    tool = TOOLS.get(tool_key)
+    if tool is None:
+        raise PermissionDenied("Herramienta no registrada en el ERP AI Gateway.")
+    if not tool.access_check(user):
+        raise PermissionDenied("No tienes permisos para consultar esta herramienta del ERP AI Gateway.")
+    return _serialize_tool_definition(tool)
+
+
+OPENAPI_TOOL_PROFILES: dict[str, dict[str, Any]] = {
+    "dg": {
+        "tool_keys": sorted(TOOLS.keys()),
+        "include_approval_workflow": True,
+    },
+    "compras": {
+        "tool_keys": [
+            "erp.get_inventory_low_stock",
+            "erp.get_purchase_requests",
+            "erp.get_purchase_orders",
+            "erp.get_recipe_cost_history",
+            "erp.create_purchase_request_draft",
+        ],
+        "include_approval_workflow": False,
+    },
+    "produccion": {
+        "tool_keys": [
+            "erp.get_sales_summary",
+            "erp.get_sales_trends",
+            "erp.get_inventory_low_stock",
+            "erp.get_recipe_cost_history",
+            "erp.create_production_plan_draft",
+        ],
+        "include_approval_workflow": False,
+    },
+    "auditoria": {
+        "tool_keys": [
+            "erp.get_audit_logs",
+            "erp.get_discrepancies",
+            "erp.get_sync_jobs",
+        ],
+        "include_approval_workflow": False,
+    },
+}
+
+
+def resolve_openapi_scope(
+    *,
+    user,
+    profile: str = "",
+    requested_tool_keys: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    profile_normalized = (profile or "").strip().lower()
+    allowed_tools = list_allowed_tools(user)
+    allowed_map = {tool["key"]: tool for tool in allowed_tools}
+
+    selected_keys = set(allowed_map.keys())
+    include_approval_workflow = has_any_role(user, ROLE_DG, ROLE_ADMIN)
+
+    if profile_normalized:
+        profile_config = OPENAPI_TOOL_PROFILES.get(profile_normalized)
+        if profile_config is None:
+            raise ValueError("profile inválido para OpenAPI del ERP AI Gateway.")
+        selected_keys &= set(profile_config["tool_keys"])
+        include_approval_workflow = bool(profile_config.get("include_approval_workflow", include_approval_workflow))
+
+    if requested_tool_keys:
+        selected_keys &= set(requested_tool_keys)
+
+    tools = [allowed_map[key] for key in sorted(selected_keys) if key in allowed_map]
+    return tools, include_approval_workflow
+
+
+def build_gateway_manifest(*, user) -> dict[str, Any]:
+    return {
+        "gateway": {
+            "name": "pollyana_erp_ai_gateway",
+            "display_name": "Pollyana ERP AI Gateway",
+            "version": "v1",
+            "source_of_truth": "ERP Django/PostgreSQL",
+            "approval_model": "human_in_the_loop",
+            "branch_scope_mode": "enforced_by_user_profile",
+        },
+        "auth": {
+            "type": "token",
+            "required": True,
+            "me_endpoint_name": "api_auth_me",
+            "token_endpoint_name": "api_auth_token",
+        },
+        "approval_workflow": {
+            "required_for_execute_safe_action": True,
+            "states": ["PENDING", "APPROVED", "REJECTED", "EXECUTED"],
+        },
+        "tools": list_allowed_tools(user),
+    }
+
+
+def _build_openapi_request_schema(tool: dict[str, Any], *, approval: bool) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "arguments": tool.get("argument_schema") or {"type": "object", "properties": {}},
+        },
+    }
+    if approval:
+        schema["properties"]["summary"] = {
+            "type": "string",
+            "description": "Resumen corto visible para aprobacion humana.",
+        }
+        schema["properties"]["rationale"] = {
+            "type": "string",
+            "description": "Motivo o justificacion operativa para la accion solicitada.",
+        }
+    return schema
+
+
+def _build_openapi_operation(*, request, tool: dict[str, Any], approval: bool) -> dict[str, Any]:
+    action_suffix = "request_approval" if approval else "invoke"
+    operation_id = f"{tool['key'].replace('.', '_')}_{action_suffix}"
+    response_status = "201" if approval else "200"
+    description = tool["description"]
+    if approval:
+        description += " Esta operacion no ejecuta la accion final; crea una solicitud de aprobacion humana."
+    elif tool.get("requires_approval"):
+        description += " Si la politica exige aprobacion, usa primero el endpoint request-approval."
+
+    return {
+        "tags": [f"ai-gateway-{tool['data_domain']}"],
+        "operationId": operation_id,
+        "summary": tool["name"] if not approval else f"{tool['name']} (solicitar aprobacion)",
+        "description": description,
+        "security": [{"TokenAuth": []}],
+        "requestBody": {
+            "required": False,
+            "content": {
+                "application/json": {
+                    "schema": _build_openapi_request_schema(tool, approval=approval),
+                }
+            },
+        },
+        "responses": {
+            response_status: {
+                "description": "Respuesta estandar del ERP AI Gateway.",
+                "content": {"application/json": {"schema": {"type": "object"}}},
+            },
+            "403": {
+                "description": "Usuario sin permisos para la herramienta o fuera de alcance RBAC/sucursal.",
+                "content": {"application/json": {"schema": {"type": "object"}}},
+            },
+        },
+    }
+
+
+def build_gateway_openapi_spec(
+    *,
+    user,
+    request,
+    profile: str = "",
+    requested_tool_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    tools, include_approval_workflow = resolve_openapi_scope(
+        user=user,
+        profile=profile,
+        requested_tool_keys=requested_tool_keys,
+    )
+    server_url = settings.AI_GATEWAY_OPENAPI_SERVER_URL or request.build_absolute_uri("/").rstrip("/")
+    paths: dict[str, Any] = {
+        "/api/ai-gateway/manifest/": {
+            "get": {
+                "tags": ["ai-gateway-meta"],
+                "operationId": "erp_ai_gateway_manifest",
+                "summary": "Manifest del ERP AI Gateway",
+                "description": "Describe herramientas, auth y workflow de aprobacion disponibles para el usuario autenticado.",
+                "security": [{"TokenAuth": []}],
+                "responses": {
+                    "200": {
+                        "description": "Manifest del gateway.",
+                        "content": {"application/json": {"schema": {"type": "object"}}},
+                    }
+                },
+            }
+        },
+    }
+
+    if include_approval_workflow:
+        paths["/api/ai-gateway/approvals/"] = {
+            "get": {
+                "tags": ["ai-gateway-approvals"],
+                "operationId": "erp_ai_gateway_list_pending_approvals",
+                "summary": "Listar aprobaciones pendientes",
+                "description": "Devuelve solicitudes pendientes para acciones seguras. Requiere rol DG o admin.",
+                "security": [{"TokenAuth": []}],
+                "responses": {
+                    "200": {
+                        "description": "Listado de solicitudes pendientes.",
+                        "content": {"application/json": {"schema": {"type": "object"}}},
+                    },
+                    "403": {
+                        "description": "Sin permisos para revisar aprobaciones.",
+                        "content": {"application/json": {"schema": {"type": "object"}}},
+                    },
+                },
+            }
+        }
+        paths["/api/ai-gateway/approvals/{suggestion_id}/approve/"] = {
+            "post": {
+                "tags": ["ai-gateway-approvals"],
+                "operationId": "erp_ai_gateway_approve",
+                "summary": "Aprobar solicitud pendiente",
+                "description": "Aprueba una solicitud de accion segura previamente creada.",
+                "security": [{"TokenAuth": []}],
+                "parameters": [
+                    {
+                        "name": "suggestion_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "integer"},
+                    }
+                ],
+                "requestBody": {
+                    "required": False,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {"comment": {"type": "string"}},
+                            }
+                        }
+                    },
+                },
+                "responses": {
+                    "200": {"description": "Solicitud aprobada.", "content": {"application/json": {"schema": {"type": "object"}}}},
+                    "403": {"description": "Sin permisos o estado invalido.", "content": {"application/json": {"schema": {"type": "object"}}}},
+                },
+            }
+        }
+        paths["/api/ai-gateway/approvals/{suggestion_id}/reject/"] = {
+            "post": {
+                "tags": ["ai-gateway-approvals"],
+                "operationId": "erp_ai_gateway_reject",
+                "summary": "Rechazar solicitud pendiente",
+                "description": "Rechaza una solicitud de accion segura previamente creada.",
+                "security": [{"TokenAuth": []}],
+                "parameters": [
+                    {
+                        "name": "suggestion_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "integer"},
+                    }
+                ],
+                "requestBody": {
+                    "required": False,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {"comment": {"type": "string"}},
+                            }
+                        }
+                    },
+                },
+                "responses": {
+                    "200": {"description": "Solicitud rechazada.", "content": {"application/json": {"schema": {"type": "object"}}}},
+                    "403": {"description": "Sin permisos o estado invalido.", "content": {"application/json": {"schema": {"type": "object"}}}},
+                },
+            }
+        }
+        paths["/api/ai-gateway/approvals/{suggestion_id}/execute/"] = {
+            "post": {
+                "tags": ["ai-gateway-approvals"],
+                "operationId": "erp_ai_gateway_execute_approved",
+                "summary": "Ejecutar solicitud aprobada",
+                "description": "Ejecuta una accion segura que ya fue aprobada por un humano.",
+                "security": [{"TokenAuth": []}],
+                "parameters": [
+                    {
+                        "name": "suggestion_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "integer"},
+                    }
+                ],
+                "responses": {
+                    "200": {"description": "Solicitud ejecutada.", "content": {"application/json": {"schema": {"type": "object"}}}},
+                    "403": {"description": "Sin permisos o estado invalido.", "content": {"application/json": {"schema": {"type": "object"}}}},
+                },
+            }
+        }
+
+    for tool in tools:
+        invoke_path = f"/api/ai-gateway/tools/{tool['key']}/invoke/"
+        paths[invoke_path] = {"post": _build_openapi_operation(request=request, tool=tool, approval=False)}
+        if tool.get("requires_approval"):
+            approval_path = f"/api/ai-gateway/tools/{tool['key']}/request-approval/"
+            paths[approval_path] = {"post": _build_openapi_operation(request=request, tool=tool, approval=True)}
+
+    return {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "Pollyana ERP AI Gateway",
+            "version": "1.0.0",
+            "description": (
+                "Contrato OpenAPI para importar acciones del ERP dentro de Onyx. "
+                "El ERP sigue siendo la unica fuente de verdad y las acciones seguras "
+                "requieren aprobacion humana cuando aplique."
+            ),
+        },
+        "servers": [{"url": server_url}],
+        "components": {
+            "securitySchemes": {
+                "TokenAuth": {
+                    "type": "apiKey",
+                    "in": "header",
+                    "name": "Authorization",
+                    "description": "Usa el header `Authorization: Token <api_token>`.",
+                }
+            }
+        },
+        "security": [{"TokenAuth": []}],
+        "paths": paths,
+    }
+
+
+def invoke_tool(*, user, tool_key: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    tool = TOOLS.get(tool_key)
+    if tool is None:
+        raise PermissionDenied("Herramienta no registrada en el ERP AI Gateway.")
+    if not tool.access_check(user):
+        raise PermissionDenied("No tienes permisos para usar esta herramienta del ERP AI Gateway.")
+
+    safe_arguments = dict(arguments or {})
+    scope = _enforce_branch_scope(user, branch_scoped=tool.branch_scoped, arguments=safe_arguments)
+    response = _tool_response(tool=tool, scope=scope, result=tool.handler(user, safe_arguments))
+    log_event(
+        user,
+        "AI_GATEWAY_TOOL_INVOKE",
+        "api.ai_gateway",
+        tool.key,
+        {
+            "tool_key": tool.key,
+            "operation_type": tool.operation_type,
+            "data_domain": tool.data_domain,
+            "requires_approval": tool.requires_approval,
+            "scope": scope,
+            "arguments": safe_arguments,
+            "result_status": response["result"].get("status"),
+        },
+    )
+    return response
+
+
+def request_tool_approval(*, user, tool_key: str, arguments: dict[str, Any], summary: str = "", rationale: str = "") -> dict[str, Any]:
+    tool = TOOLS.get(tool_key)
+    if tool is None:
+        raise PermissionDenied("Herramienta no registrada en el ERP AI Gateway.")
+    if not tool.requires_approval:
+        raise PermissionDenied("Esta herramienta no requiere aprobacion previa.")
+    if not tool.access_check(user):
+        raise PermissionDenied("No tienes permisos para solicitar aprobacion para esta herramienta.")
+
+    safe_arguments = dict(arguments or {})
+    scope = _enforce_branch_scope(user, branch_scoped=tool.branch_scoped, arguments=safe_arguments)
+    agent = _ensure_ai_gateway_agent()
+    run = OrchestrationRun.objects.create(
+        run_key=f"ai-gateway-{uuid4().hex[:16]}",
+        trigger_source="ai_gateway_approval_request",
+        status=OrchestrationRun.STATUS_SUCCESS,
+        context_json={
+            "tool_key": tool.key,
+            "arguments": safe_arguments,
+            "scope": scope,
+            "requested_by": user.username,
+        },
+        result_summary_json={"status": "approval_requested"},
+        created_by=user,
+    )
+    task = AgentTask.objects.create(
+        run=run,
+        agent=agent,
+        title=f"Aprobacion requerida: {tool.name}",
+        task_type="ai_gateway_approval",
+        priority=AgentTask.PRIORITY_HIGH,
+        status=AgentTask.STATUS_PENDING,
+        input_payload={"tool_key": tool.key, "arguments": safe_arguments, "scope": scope},
+        assigned_branch_id=scope.get("branch_id"),
+    )
+    suggestion = AgentSuggestion.objects.create(
+        task=task,
+        suggestion_type="ai_gateway_execute_safe_action",
+        domain=tool.data_domain,
+        severity=AgentSuggestion.SEVERITY_WARNING,
+        summary=(summary or f"Solicitud de aprobacion para {tool.name}")[:255],
+        details_json={
+            "tool_key": tool.key,
+            "tool_name": _safe_integration_name(tool.key, fallback="erp_tool"),
+            "tool_display_name": tool.name,
+            "arguments": safe_arguments,
+            "scope": scope,
+            "rationale": rationale,
+        },
+        recommended_action=f"Aprobar o rechazar ejecucion segura de {tool.name}",
+        requires_approval=True,
+        decision_status=AgentSuggestion.DECISION_PENDING,
+    )
+    execution = AgentExecutionLink.objects.create(
+        suggestion=suggestion,
+        execution_mode="ai_gateway_tool",
+        target_reference=tool.key,
+        execution_status=AgentExecutionLink.STATUS_PENDING,
+        execution_payload={"arguments": safe_arguments, "scope": scope},
+    )
+    log_event(
+        user,
+        "AI_GATEWAY_APPROVAL_REQUEST",
+        "orquestacion.AgentSuggestion",
+        suggestion.id,
+        {
+            "tool_key": tool.key,
+            "task_id": task.id,
+            "run_key": run.run_key,
+            "execution_link_id": execution.id,
+            "arguments": safe_arguments,
+            "scope": scope,
+        },
+    )
+    return {
+        "status": "pending_approval",
+        "approval": {
+            "suggestion_id": suggestion.id,
+            "execution_link_id": execution.id,
+            "decision_status": suggestion.decision_status,
+            "summary": suggestion.summary,
+            "tool_key": tool.key,
+            "tool_name": tool.name,
+            "requires_approval": True,
+        },
+    }
+
+
+def list_pending_approvals(*, user) -> dict[str, Any]:
+    if not has_any_role(user, ROLE_DG, ROLE_ADMIN):
+        raise PermissionDenied("No tienes permisos para consultar aprobaciones del AI Gateway.")
+    rows = (
+        AgentSuggestion.objects.select_related("task", "task__run")
+        .filter(
+            suggestion_type="ai_gateway_execute_safe_action",
+            decision_status=AgentSuggestion.DECISION_PENDING,
+        )
+        .order_by("-created_at", "-id")
+    )
+    items = []
+    for suggestion in rows[:100]:
+        details = suggestion.details_json or {}
+        items.append(
+            {
+                "suggestion_id": suggestion.id,
+                "summary": suggestion.summary,
+                "tool_key": details.get("tool_key", ""),
+                "tool_name": details.get("tool_display_name", details.get("tool_name", "")),
+                "arguments": details.get("arguments", {}),
+                "scope": details.get("scope", {}),
+                "rationale": details.get("rationale", ""),
+                "requested_by": suggestion.task.run.created_by.username if suggestion.task.run.created_by_id else "",
+                "created_at": suggestion.created_at.isoformat(),
+            }
+        )
+    return {"status": "ok", "items": items, "count": len(items)}
+
+
+def decide_tool_approval(*, user, suggestion_id: int, approve: bool, comment: str = "") -> dict[str, Any]:
+    if not has_any_role(user, ROLE_DG, ROLE_ADMIN):
+        raise PermissionDenied("No tienes permisos para decidir aprobaciones del AI Gateway.")
+    suggestion = AgentSuggestion.objects.select_related("task", "task__run").filter(
+        id=suggestion_id,
+        suggestion_type="ai_gateway_execute_safe_action",
+    ).first()
+    if suggestion is None:
+        raise PermissionDenied("Solicitud de aprobacion no encontrada.")
+    if suggestion.decision_status != AgentSuggestion.DECISION_PENDING:
+        raise PermissionDenied("La solicitud ya fue decidida y no puede modificarse.")
+
+    now = timezone.now()
+    details = dict(suggestion.details_json or {})
+    details["decision_comment"] = comment
+    if approve:
+        suggestion.decision_status = AgentSuggestion.DECISION_APPROVED
+        suggestion.approved_by = user
+        suggestion.approved_at = now
+    else:
+        suggestion.decision_status = AgentSuggestion.DECISION_REJECTED
+        suggestion.rejected_by = user
+        suggestion.rejected_at = now
+    suggestion.details_json = details
+    suggestion.save(
+        update_fields=[
+            "decision_status",
+            "approved_by",
+            "approved_at",
+            "rejected_by",
+            "rejected_at",
+            "details_json",
+            "updated_at",
+        ]
+    )
+    log_event(
+        user,
+        "AI_GATEWAY_APPROVAL_DECISION",
+        "orquestacion.AgentSuggestion",
+        suggestion.id,
+        {
+            "decision": suggestion.decision_status,
+            "tool_key": details.get("tool_key"),
+            "comment": comment,
+        },
+    )
+    return {
+        "status": "ok",
+        "suggestion_id": suggestion.id,
+        "decision_status": suggestion.decision_status,
+        "approved_by": suggestion.approved_by.username if suggestion.approved_by_id else "",
+        "rejected_by": suggestion.rejected_by.username if suggestion.rejected_by_id else "",
+    }
+
+
+def execute_approved_tool(*, user, suggestion_id: int) -> dict[str, Any]:
+    if not has_any_role(user, ROLE_DG, ROLE_ADMIN):
+        raise PermissionDenied("No tienes permisos para ejecutar acciones aprobadas del AI Gateway.")
+    suggestion = AgentSuggestion.objects.select_related("task", "task__run").filter(
+        id=suggestion_id,
+        suggestion_type="ai_gateway_execute_safe_action",
+    ).first()
+    if suggestion is None:
+        raise PermissionDenied("Solicitud aprobada no encontrada.")
+    if suggestion.decision_status != AgentSuggestion.DECISION_APPROVED:
+        raise PermissionDenied("La solicitud no esta aprobada para ejecucion.")
+
+    tool_key = str((suggestion.details_json or {}).get("tool_key") or "").strip()
+    tool = TOOLS.get(tool_key)
+    if tool is None or tool.execute_handler is None:
+        raise PermissionDenied("La herramienta aprobada no tiene ejecutor configurado.")
+
+    executions = suggestion.executions.order_by("-created_at", "-id")
+    execution = executions.first()
+    if execution is None:
+        execution = AgentExecutionLink.objects.create(
+            suggestion=suggestion,
+            execution_mode="ai_gateway_tool",
+            target_reference=tool.key,
+            execution_status=AgentExecutionLink.STATUS_PENDING,
+            execution_payload={},
+        )
+    if execution.execution_status == AgentExecutionLink.STATUS_SUCCESS:
+        raise PermissionDenied("La solicitud aprobada ya fue ejecutada.")
+
+    arguments = dict((suggestion.details_json or {}).get("arguments") or {})
+    if suggestion.task.run.created_by_id:
+        arguments.setdefault("_approval_requested_by", suggestion.task.run.created_by.username)
+    execution.execution_status = AgentExecutionLink.STATUS_RUNNING
+    execution.executed_by = user
+    execution.executed_at = timezone.now()
+    execution.execution_payload = {"arguments": arguments}
+    execution.save(update_fields=["execution_status", "executed_by", "executed_at", "execution_payload", "updated_at"])
+
+    try:
+        result = tool.execute_handler(user, arguments)
+    except Exception as exc:
+        execution.execution_status = AgentExecutionLink.STATUS_FAILED
+        execution.execution_payload = {"arguments": arguments, "error": str(exc)}
+        execution.save(update_fields=["execution_status", "execution_payload", "updated_at"])
+        log_event(
+            user,
+            "AI_GATEWAY_APPROVAL_EXECUTE_FAILED",
+            "orquestacion.AgentExecutionLink",
+            execution.id,
+            {"tool_key": tool.key, "suggestion_id": suggestion.id, "error": str(exc)},
+        )
+        raise
+
+    suggestion.decision_status = AgentSuggestion.DECISION_EXECUTED
+    suggestion.save(update_fields=["decision_status", "updated_at"])
+    execution.execution_status = AgentExecutionLink.STATUS_SUCCESS
+    execution.execution_payload = {"arguments": arguments, "result": result}
+    execution.save(update_fields=["execution_status", "execution_payload", "updated_at"])
+    log_event(
+        user,
+        "AI_GATEWAY_APPROVAL_EXECUTE",
+        "orquestacion.AgentExecutionLink",
+        execution.id,
+        {"tool_key": tool.key, "suggestion_id": suggestion.id, "result_status": result.get("status")},
+    )
+    return {
+        "status": "ok",
+        "suggestion_id": suggestion.id,
+        "decision_status": suggestion.decision_status,
+        "execution_link_id": execution.id,
+        "tool_key": tool.key,
+        "result": result,
+    }
