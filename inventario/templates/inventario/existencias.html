@@ -5,6 +5,7 @@
 
 {% block content %}
 <nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:home' %}">Dashboard</a>
   <a class="module-tab active" href="{% url 'inventario:existencias' %}">Existencias</a>
   <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
@@ -13,9 +14,30 @@
   <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
 </nav>
 
+<section class="card">
+  <div class="card-header">Filtro rápido</div>
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-md-6">
+      <label for="q" class="form-label">Artículo o código</label>
+      <input id="q" name="q" type="text" class="form-control" value="{{ selected_q }}" placeholder="Buscar artículo, categoría o código Point">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-secondary">Aplicar</button>
+    </div>
+    {% if selected_q %}
+    <div class="col-auto">
+      <a class="btn btn-link" href="{% url 'inventario:existencias' %}">Limpiar</a>
+    </div>
+    <div class="col-12">
+      <div class="muted">Filtro activo: {{ selected_q }}</div>
+    </div>
+    {% endif %}
+  </form>
+</section>
+
 <section class="card enterprise-focus-alert {% if maturity_summary.attention_steps %}enterprise-focus-alert-warning{% else %}enterprise-focus-alert-success{% endif %}">
   <div class="enterprise-focus-alert-copy">
-    <div class="enterprise-focus-alert-title">Prioridad ERP actual</div>
+    <div class="enterprise-focus-alert-title">Prioridad operativa actual</div>
     <div class="enterprise-focus-alert-summary">{{ maturity_summary.next_priority_title }}</div>
     <div class="enterprise-focus-alert-detail">{{ maturity_summary.next_priority_detail }}</div>
     <div class="muted">Cobertura {{ maturity_summary.coverage_pct }}% · Etapas controladas {{ maturity_summary.completed_steps }} · Etapas con atención {{ maturity_summary.attention_steps }}</div>
@@ -49,7 +71,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Contexto operativo del inventario</div>
+  <div class="card-header">Contexto del inventario</div>
   <div class="table-responsive">
     <table class="table table-striped align-middle">
       <tbody>
@@ -267,7 +289,7 @@
 
 {% if upstream_dependency_rows %}
 <section class="card">
-  <div class="card-header">Dependencias upstream ERP</div>
+  <div class="card-header">Dependencias previas</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -304,7 +326,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Cadena documental ERP</div>
+  <div class="card-header">Cadena de control</div>
   <div class="erp-chain-grid">
     {% for step in enterprise_chain %}
     <article class="erp-chain-card tone-{{ step.tone|default:'neutral' }}">
@@ -320,7 +342,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Ruta troncal ERP</div>
+  <div class="card-header">Ruta operativa</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -358,7 +380,7 @@
 {% if critical_path_rows or executive_radar_rows or handoff_map or document_stage_rows or erp_governance_rows or downstream_handoff_rows or operational_health_cards %}
 <details class="erp-advanced-panel">
   <summary class="erp-advanced-summary">
-    <span>Ver análisis de trazabilidad y control</span>
+    <span>Ver análisis ampliado</span>
     <span class="muted">Prioridades, cierres y seguimiento</span>
   </summary>
   <div class="erp-advanced-body">
@@ -536,7 +558,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Entrega entre módulos ERP</div>
+  <div class="card-header">Entrega entre frentes</div>
   <div class="enterprise-pill-grid enterprise-pill-grid-compact">
     {% for card in module_handoff_cards %}
     <article class="enterprise-pill-card {% if card.tone == 'success' %}is-active{% elif card.tone == 'warning' %}is-danger{% endif %}">
@@ -623,7 +645,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Control por frente</div>
+  <div class="card-header">Seguimiento por frente</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -656,7 +678,7 @@
 
 {% if downstream_handoff_rows %}
 <section class="card">
-  <div class="card-header">Entrega de inventario a downstream</div>
+  <div class="card-header">Entrega a otros frentes</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -756,7 +778,7 @@
 <section class="card">
   <div class="card-header">Stock por Insumo</div>
   <div class="card table-card mb-3">
-    <div class="card-header">Workflow ERP de inventario</div>
+    <div class="card-header">Flujo del inventario</div>
     <div class="table-responsive">
       <table class="table align-middle">
         <thead>
@@ -888,7 +910,7 @@
         <tr>
           <th>Insumo</th>
           <th>Unid.</th>
-          <th>Uso ERP</th>
+          <th>Uso operativo</th>
           <th class="text-end">Stock</th>
           <th class="text-end">Stock min</th>
           <th class="text-end">Stock max</th>
@@ -898,7 +920,7 @@
           <th class="text-end">Consumo diario</th>
           <th class="text-end">Reorden recomendado</th>
           <th class="text-end">Diferencia</th>
-          <th>Maestro ERP</th>
+          <th>Maestro</th>
           <th>Estatus stock</th>
         </tr>
       </thead>
@@ -906,7 +928,7 @@
         {% for e in existencias %}
         <tr>
           <td>
-            {{ e.insumo.nombre }}
+            {{ e.insumo.display_name }}
             {% if e.canonical_variant_count > 1 %}
             <span class="badge-verde" style="margin-left: 8px;">Maestro · {{ e.canonical_variant_count }} variantes</span>
             {% endif %}

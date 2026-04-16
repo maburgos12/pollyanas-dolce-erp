@@ -15,6 +15,7 @@ from compras.models import OrdenCompra, PresupuestoCompraPeriodo, RecepcionCompr
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
+from pos_bridge.models import PointBranch, PointSalesDailyProductFact
 from recetas.models import (
     LineaReceta,
     PlanProduccion,
@@ -68,6 +69,40 @@ class RecetasCosteoApiTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
         asegurar_version_costeo(self.receta, fuente="TEST_API")
+        self.point_branch = PointBranch.objects.create(
+            external_id="PB-API-TEST",
+            name="Sucursal API",
+            erp_branch=None,
+        )
+
+    def _create_canonical_fact(
+        self,
+        *,
+        sucursal: Sucursal,
+        fecha: date,
+        cantidad: str | Decimal,
+        receta: Receta | None = None,
+    ):
+        rec = receta or self.receta
+        branch, _ = PointBranch.objects.get_or_create(
+            external_id=f"PB-{sucursal.codigo}",
+            defaults={
+                "name": sucursal.nombre,
+                "erp_branch": sucursal,
+            },
+        )
+        PointSalesDailyProductFact.objects.create(
+            branch=branch,
+            sale_date=fecha,
+            sucursal_nombre=sucursal.nombre,
+            categoria="Categoria API",
+            producto_nombre_historico=rec.nombre,
+            receta=rec,
+            match_catalogo_status="EXACT_CODE",
+            total_cantidad=Decimal(str(cantidad)),
+            total_venta=Decimal("100.00"),
+            total_venta_neta=Decimal("100.00"),
+        )
 
     def test_endpoint_auth_token_obtain_and_access_api(self):
         self.client.logout()
@@ -3545,13 +3580,7 @@ class RecetasCosteoApiTests(TestCase):
         sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
         for week in range(1, 7):
             week_start = date(2026, 3, 20) - timedelta(days=(7 * week))
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=sucursal,
-                fecha=week_start,
-                cantidad=Decimal("10"),
-                fuente="API_TEST",
-            )
+            self._create_canonical_fact(sucursal=sucursal, fecha=week_start, cantidad="10")
         SolicitudVenta.objects.create(
             receta=self.receta,
             sucursal=sucursal,
@@ -3603,17 +3632,134 @@ class RecetasCosteoApiTests(TestCase):
         self.assertIn("bajo_rango_count", payload["compare_solicitud"]["totals"])
         self.assertEqual(payload["scope"]["escenario_compare"], "base")
 
+    def test_endpoint_ventas_pronostico_estadistico_dia_returns_detail_rows_and_model_meta(self):
+        sucursal_a = Sucursal.objects.create(codigo="SUR", nombre="Sur", activa=True)
+        sucursal_b = Sucursal.objects.create(codigo="NORTE", nombre="Norte", activa=True)
+        target_day = date(2026, 4, 6)
+        for lag in range(1, 9):
+            sample_day = target_day - timedelta(days=7 * lag)
+            self._create_canonical_fact(sucursal=sucursal_a, fecha=sample_day, cantidad="14")
+            self._create_canonical_fact(sucursal=sucursal_b, fecha=sample_day, cantidad="6")
+
+        url = reverse("api_ventas_pronostico_estadistico")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "dia",
+                "fecha_base": target_day.isoformat(),
+                "incluir_preparaciones": True,
+                "include_solicitud_compare": False,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["scope"]["alcance"], "dia")
+        self.assertGreaterEqual(payload["detail_rows_total"], 2)
+        self.assertIn("model_meta", payload)
+        self.assertEqual(payload["model_meta"]["history_selection"]["history_start"], "2022-01-01")
+        self.assertFalse(payload["model_meta"]["mix_adjuster"]["enabled"])
+        detail_rows = payload["detail_rows"]
+        self.assertTrue(any(row["sucursal_codigo"] == "SUR" for row in detail_rows))
+        self.assertTrue(any(row["sucursal_codigo"] == "NORTE" for row in detail_rows))
+        self.assertTrue(all(row["fecha"] == target_day.isoformat() for row in detail_rows))
+        self.assertTrue(all("confianza" in row for row in detail_rows))
+
+    def test_endpoint_ventas_pronostico_estadistico_mix_adjustment_enabled_caps_changes(self):
+        sucursal = Sucursal.objects.create(codigo="MIX", nombre="Mix", activa=True)
+        receta_b = Receta.objects.create(
+            nombre="Pastel Mix B",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-api-forecast-mix-b",
+        )
+        target_day = date(2026, 4, 6)
+        for lag in range(1, 10):
+            sample_day = target_day - timedelta(days=7 * lag)
+            self._create_canonical_fact(sucursal=sucursal, fecha=sample_day, cantidad="10", receta=self.receta)
+            self._create_canonical_fact(sucursal=sucursal, fecha=sample_day, cantidad="10", receta=receta_b)
+        for offset in (5, 12, 19):
+            recent_day = target_day - timedelta(days=offset)
+            self._create_canonical_fact(sucursal=sucursal, fecha=recent_day, cantidad="18", receta=self.receta)
+            self._create_canonical_fact(sucursal=sucursal, fecha=recent_day, cantidad="2", receta=receta_b)
+
+        url = reverse("api_ventas_pronostico_estadistico")
+        resp_base = self.client.post(
+            url,
+            {
+                "alcance": "dia",
+                "fecha_base": target_day.isoformat(),
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "mix_adjustment_enabled": False,
+                "include_solicitud_compare": False,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_base.status_code, 200)
+        base_payload = resp_base.json()
+        resp_mix = self.client.post(
+            url,
+            {
+                "alcance": "dia",
+                "fecha_base": target_day.isoformat(),
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "mix_adjustment_enabled": True,
+                "include_solicitud_compare": False,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp_mix.status_code, 200)
+        mix_payload = resp_mix.json()
+        self.assertTrue(mix_payload["model_meta"]["mix_adjuster"]["enabled"])
+
+        base_rows = {row["receta_id"]: row for row in base_payload["detail_rows"]}
+        mix_rows = {row["receta_id"]: row for row in mix_payload["detail_rows"]}
+        self.assertIn(self.receta.id, mix_rows)
+        self.assertIn(receta_b.id, mix_rows)
+        qty_a_base = Decimal(str(base_rows[self.receta.id]["forecast_qty"]))
+        qty_a_mix = Decimal(str(mix_rows[self.receta.id]["forecast_qty"]))
+        qty_b_base = Decimal(str(base_rows[receta_b.id]["forecast_qty"]))
+        qty_b_mix = Decimal(str(mix_rows[receta_b.id]["forecast_qty"]))
+        self.assertGreater(qty_a_mix, qty_a_base)
+        self.assertLess(qty_b_mix, qty_b_base)
+        self.assertLessEqual(qty_a_mix, (qty_a_base * Decimal("1.20")).quantize(Decimal("0.001")))
+        self.assertGreaterEqual(qty_b_mix, (qty_b_base * Decimal("0.80")).quantize(Decimal("0.001")))
+        self.assertTrue(mix_rows[self.receta.id]["mix_adjusted"])
+
+    def test_endpoint_ventas_pronostico_estadistico_does_not_fallback_to_raw_history(self):
+        sucursal = Sucursal.objects.create(codigo="RAWAPI", nombre="Raw API", activa=True)
+        target_day = date(2026, 4, 6)
+        for lag in range(1, 9):
+            sample_day = target_day - timedelta(days=7 * lag)
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=sucursal,
+                fecha=sample_day,
+                cantidad=Decimal("14"),
+                fuente="RAW_ONLY",
+            )
+
+        url = reverse("api_ventas_pronostico_estadistico")
+        resp = self.client.post(
+            url,
+            {
+                "alcance": "dia",
+                "fecha_base": target_day.isoformat(),
+                "sucursal_id": sucursal.id,
+                "incluir_preparaciones": True,
+                "include_solicitud_compare": False,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("forecast", resp.json()["detail"].lower())
+
     def test_endpoint_ventas_pronostico_estadistico_export_csv_y_xlsx(self):
         sucursal = Sucursal.objects.create(codigo="MEX", nombre="Matriz Export", activa=True)
         for week in range(1, 7):
             week_start = date(2026, 3, 20) - timedelta(days=(7 * week))
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=sucursal,
-                fecha=week_start,
-                cantidad=Decimal("10"),
-                fuente="API_TEST",
-            )
+            self._create_canonical_fact(sucursal=sucursal, fecha=week_start, cantidad="10")
         SolicitudVenta.objects.create(
             receta=self.receta,
             sucursal=sucursal,
@@ -3675,13 +3821,7 @@ class RecetasCosteoApiTests(TestCase):
         sucursal = Sucursal.objects.create(codigo="MATRIZ_BAJO", nombre="Matriz Bajo", activa=True)
         for week in range(1, 7):
             week_start = date(2026, 3, 20) - timedelta(days=(7 * week))
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=sucursal,
-                fecha=week_start,
-                cantidad=Decimal("10"),
-                fuente="API_TEST",
-            )
+            self._create_canonical_fact(sucursal=sucursal, fecha=week_start, cantidad="10")
 
         url = reverse("api_ventas_pronostico_estadistico")
         resp = self.client.post(
@@ -3707,13 +3847,7 @@ class RecetasCosteoApiTests(TestCase):
         sucursal = Sucursal.objects.create(codigo="MCONF", nombre="Confianza", activa=True)
         for week in range(1, 7):
             week_start = date(2026, 3, 20) - timedelta(days=(7 * week))
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=sucursal,
-                fecha=week_start,
-                cantidad=Decimal("10"),
-                fuente="API_TEST",
-            )
+            self._create_canonical_fact(sucursal=sucursal, fecha=week_start, cantidad="10")
 
         url = reverse("api_ventas_pronostico_estadistico")
         resp = self.client.post(
@@ -3734,13 +3868,7 @@ class RecetasCosteoApiTests(TestCase):
         sucursal = Sucursal.objects.create(codigo="MATRIZ2", nombre="Matriz 2", activa=True)
         for week, qty in [(1, "10"), (2, "13"), (3, "11"), (4, "16"), (5, "12"), (6, "17")]:
             week_start = date(2026, 3, 22) - timedelta(days=(7 * week))
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=sucursal,
-                fecha=week_start,
-                cantidad=Decimal(qty),
-                fuente="API_TEST",
-            )
+            self._create_canonical_fact(sucursal=sucursal, fecha=week_start, cantidad=qty)
 
         url = reverse("api_ventas_pronostico_estadistico_guardar")
         resp = self.client.post(
@@ -3790,13 +3918,7 @@ class RecetasCosteoApiTests(TestCase):
         sucursal = Sucursal.objects.create(codigo="MATRIZ2EXP", nombre="Matriz 2 Export", activa=True)
         for week, qty in [(1, "10"), (2, "13"), (3, "11"), (4, "16"), (5, "12"), (6, "17")]:
             week_start = date(2026, 3, 22) - timedelta(days=(7 * week))
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=sucursal,
-                fecha=week_start,
-                cantidad=Decimal(qty),
-                fuente="API_TEST",
-            )
+            self._create_canonical_fact(sucursal=sucursal, fecha=week_start, cantidad=qty)
 
         url = reverse("api_ventas_pronostico_estadistico_guardar")
         payload = {
@@ -3862,13 +3984,7 @@ class RecetasCosteoApiTests(TestCase):
             (2026, 2, "36"),
         ]
         for year, month, qty in monthly_data:
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=sucursal,
-                fecha=date(year, month, 15),
-                cantidad=Decimal(qty),
-                fuente="API_TEST",
-            )
+            self._create_canonical_fact(sucursal=sucursal, fecha=date(year, month, 15), cantidad=qty)
 
         url = reverse("api_ventas_pronostico_backtest")
         resp = self.client.post(
@@ -3886,10 +4002,14 @@ class RecetasCosteoApiTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload["scope"]["alcance"], "mes")
         self.assertEqual(payload["scope"]["sucursal_id"], sucursal.id)
+        self.assertFalse(payload["scope"]["mix_adjustment_enabled"])
         self.assertGreaterEqual(payload["totals"]["windows_evaluated"], 1)
         self.assertIn("windows", payload)
         self.assertGreaterEqual(len(payload["windows"]), 1)
         self.assertIn("mape_promedio", payload["totals"])
+        self.assertIn("mix_adjuster_compare", payload)
+        self.assertIn("base", payload["mix_adjuster_compare"])
+        self.assertIn("adjusted", payload["mix_adjuster_compare"])
 
     def test_endpoint_ventas_pronostico_backtest_escenarios(self):
         sucursal = Sucursal.objects.create(codigo="BT2", nombre="Backtest 2", activa=True)
@@ -3902,13 +4022,7 @@ class RecetasCosteoApiTests(TestCase):
             (2026, 2, "36"),
         ]
         for year, month, qty in monthly_data:
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=sucursal,
-                fecha=date(year, month, 15),
-                cantidad=Decimal(qty),
-                fuente="API_TEST",
-            )
+            self._create_canonical_fact(sucursal=sucursal, fecha=date(year, month, 15), cantidad=qty)
 
         url = reverse("api_ventas_pronostico_backtest")
         resp_low = self.client.post(
@@ -3958,13 +4072,7 @@ class RecetasCosteoApiTests(TestCase):
             (2026, 2, "36"),
         ]
         for year, month, qty in monthly_data:
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=sucursal,
-                fecha=date(year, month, 15),
-                cantidad=Decimal(qty),
-                fuente="API_TEST",
-            )
+            self._create_canonical_fact(sucursal=sucursal, fecha=date(year, month, 15), cantidad=qty)
 
         url = reverse("api_ventas_pronostico_backtest")
         payload = {

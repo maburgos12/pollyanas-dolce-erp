@@ -5,8 +5,12 @@ from datetime import datetime
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
 
+from inventario.models import AlmacenSyncRun, ExistenciaInsumo
+from inventario.stock_trace import attach_sync_trace
 from inventario.utils.almacen_import import import_folder
+from inventario.utils.sync_logging import log_sync_run
 
 
 VALID_SOURCES = {"inventario", "entradas", "salidas", "merma"}
@@ -69,6 +73,7 @@ class Command(BaseCommand):
         if not requested:
             raise CommandError("Debes indicar al menos una fuente en --sources")
 
+        run_started_at = timezone.now()
         summary = import_folder(
             folderpath=str(folder),
             include_sources=requested,
@@ -77,7 +82,23 @@ class Command(BaseCommand):
             alias_threshold=int(options["alias_threshold"]),
             create_missing_insumos=bool(options["create_missing_insumos"]),
             dry_run=bool(options["dry_run"]),
+            trace_context={
+                "process": "inventario.management.importar_almacen_archivos",
+                "batch_token": run_started_at.isoformat(),
+            },
         )
+        run = None
+        if not options["dry_run"]:
+            run = log_sync_run(
+                source=AlmacenSyncRun.SOURCE_MANUAL,
+                status=AlmacenSyncRun.STATUS_OK,
+                summary=summary,
+                started_at=run_started_at,
+                message="importar_almacen_archivos",
+            )
+            if summary.updated_existencia_ids:
+                existencias = list(ExistenciaInsumo.objects.filter(id__in=summary.updated_existencia_ids))
+                attach_sync_trace(existencias, run=run)
 
         pending_output = options["pending_output"].strip()
         if summary.pendientes:

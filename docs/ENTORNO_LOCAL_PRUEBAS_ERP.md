@@ -47,7 +47,7 @@ Para correr pruebas locales:
 
 ```bash
 ./scripts/run_tests_local.sh orquestacion.tests.SeedOrquestacionCatalogTest \
-  api.tests_ai_gateway.AIGatewayApiTests.test_manifest_exposes_onyx_ready_contract
+  api.tests_ai_gateway.AIGatewayApiTests.test_manifest_exposes_safe_gateway_contract
 ```
 
 Tambien funciona:
@@ -74,7 +74,7 @@ Para evitar colisiones entre corridas:
 Con PostgreSQL y `.venv`, esta bateria paso:
 
 - `orquestacion.tests.SeedOrquestacionCatalogTest`
-- `api.tests_ai_gateway.AIGatewayApiTests.test_manifest_exposes_onyx_ready_contract`
+- `api.tests_ai_gateway.AIGatewayApiTests.test_manifest_exposes_safe_gateway_contract` (verifica el contrato seguro del manifest del gateway)
 
 ## Politica actual
 

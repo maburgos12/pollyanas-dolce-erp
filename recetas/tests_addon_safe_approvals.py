@@ -123,6 +123,38 @@ class ApprovePointAddonsSafeCommandTests(TestCase):
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             hash_contenido=f"hash-{uuid4()}",
         )
+        LineaReceta.objects.create(
+            receta=self.ambiguous_recipe,
+            posicion=1,
+            insumo=self.addon_input,
+            insumo_texto="Addon",
+            cantidad=Decimal("1"),
+            unidad=self.unit_pza,
+            unidad_texto="pza",
+            costo_unitario_snapshot=Decimal("1.5"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        asegurar_version_costeo(self.ambiguous_recipe, fuente="TEST")
+        self.zanahoria_chico = Receta.objects.create(
+            nombre="Pastel de Zanahoria Chico",
+            codigo_point="0066",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido=f"hash-{uuid4()}",
+        )
+        LineaReceta.objects.create(
+            receta=self.zanahoria_chico,
+            posicion=1,
+            insumo=self.base_input,
+            insumo_texto="Base",
+            cantidad=Decimal("1"),
+            unidad=self.unit_pza,
+            unidad_texto="pza",
+            costo_unitario_snapshot=Decimal("9"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        asegurar_version_costeo(self.zanahoria_chico, fuente="TEST")
         PointProduct.objects.create(
             external_id="3",
             sku="1254",
@@ -145,13 +177,50 @@ class ApprovePointAddonsSafeCommandTests(TestCase):
         self.assertEqual(rule.status, RecetaAgrupacionAddon.STATUS_APPROVED)
         self.assertTrue(any(item["addon_codigo_point"] == "SFRESAG" for item in payload["approved"]))
 
-    def test_command_skips_duplicate_sku(self):
+    def test_command_keeps_brownie_as_complement_not_history(self):
+        brownie_input = Insumo.objects.create(nombre="Brownie", unidad_base=self.unit_pza, activo=True)
+        brownie_grande = Receta.objects.create(
+            nombre="Sabor Brownie Grande",
+            codigo_point="SBROWNIEG",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido=f"hash-{uuid4()}",
+        )
+        LineaReceta.objects.create(
+            receta=brownie_grande,
+            posicion=1,
+            insumo=brownie_input,
+            insumo_texto="Brownie",
+            cantidad=Decimal("1"),
+            unidad=self.unit_pza,
+            unidad_texto="pza",
+            costo_unitario_snapshot=Decimal("4"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        asegurar_version_costeo(brownie_grande, fuente="TEST")
+        PointProduct.objects.create(
+            external_id="7",
+            sku="SBROWNIEG",
+            name="Sabor Brownie Grande",
+            category="Pay Grande",
+        )
+
         out = StringIO()
         call_command("approve_point_addons_safe", stdout=out)
         payload = json.loads(out.getvalue())
 
-        self.assertFalse(RecetaAgrupacionAddon.objects.filter(addon_codigo_point="1254").exists())
-        self.assertTrue(any(item["addon_codigo_point"] == "1254" for item in payload["skipped"]))
+        rule = RecetaAgrupacionAddon.objects.get(base_receta=self.base_recipe, addon_codigo_point="SBROWNIEG")
+        self.assertEqual(rule.status, RecetaAgrupacionAddon.STATUS_APPROVED)
+        self.assertTrue(any(item["addon_codigo_point"] == "SBROWNIEG" for item in payload["approved"]))
+
+    def test_command_allows_curated_duplicate_sku_when_dg_defined(self):
+        out = StringIO()
+        call_command("approve_point_addons_safe", stdout=out)
+        payload = json.loads(out.getvalue())
+
+        rule = RecetaAgrupacionAddon.objects.get(base_receta=self.zanahoria_chico, addon_codigo_point="1254")
+        self.assertEqual(rule.status, RecetaAgrupacionAddon.STATUS_APPROVED)
+        self.assertTrue(any(item["addon_codigo_point"] == "1254" for item in payload["approved"]))
 
     def test_command_allows_smanzanareb_when_erp_recipe_is_canonical(self):
         base_input = Insumo.objects.create(nombre="Base Rebanada", unidad_base=self.unit_pza, activo=True)

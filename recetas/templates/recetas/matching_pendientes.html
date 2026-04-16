@@ -41,14 +41,14 @@
 
 <details class="erp-advanced-panel mb-3">
   <summary class="erp-advanced-summary">
-    <span>Ver control ERP avanzado</span>
-    <span class="text-muted">Centro de mando, workflow, ruta crítica y radar</span>
+    <span>Ver detalle operativo y trazabilidad</span>
+    <span class="text-muted">Cobertura del componente, dependencias y siguiente paso</span>
   </summary>
   <div class="erp-advanced-body">
 
 {% if erp_command_center %}
 <section class="card mb-3">
-  <div class="card-header">Centro de mando ERP</div>
+  <div class="card-header">Resumen del componente</div>
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
@@ -95,7 +95,7 @@
 </div>
 
 <section class="card mb-3">
-  <div class="card-header">Workflow ERP del componente</div>
+  <div class="card-header">Flujo del componente</div>
   <div class="table-responsive mb-3">
     <table class="table table-striped align-middle">
       <thead>
@@ -162,7 +162,7 @@
 
 {% if critical_path_rows %}
 <section class="card mb-3">
-  <div class="card-header">Ruta crítica ERP</div>
+  <div class="card-header">Prioridades de cierre</div>
   <div class="table-responsive">
     <table class="table table-striped align-middle">
       <thead>
@@ -202,7 +202,7 @@
   
 {% if executive_radar_rows %}
 <section class="card">
-  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="card-header">Resumen de seguimiento</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -234,7 +234,7 @@
 </section>
 {% endif %}
 
-<div class="card-header">Mesa de gobierno ERP</div>
+<div class="card-header">Control del módulo</div>
   <div class="table-responsive">
     <table class="table table-striped align-middle">
       <thead>

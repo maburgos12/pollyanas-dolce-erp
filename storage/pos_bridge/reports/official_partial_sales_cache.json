@@ -1,0 +1,50 @@
+{
+  "2025-03-01_2025-03-21": {
+    "period_start": "2025-03-01",
+    "period_end": "2025-03-21",
+    "total_quantity": "20357",
+    "gross_amount": "2628298",
+    "discount_amount": "9935.61",
+    "total_amount": "2618362.39",
+    "tax_amount": "38532.360000000335",
+    "net_amount": "2579830.03",
+    "report_path": "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260324_134717_point_sales_category_2025-03-01_2025-03-21_all_null.xls"
+  },
+  "2025-03-01_2025-03-23": {
+    "period_start": "2025-03-01",
+    "period_end": "2025-03-23",
+    "total_quantity": "22442",
+    "gross_amount": "2897420",
+    "discount_amount": "10845.69",
+    "total_amount": "2886574.31",
+    "tax_amount": "43040.76000000024",
+    "net_amount": "2843533.55",
+    "report_path": "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260324_135027_point_sales_category_2025-03-01_2025-03-23_all_null.xls"
+  },
+  "2026-03-01_2026-03-23": {
+    "period_start": "2026-03-01",
+    "period_end": "2026-03-23",
+    "total_quantity": "18643",
+    "gross_amount": "2469820",
+    "discount_amount": "3089.68",
+    "total_amount": "2466730.33",
+    "tax_amount": "37947.72999999998",
+    "net_amount": "2428782.6",
+    "report_path": "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260324_140542_point_sales_category_2026-03-01_2026-03-23_all_null.xls",
+    "request_url": "https://app.pointmeup.com/Report/PrintReportes/?ext=Excel&fi=1772348400000&ff=1774249200000&sucursal=null&idreporte=3&idtipo=0&nomSucursal=Todas+las+sucursales&nomTipo=0&credito=null",
+    "rows_count": 149
+  },
+  "2025-03-01_2025-03-24": {
+    "period_start": "2025-03-01",
+    "period_end": "2025-03-24",
+    "total_quantity": "23160",
+    "gross_amount": "2989861",
+    "discount_amount": "11045.71",
+    "total_amount": "2978815.29",
+    "tax_amount": "44319.24000000022",
+    "net_amount": "2934496.05",
+    "report_path": "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260325_140345_point_sales_category_2025-03-01_2025-03-24_all_null.xls",
+    "request_url": "https://app.pointmeup.com/Report/PrintReportes/?ext=Excel&fi=1740812400000&ff=1742799600000&sucursal=null&idreporte=3&idtipo=0&nomSucursal=Todas+las+sucursales&nomTipo=0&credito=null",
+    "rows_count": 154
+  }
+}

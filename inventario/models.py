@@ -16,6 +16,7 @@ class ExistenciaInsumo(models.Model):
     inventario_promedio = models.DecimalField(max_digits=18, decimal_places=3, default=0)
     dias_llegada_pedido = models.PositiveIntegerField(default=0)
     consumo_diario_promedio = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    trazabilidad_stock = models.JSONField(default=dict, blank=True)
     actualizado_en = models.DateTimeField(default=timezone.now)
 
     class Meta:

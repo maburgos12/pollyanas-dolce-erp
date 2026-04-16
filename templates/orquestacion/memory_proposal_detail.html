@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle de propuesta | ERP{% endblock %}
+
+{% block extra_css %}
+<style>
+  .memory-detail-shell { display: grid; gap: 1rem; }
+  .memory-detail-panel {
+    background: #fff;
+    border: 1px solid rgba(21, 36, 59, .08);
+    border-radius: 20px;
+    box-shadow: 0 16px 40px rgba(12, 20, 34, .08);
+    padding: 1.2rem;
+  }
+  .memory-detail-hero {
+    background: linear-gradient(135deg, #15243b 0%, #23486a 58%, #b17b40 100%);
+    color: #fff;
+    border-radius: 24px;
+    padding: 1.5rem 1.65rem;
+  }
+  .memory-detail-hero h1 { margin: 0 0 .35rem; }
+  .memory-detail-grid { display: grid; gap: 1rem; grid-template-columns: 1.35fr .9fr; }
+  .memory-meta { display: grid; gap: .75rem; }
+  .memory-meta-item strong { display: block; color: #15243b; margin-bottom: .2rem; }
+  .memory-subtle { color: #6d7785; font-size: .9rem; }
+  .memory-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: .2rem .55rem;
+    font-size: .78rem;
+    font-weight: 700;
+    background: #eef2f7;
+    color: #24364d;
+  }
+  .memory-pill.proposed { background: #fff1d8; color: #8f5c00; }
+  .memory-pill.approved, .memory-pill.applied { background: #dff4e5; color: #12633a; }
+  .memory-pill.rejected { background: #f8e0e0; color: #9a2430; }
+  .memory-form { display: grid; gap: .85rem; }
+  .memory-form label { display: grid; gap: .35rem; font-weight: 700; color: #15243b; }
+  .memory-input, .memory-textarea {
+    width: 100%;
+    border: 1px solid rgba(21, 36, 59, .12);
+    border-radius: 12px;
+    padding: .7rem .8rem;
+    font: inherit;
+  }
+  .memory-textarea { min-height: 180px; resize: vertical; }
+  .memory-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
+  .memory-btn {
+    border: none;
+    border-radius: 12px;
+    padding: .75rem 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .memory-btn.primary { background: #15243b; color: #fff; }
+  .memory-btn.secondary { background: #eef2f7; color: #24364d; }
+  .memory-btn.danger { background: #9a2430; color: #fff; }
+  .memory-list { margin: 0; padding-left: 1.1rem; color: #24364d; }
+  @media (max-width: 980px) {
+    .memory-detail-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="memory-detail-shell">
+  <section class="memory-detail-hero">
+    <h1>{{ proposal.summary }}</h1>
+    <p>
+      <span class="memory-pill {{ proposal.status }}">{{ proposal.get_status_display }}</span>
+      <span class="memory-subtle" style="color: rgba(255,255,255,.88); margin-left: .5rem;">
+        {{ proposal.get_section_display }} · {{ proposal.get_source_type_display }}
+      </span>
+    </p>
+  </section>
+
+  <section class="memory-detail-grid">
+    <article class="memory-detail-panel">
+      <h2>Propuesta</h2>
+      <form method="post" class="memory-form">
+        {% csrf_token %}
+        <label>
+          Resumen
+          <input type="text" name="summary" value="{{ proposal.summary }}" class="memory-input" {% if not can_manage %}readonly{% endif %}>
+        </label>
+        <label>
+          Statement aprobado
+          <textarea name="statement" class="memory-textarea" {% if not can_manage %}readonly{% endif %}>{{ proposal.statement }}</textarea>
+        </label>
+        {% if can_manage %}
+        <div class="memory-actions">
+          <button type="submit" name="action" value="approve" class="memory-btn primary">Aprobar</button>
+          <button type="submit" name="action" value="apply" class="memory-btn secondary" {% if proposal.status != 'approved' and proposal.status != 'applied' %}disabled{% endif %}>Aplicar a memory.md</button>
+        </div>
+        {% endif %}
+      </form>
+    </article>
+
+    <article class="memory-detail-panel">
+      <h2>Metadatos</h2>
+      <div class="memory-meta">
+        <div class="memory-meta-item">
+          <strong>Agente / origen</strong>
+          <div>{{ proposal.proposed_by_agent.name|default:"Sistema" }}</div>
+          <div class="memory-subtle">{{ proposal.source_reference|default:"Sin referencia específica" }}</div>
+        </div>
+        <div class="memory-meta-item">
+          <strong>Confianza y repetición</strong>
+          <div>Confianza: {{ proposal.confidence_score|floatformat:2 }}</div>
+          <div class="memory-subtle">Detectado {{ proposal.detected_count }} vez/veces</div>
+        </div>
+        <div class="memory-meta-item">
+          <strong>Clasificación y aprobación</strong>
+          <div>Categoría: {{ proposal.category|default:"sin clasificar" }}</div>
+          <div class="memory-subtle">Modo: {{ proposal.get_approval_mode_display }}</div>
+          {% if proposal.auto_approval_reason %}
+          <div class="memory-subtle">Razón automática: {{ proposal.auto_approval_reason }}</div>
+          {% endif %}
+        </div>
+        <div class="memory-meta-item">
+          <strong>Corrida asociada</strong>
+          <div>{{ proposal.run.run_key|default:"Sin run asociada" }}</div>
+          <div class="memory-subtle">{{ proposal.task.title|default:"Sin tarea asociada" }}</div>
+        </div>
+        <div class="memory-meta-item">
+          <strong>Evidencia</strong>
+          {% if proposal.evidence_refs_json %}
+          <ul class="memory-list">
+            {% for ref in proposal.evidence_refs_json %}
+            <li><code>{{ ref }}</code></li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <div class="memory-subtle">Sin evidencia registrada.</div>
+          {% endif %}
+        </div>
+        {% if proposal.applied_result_json %}
+        <div class="memory-meta-item">
+          <strong>Aplicación a memoria</strong>
+          <div class="memory-subtle">Path: {{ proposal.applied_result_json.path }}</div>
+          <div class="memory-subtle">Resultado: {{ proposal.applied_result_json.reason }}</div>
+        </div>
+        {% endif %}
+      </div>
+    </article>
+  </section>
+
+  <section class="memory-detail-grid">
+    <article class="memory-detail-panel">
+      <h2>Rechazo / observaciones</h2>
+      {% if can_manage %}
+      <form method="post" class="memory-form">
+        {% csrf_token %}
+        <label>
+          Motivo de rechazo
+          <textarea name="rejection_reason" class="memory-textarea">{{ proposal.rejection_reason }}</textarea>
+        </label>
+        <div class="memory-actions">
+          <button type="submit" name="action" value="reject" class="memory-btn danger">Rechazar</button>
+          <a href="{% url 'orquestacion:memory_proposals' %}" class="memory-btn secondary">Volver a bandeja</a>
+        </div>
+      </form>
+      {% else %}
+      <div class="memory-subtle">{{ proposal.rejection_reason|default:"Sin rechazo registrado." }}</div>
+      {% endif %}
+    </article>
+
+    <article class="memory-detail-panel">
+      <h2>Auditoría rápida</h2>
+      <div class="memory-meta">
+        <div class="memory-meta-item">
+          <strong>Primera detección</strong>
+          <div>{{ proposal.first_detected_at|date:"d/m/Y H:i" }}</div>
+        </div>
+        <div class="memory-meta-item">
+          <strong>Última detección</strong>
+          <div>{{ proposal.last_detected_at|date:"d/m/Y H:i" }}</div>
+        </div>
+        <div class="memory-meta-item">
+          <strong>Revisado por</strong>
+          <div>{{ proposal.reviewed_by.username|default:"Sin revisión aún" }}</div>
+          <div class="memory-subtle">{{ proposal.reviewed_at|date:"d/m/Y H:i"|default:"" }}</div>
+        </div>
+      </div>
+    </article>
+  </section>
+</section>
+{% endblock %}

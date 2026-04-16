@@ -2,10 +2,13 @@ from django.contrib import admin
 
 from pos_bridge.models import (
     PointBranch,
+    PointProductCostReconciliation,
     PointDailySale,
     PointExtractionLog,
     PointInventorySnapshot,
     PointProduct,
+    PointProductHistoryImport,
+    PointProductHistoryRow,
     PointSyncJob,
 )
 
@@ -63,3 +66,27 @@ class PointDailySaleAdmin(admin.ModelAdmin):
         "receta__codigo_point",
     )
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(PointProductHistoryImport)
+class PointProductHistoryImportAdmin(admin.ModelAdmin):
+    list_display = ("product_name", "branch_name", "report_date", "receta", "row_count", "latest_unit_cost", "created_at")
+    search_fields = ("product_name", "branch_name", "source_filename", "receta__nombre", "receta__codigo_point")
+    list_filter = ("report_date", "point_branch", "receta")
+    readonly_fields = ("file_hash", "created_at", "updated_at", "raw_metadata")
+
+
+@admin.register(PointProductHistoryRow)
+class PointProductHistoryRowAdmin(admin.ModelAdmin):
+    list_display = ("import_record", "movement_at", "movement_type", "quantity", "unit_cost", "cancelled")
+    search_fields = ("import_record__product_name", "movement_type")
+    list_filter = ("cancelled", "movement_type")
+    readonly_fields = ("created_at", "raw_payload")
+
+
+@admin.register(PointProductCostReconciliation)
+class PointProductCostReconciliationAdmin(admin.ModelAdmin):
+    list_display = ("import_record", "status", "point_unit_cost", "erp_unit_cost", "variance_amount", "variance_pct")
+    search_fields = ("import_record__product_name", "receta__nombre", "receta__codigo_point")
+    list_filter = ("status", "point_branch")
+    readonly_fields = ("created_at", "updated_at", "raw_payload")

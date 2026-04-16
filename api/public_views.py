@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from decimal import Decimal
 
 from django.conf import settings
@@ -13,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from crm.models import Cliente, PedidoCliente
-from crm.services import PickupAvailabilityService, PickupReservationError
+from crm.services import PickupAvailabilityService, PickupReservationError, SucursalResolutionError, resolve_sucursal
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo
@@ -276,10 +277,24 @@ class PublicPedidosCreateView(APIView):
         if not cliente:
             cliente = Cliente.objects.create(nombre=cliente_nombre)
 
+        sucursal_raw = (request.data.get("sucursal") or "").strip()
+        try:
+            sucursal_resolution = resolve_sucursal(sucursal_raw)
+        except SucursalResolutionError as exc:
+            _log_access(client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "detail": str(exc),
+                    "code": exc.code,
+                    "payload": exc.payload,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         pedido = PedidoCliente.objects.create(
             cliente=cliente,
             descripcion=descripcion,
-            sucursal=(request.data.get("sucursal") or "").strip(),
+            sucursal_ref=sucursal_resolution.sucursal,
             canal=PedidoCliente.CANAL_WEB,
             prioridad=prioridad,
             estatus=PedidoCliente.ESTATUS_NUEVO,
@@ -309,6 +324,17 @@ class PublicPickupAvailabilityView(APIView):
         product_code = (request.query_params.get("product_code") or "").strip()
         branch_code = (request.query_params.get("branch_code") or "").strip()
         quantity = request.query_params.get("quantity") or "1"
+        response_cache_seconds = max(int(getattr(settings, "PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS", 3)), 0)
+        cache_key = None
+        if response_cache_seconds > 0:
+            raw_cache_key = (
+                f"{product_code.lower()}|{branch_code.lower()}|{str(quantity).strip().lower()}"
+            )
+            cache_key = f"public_pickup_availability:{hashlib.sha1(raw_cache_key.encode('utf-8')).hexdigest()}"
+            cached_payload = cache.get(cache_key)
+            if cached_payload is not None:
+                _log_access(client, request, status.HTTP_200_OK)
+                return Response(cached_payload, status=status.HTTP_200_OK)
 
         service = PickupAvailabilityService()
         try:
@@ -321,8 +347,11 @@ class PublicPickupAvailabilityView(APIView):
             _log_access(client, request, status.HTTP_400_BAD_REQUEST)
             return _reservation_error_response(exc)
 
+        payload = availability.to_dict()
+        if cache_key:
+            cache.set(cache_key, payload, timeout=response_cache_seconds)
         _log_access(client, request, status.HTTP_200_OK)
-        return Response(availability.to_dict(), status=status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class PublicPickupReservationsView(APIView):

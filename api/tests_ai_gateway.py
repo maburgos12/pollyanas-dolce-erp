@@ -195,7 +195,7 @@ class AIGatewayApiTests(APITestCase):
         tool_keys = {row["key"] for row in response.data["tools"]}
         self.assertIn("erp.create_production_plan_draft", tool_keys)
 
-    def test_manifest_exposes_onyx_ready_contract(self):
+    def test_manifest_exposes_safe_gateway_contract(self):
         self.client.force_authenticate(self.user_dg)
         response = self.client.get(reverse("api_ai_gateway_manifest"))
         self.assertEqual(response.status_code, status.HTTP_200_OK)

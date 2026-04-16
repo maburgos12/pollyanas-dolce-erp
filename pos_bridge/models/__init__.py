@@ -1,11 +1,24 @@
 from pos_bridge.models.branch import PointBranch
 from pos_bridge.models.movements import PointProductionLine, PointTransferLine, PointWasteLine
 from pos_bridge.models.product import PointProduct
+from pos_bridge.models.product_history import (
+    PointProductCostReconciliation,
+    PointProductHistoryImport,
+    PointProductHistoryRow,
+)
 from pos_bridge.models.recipe import PointRecipeExtractionRun, PointRecipeNode, PointRecipeNodeLine
 from pos_bridge.models.sales import (
     PointDailyBranchIndicator,
     PointDailySale,
     PointMonthlySalesOfficial,
+)
+from pos_bridge.models.sales_pipeline import (
+    PointSalesDailyCategoryFact,
+    PointSalesDailyProductFact,
+    PointSalesExtractionTask,
+    PointSalesNormalized,
+    PointSalesQualityAlert,
+    PointSalesRawStaging,
 )
 from pos_bridge.models.snapshot import PointInventorySnapshot
 from pos_bridge.models.sync_job import PointExtractionLog, PointSyncJob
@@ -15,7 +28,16 @@ __all__ = [
     "PointDailySale",
     "PointDailyBranchIndicator",
     "PointMonthlySalesOfficial",
+    "PointSalesExtractionTask",
+    "PointSalesRawStaging",
+    "PointSalesNormalized",
+    "PointSalesDailyCategoryFact",
+    "PointSalesDailyProductFact",
+    "PointSalesQualityAlert",
     "PointProduct",
+    "PointProductHistoryImport",
+    "PointProductHistoryRow",
+    "PointProductCostReconciliation",
     "PointRecipeExtractionRun",
     "PointRecipeNode",
     "PointRecipeNodeLine",

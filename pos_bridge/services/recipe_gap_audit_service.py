@@ -10,8 +10,10 @@ from rapidfuzz import fuzz
 
 from maestros.models import Insumo
 from pos_bridge.config import load_point_bridge_settings
+from pos_bridge.models import PointExtractionLog
 from pos_bridge.services.point_http_client import PointHttpSessionClient
-from pos_bridge.utils.helpers import normalize_text, write_json_file
+from pos_bridge.utils.helpers import normalize_text, sanitize_sensitive_data, write_json_file
+from pos_bridge.utils.logger import get_job_logger
 from recetas.models import Receta, normalizar_codigo_point
 
 NON_RECIPE_FAMILIES = {
@@ -61,7 +63,28 @@ class PointRecipeGapAuditService:
 
     def __init__(self, settings=None, *, http_client_factory=None):
         self.settings = settings or load_point_bridge_settings()
-        self.http_client_factory = http_client_factory or (lambda: PointHttpSessionClient(self.settings))
+        self.http_client_factory = http_client_factory
+
+    def _build_http_client(self, *, sync_job=None):
+        if self.http_client_factory is not None:
+            return self.http_client_factory()
+        return PointHttpSessionClient(self.settings, audit_callback=self._make_audit_callback(sync_job=sync_job))
+
+    def _make_audit_callback(self, *, sync_job=None):
+        if sync_job is None:
+            return None
+
+        def _callback(*, event: str, message: str, context: dict | None = None) -> None:
+            safe_context = sanitize_sensitive_data({"event": event, **(context or {})})
+            PointExtractionLog.objects.create(
+                sync_job=sync_job,
+                level=PointExtractionLog.LEVEL_WARNING,
+                message=message,
+                context=safe_context,
+            )
+            get_job_logger(sync_job.id).warning("%s | %s", message, safe_context)
+
+        return _callback
 
     @property
     def reports_dir(self) -> Path:
@@ -75,6 +98,7 @@ class PointRecipeGapAuditService:
         branch_hint: str | None = None,
         product_codes: list[str] | None = None,
         limit: int | None = None,
+        sync_job=None,
     ) -> PointRecipeGapAuditResult:
         selected_codes = {normalizar_codigo_point(code) for code in (product_codes or []) if (code or "").strip()}
         audited_items: list[dict] = []
@@ -92,7 +116,7 @@ class PointRecipeGapAuditService:
             "missing_without_candidates": 0,
         }
 
-        with self.http_client_factory() as client:
+        with self._build_http_client(sync_job=sync_job) as client:
             workspace = client.login(branch_hint=branch_hint)
             summary["workspace"] = workspace["branch_name"]
             products = client.get_products()

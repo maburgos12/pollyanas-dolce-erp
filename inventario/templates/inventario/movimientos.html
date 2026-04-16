@@ -5,6 +5,7 @@
 
 {% block content %}
 <nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:home' %}">Dashboard</a>
   <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
   <a class="module-tab active" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
@@ -14,7 +15,28 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Centro de mando ERP</div>
+  <div class="card-header">Filtro rápido</div>
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-md-6">
+      <label for="q" class="form-label">Artículo, código o referencia</label>
+      <input id="q" name="q" type="text" class="form-control" value="{{ selected_q }}" placeholder="Buscar artículo, código Point o referencia">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-secondary">Aplicar</button>
+    </div>
+    {% if selected_q %}
+    <div class="col-auto">
+      <a class="btn btn-link" href="{% url 'inventario:movimientos' %}">Limpiar</a>
+    </div>
+    <div class="col-12">
+      <div class="muted">Filtro activo: {{ selected_q }}</div>
+    </div>
+    {% endif %}
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Resumen del módulo</div>
   <div class="kpi-grid">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
@@ -37,7 +59,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Expediente ERP del módulo</div>
+  <div class="card-header">Ficha del módulo</div>
   <div class="table-responsive">
     <table class="table">
       <tbody>
@@ -71,7 +93,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Workflow ERP del módulo</div>
+  <div class="card-header">Flujo del módulo</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -112,7 +134,7 @@
 
 {% if upstream_dependency_rows %}
 <section class="card">
-  <div class="card-header">Dependencias upstream ERP</div>
+  <div class="card-header">Dependencias previas</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -149,7 +171,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Cadena documental ERP</div>
+  <div class="card-header">Cadena de control</div>
   <div class="erp-chain-grid">
     {% for step in enterprise_chain %}
     <article class="erp-chain-card tone-{{ step.tone|default:'neutral' }}">
@@ -165,7 +187,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Ruta troncal ERP</div>
+  <div class="card-header">Ruta operativa</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -202,7 +224,7 @@
 
 {% if critical_path_rows %}
 <section class="card">
-  <div class="card-header">Ruta crítica ERP</div>
+  <div class="card-header">Prioridades de cierre</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -246,7 +268,7 @@
 
 {% if executive_radar_rows %}
 <section class="card">
-  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="card-header">Resumen de seguimiento</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -279,7 +301,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Madurez ERP de inventario</div>
+  <div class="card-header">Cobertura del módulo</div>
   <div class="kpi-grid">
     <article class="kpi-card">
       <div class="kpi-number is-success">{{ maturity_summary.completed_steps }}</div>
@@ -354,7 +376,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="card-header">Seguimiento por frente</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -420,7 +442,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Salud operativa ERP</div>
+  <div class="card-header">Salud operativa</div>
   <div class="kpi-mini">
     {% for card in operational_health_cards %}
     <div class="kpi-card">
@@ -491,7 +513,7 @@
     <input class="input-field" name="referencia" placeholder="Referencia">
     <button class="btn btn-primary" id="mov-submit" type="submit">Registrar movimiento</button>
   </form>
-  <p class="muted mt-2" id="mov-stock-msg">Selecciona un insumo para ver stock disponible y estado ERP.</p>
+  <p class="muted mt-2" id="mov-stock-msg">Selecciona un insumo para ver stock disponible y estado operativo.</p>
   {% else %}
   <p class="muted">Tu perfil está en modo lectura para Inventario.</p>
   {% endif %}
@@ -537,10 +559,10 @@
           <th>Fecha</th>
           <th>Tipo</th>
           <th>Insumo</th>
-          <th>Uso ERP</th>
+          <th>Uso operativo</th>
           <th class="text-end">Cantidad</th>
           <th>Referencia</th>
-          <th>Maestro ERP</th>
+          <th>Maestro</th>
         </tr>
       </thead>
       <tbody>
@@ -549,7 +571,7 @@
           <td>{{ m.fecha|date:"Y-m-d H:i" }}</td>
           <td><span class="badge bg-primary">{{ m.get_tipo_display }}</span></td>
           <td>
-            {{ m.insumo.nombre }}
+            {{ m.insumo.display_name }}
             {% if m.canonical_pending %}
             <div class="mt-1">
               <span class="badge bg-warning text-dark">{{ m.canonical_pending_label }}</span>
@@ -613,7 +635,7 @@
       const invalid = enforce && qty > 0 && qty > stock;
 
       if (!insumo.value) {
-        msg.textContent = "Selecciona un insumo para ver stock disponible y estado ERP.";
+        msg.textContent = "Selecciona un insumo para ver stock disponible y estado operativo.";
         submit.disabled = false;
         return;
       }

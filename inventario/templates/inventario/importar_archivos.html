@@ -4,22 +4,23 @@
 
 {% block content %}
 <nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:home' %}">Dashboard</a>
   <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
   <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
   <a class="module-tab" href="{% url 'inventario:alertas' %}">Alertas</a>
-  <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Referencias ERP</a>
+  <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Referencias</a>
   <a class="module-tab active" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
 </nav>
 
 <section class="card mb-3">
   <div class="module-note">
-    <strong>Centro ERP Enterprise activo</strong> · Esta pantalla ya se usa como puerta documental de inventario: origen operativo → artículo ERP → existencia aplicada → reabasto.
+    <strong>Carga operativa activa</strong> · Esta pantalla conecta origen, catálogo, existencia aplicada y señal de reabasto.
   </div>
 </section>
 
 <section class="card">
-  <div class="card-header">Workflow ERP de carga de almacén</div>
+  <div class="card-header">Flujo de carga de almacén</div>
   <div class="enterprise-flow-grid">
     {% for row in sync_workflow_rows %}
     <article class="enterprise-flow-card">
@@ -39,7 +40,7 @@
 
 {% if executive_radar_rows %}
 <section class="card">
-  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="card-header">Resumen de seguimiento</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -72,7 +73,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="card-header">Seguimiento por frente</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>

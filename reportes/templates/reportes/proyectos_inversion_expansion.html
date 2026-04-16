@@ -1,0 +1,506 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - Expansión{% endblock %}
+{% block page_title %}Reportes · Expansión{% endblock %}
+{% block body_class %}page-reportes-investment-projects{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406b">
+{% endblock %}
+
+{% block content %}
+<div class="investment-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="investment-header">
+    <article class="investment-hero">
+      <div class="investment-kicker">Inteligencia estratégica</div>
+      <h1 class="investment-title">Mapa ejecutivo de expansión</h1>
+      <p class="investment-copy">Esta vista prioriza sucursales con capacidad real de replicarse, detecta focos de riesgo y sugiere si la empresa está lista para abrir nuevas unidades sin tensionar el flujo.</p>
+      <div class="investment-meta">
+        <span class="investment-pill">Clasificación automática: expandir / vigilar / riesgo</span>
+        <span class="investment-pill">Política global de expansión</span>
+        <span class="investment-pill">Forecast de nuevas aperturas</span>
+      </div>
+    </article>
+    <aside class="investment-side">
+      <div class="investment-actions">
+        <a class="investment-action-link" href="{% url 'reportes:proyectos_inversion_expansion' %}">Actualizar análisis</a>
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion' %}">Volver al portafolio</a>
+      </div>
+      <div class="investment-muted">{{ global_summary.metrics.company_scope_note }}</div>
+    </aside>
+  </section>
+
+  {% if strategic_alerts %}
+  <section class="investment-alert-stack">
+    {% for alert in strategic_alerts %}
+    <article class="investment-alert {% if alert.severity == 'CRITICAL' %}is-critical{% endif %}">
+      <strong>{{ alert.code }}</strong>
+      <span>{{ alert.message }}</span>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="investment-kpis">
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Recomendación global</div>
+      <div class="investment-kpi-value">{{ global_summary.global_recommendation.decision }}</div>
+      <div class="investment-kpi-note">{{ global_summary.global_recommendation.explanation }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Capacidad de expansión</div>
+      <div class="investment-kpi-value">${{ global_summary.metrics.capacity_investment|floatformat:2|intcomma }}</div>
+      <div class="investment-kpi-note">Flujo libre total ${{ global_summary.metrics.free_cashflow_total|floatformat:2|intcomma }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Deuda / ingreso</div>
+      <div class="investment-kpi-value">{{ global_summary.metrics.debt_to_income_ratio_pct|floatformat:2 }}%</div>
+      <div class="investment-kpi-note">Deuda cartera expansión ${{ global_summary.metrics.debt_total|floatformat:2|intcomma }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Payback promedio</div>
+      <div class="investment-kpi-value">{{ global_summary.metrics.average_payback|default:"N/D" }}</div>
+      <div class="investment-kpi-note">Candidatas {{ global_summary.counts.expand }} · Riesgo {{ global_summary.counts.risk }}</div>
+    </article>
+  </section>
+
+  <section class="investment-layout">
+    <div class="investment-main">
+      <article class="investment-panel">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Filtros</div>
+            <h2 class="investment-panel-title">Mapa de expansión por sucursal</h2>
+          </div>
+        </div>
+        <form method="get">
+          <div class="investment-field-grid">
+            <div class="investment-field">
+              <label for="fecha_inicio_desde">Fecha inicio desde</label>
+              <input id="fecha_inicio_desde" type="date" name="fecha_inicio_desde" value="{% if filters.fecha_inicio_desde %}{{ filters.fecha_inicio_desde|date:'Y-m-d' }}{% endif %}">
+            </div>
+            <div class="investment-field">
+              <label for="fecha_inicio_hasta">Fecha inicio hasta</label>
+              <input id="fecha_inicio_hasta" type="date" name="fecha_inicio_hasta" value="{% if filters.fecha_inicio_hasta %}{{ filters.fecha_inicio_hasta|date:'Y-m-d' }}{% endif %}">
+            </div>
+            <div class="investment-field">
+              <label for="tipo_proyecto">Tipo de proyecto</label>
+              <select id="tipo_proyecto" name="tipo_proyecto">
+                <option value="">Todos</option>
+                {% for key, label in project_types %}
+                <option value="{{ key }}" {% if filters.tipo_proyecto == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="estatus">Estatus</label>
+              <select id="estatus" name="estatus">
+                <option value="">Todos</option>
+                {% for key, label in project_statuses %}
+                <option value="{{ key }}" {% if filters.estatus == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="sort_by">Ordenar por</label>
+              <select id="sort_by" name="sort_by">
+                {% for key, label in sort_options %}
+                <option value="{{ key }}" {% if selected_sort_by == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="investment-form-actions">
+            <button class="investment-button" type="submit">Aplicar filtros</button>
+            <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_expansion' %}">Limpiar</a>
+          </div>
+        </form>
+
+        <div class="investment-table-wrap">
+          <table class="investment-table">
+            <thead>
+              <tr>
+                <th>Sucursal</th>
+                <th>ROI</th>
+                <th>Payback</th>
+                <th>Cash-on-cash</th>
+                <th>Health</th>
+                <th>Clasificación</th>
+                <th>Recomendación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in decision_rows %}
+              <tr>
+                <td>
+                  <a class="investment-inline-link" href="{% url 'reportes:proyecto_inversion_detail' row.project.pk %}">{{ row.project.nombre_proyecto }}</a>
+                  <div class="investment-muted">
+                    {% if row.project.sucursal_relacionada %}{{ row.project.sucursal_relacionada.codigo }} · {{ row.project.sucursal_relacionada.nombre }}{% else %}Sucursal pendiente{% endif %}
+                  </div>
+                </td>
+                <td>{{ row.roi|floatformat:2 }}%</td>
+                <td>{% if row.payback_real %}{{ row.payback_real|floatformat:2 }} meses{% else %}N/D{% endif %}</td>
+                <td>{{ row.cash_on_cash|floatformat:2 }}%</td>
+                <td>
+                  <span class="investment-status-pill {% if row.health_score >= 80 %}is-active{% elif row.health_score < 50 %}is-warning{% endif %}">{{ row.health_score }}/100</span>
+                </td>
+                <td>
+                  <span class="investment-status-pill {% if row.classification == 'EXPANDIR' %}is-active{% elif row.classification == 'RIESGO' %}is-warning{% endif %}">{{ row.classification }}</span>
+                </td>
+                <td>
+                  <div>{{ row.recommendation }}</div>
+                  <div class="investment-muted">Flujo libre 3m ${{ row.average_free_cashflow_3m|default:0|floatformat:2|intcomma }} · Tendencia ventas {{ row.sales_trend_pct|default:0|floatformat:2 }}%</div>
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="7">No hay proyectos que coincidan con los filtros.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="investment-panel">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Calibración</div>
+            <h2 class="investment-panel-title">Sistema vs realidad del negocio</h2>
+          </div>
+          <div class="investment-actions">
+            <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_expansion' %}?report=calibration&export=xlsx">XLSX</a>
+            <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_expansion' %}?report=calibration&export=pdf">PDF</a>
+          </div>
+        </div>
+
+        <div class="investment-kpis">
+          <article class="investment-kpi-card">
+            <div class="investment-kpi-label">Precisión total</div>
+            <div class="investment-kpi-value">{{ calibration_context.accuracy.accuracy_pct|default:0|floatformat:2 }}%</div>
+            <div class="investment-kpi-note">{{ calibration_context.accuracy.accurate_cases }} aciertos de {{ calibration_context.accuracy.labeled_cases }} casos etiquetados</div>
+          </article>
+          <article class="investment-kpi-card">
+            <div class="investment-kpi-label">MAE Payback</div>
+            <div class="investment-kpi-value">{{ calibration_context.forecast_accuracy.payback_mae_months|default:"N/D" }}</div>
+            <div class="investment-kpi-note">{{ calibration_context.forecast_accuracy.evaluated_cases }} casos evaluados</div>
+          </article>
+          <article class="investment-kpi-card">
+            <div class="investment-kpi-label">Modo calibración</div>
+            <div class="investment-kpi-value">{% if calibration_context.settings.mode_enabled %}Activo{% else %}Inactivo{% endif %}</div>
+            <div class="investment-kpi-note">Mínimo {{ calibration_context.accuracy.minimum_sample_projects }} sucursales con {{ calibration_context.accuracy.minimum_months }} meses</div>
+          </article>
+          <article class="investment-kpi-card">
+            <div class="investment-kpi-label">Histórico insuficiente</div>
+            <div class="investment-kpi-value">{{ calibration_context.accuracy.insufficient_history_count }}</div>
+            <div class="investment-kpi-note">Proyectos sin profundidad suficiente para calibrar</div>
+          </article>
+        </div>
+
+        {% if calibration_context.data_gaps %}
+        <div class="investment-alert-stack" style="margin-top:1rem;">
+          {% for gap in calibration_context.data_gaps %}
+          <div class="investment-alert"><strong>Brecha</strong><span>{{ gap }}</span></div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if calibration_result %}
+        <div class="investment-chart-card investment-chart-card--summary" style="margin-top:1rem;">
+          <div class="investment-kpi-label">Resultado de recalibración</div>
+          {% if calibration_result.applied %}
+          <div class="investment-kpi-value">+{{ calibration_result.improvement_pct|default:0|floatformat:2 }}%</div>
+          <div class="investment-kpi-note">Mejora estimada en precisión vs configuración previa.</div>
+          {% else %}
+          <div class="investment-kpi-value">No aplicada</div>
+          <div class="investment-kpi-note">{{ calibration_result.reason }}</div>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="investment-grid-2" style="margin-top:1rem;">
+          <article class="investment-form-card">
+            <div class="investment-panel-head">
+              <div>
+                <div class="investment-kicker">Parámetros</div>
+                <h3 class="investment-panel-title">Pesos, umbrales y forecast</h3>
+              </div>
+            </div>
+            <form method="post">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="save_calibration_settings">
+              <div class="investment-field-grid">
+                <div class="investment-field">
+                  <label><input type="checkbox" name="mode_enabled" {% if calibration_context.settings.mode_enabled %}checked{% endif %}> Activar modo calibración</label>
+                </div>
+                <div class="investment-field">
+                  <label for="expand_min_health_score">Health para EXPANDIR</label>
+                  <input id="expand_min_health_score" type="number" name="expand_min_health_score" value="{{ calibration_context.settings.classification_thresholds.expand_min_health_score }}">
+                </div>
+                <div class="investment-field">
+                  <label for="monitor_min_health_score">Límite inferior VIGILAR</label>
+                  <input id="monitor_min_health_score" type="number" name="monitor_min_health_score" value="{{ calibration_context.settings.classification_thresholds.monitor_min_health_score }}">
+                </div>
+                <div class="investment-field">
+                  <label for="payback_tolerance_ratio">Factor payback</label>
+                  <input id="payback_tolerance_ratio" type="number" step="0.01" name="payback_tolerance_ratio" value="{{ calibration_context.settings.classification_thresholds.payback_tolerance_ratio }}">
+                </div>
+                <div class="investment-field">
+                  <label for="roi_target_factor">Factor ROI</label>
+                  <input id="roi_target_factor" type="number" step="0.01" name="roi_target_factor" value="{{ calibration_context.settings.classification_thresholds.roi_target_factor }}">
+                </div>
+                <div class="investment-field">
+                  <label for="weight_roi">Peso ROI</label>
+                  <input id="weight_roi" type="number" step="0.01" name="weight_roi" value="{{ calibration_context.settings.health_weights.roi }}">
+                </div>
+                <div class="investment-field">
+                  <label for="weight_free_cashflow">Peso flujo</label>
+                  <input id="weight_free_cashflow" type="number" step="0.01" name="weight_free_cashflow" value="{{ calibration_context.settings.health_weights.free_cashflow }}">
+                </div>
+                <div class="investment-field">
+                  <label for="weight_sales_growth">Peso crecimiento</label>
+                  <input id="weight_sales_growth" type="number" step="0.01" name="weight_sales_growth" value="{{ calibration_context.settings.health_weights.sales_growth }}">
+                </div>
+                <div class="investment-field">
+                  <label for="weight_capex">Peso CAPEX</label>
+                  <input id="weight_capex" type="number" step="0.01" name="weight_capex" value="{{ calibration_context.settings.health_weights.capex }}">
+                </div>
+                <div class="investment-field">
+                  <label for="weight_recovery">Peso recuperación</label>
+                  <input id="weight_recovery" type="number" step="0.01" name="weight_recovery" value="{{ calibration_context.settings.health_weights.recovery }}">
+                </div>
+                <div class="investment-field">
+                  <label for="preferred_window_months">Ventana forecast</label>
+                  <select id="preferred_window_months" name="preferred_window_months">
+                    <option value="3" {% if calibration_context.settings.forecast.preferred_window_months == 3 %}selected{% endif %}>3 meses</option>
+                    <option value="6" {% if calibration_context.settings.forecast.preferred_window_months == 6 %}selected{% endif %}>6 meses</option>
+                  </select>
+                </div>
+                <div class="investment-field">
+                  <label for="fallback_window_months">Ventana fallback</label>
+                  <select id="fallback_window_months" name="fallback_window_months">
+                    <option value="6" {% if calibration_context.settings.forecast.fallback_window_months == 6 %}selected{% endif %}>6 meses</option>
+                    <option value="3" {% if calibration_context.settings.forecast.fallback_window_months == 3 %}selected{% endif %}>3 meses</option>
+                  </select>
+                </div>
+                <div class="investment-field">
+                  <label for="negative_months_mode">Meses negativos</label>
+                  <select id="negative_months_mode" name="negative_months_mode">
+                    <option value="fallback_to_fallback_window" {% if calibration_context.settings.forecast.negative_months_mode == 'fallback_to_fallback_window' %}selected{% endif %}>Cambiar a ventana larga</option>
+                    <option value="include" {% if calibration_context.settings.forecast.negative_months_mode == 'include' %}selected{% endif %}>Incluir</option>
+                    <option value="exclude" {% if calibration_context.settings.forecast.negative_months_mode == 'exclude' %}selected{% endif %}>Excluir</option>
+                  </select>
+                </div>
+              </div>
+              <div class="investment-form-actions">
+                <button class="investment-button" type="submit">Guardar ajustes</button>
+              </div>
+            </form>
+            <form method="post" style="margin-top:0.85rem;">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="run_calibration">
+              <button class="investment-button is-ghost" type="submit">Recalibrar</button>
+            </form>
+          </article>
+
+          <article class="investment-panel">
+            <div class="investment-panel-head">
+              <div>
+                <div class="investment-kicker">Errores</div>
+                <h3 class="investment-panel-title">Patrones de desacierto</h3>
+              </div>
+            </div>
+            <div class="investment-portfolio-list">
+              {% for row in calibration_context.errors_common %}
+              <article class="investment-project-row">
+                <div class="investment-project-top">
+                  <strong>{{ row.pattern }}</strong>
+                  <span class="investment-pill">{{ row.count }}</span>
+                </div>
+              </article>
+              {% empty %}
+              <div class="investment-empty">Aún no hay suficientes casos etiquetados para detectar patrones de error.</div>
+              {% endfor %}
+            </div>
+          </article>
+        </div>
+
+        <div class="investment-table-wrap" style="margin-top:1rem;">
+          <table class="investment-table">
+            <thead>
+              <tr>
+                <th>Sucursal</th>
+                <th>Sistema</th>
+                <th>Real</th>
+                <th>Diferencia</th>
+                <th>Health</th>
+                <th>Meses</th>
+                <th>Capturar verdad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in calibration_context.rows %}
+              <tr>
+                <td>{{ row.project.nombre_proyecto }}</td>
+                <td>{{ row.classification }}</td>
+                <td>{{ row.real_classification|default:"-" }}</td>
+                <td>{{ row.difference }}</td>
+                <td>{{ row.health_score }}/100</td>
+                <td>{{ row.recent_month_count }}</td>
+                <td>
+                  <form method="post" class="investment-inline-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="set_real_classification">
+                    <input type="hidden" name="project_id" value="{{ row.project.pk }}">
+                    <select name="real_classification">
+                      <option value="">Sin definir</option>
+                      {% for key, label in real_classification_choices %}
+                      <option value="{{ key }}" {% if row.real_classification == key %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                    <button class="investment-button is-ghost" type="submit">Guardar</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+
+    <aside class="investment-sidebar">
+      <article class="investment-panel">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Policy engine</div>
+            <h2 class="investment-panel-title">Bloqueos y disciplina financiera</h2>
+          </div>
+        </div>
+        <div class="investment-mini-kpis">
+          <div class="investment-mini-kpi">
+            <span class="investment-muted">Umbral flujo libre</span>
+            <strong>${{ global_summary.policy.min_free_cashflow_total|floatformat:2|intcomma }}</strong>
+          </div>
+          <div class="investment-mini-kpi">
+            <span class="investment-muted">Máx. deuda / ingreso</span>
+            <strong>{{ global_summary.policy.max_debt_to_income_ratio|floatformat:2 }}%</strong>
+          </div>
+          <div class="investment-mini-kpi">
+            <span class="investment-muted">Máx. payback promedio</span>
+            <strong>{{ global_summary.policy.max_average_payback_months|floatformat:2 }} meses</strong>
+          </div>
+        </div>
+        {% if global_summary.global_recommendation.blocked_reasons %}
+        <div class="investment-alert-stack">
+          {% for reason in global_summary.global_recommendation.blocked_reasons %}
+          <div class="investment-alert is-critical"><strong>Bloqueo</strong><span>{{ reason }}</span></div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if global_summary.global_recommendation.advisory_reasons %}
+        <div class="investment-alert-stack">
+          {% for reason in global_summary.global_recommendation.advisory_reasons %}
+          <div class="investment-alert"><strong>Precaución</strong><span>{{ reason }}</span></div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </article>
+
+      <article class="investment-form-card">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Forecast</div>
+            <h2 class="investment-panel-title">Nueva sucursal</h2>
+          </div>
+        </div>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="run_expansion_forecast">
+          <div class="investment-field-grid">
+            <div class="investment-field">
+              <label for="base_project_id">Sucursal base</label>
+              <select id="base_project_id" name="base_project_id">
+                <option value="">Portafolio comparable</option>
+                {% for project in base_projects %}
+                <option value="{{ project.id }}">{{ project.nombre_proyecto }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="scenario">Escenario</label>
+              <select id="scenario" name="scenario">
+                {% for key, label in forecast_scenarios %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="investment_estimate">Inversión estimada</label>
+              <input id="investment_estimate" type="number" step="0.01" name="investment_estimate" placeholder="0.00">
+            </div>
+            <div class="investment-field">
+              <label for="location_reference">Ubicación / zona</label>
+              <input id="location_reference" type="text" name="location_reference" placeholder="Centro, plaza, corredor o ciudad">
+            </div>
+          </div>
+          <div class="investment-form-actions">
+            <button class="investment-button" type="submit">Simular apertura</button>
+          </div>
+        </form>
+
+        {% if opening_recommendation %}
+        <div class="investment-chart-card investment-chart-card--summary" style="margin-top:1rem;">
+          <div class="investment-kpi-label">Recomendación automática</div>
+          <div class="investment-kpi-value">{{ opening_recommendation.decision }}</div>
+          <div class="investment-kpi-note">{{ opening_recommendation.explanation }}</div>
+          <div class="investment-mini-kpis">
+            <div class="investment-mini-kpi">
+              <span class="investment-muted">Sucursales sugeridas</span>
+              <strong>{{ opening_recommendation.recommended_branch_count }}</strong>
+            </div>
+            <div class="investment-mini-kpi">
+              <span class="investment-muted">Inversión sugerida</span>
+              <strong>${{ opening_recommendation.suggested_investment|floatformat:2|intcomma }}</strong>
+            </div>
+            <div class="investment-mini-kpi">
+              <span class="investment-muted">Riesgo</span>
+              <strong>{{ forecast_payload.outputs.risk_level }}</strong>
+            </div>
+          </div>
+          <div class="investment-mini-kpis">
+            <div class="investment-mini-kpi">
+              <span class="investment-muted">Ventas proyectadas</span>
+              <strong>${{ forecast_payload.outputs.projected_sales|default:0|floatformat:2|intcomma }}</strong>
+            </div>
+            <div class="investment-mini-kpi">
+              <span class="investment-muted">Flujo estimado</span>
+              <strong>${{ forecast_payload.outputs.projected_free_cashflow|default:0|floatformat:2|intcomma }}</strong>
+            </div>
+            <div class="investment-mini-kpi">
+              <span class="investment-muted">Payback esperado</span>
+              <strong>{% if forecast_payload.outputs.projected_payback_months %}{{ forecast_payload.outputs.projected_payback_months|floatformat:2 }} meses{% else %}N/D{% endif %}</strong>
+            </div>
+          </div>
+          <div class="investment-muted">Fecha estimada de recuperación: {{ forecast_payload.outputs.projected_close_date|default:"No disponible" }}</div>
+          {% if forecast_payload.data_gaps %}
+          <div class="investment-alert-stack">
+            {% for gap in forecast_payload.data_gaps %}
+            <div class="investment-alert"><strong>Dato pendiente</strong><span>{{ gap }}</span></div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </article>
+    </aside>
+  </section>
+</div>
+{% endblock %}

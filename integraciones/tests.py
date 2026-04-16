@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import tempfile
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from io import StringIO
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
@@ -13,11 +15,20 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.models import AuditLog
+from core.models import Sucursal
 from inventario.models import AlmacenSyncRun
+from integraciones.management.commands.sync_pickup_catalog import Command as SyncPickupCatalogCommand
 from maestros.models import Insumo, InsumoAlias, PointPendingMatch, UnidadMedida
 from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
 
 from .models import PublicApiAccessLog, PublicApiClient
+from .views import (
+    EXECUTIVE_STATUS_CRITICAL,
+    EXECUTIVE_STATUS_DELAYED,
+    EXECUTIVE_STATUS_OK,
+    EXECUTIVE_STATUS_PARTIAL,
+    _build_executive_semaphore,
+)
 
 
 User = get_user_model()
@@ -45,6 +56,11 @@ class IntegracionesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Integraciones")
         self.assertContains(response, "Centro de mando ERP")
+        self.assertContains(response, "Monitor de integraciones Point")
+        self.assertContains(response, "Semáforo ejecutivo del corte")
+        self.assertContains(response, "Acciones manuales seguras")
+        self.assertContains(response, "Schedules, ventanas y auditoría")
+        self.assertContains(response, "Jobs recientes Point")
         self.assertContains(response, "Expediente ERP del módulo")
         self.assertContains(response, "Workflow ERP del módulo")
         self.assertContains(response, "Clientes API registrados")
@@ -84,6 +100,11 @@ class IntegracionesPanelTests(TestCase):
         self.assertIn("executive_radar_rows", response.context)
         self.assertIn("release_gate_rows", response.context)
         self.assertIn("release_gate_completion", response.context)
+        self.assertIn("integration_monitor", response.context)
+        self.assertIn("executive_semaphore", response.context["integration_monitor"])
+        self.assertIn("sales_cards", response.context["integration_monitor"])
+        self.assertIn("pipeline_rows", response.context["integration_monitor"])
+        self.assertIn("schedule_rows", response.context["integration_monitor"])
 
     def test_create_client_shows_generated_key_once(self):
         self.client.force_login(self.admin)
@@ -240,6 +261,59 @@ class IntegracionesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "/api/public/v1/insumos/")
 
+    @patch("pos_bridge.tasks.celery_tasks.task_analytics_refresh_cycle.delay")
+    def test_manual_analytics_refresh_is_queued_and_audited(self, delay_mock):
+        cache.delete("integraciones:analytics-refresh-lock")
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            self.url,
+            {
+                "action": "refresh_analytics_monitor",
+                "reference_date": "2026-04-05",
+                "lookback_days": "7",
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        delay_mock.assert_called_once_with(
+            reference_date_iso="2026-04-05",
+            lookback_days=7,
+            triggered_by_id=self.admin.id,
+        )
+        audit = AuditLog.objects.filter(action="INTEGRATIONS_ANALYTICS_REFRESH_REQUESTED").latest("timestamp")
+        self.assertEqual(audit.payload["scope"], "analytics_only")
+        self.assertEqual(audit.payload["reference_date"], "2026-04-05")
+        self.assertEqual(cache.get("integraciones:analytics-refresh-lock"), "2026-04-05")
+        cache.delete("integraciones:analytics-refresh-lock")
+
+    @patch("pos_bridge.tasks.celery_tasks.task_operations_automation_cycle.delay")
+    def test_manual_operations_refresh_is_queued_and_audited(self, delay_mock):
+        cache.delete("integraciones:operational-refresh-lock")
+        branch = Sucursal.objects.create(codigo="TEST_BRANCH", nombre="Sucursal test", activa=True)
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            self.url,
+            {
+                "action": "refresh_operations_monitor",
+                "reference_date": "2026-04-05",
+                "lookback_days": "5",
+                "sucursal_id": str(branch.id),
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        delay_mock.assert_called_once_with(
+            reference_date_iso="2026-04-05",
+            lookback_days=5,
+            sucursal_id=branch.id,
+            triggered_by_id=self.admin.id,
+        )
+        audit = AuditLog.objects.filter(action="INTEGRATIONS_OPERATIONAL_REFRESH_REQUESTED").latest("timestamp")
+        self.assertEqual(audit.payload["scope"], "operations_cycle")
+        self.assertEqual(audit.payload["sucursal_id"], branch.id)
+        self.assertEqual(cache.get("integraciones:operational-refresh-lock"), "2026-04-05")
+        cache.delete("integraciones:operational-refresh-lock")
+
     def test_logs_filters_by_status_and_client(self):
         client_ok, _ = PublicApiClient.create_with_generated_key(nombre="ERP OK", descripcion="")
         client_err, _ = PublicApiClient.create_with_generated_key(nombre="ERP ERR", descripcion="")
@@ -260,6 +334,8 @@ class IntegracionesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "/api/public/v1/pedidos/")
         self.assertNotContains(response, "/api/public/v1/insumos/")
+
+
     def test_logs_filters_by_date_range(self):
         client, _ = PublicApiClient.create_with_generated_key(nombre="ERP FECHA", descripcion="")
         recent = PublicApiAccessLog.objects.create(
@@ -517,6 +593,112 @@ class IntegracionesPanelTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Alertas operativas")
         self.assertContains(response, "Observaciones de catálogo comercial")
+
+
+class ExecutiveSemaphoreTests(TestCase):
+    def _build_cards(self, *, point_date, fact_date, dashboard_date, authoritative_date=None):
+        return [
+            {"key": "point_daily_sale", "latest_date": point_date},
+            {"key": "point_sales_v2", "latest_date": point_date},
+            {"key": "authoritative_sales", "latest_date": authoritative_date or point_date},
+            {"key": "fact_venta_diaria", "latest_date": fact_date},
+            {"key": "dashboard_materialized", "latest_date": dashboard_date},
+        ]
+
+    def _schedule_rows(self):
+        return [
+            {"key": "ventas", "schedule_label": "01:30", "enabled": True},
+            {"key": "analytics", "schedule_label": "03:35", "enabled": True},
+        ]
+
+    def test_executive_semaphore_marks_ok_when_cut_is_loaded(self):
+        result = _build_executive_semaphore(
+            reference_date=date(2026, 4, 7),
+            now=timezone.make_aware(datetime(2026, 4, 7, 6, 0)),
+            sales_cards=self._build_cards(
+                point_date=date(2026, 4, 6),
+                fact_date=date(2026, 4, 6),
+                dashboard_date=date(2026, 4, 6),
+            ),
+            pipeline_rows=[],
+            pending_windows=[],
+            quality_alerts=[],
+            recent_point_jobs=[],
+            analytic_audits=[],
+            schedule_rows=self._schedule_rows(),
+        )
+        self.assertEqual(result["status_code"], EXECUTIVE_STATUS_OK)
+        self.assertEqual(result["recommended_action"]["kind"], "none")
+
+    def test_executive_semaphore_marks_partial_inside_normal_window(self):
+        result = _build_executive_semaphore(
+            reference_date=date(2026, 4, 7),
+            now=timezone.make_aware(datetime(2026, 4, 7, 2, 15)),
+            sales_cards=self._build_cards(
+                point_date=date(2026, 4, 5),
+                fact_date=date(2026, 4, 5),
+                dashboard_date=date(2026, 4, 5),
+            ),
+            pipeline_rows=[],
+            pending_windows=[],
+            quality_alerts=[],
+            recent_point_jobs=[],
+            analytic_audits=[],
+            schedule_rows=self._schedule_rows(),
+        )
+        self.assertEqual(result["status_code"], EXECUTIVE_STATUS_PARTIAL)
+        self.assertEqual(result["recommended_action"]["kind"], "wait")
+
+    def test_executive_semaphore_marks_technical_delay_when_dashboard_lags(self):
+        result = _build_executive_semaphore(
+            reference_date=date(2026, 4, 7),
+            now=timezone.make_aware(datetime(2026, 4, 7, 6, 0)),
+            sales_cards=self._build_cards(
+                point_date=date(2026, 4, 6),
+                fact_date=date(2026, 4, 6),
+                dashboard_date=date(2026, 4, 5),
+            ),
+            pipeline_rows=[],
+            pending_windows=[],
+            quality_alerts=[],
+            recent_point_jobs=[],
+            analytic_audits=[],
+            schedule_rows=self._schedule_rows(),
+        )
+        self.assertEqual(result["status_code"], EXECUTIVE_STATUS_DELAYED)
+        self.assertEqual(result["blocking_layer"], "Dashboard materializado")
+        self.assertEqual(result["recommended_action"]["kind"], "refresh_analytics")
+
+    def test_executive_semaphore_marks_critical_when_recent_sales_failure_blocks_cut(self):
+        failing_job = type(
+            "Job",
+            (),
+            {
+                "job_type": "sales",
+                "status": "FAILED",
+                "started_at": timezone.make_aware(datetime(2026, 4, 7, 5, 10)),
+                "finished_at": timezone.make_aware(datetime(2026, 4, 7, 5, 20)),
+                "error_message": "Point timeout",
+            },
+        )()
+        result = _build_executive_semaphore(
+            reference_date=date(2026, 4, 7),
+            now=timezone.make_aware(datetime(2026, 4, 7, 6, 0)),
+            sales_cards=self._build_cards(
+                point_date=date(2026, 4, 5),
+                fact_date=date(2026, 4, 5),
+                dashboard_date=date(2026, 4, 5),
+            ),
+            pipeline_rows=[],
+            pending_windows=[],
+            quality_alerts=[],
+            recent_point_jobs=[failing_job],
+            analytic_audits=[],
+            schedule_rows=self._schedule_rows(),
+        )
+        self.assertEqual(result["status_code"], EXECUTIVE_STATUS_CRITICAL)
+        self.assertEqual(result["blocking_layer"], "Point ventas")
+        self.assertEqual(result["recommended_action"]["kind"], "refresh_operations")
 
 
 class SyncPickupCatalogCommandTests(TestCase):
@@ -865,3 +1047,19 @@ class IntegracionesMaintenanceCommandTests(TestCase):
         self.assertIsNotNone(audit)
         self.assertEqual(audit.user_id, admin.id)
         self.assertEqual((audit.payload or {}).get("source"), "CLI")
+
+
+class SyncPickupCatalogBranchStatusTests(TestCase):
+    def test_build_branch_status_report_uses_operational_branch_helper(self):
+        Sucursal.objects.create(codigo="COL", nombre="Colosio", activa=True)
+        Sucursal.objects.create(
+            codigo="COLOSIO",
+            nombre="Colosio",
+            activa=True,
+            fecha_apertura=timezone.localdate() + timedelta(days=2),
+        )
+
+        rows = SyncPickupCatalogCommand()._build_branch_status_report(freshness_seconds=60)
+        colosio_row = next(row for row in rows if row["branch_code"] == "COLOSIO")
+
+        self.assertFalse(colosio_row["erp_branch_found"])

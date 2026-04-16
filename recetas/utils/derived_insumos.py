@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from maestros.utils.canonical_catalog import latest_costo_canonico
-from recetas.models import Receta, RecetaPresentacion
+from recetas.models import LineaReceta, Receta, RecetaPresentacion
 from recetas.utils.normalizacion import normalizar_nombre
 
 
@@ -182,6 +182,9 @@ def sync_preparacion_insumo(receta: Receta) -> DerivedSyncStats:
     if receta.tipo != Receta.TIPO_PREPARACION:
         existing = Insumo.objects.filter(codigo=code).order_by("id").first()
         if existing and existing.activo:
+            downstream_usage_exists = LineaReceta.objects.filter(insumo=existing).exclude(receta=receta).exists()
+            if downstream_usage_exists:
+                return stats
             existing.activo = False
             existing.save(update_fields=["activo"])
             stats.insumos_desactivados += 1

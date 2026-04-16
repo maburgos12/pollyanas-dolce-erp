@@ -13,7 +13,9 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from core.audit import log_event
 from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.stock_trace import TRACE_IMPORTED_MOVEMENT, TRACE_IMPORT_INVENTORY, set_stock_trace
 from inventario.utils.reorder import calcular_punto_reorden
 from maestros.models import Insumo, InsumoAlias, UnidadMedida
 from maestros.utils.canonical_catalog import canonical_insumo
@@ -89,10 +91,13 @@ class ImportSummary:
     existencias_updated: int = 0
     movimientos_created: int = 0
     movimientos_skipped_duplicate: int = 0
+    updated_existencia_ids: list[int] | None = None
     errores: list[str] | None = None
     pendientes: list[dict[str, Any]] | None = None
 
     def __post_init__(self):
+        if self.updated_existencia_ids is None:
+            self.updated_existencia_ids = []
         if self.errores is None:
             self.errores = []
         if self.pendientes is None:
@@ -523,7 +528,7 @@ def audit_folder(folderpath: str, fuzzy_threshold: int = 90) -> dict[str, Any]:
                 "metodo_match": result.metodo,
                 "score": f"{result.score:.1f}",
                 "insumo_id": result.insumo.id if result.insumo else "",
-                "insumo_nombre": result.insumo.nombre if result.insumo else "",
+                "insumo_nombre": getattr(result.insumo, "display_name", "") if result.insumo else "",
                 "sugerencia": result.sugerencia or "",
             }
         )
@@ -557,14 +562,42 @@ def _ensure_alias(raw_name: str, insumo: Insumo) -> bool:
     return created
 
 
-def _apply_movimiento(movimiento: MovimientoInventario) -> None:
+def _apply_movimiento(movimiento: MovimientoInventario, *, trace_context: dict[str, Any] | None = None) -> ExistenciaInsumo:
     existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=movimiento.insumo)
     if movimiento.tipo == MovimientoInventario.TIPO_ENTRADA:
         existencia.stock_actual += movimiento.cantidad
     else:
         existencia.stock_actual -= movimiento.cantidad
     existencia.actualizado_en = timezone.now()
-    existencia.save(update_fields=["stock_actual", "actualizado_en"])
+    set_stock_trace(
+        existencia,
+        source=TRACE_IMPORTED_MOVEMENT,
+        process=str((trace_context or {}).get("process") or "inventario.import_folder"),
+        effective_at=movimiento.fecha,
+        reference=movimiento.referencia or str(movimiento.id),
+        user=(trace_context or {}).get("user"),
+        details={
+            "movement_id": movimiento.id,
+            "movement_type": movimiento.tipo,
+            "batch_token": str((trace_context or {}).get("batch_token") or ""),
+        },
+    )
+    existencia.save(update_fields=["stock_actual", "actualizado_en", "trazabilidad_stock"])
+    log_event(
+        (trace_context or {}).get("user"),
+        "IMPORT",
+        "inventario.ExistenciaInsumo",
+        existencia.id,
+        {
+            "trace_source": TRACE_IMPORTED_MOVEMENT,
+            "batch_token": str((trace_context or {}).get("batch_token") or ""),
+            "movement_id": movimiento.id,
+            "movement_type": movimiento.tipo,
+            "reference": movimiento.referencia,
+            "to_stock": str(existencia.stock_actual),
+        },
+    )
+    return existencia
 
 
 def _build_source_hash_legacy(
@@ -621,6 +654,7 @@ def import_folder(
     alias_threshold: int = 95,
     create_missing_insumos: bool = False,
     dry_run: bool = False,
+    trace_context: dict[str, Any] | None = None,
 ) -> ImportSummary:
     include_sources = include_sources or {"inventario", "entradas", "salidas", "merma"}
     summary = ImportSummary()
@@ -692,6 +726,19 @@ def import_folder(
                 existencia.consumo_diario_promedio = row.consumo_diario_promedio
             existencia.dias_llegada_pedido = max(int(row.dias_llegada_pedido), 0)
             existencia.actualizado_en = timezone.now()
+            set_stock_trace(
+                existencia,
+                source=TRACE_IMPORT_INVENTORY,
+                process=str((trace_context or {}).get("process") or "inventario.import_folder"),
+                effective_at=timezone.now(),
+                reference=row.source,
+                user=(trace_context or {}).get("user"),
+                details={
+                    "source_row": row.row_index,
+                    "batch_token": str((trace_context or {}).get("batch_token") or ""),
+                    "stock_source": row.source,
+                },
+            )
             existencia.save(
                 update_fields=[
                     "stock_actual",
@@ -702,9 +749,24 @@ def import_folder(
                     "dias_llegada_pedido",
                     "consumo_diario_promedio",
                     "actualizado_en",
+                    "trazabilidad_stock",
                 ]
             )
             summary.existencias_updated += 1
+            summary.updated_existencia_ids.append(int(existencia.id))
+            log_event(
+                (trace_context or {}).get("user"),
+                "IMPORT",
+                "inventario.ExistenciaInsumo",
+                existencia.id,
+                {
+                    "trace_source": TRACE_IMPORT_INVENTORY,
+                    "batch_token": str((trace_context or {}).get("batch_token") or ""),
+                    "source_row": row.row_index,
+                    "stock_source": row.source,
+                    "to_stock": str(existencia.stock_actual),
+                },
+            )
 
     valid_movement_sources = include_sources.intersection({"entradas", "salidas", "merma"})
     for row in movement_rows:
@@ -776,7 +838,8 @@ def import_folder(
             referencia=row.referencia[:120],
             source_hash=source_hash,
         )
-        _apply_movimiento(movimiento)
+        existencia = _apply_movimiento(movimiento, trace_context=trace_context)
+        summary.updated_existencia_ids.append(int(existencia.id))
         summary.movimientos_created += 1
 
     if dry_run:

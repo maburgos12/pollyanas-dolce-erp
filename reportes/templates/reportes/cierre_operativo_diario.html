@@ -1,0 +1,368 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - Cierre Operativo Diario{% endblock %}
+{% block page_title %}Reportes · Cierre Operativo Diario{% endblock %}
+{% block body_class %}page-reportes-cierre-operativo{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260408a">
+<style>
+  .closure-shell { display:grid; gap:18px; }
+  .closure-grid-4 { display:grid; gap:12px; grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .closure-grid-2 { display:grid; gap:14px; grid-template-columns:1.15fr .85fr; }
+  .closure-card { padding:14px 16px; border-radius:20px; border:1px solid rgba(145,36,86,.10); background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(255,248,251,.96)); box-shadow:0 10px 30px rgba(93,22,59,.04); }
+  .closure-card-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px; }
+  .closure-card-title { margin:0; color:#42292e; font-size:1.05rem; }
+  .closure-copy { margin:0; color:#6f6170; line-height:1.4; }
+  .closure-kpi-value { font-size:1.8rem; line-height:1; font-weight:700; color:#922456; margin-bottom:6px; }
+  .closure-kpi-value.success { color:#236d53; }
+  .closure-kpi-value.warning { color:#9b6b00; }
+  .closure-kpi-value.danger { color:#a53434; }
+  .closure-pill-row, .closure-meta-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .closure-pill { padding:7px 11px; border-radius:999px; font-size:.82rem; font-weight:700; background:rgba(122,40,83,.08); color:#7a2853; }
+  .closure-pill.success { background:rgba(35,109,83,.12); color:#236d53; }
+  .closure-pill.warning { background:rgba(185,140,36,.14); color:#8f6800; }
+  .closure-pill.danger { background:rgba(188,59,59,.13); color:#9c2f2f; }
+  .closure-note-list { display:grid; gap:10px; }
+  .closure-note-item { padding:12px 14px; border-radius:16px; border:1px solid rgba(145,36,86,.08); background:rgba(255,255,255,.84); }
+  .closure-note-item strong { display:block; margin-bottom:4px; }
+  .closure-table { width:100%; border-collapse:collapse; font-size:.92rem; }
+  .closure-table th, .closure-table td { padding:10px 8px; border-bottom:1px solid rgba(145,36,86,.08); vertical-align:top; }
+  .closure-table th { color:#7d6873; text-transform:uppercase; letter-spacing:.08em; font-size:.76rem; text-align:left; }
+  .closure-table td:last-child, .closure-table th:last-child { text-align:right; }
+  .closure-table td.is-right, .closure-table th.is-right { text-align:right; }
+  .closure-muted { color:#7d6873; font-size:.88rem; }
+  .closure-alert-success { border-color:rgba(35,109,83,.20); background:rgba(35,109,83,.06); }
+  .closure-alert-warning { border-color:rgba(185,140,36,.20); background:rgba(185,140,36,.08); }
+  .closure-alert-danger { border-color:rgba(188,59,59,.22); background:rgba(188,59,59,.08); }
+  .closure-source-list { display:grid; gap:10px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .closure-source-item { padding:12px 14px; border-radius:16px; border:1px solid rgba(145,36,86,.08); background:rgba(255,255,255,.92); }
+  .closure-source-item strong { display:block; margin-bottom:6px; color:#42292e; }
+  @media (max-width: 1180px) {
+    .closure-grid-4, .closure-grid-2, .closure-source-list { grid-template-columns:1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell closure-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Dirección general</div>
+      <h1 class="bi-hero-title">Cierre operativo diario</h1>
+      <p class="bi-copy">Conciliación diaria de ventas, producción, mermas e inventario con foco en lo que realmente entró desde Point y en lo que ya quedó visible en el ERP.</p>
+      <div class="closure-pill-row" style="margin-top:14px;">
+        <span class="closure-pill {% if closure.overall_status.tone == 'success' %}success{% elif closure.overall_status.tone == 'danger' %}danger{% else %}warning{% endif %}">
+          {{ closure.overall_status.label }}
+        </span>
+        <span class="closure-pill">Fecha auditada {{ target_date_iso }}</span>
+        <span class="closure-pill">Fecha operativa esperada {{ default_target_date_iso }}</span>
+      </div>
+      <p class="closure-copy" style="margin-top:10px;">{{ closure.overall_status.detail }}</p>
+    </div>
+    <div class="bi-hero-side">
+      <form class="bi-filterbar" method="get">
+        <div class="bi-control">
+          <label for="fecha">Fecha operativa</label>
+          <input id="fecha" name="fecha" type="date" value="{{ target_date_iso }}">
+        </div>
+        <div class="bi-control">
+          <label for="fecha_option">Atajos</label>
+          <select id="fecha_option" onchange="if (this.value) { document.getElementById('fecha').value = this.value; }">
+            <option value="">Elegir fecha reciente</option>
+            {% for option in date_options %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bi-control">
+          <button type="submit">Auditar fecha</button>
+        </div>
+      </form>
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card">
+          <span class="bi-status-label">Ventas visibles</span>
+          <strong>{{ closure.sales.visible_cut_snapshot_label|default:"Sin corte" }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Plan producción</span>
+          <strong>{{ production_snapshot.plan_hoy_estado }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Movimientos inventario</span>
+          <strong>{{ closure.inventory.movement_rows|intcomma }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Alertas del cierre</span>
+          <strong>{{ closure.alerts|length|intcomma }}</strong>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="closure-grid-4">
+    <article class="closure-card">
+      <div class="closure-kpi-value">{{ closure.sales.fact_amount|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Ventas del día</div>
+      <div class="closure-copy">{{ closure.sales.fact_units|floatformat:0|intcomma }} piezas · {{ closure.sales.fact_tickets|intcomma }} tickets</div>
+      <div class="closure-muted">Fuente visible: {{ closure.sales.visible_source }}</div>
+    </article>
+    <article class="closure-card">
+      <div class="closure-kpi-value {% if closure.production.fact_produced > 0 %}success{% else %}warning{% endif %}">{{ closure.production.fact_produced|floatformat:0|intcomma }}</div>
+      <div class="bi-kpi-label">Producción Point del día</div>
+      <div class="closure-copy">Venta fact {{ closure.production.fact_sold|floatformat:0|intcomma }} · merma fact {{ closure.production.fact_waste|floatformat:0|intcomma }}</div>
+      <div class="closure-muted">Plan visible del día: {{ closure.production.plan_units|floatformat:0|intcomma }} u</div>
+    </article>
+    <article class="closure-card">
+      <div class="closure-kpi-value {% if closure.waste.visible_units > 0 %}warning{% else %}success{% endif %}">{{ closure.waste.visible_units|floatformat:0|intcomma }}</div>
+      <div class="bi-kpi-label">Merma visible del día</div>
+      <div class="closure-copy">Point {{ closure.waste.raw_units|floatformat:0|intcomma }} · visible sucursal/CEDIS {{ closure.waste.visible_units|floatformat:0|intcomma }}</div>
+      <div class="closure-muted">Costo Point estimado ${{ closure.waste.raw_cost|floatformat:2|intcomma }}</div>
+    </article>
+    <article class="closure-card">
+      <div class="closure-kpi-value {% if closure.inventory.delta_stock == 0 %}success{% elif closure.inventory.delta_stock > 0 %}warning{% else %}danger{% endif %}">{{ closure.inventory.delta_stock|floatformat:3|intcomma }}</div>
+      <div class="bi-kpi-label">Diferencia stock</div>
+      <div class="closure-copy">Esperado al cierre {{ closure.inventory.expected_stock|floatformat:3|intcomma }} · visible actual {{ closure.inventory.visible_stock|floatformat:3|intcomma }}</div>
+      <div class="closure-muted">Sólo considera insumos con movimiento el día auditado. Comparación: {{ closure.inventory.comparison_scope }}.</div>
+    </article>
+  </section>
+
+  <section class="closure-grid-2">
+    <article class="closure-card">
+      <div class="closure-card-head">
+        <div>
+          <h2 class="closure-card-title">Publicación e integración</h2>
+          <p class="closure-copy">Máxima fecha en Point, fact y capa visible por dominio para detectar rezagos reales.</p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="closure-table">
+          <thead>
+            <tr>
+              <th>Dominio</th>
+              <th>Point</th>
+              <th>Fact</th>
+              <th>Visible</th>
+              <th class="is-right">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in closure.publication_rows %}
+            <tr>
+              <td><strong>{{ row.label }}</strong></td>
+              <td>{{ row.raw_max_date|date:"Y-m-d"|default:"Sin dato" }}</td>
+              <td>{{ row.fact_max_date|date:"Y-m-d"|default:"Sin dato" }}</td>
+              <td>{{ row.visible_max_date|date:"Y-m-d"|default:"Sin dato" }}</td>
+              <td class="is-right"><span class="closure-pill {% if row.publication.tone == 'success' %}success{% elif row.publication.tone == 'danger' %}danger{% else %}warning{% endif %}">{{ row.publication.label }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="closure-card">
+      <div class="closure-card-head">
+        <div>
+          <h2 class="closure-card-title">Alertas del cierre</h2>
+          <p class="closure-copy">Hallazgos operativos que impiden considerar el día completamente confiable.</p>
+        </div>
+      </div>
+      <div class="closure-note-list">
+        {% for alert in closure.alerts %}
+        <div class="closure-note-item {% if alert.tone == 'success' %}closure-alert-success{% elif alert.tone == 'danger' %}closure-alert-danger{% else %}closure-alert-warning{% endif %}">
+          <strong>{{ alert.label }}</strong>
+          <div class="closure-copy">{{ alert.detail }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="closure-grid-2">
+    {% for domain in closure.domains %}
+    <article class="closure-card">
+      <div class="closure-card-head">
+        <div>
+          <h2 class="closure-card-title">{{ domain.label }}</h2>
+          <p class="closure-copy">{{ domain.publication.detail }}</p>
+        </div>
+        <span class="closure-pill {% if domain.publication.tone == 'success' %}success{% elif domain.publication.tone == 'danger' %}danger{% else %}warning{% endif %}">{{ domain.publication.label }}</span>
+      </div>
+      <div class="closure-meta-row" style="margin-bottom:8px;">
+        <span class="closure-pill">Fuente: {{ domain.source_truth }}</span>
+        <span class="closure-pill">Visible: {{ domain.visible_source }}</span>
+      </div>
+      <div class="table-responsive">
+        <table class="closure-table">
+          <tbody>
+            {% if domain.key == "ventas" %}
+            <tr><th>Rows Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
+            <tr><th>Rows fact</th><td class="is-right">{{ domain.fact_rows|intcomma }}</td></tr>
+            <tr><th>Importe fact</th><td class="is-right">${{ domain.fact_amount|floatformat:2|intcomma }}</td></tr>
+            <tr><th>Unidades fact</th><td class="is-right">{{ domain.fact_units|floatformat:0|intcomma }}</td></tr>
+            <tr><th>Último sync</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin job" }}</td></tr>
+            <tr><th>Última publicación</th><td class="is-right">{{ domain.latest_audit.timestamp|date:"Y-m-d H:i"|default:"Sin auditoría" }}</td></tr>
+            {% elif domain.key == "produccion" %}
+            <tr><th>Rows Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
+            <tr><th>Rows fact</th><td class="is-right">{{ domain.fact_rows|intcomma }}</td></tr>
+            <tr><th>Producido fact</th><td class="is-right">{{ domain.fact_produced|floatformat:0|intcomma }}</td></tr>
+            <tr><th>Plan visible</th><td class="is-right">{{ domain.plan_units|floatformat:0|intcomma }} u</td></tr>
+            <tr><th>Último sync</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin job" }}</td></tr>
+            <tr><th>Nota</th><td class="is-right">{{ domain.plan_note }}</td></tr>
+            {% elif domain.key == "mermas" %}
+            <tr><th>Rows Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
+            <tr><th>Rows visibles</th><td class="is-right">{{ domain.visible_rows|intcomma }}</td></tr>
+            <tr><th>Merma Point</th><td class="is-right">{{ domain.raw_units|floatformat:0|intcomma }}</td></tr>
+            <tr><th>Merma visible</th><td class="is-right">{{ domain.visible_units|floatformat:0|intcomma }}</td></tr>
+            <tr><th>Último sync</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin job" }}</td></tr>
+            <tr><th>Última publicación</th><td class="is-right">{{ domain.latest_audit.timestamp|date:"Y-m-d H:i"|default:"Sin auditoría" }}</td></tr>
+            {% else %}
+            <tr><th>Movimientos del día</th><td class="is-right">{{ domain.movement_rows|intcomma }}</td></tr>
+            <tr><th>Insumos con movimiento</th><td class="is-right">{{ domain.movement_insumo_count|intcomma }}</td></tr>
+            <tr><th>Stock esperado al cierre</th><td class="is-right">{{ domain.expected_stock|floatformat:3|intcomma }}</td></tr>
+            <tr><th>Stock visible actual</th><td class="is-right">{{ domain.visible_stock|floatformat:3|intcomma }}</td></tr>
+            <tr><th>Última actualización stock visible</th><td class="is-right">{{ domain.visible_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
+            <tr><th>Último sync almacén OK</th><td class="is-right">{{ domain.latest_sync_run.started_at|date:"Y-m-d H:i"|default:"Sin sync OK" }}</td></tr>
+            <tr><th>Último sync almacén visto</th><td class="is-right">{{ domain.latest_sync_any.started_at|date:"Y-m-d H:i"|default:"Sin runs" }}{% if domain.latest_sync_any %} · {{ domain.latest_sync_any.status }}{% endif %}</td></tr>
+            <tr><th>Última reconstrucción fact</th><td class="is-right">{{ domain.fact_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
+            <tr><th>Comparación temporal</th><td class="is-right">{{ domain.comparison_scope }}</td></tr>
+            <tr><th>Origen stock visible</th><td class="is-right">{{ domain.trace_sources_text }}</td></tr>
+            <tr><th>Insumos sin traza</th><td class="is-right">{{ domain.untraceable_count|intcomma }}</td></tr>
+            <tr><th>Entradas del día</th><td class="is-right">{{ domain.entradas_dia|floatformat:3|intcomma }}</td></tr>
+            <tr><th>Salidas/consumo del día</th><td class="is-right">{{ domain.salidas_dia|floatformat:3|intcomma }}</td></tr>
+            <tr><th>Ajustes netos del día</th><td class="is-right">{{ domain.ajustes_netos|floatformat:3|intcomma }}</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+
+  <section class="closure-card">
+    <div class="closure-card-head">
+      <div>
+        <h2 class="closure-card-title">Comparativa operativa por sucursal</h2>
+        <p class="closure-copy">Lectura diaria para comparar producción, venta y merma visible por sucursal operativa.</p>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="closure-table">
+        <thead>
+          <tr>
+            <th>Sucursal</th>
+            <th class="is-right">Venta $</th>
+            <th class="is-right">Venta u</th>
+            <th class="is-right">Producción u</th>
+            <th class="is-right">Merma visible u</th>
+            <th class="is-right">Neto u</th>
+            <th class="is-right">Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in closure.branch_rows %}
+          <tr>
+            <td>
+              <strong>{{ row.branch_code }}</strong>
+              <div class="closure-muted">{{ row.branch_name }}</div>
+            </td>
+            <td class="is-right">${{ row.sales_amount|floatformat:2|intcomma }}</td>
+            <td class="is-right">{{ row.sales_units|floatformat:0|intcomma }}</td>
+            <td class="is-right">{{ row.produced_units|floatformat:0|intcomma }}</td>
+            <td class="is-right">{{ row.waste_units_visible|floatformat:0|intcomma }}</td>
+            <td class="is-right">{{ row.net_units|floatformat:0|intcomma }}</td>
+            <td class="is-right"><span class="closure-pill {% if row.tone == 'success' %}success{% elif row.tone == 'danger' %}danger{% else %}warning{% endif %}">{{ row.status }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="closure-grid-2">
+    <article class="closure-card">
+      <div class="closure-card-head">
+        <div>
+          <h2 class="closure-card-title">Desviaciones de stock vivo vs cierre auditado</h2>
+          <p class="closure-copy">Comparativo entre el stock esperado al cierre del día auditado y el inventario visible actual. Cada renglón se expresa en la unidad base del insumo.</p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="closure-table">
+          <thead>
+            <tr>
+              <th>Insumo</th>
+              <th>Unidad</th>
+              <th>Origen visible</th>
+              <th class="is-right">Esperado</th>
+              <th class="is-right">Visible</th>
+              <th class="is-right">Diferencia</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in closure.inventory_differences %}
+            <tr>
+              <td>{{ row.insumo_name }}</td>
+              <td title="{{ row.unit_name }}">{{ row.unit_code }}</td>
+              <td title="{{ row.trace_effective_at|default:'Sin fecha efectiva' }}">{{ row.trace_label }}</td>
+              <td class="is-right">{{ row.expected_stock|floatformat:3|intcomma }}</td>
+              <td class="is-right">{{ row.visible_stock|floatformat:3|intcomma }}</td>
+              <td class="is-right">{{ row.difference|floatformat:3|intcomma }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="6">No hay desviaciones abiertas para los insumos con movimiento del día.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="closure-card">
+      <div class="closure-card-head">
+        <div>
+          <h2 class="closure-card-title">Movimiento del día e interpretación</h2>
+          <p class="closure-copy">Separación explícita entre movimiento del día y saldo visible para evitar que una existencia total se lea como consumo diario.</p>
+        </div>
+      </div>
+      <table class="closure-table">
+        <tbody>
+          <tr><th>Fecha auditada</th><td class="is-right">{{ target_date_iso }}</td></tr>
+          <tr><th>Último movimiento capturado</th><td class="is-right">{{ closure.inventory.movement_latest_at|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
+          <tr><th>Entradas del día</th><td class="is-right">{{ closure.inventory.entradas_dia|floatformat:3|intcomma }}</td></tr>
+          <tr><th>Salidas/consumo del día</th><td class="is-right">{{ closure.inventory.salidas_dia|floatformat:3|intcomma }}</td></tr>
+          <tr><th>Ajustes netos del día</th><td class="is-right">{{ closure.inventory.ajustes_netos|floatformat:3|intcomma }}</td></tr>
+          <tr><th>Lectura correcta</th><td class="is-right">Cierre esperado del día vs stock vivo actual</td></tr>
+        </tbody>
+      </table>
+      <p class="closure-copy" style="margin-top:12px;">Si la fecha del stock visible es posterior a la fecha auditada, la diferencia no significa “consumo del día”; significa desviación entre el cierre esperado de ese día y la existencia viva actual.</p>
+    </article>
+  </section>
+
+  <section class="closure-card">
+    <div class="closure-card-head">
+      <div>
+        <h2 class="closure-card-title">Fuentes y notas de gobierno</h2>
+        <p class="closure-copy">Qué fuente manda por bloque para evitar lecturas falsas entre Point, plan y stock vivo.</p>
+      </div>
+    </div>
+    <div class="closure-source-list">
+      {% for note in closure.source_notes %}
+      <div class="closure-source-item">
+        <strong>{{ note.label }}</strong>
+        <div class="closure-copy">{{ note.detail }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -10,8 +10,15 @@ __pycache__
 *.pyd
 .DS_Store
 db.sqlite3
+test_db.sqlite3
 logs
 output
 storage
 backups
 staticfiles
+tmp
+_archive
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov

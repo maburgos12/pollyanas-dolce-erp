@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import date
 from datetime import timedelta
 from decimal import Decimal
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.db import OperationalError, ProgrammingError
@@ -40,8 +41,10 @@ from core.access import (
     can_view_recetas,
     can_view_rrhh,
     can_view_reportes,
+    can_view_orquestacion,
     is_branch_capture_only,
 )
+from core.cache_versions import get_or_set_versioned_cache
 from maestros.models import Proveedor, PointPendingMatch
 from maestros.models import CostoInsumo, Insumo
 from maestros.utils.canonical_catalog import (
@@ -60,13 +63,43 @@ from crm.models import PedidoCliente
 from control.models import VentaPOS, MermaPOS
 from rrhh.models import Empleado, NominaPeriodo
 from logistica.models import RutaEntrega, EntregaRuta
-from pos_bridge.models import PointDailySale, PointDailyBranchIndicator
+from pos_bridge.models import PointDailyBranchIndicator, PointSalesDailyCategoryFact, PointSalesDailyProductFact
+from reportes.dashboard_daily_ops_dataset import get_dashboard_daily_ops_dataset
+from reportes.dashboard_full_dataset import (
+    get_materialized_dashboard_full_payload,
+    normalize_dashboard_months_window,
+)
+from reportes.dashboard_sales_dataset import get_dashboard_sales_dataset
 from reportes.executive_panels import build_executive_bi_panels, _partial_month_amount_quantity
+from reportes.views import _sales_refresh_status
+from recetas.utils.derived_product_presentations import get_total_cost_map
+from orquestacion.services.chat_service import (
+    get_chat_conversation,
+    list_chat_conversations,
+    serialize_conversation,
+    serialize_conversation_detail,
+)
+from ventas.services.sales_canonical_source import (
+    OFFICIAL_POINT_SOURCE as CANONICAL_OFFICIAL_POINT_SOURCE,
+    POINT_BRIDGE_SALES_SOURCE as CANONICAL_POINT_BRIDGE_SALES_SOURCE,
+    RECENT_POINT_SOURCE as CANONICAL_RECENT_POINT_SOURCE,
+    build_sales_source_context as build_canonical_sales_source_context,
+    get_sales_source_context as get_canonical_sales_source_context,
+    operational_sales_filters as canonical_operational_sales_filters,
+    operational_sales_rows_for_date as canonical_operational_sales_rows_for_date,
+    point_sales_month_total as canonical_point_sales_month_total,
+    sales_history_queryset as canonical_sales_history_queryset,
+    sales_previous_dates as canonical_sales_previous_dates,
+    sales_rows_for_date as canonical_sales_rows_for_date,
+    sales_rows_for_month as canonical_sales_rows_for_month,
+)
+from ventas.services.sales_read_service import get_daily_sales_bulk, get_sales_range
+from ventas.models import VentaAutoritativaPoint
 
 logger = logging.getLogger(__name__)
-POINT_BRIDGE_SALES_SOURCE = "POINT_BRIDGE_SALES"
-OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
-RECENT_POINT_SOURCE = "/Report/VentasCategorias"
+POINT_BRIDGE_SALES_SOURCE = CANONICAL_POINT_BRIDGE_SALES_SOURCE
+OFFICIAL_POINT_SOURCE = CANONICAL_OFFICIAL_POINT_SOURCE
+RECENT_POINT_SOURCE = CANONICAL_RECENT_POINT_SOURCE
 
 LOCK_FIELDS = [
     ("lock_maestros", "Maestros"),
@@ -88,6 +121,31 @@ USER_BLOCKER_LABELS = {
     "DEMASIADOS_CANDADOS": "Demasiados candados",
     "SIN_ACCESOS": "Sin accesos",
 }
+
+
+def _dashboard_cached_value(
+    *,
+    runtime_cache: dict[str, object],
+    section: str,
+    builder,
+    parts: tuple[object, ...] = (),
+):
+    return get_or_set_versioned_cache(
+        key_parts=("erp", "dashboard", section, *parts),
+        scopes=("dashboard",),
+        builder=builder,
+        runtime_cache=runtime_cache,
+    )
+
+
+def _dashboard_materialized_executive_context(months_window: object) -> dict[str, object] | None:
+    normalized_months = normalize_dashboard_months_window(months_window)
+    payload = get_materialized_dashboard_full_payload(months_window=normalized_months)
+    if not payload:
+        return None
+    payload["months_window"] = normalized_months
+    payload["dashboard_exec_ready"] = True
+    return payload
 
 
 def csrf_failure(request: HttpRequest, reason: str = "", template_name: str | None = None) -> HttpResponse:
@@ -1026,14 +1084,17 @@ def _build_dashboard_master_demand_priority(limit: int = 5, lookback_days: int =
     return rows[:limit]
 
 
-def _build_dashboard_master_demand_critical_queue(limit: int = 4) -> list[dict[str, object]]:
-    rows = _build_dashboard_master_demand_priority(limit=max(limit * 3, limit))
+def _master_demand_critical_queue_from_rows(rows: list[dict[str, object]], limit: int = 4) -> list[dict[str, object]]:
     critical_rows = [row for row in rows if str(row.get("priority_tone") or "") == "danger"]
     return critical_rows[:limit]
 
 
-def _build_dashboard_master_demand_critical_focus() -> dict[str, object]:
-    queue = _build_dashboard_master_demand_critical_queue(limit=4)
+def _build_dashboard_master_demand_critical_queue(limit: int = 4) -> list[dict[str, object]]:
+    rows = _build_dashboard_master_demand_priority(limit=max(limit * 3, limit))
+    return _master_demand_critical_queue_from_rows(rows, limit=limit)
+
+
+def _master_demand_critical_focus_from_queue(queue: list[dict[str, object]]) -> dict[str, object]:
     if not queue:
         return {
             "status": "Sin cola crítica",
@@ -1055,6 +1116,11 @@ def _build_dashboard_master_demand_critical_focus() -> dict[str, object]:
         "url": str(top_item.get("url") or reverse("maestros:insumo_list")),
         "cta": "Cerrar prioridad crítica",
     }
+
+
+def _build_dashboard_master_demand_critical_focus() -> dict[str, object]:
+    queue = _build_dashboard_master_demand_critical_queue(limit=4)
+    return _master_demand_critical_focus_from_queue(queue)
 
 
 def _build_dashboard_recipe_governance() -> list[dict]:
@@ -1222,152 +1288,148 @@ def _compute_plan_forecast_semaforo(periodo_mes: str) -> dict:
 
 
 def _sales_source_context() -> dict[str, object]:
-    latest_point_date = max(
-        [
-            value
-            for value in [
-                PointDailySale.objects.filter(source_endpoint=OFFICIAL_POINT_SOURCE)
-                .order_by("-sale_date")
-                .values_list("sale_date", flat=True)
-                .first(),
-                PointDailySale.objects.filter(source_endpoint=RECENT_POINT_SOURCE)
-                .order_by("-sale_date")
-                .values_list("sale_date", flat=True)
-                .first(),
-            ]
-            if value
-        ],
-        default=None,
+    return get_canonical_sales_source_context(
+        cache_key_parts=("erp", "dashboard", "sales-source-context"),
     )
-    latest_bridge_date = (
-        VentaHistorica.objects.filter(fuente=POINT_BRIDGE_SALES_SOURCE)
-        .order_by("-fecha")
-        .values_list("fecha", flat=True)
-        .first()
-    )
-    latest_hist_date = VentaHistorica.objects.order_by("-fecha").values_list("fecha", flat=True).first()
-    if latest_point_date:
-        return {"mode": "point_stage", "latest_date": latest_point_date, "label": "Point directo", "detail": "Fuente canónica Point bridge.", "canonical": True}
-    if latest_bridge_date:
-        return {"mode": "point_history", "latest_date": latest_bridge_date, "label": "Point conciliado", "detail": "Histórico Point materializado a ERP.", "canonical": True}
-    if latest_hist_date:
-        return {"mode": "historical_fallback", "latest_date": latest_hist_date, "label": "Histórico importado no canónico", "detail": "Fuente referencial; no representa Point directo.", "canonical": False}
-    return {"mode": "none", "latest_date": None, "label": "Sin fuente", "detail": "No hay ventas cargadas.", "canonical": False}
+
+
+def _build_sales_source_context() -> dict[str, object]:
+    return build_canonical_sales_source_context()
+
+
+def _dashboard_branch_control_url(*, sucursal_id: int | None, target_date: date | None) -> str:
+    if sucursal_id and target_date:
+        return reverse("control:discrepancias") + f"?from={target_date.isoformat()}&to={target_date.isoformat()}&sucursal_id={sucursal_id}"
+    return reverse("reportes:ventas")
+
+
+def _dashboard_financial_product_url(recipe_name: str | None) -> str:
+    return reverse("reportes:financiero") + (f"?{urlencode({'q': recipe_name})}" if recipe_name else "")
 
 
 def _operational_sales_filters(*, start_date: date, end_date: date) -> Q:
-    official_max = (
-        PointDailySale.objects.filter(source_endpoint=OFFICIAL_POINT_SOURCE)
-        .order_by("-sale_date")
-        .values_list("sale_date", flat=True)
-        .first()
-    )
-    q = Q()
-    if official_max:
-        official_end = min(end_date, official_max)
-        if start_date <= official_end:
-            q |= Q(source_endpoint=OFFICIAL_POINT_SOURCE, sale_date__gte=start_date, sale_date__lte=official_end)
-        recent_start = max(start_date, official_max + timedelta(days=1))
-    else:
-        recent_start = start_date
-    if recent_start <= end_date:
-        q |= Q(source_endpoint=RECENT_POINT_SOURCE, sale_date__gte=recent_start, sale_date__lte=end_date)
-    return q
+    return canonical_operational_sales_filters(start_date=start_date, end_date=end_date)
 
 
 def _operational_sales_rows_for_date(target_date: date):
-    if PointDailySale.objects.filter(sale_date=target_date, source_endpoint=OFFICIAL_POINT_SOURCE).exists():
-        return PointDailySale.objects.filter(sale_date=target_date, source_endpoint=OFFICIAL_POINT_SOURCE)
-    return PointDailySale.objects.filter(sale_date=target_date, source_endpoint=RECENT_POINT_SOURCE)
+    return canonical_operational_sales_rows_for_date(target_date)
 
 
 def _sales_rows_for_date(source: dict[str, object], target_date):
-    if source["mode"] == "point_stage":
-        return _operational_sales_rows_for_date(target_date)
-    if source["mode"] == "point_history":
-        return VentaHistorica.objects.filter(fecha=target_date, fuente=POINT_BRIDGE_SALES_SOURCE)
-    if source["mode"] == "historical_fallback":
-        return VentaHistorica.objects.filter(fecha=target_date)
-    return VentaHistorica.objects.none()
+    return canonical_sales_rows_for_date(source, target_date)
 
 
 def _sales_rows_for_month(source: dict[str, object], year: int, month: int):
-    if source["mode"] == "point_stage":
-        start_date = date(year, month, 1)
-        end_date = date(year, month, calendar.monthrange(year, month)[1])
-        return PointDailySale.objects.filter(
-            sale_date__year=year,
-            sale_date__month=month,
-        ).filter(
-            _operational_sales_filters(start_date=start_date, end_date=end_date)
-        )
-    if source["mode"] == "point_history":
-        return VentaHistorica.objects.filter(fecha__year=year, fecha__month=month, fuente=POINT_BRIDGE_SALES_SOURCE)
-    if source["mode"] == "historical_fallback":
-        return VentaHistorica.objects.filter(fecha__year=year, fecha__month=month)
-    return VentaHistorica.objects.none()
+    return canonical_sales_rows_for_month(source, year, month)
 
 
 def _point_sales_month_total(year: int, month: int) -> dict[str, object]:
-    direct_qs = _sales_rows_for_month({"mode": "point_stage"}, year, month)
-    direct_total = direct_qs.aggregate(total=Sum("total_amount")).get("total") or Decimal("0")
-    if direct_total > 0:
-        return {"value": Decimal(str(direct_total)), "source_label": "Point directo"}
-
-    bridge_qs = VentaHistorica.objects.filter(
-        fecha__year=year,
-        fecha__month=month,
-        fuente=POINT_BRIDGE_SALES_SOURCE,
-    )
-    bridge_total = bridge_qs.aggregate(total=Sum("monto_total")).get("total") or Decimal("0")
-    if bridge_total > 0:
-        return {"value": Decimal(str(bridge_total)), "source_label": "Point conciliado"}
-
-    return {"value": Decimal("0"), "source_label": "Sin dato oficial"}
+    return canonical_point_sales_month_total(year, month)
 
 
 def _sales_previous_dates(source: dict[str, object], target_date) -> list[date]:
-    if source["mode"] == "point_stage":
-        return list(
-            PointDailySale.objects.filter(
-                sale_date__lt=target_date,
-                source_endpoint__in=[OFFICIAL_POINT_SOURCE, RECENT_POINT_SOURCE],
-            )
-            .order_by("-sale_date")
-            .values_list("sale_date", flat=True)
-            .distinct()
-        )
-    if source["mode"] == "point_history":
-        return list(
-            VentaHistorica.objects.filter(fecha__lt=target_date, fuente=POINT_BRIDGE_SALES_SOURCE)
-            .order_by("-fecha")
-            .values_list("fecha", flat=True)
-            .distinct()
-        )
-    if source["mode"] == "historical_fallback":
-        return list(VentaHistorica.objects.filter(fecha__lt=target_date).order_by("-fecha").values_list("fecha", flat=True).distinct())
-    return []
+    return canonical_sales_previous_dates(source, target_date)
 
 
 def _sales_history_queryset(source: dict[str, object]):
-    if source["mode"] == "point_stage":
-        official_max = (
-            PointDailySale.objects.filter(source_endpoint=OFFICIAL_POINT_SOURCE)
-            .order_by("-sale_date")
-            .values_list("sale_date", flat=True)
-            .first()
+    return canonical_sales_history_queryset(source)
+
+
+def _canonical_dashboard_sales_history_summary(source: dict[str, object]) -> dict[str, object] | None:
+    canonical_latest = source.get("canonical_latest_date")
+    if not canonical_latest:
+        return None
+
+    authoritative_first = VentaAutoritativaPoint.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
+    v2_category_first = PointSalesDailyCategoryFact.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
+    v2_product_first = PointSalesDailyProductFact.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
+    start_candidates = [value for value in [authoritative_first, v2_category_first, v2_product_first] if value]
+    if not start_candidates:
+        return None
+
+    start_date = min(start_candidates)
+    selected = get_sales_range(
+        start_date=start_date,
+        end_date=canonical_latest,
+        coverage_policy="prefer_complete",
+    )
+    if selected["source"] == "none":
+        return None
+
+    if selected["source"] == "authoritative":
+        rows_qs = VentaAutoritativaPoint.objects.all()
+        total_rows = rows_qs.count()
+        first_date = rows_qs.order_by("sale_date").values_list("sale_date", flat=True).first()
+        last_date = rows_qs.order_by("-sale_date").values_list("sale_date", flat=True).first()
+        recipe_count = rows_qs.exclude(product_id__isnull=True).values_list("product_id", flat=True).distinct().count()
+        top_branches = list(
+            rows_qs.values("branch__codigo", "branch__nombre")
+            .annotate(total=Sum("quantity"))
+            .order_by("-total", "branch__codigo")[:4]
         )
-        q = Q(source_endpoint=OFFICIAL_POINT_SOURCE)
-        if official_max:
-            q |= Q(source_endpoint=RECENT_POINT_SOURCE, sale_date__gt=official_max)
-        else:
-            q = Q(source_endpoint=RECENT_POINT_SOURCE)
-        return PointDailySale.objects.filter(q)
-    if source["mode"] == "point_history":
-        return VentaHistorica.objects.filter(fuente=POINT_BRIDGE_SALES_SOURCE)
-    if source["mode"] == "historical_fallback":
-        return VentaHistorica.objects.all()
-    return VentaHistorica.objects.none()
+        top_recipes = list(
+            rows_qs.values("product__nombre", "point_name")
+            .annotate(total=Sum("quantity"))
+            .order_by("-total", "product__nombre", "point_name")[:5]
+        )
+    else:
+        category_qs = PointSalesDailyCategoryFact.objects.all()
+        product_qs = PointSalesDailyProductFact.objects.all()
+        total_rows = category_qs.count()
+        first_date = category_qs.order_by("sale_date").values_list("sale_date", flat=True).first()
+        last_date = category_qs.order_by("-sale_date").values_list("sale_date", flat=True).first()
+        recipe_count = (
+            product_qs.exclude(receta_id__isnull=True).values_list("receta_id", flat=True).distinct().count()
+            if product_qs.exists()
+            else 0
+        )
+        top_branches = list(
+            category_qs.values("branch__erp_branch__codigo", "branch__erp_branch__nombre")
+            .annotate(total=Sum("total_cantidad"))
+            .order_by("-total", "branch__erp_branch__codigo")[:4]
+        )
+        top_recipes = (
+            list(
+                product_qs.values("receta__nombre", "producto_nombre_historico")
+                .annotate(total=Sum("total_cantidad"))
+                .order_by("-total", "receta__nombre", "producto_nombre_historico")[:5]
+            )
+            if product_qs.exists()
+            else []
+        )
+
+    active_days = int(selected.get("coverage_days") or 0)
+    branch_count = int(selected.get("coverage_branches") or 0)
+    expected_days = ((last_date - first_date).days + 1) if first_date and last_date else 0
+    missing_days = max(expected_days - active_days, 0)
+    return {
+        "available": True,
+        "status": "Cobertura cerrada" if missing_days == 0 else "Cobertura parcial",
+        "tone": "success" if missing_days == 0 else "warning",
+        "official_ready": missing_days == 0,
+        "detail": (
+            "Fuente canónica Point disponible para lectura ejecutiva."
+            if missing_days == 0
+            else f"Fuente canónica Point disponible con {missing_days} día(s) faltantes dentro del rango visible."
+        ),
+        "source_label": "Point directo",
+        "date_label": f"{first_date.strftime('%d/%m/%Y')} → {last_date.strftime('%d/%m/%Y')}" if first_date and last_date else "Sin cobertura",
+        "first_date": first_date,
+        "last_date": last_date,
+        "active_days": active_days,
+        "expected_days": expected_days,
+        "missing_days": missing_days,
+        "branch_count": branch_count,
+        "recipe_count": recipe_count,
+        "total_rows": total_rows,
+        "total_units": Decimal(str(selected.get("cantidad") or 0)),
+        "total_amount": Decimal(str(selected.get("monto") or 0)),
+        "latest_source": f"CANONICAL_{str(selected.get('source') or '').upper()}",
+        "top_branches": top_branches,
+        "top_recipes": top_recipes,
+        "url": reverse("reportes:bi"),
+        "cta": "Abrir reportes",
+    }
 
 
 def _build_dashboard_sales_history_summary() -> dict:
@@ -1375,6 +1437,10 @@ def _build_dashboard_sales_history_summary() -> dict:
     rows_qs = _sales_history_queryset(source)
     total_rows = rows_qs.count()
     if total_rows == 0:
+        if source["mode"] == "point_stage" and source.get("canonical_latest_date"):
+            canonical_summary = _canonical_dashboard_sales_history_summary(source)
+            if canonical_summary is not None:
+                return canonical_summary
         return {
             "available": False,
             "status": "Sin histórico",
@@ -1448,6 +1514,16 @@ def _build_dashboard_sales_history_summary() -> dict:
         if missing_days == 0
         else f"{source['detail']} Hay {missing_days} día(s) faltantes dentro del rango cargado."
     )
+    if (
+        source["mode"] == "point_stage"
+        and source.get("canonical_latest_date")
+        and source.get("stage_latest_date")
+        and source["canonical_latest_date"] > source["stage_latest_date"]
+    ):
+        detail += (
+            f" La última fecha canónica disponible es {source['canonical_latest_date'].strftime('%d/%m/%Y')}, "
+            f"pero la serie visible legacy llega a {source['stage_latest_date'].strftime('%d/%m/%Y')}."
+        )
     return {
         "available": True,
         "status": status,
@@ -1475,8 +1551,9 @@ def _build_dashboard_sales_history_summary() -> dict:
 
 
 def _build_dashboard_daily_sales_snapshot() -> dict[str, object]:
-    source = _sales_source_context()
-    latest_date = source["latest_date"]
+    dataset = get_dashboard_sales_dataset()
+    snapshot = dict(dataset.get("daily_sales_snapshot") or {})
+    latest_date = snapshot.get("date")
     if not latest_date:
         return {
             "status": "Sin cortes",
@@ -1499,184 +1576,33 @@ def _build_dashboard_daily_sales_snapshot() -> dict[str, object]:
             "cta": "Abrir BI",
         }
 
-    rows = _sales_rows_for_date(source, latest_date)
-    if source["mode"] == "point_stage":
-        indicator_rows = PointDailyBranchIndicator.objects.filter(indicator_date=latest_date)
-        totals = rows.aggregate(
-            total_units=Sum("quantity"),
-            total_amount=Sum("total_amount"),
-            branch_count=Count("branch", distinct=True),
-            recipe_count=Count("product", distinct=True),
-        )
-        indicator_totals = indicator_rows.aggregate(total_tickets=Sum("total_tickets"))
-        mapped_totals = rows.filter(receta_id__isnull=False, branch__erp_branch_id__isnull=False).aggregate(
-            mapped_units=Sum("quantity"),
-            mapped_amount=Sum("total_amount"),
-        )
-    else:
-        totals = rows.aggregate(
-            total_units=Sum("cantidad"),
-            total_amount=Sum("monto_total"),
-            total_tickets=Sum("tickets"),
-            branch_count=Count("sucursal", distinct=True),
-            recipe_count=Count("receta", distinct=True),
-        )
-        indicator_totals = {}
-        mapped_totals = {"mapped_units": totals.get("total_units"), "mapped_amount": totals.get("total_amount")}
-
-    prev_date = next(iter(_sales_previous_dates(source, latest_date)), None)
-    total_amount = Decimal(str(totals.get("total_amount") or 0))
-    total_units = Decimal(str(totals.get("total_units") or 0))
-    comparison_label = "Base inicial"
-    comparison_tone = "warning"
-    comparison_detail = "Aún no hay un corte previo comparable."
-    comparison_basis = "Contra el corte inmediato anterior"
-    if prev_date:
-        prev_rows = _sales_rows_for_date(source, prev_date)
-        if source["mode"] == "point_stage":
-            prev_totals = prev_rows.aggregate(total_units=Sum("quantity"), total_amount=Sum("total_amount"))
-        else:
-            prev_totals = prev_rows.aggregate(total_units=Sum("cantidad"), total_amount=Sum("monto_total"))
-        prev_amount = Decimal(str(prev_totals.get("total_amount") or 0))
-        prev_units = Decimal(str(prev_totals.get("total_units") or 0))
-        if prev_amount > 0:
-            delta_pct = ((total_amount - prev_amount) / prev_amount) * Decimal("100")
-            comparison_label = "Arriba" if delta_pct >= 0 else "Abajo"
-            comparison_tone = "success" if delta_pct >= 0 else "warning"
-            comparison_detail = f"{abs(delta_pct):.1f}% vs corte previo ({prev_date.isoformat()})"
-        elif prev_units > 0:
-            delta_pct = ((total_units - prev_units) / prev_units) * Decimal("100")
-            comparison_label = "Arriba" if delta_pct >= 0 else "Abajo"
-            comparison_tone = "success" if delta_pct >= 0 else "warning"
-            comparison_detail = f"{abs(delta_pct):.1f}% en unidades vs corte previo ({prev_date.isoformat()})"
-
-    month_rows = _sales_rows_for_month(source, latest_date.year, latest_date.month)
-    if source["mode"] == "point_stage":
-        month_indicator_rows = PointDailyBranchIndicator.objects.filter(
-            indicator_date__year=latest_date.year,
-            indicator_date__month=latest_date.month,
-        )
-        month_start = date(latest_date.year, latest_date.month, 1)
-        partial_month_amount, partial_month_units = _partial_month_amount_quantity(
-            start_date=month_start,
-            end_date=latest_date,
-        )
-        month_totals = month_rows.aggregate(total_units=Sum("quantity"), total_amount=Sum("total_amount"))
-        month_totals["total_amount"] = partial_month_amount
-        month_totals["total_units"] = partial_month_units
-        month_indicator_totals = month_indicator_rows.aggregate(total_tickets=Sum("total_tickets"))
-        top_branches = list(
-            rows.values("branch__external_id", "branch__name")
-            .annotate(total=Sum("quantity"), amount=Sum("total_amount"))
-            .order_by("-amount", "-total", "branch__name")[:5]
-        )
-        top_products = list(
-            rows.values("product__name")
-            .annotate(total=Sum("quantity"), amount=Sum("total_amount"))
-            .order_by("-amount", "-total", "product__name")[:5]
-        )
-    else:
-        month_totals = month_rows.aggregate(total_units=Sum("cantidad"), total_amount=Sum("monto_total"), total_tickets=Sum("tickets"))
-        month_indicator_totals = {}
-        top_branches = list(
-            rows.exclude(sucursal_id__isnull=True)
-            .values("sucursal__codigo", "sucursal__nombre")
-            .annotate(total=Sum("cantidad"), amount=Sum("monto_total"))
-            .order_by("-amount", "-total", "sucursal__nombre")[:5]
-        )
-        top_products = list(
-            rows.values("receta__nombre")
-            .annotate(total=Sum("cantidad"), amount=Sum("monto_total"))
-            .order_by("-amount", "-total", "receta__nombre")[:5]
-        )
-
-    total_tickets = int(
-        (indicator_totals.get("total_tickets") if source["mode"] == "point_stage" else totals.get("total_tickets"))
-        or 0
-    )
-    if total_tickets <= 0:
-        total_tickets = int(
-            PointDailyBranchIndicator.objects.filter(indicator_date=latest_date).aggregate(total_tickets=Sum("total_tickets")).get("total_tickets")
-            or 0
-        )
-    branch_count = int(totals.get("branch_count") or 0)
-    mapped_amount = Decimal(str(mapped_totals.get("mapped_amount") or 0))
-    mapped_units = Decimal(str(mapped_totals.get("mapped_units") or 0))
-    unmapped_amount = total_amount - mapped_amount
-    unmapped_units = total_units - mapped_units
-    mapping_coverage_pct = ((mapped_amount / total_amount) * Decimal("100")) if total_amount > 0 else None
-    month_tickets = int(
-        (month_indicator_totals.get("total_tickets") if source["mode"] == "point_stage" else month_totals.get("total_tickets"))
-        or 0
-    )
-    if month_tickets <= 0:
-        month_tickets = int(
-            PointDailyBranchIndicator.objects.filter(
-                indicator_date__year=latest_date.year,
-                indicator_date__month=latest_date.month,
-            ).aggregate(total_tickets=Sum("total_tickets")).get("total_tickets")
-            or 0
-        )
-
-    tickets_available = total_tickets > 0
-    avg_ticket = (total_amount / Decimal(total_tickets)) if tickets_available else None
-    month_tickets_available = month_tickets > 0
-    month_avg_ticket = (Decimal(str(month_totals.get("total_amount") or 0)) / Decimal(month_tickets)) if month_tickets_available else None
-    avg_branch_amount = (total_amount / Decimal(branch_count)) if branch_count else Decimal("0")
-    top_branch_rows = [
+    snapshot["mapping_coverage_pct"] = Decimal("100") if snapshot.get("total_amount") else None
+    snapshot["mapped_amount"] = snapshot.get("total_amount") or Decimal("0")
+    snapshot["mapped_units"] = snapshot.get("total_units") or Decimal("0")
+    snapshot["unmapped_amount"] = Decimal("0")
+    snapshot["unmapped_units"] = Decimal("0")
+    if snapshot.get("raw_total_amount") is not None:
+        snapshot["total_amount"] = snapshot.get("raw_total_amount") or Decimal("0")
+    snapshot["top_branches"] = [
         {
-            "label": row.get("branch__external_id") or row.get("sucursal__codigo") or "Sucursal",
-            "secondary": row.get("branch__name") or row.get("sucursal__nombre") or "",
-            "amount": row.get("amount") or Decimal("0"),
-            "total": row.get("total") or Decimal("0"),
+            **row,
+            "action_url": _dashboard_branch_control_url(
+                sucursal_id=row.get("branch_id"),
+                target_date=latest_date,
+            ),
         }
-        for row in top_branches
+        for row in list(snapshot.get("top_branches") or [])
     ]
-    top_product_rows = [
+    snapshot["top_products"] = [
         {
-            "label": row.get("product__name") or row.get("receta__nombre") or "Producto",
-            "secondary": "",
-            "amount": row.get("amount") or Decimal("0"),
-            "total": row.get("total") or Decimal("0"),
+            **row,
+            "action_url": _dashboard_financial_product_url(row.get("recipe_name") or row.get("label")),
         }
-        for row in top_products
+        for row in list(snapshot.get("top_products") or [])
     ]
-
-    return {
-        "status": "Corte cargado" if source["canonical"] else "Corte referencial",
-        "tone": "success" if source["canonical"] else "warning",
-        "detail": f"Resumen del último corte de ventas. {source['detail']}",
-        "date": latest_date,
-        "date_label": latest_date.isoformat(),
-        "month_label": f"{latest_date.year}-{latest_date.month:02d}",
-        "source_label": source["label"],
-        "total_units": total_units,
-        "total_amount": total_amount,
-        "total_tickets": total_tickets,
-        "tickets_available": tickets_available,
-        "branch_count": branch_count,
-        "recipe_count": int(totals.get("recipe_count") or 0),
-        "avg_ticket": avg_ticket,
-        "avg_branch_amount": avg_branch_amount,
-        "mapped_amount": mapped_amount,
-        "mapped_units": mapped_units,
-        "unmapped_amount": unmapped_amount,
-        "unmapped_units": unmapped_units,
-        "mapping_coverage_pct": mapping_coverage_pct,
-        "month_amount": Decimal(str(month_totals.get("total_amount") or 0)),
-        "month_units": Decimal(str(month_totals.get("total_units") or 0)),
-        "month_tickets": month_tickets,
-        "month_tickets_available": month_tickets_available,
-        "month_avg_ticket": month_avg_ticket,
-        "comparison_label": comparison_label,
-        "comparison_tone": comparison_tone,
-        "comparison_detail": comparison_detail,
-        "comparison_basis": comparison_basis,
-        "top_branches": top_branch_rows,
-        "top_products": top_product_rows,
-        "url": reverse("reportes:bi"),
-        "cta": "Abrir BI",
-    }
+    snapshot["url"] = reverse("reportes:bi")
+    snapshot["cta"] = "Abrir BI"
+    return snapshot
 
 
 def _build_dashboard_branch_daily_exceptions(limit: int = 6) -> list[dict[str, object]]:
@@ -1684,44 +1610,45 @@ def _build_dashboard_branch_daily_exceptions(limit: int = 6) -> list[dict[str, o
     latest_date = source["latest_date"]
     if not latest_date:
         return []
+    prev_date = next(iter(_sales_previous_dates(source, latest_date)), None)
     if source["mode"] == "point_stage":
-        current_rows = list(
-            _sales_rows_for_date(source, latest_date)
-            .values("branch_id", "branch__external_id", "branch__name")
-            .annotate(units=Sum("quantity"), amount=Sum("total_amount"), tickets=Sum("tickets"), recipe_count=Count("product", distinct=True))
+        bulk = get_daily_sales_bulk(
+            fechas=[value for value in [latest_date, prev_date] if value],
+            dimension="branch",
+            include_indicators=True,
+            coverage_policy="strict_priority",
         )
+        current_payload = bulk["dates"].get(latest_date.isoformat(), {})
+        current_rows = list(current_payload.get("rows") or [])
+        current_indicator_map = current_payload.get("indicator_map") or {}
+        prev_payload = bulk["dates"].get(prev_date.isoformat(), {}) if prev_date else {}
+        prev_map = {row["branch_id"]: row for row in prev_payload.get("rows") or []}
+        prev_indicator_map = prev_payload.get("indicator_map") or {}
     else:
         current_rows = list(
             _sales_rows_for_date(source, latest_date).exclude(sucursal_id__isnull=True)
             .values("sucursal_id", "sucursal__codigo", "sucursal__nombre")
             .annotate(units=Sum("cantidad"), amount=Sum("monto_total"), tickets=Sum("tickets"), recipe_count=Count("receta", distinct=True))
         )
-    if not current_rows:
-        return []
-    prev_date = next(iter(_sales_previous_dates(source, latest_date)), None)
-    prev_map: dict[int, dict[str, Decimal]] = {}
-    if prev_date:
-        if source["mode"] == "point_stage":
-            prev_map = {
-                row["branch_id"]: row
-                for row in _sales_rows_for_date(source, prev_date)
-                .values("branch_id")
-                .annotate(units=Sum("quantity"), amount=Sum("total_amount"), tickets=Sum("tickets"))
-            }
-        else:
+        prev_map: dict[int, dict[str, Decimal]] = {}
+        if prev_date:
             prev_map = {
                 row["sucursal_id"]: row
                 for row in _sales_rows_for_date(source, prev_date).exclude(sucursal_id__isnull=True)
                 .values("sucursal_id")
                 .annotate(units=Sum("cantidad"), amount=Sum("monto_total"), tickets=Sum("tickets"))
             }
+    if not current_rows:
+        return []
     exception_rows: list[dict[str, object]] = []
     for row in current_rows:
         branch_id = int(row["branch_id"] if source["mode"] == "point_stage" else row["sucursal_id"])
-        current_amount = Decimal(str(row.get("amount") or 0))
+        current_indicator = current_indicator_map.get(branch_id) if source["mode"] == "point_stage" else None
+        current_amount = Decimal(str((current_indicator or {}).get("amount") or row.get("amount") or 0))
         current_units = Decimal(str(row.get("units") or 0))
         previous = prev_map.get(branch_id) or {}
-        prev_amount = Decimal(str(previous.get("amount") or 0))
+        prev_indicator = prev_indicator_map.get(branch_id) if source["mode"] == "point_stage" else None
+        prev_amount = Decimal(str((prev_indicator or {}).get("amount") or previous.get("amount") or 0))
         prev_units = Decimal(str(previous.get("units") or 0))
         delta_pct = None
         if prev_amount > 0:
@@ -1742,7 +1669,7 @@ def _build_dashboard_branch_daily_exceptions(limit: int = 6) -> list[dict[str, o
                 "branch_name": row.get("branch__name") or row.get("sucursal__nombre") or "Sucursal",
                 "units": current_units,
                 "amount": current_amount,
-                "tickets": int(row.get("tickets") or 0),
+                "tickets": int((current_indicator or {}).get("tickets") or row.get("tickets") or 0),
                 "recipe_count": int(row.get("recipe_count") or 0),
                 "status": status,
                 "tone": tone,
@@ -1750,6 +1677,10 @@ def _build_dashboard_branch_daily_exceptions(limit: int = 6) -> list[dict[str, o
                 "delta_pct": delta_pct,
                 "previous_date": prev_date,
                 "rank_score": rank_score,
+                "action_url": _dashboard_branch_control_url(
+                    sucursal_id=row.get("branch__erp_branch_id") or row.get("sucursal_id"),
+                    target_date=latest_date,
+                ),
             }
         )
     severity_order = {"danger": 0, "warning": 1, "success": 2}
@@ -1766,17 +1697,18 @@ def _build_dashboard_branch_weekday_comparisons(limit: int = 6) -> list[dict[str
     if not comparable_date:
         return []
     if source["mode"] == "point_stage":
-        current_rows = list(
-            _sales_rows_for_date(source, latest_date)
-            .values("branch_id", "branch__external_id", "branch__name")
-            .annotate(units=Sum("quantity"), amount=Sum("total_amount"), tickets=Sum("tickets"))
+        bulk = get_daily_sales_bulk(
+            fechas=[latest_date, comparable_date],
+            dimension="branch",
+            include_indicators=True,
+            coverage_policy="strict_priority",
         )
-        comparable_map = {
-            row["branch_id"]: row
-            for row in _sales_rows_for_date(source, comparable_date)
-            .values("branch_id")
-            .annotate(units=Sum("quantity"), amount=Sum("total_amount"), tickets=Sum("tickets"))
-        }
+        current_payload = bulk["dates"].get(latest_date.isoformat(), {})
+        comparable_payload = bulk["dates"].get(comparable_date.isoformat(), {})
+        current_rows = list(current_payload.get("rows") or [])
+        current_indicator_map = current_payload.get("indicator_map") or {}
+        comparable_map = {row["branch_id"]: row for row in comparable_payload.get("rows") or []}
+        comparable_indicator_map = comparable_payload.get("indicator_map") or {}
     else:
         current_rows = list(
             _sales_rows_for_date(source, latest_date).exclude(sucursal_id__isnull=True)
@@ -1795,9 +1727,11 @@ def _build_dashboard_branch_weekday_comparisons(limit: int = 6) -> list[dict[str
         comparable = comparable_map.get(branch_id)
         if not comparable:
             continue
-        current_amount = Decimal(str(row.get("amount") or 0))
+        current_indicator = current_indicator_map.get(branch_id) if source["mode"] == "point_stage" else None
+        comparable_indicator = comparable_indicator_map.get(branch_id) if source["mode"] == "point_stage" else None
+        current_amount = Decimal(str((current_indicator or {}).get("amount") or row.get("amount") or 0))
         current_units = Decimal(str(row.get("units") or 0))
-        comparable_amount = Decimal(str(comparable.get("amount") or 0))
+        comparable_amount = Decimal(str((comparable_indicator or {}).get("amount") or comparable.get("amount") or 0))
         comparable_units = Decimal(str(comparable.get("units") or 0))
         delta_pct = None
         if comparable_amount > 0:
@@ -1818,13 +1752,17 @@ def _build_dashboard_branch_weekday_comparisons(limit: int = 6) -> list[dict[str
                 "branch_name": row.get("branch__name") or row.get("sucursal__nombre") or "Sucursal",
                 "units": current_units,
                 "amount": current_amount,
-                "tickets": int(row.get("tickets") or 0),
+                "tickets": int((current_indicator or {}).get("tickets") or row.get("tickets") or 0),
                 "status": status,
                 "tone": tone,
                 "detail": detail,
                 "delta_pct": delta_pct,
                 "comparable_date": comparable_date,
                 "rank_score": rank_score,
+                "action_url": _dashboard_branch_control_url(
+                    sucursal_id=row.get("branch__erp_branch_id") or row.get("sucursal_id"),
+                    target_date=latest_date,
+                ),
             }
         )
     severity_order = {"danger": 0, "warning": 1, "success": 2}
@@ -1837,12 +1775,17 @@ def _build_dashboard_product_daily_exceptions(limit: int = 6) -> list[dict[str, 
     latest_date = source["latest_date"]
     if not latest_date:
         return []
+    prev_date = next(iter(_sales_previous_dates(source, latest_date)), None)
     if source["mode"] == "point_stage":
-        current_rows = list(
-            _sales_rows_for_date(source, latest_date)
-            .values("product_id", "product__name")
-            .annotate(units=Sum("quantity"), amount=Sum("total_amount"), tickets=Sum("tickets"), branch_count=Count("branch", distinct=True))
+        bulk = get_daily_sales_bulk(
+            fechas=[value for value in [latest_date, prev_date] if value],
+            dimension="product",
+            coverage_policy="strict_priority",
         )
+        current_payload = bulk["dates"].get(latest_date.isoformat(), {})
+        current_rows = list(current_payload.get("rows") or [])
+        prev_payload = bulk["dates"].get(prev_date.isoformat(), {}) if prev_date else {}
+        prev_map = {row["key"]: row for row in prev_payload.get("rows") or []}
     else:
         current_rows = list(
             _sales_rows_for_date(source, latest_date).exclude(receta_id__isnull=True)
@@ -1851,17 +1794,9 @@ def _build_dashboard_product_daily_exceptions(limit: int = 6) -> list[dict[str, 
         )
     if not current_rows:
         return []
-    prev_date = next(iter(_sales_previous_dates(source, latest_date)), None)
-    prev_map: dict[int, dict[str, Decimal]] = {}
-    if prev_date:
-        if source["mode"] == "point_stage":
-            prev_map = {
-                row["product_id"]: row
-                for row in _sales_rows_for_date(source, prev_date)
-                .values("product_id")
-                .annotate(units=Sum("quantity"), amount=Sum("total_amount"), tickets=Sum("tickets"))
-            }
-        else:
+    if source["mode"] != "point_stage":
+        prev_map: dict[int, dict[str, Decimal]] = {}
+        if prev_date:
             prev_map = {
                 row["receta_id"]: row
                 for row in _sales_rows_for_date(source, prev_date).exclude(receta_id__isnull=True)
@@ -1870,7 +1805,7 @@ def _build_dashboard_product_daily_exceptions(limit: int = 6) -> list[dict[str, 
             }
     exception_rows: list[dict[str, object]] = []
     for row in current_rows:
-        product_id = int(row["product_id"] if source["mode"] == "point_stage" else row["receta_id"])
+        product_id = row["key"] if source["mode"] == "point_stage" else int(row["receta_id"])
         current_amount = Decimal(str(row.get("amount") or 0))
         current_units = Decimal(str(row.get("units") or 0))
         previous = prev_map.get(product_id) or {}
@@ -1891,7 +1826,7 @@ def _build_dashboard_product_daily_exceptions(limit: int = 6) -> list[dict[str, 
             status, tone, detail, rank_score = "Estable", "warning", f"Variación de {delta_pct:.1f}% contra el corte previo.", abs(delta_pct)
         exception_rows.append(
             {
-                "recipe_name": row.get("product__name") or row.get("receta__nombre") or "Producto",
+                "recipe_name": row.get("recipe_name") or row.get("product_name") or row.get("product__name") or row.get("receta__nombre") or "Producto",
                 "units": current_units,
                 "amount": current_amount,
                 "tickets": int(row.get("tickets") or 0),
@@ -1902,6 +1837,7 @@ def _build_dashboard_product_daily_exceptions(limit: int = 6) -> list[dict[str, 
                 "delta_pct": delta_pct,
                 "previous_date": prev_date,
                 "rank_score": rank_score,
+                "action_url": _dashboard_financial_product_url(row.get("receta__nombre") or row.get("product__name")),
             }
         )
     severity_order = {"danger": 0, "warning": 1, "success": 2}
@@ -1918,17 +1854,15 @@ def _build_dashboard_product_weekday_comparisons(limit: int = 6) -> list[dict[st
     if not comparable_date:
         return []
     if source["mode"] == "point_stage":
-        current_rows = list(
-            _sales_rows_for_date(source, latest_date)
-            .values("product_id", "product__name")
-            .annotate(units=Sum("quantity"), amount=Sum("total_amount"), tickets=Sum("tickets"), branch_count=Count("branch", distinct=True))
+        bulk = get_daily_sales_bulk(
+            fechas=[latest_date, comparable_date],
+            dimension="product",
+            coverage_policy="strict_priority",
         )
-        comparable_map = {
-            row["product_id"]: row
-            for row in _sales_rows_for_date(source, comparable_date)
-            .values("product_id")
-            .annotate(units=Sum("quantity"), amount=Sum("total_amount"), tickets=Sum("tickets"), branch_count=Count("branch", distinct=True))
-        }
+        current_payload = bulk["dates"].get(latest_date.isoformat(), {})
+        comparable_payload = bulk["dates"].get(comparable_date.isoformat(), {})
+        current_rows = list(current_payload.get("rows") or [])
+        comparable_map = {row["key"]: row for row in comparable_payload.get("rows") or []}
     else:
         current_rows = list(
             _sales_rows_for_date(source, latest_date).exclude(receta_id__isnull=True)
@@ -1943,7 +1877,7 @@ def _build_dashboard_product_weekday_comparisons(limit: int = 6) -> list[dict[st
         }
     rows: list[dict[str, object]] = []
     for row in current_rows:
-        product_id = int(row["product_id"] if source["mode"] == "point_stage" else row["receta_id"])
+        product_id = row["key"] if source["mode"] == "point_stage" else int(row["receta_id"])
         comparable = comparable_map.get(product_id)
         if not comparable:
             continue
@@ -1966,7 +1900,7 @@ def _build_dashboard_product_weekday_comparisons(limit: int = 6) -> list[dict[st
             status, tone, detail, rank_score = "Dentro de rango", "warning", f"Variación de {delta_pct:.1f}% contra el último mismo día de semana ({comparable_date.isoformat()}).", abs(delta_pct)
         rows.append(
             {
-                "recipe_name": row.get("product__name") or row.get("receta__nombre") or "Producto",
+                "recipe_name": row.get("recipe_name") or row.get("product_name") or row.get("product__name") or row.get("receta__nombre") or "Producto",
                 "units": current_units,
                 "amount": current_amount,
                 "tickets": int(row.get("tickets") or 0),
@@ -1977,6 +1911,7 @@ def _build_dashboard_product_weekday_comparisons(limit: int = 6) -> list[dict[st
                 "delta_pct": delta_pct,
                 "comparable_date": comparable_date,
                 "rank_score": rank_score,
+                "action_url": _dashboard_financial_product_url(row.get("receta__nombre") or row.get("product__name")),
             }
         )
     severity_order = {"danger": 0, "warning": 1, "success": 2}
@@ -2011,52 +1946,7 @@ def _dashboard_bar_rows(
 def _dashboard_monthly_sales_rows(limit: int = 6) -> list[dict[str, object]]:
     if limit <= 0:
         return []
-
-    month_names = [
-        "",
-        "Ene",
-        "Feb",
-        "Mar",
-        "Abr",
-        "May",
-        "Jun",
-        "Jul",
-        "Ago",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dic",
-    ]
-    today = timezone.localdate()
-    year, month = today.year, today.month
-    pairs: list[tuple[int, int]] = []
-    for _ in range(limit):
-        pairs.append((year, month))
-        month -= 1
-        if month == 0:
-            month = 12
-            year -= 1
-    pairs.reverse()
-
-    rows: list[dict[str, object]] = []
-    max_amount = Decimal("0")
-    for year, month in pairs:
-        resolved = _point_sales_month_total(year, month)
-        value = Decimal(str(resolved["value"] or 0))
-        max_amount = max(max_amount, value)
-        rows.append(
-            {
-                "label": f"{month_names[month]} {str(year)[-2:]}",
-                "value": value,
-                "source_label": resolved["source_label"],
-            }
-        )
-
-    for row in rows:
-        value = Decimal(str(row["value"]))
-        pct = float((value / max_amount) * Decimal("100")) if max_amount > 0 else 0.0
-        row["pct"] = max(8.0, pct) if value > 0 else 0.0
-    return rows
+    return list(get_dashboard_sales_dataset(months=limit).get("monthly_sales_rows") or [])
 
 
 def _dashboard_comparison_bar_rows(
@@ -2317,6 +2207,7 @@ def _build_dashboard_waste_executive_summary() -> dict[str, object]:
     branch_cost_est = Decimal("0")
     branch_cost_covered = 0
     branch_by_sucursal: dict[str, dict[str, object]] = {}
+    recipe_cost_map = get_total_cost_map({int(row.receta_id) for row in branch_rows if row.receta_id})
     for row in branch_rows:
         qty = _to_decimal(row.cantidad)
         branch_units += qty
@@ -2331,8 +2222,10 @@ def _build_dashboard_waste_executive_summary() -> dict[str, object]:
         )
         branch_bucket["value"] = _to_decimal(branch_bucket["value"]) + qty
         if row.receta_id:
-            branch_cost_est += qty * _to_decimal(getattr(row.receta, "costo_total_estimado_decimal", 0))
-            branch_cost_covered += 1
+            recipe_cost = recipe_cost_map.get(int(row.receta_id))
+            if recipe_cost is not None:
+                branch_cost_est += qty * _to_decimal(recipe_cost)
+                branch_cost_covered += 1
 
     cedis_rows = list(
         MovimientoInventario.objects.filter(
@@ -2904,6 +2797,15 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             "can_view_reportes": can_view_reportes(u),
         }
     )
+    if ctx.get("can_view_reportes"):
+        try:
+            materialized_ctx = _dashboard_materialized_executive_context(request.GET.get("months"))
+            if materialized_ctx:
+                ctx.update(materialized_ctx)
+                return render(request, "core/dashboard_executive.html", ctx)
+        except Exception:
+            logger.exception("Dashboard full materialized read failed")
+    dashboard_runtime_cache: dict[str, object] = {}
 
     inventory_metrics = None
     inventario_last_unmatched_count = 0
@@ -3155,28 +3057,96 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         logger.exception("Dashboard governance summary failed")
 
     try:
-        ctx["master_governance_summary"] = _build_dashboard_master_governance()
-        ctx["master_demand_priority_rows"] = _build_dashboard_master_demand_priority()
-        ctx["master_demand_critical_queue"] = _build_dashboard_master_demand_critical_queue()
-        ctx["master_demand_critical_focus"] = _build_dashboard_master_demand_critical_focus()
-        ctx["recipe_governance_summary"] = _build_dashboard_recipe_governance()
+        today_key = timezone.localdate().isoformat()
+        ctx["master_governance_summary"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="master-governance",
+            builder=_build_dashboard_master_governance,
+            parts=(today_key,),
+        )
+        master_demand_rows = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="master-demand-priority",
+            builder=_build_dashboard_master_demand_priority,
+            parts=(today_key,),
+        )
+        ctx["master_demand_priority_rows"] = master_demand_rows
+        critical_queue = _master_demand_critical_queue_from_rows(list(master_demand_rows or []), limit=4)
+        ctx["master_demand_critical_queue"] = critical_queue
+        ctx["master_demand_critical_focus"] = _master_demand_critical_focus_from_queue(critical_queue)
+        ctx["recipe_governance_summary"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="recipe-governance",
+            builder=_build_dashboard_recipe_governance,
+            parts=(today_key,),
+        )
     except Exception:
         logger.exception("Dashboard master/recipe governance failed")
 
     try:
-        ctx["sales_history_summary"] = _build_dashboard_sales_history_summary()
+        today_key = timezone.localdate().isoformat()
+        ctx["monthly_sales_rows"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="monthly-sales-rows",
+            builder=_dashboard_monthly_sales_rows,
+            parts=(today_key,),
+        )
+        ctx["daily_sales_snapshot"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="daily-sales-snapshot",
+            builder=_build_dashboard_daily_sales_snapshot,
+            parts=(today_key,),
+        )
+        visible_cut_date = (ctx.get("daily_sales_snapshot") or {}).get("date")
+        ctx["sales_refresh_status"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="sales-refresh-status",
+            builder=lambda: _sales_refresh_status(visible_cut_date=visible_cut_date),
+            parts=(today_key, visible_cut_date.isoformat() if visible_cut_date else "sin-fecha"),
+        )
+        daily_ops_dataset = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="daily-ops-dataset",
+            builder=get_dashboard_daily_ops_dataset,
+            parts=(today_key,),
+        )
+        ctx["sales_history_summary"] = daily_ops_dataset.get("sales_history_summary")
+        ctx["branch_daily_exception_rows"] = [
+            {
+                **row,
+                "action_url": _dashboard_branch_control_url(
+                    sucursal_id=row.get("branch_id"),
+                    target_date=daily_ops_dataset.get("latest_date"),
+                ),
+            }
+            for row in list(daily_ops_dataset.get("branch_daily_exception_rows") or [])
+        ]
+        ctx["branch_weekday_comparison_rows"] = [
+            {
+                **row,
+                "action_url": _dashboard_branch_control_url(
+                    sucursal_id=row.get("branch_id"),
+                    target_date=daily_ops_dataset.get("latest_date"),
+                ),
+            }
+            for row in list(daily_ops_dataset.get("branch_weekday_comparison_rows") or [])
+        ]
+        ctx["product_daily_exception_rows"] = [
+            {
+                **row,
+                "action_url": _dashboard_financial_product_url(row.get("recipe_name")),
+            }
+            for row in list(daily_ops_dataset.get("product_daily_exception_rows") or [])
+        ]
+        ctx["product_weekday_comparison_rows"] = [
+            {
+                **row,
+                "action_url": _dashboard_financial_product_url(row.get("recipe_name")),
+            }
+            for row in list(daily_ops_dataset.get("product_weekday_comparison_rows") or [])
+        ]
     except Exception:
-        logger.exception("Dashboard sales history summary failed")
-
-    try:
-        ctx["monthly_sales_rows"] = _dashboard_monthly_sales_rows()
-    except Exception:
-        logger.exception("Dashboard monthly sales rows failed")
-
-    try:
-        ctx["daily_sales_snapshot"] = _build_dashboard_daily_sales_snapshot()
-    except Exception:
-        logger.exception("Dashboard daily sales snapshot failed")
+        logger.exception("Dashboard sales datasets failed")
 
     try:
         snapshot = ctx.get("daily_sales_snapshot") or {}
@@ -3195,10 +3165,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         logger.exception("Dashboard ranking bars failed")
 
     try:
-        ctx["branch_daily_exception_rows"] = _build_dashboard_branch_daily_exceptions()
-    except Exception:
-        logger.exception("Dashboard branch daily exceptions failed")
-    try:
         ctx["branch_daily_exception_bar_rows"] = _dashboard_comparison_bar_rows(
             list(ctx.get("branch_daily_exception_rows") or []),
             label_key="branch_code",
@@ -3207,10 +3173,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     except Exception:
         logger.exception("Dashboard branch daily exception bars failed")
 
-    try:
-        ctx["branch_weekday_comparison_rows"] = _build_dashboard_branch_weekday_comparisons()
-    except Exception:
-        logger.exception("Dashboard branch weekday comparisons failed")
     try:
         ctx["branch_weekday_comparison_bar_rows"] = _dashboard_comparison_bar_rows(
             list(ctx.get("branch_weekday_comparison_rows") or []),
@@ -3221,10 +3183,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         logger.exception("Dashboard branch weekday bars failed")
 
     try:
-        ctx["product_daily_exception_rows"] = _build_dashboard_product_daily_exceptions()
-    except Exception:
-        logger.exception("Dashboard product daily exceptions failed")
-    try:
         ctx["product_daily_exception_bar_rows"] = _dashboard_comparison_bar_rows(
             list(ctx.get("product_daily_exception_rows") or []),
             label_key="recipe_name",
@@ -3232,10 +3190,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     except Exception:
         logger.exception("Dashboard product daily exception bars failed")
 
-    try:
-        ctx["product_weekday_comparison_rows"] = _build_dashboard_product_weekday_comparisons()
-    except Exception:
-        logger.exception("Dashboard product weekday comparisons failed")
     try:
         ctx["product_weekday_comparison_bar_rows"] = _dashboard_comparison_bar_rows(
             list(ctx.get("product_weekday_comparison_rows") or []),
@@ -3245,38 +3199,74 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         logger.exception("Dashboard product weekday bars failed")
 
     try:
-        ctx["waste_snapshot"] = _build_dashboard_waste_snapshot()
+        ctx["waste_snapshot"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="waste-snapshot",
+            builder=_build_dashboard_waste_snapshot,
+            parts=(timezone.localdate().isoformat(),),
+        )
     except Exception:
         logger.exception("Dashboard waste snapshot failed")
 
     try:
-        ctx["purchase_snapshot"] = _build_dashboard_purchase_snapshot()
+        ctx["purchase_snapshot"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="purchase-snapshot",
+            builder=_build_dashboard_purchase_snapshot,
+            parts=(timezone.localdate().isoformat(),),
+        )
     except Exception:
         logger.exception("Dashboard purchase snapshot failed")
 
     try:
-        ctx["production_snapshot"] = _build_dashboard_production_snapshot()
+        ctx["production_snapshot"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="production-snapshot",
+            builder=_build_dashboard_production_snapshot,
+            parts=(timezone.localdate().isoformat(),),
+        )
     except Exception:
         logger.exception("Dashboard production snapshot failed")
 
     try:
-        ctx["production_summary"] = _build_dashboard_production_summary()
+        ctx["production_summary"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="production-summary",
+            builder=_build_dashboard_production_summary,
+            parts=(timezone.localdate().isoformat(),),
+        )
     except Exception:
         logger.exception("Dashboard production summary failed")
 
     try:
-        ctx["waste_executive_summary"] = _build_dashboard_waste_executive_summary()
+        ctx["waste_executive_summary"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="waste-executive-summary",
+            builder=_build_dashboard_waste_executive_summary,
+            parts=(timezone.localdate().isoformat(),),
+        )
     except Exception:
         logger.exception("Dashboard waste executive summary failed")
 
     try:
         today = timezone.localdate()
-        ctx["forecast_summary"] = _build_dashboard_forecast_summary(f"{today.year:04d}-{today.month:02d}")
+        period_key = f"{today.year:04d}-{today.month:02d}"
+        ctx["forecast_summary"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="forecast-summary",
+            builder=lambda: _build_dashboard_forecast_summary(period_key),
+            parts=(period_key,),
+        )
     except Exception:
         logger.exception("Dashboard forecast summary failed")
 
     try:
-        ctx["supply_watchlist"] = _build_dashboard_supply_watchlist()
+        ctx["supply_watchlist"] = _dashboard_cached_value(
+            runtime_cache=dashboard_runtime_cache,
+            section="supply-watchlist",
+            builder=_build_dashboard_supply_watchlist,
+            parts=(timezone.localdate().isoformat(),),
+        )
     except Exception:
         logger.exception("Dashboard supply watchlist failed")
 
@@ -3339,7 +3329,11 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     if ctx.get("can_view_reportes"):
         try:
-            executive_panels = build_executive_bi_panels()
+            try:
+                months_window = int(request.GET.get("months") or "6")
+            except (TypeError, ValueError):
+                months_window = 6
+            executive_panels = build_executive_bi_panels(months=months_window)
             ctx.update(
                 {
                     "executive_panels": executive_panels,
@@ -3348,6 +3342,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     "profitability_panel": executive_panels["profitability_panel"],
                     "production_sales_panel": executive_panels["production_sales_panel"],
                     "inventory_ledger_panel": executive_panels["inventory_ledger_panel"],
+                    "months_window": months_window,
                     "dashboard_exec_ready": True,
                 }
             )
@@ -4082,6 +4077,27 @@ def audit_log_view(request: HttpRequest) -> HttpResponse:
         },
     }
     return render(request, "core/auditoria.html", context)
+
+
+def ai_private_hub_view(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_authenticated:
+        return redirect("/login/")
+    if not can_view_orquestacion(request.user):
+        raise PermissionDenied("No tienes permisos para consultar la IA privada.")
+    conversations = list_chat_conversations(request.user)
+    selected = conversations[0] if conversations else None
+    requested_conversation = (request.GET.get("conversation") or "").strip()
+    if requested_conversation:
+        try:
+            selected = get_chat_conversation(request.user, requested_conversation)
+        except Exception:
+            logger.warning("No se pudo abrir la conversación solicitada en IA privada.", exc_info=True)
+    context = {
+        "chat_api_base": "/ia-privada/api",
+        "conversations": [serialize_conversation(conversation) for conversation in conversations],
+        "selected_conversation": serialize_conversation_detail(selected) if selected else None,
+    }
+    return render(request, "orquestacion/chat.html", context)
 
 
 def users_access_view(request: HttpRequest) -> HttpResponse:

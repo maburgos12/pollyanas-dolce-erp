@@ -1,0 +1,2709 @@
+{
+  "job_id": 2707,
+  "parameters": {
+    "end_date": "2025-06-04",
+    "start_date": "2025-06-04",
+    "source_mode": "OFFICIAL_CATEGORY_REPORT",
+    "branch_filter": "11",
+    "credito_scope": "null",
+    "pipeline_code": "POINT_SALES_REBUILD_V2"
+  },
+  "summary": {
+    "pipeline_code": "POINT_SALES_REBUILD_V2",
+    "total_tasks": 1,
+    "tasks_pending": 0,
+    "tasks_running": 0,
+    "tasks_success": 1,
+    "tasks_failed": 0,
+    "tasks_skipped": 0,
+    "category_fact_rows": 6,
+    "product_fact_rows": 15,
+    "unmatched_rows": 0,
+    "duplicate_raw_rows": 0,
+    "quality_alerts": 1
+  },
+  "counts_by_branch_year": [
+    {
+      "sucursal": "EL TUNEL",
+      "year": 2025,
+      "record_count": 6
+    }
+  ],
+  "net_sales_by_branch_month": [
+    {
+      "sucursal": "EL TUNEL",
+      "year": 2025,
+      "month": 6,
+      "total_venta_neta": "1373.01"
+    }
+  ],
+  "legacy_vs_rebuilt": [
+    {
+      "receta_id": 50,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1300.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 51,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1720.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 54,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "1625.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 55,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "8.000",
+      "legacy_total_venta": "3440.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 59,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 60,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "430.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 62,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "180.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 63,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 64,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "860.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 68,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 69,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1290.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 73,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 117,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "65.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 121,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "130.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 126,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "195.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 156,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "145.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 160,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "145.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 161,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "58.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 163,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1335.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 164,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1035.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 166,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "65.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 167,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "260.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 168,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 177,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 178,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 180,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "45.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 193,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "270.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 198,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 222,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 224,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 225,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 228,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 229,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 478,
+      "sucursal_id": 1,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "11.000",
+      "legacy_total_venta": "715.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 51,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "860.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 54,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 55,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "2150.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 63,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "975.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 64,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "430.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 73,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "280.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 76,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "75.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 117,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "130.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 121,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "65.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 126,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "130.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 156,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "29.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 159,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "116.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 160,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "29.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 161,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "29.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 163,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "445.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 164,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "345.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 167,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "65.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 168,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 169,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 177,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "210.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 179,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 180,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "45.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 193,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "275.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 222,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 225,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 228,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 478,
+      "sucursal_id": 2,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "14.000",
+      "legacy_total_venta": "910.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 50,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 59,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 73,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 106,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "22.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 121,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "130.00",
+      "rebuilt_cantidad": "1.000",
+      "rebuilt_total_venta": "65.00"
+    },
+    {
+      "receta_id": 126,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "65.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 159,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "58.00",
+      "rebuilt_cantidad": "1.000",
+      "rebuilt_total_venta": "29.00"
+    },
+    {
+      "receta_id": 161,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "29.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 166,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "130.00",
+      "rebuilt_cantidad": "1.000",
+      "rebuilt_total_venta": "65.00"
+    },
+    {
+      "receta_id": 167,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "130.00",
+      "rebuilt_cantidad": "1.000",
+      "rebuilt_total_venta": "65.00"
+    },
+    {
+      "receta_id": 168,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "1.000",
+      "rebuilt_total_venta": "35.00"
+    },
+    {
+      "receta_id": 169,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 178,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 180,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "45.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 193,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "7.000",
+      "legacy_total_venta": "445.00",
+      "rebuilt_cantidad": "3.000",
+      "rebuilt_total_venta": "190.00"
+    },
+    {
+      "receta_id": 194,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 228,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "1.000",
+      "rebuilt_total_venta": "0.00"
+    },
+    {
+      "receta_id": 478,
+      "sucursal_id": 3,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "10.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "6.000",
+      "rebuilt_total_venta": "390.00"
+    },
+    {
+      "receta_id": 44,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "105.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 47,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "160.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 50,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1300.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 51,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "9.000",
+      "legacy_total_venta": "3870.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 54,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 55,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "7.000",
+      "legacy_total_venta": "3010.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 58,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "180.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 59,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 60,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "430.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 62,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "180.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 63,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 64,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1720.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 68,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 69,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "860.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 71,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "430.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 73,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "6.000",
+      "legacy_total_venta": "420.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 76,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "150.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 106,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "110.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 117,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "6.000",
+      "legacy_total_venta": "390.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 121,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "65.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 126,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "195.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 156,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "29.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 159,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "29.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 160,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "7.000",
+      "legacy_total_venta": "203.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 161,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "116.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 163,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "2225.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 164,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1380.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 167,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "14.000",
+      "legacy_total_venta": "910.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 168,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 169,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 177,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "280.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 178,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "140.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 179,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "140.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 180,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "45.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 193,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "275.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 198,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "280.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 222,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 225,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 228,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "11.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 478,
+      "sucursal_id": 4,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "12.000",
+      "legacy_total_venta": "780.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 44,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "105.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 49,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "540.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 50,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 51,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "12.000",
+      "legacy_total_venta": "5160.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 52,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "660.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 54,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "975.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 55,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "15.000",
+      "legacy_total_venta": "6450.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 56,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "1320.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 58,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "360.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 59,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 60,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "860.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 62,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "180.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 63,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "975.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 64,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1290.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 69,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "430.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 71,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "860.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 73,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "7.000",
+      "legacy_total_venta": "490.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 106,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "66.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 117,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "65.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 126,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "260.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 156,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "145.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 159,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "116.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 160,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "7.000",
+      "legacy_total_venta": "203.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 161,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "145.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 163,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "445.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 164,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "1725.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 166,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "195.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 167,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "12.000",
+      "legacy_total_venta": "780.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 168,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 169,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 177,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "210.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 178,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "105.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 180,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "180.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 198,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 222,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 225,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 228,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "8.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 478,
+      "sucursal_id": 5,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "13.000",
+      "legacy_total_venta": "845.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 43,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "60.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 44,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "6.000",
+      "legacy_total_venta": "210.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 47,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "6.000",
+      "legacy_total_venta": "240.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 49,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "540.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 50,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "7.000",
+      "legacy_total_venta": "2275.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 51,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "9.000",
+      "legacy_total_venta": "3870.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 52,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1980.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 54,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "1625.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 55,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "7.000",
+      "legacy_total_venta": "3010.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 56,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "2640.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 58,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "540.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 59,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "975.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 60,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1290.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 62,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "180.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 63,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 64,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1290.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 68,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "1625.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 69,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "8.000",
+      "legacy_total_venta": "3440.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 70,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "660.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 71,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "860.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 73,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "6.000",
+      "legacy_total_venta": "420.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 76,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "300.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 85,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "660.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 106,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "110.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 115,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "130.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 117,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "13.000",
+      "legacy_total_venta": "455.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 121,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "11.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 126,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "10.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 129,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "260.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 156,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "30.000",
+      "legacy_total_venta": "870.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 159,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "7.000",
+      "legacy_total_venta": "203.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 160,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "12.000",
+      "legacy_total_venta": "348.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 161,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "6.000",
+      "legacy_total_venta": "174.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 163,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "18.000",
+      "legacy_total_venta": "7535.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 164,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "19.000",
+      "legacy_total_venta": "6555.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 166,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "17.000",
+      "legacy_total_venta": "585.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 167,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "27.000",
+      "legacy_total_venta": "1755.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 168,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "8.000",
+      "legacy_total_venta": "280.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 169,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "9.000",
+      "legacy_total_venta": "315.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 171,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "58.000",
+      "legacy_total_venta": "464.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 177,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "210.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 178,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "105.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 179,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "175.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 180,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "7.000",
+      "legacy_total_venta": "315.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 181,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "140.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 193,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "11.000",
+      "legacy_total_venta": "780.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 198,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "280.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 222,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "9.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 224,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 225,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "12.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 227,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 228,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "23.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 230,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 478,
+      "sucursal_id": 6,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "37.000",
+      "legacy_total_venta": "2405.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 43,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "20.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 44,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "140.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 49,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "360.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 50,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "6.000",
+      "legacy_total_venta": "1950.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 51,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "2150.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 54,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1300.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 55,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1290.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 58,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "180.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 59,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 60,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "860.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 62,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "540.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 63,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "975.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 64,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1720.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 68,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 69,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "860.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 70,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "660.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 71,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "860.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 73,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "280.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 106,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "88.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 117,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "130.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 126,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "260.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 156,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "8.000",
+      "legacy_total_venta": "232.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 159,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "29.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 161,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "58.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 163,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1780.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 164,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1035.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 166,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "195.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 167,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "9.000",
+      "legacy_total_venta": "585.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 168,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "175.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 169,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 177,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "210.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 178,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 179,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 180,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "6.000",
+      "legacy_total_venta": "270.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 181,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 193,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "5.000",
+      "legacy_total_venta": "275.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 194,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 198,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "280.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 222,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 225,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 228,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "8.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 478,
+      "sucursal_id": 7,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "30.000",
+      "legacy_total_venta": "1950.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 44,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 47,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "40.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 50,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "975.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 54,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 55,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "430.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 58,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "180.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 59,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "325.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 60,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "430.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 63,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 68,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "650.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 69,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "1290.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 71,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "430.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 73,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "280.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 121,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "65.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 156,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "87.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 159,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "29.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 160,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "87.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 161,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "87.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 163,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1780.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 164,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "1380.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 166,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "65.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 167,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "195.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 168,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 169,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 178,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 179,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "35.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 180,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "180.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 181,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "70.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 193,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "8.000",
+      "legacy_total_venta": "525.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 198,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "2.000",
+      "legacy_total_venta": "140.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 222,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 223,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 225,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "4.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 228,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "3.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 478,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "17.000",
+      "legacy_total_venta": "1105.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    },
+    {
+      "receta_id": 494,
+      "sucursal_id": 8,
+      "fecha": "2025-06-04",
+      "legacy_cantidad": "1.000",
+      "legacy_total_venta": "0.00",
+      "rebuilt_cantidad": "0",
+      "rebuilt_total_venta": "0"
+    }
+  ],
+  "exact_duplicates": [],
+  "partial_duplicates": [],
+  "missing_days": {
+    "plausible": [],
+    "suspicious": [],
+    "coverage": [
+      {
+        "sucursal": "EL TUNEL",
+        "first_operational_date": "2025-06-04",
+        "last_operational_date": "2025-06-04",
+        "successful_tasks": 1,
+        "days_with_sales": 1,
+        "days_without_sales_but_successful": 0,
+        "suspicious_missing_days_inside_coverage": 0
+      }
+    ]
+  },
+  "run_deltas": [],
+  "unmatched_catalog": {
+    "total_normalized_rows": 15,
+    "unmatched_rows": 0,
+    "percentage_unmatched": 0.0
+  },
+  "coverage_by_branch": [
+    {
+      "sucursal": "EL TUNEL",
+      "first_operational_date": "2025-06-04",
+      "last_operational_date": "2025-06-04",
+      "successful_tasks": 1,
+      "days_with_sales": 1,
+      "days_without_sales_but_successful": 0,
+      "suspicious_missing_days_inside_coverage": 0
+    }
+  ],
+  "extraction_errors": [
+    {
+      "timestamp": "2026-04-06T03:55:00.120311+00:00",
+      "error": "Task Point v2 falló.",
+      "context": {
+        "error": "Object of type Decimal is not JSON serializable",
+        "branch": "EL TUNEL",
+        "task_id": 1,
+        "sale_date": "2025-06-04",
+        "timings_ms": {
+          "parse": 13,
+          "total": 3107,
+          "checksum": 0,
+          "download": 1308
+        },
+        "branch_external_id": "11"
+      }
+    }
+  ],
+  "reconciliation_summary": {
+    "records_recovered": 15,
+    "records_new_or_corrected_vs_legacy": 289,
+    "records_duplicated_exact": 0,
+    "records_duplicated_partial": 0,
+    "days_with_plausible_missing": 0,
+    "days_with_suspicious_missing": 0,
+    "branches_with_detected_opening": [
+      "EL TUNEL"
+    ],
+    "differences_monetary_against_legacy_rows": 289,
+    "quality_alerts": 1
+  }
+}

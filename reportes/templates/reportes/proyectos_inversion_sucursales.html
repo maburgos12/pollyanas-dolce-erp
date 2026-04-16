@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - Sucursales{% endblock %}
+{% block page_title %}Reportes · Sucursales{% endblock %}
+{% block body_class %}page-reportes-investment-projects{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406c">
+{% endblock %}
+
+{% block content %}
+<div class="investment-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="investment-header">
+    <article class="investment-hero">
+      <div class="investment-kicker">Dirección</div>
+      <h1 class="investment-title">Desempeño actual de sucursales</h1>
+      <p class="investment-copy">Esta vista concentra sólo lo necesario para leer el estado actual del portafolio: salud, retorno, repago y alertas. La simulación de nuevas aperturas vive aparte para no mezclar operación con decisiones futuras.</p>
+      <div class="investment-meta">
+        <span class="investment-pill">Sin simulación</span>
+        <span class="investment-pill">Sin calibración</span>
+        <span class="investment-pill">Lectura ejecutiva del portafolio</span>
+      </div>
+    </article>
+    <aside class="investment-side">
+      <div class="investment-actions">
+        <a class="investment-action-link" href="{% url 'reportes:proyectos_inversion' %}?refresh=1">Actualizar snapshots</a>
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_expansion_simulador' %}">Ir al simulador</a>
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_calibracion' %}">Ir a calibración</a>
+      </div>
+      <div class="investment-muted">Las métricas marcadas como parciales deben usarse sólo como señal temprana. La decisión final debe apoyarse en sucursales con datos oficiales y sin huecos operativos.</div>
+    </aside>
+  </section>
+
+  {% if expansion_alerts %}
+  <section class="investment-alert-stack">
+    {% for alert in expansion_alerts %}
+    <article class="investment-alert {% if alert.severity == 'CRITICAL' %}is-critical{% endif %}">
+      <strong>{{ alert.code }}</strong>
+      <span>{{ alert.message }}</span>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="investment-kpis">
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Sucursales activas</div>
+      <div class="investment-kpi-value">{{ portfolio_kpis.active_projects|intcomma }}</div>
+      <div class="investment-kpi-note">{{ portfolio_kpis.project_count|intcomma }} proyectos registrados</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Candidatas</div>
+      <div class="investment-kpi-value">{{ expansion_summary.counts.expand|intcomma }}</div>
+      <div class="investment-kpi-note">Con señal suficiente para estudiar expansión</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">En riesgo</div>
+      <div class="investment-kpi-value">{{ expansion_summary.counts.risk|intcomma }}</div>
+      <div class="investment-kpi-note">Requieren corrección antes de pensar en aperturas</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Calidad de datos</div>
+      <div class="investment-kpi-value">{{ data_readiness.official_count|intcomma }}/{{ portfolio_kpis.project_count|intcomma }}</div>
+      <div class="investment-kpi-note">{{ data_readiness.partial_count|intcomma }} proyectos con lectura parcial</div>
+    </article>
+  </section>
+
+  <section class="investment-grid-2">
+    <article class="investment-panel">
+      <div class="investment-panel-head">
+        <div>
+          <div class="investment-kicker">Prioridad</div>
+          <h2 class="investment-panel-title">Sucursales que hoy soportan expansión</h2>
+        </div>
+      </div>
+      <div class="investment-portfolio-list">
+        {% for row in expansion_candidate_rows %}
+        <article class="investment-project-row">
+          <div class="investment-project-top">
+            <strong>{{ row.project.nombre_proyecto }}</strong>
+            <span class="investment-status-pill is-active">{{ row.classification }}</span>
+          </div>
+          <div class="investment-muted">Health {{ row.health_score }}/100 · ROI {{ row.roi|floatformat:2 }}% · Payback {% if row.payback_real %}{{ row.payback_real|floatformat:2 }} meses{% else %}N/D{% endif %}</div>
+        </article>
+        {% empty %}
+        <div class="investment-empty">Todavía no hay sucursales con señal fuerte de expansión.</div>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="investment-panel">
+      <div class="investment-panel-head">
+        <div>
+          <div class="investment-kicker">Atención</div>
+          <h2 class="investment-panel-title">Sucursales que requieren corrección</h2>
+        </div>
+      </div>
+      <div class="investment-portfolio-list">
+        {% for row in expansion_risk_rows %}
+        <article class="investment-project-row">
+          <div class="investment-project-top">
+            <strong>{{ row.project.nombre_proyecto }}</strong>
+            <span class="investment-status-pill is-warning">{{ row.classification }}</span>
+          </div>
+          <div class="investment-muted">Health {{ row.health_score }}/100 · Flujo 3m ${{ row.average_free_cashflow_3m|default:0|floatformat:2|intcomma }}</div>
+        </article>
+        {% empty %}
+        <div class="investment-empty">No hay focos críticos en este momento.</div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="investment-layout">
+    <div class="investment-main">
+      <article class="investment-panel">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Vista simple</div>
+            <h2 class="investment-panel-title">Lectura ejecutiva por sucursal</h2>
+          </div>
+        </div>
+        <div class="investment-portfolio-list">
+          {% for row in projects %}
+          <article class="investment-project-row">
+            <div class="investment-project-top">
+              <div>
+                <h3 class="investment-panel-title">{{ row.project.nombre_proyecto }}</h3>
+                <div class="investment-meta">
+                  <span class="investment-status-pill {% if row.classification == 'EXPANDIR' %}is-active{% elif row.classification == 'RIESGO' %}is-warning{% else %}is-open{% endif %}">{{ row.classification }}</span>
+                  <span class="investment-status-pill {% if row.is_data_partial %}is-warning{% else %}is-active{% endif %}">{{ row.data_quality_badge }}</span>
+                  {% if row.project.sucursal_relacionada %}
+                  <span class="investment-pill">{{ row.project.sucursal_relacionada.codigo }} · {{ row.project.sucursal_relacionada.nombre }}</span>
+                  {% endif %}
+                  <span class="investment-pill">{{ row.project.get_estatus_display }}</span>
+                </div>
+              </div>
+              <a class="investment-action-link is-ghost" href="{% url 'reportes:proyecto_inversion_detail' row.project.pk %}">Abrir detalle</a>
+            </div>
+            <div class="investment-project-bottom">
+              <div class="investment-mini-kpis">
+                <div class="investment-mini-kpi">
+                  <span class="investment-muted">Health</span>
+                  <strong>{{ row.health_score }}/100</strong>
+                </div>
+                <div class="investment-mini-kpi">
+                  <span class="investment-muted">ROI</span>
+                  <strong>{% if not row.is_data_partial %}{{ row.roi_cumulative|floatformat:2 }}%{% else %}Revisar{% endif %}</strong>
+                </div>
+                <div class="investment-mini-kpi">
+                  <span class="investment-muted">Payback</span>
+                  <strong>{% if row.payback and not row.is_data_partial %}{{ row.payback|floatformat:2 }} meses{% else %}Revisar{% endif %}</strong>
+                </div>
+                <div class="investment-mini-kpi">
+                  <span class="investment-muted">Alertas</span>
+                  <strong>{{ row.active_alert_count }}</strong>
+                </div>
+              </div>
+              <div class="investment-muted">{{ row.recommendation }}</div>
+            </div>
+          </article>
+          {% empty %}
+          <div class="investment-empty">Todavía no hay sucursales registradas dentro del módulo.</div>
+          {% endfor %}
+        </div>
+      </article>
+    </div>
+
+    <aside class="investment-sidebar">
+      <article class="investment-form-card">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Alta controlada</div>
+            <h2 class="investment-panel-title">Registrar proyecto</h2>
+          </div>
+        </div>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="create_project">
+          <div class="investment-field-grid">
+            <div class="investment-field">
+              <label for="nombre_proyecto">Nombre del proyecto</label>
+              <input id="nombre_proyecto" type="text" name="nombre_proyecto" placeholder="Sucursal Plaza Norte 2026" required>
+            </div>
+            <div class="investment-field">
+              <label for="tipo_proyecto">Tipo</label>
+              <select id="tipo_proyecto" name="tipo_proyecto">
+                {% for key, label in project_types %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="sucursal_relacionada_id">Sucursal relacionada</label>
+              <select id="sucursal_relacionada_id" name="sucursal_relacionada_id">
+                <option value="">Sin asignar</option>
+                {% for sucursal in sucursales %}
+                <option value="{{ sucursal.id }}">{{ sucursal.codigo }} · {{ sucursal.nombre }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="responsable_id">Responsable</label>
+              <select id="responsable_id" name="responsable_id">
+                <option value="">Sin responsable</option>
+                {% for responsable in responsables %}
+                <option value="{{ responsable.id }}">{{ responsable.get_full_name|default:responsable.username }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="fecha_inicio">Fecha inicio</label>
+              <input id="fecha_inicio" type="date" name="fecha_inicio" required>
+            </div>
+          </div>
+          <div class="investment-form-actions">
+            <button class="investment-button" type="submit">Crear proyecto</button>
+          </div>
+        </form>
+      </article>
+    </aside>
+  </section>
+</div>
+{% endblock %}

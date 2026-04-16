@@ -31,6 +31,19 @@ class PointInventoryCostRow:
     raw_row: list[str]
 
 
+@dataclass(slots=True)
+class PointInventoryCostCaptureResult:
+    branch_name: str
+    rows_seen: int
+    matches_found: int
+    costs_created: int
+    costs_existing: int
+    unresolved_matches: int
+    zero_cost_matches: int
+    unresolved_samples: list[dict[str, str]]
+    zero_cost_samples: list[dict[str, str]]
+
+
 class PointInventoryCostCaptureService:
     def __init__(
         self,
@@ -126,6 +139,7 @@ class PointInventoryCostCaptureService:
         branch_hint: str = "ALMACEN",
         queries: list[str] | None = None,
         point_codes: list[str] | None = None,
+        include_all_rows: bool = False,
     ) -> list[PointInventoryCostRow]:
         queries, point_codes = self._expand_search_scope(queries=queries, point_codes=point_codes)
         normalized_queries = [normalizar_nombre(q) for q in queries]
@@ -164,6 +178,9 @@ class PointInventoryCostCaptureService:
                     normalized = self._normalize_supply_row(category_name=label, branch_name=branch_name, row=raw_row)
                     if normalized is None:
                         continue
+                    if include_all_rows:
+                        results.append(normalized)
+                        continue
                     haystack = normalizar_nombre(f"{normalized.point_code} {normalized.point_name} {normalized.point_category}")
                     if point_codes and normalized.point_code.upper() in point_codes:
                         results.append(normalized)
@@ -171,6 +188,16 @@ class PointInventoryCostCaptureService:
                     if normalized_queries and any(query and query in haystack for query in normalized_queries):
                         results.append(normalized)
         return results
+
+    def capture_all_rows(
+        self,
+        *,
+        branch_hint: str = "ALMACEN",
+    ) -> list[PointInventoryCostRow]:
+        return self.capture_matches(
+            branch_hint=branch_hint,
+            include_all_rows=True,
+        )
 
     def persist_cost_row(self, row: PointInventoryCostRow, *, supplier_name: str = "POINT EXISTENCIA ALMACEN") -> tuple[CostoInsumo | None, bool, str]:
         resolved = self.identity_service.resolve_insumo(point_code=row.point_code, point_name=row.point_name)
@@ -208,3 +235,61 @@ class PointInventoryCostCaptureService:
             },
         )
         return cost, created, "CREATED" if created else "EXISTS"
+
+    def capture_and_persist_all(
+        self,
+        *,
+        branch_hint: str = "ALMACEN",
+        supplier_name: str = "POINT EXISTENCIA ALMACEN",
+        sample_limit: int = 12,
+    ) -> PointInventoryCostCaptureResult:
+        rows = self.capture_all_rows(branch_hint=branch_hint)
+        created = 0
+        existing = 0
+        unresolved = 0
+        zero_cost = 0
+        unresolved_samples: list[dict[str, str]] = []
+        zero_cost_samples: list[dict[str, str]] = []
+        branch_name = branch_hint
+
+        for row in rows:
+            branch_name = row.branch_name or branch_name
+            _cost, was_created, status = self.persist_cost_row(row, supplier_name=supplier_name)
+            if status == "NO_MATCH_ERP":
+                unresolved += 1
+                if len(unresolved_samples) < sample_limit:
+                    unresolved_samples.append(
+                        {
+                            "point_code": row.point_code,
+                            "point_name": row.point_name,
+                            "category": row.category_name,
+                        }
+                    )
+                continue
+            if status == "UNIT_COST_ZERO":
+                zero_cost += 1
+                if len(zero_cost_samples) < sample_limit:
+                    zero_cost_samples.append(
+                        {
+                            "point_code": row.point_code,
+                            "point_name": row.point_name,
+                            "category": row.category_name,
+                        }
+                    )
+                continue
+            if was_created:
+                created += 1
+            else:
+                existing += 1
+
+        return PointInventoryCostCaptureResult(
+            branch_name=branch_name,
+            rows_seen=len(rows),
+            matches_found=created + existing + unresolved + zero_cost,
+            costs_created=created,
+            costs_existing=existing,
+            unresolved_matches=unresolved,
+            zero_cost_matches=zero_cost,
+            unresolved_samples=unresolved_samples,
+            zero_cost_samples=zero_cost_samples,
+        )

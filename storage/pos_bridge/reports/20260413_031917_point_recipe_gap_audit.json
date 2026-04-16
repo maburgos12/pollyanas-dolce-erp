@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-04-13T03:19:17.872735+00:00",
+  "summary": {
+    "workspace": "Matriz",
+    "products_seen": 1,
+    "products_skipped_non_recipe": 0,
+    "products_with_product_bom": 0,
+    "products_missing_recipe_in_point": 1,
+    "products_audited": 1,
+    "products_derived_presentations": 0,
+    "corroborated_from_insumos": 0,
+    "possible_matches_requiring_review": 0,
+    "internal_candidates_without_bom": 0,
+    "missing_without_candidates": 1
+  },
+  "items": [
+    {
+      "product": {
+        "pk_producto": 442,
+        "codigo": "00446",
+        "nombre": "Vaso Choco Oreo Mini",
+        "familia": "Vasos Preparados",
+        "categoria": "Vaso Preparado Mini",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    }
+  ]
+}

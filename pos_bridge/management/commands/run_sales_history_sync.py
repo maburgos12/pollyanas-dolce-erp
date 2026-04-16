@@ -30,6 +30,16 @@ class Command(BaseCommand):
         parser.add_argument("--actor-username", default="", help="Usuario ERP para registrar la ejecución.")
         parser.add_argument("--max-days", type=int, default=None, help="Límite de días calendario a procesar.")
         parser.add_argument(
+            "--source-mode",
+            default="",
+            help="Fuente de ventas: OFFICIAL o LEGACY. Por default usa POINT_SALES_SYNC_SOURCE_MODE.",
+        )
+        parser.add_argument(
+            "--credito-scopes",
+            default="",
+            help="Solo modo OFFICIAL. Scopes separados por coma: false,true,null.",
+        )
+        parser.add_argument(
             "--skip-range",
             action="append",
             default=[],
@@ -70,6 +80,15 @@ class Command(BaseCommand):
                 )
             )
 
+        source_mode = (options.get("source_mode") or "").strip().upper() or None
+        if source_mode and source_mode not in {"OFFICIAL", "LEGACY"}:
+            raise CommandError("source-mode debe ser OFFICIAL o LEGACY.")
+
+        credito_scopes = [item.strip() for item in str(options.get("credito_scopes") or "").split(",") if item.strip()]
+        invalid_scopes = [item for item in credito_scopes if item not in {"false", "true", "null"}]
+        if invalid_scopes:
+            raise CommandError(f"Scopes crédito inválidos: {', '.join(invalid_scopes)}")
+
         sync_job = run_sales_history_sync(
             start_date=start_date,
             end_date=end_date,
@@ -77,6 +96,8 @@ class Command(BaseCommand):
             triggered_by=actor,
             branch_filter=(options.get("branch") or "").strip() or None,
             max_days=options.get("max_days"),
+            source_mode=source_mode,
+            credito_scopes=credito_scopes or None,
         )
         payload = {
             "job_id": sync_job.id,

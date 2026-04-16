@@ -27,11 +27,25 @@ class Receta(models.Model):
         (TEMPORALIDAD_TEMPORAL, "Temporal"),
         (TEMPORALIDAD_FECHA_ESPECIAL, "Fecha especial"),
     ]
+    MODO_COSTEO_FABRICADO = "FABRICADO"
+    MODO_COSTEO_REVENTA = "REVENTA"
+    MODO_COSTEO_SERVICIO = "SERVICIO_ACCESORIO"
+    MODO_COSTEO_CHOICES = [
+        (MODO_COSTEO_FABRICADO, "Fabricado"),
+        (MODO_COSTEO_REVENTA, "Reventa"),
+        (MODO_COSTEO_SERVICIO, "Servicio/Accesorio"),
+    ]
 
     nombre = models.CharField(max_length=250)
     codigo_point = models.CharField(max_length=80, blank=True, default="", db_index=True)
     nombre_normalizado = models.CharField(max_length=260, db_index=True)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_PREPARACION, db_index=True)
+    modo_costeo = models.CharField(
+        max_length=20,
+        choices=MODO_COSTEO_CHOICES,
+        default=MODO_COSTEO_FABRICADO,
+        db_index=True,
+    )
     familia = models.CharField(max_length=120, blank=True, default="", db_index=True)
     categoria = models.CharField(max_length=120, blank=True, default="", db_index=True)
     temporalidad = models.CharField(
@@ -262,6 +276,10 @@ class LineaReceta(models.Model):
 
     @property
     def costo_total_estimado(self):
+        # Las subsecciones son desglose operativo/legacy y no deben volver a
+        # sumar costo al rollup principal de la receta.
+        if self.tipo_linea == self.TIPO_SUBSECCION:
+            return None
         # Modo operativo:
         # - Si la linea esta ligada a un insumo, el costo SIEMPRE sale de cantidad * costo_unitario_snapshot.
         # - Si falta cantidad o costo snapshot, no se calcula costo.
@@ -787,3 +805,88 @@ class SolicitudReabastoCedisLinea(models.Model):
 
     def __str__(self) -> str:
         return f"{self.solicitud.folio} · {self.receta.nombre}"
+
+
+class ProductoMonthClosure(models.Model):
+    STATUS_DRAFT = "DRAFT"
+    STATUS_BUILT = "BUILT"
+    STATUS_LOCKED = "LOCKED"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Borrador"),
+        (STATUS_BUILT, "Construido"),
+        (STATUS_LOCKED, "Bloqueado"),
+    ]
+
+    OPENING_SOURCE_PREVIOUS_CLOSURE = "PREVIOUS_CLOSURE"
+    OPENING_SOURCE_POINT_SNAPSHOT = "POINT_SNAPSHOT"
+    OPENING_SOURCE_BOOTSTRAP_SEED = "BOOTSTRAP_SEED"
+    OPENING_SOURCE_CHOICES = [
+        (OPENING_SOURCE_PREVIOUS_CLOSURE, "Cierre previo"),
+        (OPENING_SOURCE_POINT_SNAPSHOT, "Snapshot Point"),
+        (OPENING_SOURCE_BOOTSTRAP_SEED, "Bootstrap historico"),
+    ]
+
+    month_start = models.DateField(unique=True, db_index=True)
+    month_end = models.DateField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    opening_source = models.CharField(
+        max_length=32,
+        choices=OPENING_SOURCE_CHOICES,
+        blank=True,
+        default="",
+    )
+    opening_reference_date = models.DateField(null=True, blank=True)
+    upstream_sync_cutoff_at = models.DateTimeField(null=True, blank=True)
+    built_at = models.DateTimeField(null=True, blank=True)
+    built_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="product_month_closures_built",
+    )
+    notes = models.TextField(blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    is_locked = models.BooleanField(default=False)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Cierre mensual de producto"
+        verbose_name_plural = "Cierres mensuales de producto"
+        ordering = ["-month_start", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.month_start:%Y-%m} · {self.status}"
+
+
+class ProductoMonthClosureLine(models.Model):
+    closure = models.ForeignKey(ProductoMonthClosure, related_name="lines", on_delete=models.CASCADE)
+    receta_padre = models.ForeignKey(Receta, related_name="product_month_closure_lines", on_delete=models.PROTECT)
+    inventario_inicial_teorico = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    produccion_mes = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    venta_directa_enteros = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    venta_derivada_equivalente = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    venta_total_equivalente = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    merma_directa_enteros = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    merma_derivada_equivalente = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    merma_total_equivalente = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    inventario_final_teorico = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    source_snapshot_count = models.PositiveIntegerField(default=0)
+    source_sale_rows = models.PositiveIntegerField(default=0)
+    source_production_rows = models.PositiveIntegerField(default=0)
+    source_waste_rows = models.PositiveIntegerField(default=0)
+    has_catalog_issue = models.BooleanField(default=False)
+    catalog_issue_note = models.CharField(max_length=255, blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Linea cierre mensual de producto"
+        verbose_name_plural = "Lineas cierre mensual de producto"
+        ordering = ["receta_padre__nombre", "id"]
+        unique_together = [("closure", "receta_padre")]
+
+    def __str__(self) -> str:
+        return f"{self.closure.month_start:%Y-%m} · {self.receta_padre.nombre}"

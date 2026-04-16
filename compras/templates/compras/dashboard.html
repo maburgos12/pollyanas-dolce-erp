@@ -1,0 +1,678 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Compras - Dashboard{% endblock %}
+{% block page_title %}Compras · Dashboard{% endblock %}
+{% block body_class %}page-compras-dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+<style>
+  .purchases-shell { display:grid; gap:20px; }
+  .purchases-copy { margin:0; color:#6d5f67; }
+  .purchases-summary-grid { display:grid; gap:18px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .purchases-audit-grid { display:grid; gap:18px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .purchases-compact-list { display:grid; gap:10px; margin-top:14px; }
+  .purchases-compact-item { display:grid; gap:6px; padding:12px 14px; border:1px solid rgba(131,24,67,.08); border-radius:16px; background:rgba(255,255,255,.92); }
+  .purchases-compact-top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+  .purchases-compact-item strong { display:block; font-size:.95rem; }
+  .purchases-compact-meta { color:#6d5f67; font-size:.92rem; }
+  .purchases-empty-note { display:grid; gap:10px; }
+  .purchases-empty-note .bi-empty { min-height:100%; }
+  @media (max-width: 1200px) {
+    .purchases-summary-grid, .purchases-audit-grid { grid-template-columns:1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell purchases-shell">
+  <nav class="module-tabs">
+    <a class="module-tab active" href="{% url 'compras:home' %}">Dashboard</a>
+    <a class="module-tab" href="{% url 'compras:solicitudes' %}">Solicitudes</a>
+    <a class="module-tab" href="{% url 'compras:ordenes' %}">Órdenes</a>
+    <a class="module-tab" href="{% url 'compras:recepciones' %}">Recepciones</a>
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Abastecimiento</div>
+      <h1 class="bi-hero-title">Compras en control</h1>
+      <p class="purchases-copy">Monto solicitado, ejecución, presión por proveedor y consumo contra plan en una sola lectura útil.</p>
+      <div class="bi-hero-highlights">
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Solicitado visible</div>
+          <div class="bi-hero-highlight-value">${{ total_estimado|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ solicitudes_count|intcomma }} solicitudes en {{ periodo_label|lower }}</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Ejecutado visible</div>
+          <div class="bi-hero-highlight-value">${{ total_ejecutado|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ ordenes_abiertas|intcomma }} órdenes abiertas · {{ recepciones_pendientes|intcomma }} recepciones pendientes</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Objetivo del periodo</div>
+          <div class="bi-hero-highlight-value">{% if objetivo > 0 %}${{ objetivo|floatformat:2|intcomma }}{% else %}Pendiente{% endif %}</div>
+          <div class="bi-hero-highlight-meta">{% if objetivo_pct is not None %}Avance {{ objetivo_pct|floatformat:1 }}%{% else %}Sin objetivo cargado{% endif %}</div>
+        </article>
+      </div>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card">
+          <span class="bi-status-label">Periodo</span>
+          <strong>{{ periodo_label }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Última necesidad visible</span>
+          <strong>{% if latest_request %}{{ latest_request|date:"Y-m-d" }}{% else %}Pendiente{% endif %}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Desviación ejecutado vs solicitado</span>
+          <strong>{% if execution_gap > 0 %}+{% endif %}${{ execution_gap|floatformat:2|intcomma }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Alertas visibles</span>
+          <strong>{{ alert_rows|length|intcomma }}</strong>
+        </article>
+      </div>
+      <form class="bi-filterbar is-shared" method="get">
+        <div class="bi-control">
+          <label for="periodo_tipo">Fecha</label>
+          <select id="periodo_tipo" name="periodo_tipo">
+            <option value="mes" {% if periodo_tipo == "mes" %}selected{% endif %}>Mensual</option>
+            <option value="q1" {% if periodo_tipo == "q1" %}selected{% endif %}>1ra quincena</option>
+            <option value="q2" {% if periodo_tipo == "q2" %}selected{% endif %}>2da quincena</option>
+            <option value="all" {% if periodo_tipo == "all" %}selected{% endif %}>Todo</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="periodo_mes">Mes</label>
+          <input id="periodo_mes" name="periodo_mes" type="month" value="{{ periodo_mes }}">
+        </div>
+        <div class="bi-control">
+          <label for="source">Origen</label>
+          <select id="source" name="source">
+            <option value="all" {% if source_filter == "all" %}selected{% endif %}>Todos</option>
+            <option value="plan" {% if source_filter == "plan" %}selected{% endif %}>Plan</option>
+            <option value="manual" {% if source_filter == "manual" %}selected{% endif %}>Manual</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="categoria">Categoría</label>
+          <select id="categoria" name="categoria">
+            <option value="">Todas</option>
+            {% for option in categoria_options %}
+            <option value="{{ option }}" {% if categoria_filter == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="plan_id">Plan</label>
+          <select id="plan_id" name="plan_id">
+            <option value="">Todos</option>
+            {% for plan in plan_options %}
+            <option value="{{ plan.id }}" {% if plan_filter == plan.id|stringformat:'s' %}selected{% endif %}>{{ plan.nombre }} · {{ plan.fecha_produccion }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="consumo_ref">Consumo</label>
+          <select id="consumo_ref" name="consumo_ref">
+            <option value="all" {% if consumo_ref_filter == "all" %}selected{% endif %}>Todo visible</option>
+            <option value="plan_ref" {% if consumo_ref_filter == "plan_ref" %}selected{% endif %}>Solo referencia plan</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <button type="submit">Actualizar compras</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="bi-kpi-grid">
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if open_solicitudes %}warning{% else %}success{% endif %}">{{ open_solicitudes|intcomma }}</div>
+      <div class="bi-kpi-label">Solicitudes abiertas</div>
+      <div class="bi-kpi-note">Captura o validación pendiente antes de emitir compra.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if ready_for_order %}success{% else %}warning{% endif %}">{{ ready_for_order|intcomma }}</div>
+      <div class="bi-kpi-label">Listas para OC</div>
+      <div class="bi-kpi-note">Solicitudes aprobadas y sin bloqueo inmediato.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if blocked_solicitudes %}danger{% else %}success{% endif %}">{{ blocked_solicitudes|intcomma }}</div>
+      <div class="bi-kpi-label">Solicitudes bloqueadas</div>
+      <div class="bi-kpi-note">Faltantes de maestro, costo o proveedor aún visibles.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if recepciones_con_diferencias %}warning{% else %}success{% endif %}">{{ recepciones_con_diferencias|intcomma }}</div>
+      <div class="bi-kpi-label">Recepciones con diferencias</div>
+      <div class="bi-kpi-note">Casos con diferencia documental o física abiertos.</div>
+    </article>
+  </section>
+
+  {% if has_visible_data %}
+  <section class="bi-grid-feature">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Periodo</div>
+          <h2 class="bi-panel-title">Objetivo vs solicitado vs ejecutado</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill {% if objetivo > 0 %}success{% else %}warning{% endif %}">{% if objetivo > 0 %}Objetivo visible{% else %}Objetivo pendiente{% endif %}</span>
+          <a class="btn btn-secondary btn-sm" href="{{ solicitudes_url }}">Abrir solicitudes</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage">
+        <canvas id="purchasesBudgetChart" aria-label="Objetivo vs solicitado vs ejecutado" role="img"></canvas>
+      </div>
+      <div class="bi-metric-strip">
+        <div class="bi-metric">
+          <div class="bi-metric-label">Objetivo</div>
+          <div class="bi-metric-value">{% if objetivo > 0 %}${{ objetivo|floatformat:0|intcomma }}{% else %}Pendiente{% endif %}</div>
+          <div class="bi-subtle">Periodo visible</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Solicitado</div>
+          <div class="bi-metric-value">${{ total_estimado|floatformat:0|intcomma }}</div>
+          <div class="bi-subtle">Base de solicitudes</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Ejecutado</div>
+          <div class="bi-metric-value">${{ total_ejecutado|floatformat:0|intcomma }}</div>
+          <div class="bi-subtle">Órdenes emitidas</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Pipeline</div>
+          <h2 class="bi-panel-title">Carga documental del periodo</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill {% if open_solicitudes or ordenes_abiertas or recepciones_pendientes %}warning{% else %}success{% endif %}">Flujo visible</span>
+          <a class="btn btn-secondary btn-sm" href="{{ ordenes_url }}">Abrir órdenes</a>
+          <a class="btn btn-secondary btn-sm" href="{{ recepciones_url }}">Abrir recepciones</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage">
+        <canvas id="purchasesPipelineChart" aria-label="Pipeline documental de compras" role="img"></canvas>
+      </div>
+      <div class="purchases-summary-grid">
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Solicitudes</div>
+          <div class="bi-insight-value">{{ solicitudes_count|intcomma }}</div>
+          <div class="bi-insight-meta">Base visible</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Órdenes confirmadas</div>
+          <div class="bi-insight-value">{{ ordenes_confirmadas|intcomma }}</div>
+          <div class="bi-insight-meta">Listas para recepción</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Recepciones pendientes</div>
+          <div class="bi-insight-value">{{ recepciones_pendientes|intcomma }}</div>
+          <div class="bi-insight-meta">Pendientes de cierre</div>
+        </article>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Proveedor</div>
+          <h2 class="bi-panel-title">Concentración por proveedor</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ ordenes_url }}">Ver compras</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="purchasesProviderChart" aria-label="Concentración por proveedor" role="img"></canvas>
+      </div>
+      <div class="purchases-compact-list">
+        {% for row in top_provider_rows %}
+        <article class="purchases-compact-item">
+          <div class="purchases-compact-top">
+            <strong>{{ row.proveedor }}</strong>
+            <span class="bi-tone {% if row.variacion > 0 %}danger{% elif row.variacion < 0 %}success{% else %}warning{% endif %}">
+              {% if row.variacion > 0 %}+{% endif %}${{ row.variacion|floatformat:2|intcomma }}
+            </span>
+          </div>
+          <div class="purchases-compact-meta">Solicitado ${{ row.estimado|floatformat:2|intcomma }} · ejecutado ${{ row.ejecutado|floatformat:2|intcomma }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Abrir detalle</a>
+          </div>
+        </article>
+        {% empty %}
+        <div class="bi-empty">Sin proveedores visibles para el periodo filtrado.</div>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Categoría</div>
+          <h2 class="bi-panel-title">Presión por categoría</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ solicitudes_url }}">Abrir solicitudes</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="purchasesCategoryChart" aria-label="Presión por categoría" role="img"></canvas>
+      </div>
+      <div class="purchases-compact-list">
+        {% for row in top_category_rows %}
+        <article class="purchases-compact-item">
+          <div class="purchases-compact-top">
+            <strong>{{ row.categoria }}</strong>
+            <span class="bi-tone {% if row.variacion > 0 %}danger{% elif row.variacion < 0 %}success{% else %}warning{% endif %}">
+              {% if row.variacion > 0 %}+{% endif %}${{ row.variacion|floatformat:2|intcomma }}
+            </span>
+          </div>
+          <div class="purchases-compact-meta">Solicitado ${{ row.estimado|floatformat:2|intcomma }} · ejecutado ${{ row.ejecutado|floatformat:2|intcomma }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Abrir categoría</a>
+          </div>
+        </article>
+        {% empty %}
+        <div class="bi-empty">Sin categorías visibles para el periodo filtrado.</div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Consumo</div>
+          <h2 class="bi-panel-title">Plan de producción vs consumo real</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill {% if top_consumo_rows %}warning{% else %}success{% endif %}">Brechas visibles</span>
+          <a class="btn btn-secondary btn-sm" href="{{ solicitudes_url }}">Abrir plan de compra</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="purchasesConsumptionChart" aria-label="Plan vs consumo real" role="img"></canvas>
+      </div>
+      <div class="purchases-compact-list">
+        {% for row in top_consumo_rows %}
+        <article class="purchases-compact-item">
+          <div class="purchases-compact-top">
+            <strong>{{ row.insumo }}</strong>
+            <span class="bi-tone {% if row.semaforo == 'ROJO' %}danger{% elif row.semaforo == 'AMARILLO' %}warning{% else %}success{% endif %}">{{ row.estado }}</span>
+          </div>
+          <div class="purchases-compact-meta">Plan {{ row.cantidad_plan|floatformat:2 }} {{ row.unidad }} · real {{ row.cantidad_real|floatformat:2 }} {{ row.unidad }}</div>
+          {% if row.alerta %}<div class="bi-subtle">{{ row.alerta }}</div>{% endif %}
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Abrir insumo</a>
+          </div>
+        </article>
+        {% empty %}
+        <div class="bi-empty">Sin consumo material visible para comparar contra producción en el periodo.</div>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Trayectoria</div>
+          <h2 class="bi-panel-title">Histórico mensual visible</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ recepciones_url }}">Ver recepciones</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="purchasesHistoryChart" aria-label="Histórico mensual de compras" role="img"></canvas>
+      </div>
+      <div class="purchases-compact-list">
+        {% for row in alert_rows %}
+        <article class="purchases-compact-item">
+          <div class="purchases-compact-top">
+            <strong>{{ row.titulo }}</strong>
+            <span class="bi-tone {% if row.nivel == 'alto' %}danger{% else %}warning{% endif %}">{{ row.nivel|title }}</span>
+          </div>
+          <div class="purchases-compact-meta">{{ row.detalle }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Abrir periodo</a>
+          </div>
+        </article>
+        {% empty %}
+        <div class="bi-empty">Sin alertas presupuestales visibles en el periodo filtrado.</div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+  {% else %}
+  <section class="bi-grid-2 purchases-empty-note">
+    <article class="bi-empty">
+      <strong>Sin operación visible en Compras</strong>
+      <div>La base actual no tiene solicitudes, órdenes o recepciones capturadas para el periodo filtrado. El tablero se activará en cuanto el módulo empiece a registrar operación real.</div>
+    </article>
+    <article class="bi-empty">
+      <strong>Dato pendiente por capturar</strong>
+      <div>Para que esta vista gane señal ejecutiva hacen falta documentos reales de compras: solicitudes, órdenes, recepciones y objetivos presupuestales por periodo.</div>
+    </article>
+  </section>
+  {% endif %}
+
+  <details class="bi-audit-details">
+    <summary>Detalle auditable de compras</summary>
+    <div class="bi-audit-grid purchases-audit-grid">
+      <article class="bi-panel">
+        <div class="bi-panel-head">
+          <div>
+            <div class="bi-kicker">Detalle</div>
+            <h2 class="bi-panel-title">Solicitudes recientes</h2>
+          </div>
+          <div class="bi-panel-actions">
+            <a class="btn btn-secondary btn-sm" href="{{ solicitudes_url }}">Abrir solicitudes</a>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Folio</th>
+                <th>Insumo</th>
+                <th>Estatus</th>
+                <th>Proveedor</th>
+                <th class="text-end">Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in latest_rows %}
+              <tr>
+                <td>{{ row.folio }}</td>
+                <td>{{ row.insumo }}</td>
+                <td>{{ row.estatus }}</td>
+                <td>{{ row.proveedor }}</td>
+                <td class="text-end">${{ row.monto|floatformat:2|intcomma }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="muted">Sin solicitudes visibles.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+      <article class="bi-panel">
+        <div class="bi-panel-head">
+          <div>
+            <div class="bi-kicker">Detalle</div>
+            <h2 class="bi-panel-title">Órdenes recientes</h2>
+          </div>
+          <div class="bi-panel-actions">
+            <a class="btn btn-secondary btn-sm" href="{{ ordenes_url }}">Abrir órdenes</a>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Folio</th>
+                <th>Proveedor</th>
+                <th>Estatus</th>
+                <th class="text-end">Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in latest_orders %}
+              <tr>
+                <td>{{ row.folio }}</td>
+                <td>{{ row.proveedor }}</td>
+                <td>{{ row.estatus }}</td>
+                <td class="text-end">${{ row.monto|floatformat:2|intcomma }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="4" class="muted">Sin órdenes visibles.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+      <article class="bi-panel">
+        <div class="bi-panel-head">
+          <div>
+            <div class="bi-kicker">Detalle</div>
+            <h2 class="bi-panel-title">Recepciones recientes</h2>
+          </div>
+          <div class="bi-panel-actions">
+            <a class="btn btn-secondary btn-sm" href="{{ recepciones_url }}">Abrir recepciones</a>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Folio</th>
+                <th>Orden</th>
+                <th>Estatus</th>
+                <th>Fecha</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in latest_receptions %}
+              <tr>
+                <td>{{ row.folio }}</td>
+                <td>{{ row.orden }}</td>
+                <td>{{ row.estatus }}</td>
+                <td>{{ row.fecha|date:"Y-m-d" }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="4" class="muted">Sin recepciones visibles.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  </details>
+</div>
+
+{{ provider_chart_rows|json_script:"purchases-provider-data" }}
+{{ category_chart_rows|json_script:"purchases-category-data" }}
+{{ pipeline_rows|json_script:"purchases-pipeline-data" }}
+{{ history_rows|json_script:"purchases-history-data" }}
+{{ consumo_chart_rows|json_script:"purchases-consumption-data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  (() => {
+    const parse = (id) => {
+      const el = document.getElementById(id);
+      if (!el) return [];
+      try { return JSON.parse(el.textContent || "[]"); } catch (_) { return []; }
+    };
+
+    const makeChart = (id, config) => {
+      const el = document.getElementById(id);
+      if (!el || typeof Chart === "undefined") return;
+      new Chart(el, config);
+    };
+
+    const palette = {
+      vino: "#8b2252",
+      vinoSoft: "rgba(139, 34, 82, 0.15)",
+      success: "#236d53",
+      successSoft: "rgba(35, 109, 83, 0.18)",
+      warning: "#b38a25",
+      warningSoft: "rgba(179, 138, 37, 0.18)",
+      danger: "#bc3b3b",
+      dangerSoft: "rgba(188, 59, 59, 0.18)",
+      neutral: "#7c6f76",
+      neutralSoft: "rgba(124, 111, 118, 0.18)",
+    };
+
+    const providers = parse("purchases-provider-data");
+    makeChart("purchasesProviderChart", {
+      type: "bar",
+      data: {
+        labels: providers.map((row) => row.label),
+        datasets: [
+          {
+            label: "Solicitado",
+            data: providers.map((row) => row.estimado),
+            backgroundColor: palette.vinoSoft,
+            borderColor: palette.vino,
+            borderWidth: 1.5,
+            borderRadius: 10,
+          },
+          {
+            label: "Ejecutado",
+            data: providers.map((row) => row.ejecutado),
+            backgroundColor: palette.warningSoft,
+            borderColor: palette.warning,
+            borderWidth: 1.5,
+            borderRadius: 10,
+          },
+        ],
+      },
+      options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } },
+    });
+
+    const categories = parse("purchases-category-data");
+    makeChart("purchasesCategoryChart", {
+      type: "bar",
+      data: {
+        labels: categories.map((row) => row.label),
+        datasets: [
+          {
+            label: "Solicitado",
+            data: categories.map((row) => row.estimado),
+            backgroundColor: palette.successSoft,
+            borderColor: palette.success,
+            borderWidth: 1.5,
+            borderRadius: 10,
+          },
+          {
+            label: "Ejecutado",
+            data: categories.map((row) => row.ejecutado),
+            backgroundColor: palette.warningSoft,
+            borderColor: palette.warning,
+            borderWidth: 1.5,
+            borderRadius: 10,
+          },
+        ],
+      },
+      options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } },
+    });
+
+    const pipeline = parse("purchases-pipeline-data");
+    makeChart("purchasesPipelineChart", {
+      type: "doughnut",
+      data: {
+        labels: pipeline.map((row) => row.label),
+        datasets: [{
+          data: pipeline.map((row) => row.value),
+          backgroundColor: [palette.warningSoft, palette.successSoft, palette.vinoSoft, palette.dangerSoft],
+          borderColor: [palette.warning, palette.success, palette.vino, palette.danger],
+          borderWidth: 1.5,
+        }],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.raw}` } },
+        },
+      },
+    });
+
+    const history = parse("purchases-history-data");
+    makeChart("purchasesHistoryChart", {
+      type: "line",
+      data: {
+        labels: history.map((row) => row.label),
+        datasets: [
+          {
+            label: "Objetivo",
+            data: history.map((row) => row.objetivo),
+            borderColor: palette.neutral,
+            backgroundColor: palette.neutralSoft,
+            tension: 0.3,
+            fill: false,
+          },
+          {
+            label: "Solicitado",
+            data: history.map((row) => row.estimado),
+            borderColor: palette.vino,
+            backgroundColor: palette.vinoSoft,
+            tension: 0.3,
+            fill: false,
+          },
+          {
+            label: "Ejecutado",
+            data: history.map((row) => row.ejecutado),
+            borderColor: palette.warning,
+            backgroundColor: palette.warningSoft,
+            tension: 0.3,
+            fill: false,
+          },
+        ],
+      },
+      options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } },
+    });
+
+    const consumption = parse("purchases-consumption-data");
+    makeChart("purchasesConsumptionChart", {
+      type: "bar",
+      data: {
+        labels: consumption.map((row) => row.label),
+        datasets: [
+          {
+            label: "Plan",
+            data: consumption.map((row) => row.plan),
+            backgroundColor: palette.successSoft,
+            borderColor: palette.success,
+            borderWidth: 1.5,
+            borderRadius: 10,
+          },
+          {
+            label: "Real",
+            data: consumption.map((row) => row.real),
+            backgroundColor: palette.dangerSoft,
+            borderColor: palette.danger,
+            borderWidth: 1.5,
+            borderRadius: 10,
+          },
+        ],
+      },
+      options: { maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } },
+    });
+
+    makeChart("purchasesBudgetChart", {
+      type: "bar",
+      data: {
+        labels: ["Objetivo", "Solicitado", "Ejecutado"],
+        datasets: [{
+          data: [{{ objetivo|default:0 }}, {{ total_estimado|default:0 }}, {{ total_ejecutado|default:0 }}],
+          backgroundColor: [palette.neutralSoft, palette.vinoSoft, palette.warningSoft],
+          borderColor: [palette.neutral, palette.vino, palette.warning],
+          borderWidth: 1.5,
+          borderRadius: 12,
+        }],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+      },
+    });
+  })();
+</script>
+{% endblock %}

@@ -14,7 +14,7 @@ from core.models import Sucursal
 from control.models import MermaPOS
 from inventario.models import ExistenciaInsumo
 from inventario.models import MovimientoInventario
-from maestros.models import Insumo, UnidadMedida
+from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from pos_bridge.models import (
     PointBranch,
     PointDailySale,
@@ -37,6 +37,7 @@ from recetas.models import (
     VentaHistorica,
 )
 from recetas.utils.costeo_versionado import calcular_costeo_receta
+from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost, resolve_preparation_recipe_for_insumo
 from recetas.views import (
     _apply_plan_consumption,
     _export_periodo_mrp_csv,
@@ -141,6 +142,41 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertEqual(breakdown.costo_indirecto, Decimal("0.000000"))
         self.assertEqual(breakdown.snapshot_payload["costos"]["derived_parent_unit_cost"], "13.333333")
         self.assertEqual(breakdown.snapshot_payload["costos"]["direct_components_cost"], "2.000000")
+
+    def test_total_cost_falls_back_to_live_cost_when_snapshot_is_missing(self):
+        raw = Insumo.objects.create(
+            codigo="MP-FRESA",
+            nombre="Fresa fresca",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unit,
+        )
+        CostoInsumo.objects.create(
+            insumo=raw,
+            costo_unitario=Decimal("12"),
+            source_hash="derived-live-cost-fresa",
+        )
+        live_recipe = Receta.objects.create(
+            nombre="Vaso Fresa Especial",
+            codigo_point="0200",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Vasos",
+            categoria="Especial",
+            hash_contenido="hash-live-cost-recipe",
+        )
+        LineaReceta.objects.create(
+            receta=live_recipe,
+            posicion=1,
+            insumo=raw,
+            insumo_texto="Fresa fresca",
+            cantidad=Decimal("2"),
+            unidad_texto="pza",
+            unidad=self.unit,
+            costo_unitario_snapshot=None,
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        self.assertEqual(live_recipe.costo_total_estimado_decimal, Decimal("24"))
 
     def test_upstream_snapshot_exposes_parent_even_without_internal_line(self):
         lineas = list(self.derived.lineas.select_related("insumo"))
@@ -582,10 +618,14 @@ class DerivedProductPresentationCostingTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Cockpit DG consolidado")
+        self.assertContains(response, "Operación diaria")
         self.assertContains(response, "Dirección General · Operación Integrada")
-        self.assertContains(response, "Mermas Point del día operativo")
-        self.assertContains(response, "Flujo central Point")
+        self.assertContains(response, "Fecha visible")
+        self.assertContains(response, "2026-03-20")
+        self.assertContains(response, "Corte 2026-03-20")
+        self.assertContains(response, "corte 20/03/2026")
+        self.assertContains(response, "Mermas del día")
+        self.assertContains(response, "Top sucursales")
         self.assertEqual(response.context["plan_status_dashboard"]["total"], 1)
         self.assertEqual(response.context["resumen_cierre"]["total"], 2)
         self.assertEqual(
@@ -637,7 +677,7 @@ class DerivedProductPresentationCostingTests(TestCase):
         response = self.client.get(
             reverse("recetas:dg_operacion_dashboard"),
             {
-                "fecha_operacion": "2026-03-20",
+                "fecha_operacion": "2026-03-19",
                 "dg_start_date": "2026-03-01",
                 "dg_end_date": "2026-03-31",
                 "dg_group_by": "month",
@@ -645,7 +685,7 @@ class DerivedProductPresentationCostingTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Cuadre operativo Point")
+        self.assertContains(response, "Cuadre operativo")
         self.assertEqual(response.context["point_closure_summary"]["closure_date"], date(2026, 3, 19))
         self.assertEqual(response.context["point_closure_summary"]["branch_count"], 1)
         self.assertEqual(response.context["point_closure_summary"]["cuadra"], 1)
@@ -702,7 +742,7 @@ class DerivedProductPresentationCostingTests(TestCase):
         response = self.client.get(
             reverse("recetas:dg_operacion_dashboard"),
             {
-                "fecha_operacion": "2026-03-20",
+                "fecha_operacion": "2026-03-19",
                 "dg_start_date": "2026-03-01",
                 "dg_end_date": "2026-03-31",
                 "dg_group_by": "month",
@@ -713,6 +753,42 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertEqual(response.context["point_closure_summary"]["branch_count"], 1)
         self.assertEqual(len(response.context["point_closure_summary"]["rows"]), 1)
         self.assertIn("MATRIZ", response.context["point_closure_summary"]["rows"][0]["branch_label"])
+
+    def test_dg_operacion_dashboard_defaults_to_rule_managed_cut_date(self):
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        crontab = CrontabSchedule.objects.create(
+            minute="35",
+            hour="3",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=str(timezone.get_current_timezone()),
+        )
+        PeriodicTask.objects.create(
+            name="reportes: refresh analytics operativo",
+            task="reportes.tasks.refresh_operational_analytics",
+            crontab=crontab,
+            enabled=True,
+        )
+
+        fixed_now = timezone.make_aware(datetime(2026, 3, 13, 10, 0), timezone.get_current_timezone())
+
+        with patch("reportes.views.timezone.localtime", return_value=fixed_now):
+            response = self.client.get(
+                reverse("recetas:dg_operacion_dashboard"),
+                {
+                    "dg_start_date": "2026-03-01",
+                    "dg_end_date": "2026-03-31",
+                    "dg_group_by": "month",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["fecha_operacion"], date(2026, 3, 12))
+        self.assertEqual(response.context["point_exec_summary"]["closure_date"], date(2026, 3, 12))
+        self.assertContains(response, "Corte 2026-03-12")
+        self.assertContains(response, "Fecha visible")
 
     def test_dg_operacion_dashboard_export_csv_contains_three_fronts(self):
         sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
@@ -876,6 +952,10 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertEqual(response.context["week_label"], "2026-W12")
         self.assertEqual(response.context["production_units"], Decimal("15"))
         self.assertEqual(response.context["sales_units"], Decimal("12"))
+        self.assertTrue(response.context["top_sales_rows"])
+        self.assertIn("action_url", response.context["top_sales_rows"][0])
+        self.assertTrue(response.context["waste_branch_rows"])
+        self.assertIn("action_url", response.context["waste_branch_rows"][0])
 
     def test_plan_status_dashboard_export_csv_contains_summary_and_rows(self):
         PlanProduccion.objects.create(nombre="Plan dg borrador export", fecha_produccion=date(2026, 3, 17))
@@ -919,3 +999,101 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertIn("Mes,Total,Borrador,Consumo aplicado,Cerrado,Abiertos", payload)
         self.assertIn("2026-03,1,1,0,0,1", payload)
         self.assertNotIn("2026-04", payload)
+
+
+class PreparationSnapshotResolutionTests(TestCase):
+    def setUp(self):
+        self.kg = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.lt = UnidadMedida.objects.create(
+            codigo="lt",
+            nombre="Litro",
+            tipo=UnidadMedida.TIPO_VOLUMEN,
+            factor_to_base=Decimal("1000"),
+        )
+        self.prep_input = Insumo.objects.create(
+            codigo="AZUCAR",
+            nombre="Azucar",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.kg,
+        )
+        self.correct_recipe = Receta.objects.create(
+            nombre="Mermelada Fresa",
+            codigo_point="",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="hash-mermelada-fresa-correcta",
+            rendimiento_cantidad=Decimal("10"),
+            rendimiento_unidad=self.kg,
+        )
+        LineaReceta.objects.create(
+            receta=self.correct_recipe,
+            posicion=1,
+            insumo=self.prep_input,
+            insumo_texto="Azucar",
+            cantidad=Decimal("1"),
+            unidad=self.kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("120"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        self.competing_recipe = Receta.objects.create(
+            nombre="Mermelada Fresa Liquida",
+            codigo_point="01MF06",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="hash-mermelada-fresa-liquida",
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.lt,
+        )
+        LineaReceta.objects.create(
+            receta=self.competing_recipe,
+            posicion=1,
+            insumo=self.prep_input,
+            insumo_texto="Azucar",
+            cantidad=Decimal("1"),
+            unidad=self.lt,
+            unidad_texto="lt",
+            costo_unitario_snapshot=Decimal("300"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        self.internal_prep = Insumo.objects.create(
+            codigo=f"DERIVADO:RECETA:{self.correct_recipe.id}:PREPARACION",
+            codigo_point="01MF06",
+            nombre_point="Mermelada Fresa Liquida",
+            nombre="Mermelada Fresa",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.lt,
+        )
+        self.product = Receta.objects.create(
+            nombre="Pastel Fresas Con Crema - Mini Test",
+            codigo_point="PFCMINI-TEST",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-pfcm-mini-test",
+        )
+        self.line = LineaReceta.objects.create(
+            receta=self.product,
+            posicion=1,
+            insumo=self.internal_prep,
+            insumo_texto="Mermelada Fresa",
+            cantidad=Decimal("0.564491"),
+            unidad=None,
+            unidad_texto="",
+            costo_unitario_snapshot=Decimal("0"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+    def test_resolve_preparation_recipe_prefers_derived_code_recipe(self):
+        recipe = resolve_preparation_recipe_for_insumo(self.internal_prep)
+        self.assertIsNotNone(recipe)
+        self.assertEqual(recipe.id, self.correct_recipe.id)
+
+    def test_resolve_line_snapshot_uses_preparation_unit_when_line_unit_missing(self):
+        snapshot_cost, source = resolve_line_snapshot_cost(self.line)
+        self.assertEqual(source, "RECETA_PREPARACION")
+        self.assertEqual(snapshot_cost, Decimal("12.000000"))

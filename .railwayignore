@@ -17,3 +17,12 @@ README.md
 .github/
 entrypoint.sh
 docker-compose.yml
+backups/
+tmp/
+storage/
+output/
+staticfiles/
+_archive/
+db.sqlite3
+test_db.sqlite3
+infra/

@@ -2,6 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
+    restart: unless-stopped
     ports:
       - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
@@ -35,11 +36,12 @@ services:
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
       REDIS_URL: redis://redis:6379/0
-    command: python manage.py runserver 0.0.0.0:8000
+    command: /opt/venv/bin/python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app
     ports:
       - "${WEB_HOST_PORT:-8011}:8000"
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -58,10 +60,9 @@ services:
     env_file:
       - .env
     environment:
-      C_FORCE_ROOT: "1"
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
       REDIS_URL: redis://redis:6379/0
-    command: python -m celery -A config worker -l info --pool=solo --concurrency=1
+    command: /opt/venv/bin/python -m celery -A config worker -l info --pool=solo --concurrency=1
     volumes:
       - .:/app
     depends_on:
@@ -78,10 +79,9 @@ services:
     env_file:
       - .env
     environment:
-      C_FORCE_ROOT: "1"
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
       REDIS_URL: redis://redis:6379/0
-    command: bash -lc "python manage.py setup_celery_schedules && python -m celery -A config beat -l info"
+    command: /bin/sh -lc "/opt/venv/bin/python manage.py setup_celery_schedules && /opt/venv/bin/python -m celery -A config beat -l info"
     volumes:
       - .:/app
     depends_on:

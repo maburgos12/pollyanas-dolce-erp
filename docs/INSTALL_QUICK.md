@@ -16,9 +16,11 @@ cp .env.example .env
 # Los valores por defecto funcionan, no necesitas editarlo
 ```
 
+URL local oficial: `http://localhost:8011`
+
 ## Paso 4: Levantar
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ## Paso 5: Inicializar
@@ -27,10 +29,10 @@ docker-compose up -d --build
 sleep 30
 
 # Crear tablas
-docker-compose exec web python manage.py migrate
+docker compose exec web python manage.py migrate
 
 # Crear usuario admin
-docker-compose exec web python manage.py createsuperuser
+docker compose exec web python manage.py createsuperuser
 # Usuario: admin
 # Email: admin@pastelerias.mx  
 # Password: (el que quieras)
@@ -38,12 +40,14 @@ docker-compose exec web python manage.py createsuperuser
 
 ## Paso 6: Importar datos
 ```bash
-docker-compose exec web python manage.py import_costeo test_data/COSTEO_Prueba.xlsx
+docker compose exec web python manage.py import_costeo test_data/COSTEO_Prueba.xlsx
 ```
 
 ## ✅ Listo!
 
-Abre http://localhost:8000/admin
+Abre http://localhost:8011/admin
+
+El servicio `web` se recarga automáticamente al detectar cambios de código local.
 
 **Usuario**: admin  
 **Password**: (el que pusiste)
@@ -58,17 +62,17 @@ cat logs/import_summary_*.csv
 ```bash
 # Primero obtén un receta_id del admin
 # Luego:
-curl -X POST http://localhost:8000/api/mrp/explode/ \
+curl -X POST http://localhost:8011/api/mrp/explode/ \
   -H "Content-Type: application/json" \
   -d '{"receta_id": 1, "multiplicador": 5}'
 
 # Requerimientos agregados por periodo (mes completo)
-curl -X POST http://localhost:8000/api/mrp/calcular-requerimientos/ \
+curl -X POST http://localhost:8011/api/mrp/calcular-requerimientos/ \
   -H "Content-Type: application/json" \
   -d '{"periodo":"2026-02","periodo_tipo":"mes"}'
 
 # Crear plan de producción desde pronóstico mensual
-curl -X POST http://localhost:8000/api/mrp/generar-plan-pronostico/ \
+curl -X POST http://localhost:8011/api/mrp/generar-plan-pronostico/ \
   -H "Content-Type: application/json" \
   -d '{"periodo":"2026-02","fecha_produccion":"2026-02-20","incluir_preparaciones":false}'
 ```

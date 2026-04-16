@@ -80,6 +80,11 @@ class Insumo(models.Model):
         return self.nombre
 
     @property
+    def display_name(self) -> str:
+        point_name = (self.nombre_point or "").strip()
+        return point_name or self.nombre
+
+    @property
     def es_materia_prima(self) -> bool:
         return self.tipo_item == self.TIPO_MATERIA_PRIMA
 

@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}CRM - Dashboard{% endblock %}
+{% block page_title %}CRM · Dashboard{% endblock %}
+{% block body_class %}page-crm-dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Comercial</div>
+      <h1 class="bi-hero-title">Clientes y pedidos en control</h1>
+      <p class="bi-copy">Cartera, actividad comercial y pedidos abiertos en una sola lectura.</p>
+      <div class="bi-hero-highlights">
+        <article class="bi-hero-highlight"><div class="bi-hero-highlight-label">Clientes activos</div><div class="bi-hero-highlight-value">{{ clientes_activos|intcomma }}</div><div class="bi-hero-highlight-meta">{{ clientes_total|intcomma }} clientes visibles</div></article>
+        <article class="bi-hero-highlight"><div class="bi-hero-highlight-label">Pedidos abiertos</div><div class="bi-hero-highlight-value">{{ pedidos_abiertos|intcomma }}</div><div class="bi-hero-highlight-meta">{{ pedidos_hoy|intcomma }} movimientos del día</div></article>
+        <article class="bi-hero-highlight"><div class="bi-hero-highlight-label">Monto visible</div><div class="bi-hero-highlight-value">${{ monto_visible|floatformat:2|intcomma }}</div><div class="bi-hero-highlight-meta">Pedidos visibles en base actual</div></article>
+      </div>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card"><span class="bi-status-label">Producción</span><strong>{{ pedidos_produccion|intcomma }}</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Entregados</span><strong>{{ pedidos_entregados|intcomma }}</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Cancelados</span><strong>{{ pedidos_cancelados|intcomma }}</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Actividad hoy</span><strong>{{ pedidos_hoy|intcomma }}</strong></article>
+      </div>
+      <form class="bi-filterbar is-shared" method="get">
+        <div class="bi-control">
+          <label for="crm-date-from">Fecha desde</label>
+          <input id="crm-date-from" type="date" name="date_from" value="{{ date_from }}">
+        </div>
+        <div class="bi-control">
+          <label for="crm-date-to">Fecha hasta</label>
+          <input id="crm-date-to" type="date" name="date_to" value="{{ date_to }}">
+        </div>
+        <div class="bi-control">
+          <label for="crm-sucursal">Sucursal</label>
+          <select id="crm-sucursal" name="sucursal_id">
+            <option value="">Todas</option>
+            {% for option in sucursal_options %}
+            <option value="{{ option.id }}" {% if selected_sucursal_id == option.id|stringformat:"s" %}selected{% endif %}>{{ option.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="crm-estatus">Estatus</label>
+          <select id="crm-estatus" name="estatus">
+            <option value="">Todos</option>
+            <option value="NUEVO" {% if selected_estatus == "NUEVO" %}selected{% endif %}>Nuevo</option>
+            <option value="CONFIRMADO" {% if selected_estatus == "CONFIRMADO" %}selected{% endif %}>Confirmado</option>
+            <option value="EN_PRODUCCION" {% if selected_estatus == "EN_PRODUCCION" %}selected{% endif %}>Producción</option>
+            <option value="ENTREGADO" {% if selected_estatus == "ENTREGADO" %}selected{% endif %}>Entregado</option>
+            <option value="CANCELADO" {% if selected_estatus == "CANCELADO" %}selected{% endif %}>Cancelado</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="crm-canal">Canal</label>
+          <select id="crm-canal" name="canal">
+            <option value="">Todos</option>
+            <option value="MOSTRADOR" {% if selected_canal == "MOSTRADOR" %}selected{% endif %}>Mostrador</option>
+            <option value="WHATSAPP" {% if selected_canal == "WHATSAPP" %}selected{% endif %}>WhatsApp</option>
+            <option value="TELEFONO" {% if selected_canal == "TELEFONO" %}selected{% endif %}>Teléfono</option>
+            <option value="WEB" {% if selected_canal == "WEB" %}selected{% endif %}>Web</option>
+            <option value="OTRO" {% if selected_canal == "OTRO" %}selected{% endif %}>Otro</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="crm-prioridad">Prioridad</label>
+          <select id="crm-prioridad" name="prioridad">
+            <option value="">Todas</option>
+            <option value="BAJA" {% if selected_prioridad == "BAJA" %}selected{% endif %}>Baja</option>
+            <option value="MEDIA" {% if selected_prioridad == "MEDIA" %}selected{% endif %}>Media</option>
+            <option value="ALTA" {% if selected_prioridad == "ALTA" %}selected{% endif %}>Alta</option>
+            <option value="URGENTE" {% if selected_prioridad == "URGENTE" %}selected{% endif %}>Urgente</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="crm-q">Cliente o folio</label>
+          <input id="crm-q" type="text" name="q" value="{{ selected_q }}" placeholder="Cliente, folio o comentario">
+        </div>
+        <div class="bi-control"><button type="submit">Aplicar filtros</button></div>
+      </form>
+      {% if selected_canal or selected_prioridad or selected_q %}
+      <div class="bi-summary-band">
+        {% if selected_canal %}<div class="bi-summary-chip"><span>Canal</span><strong>{{ selected_canal }}</strong></div>{% endif %}
+        {% if selected_prioridad %}<div class="bi-summary-chip"><span>Prioridad</span><strong>{{ selected_prioridad }}</strong></div>{% endif %}
+        {% if selected_q %}<div class="bi-summary-chip"><span>Búsqueda</span><strong>{{ selected_q }}</strong></div>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="bi-kpi-grid">
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if clientes_activos %}success{% else %}warning{% endif %}">{{ clientes_activos|intcomma }}</div><div class="bi-kpi-label">Base activa</div><div class="bi-kpi-note">Clientes disponibles para operar.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if pedidos_abiertos %}warning{% else %}success{% endif %}">{{ pedidos_abiertos|intcomma }}</div><div class="bi-kpi-label">Pedidos abiertos</div><div class="bi-kpi-note">Pendientes de cierre o entrega.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if pedidos_produccion %}warning{% else %}success{% endif %}">{{ pedidos_produccion|intcomma }}</div><div class="bi-kpi-label">En producción</div><div class="bi-kpi-note">Pedidos ya transferidos a operación.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if pedidos_cancelados %}danger{% else %}success{% endif %}">{{ pedidos_cancelados|intcomma }}</div><div class="bi-kpi-label">Cancelados</div><div class="bi-kpi-note">Casos perdidos visibles en historial.</div></article>
+  </section>
+
+  {% if has_visible_data %}
+  <section class="bi-grid-feature">
+    <article class="bi-panel">
+      <div class="bi-panel-head"><div><div class="bi-kicker">Pedidos</div><h2 class="bi-panel-title">Distribución por estatus</h2></div></div>
+      <div class="bi-panel-actions">
+        <a class="btn btn-secondary btn-sm" href="{{ pedidos_abiertos_url }}">Abrir abiertos</a>
+      </div>
+      <div class="bi-chart-stage"><canvas id="crmStatusChart" aria-label="Distribución por estatus de pedido" role="img"></canvas></div>
+    </article>
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div><div class="bi-kicker">Canal</div><h2 class="bi-panel-title">Origen comercial</h2></div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ clientes_url }}">Abrir clientes</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage"><canvas id="crmChannelChart" aria-label="Origen comercial" role="img"></canvas></div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div><div class="bi-kicker">Actividad</div><h2 class="bi-panel-title">Últimos 7 días</h2></div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ pedidos_url }}">Abrir pedidos</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact"><canvas id="crmTrendChart" aria-label="Pedidos y seguimientos últimos 7 días" role="img"></canvas></div>
+      <div class="bi-list bi-list-dense">
+        {% for row in latest_orders %}
+        <article class="bi-list-item is-tight">
+          <strong>{{ row.folio }} · {{ row.cliente.nombre }}</strong>
+          <div>{{ row.get_estatus_display }} · {{ row.get_canal_display }} · ${{ row.monto_estimado|floatformat:2|intcomma }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{% url 'crm:pedido_detail' row.id %}">Abrir pedido</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin pedidos recientes</strong><div class="bi-subtle">Aún no hay pedidos capturados en la base visible.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div><div class="bi-kicker">Prioridad</div><h2 class="bi-panel-title">Presión comercial</h2></div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ pedidos_produccion_url }}">Ver producción</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact"><canvas id="crmPriorityChart" aria-label="Prioridad de pedidos" role="img"></canvas></div>
+      <div class="bi-list bi-list-dense">
+        {% for row in top_client_rows %}
+        <article class="bi-list-item is-tight">
+          <strong>{{ row.cliente }}</strong>
+          <div>{{ row.pedidos|intcomma }} pedidos · ${{ row.monto|floatformat:2|intcomma }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Ver pedidos</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin clientes dominantes</strong><div class="bi-subtle">Aún no hay historial suficiente para ranking comercial.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+  {% else %}
+  <section class="bi-grid-2">
+    <article class="bi-empty"><strong>Sin operación comercial visible</strong><div>No hay clientes o pedidos capturados todavía en la base actual.</div></article>
+    <article class="bi-empty"><strong>Dato pendiente</strong><div>Este tablero se activará con más señal en cuanto el módulo registre pedidos y seguimientos reales.</div></article>
+  </section>
+  {% endif %}
+
+  <details class="bi-audit-details">
+    <summary>Detalle auditable comercial</summary>
+    <div class="bi-audit-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));">
+      <article class="bi-panel">
+        <div class="bi-panel-head"><div><div class="bi-kicker">Detalle</div><h2 class="bi-panel-title">Clientes recientes</h2></div></div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead><tr><th>Código</th><th>Cliente</th><th>Tipo</th></tr></thead>
+            <tbody>
+              {% for row in latest_clients %}
+              <tr><td>{{ row.codigo }}</td><td>{{ row.nombre }}</td><td>{{ row.tipo_cliente|default:"-" }}</td></tr>
+              {% empty %}
+              <tr><td colspan="3" class="muted">Sin clientes visibles.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+      <article class="bi-panel">
+        <div class="bi-panel-head"><div><div class="bi-kicker">Detalle</div><h2 class="bi-panel-title">Pedidos recientes</h2></div></div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead><tr><th>Folio</th><th>Cliente</th><th>Estatus</th><th class="text-end">Monto</th></tr></thead>
+            <tbody>
+              {% for row in latest_orders %}
+              <tr><td>{{ row.folio }}</td><td>{{ row.cliente.nombre }}</td><td>{{ row.get_estatus_display }}</td><td class="text-end">${{ row.monto_estimado|floatformat:2|intcomma }}</td></tr>
+              {% empty %}
+              <tr><td colspan="4" class="muted">Sin pedidos visibles.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+      <article class="bi-panel">
+        <div class="bi-panel-head"><div><div class="bi-kicker">Detalle</div><h2 class="bi-panel-title">Seguimiento reciente</h2></div></div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead><tr><th>Pedido</th><th>Estatus</th><th>Comentario</th></tr></thead>
+            <tbody>
+              {% for row in latest_tracking %}
+              <tr><td>{{ row.pedido.folio }}</td><td>{{ row.get_estatus_nuevo_display|default:row.estatus_nuevo }}</td><td>{{ row.comentario|default:"-" }}</td></tr>
+              {% empty %}
+              <tr><td colspan="3" class="muted">Sin seguimientos visibles.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  </details>
+</div>
+
+{{ status_rows|json_script:"crm-status-data" }}
+{{ channel_rows|json_script:"crm-channel-data" }}
+{{ recent_days|json_script:"crm-trend-data" }}
+{{ priority_rows|json_script:"crm-priority-data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+(() => {
+  const parse = (id) => { const el = document.getElementById(id); if (!el) return []; try { return JSON.parse(el.textContent || "[]"); } catch (_) { return []; } };
+  const makeChart = (id, config) => { const el = document.getElementById(id); if (!el || typeof Chart === "undefined") return; new Chart(el, config); };
+  const palette = { vino:"#8b2252", vinoSoft:"rgba(139,34,82,.15)", success:"#236d53", successSoft:"rgba(35,109,83,.18)", warning:"#b38a25", warningSoft:"rgba(179,138,37,.18)", danger:"#bc3b3b", dangerSoft:"rgba(188,59,59,.18)" };
+  const status = parse("crm-status-data");
+  makeChart("crmStatusChart", { type:"doughnut", data:{ labels:status.map(r=>r.label), datasets:[{ data:status.map(r=>r.value), backgroundColor:[palette.vinoSoft,palette.warningSoft,palette.successSoft,palette.dangerSoft], borderColor:[palette.vino,palette.warning,palette.success,palette.danger], borderWidth:1.5 }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:"bottom" } } } });
+  const channel = parse("crm-channel-data");
+  makeChart("crmChannelChart", { type:"bar", data:{ labels:channel.map(r=>r.label), datasets:[{ data:channel.map(r=>r.value), backgroundColor:palette.vinoSoft, borderColor:palette.vino, borderWidth:1.5, borderRadius:10 }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ display:false } } } });
+  const trend = parse("crm-trend-data");
+  makeChart("crmTrendChart", { type:"line", data:{ labels:trend.map(r=>r.label), datasets:[{ label:"Pedidos", data:trend.map(r=>r.pedidos), borderColor:palette.vino, backgroundColor:palette.vinoSoft, tension:.3 }, { label:"Seguimientos", data:trend.map(r=>r.seguimientos), borderColor:palette.warning, backgroundColor:palette.warningSoft, tension:.3 }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:"bottom" } } } });
+  const priority = parse("crm-priority-data");
+  makeChart("crmPriorityChart", { type:"bar", data:{ labels:priority.map(r=>r.label), datasets:[{ data:priority.map(r=>r.value), backgroundColor:[palette.successSoft,palette.vinoSoft,palette.warningSoft,palette.dangerSoft], borderColor:[palette.success,palette.vino,palette.warning,palette.danger], borderWidth:1.5, borderRadius:10 }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ display:false } } } });
+})();
+</script>
+{% endblock %}

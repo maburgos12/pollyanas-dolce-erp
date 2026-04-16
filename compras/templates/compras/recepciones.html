@@ -12,7 +12,7 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Resumen de compras</div>
+  <div class="card-header">Resumen de recepciones</div>
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
@@ -283,7 +283,7 @@
     {% for item in plan_scope_context.pipeline_steps %}
     <article class="kpi-card {% if item.is_active %}is-active{% endif %}">
       <div class="kpi-number {% if item.semaphore_tone == 'danger' %}is-danger{% elif item.semaphore_tone == 'warning' %}is-warning{% elif item.semaphore_tone == 'primary' %}is-primary{% else %}is-success{% endif %}">{{ item.progress_pct }}%</div>
-      <div class="kpi-label">Madurez ERP · {{ item.label }}</div>
+      <div class="kpi-label">Cobertura · {{ item.label }}</div>
       <div class="muted mt-2">{{ item.status_label }} · abiertos {{ item.open }} · cerrados {{ item.closed }}</div>
       <div class="erp-progress mt-2">
         <div class="erp-progress-fill {% if item.semaphore_tone == 'danger' %}is-danger{% elif item.semaphore_tone == 'warning' %}is-warning{% elif item.semaphore_tone == 'primary' %}is-primary{% else %}is-success{% endif %}" style="width: {{ item.progress_pct }}%;"></div>
@@ -850,7 +850,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Salud operativa ERP</div>
+  <div class="card-header">Salud operativa</div>
   <p class="muted">Prioriza validación, cierre con justificación y aplicación correcta a inventario para no romper conciliación ni auditoría.</p>
   <div class="kpi-grid kpi-mini mb-3">
     {% for item in enterprise_board.source_cards %}

@@ -67,7 +67,7 @@ class PointRecipeIdentityService:
             code_norm = normalizar_codigo_point(point_code)
             for insumo in Insumo.objects.exclude(codigo_point="").order_by("id"):
                 if normalizar_codigo_point(insumo.codigo_point) == code_norm:
-                    return ResolvedInsumo(insumo=canonical_insumo(insumo), score=100.0, method="POINT_CODE")
+                    return ResolvedInsumo(insumo=insumo, score=100.0, method="POINT_CODE")
 
         candidate_names = [point_name, *extra_names]
         for candidate in candidate_names:
@@ -96,11 +96,13 @@ class PointRecipeIdentityService:
         insumo: Insumo,
         point_code: str = "",
         point_name: str = "",
+        category: str = "",
         alias_names: list[str] | None = None,
     ) -> int:
         changes = 0
         point_code = (point_code or "").strip().upper()
         point_name = (point_name or "").strip()
+        category = (category or "").strip()
         alias_names = [name for name in (alias_names or []) if (name or "").strip()]
 
         update_fields: list[str] = []
@@ -110,6 +112,9 @@ class PointRecipeIdentityService:
         if point_name and insumo.nombre_point != point_name:
             insumo.nombre_point = point_name[:250]
             update_fields.append("nombre_point")
+        if category and insumo.categoria != category[:120]:
+            insumo.categoria = category[:120]
+            update_fields.append("categoria")
         if update_fields:
             insumo.save(update_fields=update_fields)
             changes += 1
@@ -156,6 +161,7 @@ class PointRecipeIdentityService:
                 insumo=resolved.insumo,
                 point_code=point_code,
                 point_name=point_name,
+                category=categoria,
             )
             return resolved.insumo
 
@@ -172,6 +178,7 @@ class PointRecipeIdentityService:
             insumo=insumo,
             point_code=point_code,
             point_name=point_name,
+            category=categoria,
         )
         return canonical_insumo(insumo) or insumo
 

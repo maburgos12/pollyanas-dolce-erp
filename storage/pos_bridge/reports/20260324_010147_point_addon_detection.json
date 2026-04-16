@@ -1,0 +1,25 @@
+{
+  "generated_at": "2026-03-24T01:01:47.460978+00:00",
+  "candidates": [
+    {
+      "sku": "SFRESAG",
+      "name": "Sabor Fresa Grande Pay",
+      "category": "Pay Grande",
+      "total_qty": "10.000",
+      "rows": 1
+    }
+  ],
+  "synced_codes": [],
+  "detected_rules": [
+    {
+      "base_codigo_point": "0001",
+      "base_nombre": "Pay de Queso Grande",
+      "addon_codigo_point": "SFRESAG",
+      "addon_nombre": "Sabor Fresa Grande Pay",
+      "coverage": "100.0000",
+      "qty": "10.000",
+      "rule_id": 1,
+      "status": "DETECTED"
+    }
+  ]
+}

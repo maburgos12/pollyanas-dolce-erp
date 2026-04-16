@@ -1,0 +1,492 @@
+{
+  "sale_date": "2026-03-17",
+  "branch_filter": "",
+  "probes": [
+    {
+      "captured_at_utc": "2026-03-18T06:13:12.375672+00:00",
+      "captured_at_local": "2026-03-17T23:13:12.375676-07:00",
+      "sync_job_id": 68,
+      "sync_job_status": "SUCCESS",
+      "sync_job_summary": {
+        "days_processed": 1,
+        "branches_processed": 8,
+        "sales_rows_seen": 249,
+        "daily_sales_created": 0,
+        "daily_sales_updated": 249,
+        "historical_sales_created": 0,
+        "historical_sales_updated": 185,
+        "unresolved_recipe_rows": 0,
+        "unresolved_branch_rows": 0,
+        "point_identity_synced": 0,
+        "raw_exports": [
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231303_1_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231304_2_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231304_3_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231305_4_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231305_5_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231306_6_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231308_7_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231308_11_2026-03-17_sales.json"
+        ]
+      },
+      "snapshot": {
+        "sale_date": "2026-03-17",
+        "branch_filter": "",
+        "row_count": 249,
+        "branch_count": 7,
+        "total_quantity": "653",
+        "total_tickets": 0,
+        "gross_amount": "88074",
+        "discount_amount": "79",
+        "total_amount": "87995",
+        "tax_amount": "1077.65000000000",
+        "net_amount": "86917.3500000000",
+        "branches": [
+          {
+            "external_id": "5",
+            "name": "Colosio",
+            "row_count": 32,
+            "total_quantity": "71",
+            "total_tickets": 0,
+            "total_amount": "9926",
+            "net_amount": "9817.73000000000"
+          },
+          {
+            "external_id": "2",
+            "name": "Crucero",
+            "row_count": 26,
+            "total_quantity": "42",
+            "total_tickets": 0,
+            "total_amount": "6217",
+            "net_amount": "6092.18000000000"
+          },
+          {
+            "external_id": "3",
+            "name": "Las Glorias",
+            "row_count": 44,
+            "total_quantity": "108",
+            "total_tickets": 0,
+            "total_amount": "13946",
+            "net_amount": "13720.9000000000"
+          },
+          {
+            "external_id": "6",
+            "name": "Leyva",
+            "row_count": 23,
+            "total_quantity": "43",
+            "total_tickets": 0,
+            "total_amount": "7603",
+            "net_amount": "7581.62000000000"
+          },
+          {
+            "external_id": "1",
+            "name": "Matriz",
+            "row_count": 57,
+            "total_quantity": "287",
+            "total_tickets": 0,
+            "total_amount": "35656",
+            "net_amount": "35171.4300000000"
+          },
+          {
+            "external_id": "4",
+            "name": "Payán",
+            "row_count": 33,
+            "total_quantity": "53",
+            "total_tickets": 0,
+            "total_amount": "8004",
+            "net_amount": "7984"
+          },
+          {
+            "external_id": "7",
+            "name": "Plaza Nío",
+            "row_count": 34,
+            "total_quantity": "49",
+            "total_tickets": 0,
+            "total_amount": "6643",
+            "net_amount": "6549.49000000000"
+          }
+        ]
+      },
+      "comparison": {
+        "status": "BASELINE",
+        "is_unchanged": false,
+        "changed_fields": [],
+        "delta": {}
+      }
+    },
+    {
+      "captured_at_utc": "2026-03-18T06:13:42.166755+00:00",
+      "captured_at_local": "2026-03-17T23:13:42.166759-07:00",
+      "sync_job_id": 69,
+      "sync_job_status": "SUCCESS",
+      "sync_job_summary": {
+        "days_processed": 1,
+        "branches_processed": 8,
+        "sales_rows_seen": 249,
+        "daily_sales_created": 0,
+        "daily_sales_updated": 249,
+        "historical_sales_created": 0,
+        "historical_sales_updated": 185,
+        "unresolved_recipe_rows": 0,
+        "unresolved_branch_rows": 0,
+        "point_identity_synced": 0,
+        "raw_exports": [
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231335_1_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231335_2_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231336_3_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231336_4_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231337_5_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231337_6_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231338_7_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260317_231338_11_2026-03-17_sales.json"
+        ]
+      },
+      "snapshot": {
+        "sale_date": "2026-03-17",
+        "branch_filter": "",
+        "row_count": 249,
+        "branch_count": 7,
+        "total_quantity": "653",
+        "total_tickets": 0,
+        "gross_amount": "88074",
+        "discount_amount": "79",
+        "total_amount": "87995",
+        "tax_amount": "1077.65000000000",
+        "net_amount": "86917.3500000000",
+        "branches": [
+          {
+            "external_id": "5",
+            "name": "Colosio",
+            "row_count": 32,
+            "total_quantity": "71",
+            "total_tickets": 0,
+            "total_amount": "9926",
+            "net_amount": "9817.73000000000"
+          },
+          {
+            "external_id": "2",
+            "name": "Crucero",
+            "row_count": 26,
+            "total_quantity": "42",
+            "total_tickets": 0,
+            "total_amount": "6217",
+            "net_amount": "6092.18000000000"
+          },
+          {
+            "external_id": "3",
+            "name": "Las Glorias",
+            "row_count": 44,
+            "total_quantity": "108",
+            "total_tickets": 0,
+            "total_amount": "13946",
+            "net_amount": "13720.9000000000"
+          },
+          {
+            "external_id": "6",
+            "name": "Leyva",
+            "row_count": 23,
+            "total_quantity": "43",
+            "total_tickets": 0,
+            "total_amount": "7603",
+            "net_amount": "7581.62000000000"
+          },
+          {
+            "external_id": "1",
+            "name": "Matriz",
+            "row_count": 57,
+            "total_quantity": "287",
+            "total_tickets": 0,
+            "total_amount": "35656",
+            "net_amount": "35171.4300000000"
+          },
+          {
+            "external_id": "4",
+            "name": "Payán",
+            "row_count": 33,
+            "total_quantity": "53",
+            "total_tickets": 0,
+            "total_amount": "8004",
+            "net_amount": "7984"
+          },
+          {
+            "external_id": "7",
+            "name": "Plaza Nío",
+            "row_count": 34,
+            "total_quantity": "49",
+            "total_tickets": 0,
+            "total_amount": "6643",
+            "net_amount": "6549.49000000000"
+          }
+        ]
+      },
+      "comparison": {
+        "status": "UNCHANGED",
+        "is_unchanged": true,
+        "changed_fields": [],
+        "delta": {
+          "row_count": 0,
+          "branch_count": 0,
+          "total_quantity": "0",
+          "total_tickets": 0,
+          "gross_amount": "0",
+          "discount_amount": "0",
+          "total_amount": "0",
+          "tax_amount": "0E-11",
+          "net_amount": "0E-10"
+        }
+      }
+    },
+    {
+      "captured_at_utc": "2026-03-18T07:14:16.818691+00:00",
+      "captured_at_local": "2026-03-18T00:14:16.818694-07:00",
+      "sync_job_id": 70,
+      "sync_job_status": "SUCCESS",
+      "sync_job_summary": {
+        "days_processed": 1,
+        "branches_processed": 8,
+        "sales_rows_seen": 249,
+        "daily_sales_created": 0,
+        "daily_sales_updated": 249,
+        "historical_sales_created": 0,
+        "historical_sales_updated": 185,
+        "unresolved_recipe_rows": 0,
+        "unresolved_branch_rows": 0,
+        "point_identity_synced": 0,
+        "raw_exports": [
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_001406_1_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_001411_2_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_001411_3_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_001412_4_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_001412_5_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_001413_6_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_001413_7_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_001414_11_2026-03-17_sales.json"
+        ]
+      },
+      "snapshot": {
+        "sale_date": "2026-03-17",
+        "branch_filter": "",
+        "row_count": 249,
+        "branch_count": 7,
+        "total_quantity": "653",
+        "total_tickets": 0,
+        "gross_amount": "88074",
+        "discount_amount": "79",
+        "total_amount": "87995",
+        "tax_amount": "1077.65000000000",
+        "net_amount": "86917.3500000000",
+        "branches": [
+          {
+            "external_id": "5",
+            "name": "Colosio",
+            "row_count": 32,
+            "total_quantity": "71",
+            "total_tickets": 0,
+            "total_amount": "9926",
+            "net_amount": "9817.73000000000"
+          },
+          {
+            "external_id": "2",
+            "name": "Crucero",
+            "row_count": 26,
+            "total_quantity": "42",
+            "total_tickets": 0,
+            "total_amount": "6217",
+            "net_amount": "6092.18000000000"
+          },
+          {
+            "external_id": "3",
+            "name": "Las Glorias",
+            "row_count": 44,
+            "total_quantity": "108",
+            "total_tickets": 0,
+            "total_amount": "13946",
+            "net_amount": "13720.9000000000"
+          },
+          {
+            "external_id": "6",
+            "name": "Leyva",
+            "row_count": 23,
+            "total_quantity": "43",
+            "total_tickets": 0,
+            "total_amount": "7603",
+            "net_amount": "7581.62000000000"
+          },
+          {
+            "external_id": "1",
+            "name": "Matriz",
+            "row_count": 57,
+            "total_quantity": "287",
+            "total_tickets": 0,
+            "total_amount": "35656",
+            "net_amount": "35171.4300000000"
+          },
+          {
+            "external_id": "4",
+            "name": "Payán",
+            "row_count": 33,
+            "total_quantity": "53",
+            "total_tickets": 0,
+            "total_amount": "8004",
+            "net_amount": "7984"
+          },
+          {
+            "external_id": "7",
+            "name": "Plaza Nío",
+            "row_count": 34,
+            "total_quantity": "49",
+            "total_tickets": 0,
+            "total_amount": "6643",
+            "net_amount": "6549.49000000000"
+          }
+        ]
+      },
+      "comparison": {
+        "status": "UNCHANGED",
+        "is_unchanged": true,
+        "changed_fields": [],
+        "delta": {
+          "row_count": 0,
+          "branch_count": 0,
+          "total_quantity": "0",
+          "total_tickets": 0,
+          "gross_amount": "0",
+          "discount_amount": "0",
+          "total_amount": "0",
+          "tax_amount": "0E-11",
+          "net_amount": "0E-10"
+        }
+      }
+    },
+    {
+      "captured_at_utc": "2026-03-18T08:14:54.700641+00:00",
+      "captured_at_local": "2026-03-18T01:14:54.700644-07:00",
+      "sync_job_id": 71,
+      "sync_job_status": "SUCCESS",
+      "sync_job_summary": {
+        "days_processed": 1,
+        "branches_processed": 8,
+        "sales_rows_seen": 249,
+        "daily_sales_created": 0,
+        "daily_sales_updated": 249,
+        "historical_sales_created": 0,
+        "historical_sales_updated": 185,
+        "unresolved_recipe_rows": 0,
+        "unresolved_branch_rows": 0,
+        "point_identity_synced": 0,
+        "raw_exports": [
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_011443_1_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_011445_2_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_011448_3_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_011449_4_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_011449_5_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_011450_6_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_011451_7_2026-03-17_sales.json",
+          "/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1/storage/pos_bridge/raw_exports/20260318_011452_11_2026-03-17_sales.json"
+        ]
+      },
+      "snapshot": {
+        "sale_date": "2026-03-17",
+        "branch_filter": "",
+        "row_count": 249,
+        "branch_count": 7,
+        "total_quantity": "653",
+        "total_tickets": 0,
+        "gross_amount": "88074",
+        "discount_amount": "79",
+        "total_amount": "87995",
+        "tax_amount": "1077.65000000000",
+        "net_amount": "86917.3500000000",
+        "branches": [
+          {
+            "external_id": "5",
+            "name": "Colosio",
+            "row_count": 32,
+            "total_quantity": "71",
+            "total_tickets": 0,
+            "total_amount": "9926",
+            "net_amount": "9817.73000000000"
+          },
+          {
+            "external_id": "2",
+            "name": "Crucero",
+            "row_count": 26,
+            "total_quantity": "42",
+            "total_tickets": 0,
+            "total_amount": "6217",
+            "net_amount": "6092.18000000000"
+          },
+          {
+            "external_id": "3",
+            "name": "Las Glorias",
+            "row_count": 44,
+            "total_quantity": "108",
+            "total_tickets": 0,
+            "total_amount": "13946",
+            "net_amount": "13720.9000000000"
+          },
+          {
+            "external_id": "6",
+            "name": "Leyva",
+            "row_count": 23,
+            "total_quantity": "43",
+            "total_tickets": 0,
+            "total_amount": "7603",
+            "net_amount": "7581.62000000000"
+          },
+          {
+            "external_id": "1",
+            "name": "Matriz",
+            "row_count": 57,
+            "total_quantity": "287",
+            "total_tickets": 0,
+            "total_amount": "35656",
+            "net_amount": "35171.4300000000"
+          },
+          {
+            "external_id": "4",
+            "name": "Payán",
+            "row_count": 33,
+            "total_quantity": "53",
+            "total_tickets": 0,
+            "total_amount": "8004",
+            "net_amount": "7984"
+          },
+          {
+            "external_id": "7",
+            "name": "Plaza Nío",
+            "row_count": 34,
+            "total_quantity": "49",
+            "total_tickets": 0,
+            "total_amount": "6643",
+            "net_amount": "6549.49000000000"
+          }
+        ]
+      },
+      "comparison": {
+        "status": "UNCHANGED",
+        "is_unchanged": true,
+        "changed_fields": [],
+        "delta": {
+          "row_count": 0,
+          "branch_count": 0,
+          "total_quantity": "0",
+          "total_tickets": 0,
+          "gross_amount": "0",
+          "discount_amount": "0",
+          "total_amount": "0",
+          "tax_amount": "0E-11",
+          "net_amount": "0E-10"
+        }
+      }
+    }
+  ],
+  "analysis": {
+    "probe_count": 4,
+    "stable_after_unchanged_probes": 2,
+    "trailing_unchanged_probes": 3,
+    "latest_status": "UNCHANGED",
+    "is_stable": true,
+    "latest_probe_at": "2026-03-18T01:14:54.700644-07:00"
+  }
+}

@@ -1,0 +1,700 @@
+{
+  "generated_at": "2026-04-10T06:39:24.409904-07:00",
+  "sources": {
+    "catalog": "orquestacion/catalog.py",
+    "runners": "orquestacion/services/rule_runners.py",
+    "agent_runtime": "orquestacion/services/agent_runtime.py",
+    "gateway": "api/ai_gateway_services.py",
+    "schedules": "pos_bridge/management/commands/setup_celery_schedules.py"
+  },
+  "counts": {
+    "agents_declared": 6,
+    "capabilities_declared": 32,
+    "rules_declared": 13,
+    "supported_rules": 5,
+    "runtime_goal_handlers": 5,
+    "gateway_tools": 14,
+    "orchestration_schedules": 4,
+    "gateway_tools_requiring_approval": 3
+  },
+  "gateway_operation_types": {
+    "analyze": 4,
+    "execute_safe_action": 3,
+    "read": 7
+  },
+  "agents": [
+    {
+      "code": "agente_compras",
+      "name": "Agente de Compras",
+      "domain": "compras",
+      "system_prompt_version": "v1",
+      "declared_capabilities_count": 7,
+      "primary_rules": [
+        "production_weekly_purchase_request_deadline",
+        "purchase_exception_requires_dg_approval"
+      ],
+      "secondary_rules": [
+        "branch_capacity_below_threshold",
+        "near_expiry_or_low_rotation_review",
+        "stock_arranque_branch_risk"
+      ],
+      "runnable_primary_rules": [
+        "purchase_exception_requires_dg_approval"
+      ],
+      "runnable_secondary_rules": [
+        "near_expiry_or_low_rotation_review"
+      ],
+      "scheduled_primary_rules": [
+        "purchase_exception_requires_dg_approval"
+      ],
+      "runtime_goal_types_declared": [
+        "purchase_review_guard"
+      ],
+      "runtime_goal_handlers": [
+        "purchase_review_guard"
+      ],
+      "allowed_tools_declared": [
+        "api.inventario_sugerencias_compra",
+        "api.pos_bridge_inventory_low_stock",
+        "api.compras_solicitudes",
+        "api.compras_ordenes"
+      ],
+      "exact_gateway_tool_matches": [],
+      "resolved_gateway_tool_matches": [
+        "erp.get_inventory_low_stock",
+        "erp.get_purchase_orders",
+        "erp.get_purchase_requests"
+      ],
+      "allowed_actions_declared": [
+        "purchase_request_recommendation",
+        "supplier_risk_alert",
+        "inventory_refresh_request"
+      ],
+      "runtime_state": "runtime_parcial"
+    },
+    {
+      "code": "agente_conciliacion",
+      "name": "Agente de Conciliacion",
+      "domain": "conciliacion",
+      "system_prompt_version": "v1",
+      "declared_capabilities_count": 6,
+      "primary_rules": [
+        "cold_chain_temperature_breach",
+        "integration_job_failure_review",
+        "inventory_adjustment_authorization_guard",
+        "near_expiry_or_low_rotation_review"
+      ],
+      "secondary_rules": [
+        "sales_event_operational_chain_review"
+      ],
+      "runnable_primary_rules": [
+        "inventory_adjustment_authorization_guard",
+        "near_expiry_or_low_rotation_review"
+      ],
+      "runnable_secondary_rules": [],
+      "scheduled_primary_rules": [
+        "inventory_adjustment_authorization_guard"
+      ],
+      "runtime_goal_types_declared": [
+        "reconciliation_guard"
+      ],
+      "runtime_goal_handlers": [
+        "reconciliation_guard"
+      ],
+      "allowed_tools_declared": [
+        "api.control_discrepancias",
+        "api.integraciones_point_historial",
+        "api.pos_bridge_sync_jobs",
+        "api.audit_logs"
+      ],
+      "exact_gateway_tool_matches": [],
+      "resolved_gateway_tool_matches": [
+        "erp.get_audit_logs",
+        "erp.get_discrepancies",
+        "erp.get_sync_jobs"
+      ],
+      "allowed_actions_declared": [
+        "reconciliation_review",
+        "retry_sync_request",
+        "issue_escalation"
+      ],
+      "runtime_state": "runtime_parcial"
+    },
+    {
+      "code": "agente_demanda_ventas",
+      "name": "Agente de Demanda y Ventas",
+      "domain": "ventas",
+      "system_prompt_version": "v1",
+      "declared_capabilities_count": 6,
+      "primary_rules": [
+        "branch_capacity_below_threshold",
+        "plan_demand_production_purchase_chain",
+        "seasonal_peak_detection",
+        "stock_arranque_branch_risk"
+      ],
+      "secondary_rules": [],
+      "runnable_primary_rules": [
+        "plan_demand_production_purchase_chain"
+      ],
+      "runnable_secondary_rules": [],
+      "scheduled_primary_rules": [
+        "plan_demand_production_purchase_chain"
+      ],
+      "runtime_goal_types_declared": [],
+      "runtime_goal_handlers": [],
+      "allowed_tools_declared": [
+        "api.pos_bridge_sales_summary",
+        "api.pos_bridge_sales_branch",
+        "api.pos_bridge_sales_product",
+        "api.ventas_historial",
+        "api.ventas_pronostico"
+      ],
+      "exact_gateway_tool_matches": [],
+      "resolved_gateway_tool_matches": [
+        "erp.get_sales_by_branch",
+        "erp.get_sales_summary"
+      ],
+      "allowed_actions_declared": [
+        "forecast_review",
+        "seasonality_alert",
+        "product_special_request"
+      ],
+      "runtime_state": "runtime_parcial"
+    },
+    {
+      "code": "agente_produccion",
+      "name": "Agente de Produccion",
+      "domain": "produccion",
+      "system_prompt_version": "v1",
+      "declared_capabilities_count": 5,
+      "primary_rules": [
+        "daily_production_plan_missing",
+        "production_checklist_below_target"
+      ],
+      "secondary_rules": [
+        "seasonal_peak_detection"
+      ],
+      "runnable_primary_rules": [
+        "daily_production_plan_missing"
+      ],
+      "runnable_secondary_rules": [],
+      "scheduled_primary_rules": [
+        "daily_production_plan_missing"
+      ],
+      "runtime_goal_types_declared": [
+        "production_readiness_guard"
+      ],
+      "runtime_goal_handlers": [
+        "production_readiness_guard"
+      ],
+      "allowed_tools_declared": [
+        "api.mrp_explode",
+        "api.mrp_requerimientos",
+        "api.mrp_planes",
+        "api.recetas_versiones"
+      ],
+      "exact_gateway_tool_matches": [],
+      "resolved_gateway_tool_matches": [],
+      "allowed_actions_declared": [
+        "build_production_recommendation",
+        "capacity_alert",
+        "recipe_gap_review"
+      ],
+      "runtime_state": "runtime_parcial"
+    },
+    {
+      "code": "agente_publicacion_eventos_ventas",
+      "name": "Agente de Publicacion de Eventos de Ventas",
+      "domain": "ventas",
+      "system_prompt_version": "v1-agent-runtime",
+      "declared_capabilities_count": 3,
+      "primary_rules": [],
+      "secondary_rules": [],
+      "runnable_primary_rules": [],
+      "runnable_secondary_rules": [],
+      "scheduled_primary_rules": [],
+      "runtime_goal_types_declared": [
+        "sales_event_publication_guard"
+      ],
+      "runtime_goal_handlers": [
+        "sales_event_publication_guard"
+      ],
+      "allowed_tools_declared": [
+        "skill.sales_event_publication_guard",
+        "python.ventas.publication_guard",
+        "orm.ventas.sales_event",
+        "orm.ventas.projection_artifacts"
+      ],
+      "exact_gateway_tool_matches": [],
+      "resolved_gateway_tool_matches": [],
+      "allowed_actions_declared": [
+        "review_publication",
+        "publish_if_safe",
+        "block_publication"
+      ],
+      "runtime_state": "runtime_parcial"
+    },
+    {
+      "code": "director_operativo",
+      "name": "Director Operativo",
+      "domain": "operaciones",
+      "system_prompt_version": "v1",
+      "declared_capabilities_count": 5,
+      "primary_rules": [
+        "sales_event_operational_chain_review"
+      ],
+      "secondary_rules": [
+        "cold_chain_temperature_breach",
+        "daily_production_plan_missing",
+        "integration_job_failure_review",
+        "inventory_adjustment_authorization_guard",
+        "plan_demand_production_purchase_chain",
+        "production_checklist_below_target",
+        "production_weekly_purchase_request_deadline",
+        "purchase_exception_requires_dg_approval"
+      ],
+      "runnable_primary_rules": [],
+      "runnable_secondary_rules": [
+        "daily_production_plan_missing",
+        "inventory_adjustment_authorization_guard",
+        "plan_demand_production_purchase_chain",
+        "purchase_exception_requires_dg_approval"
+      ],
+      "scheduled_primary_rules": [],
+      "runtime_goal_types_declared": [
+        "operational_chain_review"
+      ],
+      "runtime_goal_handlers": [
+        "operational_chain_review"
+      ],
+      "allowed_tools_declared": [
+        "api.reportes_bi_dashboard",
+        "api.audit_logs",
+        "api.integraciones_point_resumen",
+        "api.pos_bridge_sync_jobs"
+      ],
+      "exact_gateway_tool_matches": [],
+      "resolved_gateway_tool_matches": [
+        "erp.get_audit_logs",
+        "erp.get_dashboard",
+        "erp.get_sync_jobs"
+      ],
+      "allowed_actions_declared": [
+        "delegate",
+        "summarize",
+        "request_approval"
+      ],
+      "runtime_state": "runtime_parcial"
+    }
+  ],
+  "rules": [
+    {
+      "code": "branch_capacity_below_threshold",
+      "primary_agent_code": "agente_demanda_ventas",
+      "secondary_agent_code": "agente_compras",
+      "trigger_type": "threshold",
+      "action_mode": "recommend",
+      "runner_implemented": false,
+      "scheduled": false,
+      "schedule_name": ""
+    },
+    {
+      "code": "cold_chain_temperature_breach",
+      "primary_agent_code": "agente_conciliacion",
+      "secondary_agent_code": "director_operativo",
+      "trigger_type": "threshold",
+      "action_mode": "approval_required",
+      "runner_implemented": false,
+      "scheduled": false,
+      "schedule_name": ""
+    },
+    {
+      "code": "daily_production_plan_missing",
+      "primary_agent_code": "agente_produccion",
+      "secondary_agent_code": "director_operativo",
+      "trigger_type": "schedule",
+      "action_mode": "approval_required",
+      "runner_implemented": true,
+      "scheduled": true,
+      "schedule_name": "orquestacion: plan diario faltante"
+    },
+    {
+      "code": "integration_job_failure_review",
+      "primary_agent_code": "agente_conciliacion",
+      "secondary_agent_code": "director_operativo",
+      "trigger_type": "event",
+      "action_mode": "approval_required",
+      "runner_implemented": false,
+      "scheduled": false,
+      "schedule_name": ""
+    },
+    {
+      "code": "inventory_adjustment_authorization_guard",
+      "primary_agent_code": "agente_conciliacion",
+      "secondary_agent_code": "director_operativo",
+      "trigger_type": "event",
+      "action_mode": "approval_required",
+      "runner_implemented": true,
+      "scheduled": true,
+      "schedule_name": "orquestacion: guardia ajustes inventario"
+    },
+    {
+      "code": "near_expiry_or_low_rotation_review",
+      "primary_agent_code": "agente_conciliacion",
+      "secondary_agent_code": "agente_compras",
+      "trigger_type": "threshold",
+      "action_mode": "recommend",
+      "runner_implemented": true,
+      "scheduled": false,
+      "schedule_name": ""
+    },
+    {
+      "code": "plan_demand_production_purchase_chain",
+      "primary_agent_code": "agente_demanda_ventas",
+      "secondary_agent_code": "director_operativo",
+      "trigger_type": "manual",
+      "action_mode": "approval_required",
+      "runner_implemented": true,
+      "scheduled": true,
+      "schedule_name": "orquestacion: cadena plan demanda-produccion-compras"
+    },
+    {
+      "code": "production_checklist_below_target",
+      "primary_agent_code": "agente_produccion",
+      "secondary_agent_code": "director_operativo",
+      "trigger_type": "threshold",
+      "action_mode": "recommend",
+      "runner_implemented": false,
+      "scheduled": false,
+      "schedule_name": ""
+    },
+    {
+      "code": "production_weekly_purchase_request_deadline",
+      "primary_agent_code": "agente_compras",
+      "secondary_agent_code": "director_operativo",
+      "trigger_type": "schedule",
+      "action_mode": "approval_required",
+      "runner_implemented": false,
+      "scheduled": false,
+      "schedule_name": ""
+    },
+    {
+      "code": "purchase_exception_requires_dg_approval",
+      "primary_agent_code": "agente_compras",
+      "secondary_agent_code": "director_operativo",
+      "trigger_type": "threshold",
+      "action_mode": "approval_required",
+      "runner_implemented": true,
+      "scheduled": true,
+      "schedule_name": "orquestacion: excepciones compra DG"
+    },
+    {
+      "code": "sales_event_operational_chain_review",
+      "primary_agent_code": "director_operativo",
+      "secondary_agent_code": "agente_conciliacion",
+      "trigger_type": "manual",
+      "action_mode": "approval_required",
+      "runner_implemented": false,
+      "scheduled": false,
+      "schedule_name": ""
+    },
+    {
+      "code": "seasonal_peak_detection",
+      "primary_agent_code": "agente_demanda_ventas",
+      "secondary_agent_code": "agente_produccion",
+      "trigger_type": "schedule",
+      "action_mode": "recommend",
+      "runner_implemented": false,
+      "scheduled": false,
+      "schedule_name": ""
+    },
+    {
+      "code": "stock_arranque_branch_risk",
+      "primary_agent_code": "agente_demanda_ventas",
+      "secondary_agent_code": "agente_compras",
+      "trigger_type": "threshold",
+      "action_mode": "approval_required",
+      "runner_implemented": false,
+      "scheduled": false,
+      "schedule_name": ""
+    }
+  ],
+  "runtime_goal_handlers": [
+    {
+      "goal_type": "operational_chain_review",
+      "agent_code": "director_operativo",
+      "has_executor": false,
+      "handoff_targets": [
+        "agente_publicacion_eventos_ventas",
+        "agente_produccion",
+        "agente_compras"
+      ],
+      "tool_hints": [
+        {
+          "tool_key": "python.operational_chain_review",
+          "description": "Orquesta la cadena publicación -> producción -> compras.",
+          "kind": "python_callable",
+          "executable": true,
+          "source": "orquestacion.services.agent_runtime._run_operational_chain"
+        }
+      ]
+    },
+    {
+      "goal_type": "production_readiness_guard",
+      "agent_code": "agente_produccion",
+      "has_executor": false,
+      "handoff_targets": [
+        "agente_compras"
+      ],
+      "tool_hints": [
+        {
+          "tool_key": "python.production_readiness_guard",
+          "description": "Valida readiness productiva sobre planes y workflow del evento.",
+          "kind": "python_callable",
+          "executable": true,
+          "source": "orquestacion.services.multi_agent_guards.observe_production_readiness"
+        }
+      ]
+    },
+    {
+      "goal_type": "purchase_review_guard",
+      "agent_code": "agente_compras",
+      "has_executor": false,
+      "handoff_targets": [
+        "agente_conciliacion"
+      ],
+      "tool_hints": [
+        {
+          "tool_key": "python.purchase_review_guard",
+          "description": "Valida readiness de compras e insumos del evento.",
+          "kind": "python_callable",
+          "executable": true,
+          "source": "orquestacion.services.multi_agent_guards.observe_purchase_review"
+        }
+      ]
+    },
+    {
+      "goal_type": "reconciliation_guard",
+      "agent_code": "agente_conciliacion",
+      "has_executor": false,
+      "handoff_targets": [],
+      "tool_hints": [
+        {
+          "tool_key": "python.reconciliation_guard",
+          "description": "Valida consistencia DB/disco y cobertura financiera del evento.",
+          "kind": "python_callable",
+          "executable": true,
+          "source": "orquestacion.services.multi_agent_guards.observe_reconciliation_guard"
+        }
+      ]
+    },
+    {
+      "goal_type": "sales_event_publication_guard",
+      "agent_code": "agente_publicacion_eventos_ventas",
+      "has_executor": true,
+      "handoff_targets": [
+        "agente_produccion"
+      ],
+      "tool_hints": [
+        {
+          "tool_key": "python.sales_event_publication_guard",
+          "description": "Observa taxonomía, workflow y artifacts del evento comercial.",
+          "kind": "python_callable",
+          "executable": true,
+          "source": "orquestacion.services.sales_event_publication_guard.observe_sales_event_publication"
+        },
+        {
+          "tool_key": "python.persist_projection_artifacts",
+          "description": "Publica artifacts si el guardrail ya validó el evento.",
+          "kind": "python_callable",
+          "executable": true,
+          "source": "ventas.views._persist_projection_artifacts"
+        }
+      ]
+    }
+  ],
+  "gateway_tools": [
+    {
+      "key": "erp.create_production_plan_draft",
+      "name": "Crear borrador de plan de produccion",
+      "description": "Genera un PlanProduccion en BORRADOR tras aprobacion humana.",
+      "operation_type": "execute_safe_action",
+      "data_domain": "production",
+      "branch_scoped": false,
+      "requires_approval": true
+    },
+    {
+      "key": "erp.create_purchase_request_draft",
+      "name": "Crear borrador de solicitud de compra",
+      "description": "Genera una SolicitudCompra en BORRADOR tras aprobacion humana.",
+      "operation_type": "execute_safe_action",
+      "data_domain": "purchasing",
+      "branch_scoped": false,
+      "requires_approval": true
+    },
+    {
+      "key": "erp.get_audit_logs",
+      "name": "Bitácora audit ERP",
+      "description": "Consulta registros de auditoría del ERP.",
+      "operation_type": "read",
+      "data_domain": "audit",
+      "branch_scoped": false,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_dashboard",
+      "name": "Dashboard ejecutivo ERP",
+      "description": "Consulta KPIs ejecutivos y snapshot BI del ERP.",
+      "operation_type": "read",
+      "data_domain": "reporting",
+      "branch_scoped": false,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_discrepancies",
+      "name": "Discrepancias operativas",
+      "description": "Analiza diferencias entre producción, ventas, mermas e inventario.",
+      "operation_type": "analyze",
+      "data_domain": "control",
+      "branch_scoped": true,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_inventory_low_stock",
+      "name": "Alertas de stock bajo",
+      "description": "Consulta productos por debajo del stock mínimo.",
+      "operation_type": "read",
+      "data_domain": "inventory",
+      "branch_scoped": true,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_purchase_orders",
+      "name": "Ordenes de compra",
+      "description": "Consulta ordenes de compra del ERP.",
+      "operation_type": "read",
+      "data_domain": "purchasing",
+      "branch_scoped": false,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_purchase_requests",
+      "name": "Solicitudes de compra",
+      "description": "Consulta solicitudes de compra del ERP.",
+      "operation_type": "read",
+      "data_domain": "purchasing",
+      "branch_scoped": false,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_recipe_cost_history",
+      "name": "Costo historico de receta",
+      "description": "Consulta versiones historicas de costo de una receta.",
+      "operation_type": "analyze",
+      "data_domain": "costing",
+      "branch_scoped": false,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_sales_by_branch",
+      "name": "Ventas por sucursal",
+      "description": "Analiza ventas agregadas por sucursal.",
+      "operation_type": "analyze",
+      "data_domain": "sales",
+      "branch_scoped": true,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_sales_summary",
+      "name": "Resumen de ventas Point",
+      "description": "Resume ventas del POS por rango y sucursal.",
+      "operation_type": "read",
+      "data_domain": "sales",
+      "branch_scoped": true,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_sales_trends",
+      "name": "Tendencias de ventas",
+      "description": "Analiza tendencia mensual de ventas del POS.",
+      "operation_type": "analyze",
+      "data_domain": "sales",
+      "branch_scoped": true,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.get_sync_jobs",
+      "name": "Jobs de sincronización Point",
+      "description": "Consulta estado de jobs de sincronización Point/ERP.",
+      "operation_type": "read",
+      "data_domain": "integrations",
+      "branch_scoped": false,
+      "requires_approval": false
+    },
+    {
+      "key": "erp.trigger_sync_jobs",
+      "name": "Disparo seguro de sync jobs",
+      "description": "Acción segura candidata para refresh de sync jobs; requiere aprobación humana en piloto.",
+      "operation_type": "execute_safe_action",
+      "data_domain": "integrations",
+      "branch_scoped": false,
+      "requires_approval": true
+    }
+  ],
+  "orchestration_schedules": [
+    {
+      "name": "orquestacion: cadena plan demanda-produccion-compras",
+      "task": "orquestacion.run_rule",
+      "rule_code": "plan_demand_production_purchase_chain",
+      "schedule_kind": "crontab"
+    },
+    {
+      "name": "orquestacion: excepciones compra DG",
+      "task": "orquestacion.run_rule",
+      "rule_code": "purchase_exception_requires_dg_approval",
+      "schedule_kind": "interval"
+    },
+    {
+      "name": "orquestacion: guardia ajustes inventario",
+      "task": "orquestacion.run_rule",
+      "rule_code": "inventory_adjustment_authorization_guard",
+      "schedule_kind": "interval"
+    },
+    {
+      "name": "orquestacion: plan diario faltante",
+      "task": "orquestacion.run_rule",
+      "rule_code": "daily_production_plan_missing",
+      "schedule_kind": "crontab"
+    }
+  ],
+  "derived_findings": {
+    "agents_with_exact_gateway_tool_match": [],
+    "agents_with_resolved_gateway_tool_match": [
+      "agente_compras",
+      "agente_conciliacion",
+      "agente_demanda_ventas",
+      "director_operativo"
+    ],
+    "rules_declared_without_runner": [
+      "branch_capacity_below_threshold",
+      "cold_chain_temperature_breach",
+      "integration_job_failure_review",
+      "production_checklist_below_target",
+      "production_weekly_purchase_request_deadline",
+      "sales_event_operational_chain_review",
+      "seasonal_peak_detection",
+      "stock_arranque_branch_risk"
+    ],
+    "rules_with_runner_without_schedule": [
+      "near_expiry_or_low_rotation_review"
+    ],
+    "agents_without_runnable_primary_rules": [],
+    "agents_with_runtime_goal_handlers": [
+      "agente_compras",
+      "agente_conciliacion",
+      "agente_produccion",
+      "agente_publicacion_eventos_ventas",
+      "director_operativo"
+    ]
+  }
+}

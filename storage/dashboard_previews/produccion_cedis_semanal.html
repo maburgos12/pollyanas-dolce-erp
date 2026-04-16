@@ -1,0 +1,1486 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard · Producción CEDIS semanal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260321-05">
+    
+<style>
+  .cedis-shell { display: grid; gap: 18px; }
+  .cedis-hero {
+    position: relative;
+    overflow: hidden;
+    padding: 28px;
+    border-radius: 28px;
+    background:
+      radial-gradient(circle at top left, rgba(84, 126, 197, 0.22), transparent 24%),
+      radial-gradient(circle at top right, rgba(46, 180, 149, 0.18), transparent 22%),
+      linear-gradient(135deg, #10273e 0%, #163555 52%, #0f1f34 100%);
+    color: #f5efe8;
+    box-shadow: 0 30px 70px rgba(18, 35, 57, 0.35);
+  }
+  .cedis-hero-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 18px;
+    align-items: end;
+  }
+  .cedis-eyebrow {
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .18em;
+    color: rgba(240, 229, 220, .7);
+    margin-bottom: 10px;
+  }
+  .cedis-title {
+    margin: 0 0 10px;
+    font-family: "Playfair Display", serif;
+    font-size: 2rem;
+    line-height: 1.02;
+  }
+  .cedis-subtitle {
+    margin: 0;
+    max-width: 68ch;
+    color: rgba(245, 239, 232, .82);
+  }
+  .cedis-hero-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .cedis-badge {
+    min-width: 150px;
+    padding: 12px 14px;
+    border-radius: 18px;
+    background: rgba(255,255,255,.09);
+    border: 1px solid rgba(255,255,255,.09);
+  }
+  .cedis-badge span {
+    display: block;
+    color: rgba(243, 235, 228, .72);
+    font-size: .78rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .cedis-badge strong {
+    display: block;
+    margin-top: 4px;
+    font-size: 1.2rem;
+    color: #fff8f3;
+  }
+  .cedis-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+  }
+  .cedis-filter {
+    display: grid;
+    grid-template-columns: minmax(0, 220px) auto;
+    gap: 12px;
+    align-items: end;
+    margin-top: 18px;
+  }
+  .cedis-filter input { width: 100%; }
+  .cedis-command-grid,
+  .cedis-story-grid {
+    display: grid;
+    gap: 16px;
+  }
+  .cedis-command-grid {
+    grid-template-columns: 1.15fr .85fr;
+  }
+  .cedis-story-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cedis-grid-4, .cedis-grid-3, .cedis-grid-2 {
+    display: grid;
+    gap: 16px;
+  }
+  .cedis-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .cedis-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cedis-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cedis-card, .cedis-panel {
+    border-radius: 24px;
+    border: 1px solid rgba(152, 116, 94, .12);
+    background: linear-gradient(180deg, #fff 0%, #fff9f5 100%);
+    box-shadow: 0 14px 34px rgba(77, 55, 45, .08);
+  }
+  .cedis-card { padding: 18px; }
+  .cedis-label {
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .16em;
+    color: #927061;
+    margin-bottom: 10px;
+  }
+  .cedis-value {
+    font-family: "Playfair Display", serif;
+    font-size: 2rem;
+    line-height: 1;
+    color: #312019;
+  }
+  .cedis-foot {
+    margin-top: 10px;
+    color: #715d54;
+    font-size: .92rem;
+  }
+  .cedis-tone-success { color: #1f7056; }
+  .cedis-tone-warning { color: #8c611a; }
+  .cedis-tone-danger { color: #9a2f2f; }
+  .cedis-panel { padding: 20px 22px; }
+  .cedis-panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .cedis-panel-title {
+    margin: 0;
+    font-family: "Playfair Display", serif;
+    font-size: 1.35rem;
+    color: #39231b;
+  }
+  .cedis-panel-subtitle {
+    margin: 5px 0 0;
+    color: #7a665d;
+    font-size: .94rem;
+  }
+  .cedis-story-card {
+    padding: 16px 18px;
+    border-radius: 20px;
+    background: linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(255,248,243,.92) 100%);
+    border: 1px solid rgba(160, 118, 97, .12);
+  }
+  .cedis-story-kicker {
+    margin-bottom: 8px;
+    color: #9b765f;
+    font-size: .74rem;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+  .cedis-story-value {
+    font-family: "Playfair Display", serif;
+    font-size: 1.75rem;
+    line-height: 1;
+    color: #312019;
+    margin-bottom: 8px;
+  }
+  .cedis-story-copy {
+    margin: 0;
+    color: #735e54;
+    font-size: .92rem;
+  }
+  .cedis-quality-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .cedis-quality-card {
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: rgba(255,255,255,.84);
+    border: 1px solid rgba(170, 126, 102, .11);
+  }
+  .cedis-quality-card strong {
+    display: block;
+    color: #39241a;
+    font-size: 1.2rem;
+    margin-bottom: 4px;
+  }
+  .cedis-quality-card span {
+    color: #7b655a;
+    font-size: .88rem;
+  }
+  .cedis-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: #f6ede7;
+    color: #6a4838;
+    font-weight: 700;
+    font-size: .82rem;
+  }
+  .cedis-pill.is-success { background: #eef8f1; color: #1d6c53; }
+  .cedis-pill.is-warning { background: #fff4de; color: #8a5c18; }
+  .cedis-pill.is-danger { background: #fff0ef; color: #9a2f2f; }
+  .cedis-table-wrap {
+    overflow: auto;
+    border-radius: 18px;
+    border: 1px solid rgba(175, 126, 101, .12);
+  }
+  .cedis-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+    background: #fff;
+  }
+  .cedis-table th, .cedis-table td {
+    padding: 11px 13px;
+    border-bottom: 1px solid rgba(177, 132, 111, .12);
+  }
+  .cedis-table th {
+    background: #fff8f4;
+    color: #8c6a59;
+    font-size: .76rem;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+  }
+  .cedis-num { text-align: right; font-variant-numeric: tabular-nums; }
+  .cedis-chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .cedis-chart {
+    padding: 18px;
+    border-radius: 24px;
+    background:
+      radial-gradient(circle at top right, rgba(84, 126, 197, .12), transparent 28%),
+      linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(255,249,245,.95) 100%);
+    border: 1px solid rgba(152, 116, 94, .12);
+  }
+  .cedis-chart--wide {
+    grid-column: 1 / -1;
+  }
+  .cedis-chart h3 {
+    margin: 0 0 6px;
+    color: #3a241c;
+    font-size: 1rem;
+  }
+  .cedis-chart p {
+    margin: 0 0 12px;
+    color: #80685f;
+    font-size: .88rem;
+  }
+  .cedis-chart canvas {
+    width: 100%;
+    min-height: 260px;
+  }
+  .cedis-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin-top: 12px;
+  }
+  .cedis-chart-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #765f55;
+    font-size: .86rem;
+  }
+  .cedis-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    display: inline-block;
+  }
+  @media (max-width: 1200px) {
+    .cedis-grid-4, .cedis-grid-3, .cedis-chart-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .cedis-grid-2, .cedis-hero-grid, .cedis-command-grid {
+      grid-template-columns: 1fr;
+    }
+    .cedis-hero-badges { justify-content: flex-start; }
+  }
+  @media (max-width: 720px) {
+    .cedis-grid-4, .cedis-grid-3, .cedis-grid-2, .cedis-chart-grid, .cedis-filter, .cedis-story-grid, .cedis-quality-grid {
+      grid-template-columns: 1fr;
+    }
+    .cedis-hero { padding: 22px 18px; }
+    .cedis-title { font-size: 1.6rem; }
+  }
+</style>
+
+</head>
+<body class="page-produccion-cedis-weekly-dashboard">
+    <div class="layout-wrapper">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3.5 10.5 12 5l8.5 5.5L12 16 3.5 10.5Z"/>
+                        <path d="M3.5 14 12 19l8.5-5"/>
+                    </svg>
+                </div>
+                <div class="sidebar-brand">Pollyana's Dolce</div>
+                <div class="sidebar-tagline">Operación y control</div>
+            </div>
+
+            <nav>
+                
+                <div class="sidebar-section-label">Dirección</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    <li>
+                        <a href="/dashboard/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>
+                            </span>
+                            <span>Dashboard</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/recetas/dg-operacion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="7" width="3" height="10" rx="1"/><rect x="16" y="4" width="3" height="13" rx="1"/></svg>
+                            </span>
+                            <span>Operación DG</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/reportes/bi/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>BI ejecutivo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Operación diaria</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/maestros/proveedores/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4L11 7h7.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-10Z"/></svg>
+                            </span>
+                            <span>Maestros</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/recetas/" class="active">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+                            </span>
+                            <span>Recetas</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/plan-produccion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>
+                            </span>
+                            <span>Plan de producción</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/reabasto-cedis/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/><path d="M7 12h6"/><path d="m10 9 3 3-3 3"/></svg>
+                            </span>
+                            <span>Reabasto CEDIS</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/compras/solicitudes/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/></svg>
+                            </span>
+                            <span>Compras</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/inventario/existencias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
+                            </span>
+                            <span>Inventario</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/inventario/importar/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M4 15.5A2.5 2.5 0 0 0 6.5 18h11A2.5 2.5 0 0 0 20 15.5"/></svg>
+                            </span>
+                            <span>Cortes de almacén</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/captura-movil/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10 6.5h4"/><circle cx="12" cy="18" r="1"/></svg>
+                            </span>
+                            <span>Captura de piso</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Análisis y soporte</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/reportes/costo-receta/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>Reportes</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/crm/pedidos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            </span>
+                            <span>CRM</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/logistica/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v8H3z"/><path d="M14 10h3l3 3v2h-6z"/><circle cx="7" cy="17.5" r="1.5"/><circle cx="18" cy="17.5" r="1.5"/></svg>
+                            </span>
+                            <span>Logística</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/rrhh/empleados/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8h3M21.5 6.5v3"/></svg>
+                            </span>
+                            <span>RRHH</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/activos/dashboard/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/><path d="M8 14h3M13 14h3"/></svg>
+                            </span>
+                            <span>Activos</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/discrepancias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20V9"/><path d="M12 20V4"/><path d="M17 20v-7"/><path d="m6 11 5-5 6 3"/></svg>
+                            </span>
+                            <span>Control operativo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Gobierno</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/auditoria/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10l2 2v14H5V6l2-2Z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+                            </span>
+                            <span>Bitácora</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/integraciones/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="7" height="12" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 12h4"/></svg>
+                            </span>
+                            <span>Integraciones</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/usuarios-accesos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-1.5a3.5 3.5 0 0 0-3.5-3.5H6.5A3.5 3.5 0 0 0 3 19.5V21"/><circle cx="9.5" cy="8" r="3.5"/><path d="M18 8v6M15 11h6"/></svg>
+                            </span>
+                            <span>Accesos</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/admin/">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.2 1.2 0 0 1-1.7 1.7l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V19a1.2 1.2 0 0 1-2.4 0v-.2a1 1 0 0 0-.7-1 1 1 0 0 0-1 .2l-.2.1a1.2 1.2 0 1 1-1.7-1.7l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H5a1.2 1.2 0 0 1 0-2.4h.2a1 1 0 0 0 1-.7 1 1 0 0 0-.2-1l-.1-.2a1.2 1.2 0 1 1 1.7-1.7l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V5a1.2 1.2 0 1 1 2.4 0v.2a1 1 0 0 0 .7 1 1 1 0 0 0 1-.2l.2-.1a1.2 1.2 0 0 1 1.7 1.7l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2a1.2 1.2 0 0 1 0 2.4h-.2a1 1 0 0 0-1 .7Z"/></svg>
+                            </span>
+                            <span>Administración</span>
+                        </a>
+                    </li>
+                </ul>
+                
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-user">Sesión activa</div>
+                <div class="sidebar-user-name">maburgos</div>
+                <a href="/logout/" class="logout-link">Cerrar sesión</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="header">
+                <h1 class="header-title">Dashboard · Producción CEDIS semanal</h1>
+                <div class="header-meta">
+                    <span class="header-context-pill">Operación diaria</span>
+                    <button id="densityToggle" class="btn btn-secondary btn-sm density-toggle" type="button" aria-pressed="false">
+                        Modo compacto
+                    </button>
+                    <span>Domingo, 22 de Marzo de 2026</span>
+                </div>
+            </header>
+
+            <div class="container">
+                
+                
+<div class="module-shell cedis-shell">
+  <section class="cedis-hero">
+    <div class="cedis-hero-grid">
+      <div>
+        <div class="cedis-eyebrow">Dashboard semanal CEDIS</div>
+        <h1 class="cedis-title">Producción CEDIS vs ventas, merma y pronóstico</h1>
+        <p class="cedis-subtitle">Tablero semanal orientado a Dirección General y operación central. Usa producción Point, ventas reales reconciliadas, merma capturada por personal y un pronóstico simple de próxima semana para detectar exceso, faltante o presión comercial.</p>
+        <div class="cedis-actions">
+          <a class="btn btn-secondary" href="/recetas/dg-operacion/">Volver al cockpit DG</a>
+          <a class="btn btn-secondary" href="/recetas/plan-produccion/">Abrir plan operativo</a>
+          <a class="btn btn-secondary" href="/recetas/reabasto-cedis/?fecha=2026-03-22">Abrir reabasto CEDIS</a>
+        </div>
+      </div>
+      <div class="cedis-hero-badges">
+        <div class="cedis-badge">
+          <span>Semana actual</span>
+          <strong>2026-W12</strong>
+        </div>
+        <div class="cedis-badge">
+          <span>Semana anterior</span>
+          <strong>2026-W11</strong>
+        </div>
+        <div class="cedis-badge">
+          <span>Rango</span>
+          <strong>16 Mar · 22 Mar</strong>
+        </div>
+      </div>
+    </div>
+    <form method="get" class="cedis-filter">
+      <input type="date" name="week_of" value="2026-03-16" aria-label="Semana base">
+      <button class="btn btn-primary" type="submit">Actualizar semana</button>
+    </form>
+  </section>
+
+  <section class="cedis-command-grid">
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Lectura ejecutiva de la semana</h2>
+          <p class="cedis-panel-subtitle">Señal rápida para saber si el centro va holgado, justo o detrás de la demanda comercial.</p>
+        </div>
+        <span class="cedis-pill is-success">Holgura central</span>
+      </div>
+      <div class="cedis-story-grid">
+        <div class="cedis-story-card">
+          <div class="cedis-story-kicker">Flujo central</div>
+          <div class="cedis-story-value">12107</div>
+          <p class="cedis-story-copy">Unidades que entraron al centro esta semana combinando producción CEDIS y transferencias recibidas.</p>
+        </div>
+        <div class="cedis-story-card">
+          <div class="cedis-story-kicker">Gap vs venta</div>
+          <div class="cedis-story-value cedis-tone-success">8414</div>
+          <p class="cedis-story-copy">Diferencia entre entradas centrales y unidades vendidas. Positivo implica holgura; negativo indica presión de surtido.</p>
+        </div>
+        <div class="cedis-story-card">
+          <div class="cedis-story-kicker">Peso de transferencias</div>
+          <div class="cedis-story-value">97.8%</div>
+          <p class="cedis-story-copy">Participación de transferencias dentro del abastecimiento central de la semana.</p>
+        </div>
+        <div class="cedis-story-card">
+          <div class="cedis-story-kicker">Tasa de merma</div>
+          <div class="cedis-story-value cedis-tone-success">0.1%</div>
+          <p class="cedis-story-copy">Merma semanal en piezas sobre venta semanal. Sirve para ver deterioro operativo más allá del costo monetario.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Confianza del dato</h2>
+          <p class="cedis-panel-subtitle">Transparencia sobre qué tan completa quedó la semana para tickets y clasificación operativa.</p>
+        </div>
+        <span class="cedis-pill is-success">Confirmado</span>
+      </div>
+      <div class="cedis-quality-grid">
+        <div class="cedis-quality-card">
+          <strong>1717</strong>
+          <span>Tickets semanales disponibles para monetización del tráfico.</span>
+        </div>
+        <div class="cedis-quality-card">
+          <strong>98.2%</strong>
+          <span>Venta semanal clasificada en categorías operativas visibles en tablero.</span>
+        </div>
+        <div class="cedis-quality-card">
+          <strong>97.7%</strong>
+          <span>Producción directa clasificada en categorías productivas comparables contra venta.</span>
+        </div>
+        <div class="cedis-quality-card">
+          <strong>66 / 6</strong>
+          <span>Venta y entradas aún sin clasificar. No bloquean el tablero, pero sí reducen precisión analítica.</span>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="cedis-grid-4">
+    <article class="cedis-card">
+      <div class="cedis-label">Cobertura operativa</div>
+      <div class="cedis-value cedis-tone-warning">3.28</div>
+      <div class="cedis-foot">Entradas centrales / unidades vendidas. Sirve como semáforo rápido de presión semanal.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Ventas semana ($)</div>
+      <div class="cedis-value">$484226</div>
+      <div class="cedis-foot">
+        
+          1717 tickets · ticket promedio $282
+        
+      </div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Unidades vendidas</div>
+      <div class="cedis-value">3693</div>
+      <div class="cedis-foot">Venta comercial de sucursales activas, excluyendo ramas no comerciales.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Alerta semanal</div>
+      <div class="cedis-value cedis-tone-warning">Amarillo</div>
+      <div class="cedis-foot">Operación relativamente controlada, pero conviene revisar presión comercial o merma.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Producción CEDIS</div>
+      <div class="cedis-value">262</div>
+      <div class="cedis-foot">Producción directa de ramas configuradas como centrales.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Transferencias a CEDIS</div>
+      <div class="cedis-value">11845</div>
+      <div class="cedis-foot">Entradas recibidas por transferencia hacia inventario central.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Merma semanal ($)</div>
+      <div class="cedis-value cedis-tone-warning">$19</div>
+      <div class="cedis-foot">5 piezas registradas por el personal.</div>
+    </article>
+    <article class="cedis-card">
+      <div class="cedis-label">Pronóstico próxima semana</div>
+      <div class="cedis-value">$671599</div>
+      <div class="cedis-foot">Ventas estimadas · 5121 unidades · producción orientativa 87</div>
+    </article>
+  </section>
+
+  <section class="cedis-grid-2">
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Comparativo semana actual vs anterior</h2>
+          <p class="cedis-panel-subtitle">Corte semanal principal para leer cambio porcentual y dirección operativa.</p>
+        </div>
+        <span class="cedis-pill is-warning">Amarillo</span>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Indicador</th>
+              <th class="cedis-num">Actual</th>
+              <th class="cedis-num">Anterior</th>
+              <th class="cedis-num">Δ%</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>Ventas ($)</td>
+              <td class="cedis-num">484226.0</td>
+              <td class="cedis-num">782578.9</td>
+              <td class="cedis-num">
+                
+                  <span class="cedis-tone-danger">
+                    -38.1%
+                  </span>
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Unidades vendidas</td>
+              <td class="cedis-num">3693.0</td>
+              <td class="cedis-num">6029.0</td>
+              <td class="cedis-num">
+                
+                  <span class="cedis-tone-danger">
+                    -38.7%
+                  </span>
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Producción CEDIS</td>
+              <td class="cedis-num">262.0</td>
+              <td class="cedis-num">0.0</td>
+              <td class="cedis-num">
+                
+                  -
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Transferencias a CEDIS</td>
+              <td class="cedis-num">11845.4</td>
+              <td class="cedis-num">0.0</td>
+              <td class="cedis-num">
+                
+                  -
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Ticket promedio</td>
+              <td class="cedis-num">282.0</td>
+              <td class="cedis-num">281.8</td>
+              <td class="cedis-num">
+                
+                  <span class="cedis-tone-success">
+                    0.1%
+                  </span>
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Merma ($)</td>
+              <td class="cedis-num">18.5</td>
+              <td class="cedis-num">0.0</td>
+              <td class="cedis-num">
+                
+                  -
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Merma (pzas)</td>
+              <td class="cedis-num">5.0</td>
+              <td class="cedis-num">0.0</td>
+              <td class="cedis-num">
+                
+                  -
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>Cobertura operativa</td>
+              <td class="cedis-num">3.3</td>
+              <td class="cedis-num">0.0</td>
+              <td class="cedis-num">
+                
+                  -
+                
+              </td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Comparativa 3 semanas</h2>
+          <p class="cedis-panel-subtitle">Vista corta para detectar pendiente de aceleración, merma o desacoplamiento de flujo central.</p>
+        </div>
+        <span class="cedis-pill">W actual + 2 previas</span>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Semana</th>
+              <th class="cedis-num">Ventas ($)</th>
+              <th class="cedis-num">Unidades</th>
+              <th class="cedis-num">Producción</th>
+              <th class="cedis-num">Transfer.</th>
+              <th class="cedis-num">Merma ($)</th>
+              <th class="cedis-num">Cobertura</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>2026-W12</td>
+              <td class="cedis-num">$484226</td>
+              <td class="cedis-num">3693</td>
+              <td class="cedis-num">262</td>
+              <td class="cedis-num">11845</td>
+              <td class="cedis-num">$19</td>
+              <td class="cedis-num">3.28</td>
+            </tr>
+            
+            <tr>
+              <td>2026-W11</td>
+              <td class="cedis-num">$782579</td>
+              <td class="cedis-num">6029</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">$0</td>
+              <td class="cedis-num">0.00</td>
+            </tr>
+            
+            <tr>
+              <td>2026-W10</td>
+              <td class="cedis-num">$747991</td>
+              <td class="cedis-num">5640</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">$0</td>
+              <td class="cedis-num">0.00</td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="cedis-grid-3">
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Top 10 ventas $ por producto</h2>
+          <p class="cedis-panel-subtitle">Semana actual.</p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th class="cedis-num">Venta total</th>
+              <th class="cedis-num">% participación</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>Pastel de 3 Pecados Mediano</td>
+              <td class="cedis-num">$65170</td>
+              <td class="cedis-num">20.8%</td>
+            </tr>
+            
+            <tr>
+              <td>Pastel de Fresas Con Crema Mediano</td>
+              <td class="cedis-num">$62181</td>
+              <td class="cedis-num">19.8%</td>
+            </tr>
+            
+            <tr>
+              <td>Pay de Queso Grande</td>
+              <td class="cedis-num">$42825</td>
+              <td class="cedis-num">13.7%</td>
+            </tr>
+            
+            <tr>
+              <td>Pay de Queso Mediano</td>
+              <td class="cedis-num">$29945</td>
+              <td class="cedis-num">9.6%</td>
+            </tr>
+            
+            <tr>
+              <td>Pastel de Fresas Con Crema Chico</td>
+              <td class="cedis-num">$21775</td>
+              <td class="cedis-num">6.9%</td>
+            </tr>
+            
+            <tr>
+              <td>Pastel de 3 Pecados Chico</td>
+              <td class="cedis-num">$21760</td>
+              <td class="cedis-num">6.9%</td>
+            </tr>
+            
+            <tr>
+              <td>Pastel de Snickers Mediano</td>
+              <td class="cedis-num">$21000</td>
+              <td class="cedis-num">6.7%</td>
+            </tr>
+            
+            <tr>
+              <td>Pastel de Crunch Mediano</td>
+              <td class="cedis-num">$17640</td>
+              <td class="cedis-num">5.6%</td>
+            </tr>
+            
+            <tr>
+              <td>Vaso Fresas con Crema Chico</td>
+              <td class="cedis-num">$16290</td>
+              <td class="cedis-num">5.2%</td>
+            </tr>
+            
+            <tr>
+              <td>Pastel de Zanahoria Mediano</td>
+              <td class="cedis-num">$14938</td>
+              <td class="cedis-num">4.8%</td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Top 10 merma $ por producto</h2>
+          <p class="cedis-panel-subtitle">Semana actual.</p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th class="cedis-num">Merma total</th>
+              <th class="cedis-num">% participación</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>Bollo Zanahoria</td>
+              <td class="cedis-num">$9</td>
+              <td class="cedis-num">51.0%</td>
+            </tr>
+            
+            <tr>
+              <td>Bollo Red Velvet</td>
+              <td class="cedis-num">$9</td>
+              <td class="cedis-num">49.0%</td>
+            </tr>
+            
+            <tr>
+              <td>Pastel de 3 Pecados R</td>
+              <td class="cedis-num">$0</td>
+              <td class="cedis-num">0.0%</td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Merma por sucursal</h2>
+          <p class="cedis-panel-subtitle">Participación semanal por costo y piezas.</p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Sucursal</th>
+              <th class="cedis-num">Merma ($)</th>
+              <th class="cedis-num">Merma (pzas)</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>EL_TUNEL</td>
+              <td class="cedis-num">$19</td>
+              <td class="cedis-num">2</td>
+            </tr>
+            
+            <tr>
+              <td>COLOSIO</td>
+              <td class="cedis-num">$0</td>
+              <td class="cedis-num">1</td>
+            </tr>
+            
+            <tr>
+              <td>MATRIZ</td>
+              <td class="cedis-num">$0</td>
+              <td class="cedis-num">2</td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="cedis-grid-2">
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Producción CEDIS vs ventas por categoría</h2>
+          <p class="cedis-panel-subtitle">
+            Semana actual con buckets operativos normalizados. Transferencias quedan fuera de este comparativo para no mezclar logística con producción propia.
+            
+              Queda pendiente de clasificar venta 66 pzas y producción 6 pzas.
+            
+          </p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th class="cedis-num">Entradas</th>
+              <th class="cedis-num">Ventas</th>
+              <th class="cedis-num">Diferencia</th>
+              <th>Estatus</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>Bollo</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">334</td>
+              <td class="cedis-num">-334</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+            <tr>
+              <td>Galletas</td>
+              <td class="cedis-num">5</td>
+              <td class="cedis-num">194</td>
+              <td class="cedis-num">-189</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pastel Chico</td>
+              <td class="cedis-num">70</td>
+              <td class="cedis-num">312</td>
+              <td class="cedis-num">-242</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pastel Mediano</td>
+              <td class="cedis-num">103</td>
+              <td class="cedis-num">674</td>
+              <td class="cedis-num">-571</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pastel Grande</td>
+              <td class="cedis-num">2</td>
+              <td class="cedis-num">40</td>
+              <td class="cedis-num">-38</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pastel Mini</td>
+              <td class="cedis-num">22</td>
+              <td class="cedis-num">97</td>
+              <td class="cedis-num">-75</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+            <tr>
+              <td>Rebanada</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">593</td>
+              <td class="cedis-num">-593</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+            <tr>
+              <td>Individual</td>
+              <td class="cedis-num">54</td>
+              <td class="cedis-num">157</td>
+              <td class="cedis-num">-103</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pay Mediano</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">151</td>
+              <td class="cedis-num">-151</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pay Grande</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">174</td>
+              <td class="cedis-num">-174</td>
+              <td><span class="cedis-tone-danger">Faltante</span></td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="cedis-panel">
+      <div class="cedis-panel-head">
+        <div>
+          <h2 class="cedis-panel-title">Pronóstico orientativo por categoría</h2>
+          <p class="cedis-panel-subtitle">Promedio simple de las últimas 3 semanas. Sirve como señal, no sustituye planeación fina.</p>
+        </div>
+      </div>
+      <div class="cedis-table-wrap">
+        <table class="cedis-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th class="cedis-num">Pron. prod.</th>
+              <th class="cedis-num">Pron. ventas ($)</th>
+              <th class="cedis-num">Pron. ventas (pzas)</th>
+              <th class="cedis-num">Tendencia</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>Pastel Mediano</td>
+              <td class="cedis-num">21</td>
+              <td class="cedis-num">$753</td>
+              <td class="cedis-num">3</td>
+              <td class="cedis-num">↓</td>
+            </tr>
+            
+            <tr>
+              <td>Rebanada</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">$151</td>
+              <td class="cedis-num">3</td>
+              <td class="cedis-num">↑</td>
+            </tr>
+            
+            <tr>
+              <td>Accesorios</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">$88</td>
+              <td class="cedis-num">3</td>
+              <td class="cedis-num">↑</td>
+            </tr>
+            
+            <tr>
+              <td>Vasos Grande</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">$422</td>
+              <td class="cedis-num">4</td>
+              <td class="cedis-num">↑</td>
+            </tr>
+            
+            <tr>
+              <td>Pastel Chico</td>
+              <td class="cedis-num">18</td>
+              <td class="cedis-num">$373</td>
+              <td class="cedis-num">2</td>
+              <td class="cedis-num">↓</td>
+            </tr>
+            
+            <tr>
+              <td>Bollo</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">$89</td>
+              <td class="cedis-num">3</td>
+              <td class="cedis-num">↑</td>
+            </tr>
+            
+            <tr>
+              <td>Galletas</td>
+              <td class="cedis-num">3</td>
+              <td class="cedis-num">$74</td>
+              <td class="cedis-num">2</td>
+              <td class="cedis-num">↓</td>
+            </tr>
+            
+            <tr>
+              <td>Pay Mediano</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">$490</td>
+              <td class="cedis-num">3</td>
+              <td class="cedis-num">↑</td>
+            </tr>
+            
+            <tr>
+              <td>Pay Grande</td>
+              <td class="cedis-num">0</td>
+              <td class="cedis-num">$698</td>
+              <td class="cedis-num">3</td>
+              <td class="cedis-num">↑</td>
+            </tr>
+            
+            <tr>
+              <td>Individual</td>
+              <td class="cedis-num">18</td>
+              <td class="cedis-num">$191</td>
+              <td class="cedis-num">2</td>
+              <td class="cedis-num">↓</td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="cedis-chart-grid">
+    <article class="cedis-chart cedis-chart--wide">
+      <h3>Ventas $ por semana</h3>
+      <p>Gráfica protagonista del tablero semanal. Úsala para leer velocidad comercial y compararla con la capacidad central.</p>
+      <canvas id="cedis-chart-sales"></canvas>
+      <div class="cedis-chart-legend">
+        <span><i class="cedis-dot" style="background:#d65a71;"></i>Ventas $</span>
+      </div>
+    </article>
+    <article class="cedis-chart">
+      <h3>Merma $ por sucursal</h3>
+      <p>Distribución semanal de pérdida monetizada.</p>
+      <canvas id="cedis-chart-waste"></canvas>
+    </article>
+    <article class="cedis-chart">
+      <h3>Entradas actuales vs pronóstico próximo</h3>
+      <p>Categorías líderes de la semana contra la próxima referencia operativa.</p>
+      <canvas id="cedis-chart-forecast"></canvas>
+      <div class="cedis-chart-legend">
+        <span><i class="cedis-dot" style="background:#214f9b;"></i>Entradas actuales</span>
+        <span><i class="cedis-dot" style="background:#2eb495;"></i>Pronóstico próximo</span>
+      </div>
+    </article>
+  </section>
+</div>
+
+            </div>
+        </main>
+    </div>
+    <script>
+      (() => {
+        const key = "ui_density_mode";
+        const body = document.body;
+        const toggle = document.getElementById("densityToggle");
+        if (!toggle) return;
+
+        const applyMode = (mode) => {
+          const compact = mode === "compact";
+          body.classList.toggle("ui-compact", compact);
+          toggle.setAttribute("aria-pressed", compact ? "true" : "false");
+          toggle.textContent = compact ? "Modo normal" : "Modo compacto";
+        };
+
+        const saved = localStorage.getItem(key);
+        applyMode(saved || "normal");
+
+        toggle.addEventListener("click", () => {
+          const compact = !body.classList.contains("ui-compact");
+          const mode = compact ? "compact" : "normal";
+          localStorage.setItem(key, mode);
+          applyMode(mode);
+        });
+      })();
+    </script>
+    
+<script id="cedis-weekly-chart-bundle" type="application/json">{"weekly_labels": ["2026-W10", "2026-W11", "2026-W12"], "weekly_sales_amount": [747991.38, 782578.92, 484225.95], "weekly_sales_units": [5640.0, 6029.0, 3693.0], "weekly_production_units": [0.0, 0.0, 262.0], "weekly_waste_cost": [0.0, 0.0, 18.51], "category_labels": ["Bollo", "Galletas", "Pastel Chico", "Pastel Mediano", "Pastel Grande", "Pastel Mini", "Rebanada", "Individual", "Pay Mediano", "Pay Grande"], "category_production": [0.0, 5.0, 70.0, 103.0, 2.0, 22.0, 0.0, 54.0, 0.0, 0.0], "category_sales": [334.0, 194.0, 312.0, 674.0, 40.0, 97.0, 593.0, 157.0, 151.0, 174.0], "waste_branch_labels": ["EL_TUNEL", "COLOSIO", "MATRIZ"], "waste_branch_values": [18.51, 0.0, 0.0], "forecast_labels": ["Pastel Mediano", "Rebanada", "Accesorios", "Vasos Grande", "Pastel Chico", "Bollo", "Galletas", "Pay Mediano", "Pay Grande", "Individual"], "forecast_current_production": [103.0, 0.0, 0.0, 0.0, 70.0, 0.0, 5.0, 0.0, 0.0, 54.0], "forecast_next_production": [20.6, 0.0, 0.0, 0.0, 17.5, 0.0, 2.5, 0.0, 0.0, 18.0]}</script>
+<script>
+  (() => {
+    const source = document.getElementById("cedis-weekly-chart-bundle");
+    if (!source) return;
+    const bundle = JSON.parse(source.textContent || "{}");
+    const palette = {
+      rose: "#d65a71",
+      blue: "#214f9b",
+      green: "#2eb495",
+      cyan: "#53a7c2",
+      amber: "#d27a27",
+      red: "#b14b4b",
+      axis: "#7e665d",
+      grid: "rgba(98, 74, 64, 0.12)",
+    };
+
+    function setupCanvas(canvas) {
+      if (!canvas) return null;
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth || 360;
+      const height = canvas.clientHeight || 260;
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(ratio, ratio);
+      return { ctx, width, height };
+    }
+
+    function formatNumber(value) {
+      return new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(value || 0);
+    }
+
+    function drawLine(canvas, labels, values, color) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const pad = { top: 16, right: 16, bottom: 34, left: 54 };
+      const chartW = width - pad.left - pad.right;
+      const chartH = height - pad.top - pad.bottom;
+      const max = Math.max(...values, 1);
+      ctx.clearRect(0, 0, width, height);
+      ctx.strokeStyle = palette.grid;
+      for (let i = 0; i < 4; i += 1) {
+        const y = pad.top + (chartH / 3) * i;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+      }
+      const points = values.map((value, index) => ({
+        x: pad.left + (chartW * index) / Math.max(labels.length - 1, 1),
+        y: pad.top + chartH - (value / max) * chartH,
+      }));
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      points.forEach((point) => {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+      });
+      ctx.fillStyle = palette.axis;
+      ctx.font = '12px Inter, sans-serif';
+      labels.forEach((label, index) => {
+        const x = pad.left + (chartW * index) / Math.max(labels.length - 1, 1);
+        ctx.fillText(label, x - 14, height - 10);
+      });
+      ctx.fillText(formatNumber(max), 8, pad.top + 4);
+    }
+
+    function drawDonut(canvas, labels, values) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const total = values.reduce((acc, value) => acc + Number(value || 0), 0);
+      if (!total) return;
+      const colors = ["#214f9b", "#d65a71", "#53a7c2", "#d27a27", "#2eb495", "#7d66b1", "#b14b4b", "#9e7a57"];
+      const cx = width * 0.32;
+      const cy = height * 0.5;
+      const radius = Math.min(width, height) * 0.25;
+      let start = -Math.PI / 2;
+      ctx.clearRect(0, 0, width, height);
+      values.forEach((rawValue, index) => {
+        const value = Number(rawValue || 0);
+        const slice = (value / total) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, start + slice);
+        ctx.closePath();
+        ctx.fillStyle = colors[index % colors.length];
+        ctx.fill();
+        start += slice;
+      });
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.58, 0, Math.PI * 2);
+      ctx.fillStyle = "#fffaf7";
+      ctx.fill();
+      ctx.fillStyle = "#41271d";
+      ctx.font = '700 20px Inter, sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText(formatNumber(total), cx, cy + 6);
+      ctx.font = '12px Inter, sans-serif';
+      ctx.fillStyle = palette.axis;
+      ctx.fillText("Merma $", cx, cy - 16);
+      ctx.textAlign = "left";
+      labels.forEach((label, index) => {
+        const y = 26 + index * 22;
+        ctx.fillStyle = colors[index % colors.length];
+        ctx.fillRect(width * 0.62, y - 10, 10, 10);
+        ctx.fillStyle = "#5e4a41";
+        ctx.fillText(`${label} · ${formatNumber(values[index])}`, width * 0.62 + 18, y);
+      });
+    }
+
+    function drawHorizontalBars(canvas, labels, leftValues, rightValues) {
+      const setup = setupCanvas(canvas);
+      if (!setup || !labels.length) return;
+      const { ctx, width, height } = setup;
+      const pad = { top: 18, right: 18, bottom: 12, left: 120 };
+      const chartW = width - pad.left - pad.right;
+      const chartH = height - pad.top - pad.bottom;
+      const rowH = chartH / Math.max(labels.length, 1);
+      const max = Math.max(1, ...leftValues, ...rightValues);
+      ctx.clearRect(0, 0, width, height);
+      ctx.font = '12px Inter, sans-serif';
+      labels.forEach((label, index) => {
+        const y = pad.top + rowH * index + rowH / 2;
+        const leftW = (Number(leftValues[index] || 0) / max) * chartW;
+        const rightW = (Number(rightValues[index] || 0) / max) * chartW;
+        ctx.fillStyle = "#5d4c43";
+        ctx.fillText(label, 10, y + 4);
+        ctx.fillStyle = palette.blue;
+        ctx.fillRect(pad.left, y - 10, leftW, 8);
+        ctx.fillStyle = palette.green;
+        ctx.fillRect(pad.left, y + 2, rightW, 8);
+      });
+    }
+
+    drawLine(
+      document.getElementById("cedis-chart-sales"),
+      bundle.weekly_labels || [],
+      bundle.weekly_sales_amount || [],
+      palette.rose
+    );
+    drawDonut(
+      document.getElementById("cedis-chart-waste"),
+      bundle.waste_branch_labels || [],
+      bundle.waste_branch_values || []
+    );
+    drawHorizontalBars(
+      document.getElementById("cedis-chart-forecast"),
+      bundle.forecast_labels || [],
+      bundle.forecast_current_production || [],
+      bundle.forecast_next_production || []
+    );
+  })();
+</script>
+
+</body>
+</html>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
@@ -11,11 +12,14 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from urllib.parse import urlencode
 
 from core.access import can_manage_crm, can_view_crm
 from core.audit import log_event
+from core.models import Sucursal
 
 from .models import Cliente, PedidoCliente, SeguimientoPedido
+from .services import SucursalResolutionError, resolve_sucursal
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -27,6 +31,7 @@ def _parse_decimal(raw: str | None) -> Decimal:
 
 def _module_tabs(active: str) -> list[dict]:
     return [
+        {"label": "Dashboard", "url_name": "crm:home", "active": active == "dashboard"},
         {"label": "Clientes", "url_name": "crm:clientes", "active": active == "clientes"},
         {"label": "Pedidos", "url_name": "crm:pedidos", "active": active == "pedidos"},
     ]
@@ -524,6 +529,217 @@ def _crm_release_gate_rows(
 
 
 @login_required
+def dashboard(request: HttpRequest) -> HttpResponse:
+    if not can_view_crm(request.user):
+        raise PermissionDenied("No tienes permisos para ver CRM")
+
+    today = timezone.localdate()
+    date_from_raw = (request.GET.get("date_from") or "").strip()
+    date_to_raw = (request.GET.get("date_to") or "").strip()
+    sucursal_id_raw = (request.GET.get("sucursal_id") or "").strip()
+    estatus = (request.GET.get("estatus") or "").strip().upper()
+    canal = (request.GET.get("canal") or "").strip().upper()
+    prioridad = (request.GET.get("prioridad") or "").strip().upper()
+    q = (request.GET.get("q") or "").strip()
+    try:
+        sucursal_id = int(sucursal_id_raw) if sucursal_id_raw else None
+    except (TypeError, ValueError):
+        sucursal_id = None
+    try:
+        date_from = date.fromisoformat(date_from_raw) if date_from_raw else (today - timedelta(days=6))
+    except ValueError:
+        date_from = today - timedelta(days=6)
+    try:
+        date_to = date.fromisoformat(date_to_raw) if date_to_raw else today
+    except ValueError:
+        date_to = today
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
+
+    clientes_qs = Cliente.objects.all()
+    pedidos_qs = PedidoCliente.objects.select_related("cliente", "sucursal_ref")
+    seguimientos_qs = SeguimientoPedido.objects.select_related("pedido", "pedido__cliente")
+    if date_from and date_to:
+        pedidos_qs = pedidos_qs.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
+        seguimientos_qs = seguimientos_qs.filter(fecha_evento__date__gte=date_from, fecha_evento__date__lte=date_to)
+        clientes_qs = clientes_qs.filter(created_at__date__lte=date_to)
+    if sucursal_id:
+        pedidos_qs = pedidos_qs.filter(sucursal_ref_id=sucursal_id)
+        seguimientos_qs = seguimientos_qs.filter(pedido__sucursal_ref_id=sucursal_id)
+    valid_estatuses = {
+        PedidoCliente.ESTATUS_NUEVO,
+        PedidoCliente.ESTATUS_CONFIRMADO,
+        PedidoCliente.ESTATUS_EN_PRODUCCION,
+        PedidoCliente.ESTATUS_ENTREGADO,
+        PedidoCliente.ESTATUS_CANCELADO,
+    }
+    valid_canales = {value for value, _ in PedidoCliente.CANAL_CHOICES}
+    valid_prioridades = {value for value, _ in PedidoCliente.PRIORIDAD_CHOICES}
+    if estatus not in valid_estatuses:
+        estatus = ""
+    if canal not in valid_canales:
+        canal = ""
+    if prioridad not in valid_prioridades:
+        prioridad = ""
+    if estatus:
+        pedidos_qs = pedidos_qs.filter(estatus=estatus)
+        seguimientos_qs = seguimientos_qs.filter(
+            Q(estatus_nuevo=estatus) | Q(pedido__estatus=estatus)
+        )
+    if canal:
+        pedidos_qs = pedidos_qs.filter(canal=canal)
+        seguimientos_qs = seguimientos_qs.filter(pedido__canal=canal)
+        clientes_qs = clientes_qs.filter(pedidos__canal=canal).distinct()
+    if prioridad:
+        pedidos_qs = pedidos_qs.filter(prioridad=prioridad)
+        seguimientos_qs = seguimientos_qs.filter(pedido__prioridad=prioridad)
+        clientes_qs = clientes_qs.filter(pedidos__prioridad=prioridad).distinct()
+    if q:
+        pedidos_qs = pedidos_qs.filter(
+            Q(folio__icontains=q)
+            | Q(cliente__nombre__icontains=q)
+            | Q(cliente__codigo__icontains=q)
+            | Q(descripcion__icontains=q)
+        )
+        seguimientos_qs = seguimientos_qs.filter(
+            Q(pedido__folio__icontains=q)
+            | Q(pedido__cliente__nombre__icontains=q)
+            | Q(comentario__icontains=q)
+        )
+        clientes_qs = clientes_qs.filter(
+            Q(nombre__icontains=q)
+            | Q(codigo__icontains=q)
+            | Q(telefono__icontains=q)
+            | Q(email__icontains=q)
+        )
+
+    clientes_total = clientes_qs.count()
+    clientes_activos = clientes_qs.filter(activo=True).count()
+    pedidos_total = pedidos_qs.count()
+    pedidos_abiertos = pedidos_qs.exclude(
+        estatus__in=[PedidoCliente.ESTATUS_ENTREGADO, PedidoCliente.ESTATUS_CANCELADO]
+    ).count()
+    pedidos_hoy = pedidos_qs.filter(created_at__date=today).count()
+    pedidos_produccion = pedidos_qs.filter(estatus=PedidoCliente.ESTATUS_EN_PRODUCCION).count()
+    pedidos_entregados = pedidos_qs.filter(estatus=PedidoCliente.ESTATUS_ENTREGADO).count()
+    pedidos_cancelados = pedidos_qs.filter(estatus=PedidoCliente.ESTATUS_CANCELADO).count()
+    monto_visible = sum((row.monto_estimado for row in pedidos_qs[:500]), Decimal("0"))
+
+    status_rows = [
+        {"label": "Nuevos", "value": pedidos_qs.filter(estatus=PedidoCliente.ESTATUS_NUEVO).count()},
+        {"label": "Confirmados", "value": pedidos_qs.filter(estatus=PedidoCliente.ESTATUS_CONFIRMADO).count()},
+        {"label": "Producción", "value": pedidos_produccion},
+        {"label": "Entregados", "value": pedidos_entregados},
+    ]
+    channel_rows = [
+        {"label": "Mostrador", "value": pedidos_qs.filter(canal=PedidoCliente.CANAL_MOSTRADOR).count()},
+        {"label": "WhatsApp", "value": pedidos_qs.filter(canal=PedidoCliente.CANAL_WHATSAPP).count()},
+        {"label": "Teléfono", "value": pedidos_qs.filter(canal=PedidoCliente.CANAL_TELEFONO).count()},
+        {"label": "Web", "value": pedidos_qs.filter(canal=PedidoCliente.CANAL_WEB).count()},
+    ]
+    priority_rows = [
+        {"label": "Baja", "value": pedidos_qs.filter(prioridad=PedidoCliente.PRIORIDAD_BAJA).count()},
+        {"label": "Media", "value": pedidos_qs.filter(prioridad=PedidoCliente.PRIORIDAD_MEDIA).count()},
+        {"label": "Alta", "value": pedidos_qs.filter(prioridad=PedidoCliente.PRIORIDAD_ALTA).count()},
+        {"label": "Urgente", "value": pedidos_qs.filter(prioridad=PedidoCliente.PRIORIDAD_URGENTE).count()},
+    ]
+    recent_days = []
+    for delta in range(6, -1, -1):
+        day = today - timedelta(days=delta)
+        recent_days.append(
+            {
+                "label": day.strftime("%d %b"),
+                "pedidos": pedidos_qs.filter(created_at__date=day).count(),
+                "seguimientos": seguimientos_qs.filter(fecha_evento__date=day).count(),
+            }
+        )
+
+    top_client_rows = []
+    for cliente in clientes_qs.order_by("nombre")[:20]:
+        cliente_pedidos = list(cliente.pedidos.all()[:50])
+        total_cliente = sum((row.monto_estimado for row in cliente_pedidos), Decimal("0"))
+        if not cliente_pedidos:
+            continue
+        top_client_rows.append(
+            {
+                "cliente": cliente.nombre,
+                "pedidos": len(cliente_pedidos),
+                "monto": total_cliente,
+                "activo": cliente.activo,
+            }
+        )
+    top_client_rows.sort(key=lambda row: (row["monto"], row["pedidos"]), reverse=True)
+
+    latest_clients = list(clientes_qs.order_by("-created_at", "-id")[:4])
+    latest_orders = list(pedidos_qs.order_by("-created_at", "-id")[:4])
+    latest_tracking = list(seguimientos_qs.order_by("-fecha_evento", "-id")[:4])
+
+    sucursal_options = list(
+        Sucursal.objects.filter(activa=True).order_by("nombre").values("id", "nombre")
+    )
+    dashboard_query = {
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+    }
+    if sucursal_id:
+        dashboard_query["sucursal_id"] = sucursal_id
+    if estatus:
+        dashboard_query["estatus"] = estatus
+    if canal:
+        dashboard_query["canal"] = canal
+    if prioridad:
+        dashboard_query["prioridad"] = prioridad
+    if q:
+        dashboard_query["q"] = q
+    top_client_rows_with_urls = []
+    for row in top_client_rows[:4]:
+        detail_query = dict(dashboard_query)
+        client_name = str(row.get("cliente") or "").strip()
+        if client_name:
+            detail_query["q"] = client_name
+        top_client_rows_with_urls.append(
+            {
+                **row,
+                "action_url": reverse("crm:pedidos") + f"?{urlencode(detail_query)}",
+            }
+        )
+    context = {
+        "module_tabs": _module_tabs("dashboard"),
+        "clientes_total": clientes_total,
+        "clientes_activos": clientes_activos,
+        "pedidos_total": pedidos_total,
+        "pedidos_abiertos": pedidos_abiertos,
+        "pedidos_hoy": pedidos_hoy,
+        "pedidos_produccion": pedidos_produccion,
+        "pedidos_entregados": pedidos_entregados,
+        "pedidos_cancelados": pedidos_cancelados,
+        "monto_visible": monto_visible,
+        "status_rows": status_rows,
+        "channel_rows": channel_rows,
+        "priority_rows": priority_rows,
+        "recent_days": recent_days,
+        "top_client_rows": top_client_rows_with_urls,
+        "latest_clients": latest_clients,
+        "latest_orders": latest_orders,
+        "latest_tracking": latest_tracking,
+        "has_visible_data": any([clientes_total, pedidos_total, latest_tracking]),
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "selected_sucursal_id": str(sucursal_id or ""),
+        "selected_estatus": estatus,
+        "selected_canal": canal,
+        "selected_prioridad": prioridad,
+        "selected_q": q,
+        "sucursal_options": sucursal_options,
+        "clientes_url": reverse("crm:clientes") + (f"?{urlencode({'q': q})}" if q else ""),
+        "pedidos_url": reverse("crm:pedidos") + f"?{urlencode(dashboard_query)}",
+        "pedidos_abiertos_url": reverse("crm:pedidos") + f"?{urlencode({**dashboard_query, 'enterprise_focus': 'ABIERTOS'})}",
+        "pedidos_produccion_url": reverse("crm:pedidos") + f"?{urlencode({**dashboard_query, 'enterprise_focus': 'PRODUCCION'})}",
+    }
+    return render(request, "crm/dashboard.html", context)
+
+
+@login_required
 def clientes(request: HttpRequest) -> HttpResponse:
     if not can_view_crm(request.user):
         raise PermissionDenied("No tienes permisos para ver CRM")
@@ -677,45 +893,74 @@ def pedidos(request: HttpRequest) -> HttpResponse:
             messages.error(request, "Cliente y descripción son obligatorios.")
         else:
             cliente = get_object_or_404(Cliente, pk=cliente_id)
-            pedido = PedidoCliente.objects.create(
-                cliente=cliente,
-                descripcion=descripcion,
-                fecha_compromiso=request.POST.get("fecha_compromiso") or None,
-                sucursal=(request.POST.get("sucursal") or "").strip(),
-                canal=(request.POST.get("canal") or PedidoCliente.CANAL_MOSTRADOR).strip(),
-                prioridad=(request.POST.get("prioridad") or PedidoCliente.PRIORIDAD_MEDIA).strip(),
-                estatus=(request.POST.get("estatus") or PedidoCliente.ESTATUS_NUEVO).strip(),
-                monto_estimado=_parse_decimal(request.POST.get("monto_estimado")),
-                created_by=request.user,
-            )
-            SeguimientoPedido.objects.create(
-                pedido=pedido,
-                estatus_anterior="",
-                estatus_nuevo=pedido.estatus,
-                comentario="Alta de pedido",
-                created_by=request.user,
-            )
-            log_event(
-                request.user,
-                "CREATE",
-                "crm.PedidoCliente",
-                str(pedido.id),
-                {
-                    "folio": pedido.folio,
-                    "cliente": pedido.cliente.nombre,
-                    "estatus": pedido.estatus,
-                    "monto_estimado": str(pedido.monto_estimado),
-                },
-            )
-            messages.success(request, f"Pedido {pedido.folio} creado.")
-            return redirect("crm:pedidos")
+            try:
+                sucursal_resolution = resolve_sucursal(request.POST.get("sucursal") or "")
+            except SucursalResolutionError as exc:
+                messages.error(request, str(exc))
+            else:
+                pedido = PedidoCliente.objects.create(
+                    cliente=cliente,
+                    descripcion=descripcion,
+                    fecha_compromiso=request.POST.get("fecha_compromiso") or None,
+                    sucursal_ref=sucursal_resolution.sucursal,
+                    canal=(request.POST.get("canal") or PedidoCliente.CANAL_MOSTRADOR).strip(),
+                    prioridad=(request.POST.get("prioridad") or PedidoCliente.PRIORIDAD_MEDIA).strip(),
+                    estatus=(request.POST.get("estatus") or PedidoCliente.ESTATUS_NUEVO).strip(),
+                    monto_estimado=_parse_decimal(request.POST.get("monto_estimado")),
+                    created_by=request.user,
+                )
+                SeguimientoPedido.objects.create(
+                    pedido=pedido,
+                    estatus_anterior="",
+                    estatus_nuevo=pedido.estatus,
+                    comentario="Alta de pedido",
+                    created_by=request.user,
+                )
+                log_event(
+                    request.user,
+                    "CREATE",
+                    "crm.PedidoCliente",
+                    str(pedido.id),
+                    {
+                        "folio": pedido.folio,
+                        "cliente": pedido.cliente.nombre,
+                        "estatus": pedido.estatus,
+                        "monto_estimado": str(pedido.monto_estimado),
+                    },
+                )
+                messages.success(request, f"Pedido {pedido.folio} creado.")
+                return redirect("crm:pedidos")
 
     q = (request.GET.get("q") or "").strip()
     estatus = (request.GET.get("estatus") or "").strip()
     prioridad = (request.GET.get("prioridad") or "").strip()
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
+    date_from_raw = (request.GET.get("date_from") or "").strip()
+    date_to_raw = (request.GET.get("date_to") or "").strip()
+    sucursal_id_raw = (request.GET.get("sucursal_id") or "").strip()
+
+    try:
+        date_from = date.fromisoformat(date_from_raw) if date_from_raw else None
+    except ValueError:
+        date_from = None
+    try:
+        date_to = date.fromisoformat(date_to_raw) if date_to_raw else None
+    except ValueError:
+        date_to = None
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
+    try:
+        sucursal_id = int(sucursal_id_raw) if sucursal_id_raw else None
+    except (TypeError, ValueError):
+        sucursal_id = None
 
     pedidos_qs = PedidoCliente.objects.select_related("cliente")
+    if date_from:
+        pedidos_qs = pedidos_qs.filter(created_at__date__gte=date_from)
+    if date_to:
+        pedidos_qs = pedidos_qs.filter(created_at__date__lte=date_to)
+    if sucursal_id:
+        pedidos_qs = pedidos_qs.filter(sucursal_ref_id=sucursal_id)
     if q:
         pedidos_qs = pedidos_qs.filter(
             Q(folio__icontains=q)
@@ -788,6 +1033,10 @@ def pedidos(request: HttpRequest) -> HttpResponse:
         "estatus": estatus,
         "prioridad": prioridad,
         "enterprise_focus": enterprise_focus,
+        "date_from": date_from.isoformat() if date_from else "",
+        "date_to": date_to.isoformat() if date_to else "",
+        "selected_sucursal_id": str(sucursal_id or ""),
+        "sucursal_options": list(Sucursal.objects.filter(activa=True).order_by("nombre").values("id", "nombre")),
         "can_manage_crm": can_manage_crm(request.user),
         "pedidos_abiertos": pedidos_abiertos,
         "pedidos_hoy": pedidos_hoy,

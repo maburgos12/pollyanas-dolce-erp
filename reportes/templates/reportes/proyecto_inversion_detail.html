@@ -1,0 +1,621 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - {{ project.nombre_proyecto }}{% endblock %}
+{% block page_title %}Reportes · {{ project.nombre_proyecto }}{% endblock %}
+{% block body_class %}page-reportes-investment-project-detail{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406a">
+{% endblock %}
+
+{% block content %}
+<div class="investment-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="investment-header">
+    <article class="investment-hero">
+      <div class="investment-kicker">Proyecto de inversión</div>
+      <h1 class="investment-title">{{ project.nombre_proyecto }}</h1>
+      <p class="investment-copy">Control ejecutivo de inversión, operación real, recuperación, deuda y escenarios para la sucursal/proyecto seleccionado.</p>
+      <div class="investment-meta">
+        <span class="investment-status-pill {% if project.estatus == 'CERRADO' or project.estatus == 'CANCELADO' %}is-closed{% elif project.estatus == 'EN_RECUPERACION' %}is-warning{% else %}is-active{% endif %}">{{ project.get_estatus_display }}</span>
+        <span class="investment-pill">{{ project.get_tipo_proyecto_display }}</span>
+        {% if project.sucursal_relacionada %}
+        <span class="investment-pill">{{ project.sucursal_relacionada.codigo }} · {{ project.sucursal_relacionada.nombre }}</span>
+        {% else %}
+        <span class="investment-pill">Sucursal pendiente</span>
+        {% endif %}
+        <span class="investment-pill">Recovery {{ project.get_recovery_strategy_display }}</span>
+        <span class="investment-status-pill {% if kpis.health_status == 'GREEN' %}is-active{% elif kpis.health_status == 'YELLOW' %}is-warning{% else %}is-danger{% endif %}">Salud {{ kpis.health_score }}/100</span>
+        <span class="investment-pill">{{ kpis.data_quality_badge }} · {{ kpis.confidence_score }}%</span>
+        <span class="investment-pill">Opex real {{ kpis.expense_coverage_label }}</span>
+      </div>
+      <div class="investment-meta">
+        <span class="investment-muted">Inicio {{ project.fecha_inicio|date:"Y-m-d" }}</span>
+        <span class="investment-muted">Apertura {% if project.fecha_apertura %}{{ project.fecha_apertura|date:"Y-m-d" }}{% else %}pendiente{% endif %}</span>
+        <span class="investment-muted">Responsable {% if project.responsable %}{{ project.responsable.get_full_name|default:project.responsable.username }}{% else %}sin asignar{% endif %}</span>
+      </div>
+    </article>
+    <aside class="investment-side">
+      <div class="investment-actions">
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="refresh_project">
+          <button class="investment-button" type="submit">Refrescar métricas</button>
+        </form>
+      </div>
+      <div class="investment-actions">
+        {% for report in report_definitions %}
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report={{ report.key }}&export=xlsx">{{ report.label }} XLSX</a>
+        {% endfor %}
+      </div>
+      <div class="investment-actions">
+        {% for report in report_definitions %}
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report={{ report.key }}&export=pdf">{{ report.label }} PDF</a>
+        {% endfor %}
+      </div>
+    </aside>
+  </section>
+
+  {% if active_alerts %}
+  <div class="investment-alert-stack">
+    {% for alert in active_alerts %}
+    <div class="investment-alert {% if alert.severidad == 'CRITICAL' %}is-critical{% endif %}">
+      <strong>{{ alert.titulo }}</strong>
+      {{ alert.mensaje }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <section class="investment-kpis">
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Inversión planeada</div>
+      <div class="investment-kpi-value">${{ kpis.planned_investment|floatformat:2|intcomma }}</div>
+      <div class="investment-kpi-note">Real ${{ kpis.actual_investment|floatformat:2|intcomma }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Recuperado</div>
+      <div class="investment-kpi-value">${{ kpis.cumulative_recovery|floatformat:2|intcomma }}</div>
+      <div class="investment-kpi-note">Pendiente ${{ kpis.pending_balance|floatformat:2|intcomma }} · {{ kpis.recovery_pct|floatformat:2 }}%</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Ventas acumuladas</div>
+      <div class="investment-kpi-value">${{ kpis.cumulative_sales|floatformat:2|intcomma }}</div>
+      <div class="investment-kpi-note">Utilidad operativa acumulada ${{ kpis.cumulative_operating_profit|floatformat:2|intcomma }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Deuda actual</div>
+      <div class="investment-kpi-value">${{ kpis.debt_balance|floatformat:2|intcomma }}</div>
+      <div class="investment-kpi-note">ROI acumulado {{ kpis.roi_cumulative|floatformat:2 }}% · Payback {% if kpis.payback %}{{ kpis.payback|floatformat:2 }} meses{% else %}N/D{% endif %}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Cash-on-cash</div>
+      <div class="investment-kpi-value">{{ kpis.cash_on_cash|floatformat:2 }}%</div>
+      <div class="investment-kpi-note">Capital propio invertido ${{ project.capital_inicial_aportado|floatformat:2|intcomma }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Forecast cierre</div>
+      <div class="investment-kpi-value">{% if kpis.forecast_close_date %}{{ kpis.forecast_close_date|date:"Y-m-d" }}{% else %}N/D{% endif %}</div>
+      <div class="investment-kpi-note">Payback forecast {% if kpis.forecast_payback %}{{ kpis.forecast_payback|floatformat:2 }} meses{% else %}N/D{% endif %}</div>
+    </article>
+  </section>
+
+  {% if data_gaps %}
+  <div class="investment-alert">
+    <strong>Fuentes pendientes o parciales:</strong>
+    {{ data_gaps|join:" · " }}
+  </div>
+  {% endif %}
+
+  <section class="investment-section-nav">
+    <a class="investment-pill" href="#summary">Resumen</a>
+    <a class="investment-pill" href="#capex">Inversión</a>
+    <a class="investment-pill" href="#operation">Operación</a>
+    <a class="investment-pill" href="#debt">Deuda</a>
+    <a class="investment-pill" href="#scenarios">Escenarios</a>
+    <a class="investment-pill" href="#reports">Reportes</a>
+    <a class="investment-pill" href="#configuration">Configuración</a>
+  </section>
+
+  <section class="investment-layout">
+    <div class="investment-main">
+      <article class="investment-panel" id="summary">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Resumen</div>
+            <h2 class="investment-panel-title">Dashboard ejecutivo del proyecto</h2>
+          </div>
+        </div>
+        <div class="investment-chart-grid">
+          <div class="investment-chart-card investment-chart-card--summary">
+            <h3 class="investment-panel-title">Avance de recuperación</h3>
+            <div class="investment-progress">
+              <div class="investment-progress-bar" style="width: {{ kpis.recovery_progress_pct|floatformat:2 }}%;"></div>
+            </div>
+            <div class="investment-progress-meta">
+              <span>{{ kpis.recovery_pct|floatformat:2 }}% recuperado</span>
+              <span>{% if kpis.forecast_vs_target is not None %}Gap vs objetivo {{ kpis.forecast_vs_target|floatformat:2 }} meses{% else %}Objetivo pendiente{% endif %}</span>
+            </div>
+          </div>
+          <div class="investment-chart-card">
+            <h3 class="investment-panel-title">Inversión vs recuperación</h3>
+            <canvas id="investmentRecoveryChart" aria-label="Inversión acumulada vs recuperación" role="img"></canvas>
+          </div>
+          <div class="investment-chart-card">
+            <h3 class="investment-panel-title">Ventas y flujo mensual</h3>
+            <canvas id="investmentOperationChart" aria-label="Ventas y flujo mensual" role="img"></canvas>
+          </div>
+          <div class="investment-chart-card">
+            <h3 class="investment-panel-title">Recuperación y deuda</h3>
+            <canvas id="investmentDebtChart" aria-label="Deuda vs recuperación" role="img"></canvas>
+          </div>
+          <div class="investment-chart-card">
+            <h3 class="investment-panel-title">Timeline del proyecto</h3>
+            <div class="investment-timeline">
+              {% for row in timeline_rows %}
+              <div class="investment-timeline-row">
+                <div class="investment-timeline-dot {% if row.status == 'done' %}is-done{% endif %}"></div>
+                <div>
+                  <strong>{{ row.label }}</strong>
+                  <div class="investment-muted">{% if row.date %}{{ row.date|date:"Y-m-d" }}{% else %}Pendiente{% endif %}</div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="investment-panel" id="capex">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">CAPEX</div>
+            <h2 class="investment-panel-title">Detalle de inversión</h2>
+          </div>
+        </div>
+        <div class="investment-table-wrap">
+          <table class="investment-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Categoría</th>
+                <th>Descripción</th>
+                <th>Proveedor</th>
+                <th>Total</th>
+                <th>Compra ERP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in expenses %}
+              <tr>
+                <td>{{ row.fecha|date:"Y-m-d" }}</td>
+                <td>{{ row.get_categoria_display }}</td>
+                <td>{{ row.descripcion }}</td>
+                <td>{{ row.proveedor_nombre|default:"-" }}</td>
+                <td>${{ row.monto_total|floatformat:2|intcomma }}</td>
+                <td>{{ row.referencia_compra|default:"-" }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="6">Sin gastos de inversión capturados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="investment-panel" id="operation">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Operación</div>
+            <h2 class="investment-panel-title">Desempeño mensual real</h2>
+          </div>
+        </div>
+        <div class="investment-table-wrap">
+          <table class="investment-table">
+            <thead>
+              <tr>
+                <th>Periodo</th>
+                <th>Ventas</th>
+                <th>Costo venta</th>
+                <th>Utilidad bruta</th>
+                <th>Gastos operativos</th>
+                <th>Flujo operativo</th>
+                <th>Servicio deuda</th>
+                <th>Flujo libre</th>
+                <th>Opex real</th>
+                <th>Calidad</th>
+                <th>Recovery %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in snapshots %}
+              <tr>
+                <td>{{ row.periodo|date:"Y-m" }}</td>
+                <td>${{ row.ventas_mensuales|floatformat:2|intcomma }}</td>
+                <td>{% if row.costo_venta_mensual is not None %}${{ row.costo_venta_mensual|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                <td>{% if row.utilidad_bruta is not None %}${{ row.utilidad_bruta|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                <td>{% if row.gastos_operativos is not None %}${{ row.gastos_operativos|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                <td>{% if row.flujo_operativo is not None %}${{ row.flujo_operativo|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                <td>{% if row.servicio_deuda is not None %}${{ row.servicio_deuda|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                <td>{% if row.flujo_libre is not None %}${{ row.flujo_libre|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                <td>
+                  <span class="investment-status-pill {% if row.fuentes.expense_coverage_status == 'COMPLETE' %}is-active{% elif row.fuentes.expense_coverage_status == 'PARTIAL' %}is-warning{% else %}is-danger{% endif %}">
+                    {{ row.fuentes.expense_coverage_label|default:"Faltante" }}
+                  </span>
+                </td>
+                <td><span class="investment-status-pill {% if row.data_source == 'FACT' %}is-active{% elif row.data_source == 'FALLBACK' %}is-warning{% else %}is-danger{% endif %}">{{ row.confidence_score }}%</span></td>
+                <td>{% if row.porcentaje_recuperado is not None %}{{ row.porcentaje_recuperado|floatformat:2 }}%{% else %}N/D{% endif %}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="11">Todavía no hay snapshots mensuales materializados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+
+    <aside class="investment-sidebar">
+      <article class="investment-form-card">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Alta CAPEX</div>
+            <h2 class="investment-panel-title">Registrar gasto</h2>
+          </div>
+        </div>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_expense">
+          <div class="investment-field-grid">
+            <div class="investment-field">
+              <label for="exp_fecha">Fecha</label>
+              <input id="exp_fecha" type="date" name="fecha" value="{{ today|date:'Y-m-d' }}">
+            </div>
+            <div class="investment-field">
+              <label for="exp_categoria">Categoría</label>
+              <select id="exp_categoria" name="categoria">
+                {% for key, label in expense_categories %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="exp_subcategoria">Subcategoría</label>
+              <input id="exp_subcategoria" type="text" name="subcategoria">
+            </div>
+            <div class="investment-field">
+              <label for="exp_proveedor_nombre">Proveedor</label>
+              <input id="exp_proveedor_nombre" type="text" name="proveedor_nombre">
+            </div>
+            <div class="investment-field" style="grid-column:1 / -1;">
+              <label for="exp_descripcion">Descripción</label>
+              <input id="exp_descripcion" type="text" name="descripcion" required>
+            </div>
+            <div class="investment-field">
+              <label for="exp_monto">Monto</label>
+              <input id="exp_monto" type="number" step="0.01" name="monto" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="exp_iva">IVA</label>
+              <input id="exp_iva" type="number" step="0.01" name="iva" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="exp_monto_total">Monto total</label>
+              <input id="exp_monto_total" type="number" step="0.01" name="monto_total" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="exp_metodo_pago">Método pago</label>
+              <input id="exp_metodo_pago" type="text" name="metodo_pago">
+            </div>
+            <div class="investment-field">
+              <label for="exp_referencia_compra">Referencia compra</label>
+              <input id="exp_referencia_compra" type="text" name="referencia_compra">
+            </div>
+            <div class="investment-field">
+              <label for="exp_referencia_contable">Referencia contable</label>
+              <input id="exp_referencia_contable" type="text" name="referencia_contable">
+            </div>
+            <div class="investment-field">
+              <label for="exp_orden_compra_id">Orden compra ERP</label>
+              <select id="exp_orden_compra_id" name="orden_compra_id">
+                <option value="">Sin vínculo</option>
+                {% for orden in ordenes_compra %}
+                <option value="{{ orden.id }}">{{ orden.folio }} · {{ orden.proveedor.nombre }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="exp_recepcion_compra_id">Recepción ERP</label>
+              <select id="exp_recepcion_compra_id" name="recepcion_compra_id">
+                <option value="">Sin vínculo</option>
+                {% for recepcion in recepciones_compra %}
+                <option value="{{ recepcion.id }}">{{ recepcion.folio }} · {{ recepcion.orden.folio }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="investment-form-actions">
+            <button class="investment-button" type="submit">Guardar gasto</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="investment-form-card" id="debt">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Deuda</div>
+            <h2 class="investment-panel-title">Registrar pago</h2>
+          </div>
+        </div>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_debt_payment">
+          <div class="investment-field-grid">
+            <div class="investment-field">
+              <label for="debt_fecha_pago">Fecha pago</label>
+              <input id="debt_fecha_pago" type="date" name="fecha_pago" value="{{ today|date:'Y-m-d' }}">
+            </div>
+            <div class="investment-field">
+              <label for="debt_monto_pago">Monto pago</label>
+              <input id="debt_monto_pago" type="number" step="0.01" name="monto_pago" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="debt_interes_pagado">Interés pagado</label>
+              <input id="debt_interes_pagado" type="number" step="0.01" name="interes_pagado" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="debt_capital_amortizado">Capital amortizado</label>
+              <input id="debt_capital_amortizado" type="number" step="0.01" name="capital_amortizado" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="debt_saldo_insoluto">Saldo insoluto</label>
+              <input id="debt_saldo_insoluto" type="number" step="0.01" name="saldo_insoluto" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="debt_referencia">Referencia</label>
+              <input id="debt_referencia" type="text" name="referencia">
+            </div>
+          </div>
+          <div class="investment-form-actions">
+            <button class="investment-button" type="submit">Guardar pago</button>
+          </div>
+        </form>
+        <div class="investment-table-wrap" style="margin-top:1rem;">
+          <table class="investment-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Pago</th>
+                <th>Interés</th>
+                <th>Capital</th>
+                <th>Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in debt_payments %}
+              <tr>
+                <td>{{ row.fecha_pago|date:"Y-m-d" }}</td>
+                <td>${{ row.monto_pago|floatformat:2|intcomma }}</td>
+                <td>${{ row.interes_pagado|floatformat:2|intcomma }}</td>
+                <td>${{ row.capital_amortizado|floatformat:2|intcomma }}</td>
+                <td>${{ row.saldo_insoluto|floatformat:2|intcomma }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5">Sin pagos de deuda capturados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="investment-form-card" id="scenarios">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Simulación</div>
+            <h2 class="investment-panel-title">Guardar escenario</h2>
+          </div>
+        </div>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="save_scenario">
+          <div class="investment-field-grid">
+            <div class="investment-field">
+              <label for="sc_nombre">Nombre</label>
+              <input id="sc_nombre" type="text" name="nombre" placeholder="Base 2026" required>
+            </div>
+            <div class="investment-field">
+              <label for="sc_tipo">Tipo</label>
+              <select id="sc_tipo" name="tipo_escenario">
+                {% for key, label in scenario_types %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="sc_ventas_promedio_mensuales">Ventas promedio mensuales</label>
+              <input id="sc_ventas_promedio_mensuales" type="number" step="0.01" name="ventas_promedio_mensuales" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="sc_crecimiento_mensual_pct">Crecimiento mensual %</label>
+              <input id="sc_crecimiento_mensual_pct" type="number" step="0.0001" name="crecimiento_mensual_pct" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="sc_margen_bruto_pct">Margen bruto %</label>
+              <input id="sc_margen_bruto_pct" type="number" step="0.0001" name="margen_bruto_pct" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="sc_gastos_operativos_mensuales">Gastos operativos</label>
+              <input id="sc_gastos_operativos_mensuales" type="number" step="0.01" name="gastos_operativos_mensuales" value="0">
+            </div>
+            <div class="investment-field">
+              <label for="sc_recovery_strategy_override">Recovery strategy</label>
+              <select id="sc_recovery_strategy_override" name="recovery_strategy_override">
+                <option value="">Usar proyecto</option>
+                {% for key, label in recovery_strategies %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="investment-field">
+              <label for="sc_recovery_percentage_override">Recovery % / factor</label>
+              <input id="sc_recovery_percentage_override" type="number" step="0.0001" name="recovery_percentage_override">
+            </div>
+            <div class="investment-field">
+              <label for="sc_horizonte_meses">Horizonte meses</label>
+              <input id="sc_horizonte_meses" type="number" name="horizonte_meses" value="24">
+            </div>
+          </div>
+          <div class="investment-form-actions">
+            <button class="investment-button" type="submit">Guardar escenario</button>
+          </div>
+        </form>
+        <div class="investment-table-wrap" style="margin-top:1rem;">
+          <table class="investment-table">
+            <thead>
+              <tr>
+                <th>Escenario</th>
+                <th>Ventas</th>
+                <th>Flujo neto</th>
+                <th>Recovery</th>
+                <th>Payback</th>
+                <th>ROI anual</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in scenario_rows %}
+              <tr>
+                <td>{{ row.scenario_name }}</td>
+                <td>${{ row.monthly_sales|floatformat:2|intcomma }}</td>
+                <td>{% if row.monthly_net_cashflow is not None %}${{ row.monthly_net_cashflow|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                <td>{% if row.monthly_recovery_amount is not None %}${{ row.monthly_recovery_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                <td>{% if row.payback_months is not None %}{{ row.payback_months|floatformat:2 }} meses{% else %}N/D{% endif %}</td>
+                <td>{% if row.annual_roi_pct is not None %}{{ row.annual_roi_pct|floatformat:2 }}%{% else %}N/D{% endif %}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="6">Sin escenarios guardados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="investment-form-card" id="reports">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Reportes</div>
+            <h2 class="investment-panel-title">Exportables</h2>
+          </div>
+        </div>
+        <div class="investment-portfolio-list">
+          {% for report in report_definitions %}
+          <article class="investment-project-row">
+            <div class="investment-project-top">
+              <div>
+                <strong>{{ report.label }}</strong>
+                <div class="investment-muted">PDF y XLSX listos para dirección y auditoría.</div>
+              </div>
+              <div class="investment-actions">
+                <a class="investment-action-link is-ghost" href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report={{ report.key }}&export=xlsx">XLSX</a>
+                <a class="investment-action-link is-ghost" href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report={{ report.key }}&export=pdf">PDF</a>
+              </div>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="investment-form-card" id="configuration">
+        <div class="investment-panel-head">
+          <div>
+            <div class="investment-kicker">Cierre</div>
+            <h2 class="investment-panel-title">Cierre manual controlado</h2>
+          </div>
+        </div>
+        {% if project.cierre_manual_habilitado and project.estatus != 'CERRADO' %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="close_project">
+          <div class="investment-field-grid">
+            <div class="investment-field">
+              <label for="close_fecha_cierre">Fecha cierre</label>
+              <input id="close_fecha_cierre" type="date" name="fecha_cierre" value="{{ today|date:'Y-m-d' }}">
+            </div>
+            <div class="investment-field" style="grid-column:1 / -1;">
+              <label for="close_motivo_cierre">Motivo</label>
+              <textarea id="close_motivo_cierre" name="motivo_cierre" placeholder="Razón ejecutiva para cierre manual del proyecto."></textarea>
+            </div>
+          </div>
+          <div class="investment-form-actions">
+            <button class="investment-button is-ghost" type="submit">Cerrar proyecto</button>
+          </div>
+        </form>
+        {% else %}
+        <div class="investment-empty">El cierre manual no está habilitado o el proyecto ya está cerrado.</div>
+        {% endif %}
+      </article>
+    </aside>
+  </section>
+</div>
+
+{{ chart_rows|json_script:"investment-chart-rows" }}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  (() => {
+    if (typeof window.Chart !== "function") return;
+    const rows = JSON.parse(document.getElementById("investment-chart-rows").textContent || "[]");
+    if (!rows.length) return;
+    const labels = rows.map((row) => row.period);
+    const investmentLine = labels.map(() => Number("{{ kpis.actual_investment|default:'0' }}"));
+
+    const makeChart = (id, config) => {
+      const ctx = document.getElementById(id);
+      if (!ctx) return;
+      new Chart(ctx, config);
+    };
+
+    makeChart("investmentRecoveryChart", {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "Inversión real", data: investmentLine, borderColor: "#b88632", backgroundColor: "rgba(184, 134, 50, 0.16)", borderWidth: 2, pointRadius: 0, tension: 0.25 },
+          { label: "Recuperación acumulada", data: rows.map((row) => row.recovery_cumulative), borderColor: "#1f6f5d", backgroundColor: "rgba(31, 111, 93, 0.16)", borderWidth: 3, pointRadius: 2, tension: 0.25 }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+
+    makeChart("investmentOperationChart", {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          { label: "Ventas", data: rows.map((row) => row.sales), backgroundColor: "rgba(23, 50, 77, 0.78)" },
+          { label: "Utilidad operativa", data: rows.map((row) => row.operating_profit), backgroundColor: "rgba(184, 134, 50, 0.78)" },
+          { label: "Flujo neto", data: rows.map((row) => row.net_cashflow), backgroundColor: "rgba(31, 111, 93, 0.78)" }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+
+    makeChart("investmentDebtChart", {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "Saldo deuda", data: rows.map((row) => row.debt_balance), borderColor: "#a14343", backgroundColor: "rgba(161, 67, 67, 0.14)", borderWidth: 3, pointRadius: 2, tension: 0.25 },
+          { label: "Recuperación acumulada", data: rows.map((row) => row.recovery_cumulative), borderColor: "#17324d", backgroundColor: "rgba(23, 50, 77, 0.12)", borderWidth: 2, pointRadius: 0, tension: 0.25 }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+  })();
+</script>
+{% endblock %}

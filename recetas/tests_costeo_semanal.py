@@ -82,3 +82,25 @@ class WeeklyCostSnapshotTests(TestCase):
         snapshot_weekly_costs(anchor_date=date(2026, 3, 23))
         latest = RecetaCostoSemanal.objects.get(identity_key=f"RECIPE:{self.base_recipe.id}", week_start=date(2026, 3, 23))
         self.assertEqual(latest.delta_total, Decimal("2.000000"))
+
+    def test_snapshot_ignores_subsection_cost_in_recipe_total(self):
+        LineaReceta.objects.create(
+            receta=self.base_recipe,
+            posicion=2,
+            tipo_linea=LineaReceta.TIPO_SUBSECCION,
+            etapa="Decorado",
+            insumo=None,
+            insumo_texto="Decorado",
+            cantidad=Decimal("0.100000"),
+            unidad=self.unit,
+            unidad_texto="pza",
+            costo_linea_excel=Decimal("99"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_SUBSECTION,
+        )
+
+        snapshot_weekly_costs(anchor_date=date(2026, 3, 23))
+        latest = RecetaCostoSemanal.objects.get(identity_key=f"RECIPE:{self.base_recipe.id}", week_start=date(2026, 3, 23))
+
+        self.assertEqual(latest.costo_mp, Decimal("10.000000"))
+        self.assertEqual(latest.costo_total, Decimal("10.000000"))

@@ -1,0 +1,1138 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reportes - BI Ejecutivo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260321-05">
+    
+</head>
+<body class="page-reportes-bi">
+    <div class="layout-wrapper">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3.5 10.5 12 5l8.5 5.5L12 16 3.5 10.5Z"/>
+                        <path d="M3.5 14 12 19l8.5-5"/>
+                    </svg>
+                </div>
+                <div class="sidebar-brand">Pollyana's Dolce</div>
+                <div class="sidebar-tagline">Operación y control</div>
+            </div>
+
+            <nav>
+                
+                <div class="sidebar-section-label">Dirección</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    <li>
+                        <a href="/dashboard/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>
+                            </span>
+                            <span>Dashboard</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/recetas/dg-operacion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="7" width="3" height="10" rx="1"/><rect x="16" y="4" width="3" height="13" rx="1"/></svg>
+                            </span>
+                            <span>Operación DG</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/reportes/bi/" class="active">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>BI ejecutivo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Operación diaria</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/maestros/proveedores/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4L11 7h7.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-10Z"/></svg>
+                            </span>
+                            <span>Maestros</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/recetas/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+                            </span>
+                            <span>Recetas</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/plan-produccion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>
+                            </span>
+                            <span>Plan de producción</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/reabasto-cedis/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/><path d="M7 12h6"/><path d="m10 9 3 3-3 3"/></svg>
+                            </span>
+                            <span>Reabasto CEDIS</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/compras/solicitudes/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/></svg>
+                            </span>
+                            <span>Compras</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/inventario/existencias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
+                            </span>
+                            <span>Inventario</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/inventario/importar/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M4 15.5A2.5 2.5 0 0 0 6.5 18h11A2.5 2.5 0 0 0 20 15.5"/></svg>
+                            </span>
+                            <span>Cortes de almacén</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/captura-movil/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10 6.5h4"/><circle cx="12" cy="18" r="1"/></svg>
+                            </span>
+                            <span>Captura de piso</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Análisis y soporte</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/reportes/costo-receta/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>Reportes</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/crm/pedidos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            </span>
+                            <span>CRM</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/logistica/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v8H3z"/><path d="M14 10h3l3 3v2h-6z"/><circle cx="7" cy="17.5" r="1.5"/><circle cx="18" cy="17.5" r="1.5"/></svg>
+                            </span>
+                            <span>Logística</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/rrhh/empleados/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8h3M21.5 6.5v3"/></svg>
+                            </span>
+                            <span>RRHH</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/activos/dashboard/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/><path d="M8 14h3M13 14h3"/></svg>
+                            </span>
+                            <span>Activos</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/discrepancias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20V9"/><path d="M12 20V4"/><path d="M17 20v-7"/><path d="m6 11 5-5 6 3"/></svg>
+                            </span>
+                            <span>Control operativo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Gobierno</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/auditoria/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10l2 2v14H5V6l2-2Z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+                            </span>
+                            <span>Bitácora</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/integraciones/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="7" height="12" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 12h4"/></svg>
+                            </span>
+                            <span>Integraciones</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/usuarios-accesos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-1.5a3.5 3.5 0 0 0-3.5-3.5H6.5A3.5 3.5 0 0 0 3 19.5V21"/><circle cx="9.5" cy="8" r="3.5"/><path d="M18 8v6M15 11h6"/></svg>
+                            </span>
+                            <span>Accesos</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/admin/">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.2 1.2 0 0 1-1.7 1.7l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V19a1.2 1.2 0 0 1-2.4 0v-.2a1 1 0 0 0-.7-1 1 1 0 0 0-1 .2l-.2.1a1.2 1.2 0 1 1-1.7-1.7l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H5a1.2 1.2 0 0 1 0-2.4h.2a1 1 0 0 0 1-.7 1 1 0 0 0-.2-1l-.1-.2a1.2 1.2 0 1 1 1.7-1.7l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V5a1.2 1.2 0 1 1 2.4 0v.2a1 1 0 0 0 .7 1 1 1 0 0 0 1-.2l.2-.1a1.2 1.2 0 0 1 1.7 1.7l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2a1.2 1.2 0 0 1 0 2.4h-.2a1 1 0 0 0-1 .7Z"/></svg>
+                            </span>
+                            <span>Administración</span>
+                        </a>
+                    </li>
+                </ul>
+                
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-user">Sesión activa</div>
+                <div class="sidebar-user-name">maburgos</div>
+                <a href="/logout/" class="logout-link">Cerrar sesión</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="header">
+                <h1 class="header-title">Reportes · BI Ejecutivo</h1>
+                <div class="header-meta">
+                    <span class="header-context-pill">Operación diaria</span>
+                    <button id="densityToggle" class="btn btn-secondary btn-sm density-toggle" type="button" aria-pressed="false">
+                        Modo compacto
+                    </button>
+                    <span>Domingo, 22 de Marzo de 2026</span>
+                </div>
+            </header>
+
+            <div class="container">
+                
+                
+<div class="module-shell reportes-shell executive-shell executive-shell-bi">
+<nav class="module-tabs">
+  <a class="module-tab" href="/reportes/costo-receta/">Costo receta</a>
+  <a class="module-tab" href="/reportes/consumo/">Consumo</a>
+  <a class="module-tab" href="/reportes/faltantes/">Faltantes</a>
+  <a class="module-tab active" href="/reportes/bi/">BI</a>
+</nav>
+
+<section class="card dashboard-hero executive-hero">
+  <div class="executive-hero-copy">
+    <div class="executive-eyebrow">Dirección y análisis</div>
+    <div class="dashboard-hero-title">Pulso ejecutivo del negocio</div>
+    <div class="dashboard-hero-subtitle">Ventas, rentabilidad, abasto y producción consolidados para decisión diaria.</div>
+  </div>
+  <div class="dashboard-hero-badges">
+    <span class="badge bg-primary">Ventana BI: 90 días</span>
+    <span class="badge bg-danger">Stock crítico: 299</span>
+    <span class="badge bg-success">Compras abiertas: 0</span>
+    <span class="badge bg-warning text-dark">Producción: Sin plan</span>
+  </div>
+</section>
+
+<div class="executive-grid executive-grid-primary">
+  <section class="card executive-section executive-section-highlight">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Resumen</div>
+        <div class="card-header">Resumen ejecutivo</div>
+        <p class="executive-section-copy">Magnitud comercial del periodo y estado ejecutivo de la operación.</p>
+      </div>
+      
+      <div class="executive-meta-pill">2026-03</div>
+      
+    </div>
+    <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-primary">$124,562.01</div>
+        <div class="kpi-label">Venta último corte</div>
+        <div class="muted executive-kpi-note">
+          2026-03-21 · Point directo
+          
+            · Cobertura ERP 90.4%
+          
+        </div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-primary">$306.80</div>
+        <div class="kpi-label">Ticket promedio</div>
+        <div class="muted executive-kpi-note">406 tickets en el último corte</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-primary">$2,270,044.26</div>
+        <div class="kpi-label">Venta acumulada del mes</div>
+        <div class="muted executive-kpi-note">
+          17162 unidades
+          
+            · 7970 tickets
+          
+          
+            · $11,995.00 sin mapear al ERP
+          
+        </div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-warning">Sin plan</div>
+        <div class="kpi-label">Producción del día</div>
+        <div class="muted executive-kpi-note">Sin plan para hoy</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-success">0</div>
+        <div class="kpi-label">Órdenes abiertas</div>
+        <div class="muted executive-kpi-note">0 recepciones abiertas</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-danger">299</div>
+        <div class="kpi-label">Insumos en crítico</div>
+        <div class="muted executive-kpi-note">21 bajo reorden</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+
+<section class="card executive-section executive-section-spotlight">
+  <div class="executive-section-head">
+    <div>
+      <div class="executive-section-kicker">Acción</div>
+      <div class="card-header">Top decisiones del día</div>
+      <p class="executive-section-copy">Prioridades ejecutivas derivadas de ventas, stock, compras, producción y maestro.</p>
+    </div>
+  </div>
+  <div class="executive-decision-list">
+    
+    <article class="executive-decision-item tone-danger">
+      <div class="executive-decision-rank">1</div>
+      <div class="executive-decision-copy">
+        <div class="executive-decision-title">Cerrar stock crítico</div>
+        <div class="executive-decision-detail">Hay 299 insumos en crítico y 21 bajo reorden con riesgo directo de surtido.</div>
+      </div>
+      <a class="btn btn-secondary btn-sm" href="/inventario/alertas/">Abrir alertas</a>
+    </article>
+    
+    <article class="executive-decision-item tone-danger">
+      <div class="executive-decision-rank">2</div>
+      <div class="executive-decision-copy">
+        <div class="executive-decision-title">Confirmar producción del día</div>
+        <div class="executive-decision-detail">No hay plan operativo cargado para hoy. No conviene empujar compras o surtido sin ese documento.</div>
+      </div>
+      <a class="btn btn-secondary btn-sm" href="/recetas/plan-produccion/">Abrir plan</a>
+    </article>
+    
+    <article class="executive-decision-item tone-success">
+      <div class="executive-decision-rank">3</div>
+      <div class="executive-decision-copy">
+        <div class="executive-decision-title">Atender merma operativa</div>
+        <div class="executive-decision-detail">Merma sucursal 364.3 u y CEDIS 2.8 u. 74.3% vs la ventana previa (2025-09-24 a 2025-12-22)</div>
+      </div>
+      <a class="btn btn-secondary btn-sm" href="/control/discrepancias/">Abrir merma</a>
+    </article>
+    
+    <article class="executive-decision-item tone-danger">
+      <div class="executive-decision-rank">4</div>
+      <div class="executive-decision-copy">
+        <div class="executive-decision-title">Revisar sucursal Plaza Nío</div>
+        <div class="executive-decision-detail">Cae 35.9% contra el último mismo día de semana (2026-03-14).</div>
+      </div>
+      <a class="btn btn-secondary btn-sm" href="/reportes/bi/">Ver BI</a>
+    </article>
+    
+    <article class="executive-decision-item tone-danger">
+      <div class="executive-decision-rank">5</div>
+      <div class="executive-decision-copy">
+        <div class="executive-decision-title">Revisar producto ESPAGUETI DORADA</div>
+        <div class="executive-decision-detail">Cae 85.7% contra el último mismo día de semana (2026-03-14).</div>
+      </div>
+      <a class="btn btn-secondary btn-sm" href="/reportes/bi/">Ver BI</a>
+    </article>
+    
+  </div>
+</section>
+
+
+
+
+<div class="executive-grid executive-grid-two">
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Comercial</div>
+        <div class="card-header">Ventas recientes</div>
+        <p class="executive-section-copy">Lectura rápida del corte más cercano para validar ritmo y mezcla comercial.</p>
+      </div>
+    </div>
+    <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number">855</div>
+        <div class="kpi-label">Unidades</div>
+        <div class="muted executive-kpi-note">8 sucursales · 97 productos</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-success">Arriba</div>
+        <div class="kpi-label">Vs corte previo</div>
+        <div class="muted executive-kpi-note">Contra el corte inmediato anterior · 20.2% vs corte previo (2026-03-20)</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number ">406</div>
+        <div class="kpi-label">Tickets</div>
+        <div class="muted executive-kpi-note">Último corte disponible</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-primary">$15,570.25</div>
+        <div class="kpi-label">Venta promedio por sucursal</div>
+        <div class="muted executive-kpi-note">Base del último corte disponible.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Ranking</div>
+        <div class="card-header">Ranking comercial del corte</div>
+        <p class="executive-section-copy">Principales sucursales y productos que explican el resultado del corte.</p>
+      </div>
+    </div>
+    <div class="executive-chart-grid">
+      <section class="executive-chart-card">
+        <div class="executive-chart-title">Sucursales líderes</div>
+        
+        <div class="executive-bar-list">
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">1</div>
+              <div class="executive-bar-meta">Matriz</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill" style="width: 100%;"></div>
+            </div>
+            <div class="executive-bar-value">$42,682.01</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">6</div>
+              <div class="executive-bar-meta">Leyva</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill" style="width: 50%;"></div>
+            </div>
+            <div class="executive-bar-value">$21,408.00</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">3</div>
+              <div class="executive-bar-meta">Las Glorias</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill" style="width: 39%;"></div>
+            </div>
+            <div class="executive-bar-value">$16,436.00</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">5</div>
+              <div class="executive-bar-meta">Colosio</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill" style="width: 37%;"></div>
+            </div>
+            <div class="executive-bar-value">$15,842.00</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">4</div>
+              <div class="executive-bar-meta">Payán</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill" style="width: 23%;"></div>
+            </div>
+            <div class="executive-bar-value">$9,679.00</div>
+          </div>
+          
+        </div>
+        
+      </section>
+      <section class="executive-chart-card">
+        <div class="executive-chart-title">Productos líderes</div>
+        
+        <div class="executive-bar-list">
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">Pastel de 3 Pecados Mediano</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-accent" style="width: 100%;"></div>
+            </div>
+            <div class="executive-bar-value">$24,010.00</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">Pastel de Fresas Con Crema Mediano</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-accent" style="width: 57%;"></div>
+            </div>
+            <div class="executive-bar-value">$13,720.00</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">Pay de Queso Grande</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-accent" style="width: 35%;"></div>
+            </div>
+            <div class="executive-bar-value">$8,355.01</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">Pay de Queso Mediano</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-accent" style="width: 33%;"></div>
+            </div>
+            <div class="executive-bar-value">$7,900.00</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">Pastel de 3 Pecados Chico</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-accent" style="width: 25%;"></div>
+            </div>
+            <div class="executive-bar-value">$6,120.00</div>
+          </div>
+          
+        </div>
+        
+      </section>
+    </div>
+  </section>
+</div>
+
+<div class="executive-grid executive-grid-two">
+  
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Comparable</div>
+        <div class="card-header">Sucursales vs mismo día de semana</div>
+        <p class="executive-section-copy">Comparación contra el último corte del mismo día de semana para separar tendencia real de ruido del calendario.</p>
+      </div>
+    </div>
+    <div class="executive-chart-card">
+      <div class="executive-bar-list">
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">7</div>
+            <div class="executive-bar-meta">Plaza Nío</div>
+            <div class="executive-bar-detail">Cae 35.9% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$6,705.00</div>
+          </div>
+        </div>
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">2</div>
+            <div class="executive-bar-meta">Crucero</div>
+            <div class="executive-bar-detail">Cae 26.9% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$8,075.00</div>
+          </div>
+        </div>
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">4</div>
+            <div class="executive-bar-meta">Payán</div>
+            <div class="executive-bar-detail">Cae 26.8% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$9,679.00</div>
+          </div>
+        </div>
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">1</div>
+            <div class="executive-bar-meta">Matriz</div>
+            <div class="executive-bar-detail">Cae 25.6% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$42,682.01</div>
+          </div>
+        </div>
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">3</div>
+            <div class="executive-bar-meta">Las Glorias</div>
+            <div class="executive-bar-detail">Cae 14.1% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$16,436.00</div>
+          </div>
+        </div>
+        
+      </div>
+    </div>
+  </section>
+  
+
+  
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Comparable</div>
+        <div class="card-header">Productos vs mismo día de semana</div>
+        <p class="executive-section-copy">Comparación contra el último corte del mismo día de semana para validar si el cambio del producto exige ajuste comercial o productivo.</p>
+      </div>
+    </div>
+    <div class="executive-chart-card">
+      <div class="executive-bar-list">
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">ESPAGUETI DORADA</div>
+            <div class="executive-bar-detail">Cae 85.7% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$68.00</div>
+          </div>
+        </div>
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">Pastel de Snickers Rebanada</div>
+            <div class="executive-bar-detail">Cae 77.8% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$280.00</div>
+          </div>
+        </div>
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">Galleta Nutella</div>
+            <div class="executive-bar-detail">Cae 73.3% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$120.00</div>
+          </div>
+        </div>
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">Bolitas de Nuez 10 PZ</div>
+            <div class="executive-bar-detail">Cae 71.4% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$40.00</div>
+          </div>
+        </div>
+        
+        <div class="executive-bar-row executive-bar-row-detailed">
+          <div class="executive-bar-copy">
+            <div class="executive-bar-label">Empanada de Manzana</div>
+            <div class="executive-bar-detail">Cae 66.7% contra el último mismo día de semana (2026-03-14).</div>
+          </div>
+          <div class="executive-bar-track">
+            <div class="executive-bar-fill is-danger" style="width: 0%;"></div>
+          </div>
+          <div class="executive-bar-side">
+            <span class="badge bg-danger">0.0%</span>
+            <div class="executive-bar-value">$80.00</div>
+          </div>
+        </div>
+        
+      </div>
+    </div>
+  </section>
+  
+</div>
+
+<div class="executive-grid executive-grid-two">
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Producción</div>
+        <div class="card-header">Producción CEDIS y cobertura</div>
+        <p class="executive-section-copy">Volumen producido, costo estimado y cobertura contra venta final dentro de la ventana BI.</p>
+      </div>
+      <div class="executive-meta-pill">2025-12-23 a 2026-03-22</div>
+    </div>
+    <div class="kpi-mini executive-kpi-grid">
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-warning">0</div>
+        <div class="kpi-label">Unidades producidas</div>
+        <div class="muted executive-kpi-note">0 planes · 0 abiertos</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-primary">$0.00</div>
+        <div class="kpi-label">Costo estimado</div>
+        <div class="muted executive-kpi-note">Costo total estimado de la producción registrada.</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-warning">Sin producción</div>
+        <div class="kpi-label">Cobertura vs venta</div>
+        <div class="muted executive-kpi-note">
+          
+          No hay renglones de producción capturados en la ventana BI.
+          
+        </div>
+      </div>
+      <div class="kpi-card executive-kpi-card executive-kpi-card-action">
+        <div class="kpi-label">Conversión</div>
+        <div class="muted executive-kpi-note">Conversión a enteros equivalentes pendiente de catálogo específico por presentación.</div>
+      </div>
+    </div>
+    
+  </section>
+
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Forecast</div>
+        <div class="card-header">Forecast de venta y producción</div>
+        <p class="executive-section-copy">Señal mensual de desalineación entre forecast y producción planificada.</p>
+      </div>
+      <div class="executive-meta-pill">2026-03</div>
+    </div>
+    <div class="kpi-mini executive-kpi-grid">
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-primary">0</div>
+        <div class="kpi-label">Forecast</div>
+        <div class="muted executive-kpi-note">0 recetas con base</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-primary">0</div>
+        <div class="kpi-label">Plan</div>
+        <div class="muted executive-kpi-note">0 recetas con brecha</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-warning">Sin datos</div>
+        <div class="kpi-label">Semáforo</div>
+        <div class="muted executive-kpi-note">
+          
+          No hay forecast ni producción planificada para el periodo.
+          
+        </div>
+      </div>
+      <div class="kpi-card executive-kpi-card executive-kpi-card-action">
+        <div class="kpi-label">Dato faltante</div>
+        <div class="muted executive-kpi-note">Forecast mensual cargado en ERP. La exclusión automática de semanas atípicas aún no está parametrizada.</div>
+      </div>
+    </div>
+    
+  </section>
+</div>
+
+<div class="executive-grid executive-grid-two">
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Merma</div>
+        <div class="card-header">Merma sucursal y CEDIS</div>
+        <p class="executive-section-copy">Separación ejecutiva entre merma comercial en sucursal y merma de producción CEDIS.</p>
+      </div>
+      <div class="executive-meta-pill">2025-12-23 a 2026-03-22</div>
+    </div>
+    <div class="kpi-mini executive-kpi-grid">
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-success">364</div>
+        <div class="kpi-label">Merma sucursal</div>
+        <div class="muted executive-kpi-note">$5,529.72 estimados · 7 sucursales · captura ERP</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-warning">3</div>
+        <div class="kpi-label">Merma CEDIS</div>
+        <div class="muted executive-kpi-note">$248.69 estimados · 1 movimientos de inventario</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-success">Baja</div>
+        <div class="kpi-label">Vs ventana previa</div>
+        <div class="muted executive-kpi-note">74.3% vs la ventana previa (2025-09-24 a 2025-12-22)</div>
+      </div>
+      <div class="kpi-card executive-kpi-card executive-kpi-card-action">
+        <div class="kpi-label">Costo estimado</div>
+        <div class="muted executive-kpi-note">Costo estimado en sucursal sobre 55 capturas con receta mapeada. Costo estimado en CEDIS sobre 1 movimientos con costo canónico.</div>
+      </div>
+    </div>
+    <div class="executive-chart-grid" style="margin-top: 16px;">
+      <section class="executive-chart-card">
+        <div class="executive-chart-title">Sucursales con más merma</div>
+        
+        <div class="executive-bar-list">
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">SIN SUCURSAL</div>
+              <div class="executive-bar-meta">Sin sucursal</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-warning" style="width: 100%;"></div>
+            </div>
+            <div class="executive-bar-value">283.3</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">COLOSIO</div>
+              <div class="executive-bar-meta">Colosio</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-warning" style="width: 9%;"></div>
+            </div>
+            <div class="executive-bar-value">26.0</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">EL_TUNEL</div>
+              <div class="executive-bar-meta">EL TUNEL</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-warning" style="width: 9%;"></div>
+            </div>
+            <div class="executive-bar-value">26.0</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">MATRIZ</div>
+              <div class="executive-bar-meta">Matriz</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-warning" style="width: 8%;"></div>
+            </div>
+            <div class="executive-bar-value">17.0</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">LEYVA</div>
+              <div class="executive-bar-meta">Leyva</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-warning" style="width: 8%;"></div>
+            </div>
+            <div class="executive-bar-value">6.0</div>
+          </div>
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">CRUCERO</div>
+              <div class="executive-bar-meta">Crucero</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-warning" style="width: 8%;"></div>
+            </div>
+            <div class="executive-bar-value">4.0</div>
+          </div>
+          
+        </div>
+        
+      </section>
+      <section class="executive-chart-card">
+        <div class="executive-chart-title">Insumos con más merma CEDIS</div>
+        
+        <div class="executive-bar-list">
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">Fresa</div>
+              <div class="executive-bar-meta">Merma CEDIS</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-danger" style="width: 100%;"></div>
+            </div>
+            <div class="executive-bar-value">2.8</div>
+          </div>
+          
+        </div>
+        
+      </section>
+    </div>
+  </section>
+
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Operación</div>
+        <div class="card-header">Abasto y producción</div>
+        <p class="executive-section-copy">Lectura consolidada de compras, inventario y avance operativo del día.</p>
+      </div>
+    </div>
+    <div class="kpi-mini executive-kpi-grid">
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-success">0</div>
+        <div class="kpi-label">Solicitudes vencidas</div>
+        <div class="muted executive-kpi-note">0 abiertas · 0 aprobadas</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-success">0</div>
+        <div class="kpi-label">Órdenes por recibir</div>
+        <div class="muted executive-kpi-note">0 órdenes abiertas</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-danger">0</div>
+        <div class="kpi-label">Movimientos de inventario hoy</div>
+        <div class="muted executive-kpi-note">Hay artículos críticos que ya comprometen surtido.</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-warning">0</div>
+        <div class="kpi-label">Planes abiertos</div>
+        <div class="muted executive-kpi-note">0 solicitudes de venta activas</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Resultado</div>
+        <div class="card-header">Rentabilidad y estructura del periodo</div>
+        <p class="executive-section-copy">Resultado operativo consolidado para evaluar salud del negocio y composición del periodo.</p>
+      </div>
+    </div>
+    <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-primary">$13,309,630.91</div>
+        <div class="kpi-label">Ventas del periodo</div>
+        <div class="muted executive-kpi-note">Base ejecutiva del rango seleccionado.</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-success">$0.00</div>
+        <div class="kpi-label">Compras del periodo</div>
+        <div class="muted executive-kpi-note">Órdenes emitidas dentro de la ventana BI.</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-success">$0.00</div>
+        <div class="kpi-label">Nómina del periodo</div>
+        <div class="muted executive-kpi-note">Costo laboral neto dentro de la ventana BI.</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-warning">N/D</div>
+        <div class="kpi-label">Margen operativo</div>
+        <div class="muted executive-kpi-note">No se muestra margen oficial porque faltan costos de compras o nómina para el periodo.</div>
+      </div>
+    </div>
+    
+    <div class="executive-chart-card executive-chart-card-muted" style="margin-top: 16px;">
+      <div class="executive-chart-title">Tendencia mensual de margen</div>
+      <div class="muted">No se muestra la tendencia mensual de margen porque faltan costos del periodo o la serie oficial de ventas sigue incompleta.</div>
+    </div>
+    
+  </section>
+</div>
+
+<div class="executive-grid executive-grid-two">
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Consumo</div>
+        <div class="card-header">Abasto y consumo clave</div>
+        <p class="executive-section-copy">Concentración de gasto y materiales que más pesan en el periodo.</p>
+      </div>
+    </div>
+    <div class="executive-chart-grid">
+      <section class="executive-chart-card">
+        <div class="executive-chart-title">Top proveedores</div>
+        
+        <div class="muted">Sin compras en el periodo.</div>
+        
+      </section>
+      <section class="executive-chart-card">
+        <div class="executive-chart-title">Top insumos consumidos</div>
+        
+        <div class="executive-bar-list">
+          
+          <div class="executive-bar-row">
+            <div class="executive-bar-copy">
+              <div class="executive-bar-label">Fresa</div>
+            </div>
+            <div class="executive-bar-track">
+              <div class="executive-bar-fill is-accent" style="width: 100%;"></div>
+            </div>
+            <div class="executive-bar-value">2.76</div>
+          </div>
+          
+        </div>
+        
+      </section>
+    </div>
+  </section>
+
+  
+  <section class="card executive-section">
+    <div class="executive-section-head">
+      <div>
+        <div class="executive-section-kicker">Base</div>
+        <div class="card-header">Base histórica consolidada</div>
+        <p class="executive-section-copy">Profundidad de datos para comparables, forecast y decisiones de expansión o corrección.</p>
+      </div>
+    </div>
+    <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number is-warning">Cobertura parcial</div>
+        <div class="kpi-label">Cobertura</div>
+        <div class="muted executive-kpi-note">Fuente canónica Point bridge. Hay 1 día(s) faltantes dentro del rango histórico cargado.</div>
+      </div>
+      <div class="kpi-card executive-kpi-card">
+        <div class="kpi-number">470077</div>
+        <div class="kpi-label">Registros diarios</div>
+        <div class="muted executive-kpi-note">01/01/2022 → 21/03/2026</div>
+      </div>
+      
+      <div class="kpi-card executive-kpi-card executive-kpi-card-action">
+        <div class="kpi-label">Serie oficial</div>
+        <div class="muted executive-kpi-note">No se muestran acumulados ni tendencia mensual porque la serie oficial de Point sigue incompleta o sin conciliación continua.</div>
+      </div>
+      
+    </div>
+    
+    <div class="executive-chart-card executive-chart-card-muted">
+      <div class="executive-chart-title">Tendencia mensual de ventas Point</div>
+      <div class="muted">No se muestra la tendencia mensual porque la serie oficial de Point sigue incompleta o sin conciliación continua.</div>
+    </div>
+    
+  </section>
+  
+</div>
+</div>
+
+            </div>
+        </main>
+    </div>
+    <script>
+      (() => {
+        const key = "ui_density_mode";
+        const body = document.body;
+        const toggle = document.getElementById("densityToggle");
+        if (!toggle) return;
+
+        const applyMode = (mode) => {
+          const compact = mode === "compact";
+          body.classList.toggle("ui-compact", compact);
+          toggle.setAttribute("aria-pressed", compact ? "true" : "false");
+          toggle.textContent = compact ? "Modo normal" : "Modo compacto";
+        };
+
+        const saved = localStorage.getItem(key);
+        applyMode(saved || "normal");
+
+        toggle.addEventListener("click", () => {
+          const compact = !body.classList.contains("ui-compact");
+          const mode = compact ? "compact" : "normal";
+          localStorage.setItem(key, mode);
+          applyMode(mode);
+        });
+      })();
+    </script>
+    
+</body>
+</html>

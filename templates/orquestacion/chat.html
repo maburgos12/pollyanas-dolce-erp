@@ -1,0 +1,732 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Chat ERP · Pollyana's Dolce{% endblock %}
+{% block page_title %}Chat ERP{% endblock %}
+
+{% block extra_css %}
+<style>
+  .erp-chat-shell {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    gap: 1rem;
+    min-height: calc(100vh - 11rem);
+  }
+  .erp-chat-sidebar,
+  .erp-chat-main {
+    background: #fff;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 24px;
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
+  }
+  .erp-chat-sidebar {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .erp-chat-sidebar-head {
+    padding: 1.1rem 1.1rem .9rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    background: linear-gradient(180deg, #fff7f1 0%, #fff 100%);
+  }
+  .erp-chat-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    border-radius: 999px;
+    padding: .32rem .65rem;
+    background: rgba(132, 39, 78, 0.08);
+    color: #84274e;
+    font-size: .78rem;
+    font-weight: 800;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+  }
+  .erp-chat-badge.is-warning {
+    background: rgba(227, 155, 67, 0.16);
+    color: #8a4b0f;
+  }
+  .erp-chat-badge-dot {
+    width: .5rem;
+    height: .5rem;
+    border-radius: 999px;
+    background: #e39b43;
+  }
+  .erp-chat-title {
+    margin: .8rem 0 .25rem;
+    font-size: 1.18rem;
+    font-weight: 800;
+    color: #1f2937;
+  }
+  .erp-chat-subtitle {
+    margin: 0;
+    color: #64748b;
+    font-size: .92rem;
+    line-height: 1.45;
+  }
+  .erp-chat-new-btn {
+    margin-top: 1rem;
+    width: 100%;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    gap: .55rem;
+    border: 0;
+    border-radius: 16px;
+    padding: .92rem 1rem;
+    background: linear-gradient(135deg, #8b2252 0%, #c65b53 100%);
+    color: #fff;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .erp-chat-conversation-list {
+    padding: .8rem;
+    overflow: auto;
+    display: grid;
+    gap: .65rem;
+  }
+  .erp-chat-conversation {
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 18px;
+    padding: .85rem .9rem;
+    background: #fcfcfd;
+    cursor: pointer;
+    transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+  }
+  .erp-chat-conversation:hover,
+  .erp-chat-conversation.active {
+    border-color: rgba(139, 34, 82, 0.35);
+    box-shadow: 0 10px 24px rgba(139, 34, 82, 0.08);
+    transform: translateY(-1px);
+  }
+  .erp-chat-conversation-title {
+    margin: 0 0 .25rem;
+    font-weight: 800;
+    color: #1f2937;
+    font-size: .96rem;
+  }
+  .erp-chat-conversation-preview {
+    margin: 0;
+    color: #64748b;
+    font-size: .86rem;
+    line-height: 1.35;
+    min-height: 2.2em;
+  }
+  .erp-chat-conversation-time {
+    margin-top: .5rem;
+    color: #94a3b8;
+    font-size: .78rem;
+  }
+  .erp-chat-main {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+  }
+  .erp-chat-main-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1.1rem 1.2rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    background: linear-gradient(180deg, #fffaf8 0%, #fff 100%);
+  }
+  .erp-chat-main-title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #1f2937;
+  }
+  .erp-chat-main-subtitle {
+    margin: .2rem 0 0;
+    color: #64748b;
+    font-size: .9rem;
+  }
+  .erp-chat-main-body {
+    overflow: auto;
+    padding: 1.4rem 1.5rem 1rem;
+    background:
+      radial-gradient(circle at top right, rgba(255, 233, 214, 0.75), transparent 28%),
+      linear-gradient(180deg, #fff 0%, #fffaf8 100%);
+  }
+  .erp-chat-empty {
+    max-width: 760px;
+    margin: 2rem auto;
+    text-align: center;
+    color: #475569;
+  }
+  .erp-chat-empty h2 {
+    margin: 1rem 0 .45rem;
+    font-size: 2rem;
+    color: #1f2937;
+  }
+  .erp-chat-empty p {
+    margin: 0 auto;
+    max-width: 60ch;
+    line-height: 1.6;
+  }
+  .erp-chat-prompts {
+    margin-top: 1.5rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: .9rem;
+  }
+  .erp-chat-prompt {
+    text-align: left;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: #fff;
+    border-radius: 18px;
+    padding: 1rem 1rem;
+    cursor: pointer;
+  }
+  .erp-chat-prompt strong {
+    display: block;
+    margin-bottom: .35rem;
+    color: #1f2937;
+  }
+  .erp-chat-message-list {
+    max-width: 920px;
+    margin: 0 auto;
+    display: grid;
+    gap: 1rem;
+  }
+  .erp-chat-message-row {
+    display: flex;
+    gap: .9rem;
+  }
+  .erp-chat-message-row.user {
+    justify-content: flex-end;
+  }
+  .erp-chat-avatar {
+    flex: 0 0 42px;
+    height: 42px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #8b2252 0%, #e39b43 100%);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    box-shadow: 0 10px 20px rgba(139, 34, 82, 0.18);
+  }
+  .erp-chat-avatar.user {
+    background: linear-gradient(135deg, #1f3c88 0%, #355c7d 100%);
+  }
+  .erp-chat-bubble {
+    max-width: min(780px, 85%);
+    border-radius: 22px;
+    padding: 1rem 1.1rem;
+    background: #fff;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  }
+  .erp-chat-message-row.user .erp-chat-bubble {
+    background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+    border-color: rgba(31, 60, 136, 0.16);
+  }
+  .erp-chat-bubble p {
+    margin: 0;
+    white-space: pre-wrap;
+    line-height: 1.62;
+    color: #1f2937;
+  }
+  .erp-chat-bubble.is-error {
+    background: linear-gradient(180deg, #fff7f7 0%, #fff 100%);
+    border-color: rgba(185, 28, 28, 0.16);
+  }
+  .erp-chat-bubble.is-error p {
+    color: #7f1d1d;
+  }
+  .erp-chat-meta {
+    margin-top: .65rem;
+    color: #94a3b8;
+    font-size: .78rem;
+  }
+  .erp-chat-tool-box {
+    margin-top: .9rem;
+    border-top: 1px dashed rgba(148, 163, 184, 0.35);
+    padding-top: .85rem;
+    display: grid;
+    gap: .6rem;
+  }
+  .erp-chat-tool-item {
+    border-radius: 14px;
+    background: #fff7f1;
+    border: 1px solid rgba(227, 155, 67, 0.22);
+    padding: .8rem .85rem;
+  }
+  .erp-chat-tool-item strong {
+    color: #8b2252;
+    display: block;
+    margin-bottom: .25rem;
+  }
+  .erp-chat-tool-item p {
+    margin: 0;
+    color: #475569;
+    font-size: .88rem;
+  }
+  .erp-chat-composer-wrap {
+    padding: 1rem 1.2rem 1.2rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+    background: #fff;
+  }
+  .erp-chat-composer {
+    max-width: 920px;
+    margin: 0 auto;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 24px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+    padding: .9rem .95rem .8rem;
+    background: #fff;
+  }
+  .erp-chat-textarea {
+    width: 100%;
+    min-height: 88px;
+    max-height: 220px;
+    border: 0;
+    resize: vertical;
+    outline: none;
+    font: inherit;
+    font-size: 1rem;
+    line-height: 1.55;
+    color: #111827;
+    background: transparent;
+  }
+  .erp-chat-composer-actions {
+    margin-top: .6rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .erp-chat-hint {
+    color: #94a3b8;
+    font-size: .82rem;
+  }
+  .erp-chat-send {
+    border: 0;
+    border-radius: 16px;
+    padding: .75rem 1rem;
+    background: linear-gradient(135deg, #8b2252 0%, #c65b53 100%);
+    color: #fff;
+    font-weight: 800;
+    cursor: pointer;
+    min-width: 136px;
+  }
+  .erp-chat-send:disabled {
+    opacity: .6;
+    cursor: wait;
+  }
+  @media (max-width: 1080px) {
+    .erp-chat-shell {
+      grid-template-columns: 1fr;
+    }
+    .erp-chat-sidebar {
+      min-height: 280px;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{{ conversations|json_script:"erp-chat-conversations-data" }}
+{{ selected_conversation|json_script:"erp-chat-selected-data" }}
+{{ runtime_status|json_script:"erp-chat-runtime-status" }}
+
+<section class="erp-chat-shell">
+  <aside class="erp-chat-sidebar">
+    <div class="erp-chat-sidebar-head">
+      <span class="erp-chat-badge"><span class="erp-chat-badge-dot"></span>Chat ERP nativo</span>
+      <h2 class="erp-chat-title">Pollyana's Dolce AI</h2>
+      <p class="erp-chat-subtitle">Consulta ventas, compras, inventario, producción, costos y riesgos operativos desde un solo chat.</p>
+      <button type="button" class="erp-chat-new-btn" id="erp-chat-new-btn">Nueva conversación</button>
+    </div>
+    <div class="erp-chat-conversation-list" id="erp-chat-conversation-list"></div>
+  </aside>
+
+  <section class="erp-chat-main">
+    <header class="erp-chat-main-head">
+      <div>
+        <h1 class="erp-chat-main-title" id="erp-chat-main-title">Nueva conversación</h1>
+        <p class="erp-chat-main-subtitle" id="erp-chat-main-subtitle">Consulta ventas, compras, inventario, producción, costos, forecast y discrepancias sin salir del ERP.</p>
+      </div>
+      <span class="erp-chat-badge {% if not runtime_status.ready %}is-warning{% endif %}" id="erp-chat-runtime-badge">
+        {% if runtime_status.ready %}
+          IA privada empresarial
+        {% else %}
+          Configuración pendiente del modelo
+        {% endif %}
+      </span>
+    </header>
+
+    <div class="erp-chat-main-body" id="erp-chat-main-body">
+      <div class="erp-chat-empty" id="erp-chat-empty-state">
+        <img src="{% static 'favicon.ico' %}" alt="Pollyana's Dolce" style="width:54px;height:54px;border-radius:16px;box-shadow:0 10px 24px rgba(139,34,82,.16);">
+        <h2>Estoy lista para ayudarte con Pollyana's Dolce.</h2>
+        <p>Haz preguntas operativas reales del ERP y mantén conversaciones estables: gastos, compras, inventario, forecast, producción, costos o discrepancias.</p>
+        {% if not runtime_status.ready %}
+          <p style="margin-top:1rem;color:#8a4b0f;font-weight:700;">La interfaz ya está lista, pero falta completar la conexión del modelo para responder automáticamente.</p>
+        {% endif %}
+        <div class="erp-chat-prompts">
+          <button type="button" class="erp-chat-prompt" data-prompt="¿Qué tanto gasto en insumos haremos en lo que resta del mes de abril?">
+            <strong>Forecast operativo</strong>
+            Estima gasto de insumos separando comprometido vs esperado.
+          </button>
+          <button type="button" class="erp-chat-prompt" data-prompt="¿Cuáles son los productos con mayor riesgo de stock bajo esta semana?">
+            <strong>Riesgo de inventario</strong>
+            Detecta faltantes y prioriza reabasto.
+          </button>
+          <button type="button" class="erp-chat-prompt" data-prompt="¿Qué discrepancias operativas críticas siguen abiertas hoy?">
+            <strong>Conciliación</strong>
+            Resume hallazgos pendientes y siguiente acción.
+          </button>
+        </div>
+      </div>
+      <div class="erp-chat-message-list" id="erp-chat-message-list" hidden></div>
+    </div>
+
+    <div class="erp-chat-composer-wrap">
+      <div class="erp-chat-composer">
+        <textarea id="erp-chat-input" class="erp-chat-textarea" placeholder="Pregunta al ERP como hablarías con ChatGPT, por ejemplo: ¿cuánto vamos a gastar en insumos el resto del mes?"></textarea>
+        <div class="erp-chat-composer-actions">
+          <div class="erp-chat-hint" id="erp-chat-status">Haz una pregunta y te responderé con contexto del ERP.</div>
+          <button type="button" class="erp-chat-send" id="erp-chat-send-btn">Enviar</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const apiBase = "{{ chat_api_base }}";
+  const csrfToken = "{{ csrf_token }}";
+  const conversationsSeed = JSON.parse(document.getElementById("erp-chat-conversations-data").textContent || "[]");
+  const selectedSeed = JSON.parse(document.getElementById("erp-chat-selected-data").textContent || "null");
+  const runtimeStatus = JSON.parse(document.getElementById("erp-chat-runtime-status").textContent || "{}");
+
+  const state = {
+    conversations: conversationsSeed,
+    activeConversation: selectedSeed,
+    sending: false,
+  };
+
+  const listEl = document.getElementById("erp-chat-conversation-list");
+  const bodyEl = document.getElementById("erp-chat-main-body");
+  const messageListEl = document.getElementById("erp-chat-message-list");
+  const emptyEl = document.getElementById("erp-chat-empty-state");
+  const titleEl = document.getElementById("erp-chat-main-title");
+  const subtitleEl = document.getElementById("erp-chat-main-subtitle");
+  const inputEl = document.getElementById("erp-chat-input");
+  const sendBtn = document.getElementById("erp-chat-send-btn");
+  const statusEl = document.getElementById("erp-chat-status");
+
+  function escapeHtml(value) {
+    return (value || "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#039;",
+    }[char]));
+  }
+
+  function formatTimestamp(value) {
+    if (!value) return "";
+    try {
+      return new Date(value).toLocaleString("es-MX", {
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+    } catch (error) {
+      return value;
+    }
+  }
+
+  function renderConversationList() {
+    listEl.innerHTML = "";
+    if (!state.conversations.length) {
+      listEl.innerHTML = '<div class="erp-chat-conversation"><p class="erp-chat-conversation-preview">Todavía no hay conversaciones guardadas.</p></div>';
+      return;
+    }
+    state.conversations.forEach((conversation) => {
+      const active = state.activeConversation && state.activeConversation.conversation.id === conversation.id;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `erp-chat-conversation${active ? " active" : ""}`;
+      button.innerHTML = `
+        <div class="erp-chat-conversation-title">${escapeHtml(conversation.title)}</div>
+        <p class="erp-chat-conversation-preview">${escapeHtml(conversation.preview || "Sin mensajes todavía.")}</p>
+        <div class="erp-chat-conversation-time">${formatTimestamp(conversation.last_message_at)}</div>
+      `;
+      button.addEventListener("click", () => loadConversation(conversation.id));
+      listEl.appendChild(button);
+    });
+  }
+
+  function renderMessages() {
+    const detail = state.activeConversation;
+    if (!detail || !detail.messages || !detail.messages.length) {
+      emptyEl.hidden = false;
+      messageListEl.hidden = true;
+      titleEl.textContent = detail?.conversation?.title || "Nueva conversación";
+      subtitleEl.textContent = "Consulta ventas, compras, inventario, producción, costos, forecast y discrepancias sin salir del ERP.";
+      return;
+    }
+
+    emptyEl.hidden = true;
+    messageListEl.hidden = false;
+    titleEl.textContent = detail.conversation.title;
+    subtitleEl.textContent = "Conversación guardada y lista para continuar.";
+    messageListEl.innerHTML = "";
+
+    detail.messages.forEach((message) => {
+      const row = document.createElement("div");
+      row.className = `erp-chat-message-row ${message.role === "user" ? "user" : "assistant"}`;
+      const avatar = message.role === "user"
+        ? '<div class="erp-chat-avatar user">Tú</div>'
+        : '<div class="erp-chat-avatar">PD</div>';
+      const bubbleClasses = ["erp-chat-bubble"];
+      if (message.status === "error") {
+        bubbleClasses.push("is-error");
+      }
+      const toolsHtml = (message.tool_calls || []).length
+        ? `
+          <div class="erp-chat-tool-box">
+            ${message.tool_calls.map((toolCall) => `
+              <div class="erp-chat-tool-item">
+                <strong>${escapeHtml(toolCall.tool_display_name || toolCall.tool_name)}</strong>
+                <p>${escapeHtml(toolCall.summary || "Herramienta ejecutada sin resumen adicional.")}</p>
+              </div>
+            `).join("")}
+          </div>
+        `
+        : "";
+      row.innerHTML = `
+        ${message.role === "user" ? "" : avatar}
+        <div class="${bubbleClasses.join(" ")}" data-message-id="${message.id}">
+          <p>${escapeHtml(message.content)}</p>
+          ${toolsHtml}
+          <div class="erp-chat-meta">${formatTimestamp(message.created_at)}</div>
+        </div>
+        ${message.role === "user" ? avatar : ""}
+      `;
+      messageListEl.appendChild(row);
+    });
+
+    bodyEl.scrollTop = bodyEl.scrollHeight;
+  }
+
+  async function refreshConversations() {
+    const response = await fetch(`${apiBase}/conversations/`, { credentials: "same-origin" });
+    if (!response.ok) return;
+    const payload = await response.json();
+    state.conversations = payload.items || [];
+    renderConversationList();
+  }
+
+  async function createConversation() {
+    const response = await fetch(`${apiBase}/conversations/new/`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken,
+      },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "No pude crear la conversación.");
+    }
+    state.activeConversation = {
+      conversation: payload.conversation,
+      messages: [],
+    };
+    await refreshConversations();
+    renderMessages();
+    return state.activeConversation.conversation.id;
+  }
+
+  async function loadConversation(id) {
+    const response = await fetch(`${apiBase}/conversations/${id}/`, { credentials: "same-origin" });
+    if (!response.ok) {
+      throw new Error("No pude abrir la conversación.");
+    }
+    state.activeConversation = await response.json();
+    renderConversationList();
+    renderMessages();
+  }
+
+  function appendOptimisticMessages(content) {
+    if (!state.activeConversation) return null;
+    const now = new Date().toISOString();
+    const userMessage = {
+      id: `tmp-user-${Date.now()}`,
+      sequence: (state.activeConversation.messages.at(-1)?.sequence || 0) + 1,
+      role: "user",
+      status: "complete",
+      content,
+      created_at: now,
+      tool_calls: [],
+    };
+    const assistantMessage = {
+      id: `tmp-assistant-${Date.now()}`,
+      sequence: userMessage.sequence + 1,
+      role: "assistant",
+      status: "streaming",
+      content: "",
+      created_at: now,
+      tool_calls: [],
+    };
+    state.activeConversation.messages.push(userMessage, assistantMessage);
+    renderMessages();
+    return assistantMessage;
+  }
+
+  function updateStreamingAssistant(tempAssistant, eventName, payload) {
+    const target = state.activeConversation.messages.find((item) => item.id === tempAssistant.id);
+    if (!target) return;
+    if (eventName === "tool") {
+      target.tool_calls = target.tool_calls || [];
+      target.tool_calls.push(payload);
+    }
+    if (eventName === "chunk") {
+      target.content = payload.content || `${target.content}${payload.delta || ""}`;
+    }
+    if (eventName === "done") {
+      target.content = payload.content || target.content;
+      target.status = "complete";
+      if (payload.assistant_message_id) {
+        target.id = payload.assistant_message_id;
+      }
+    }
+    if (eventName === "error") {
+      target.content = payload.content || target.content;
+      target.status = "error";
+      if (payload.assistant_message_id) {
+        target.id = payload.assistant_message_id;
+      }
+    }
+    renderMessages();
+  }
+
+  function markAssistantError(tempAssistant, payload) {
+    const target = state.activeConversation.messages.find((item) => item.id === tempAssistant.id);
+    if (!target) return;
+    target.content = payload.assistant_content || payload.detail || payload.error || "No pude completar la respuesta del ERP.";
+    target.status = "error";
+    if (payload.assistant_message_id) {
+      target.id = payload.assistant_message_id;
+    }
+    renderMessages();
+  }
+
+  async function sendMessage() {
+    const content = inputEl.value.trim();
+    if (!content || state.sending) return;
+    state.sending = true;
+    sendBtn.disabled = true;
+    inputEl.disabled = true;
+    statusEl.textContent = "Procesando tu consulta…";
+
+    try {
+      if (!state.activeConversation || !state.activeConversation.conversation?.id) {
+        await createConversation();
+      }
+      const conversationId = state.activeConversation.conversation.id;
+      const tempAssistant = appendOptimisticMessages(content);
+      inputEl.value = "";
+
+      const response = await fetch(`${apiBase}/conversations/${conversationId}/stream/`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken,
+        },
+        body: JSON.stringify({ content }),
+      });
+
+      if (!response.ok) {
+        let payload = {};
+        try {
+          payload = await response.json();
+        } catch (error) {
+          payload = {};
+        }
+        markAssistantError(tempAssistant, payload);
+        await refreshConversations();
+        statusEl.textContent = payload.detail || payload.error || "No pude completar la respuesta del ERP.";
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() || "";
+        blocks.forEach((block) => {
+          const lines = block.split("\n");
+          const eventLine = lines.find((line) => line.startsWith("event:"));
+          const dataLine = lines.find((line) => line.startsWith("data:"));
+          if (!eventLine || !dataLine) return;
+          const eventName = eventLine.replace("event:", "").trim();
+          const payload = JSON.parse(dataLine.replace("data:", "").trim());
+          updateStreamingAssistant(tempAssistant, eventName, payload);
+        });
+      }
+
+      await loadConversation(conversationId);
+      await refreshConversations();
+      statusEl.textContent = "Respuesta lista.";
+    } catch (error) {
+      console.error(error);
+      statusEl.textContent = error.message || "No pude completar la respuesta.";
+    } finally {
+      state.sending = false;
+      sendBtn.disabled = false;
+      inputEl.disabled = false;
+      inputEl.focus();
+    }
+  }
+
+  document.getElementById("erp-chat-new-btn").addEventListener("click", async () => {
+    try {
+      await createConversation();
+    } catch (error) {
+      statusEl.textContent = error.message || "No pude crear la conversación.";
+    }
+  });
+
+  document.querySelectorAll(".erp-chat-prompt").forEach((button) => {
+    button.addEventListener("click", () => {
+      inputEl.value = button.dataset.prompt || "";
+      inputEl.focus();
+    });
+  });
+
+  sendBtn.addEventListener("click", sendMessage);
+  inputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
+  });
+
+  statusEl.textContent = runtimeStatus.ready
+    ? "Pregunta al ERP con lenguaje natural y te responderé con contexto operativo."
+    : `Modo configuración pendiente: ${runtimeStatus.issue || "falta configurar el modelo del chat."}`;
+
+  renderConversationList();
+  renderMessages();
+})();
+</script>
+{% endblock %}

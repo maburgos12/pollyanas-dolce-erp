@@ -28,6 +28,16 @@ class Command(BaseCommand):
         parser.add_argument("--branch", default="", help="Filtra por sucursal Point (id o nombre parcial).")
         parser.add_argument("--actor-username", default="", help="Usuario ERP para registrar la ejecución.")
         parser.add_argument(
+            "--source-mode",
+            default="",
+            help="Fuente de ventas: OFFICIAL o LEGACY. Por default usa POINT_SALES_SYNC_SOURCE_MODE.",
+        )
+        parser.add_argument(
+            "--credito-scopes",
+            default="",
+            help="Solo modo OFFICIAL. Scopes separados por coma: false,true,null.",
+        )
+        parser.add_argument(
             "--no-default-skip-range",
             action="store_true",
             help="No excluir el rango ya incorporado del 2026-01-01 al 2026-03-13.",
@@ -55,6 +65,15 @@ class Command(BaseCommand):
         if not options.get("no_default_skip_range"):
             excluded_ranges.append(DEFAULT_ALREADY_LOADED_RANGE)
 
+        source_mode = (options.get("source_mode") or "").strip().upper() or None
+        if source_mode and source_mode not in {"OFFICIAL", "LEGACY"}:
+            raise CommandError("source-mode debe ser OFFICIAL o LEGACY.")
+
+        credito_scopes = [item.strip() for item in str(options.get("credito_scopes") or "").split(",") if item.strip()]
+        invalid_scopes = [item for item in credito_scopes if item not in {"false", "true", "null"}]
+        if invalid_scopes:
+            raise CommandError(f"Scopes crédito inválidos: {', '.join(invalid_scopes)}")
+
         sync_job = run_daily_sales_sync(
             triggered_by=actor,
             branch_filter=(options.get("branch") or "").strip() or None,
@@ -62,6 +81,8 @@ class Command(BaseCommand):
             lag_days=lag_days,
             anchor_date=anchor_date,
             excluded_ranges=excluded_ranges,
+            source_mode=source_mode,
+            credito_scopes=credito_scopes or None,
         )
         payload = {
             "window_start": start_date.isoformat(),

@@ -4,7 +4,9 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from core.access import ROLE_LECTURA, ROLE_VENTAS
+from core.models import Sucursal
 from crm.models import Cliente, PedidoCliente
+from pos_bridge.models import PointBranch
 
 
 class CRMApiTests(APITestCase):
@@ -16,6 +18,13 @@ class CRMApiTests(APITestCase):
         self.user_lectura = User.objects.create_user(username="lectura_api", password="pass123")
         lectura_group, _ = Group.objects.get_or_create(name=ROLE_LECTURA)
         self.user_lectura.groups.add(lectura_group)
+        self.sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        self.point_branch = PointBranch.objects.create(
+            external_id="1",
+            name="Matriz Point",
+            erp_branch=self.sucursal,
+            status=PointBranch.STATUS_ACTIVE,
+        )
 
     def test_clientes_list_and_create(self):
         self.client.force_authenticate(self.user_ventas)
@@ -48,6 +57,7 @@ class CRMApiTests(APITestCase):
             {
                 "cliente": cliente.id,
                 "descripcion": "Pedido API pastel chocolate",
+                "sucursal": self.point_branch.external_id,
                 "estatus": PedidoCliente.ESTATUS_NUEVO,
                 "prioridad": PedidoCliente.PRIORIDAD_MEDIA,
                 "canal": PedidoCliente.CANAL_WHATSAPP,
@@ -57,6 +67,9 @@ class CRMApiTests(APITestCase):
         )
         self.assertEqual(resp_create.status_code, status.HTTP_201_CREATED)
         pedido_id = resp_create.data["id"]
+        pedido = PedidoCliente.objects.get(id=pedido_id)
+        self.assertEqual(pedido.sucursal_ref_id, self.sucursal.id)
+        self.assertEqual(pedido.sucursal, self.sucursal.nombre)
 
         seguimiento_url = reverse("api_crm_pedido_seguimiento", kwargs={"pedido_id": pedido_id})
         resp_followup = self.client.post(

@@ -37,6 +37,7 @@ from core.audit import log_event
 from compras.models import SolicitudCompra
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor
 from maestros.utils.canonical_catalog import (
+    canonical_catalog_maps,
     canonical_insumo_by_id,
     canonicalized_active_insumos,
     canonicalized_insumo_selector,
@@ -56,6 +57,14 @@ from inventario.utils.almacen_import import (
 from inventario.utils.google_drive_sync import get_drive_sync_mode, sync_almacen_from_drive
 from inventario.utils.sync_logging import log_sync_run
 from inventario.utils.reorder import FORMULA_EXCEL_LEGACY, FORMULA_LEADTIME_PLUS_SAFETY, calcular_punto_reorden
+from inventario.stock_trace import (
+    TRACE_INVENTORY_ADJUSTMENT,
+    TRACE_MANUAL_EDIT,
+    TRACE_MANUAL_MOVEMENT,
+    TRACE_MERGE,
+    attach_sync_trace,
+    set_stock_trace,
+)
 
 from .models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, InventarioConfig, MovimientoInventario
 
@@ -70,11 +79,40 @@ SOURCE_TO_FILENAME = {
 FILENAME_TO_SOURCE = {v: k for k, v in SOURCE_TO_FILENAME.items()}
 
 
-def _canonicalized_insumo_stock_options(limit: int = 200) -> list[dict]:
-    canonical_rows = canonicalized_active_insumos(limit=limit)
-    grouped_member_ids = [member_id for row in canonical_rows for member_id in row["member_ids"]]
-    usage_maps = usage_maps_for_insumo_ids(grouped_member_ids)
+def _insumo_display_name(insumo: Insumo | None) -> str:
+    if not insumo:
+        return ""
+    return getattr(insumo, "display_name", "") or getattr(insumo, "nombre", "")
+
+
+def _inventory_canonical_context(limit: int = 200) -> dict[str, object]:
+    canonical_rows, member_to_row, canonical_by_member_id, _ = canonical_catalog_maps(limit=limit)
+    member_ids = [member_id for row in canonical_rows for member_id in row["member_ids"]]
+    usage_maps = usage_maps_for_insumo_ids(member_ids)
     existencias_by_insumo = {
+        row["insumo_id"]: row["stock_actual"]
+        for row in ExistenciaInsumo.objects.filter(insumo_id__in=member_ids).values("insumo_id", "stock_actual")
+    }
+    return {
+        "canonical_rows": canonical_rows,
+        "member_to_row": member_to_row,
+        "canonical_by_member_id": canonical_by_member_id,
+        "usage_maps": usage_maps,
+        "existencias_by_insumo": existencias_by_insumo,
+    }
+
+
+def _canonicalized_insumo_stock_options(
+    limit: int = 200,
+    *,
+    canonical_rows: list[dict] | None = None,
+    usage_maps: dict[str, object] | None = None,
+    existencias_by_insumo: dict[int, Decimal] | None = None,
+) -> list[dict]:
+    canonical_rows = canonical_rows or canonicalized_active_insumos(limit=limit)
+    grouped_member_ids = [member_id for row in canonical_rows for member_id in row["member_ids"]]
+    usage_maps = usage_maps or usage_maps_for_insumo_ids(grouped_member_ids)
+    existencias_by_insumo = existencias_by_insumo or {
         row["insumo_id"]: row["stock_actual"]
         for row in ExistenciaInsumo.objects.filter(insumo_id__in=grouped_member_ids).values("insumo_id", "stock_actual")
     }
@@ -91,7 +129,7 @@ def _canonicalized_insumo_stock_options(limit: int = 200) -> list[dict]:
         options.append(
             {
                 "id": insumo.id,
-                "nombre": insumo.nombre,
+                "nombre": _insumo_display_name(insumo),
                 "stock": stock_total,
                 "canonical_variant_count": row["variant_count"],
                 "enterprise_status": enterprise_profile["readiness_label"],
@@ -103,10 +141,15 @@ def _canonicalized_insumo_stock_options(limit: int = 200) -> list[dict]:
     return options
 
 
-def _canonicalized_existencias_rows(limit: int = 200) -> list[SimpleNamespace]:
-    canonical_rows = canonicalized_active_insumos(limit=limit)
+def _canonicalized_existencias_rows(
+    limit: int = 200,
+    *,
+    canonical_rows: list[dict] | None = None,
+    usage_maps: dict[str, object] | None = None,
+) -> list[SimpleNamespace]:
+    canonical_rows = canonical_rows or canonicalized_active_insumos(limit=limit)
     member_ids = [member_id for row in canonical_rows for member_id in row["member_ids"]]
-    usage_maps = usage_maps_for_insumo_ids(member_ids)
+    usage_maps = usage_maps or usage_maps_for_insumo_ids(member_ids)
     existencias = {
         existencia.insumo_id: existencia
         for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=member_ids).select_related("insumo", "insumo__unidad_base")
@@ -185,7 +228,7 @@ def _canonicalized_existencias_rows(limit: int = 200) -> list[SimpleNamespace]:
                 canonical_pending=row["variant_count"] > 1 and inventory_refs > 0,
                 canonical_pending_label="Consolidación pendiente" if row["variant_count"] > 1 and inventory_refs > 0 else "",
                 canonical_list_url=reverse("maestros:insumo_list")
-                + f"?{urlencode({'usage_scope': 'inventory', 'canonical_status': 'variantes', 'q': insumo.nombre})}",
+                + f"?{urlencode({'usage_scope': 'inventory', 'canonical_status': 'variantes', 'q': _insumo_display_name(insumo)})}",
                 is_operational_blocker=is_operational_blocker,
                 operational_blocker_label="Bloquea inventario" if is_operational_blocker else "",
                 enterprise_edit_url=reverse("maestros:insumo_update", args=[insumo.id]),
@@ -193,6 +236,23 @@ def _canonicalized_existencias_rows(limit: int = 200) -> list[SimpleNamespace]:
             )
         )
     return rows
+
+
+def _inventory_query_matches(*values: object, q: str) -> bool:
+    q = (q or "").strip()
+    if not q:
+        return True
+    q_lower = q.lower()
+    q_norm = normalizar_nombre(q)
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if q_lower in text.lower():
+            return True
+        if q_norm and q_norm in normalizar_nombre(text):
+            return True
+    return False
 
 
 def _inventory_master_blocker_context(
@@ -434,7 +494,7 @@ def _inventario_reorder_max_diff_pct() -> Decimal:
     return InventarioConfig.get_solo(default_pct=default_pct).reorder_max_diff_pct
 
 
-def _apply_movimiento(movimiento: MovimientoInventario) -> None:
+def _apply_movimiento(movimiento: MovimientoInventario, *, trace_source: str = TRACE_MANUAL_MOVEMENT, user=None) -> None:
     insumo_canonical = canonical_insumo_by_id(movimiento.insumo_id) or movimiento.insumo
     existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo_canonical)
     if movimiento.tipo == MovimientoInventario.TIPO_ENTRADA:
@@ -442,7 +502,16 @@ def _apply_movimiento(movimiento: MovimientoInventario) -> None:
     else:
         existencia.stock_actual -= movimiento.cantidad
     existencia.actualizado_en = timezone.now()
-    existencia.save()
+    set_stock_trace(
+        existencia,
+        source=trace_source,
+        process="inventario.movimientos",
+        effective_at=movimiento.fecha,
+        reference=movimiento.referencia or str(movimiento.id),
+        user=user,
+        details={"movement_id": movimiento.id, "movement_type": movimiento.tipo},
+    )
+    existencia.save(update_fields=["stock_actual", "actualizado_en", "trazabilidad_stock"])
 
 
 def _can_approve_ajustes(user) -> bool:
@@ -459,7 +528,16 @@ def _apply_ajuste(ajuste: AjusteInventario, acted_by, comentario: str = "") -> N
     else:
         existencia.stock_actual = prev_stock + delta
     existencia.actualizado_en = timezone.now()
-    existencia.save()
+    set_stock_trace(
+        existencia,
+        source=TRACE_INVENTORY_ADJUSTMENT,
+        process="inventario.ajustes",
+        effective_at=ajuste.aplicado_en or timezone.now(),
+        reference=ajuste.folio,
+        user=acted_by,
+        details={"ajuste_id": ajuste.id, "delta": str(delta)},
+    )
+    existencia.save(update_fields=["stock_actual", "actualizado_en", "trazabilidad_stock"])
     log_event(
         acted_by,
         "APPLY",
@@ -1068,7 +1146,12 @@ def _resolve_cross_source_with_alias(alias_name: str, insumo: Insumo) -> tuple[i
         return 0, 0
 
     point_resolved = 0
-    for pending in PointPendingMatch.qs_operativos().filter(tipo=PointPendingMatch.TIPO_INSUMO).only("id", "point_nombre", "point_codigo"):
+    for pending in PointPendingMatch.qs_operativos().filter(tipo=PointPendingMatch.TIPO_INSUMO).only(
+        "id",
+        "point_nombre",
+        "point_codigo",
+        "payload",
+    ):
         if normalizar_nombre(pending.point_nombre or "") != alias_norm:
             continue
         point_code = (pending.point_codigo or "").strip()
@@ -1079,6 +1162,10 @@ def _resolve_cross_source_with_alias(alias_name: str, insumo: Insumo) -> tuple[i
         if (pending.point_nombre or "").strip() and insumo.nombre_point != pending.point_nombre:
             insumo.nombre_point = pending.point_nombre[:250]
             changed.append("nombre_point")
+        point_category = str((pending.payload or {}).get("categoria") or "").strip()
+        if point_category and insumo.categoria != point_category[:120]:
+            insumo.categoria = point_category[:120]
+            changed.append("categoria")
         if changed:
             insumo.save(update_fields=changed)
         pending.delete()
@@ -1273,6 +1360,11 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
                     create_aliases=create_aliases,
                     create_missing_insumos=create_missing_insumos,
                     dry_run=False,
+                    trace_context={
+                        "process": "inventario.sync_almacen_from_drive",
+                        "batch_token": run_started_at.isoformat(),
+                        "user": request.user,
+                    },
                 )
                 summary = drive_result.summary
                 drive_info = {
@@ -1333,6 +1425,11 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
                         create_aliases=create_aliases,
                         create_missing_insumos=create_missing_insumos,
                         dry_run=False,
+                        trace_context={
+                            "process": "inventario.importar_archivos",
+                            "batch_token": run_started_at.isoformat(),
+                            "user": request.user,
+                        },
                     )
                 except Exception as exc:
                     log_sync_run(
@@ -1368,7 +1465,7 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
                 messages.warning(request, f"Quedaron {summary.unmatched} filas sin match.")
             pendientes_preview = summary.pendientes[:80]
             request.session["inventario_pending_preview"] = summary.pendientes[:200]
-            log_sync_run(
+            run = log_sync_run(
                 source=run_source,
                 status=AlmacenSyncRun.STATUS_OK,
                 summary=summary,
@@ -1380,6 +1477,9 @@ def importar_archivos(request: HttpRequest) -> HttpResponse:
                 message=" | ".join(warnings[:12]),
                 started_at=run_started_at,
             )
+            if summary.updated_existencia_ids:
+                existencias = list(ExistenciaInsumo.objects.filter(id__in=summary.updated_existencia_ids))
+                attach_sync_trace(existencias, run=run, user=request.user)
 
     context = {
         "pending_grouped": _build_pending_grouped(pendientes_preview),
@@ -2015,7 +2115,16 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo) -> dict[str, int]:
         if not target_ex:
             source_ex.insumo_id = target.id
             source_ex.actualizado_en = timezone.now()
-            source_ex.save(update_fields=["insumo", "actualizado_en"])
+            set_stock_trace(
+                source_ex,
+                source=TRACE_MERGE,
+                process="inventario.merge_insumos",
+                effective_at=timezone.now(),
+                reference=f"{source.id}->{target.id}",
+                user=acted_by,
+                details={"source_insumo_id": source.id, "target_insumo_id": target.id},
+            )
+            source_ex.save(update_fields=["insumo", "actualizado_en", "trazabilidad_stock"])
             existencia_merged = 1
         else:
             target_ex.stock_actual = _to_decimal(target_ex.stock_actual) + _to_decimal(source_ex.stock_actual)
@@ -2035,6 +2144,15 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo) -> dict[str, int]:
                 _to_decimal(source_ex.consumo_diario_promedio),
             )
             target_ex.actualizado_en = timezone.now()
+            set_stock_trace(
+                target_ex,
+                source=TRACE_MERGE,
+                process="inventario.merge_insumos",
+                effective_at=timezone.now(),
+                reference=f"{source.id}->{target.id}",
+                user=acted_by,
+                details={"source_insumo_id": source.id, "target_insumo_id": target.id},
+            )
             target_ex.save(
                 update_fields=[
                     "stock_actual",
@@ -2045,6 +2163,7 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo) -> dict[str, int]:
                     "dias_llegada_pedido",
                     "consumo_diario_promedio",
                     "actualizado_en",
+                    "trazabilidad_stock",
                 ]
             )
             source_ex.delete()
@@ -4430,9 +4549,30 @@ def _inventory_commercial_priority_rows(rows: list[SimpleNamespace], *, lookback
         else:
             priority_label = "Base"
             priority_tone = "primary"
+        missing_master = any(
+            str(item).strip().lower() != "sin faltante"
+            for item in (readiness_profile["missing"][:2] or [])
+        )
+        edit_url = reverse("maestros:insumo_update", args=[canonical.id])
+        display_name = _insumo_display_name(insumo)
+        inventory_url = reverse("inventario:existencias") + f"?{urlencode({'q': display_name})}"
+        movement_url = reverse("inventario:movimientos") + f"?{urlencode({'q': display_name})}"
+        alert_url = reverse("inventario:alertas") + f"?{urlencode({'nivel': 'alerta', 'q': display_name})}"
+        if missing_master:
+            action_url = edit_url
+            action_label = "Cerrar maestro"
+        elif gap > 0:
+            action_url = alert_url
+            action_label = "Ver alerta"
+        elif historico_units > 0:
+            action_url = movement_url
+            action_label = "Ver movimientos"
+        else:
+            action_url = inventory_url
+            action_label = "Ver existencia"
         priority_rows.append(
             {
-                "insumo_nombre": insumo.nombre,
+                "insumo_nombre": display_name,
                 "historico_units": historico_units,
                 "gap": gap,
                 "stock_actual": Decimal(str(getattr(row, "stock_actual", 0) or 0)),
@@ -4441,7 +4581,12 @@ def _inventory_commercial_priority_rows(rows: list[SimpleNamespace], *, lookback
                 "priority_tone": priority_tone,
                 "master_missing": readiness_profile["missing"][:2] or ["Sin faltante"],
                 "recipe_names": [receta_name_map[rid] for rid in linked_receta_ids[:3] if rid in receta_name_map],
-                "action_url": reverse("maestros:insumo_update", args=[canonical.id]),
+                "action_url": action_url,
+                "action_label": action_label,
+                "inventory_url": inventory_url,
+                "movement_url": movement_url,
+                "alert_url": alert_url,
+                "edit_url": edit_url,
                 "priority_score": priority_score,
             }
         )
@@ -4527,10 +4672,303 @@ def _inventory_supply_focus_rows(rows: list[dict[str, object]] | None, *, limit:
                 "gap": Decimal(str(row.get("gap") or 0)),
                 "master_missing": list(row.get("master_missing") or []),
                 "action_url": row.get("action_url") or reverse("inventario:existencias"),
-                "action_label": "Asegurar artículo",
+                "action_label": row.get("action_label") or "Asegurar artículo",
             }
         )
     return supply_rows
+
+
+@login_required
+def dashboard(request: HttpRequest) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+
+    focus = (request.GET.get("focus") or "all").strip().lower()
+    valid_focus = {"all", "critical", "reorder", "blocked", "healthy", "pending"}
+    if focus not in valid_focus:
+        focus = "all"
+    selected_categoria = (request.GET.get("categoria") or "").strip()
+    selected_clase = (request.GET.get("clase") or "all").strip().lower()
+    selected_q = (request.GET.get("q") or "").strip()
+    valid_clases = {"all", "interno", "materia_prima", "empaque"}
+    if selected_clase not in valid_clases:
+        selected_clase = "all"
+
+    all_existencias_rows = _canonicalized_existencias_rows(limit=2000)
+    categoria_options = sorted(
+        {
+            (getattr(row.insumo, "categoria", "") or "").strip()
+            for row in all_existencias_rows
+            if (getattr(row.insumo, "categoria", "") or "").strip()
+        }
+    )
+    clase_options = [
+        {"value": "all", "label": "Todas"},
+        {"value": "interno", "label": "Interno"},
+        {"value": "materia_prima", "label": "Materia prima"},
+        {"value": "empaque", "label": "Empaque"},
+    ]
+
+    def _matches_inventory_focus(row: SimpleNamespace) -> bool:
+        stock = Decimal(str(getattr(row, "stock_actual", 0) or 0))
+        reorder = Decimal(str(getattr(row, "punto_reorden", 0) or 0))
+        if selected_categoria and (getattr(row.insumo, "categoria", "") or "").strip() != selected_categoria:
+            return False
+        if selected_q:
+            search_blob = " ".join(
+                [
+                    str(getattr(row.insumo, "nombre", "") or ""),
+                    str(getattr(row.insumo, "nombre_point", "") or ""),
+                    str(getattr(row.insumo, "categoria", "") or ""),
+                    str(getattr(row.insumo, "codigo", "") or ""),
+                ]
+            ).lower()
+            if selected_q.lower() not in search_blob:
+                return False
+        clase_actual = (
+            "interno"
+            if getattr(row.insumo, "tipo_item", "") == Insumo.TIPO_INTERNO
+            else "empaque"
+            if getattr(row.insumo, "tipo_item", "") == Insumo.TIPO_EMPAQUE
+            else "materia_prima"
+        )
+        if selected_clase != "all" and clase_actual != selected_clase:
+            return False
+        if focus == "critical":
+            return stock <= 0
+        if focus == "reorder":
+            return reorder > 0 and stock < reorder
+        if focus == "blocked":
+            return bool(getattr(row, "is_operational_blocker", False))
+        if focus == "healthy":
+            return stock > 0 and (reorder <= 0 or stock >= reorder)
+        if focus == "pending":
+            return bool(getattr(row, "canonical_pending", False))
+        return True
+
+    existencias_rows = [row for row in all_existencias_rows if _matches_inventory_focus(row)]
+    total_unfiltered_count = len(all_existencias_rows)
+    total_count = len(existencias_rows)
+    critical_out_count = 0
+    below_reorder_count = 0
+    healthy_count = 0
+    master_blocked_count = 0
+    top_shortage_rows: list[dict[str, object]] = []
+
+    for row in existencias_rows:
+        stock = Decimal(str(getattr(row, "stock_actual", 0) or 0))
+        reorder = Decimal(str(getattr(row, "punto_reorden", 0) or 0))
+        if getattr(row, "is_operational_blocker", False):
+            master_blocked_count += 1
+        if stock <= 0:
+            critical_out_count += 1
+        elif reorder > 0 and stock < reorder:
+            below_reorder_count += 1
+        elif reorder <= 0 or stock >= reorder:
+            healthy_count += 1
+        if reorder > 0 and stock < reorder:
+            coverage_pct = max(min((stock / reorder) * Decimal("100"), Decimal("100")), Decimal("0"))
+            top_shortage_rows.append(
+                {
+                    "name": _insumo_display_name(row.insumo),
+                    "stock": stock,
+                    "reorder": reorder,
+                    "coverage_pct": coverage_pct,
+                    "gap": reorder - stock,
+                    "edit_url": reverse("maestros:insumo_update", args=[row.insumo.id]),
+                    "detail_url": reverse("inventario:existencias") + f"?{urlencode({'q': _insumo_display_name(row.insumo)})}",
+                    "alert_url": reverse("inventario:alertas")
+                    + f"?{urlencode({'nivel': 'critico' if stock <= 0 else 'bajo', 'q': _insumo_display_name(row.insumo)})}",
+                    "missing": list(getattr(row, "enterprise_missing", []) or []),
+                }
+            )
+
+    top_shortage_rows.sort(
+        key=lambda item: (
+            Decimal(str(item["coverage_pct"] or 0)),
+            -Decimal(str(item["gap"] or 0)),
+        )
+    )
+    top_shortage_rows = top_shortage_rows[:6]
+
+    sales_demand_signal = _inventory_sales_demand_signal(existencias_rows) or {
+        "available": False,
+        "status": "Pendiente",
+        "tone": "warning",
+        "detail": "La señal comercial todavía no tiene suficiente historia ligada a este inventario.",
+        "days_count": 0,
+        "recipes_count": 0,
+        "insumos_count": 0,
+        "units_total": 0,
+        "years_observed": 0,
+        "comparable_years": 0,
+        "top_products": [],
+    }
+    commercial_priority_rows = _inventory_commercial_priority_rows(existencias_rows)
+    supply_focus_rows = _inventory_supply_focus_rows(commercial_priority_rows)
+
+    latest_runs = list(
+        AlmacenSyncRun.objects.only(
+            "id",
+            "started_at",
+            "source",
+            "status",
+            "matched",
+            "unmatched",
+            "rows_stock_read",
+            "rows_mov_read",
+            "aliases_created",
+            "insumos_created",
+            "pending_preview",
+        )
+        .order_by("-started_at")[:8]
+    )
+    latest_sync = next((run for run in latest_runs if run.status == AlmacenSyncRun.STATUS_OK), None)
+    pending_preview = _load_visible_pending_preview(request, max_rows=120, max_runs=20)
+    pending_grouped = _build_pending_grouped(pending_preview)
+    pending_visible_count = len(pending_preview)
+
+    if latest_sync:
+        matched = int(latest_sync.matched or 0)
+        unmatched = int(latest_sync.unmatched or 0)
+        total_sync = matched + unmatched
+        match_rate = round((matched * 100.0 / total_sync), 1) if total_sync else 100.0
+        freshness_label = timezone.localtime(latest_sync.started_at).strftime("%Y-%m-%d %H:%M")
+    else:
+        matched = unmatched = 0
+        match_rate = 0.0
+        freshness_label = "Sin corte"
+
+    movement_window_start = timezone.localdate() - timedelta(days=30)
+    movement_counts_map = {
+        row["tipo"]: int(row["total"] or 0)
+        for row in (
+            MovimientoInventario.objects.filter(fecha__date__gte=movement_window_start)
+            .values("tipo")
+            .annotate(total=Count("id"))
+        )
+    }
+    movement_mix_rows = [
+        {"label": "Entradas", "value": movement_counts_map.get(MovimientoInventario.TIPO_ENTRADA, 0)},
+        {"label": "Salidas", "value": movement_counts_map.get(MovimientoInventario.TIPO_SALIDA, 0)},
+        {"label": "Consumos", "value": movement_counts_map.get(MovimientoInventario.TIPO_CONSUMO, 0)},
+        {"label": "Ajustes", "value": movement_counts_map.get(MovimientoInventario.TIPO_AJUSTE, 0)},
+    ]
+    movement_total = sum(item["value"] for item in movement_mix_rows)
+
+    health_rows = [
+        {"label": "Saludable", "value": healthy_count},
+        {"label": "Bajo reorden", "value": below_reorder_count},
+        {"label": "Sin stock", "value": critical_out_count},
+        {"label": "Bloqueados", "value": master_blocked_count},
+    ]
+    sync_quality_rows = [
+        {
+            "label": timezone.localtime(run.started_at).strftime("%d %b"),
+            "matched": int(run.matched or 0),
+            "unmatched": int(run.unmatched or 0),
+        }
+        for run in reversed(latest_runs[:6])
+    ]
+    demand_rows = [
+        {
+            "label": str(row.get("insumo_nombre") or "Artículo"),
+            "value": float(Decimal(str(row.get("historico_units") or 0))),
+        }
+        for row in commercial_priority_rows[:6]
+    ]
+    product_signal_rows = [
+        {
+            "label": str(row.get("receta__nombre") or "Producto"),
+            "value": float(Decimal(str(row.get("total") or 0))),
+        }
+        for row in list(sales_demand_signal.get("top_products") or [])[:6]
+    ]
+    shortage_chart_rows = [
+        {
+            "label": item["name"],
+            "value": float(Decimal(str(item["coverage_pct"] or 0))),
+        }
+        for item in top_shortage_rows
+    ]
+    pending_rows = [
+        {
+            "name": row.get("nombre_origen") or "Referencia pendiente",
+            "count": int(row.get("count") or 0),
+            "sources": row.get("sources") or "-",
+            "suggestion": row.get("suggestion") or "",
+            "action_url": reverse("inventario:aliases_catalog")
+            + f"?{urlencode({'q': row.get('nombre_origen') or ''})}",
+        }
+        for row in pending_grouped[:4]
+    ]
+    dashboard_query = {}
+    if focus and focus != "all":
+        dashboard_query["focus"] = focus
+    if selected_categoria:
+        dashboard_query["categoria"] = selected_categoria
+    if selected_clase and selected_clase != "all":
+        dashboard_query["clase"] = selected_clase
+    if selected_q:
+        dashboard_query["q"] = selected_q
+
+    context = {
+        "latest_sync": latest_sync,
+        "sync_freshness_label": freshness_label,
+        "match_rate": match_rate,
+        "matched_count": matched,
+        "unmatched_count": unmatched,
+        "pending_rows": pending_rows,
+        "total_items": total_count,
+        "total_unfiltered_count": total_unfiltered_count,
+        "critical_out_count": critical_out_count,
+        "below_reorder_count": below_reorder_count,
+        "healthy_count": healthy_count,
+        "master_blocked_count": master_blocked_count,
+        "pending_visible_count": pending_visible_count,
+        "selected_focus": focus,
+        "selected_categoria": selected_categoria,
+        "selected_clase": selected_clase,
+        "selected_q": selected_q,
+        "focus_options": [
+            {"value": "all", "label": "Todo"},
+            {"value": "critical", "label": "Sin stock"},
+            {"value": "reorder", "label": "Bajo reorden"},
+            {"value": "blocked", "label": "Bloqueados"},
+            {"value": "healthy", "label": "Saludables"},
+            {"value": "pending", "label": "Pendientes"},
+        ],
+        "categoria_options": categoria_options,
+        "clase_options": clase_options,
+        "sales_demand_signal": sales_demand_signal,
+        "commercial_priority_rows": commercial_priority_rows[:4],
+        "supply_focus_rows": supply_focus_rows[:4],
+        "top_shortage_rows": top_shortage_rows[:4],
+        "movement_mix_rows": movement_mix_rows,
+        "movement_total": movement_total,
+        "health_rows": health_rows,
+        "sync_quality_rows": sync_quality_rows,
+        "demand_rows": demand_rows,
+        "product_signal_rows": product_signal_rows,
+        "shortage_chart_rows": shortage_chart_rows,
+        "existencias_url": reverse("inventario:existencias"),
+        "movimientos_url": reverse("inventario:movimientos"),
+        "ajustes_url": reverse("inventario:ajustes"),
+        "alertas_url": reverse("inventario:alertas")
+        + (
+            f"?{urlencode({'nivel': 'critico' if focus == 'critical' else 'alerta'})}"
+            if focus in {"critical", "reorder", "all", "blocked", "healthy", "pending"}
+            else ""
+        ),
+        "compras_url": reverse("compras:solicitudes")
+        + (
+            f"?{urlencode({key: value for key, value in {'categoria': selected_categoria, 'q': selected_q}.items() if value})}"
+            if selected_categoria or selected_q
+            else ""
+        ),
+        "dashboard_filter_query": urlencode(dashboard_query),
+    }
+    return render(request, "inventario/dashboard.html", context)
 
 
 @login_required
@@ -4618,7 +5056,28 @@ def existencias(request: HttpRequest) -> HttpResponse:
             existencia.dias_llegada_pedido = new_dias
             existencia.consumo_diario_promedio = new_consumo
             existencia.actualizado_en = timezone.now()
-            existencia.save()
+            set_stock_trace(
+                existencia,
+                source=TRACE_MANUAL_EDIT,
+                process="inventario.existencias",
+                effective_at=timezone.now(),
+                reference=f"existencia:{existencia.id}",
+                user=request.user,
+                details={"form": "existencias"},
+            )
+            existencia.save(
+                update_fields=[
+                    "stock_actual",
+                    "punto_reorden",
+                    "stock_minimo",
+                    "stock_maximo",
+                    "inventario_promedio",
+                    "dias_llegada_pedido",
+                    "consumo_diario_promedio",
+                    "actualizado_en",
+                    "trazabilidad_stock",
+                ]
+            )
             if reorden_auto:
                 messages.info(
                     request,
@@ -4649,7 +5108,26 @@ def existencias(request: HttpRequest) -> HttpResponse:
             )
         return redirect("inventario:existencias")
 
-    existencias_rows = _canonicalized_existencias_rows(limit=200)
+    selected_q = (request.GET.get("q") or "").strip()
+    inventory_ctx = _inventory_canonical_context(limit=200)
+    existencias_rows = _canonicalized_existencias_rows(
+        limit=200,
+        canonical_rows=inventory_ctx["canonical_rows"],
+        usage_maps=inventory_ctx["usage_maps"],
+    )
+    if selected_q:
+        existencias_rows = [
+            row
+            for row in existencias_rows
+            if _inventory_query_matches(
+                getattr(row.insumo, "nombre", ""),
+                getattr(row.insumo, "nombre_point", ""),
+                getattr(row.insumo, "categoria", ""),
+                getattr(row.insumo, "codigo_point", ""),
+                getattr(row, "enterprise_missing", []),
+                q=selected_q,
+            )
+        ]
     formula_mode = getattr(settings, "INVENTARIO_REORDER_FORMULA", FORMULA_EXCEL_LEGACY)
     selected_focus_key = (request.GET.get("master_focus_key") or "auto").strip() or "auto"
     blocker_context = _inventory_master_blocker_context(
@@ -4668,8 +5146,9 @@ def existencias(request: HttpRequest) -> HttpResponse:
 
     context = {
         "existencias": existencias_rows,
-        "insumos": canonicalized_insumo_selector(limit=200),
+        "insumos": [row["canonical"] for row in inventory_ctx["canonical_rows"]],
         "can_manage_inventario": can_manage_inventario(request.user),
+        "selected_q": selected_q,
         "reorder_formula_mode": formula_mode,
         "reorder_max_diff_pct": _inventario_reorder_max_diff_pct(),
         "formula_excel_legacy": FORMULA_EXCEL_LEGACY,
@@ -4911,7 +5390,7 @@ def movimientos(request: HttpRequest) -> HttpResponse:
                 cantidad=cantidad,
                 referencia=request.POST.get("referencia", "").strip(),
             )
-            _apply_movimiento(movimiento)
+            _apply_movimiento(movimiento, user=request.user)
             log_event(
                 request.user,
                 "CREATE",
@@ -4926,11 +5405,29 @@ def movimientos(request: HttpRequest) -> HttpResponse:
             )
         return redirect("inventario:movimientos")
 
-    insumo_options = _canonicalized_insumo_stock_options(limit=200)
-    movimiento_rows = list(MovimientoInventario.objects.select_related("insumo")[:100])
+    selected_q = (request.GET.get("q") or "").strip()
+    inventory_ctx = _inventory_canonical_context(limit=200)
+    insumo_options = _canonicalized_insumo_stock_options(
+        limit=200,
+        canonical_rows=inventory_ctx["canonical_rows"],
+        usage_maps=inventory_ctx["usage_maps"],
+        existencias_by_insumo=inventory_ctx["existencias_by_insumo"],
+    )
+    movement_qs = MovimientoInventario.objects.select_related("insumo")
+    if selected_q:
+        movement_qs = movement_qs.filter(
+            Q(insumo__nombre__icontains=selected_q)
+            | Q(insumo__nombre_point__icontains=selected_q)
+            | Q(insumo__codigo_point__icontains=selected_q)
+            | Q(referencia__icontains=selected_q)
+        )
+    movimiento_rows = list(movement_qs[:100])
+    movement_canonical_map = {}
+    if movimiento_rows:
+        _, _, movement_canonical_map, _ = canonical_catalog_maps(limit=5000)
     for movimiento in movimiento_rows:
         enterprise_profile = enterprise_readiness_profile(movimiento.insumo)
-        canonical = canonical_insumo_by_id(movimiento.insumo_id) or movimiento.insumo
+        canonical = movement_canonical_map.get(movimiento.insumo_id) or movimiento.insumo
         movimiento.enterprise_profile = enterprise_profile
         movimiento.enterprise_missing = enterprise_profile["missing"]
         movimiento.enterprise_status = enterprise_profile["readiness_label"]
@@ -4967,7 +5464,11 @@ def movimientos(request: HttpRequest) -> HttpResponse:
 
     selected_focus_key = (request.GET.get("master_focus_key") or "auto").strip() or "auto"
     blocker_context = _inventory_master_blocker_context(
-        _canonicalized_existencias_rows(limit=200),
+        _canonicalized_existencias_rows(
+            limit=200,
+            canonical_rows=inventory_ctx["canonical_rows"],
+            usage_maps=inventory_ctx["usage_maps"],
+        ),
         usage_scope="inventory",
         focus_summary_template=(
             "La captura de movimientos sigue condicionada por {name} ({missing_field})."
@@ -4989,6 +5490,7 @@ def movimientos(request: HttpRequest) -> HttpResponse:
             if value != MovimientoInventario.TIPO_AJUSTE
         ],
         "can_manage_inventario": can_manage_inventario(request.user),
+        "selected_q": selected_q,
         "enterprise_chain": _inventario_enterprise_chain(
             focus="movimientos",
             total_rows=len(movimiento_rows),
@@ -5155,7 +5657,31 @@ def ajustes(request: HttpRequest) -> HttpResponse:
                 messages.success(request, f"Ajuste {ajuste.folio} creado en pendiente.")
         return redirect("inventario:ajustes")
 
-    ajustes_qs = AjusteInventario.objects.select_related("insumo", "solicitado_por", "aprobado_por")[:150]
+    selected_q = (request.GET.get("q") or "").strip()
+    selected_status = (request.GET.get("estatus") or "all").strip().upper() or "ALL"
+    selected_ajuste_id = (request.GET.get("ajuste_id") or "").strip()
+
+    ajustes_qs = AjusteInventario.objects.select_related("insumo", "solicitado_por", "aprobado_por").order_by("-creado_en", "-id")
+    valid_statuses = {choice[0] for choice in AjusteInventario.STATUS_CHOICES}
+    if selected_status in valid_statuses:
+        ajustes_qs = ajustes_qs.filter(estatus=selected_status)
+    else:
+        selected_status = "ALL"
+    if selected_ajuste_id.isdigit():
+        ajustes_qs = ajustes_qs.filter(pk=int(selected_ajuste_id))
+    else:
+        selected_ajuste_id = ""
+    if selected_q:
+        ajustes_qs = ajustes_qs.filter(
+            Q(folio__icontains=selected_q)
+            | Q(motivo__icontains=selected_q)
+            | Q(insumo__nombre__icontains=selected_q)
+            | Q(insumo__nombre_point__icontains=selected_q)
+            | Q(insumo__codigo_point__icontains=selected_q)
+            | Q(solicitado_por__username__icontains=selected_q)
+            | Q(aprobado_por__username__icontains=selected_q)
+        )
+    ajustes_qs = ajustes_qs[:150]
     ajustes_rows = []
     for ajuste in ajustes_qs:
         enterprise_profile = enterprise_readiness_profile(ajuste.insumo)
@@ -5214,6 +5740,9 @@ def ajustes(request: HttpRequest) -> HttpResponse:
         "ajustes": ajustes_rows,
         "insumos": canonicalized_insumo_selector(limit=200),
         "status_choices": AjusteInventario.STATUS_CHOICES,
+        "selected_q": selected_q,
+        "selected_status": selected_status,
+        "selected_ajuste_id": selected_ajuste_id,
         "can_manage_inventario": can_manage_inventario(request.user),
         "can_approve_ajustes": can_approve_ajustes,
         "enterprise_chain": _inventario_enterprise_chain(
@@ -5288,8 +5817,22 @@ def alertas(request: HttpRequest) -> HttpResponse:
     valid_levels = {"alerta", "critico", "bajo", "ok", "all"}
     if nivel not in valid_levels:
         nivel = "alerta"
+    selected_q = (request.GET.get("q") or "").strip()
 
     existencias = _canonicalized_existencias_rows(limit=500)
+    if selected_q:
+        existencias = [
+            row
+            for row in existencias
+            if _inventory_query_matches(
+                getattr(row.insumo, "nombre", ""),
+                getattr(row.insumo, "nombre_point", ""),
+                getattr(row.insumo, "categoria", ""),
+                getattr(row.insumo, "codigo_point", ""),
+                getattr(row, "enterprise_missing", []),
+                q=selected_q,
+            )
+        ]
 
     rows = []
     criticos_count = 0
@@ -5345,6 +5888,7 @@ def alertas(request: HttpRequest) -> HttpResponse:
     context = {
         "rows": rows,
         "nivel": nivel,
+        "selected_q": selected_q,
         "criticos_count": criticos_count,
         "bajo_reorden_count": bajo_reorden_count,
         "ok_count": ok_count,

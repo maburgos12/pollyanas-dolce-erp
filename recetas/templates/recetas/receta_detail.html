@@ -101,12 +101,12 @@
   </div>
   <details class="erp-advanced-panel mb-3">
     <summary class="erp-advanced-summary">
-      <span>Ver control ERP avanzado</span>
-      <span class="text-muted">Centro de mando, workflow, radar y trazabilidad ejecutiva</span>
+      <span>Ver detalle operativo y trazabilidad</span>
+      <span class="text-muted">Control documental, cobertura y dependencias del documento</span>
     </summary>
     <div class="erp-advanced-body">
   <section class="card mb-3">
-    <div class="card-header">Centro de mando ERP</div>
+    <div class="card-header">Resumen del documento</div>
     <div class="kpi-grid kpi-mini">
       <article class="kpi-card">
         <div class="kpi-label">Responsable principal</div>
@@ -128,7 +128,7 @@
     </div>
   </section>
   <div class="card table-card mb-3">
-    <div class="card-header">Workflow ERP del documento</div>
+    <div class="card-header">Flujo del documento</div>
     <div class="table-responsive">
       <table class="table table-striped align-middle">
         <thead>
@@ -170,7 +170,7 @@
   </div>
   <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
     <div class="enterprise-pill-card is-active">
-      <div class="enterprise-pill-title">Documento ERP</div>
+      <div class="enterprise-pill-title">Documento</div>
       <div class="enterprise-pill-text">{{ receta_rol_label }} listo para gobierno, costeo y trazabilidad.</div>
     </div>
     <div class="enterprise-pill-card">
@@ -182,20 +182,20 @@
       <div class="enterprise-pill-text">{{ recipe_health.label }}</div>
     </div>
     <div class="enterprise-pill-card">
-      <div class="enterprise-pill-title">Trazabilidad ERP</div>
+      <div class="enterprise-pill-title">Trazabilidad</div>
       <div class="enterprise-pill-text">{{ recipe_chain_status.label }}</div>
     </div>
   </div>
 
   <div class="card table-card mb-3">
-    <div class="card-header">Ficha documental ERP</div>
+    <div class="card-header">Ficha documental</div>
     <div class="table-responsive">
       <table class="table table-striped align-middle">
         <tbody>
           <tr>
             <th style="width:22%;">Tipo documental</th>
             <td style="width:28%;">{{ receta_rol_label }}</td>
-            <th style="width:22%;">Referencia ERP</th>
+            <th style="width:22%;">Referencia</th>
             <td style="width:28%;">{% if receta.codigo_point %}{{ receta.codigo_point }}{% else %}<span class="text-muted">Sin código Point</span>{% endif %}</td>
           </tr>
           <tr>
@@ -207,7 +207,7 @@
           <tr>
             <th>Estado del documento</th>
             <td>{{ enterprise_stage.label }}</td>
-            <th>Trazabilidad ERP</th>
+            <th>Trazabilidad</th>
             <td>{{ recipe_chain_status.label }}</td>
           </tr>
           <tr>
@@ -222,12 +222,12 @@
   </div>
 
   <div class="card mb-3">
-    <div class="card-header">Madurez ERP del documento</div>
+    <div class="card-header">Cobertura del documento</div>
     <p class="muted mb-2">Avance real del documento sobre gobierno maestro, estructura BOM, trazabilidad y cierre operativo.</p>
     <div class="kpi-grid kpi-mini">
       <article class="kpi-card">
         <div class="kpi-number {% if enterprise_stage_progress.pct >= 100 %}is-success{% elif enterprise_stage_progress.pct >= 50 %}is-warning{% else %}is-danger{% endif %}">{{ enterprise_stage_progress.pct }}%</div>
-        <div class="kpi-label">Cierre de etapa ERP</div>
+        <div class="kpi-label">Cierre de etapa</div>
         <div class="muted mt-2">{{ enterprise_stage_progress.completed }}/{{ enterprise_stage_progress.total }} criterios cerrados</div>
         <div class="erp-progress mt-2">
           <div class="erp-progress-fill {% if enterprise_stage_progress.pct >= 100 %}is-success{% elif enterprise_stage_progress.pct >= 50 %}is-warning{% else %}is-danger{% endif %}" style="width: {{ enterprise_stage_progress.pct }}%;"></div>
@@ -255,7 +255,7 @@
   </div>
 
   <div class="card table-card mb-3">
-    <div class="card-header">Cadena de control ERP</div>
+    <div class="card-header">Cadena de control</div>
     <div class="table-responsive">
       <table class="table table-striped align-middle">
         <thead>
@@ -366,7 +366,7 @@
   </section>
   {% endif %}
   <div class="card table-card mb-3">
-    <div class="card-header">Ruta troncal ERP</div>
+    <div class="card-header">Ruta operativa</div>
     <p class="muted mb-2">
       Expone cómo este documento conecta con el flujo troncal del ERP: estructura BOM, compras documentales e inventario/reabasto.
     </p>
@@ -426,7 +426,7 @@
   {% if erp_governance_rows %}
   {% if critical_path_rows %}
   <section class="card mb-3">
-    <div class="card-header">Ruta crítica ERP</div>
+    <div class="card-header">Prioridades de cierre</div>
     <p class="muted mb-2">
       Tramos prioritarios del documento según bloqueos, avance de cierre y dependencia operativa.
     </p>
@@ -471,7 +471,7 @@
   {% endif %}
   {% if executive_radar_rows %}
   <section class="card mb-3">
-    <div class="card-header">Radar ejecutivo ERP</div>
+    <div class="card-header">Resumen de seguimiento</div>
     <p class="muted mb-2">
       Lectura directiva del frente: responsable, bloqueo dominante, dependencia y avance de cierre operativo.
     </p>
@@ -506,7 +506,7 @@
   </section>
   {% endif %}
   <section class="card mb-3">
-    <div class="card-header">Mesa de gobierno ERP</div>
+    <div class="card-header">Control del documento</div>
     <p class="muted mb-2">
       Vista resumida del documento. Muestra frente, responsable, bloqueos, porcentaje de cierre y siguiente paso para liberar costeo, MRP y abastecimiento.
     </p>
@@ -607,7 +607,7 @@
             <td><a class="btn btn-secondary btn-sm" href="{% url 'recetas:linea_create' receta.id %}">{{ add_line_label }}</a></td>
           </tr>
           <tr>
-            <td>Trazabilidad ERP</td>
+            <td>Trazabilidad</td>
             <td>
               <span class="badge {% if recipe_chain_status.tone == 'danger' %}bg-danger{% elif recipe_chain_status.tone == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">
                 {{ recipe_chain_status.label }}
@@ -683,7 +683,7 @@
   </div>
 
   <div class="card table-card mb-3">
-    <div class="card-header">Criterios de cierre ERP</div>
+    <div class="card-header">Criterios de cierre</div>
     <div class="module-note mb-3">
       Cierre actual: <strong>{{ release_gate_progress.completed }}/{{ release_gate_progress.total }}</strong>.
       El documento solo debe considerarse liberado cuando todos los criterios estén cerrados.

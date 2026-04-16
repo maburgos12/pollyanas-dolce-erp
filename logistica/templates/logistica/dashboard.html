@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Logística - Dashboard{% endblock %}
+{% block page_title %}Logística · Dashboard{% endblock %}
+{% block body_class %}page-logistica-dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Distribución</div>
+      <h1 class="bi-hero-title">Logística en control</h1>
+      <p class="bi-copy">Rutas, entregas, incidencias y cierres del reparto en una sola lectura.</p>
+      <div class="bi-hero-highlights">
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Rutas visibles</div>
+          <div class="bi-hero-highlight-value">{{ rutas_total|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ rutas_hoy|intcomma }} del día · {{ rutas_en_ruta|intcomma }} en tránsito</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Entregas visibles</div>
+          <div class="bi-hero-highlight-value">{{ entregas_total|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ entregas_entregadas|intcomma }} cerradas · {{ incidencias|intcomma }} con incidencia</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Monto visible</div>
+          <div class="bi-hero-highlight-value">${{ monto_visible|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">Suma estimada de entregas visibles</div>
+        </article>
+      </div>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card"><span class="bi-status-label">Rutas en ruta</span><strong>{{ rutas_en_ruta|intcomma }}</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Entregas pendientes</span><strong>{{ entregas_pendientes|intcomma }}</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Incidencias</span><strong>{{ incidencias|intcomma }}</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Cierres</span><strong>{{ entregas_entregadas|intcomma }}</strong></article>
+      </div>
+      <form class="bi-filterbar" method="get">
+        <div class="bi-control">
+          <label for="logistica-date-from">Fecha desde</label>
+          <input id="logistica-date-from" type="date" name="date_from" value="{{ date_from }}">
+        </div>
+        <div class="bi-control">
+          <label for="logistica-date-to">Fecha hasta</label>
+          <input id="logistica-date-to" type="date" name="date_to" value="{{ date_to }}">
+        </div>
+        <div class="bi-control">
+          <label for="logistica-focus">Foco</label>
+          <select id="logistica-focus" name="enterprise_focus">
+            <option value="">Todos</option>
+            <option value="HOY" {% if enterprise_focus == "HOY" %}selected{% endif %}>Hoy</option>
+            <option value="EN_RUTA" {% if enterprise_focus == "EN_RUTA" %}selected{% endif %}>En ruta</option>
+            <option value="PENDIENTES" {% if enterprise_focus == "PENDIENTES" %}selected{% endif %}>Pendientes</option>
+            <option value="INCIDENCIAS" {% if enterprise_focus == "INCIDENCIAS" %}selected{% endif %}>Incidencias</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="logistica-q">Ruta o pedido</label>
+          <input id="logistica-q" type="text" name="q" value="{{ selected_q }}" placeholder="Folio, ruta, chofer, unidad o cliente">
+        </div>
+        <div class="bi-control"><button type="submit">Aplicar filtros</button></div>
+      </form>
+      <div class="bi-summary-band">
+        <div class="bi-summary-chip"><span>Foco</span><strong>{% if focus_summary %}{{ focus_summary.label }}{% else %}Toda la red{% endif %}</strong></div>
+        <div class="bi-summary-chip"><span>Rutas</span><strong>{{ rutas_total|intcomma }}</strong></div>
+        <div class="bi-summary-chip"><span>Entregas</span><strong>{{ entregas_total|intcomma }}</strong></div>
+        {% if selected_q %}
+        <div class="bi-summary-chip"><span>Búsqueda</span><strong>{{ selected_q }}</strong></div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="bi-kpi-grid">
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if rutas_hoy %}success{% else %}warning{% endif %}">{{ rutas_hoy|intcomma }}</div><div class="bi-kpi-label">Rutas del día</div><div class="bi-kpi-note">Programación visible para la fecha operativa.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if rutas_en_ruta %}warning{% else %}success{% endif %}">{{ rutas_en_ruta|intcomma }}</div><div class="bi-kpi-label">En tránsito</div><div class="bi-kpi-note">Rutas actualmente en ejecución.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if entregas_pendientes %}warning{% else %}success{% endif %}">{{ entregas_pendientes|intcomma }}</div><div class="bi-kpi-label">Entregas por cerrar</div><div class="bi-kpi-note">Pendientes documentales o físicas.</div></article>
+    <article class="bi-kpi-card"><div class="bi-kpi-value {% if incidencias %}danger{% else %}success{% endif %}">{{ incidencias|intcomma }}</div><div class="bi-kpi-label">Incidencias abiertas</div><div class="bi-kpi-note">Casos que todavía frenan el cierre total.</div></article>
+  </section>
+
+  {% if has_visible_data %}
+  <section class="bi-grid-feature">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div><div class="bi-kicker">Rutas</div><h2 class="bi-panel-title">Distribución de estatus de ruta</h2></div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ rutas_url }}">Abrir rutas</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage"><canvas id="logisticaRouteChart" aria-label="Distribución de estatus de ruta" role="img"></canvas></div>
+    </article>
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div><div class="bi-kicker">Entregas</div><h2 class="bi-panel-title">Distribución de estatus de entrega</h2></div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ rutas_incidencias_url }}">Ver incidencias</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage"><canvas id="logisticaDeliveryChart" aria-label="Distribución de estatus de entrega" role="img"></canvas></div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div><div class="bi-kicker">Ritmo</div><h2 class="bi-panel-title">Últimos 7 días</h2></div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ rutas_hoy_url }}">Ver hoy</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact"><canvas id="logisticaTrendChart" aria-label="Rutas y entregas últimos 7 días" role="img"></canvas></div>
+      <div class="bi-list bi-list-dense">
+        {% for row in latest_routes %}
+        <article class="bi-list-item is-tight">
+          <strong>{{ row.folio }} · {{ row.nombre }}</strong>
+          <div>{{ row.fecha_ruta|date:"Y-m-d" }} · {{ row.get_estatus_display }} · {{ row.total_entregas|intcomma }} entregas</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{% url 'logistica:ruta_detail' row.id %}">Abrir ruta</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin rutas recientes</strong><div class="bi-subtle">Aún no hay operación logística cargada.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div><div class="bi-kicker">Excepción</div><h2 class="bi-panel-title">Rutas con mayor presión</h2></div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ rutas_en_ruta_url }}">En tránsito</a>
+        </div>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in incident_routes %}
+        <article class="bi-list-item is-tight is-signal-danger">
+          <strong>{{ row.folio }} · {{ row.nombre }}</strong>
+          <div>{{ row.entregas_incidencia|intcomma }} incidencias · {{ row.total_entregas|intcomma }} entregas · {{ row.get_estatus_display }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{% url 'logistica:ruta_detail' row.id %}">Resolver ruta</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item is-tight is-signal-success">
+          <strong>Sin rutas presionadas</strong>
+          <div class="bi-subtle">No hay rutas con incidencias visibles.</div>
+        </article>
+        {% endfor %}
+        {% for row in pending_deliveries %}
+        <article class="bi-list-item is-tight is-signal-warning">
+          <strong>{{ row.ruta.folio }} · {{ row.cliente_nombre|default:row.pedido.cliente.nombre }}</strong>
+          <div>{{ row.get_estatus_display }} · ${{ row.monto_estimado|floatformat:2|intcomma }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{% url 'logistica:ruta_detail' row.ruta.id %}">Abrir ruta</a>
+            {% if row.pedido_id %}<a class="bi-inline-link" href="{% url 'crm:pedido_detail' row.pedido_id %}">Abrir pedido</a>{% endif %}
+          </div>
+        </article>
+        {% empty %}
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+  {% else %}
+  <section class="bi-grid-2">
+    <article class="bi-empty"><strong>Sin operación logística visible</strong><div>No hay rutas o entregas registradas todavía en la base actual.</div></article>
+    <article class="bi-empty"><strong>Dato pendiente</strong><div>Este tablero se activará con más señal en cuanto empiece a operar el flujo real de rutas y cierres.</div></article>
+  </section>
+  {% endif %}
+</div>
+
+{{ route_status_rows|json_script:"logistica-route-data" }}
+{{ delivery_status_rows|json_script:"logistica-delivery-data" }}
+{{ last_days|json_script:"logistica-trend-data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+(() => {
+  const parse = (id) => { const el = document.getElementById(id); if (!el) return []; try { return JSON.parse(el.textContent || "[]"); } catch (_) { return []; } };
+  const makeChart = (id, config) => { const el = document.getElementById(id); if (!el || typeof Chart === "undefined") return; new Chart(el, config); };
+  const palette = { vino:"#8b2252", vinoSoft:"rgba(139,34,82,.15)", success:"#236d53", successSoft:"rgba(35,109,83,.18)", warning:"#b38a25", warningSoft:"rgba(179,138,37,.18)", danger:"#bc3b3b", dangerSoft:"rgba(188,59,59,.18)" };
+
+  const routes = parse("logistica-route-data");
+  makeChart("logisticaRouteChart", { type:"doughnut", data:{ labels:routes.map(r=>r.label), datasets:[{ data:routes.map(r=>r.value), backgroundColor:[palette.warningSoft,palette.vinoSoft,palette.successSoft,palette.dangerSoft], borderColor:[palette.warning,palette.vino,palette.success,palette.danger], borderWidth:1.5 }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:"bottom" } } } });
+
+  const deliveries = parse("logistica-delivery-data");
+  makeChart("logisticaDeliveryChart", { type:"doughnut", data:{ labels:deliveries.map(r=>r.label), datasets:[{ data:deliveries.map(r=>r.value), backgroundColor:[palette.warningSoft,palette.vinoSoft,palette.successSoft,palette.dangerSoft], borderColor:[palette.warning,palette.vino,palette.success,palette.danger], borderWidth:1.5 }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:"bottom" } } } });
+
+  const trend = parse("logistica-trend-data");
+  makeChart("logisticaTrendChart", { type:"line", data:{ labels:trend.map(r=>r.label), datasets:[{ label:"Rutas", data:trend.map(r=>r.rutas), borderColor:palette.vino, backgroundColor:palette.vinoSoft, tension:.3 }, { label:"Entregas", data:trend.map(r=>r.entregas), borderColor:palette.warning, backgroundColor:palette.warningSoft, tension:.3 }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ position:"bottom" } } } });
+})();
+</script>
+{% endblock %}

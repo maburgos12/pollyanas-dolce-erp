@@ -13,12 +13,13 @@ class FakeSyncService:
     def __init__(self):
         self.calls = []
 
-    def run_inventory_sync(self, *, triggered_by=None, branch_filter=None, limit_branches=None):
+    def run_inventory_sync(self, *, triggered_by=None, branch_filter=None, limit_branches=None, capture_costs=None):
         self.calls.append(
             {
                 "triggered_by": triggered_by,
                 "branch_filter": branch_filter,
                 "limit_branches": limit_branches,
+                "capture_costs": capture_costs,
             }
         )
         return SimpleNamespace(
@@ -45,6 +46,7 @@ class RealtimeInventoryServiceTests(SimpleTestCase):
         self.assertEqual(len(jobs), 2)
         self.assertEqual(fake_sync.calls[0]["branch_filter"], "MATRIZ")
         self.assertEqual(fake_sync.calls[1]["branch_filter"], "COLOSIO")
+        self.assertFalse(fake_sync.calls[0]["capture_costs"])
 
     def test_run_sync_uses_all_branches_when_env_is_empty(self):
         fake_sync = FakeSyncService()
@@ -62,3 +64,17 @@ class RealtimeInventoryServiceTests(SimpleTestCase):
             jobs = service.run_sync(force=True)
         self.assertEqual(jobs, [])
         self.assertEqual(fake_sync.calls, [])
+
+    def test_run_sync_enqueues_webhook_delivery_when_configured(self):
+        fake_sync = FakeSyncService()
+        with patch.dict(os.environ, {"POS_BRIDGE_ECOMMERCE_WEBHOOK_URL": "https://example.com/hook"}, clear=False):
+            service = RealtimeInventoryService(sync_service=fake_sync)
+        with patch.object(service, "has_running_inventory_job", return_value=False), patch(
+            "pos_bridge.tasks.celery_tasks.task_ecommerce_webhook_delivery.delay"
+        ) as delay_mock:
+            jobs = service.run_sync(force=True)
+        self.assertEqual(len(jobs), 1)
+        delay_mock.assert_called_once()
+        kwargs = delay_mock.call_args.kwargs
+        self.assertEqual(kwargs["webhook_url"], "https://example.com/hook")
+        self.assertEqual(kwargs["payload"]["event"], "inventory_updated")

@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Propuestas de memoria | ERP{% endblock %}
+
+{% block extra_css %}
+<style>
+  .memory-shell { display: grid; gap: 1.25rem; }
+  .memory-hero {
+    background: linear-gradient(135deg, #15243b 0%, #23486a 58%, #b17b40 100%);
+    color: #fff;
+    border-radius: 24px;
+    padding: 1.6rem 1.75rem;
+    box-shadow: 0 20px 50px rgba(12, 20, 34, .14);
+  }
+  .memory-hero h1 { margin: 0 0 .4rem; font-size: 1.9rem; }
+  .memory-hero p { margin: 0; max-width: 68ch; color: rgba(255,255,255,.88); }
+  .memory-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .memory-card, .memory-panel {
+    background: #fff;
+    border: 1px solid rgba(21, 36, 59, .08);
+    border-radius: 20px;
+    box-shadow: 0 16px 40px rgba(12, 20, 34, .08);
+  }
+  .memory-card { padding: 1rem 1.1rem; }
+  .memory-card-label { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: #6d7785; margin-bottom: .35rem; }
+  .memory-card-value { font-size: 1.9rem; font-weight: 800; color: #15243b; }
+  .memory-panel { padding: 1.15rem; }
+  .memory-panel h2 { margin: 0 0 .85rem; color: #15243b; }
+  .memory-toolbar { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 1rem; }
+  .memory-field { display: grid; gap: .3rem; }
+  .memory-field label { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: #6d7785; font-weight: 700; }
+  .memory-select {
+    width: 100%;
+    border: 1px solid rgba(21, 36, 59, .12);
+    border-radius: 12px;
+    padding: .65rem .75rem;
+    color: #15243b;
+    background: #fff;
+  }
+  .memory-actions { display: flex; gap: .5rem; align-items: end; flex-wrap: wrap; }
+  .memory-btn {
+    border: none;
+    border-radius: 12px;
+    padding: .7rem .95rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .memory-btn.primary { background: #15243b; color: #fff; }
+  .memory-btn.secondary { background: #eef2f7; color: #24364d; }
+  .memory-table { width: 100%; border-collapse: collapse; }
+  .memory-table th, .memory-table td { text-align: left; padding: .7rem .55rem; border-top: 1px solid rgba(21, 36, 59, .08); vertical-align: top; }
+  .memory-table th { border-top: none; color: #6d7785; font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; }
+  .memory-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: .2rem .55rem;
+    font-size: .78rem;
+    font-weight: 700;
+    background: #eef2f7;
+    color: #24364d;
+  }
+  .memory-pill.proposed { background: #fff1d8; color: #8f5c00; }
+  .memory-pill.approved, .memory-pill.applied { background: #dff4e5; color: #12633a; }
+  .memory-pill.rejected { background: #f8e0e0; color: #9a2430; }
+  .memory-subtle { color: #6d7785; font-size: .88rem; }
+  .memory-empty {
+    border: 1px dashed rgba(21, 36, 59, .14);
+    border-radius: 16px;
+    padding: .95rem 1rem;
+    color: #6d7785;
+    background: #fafbfd;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="memory-shell">
+  <section class="memory-hero">
+    <h1>Propuestas de memoria operativa</h1>
+    <p>
+      Bandeja de revisión para decidir qué hallazgos estables pasan a <code>memory.md</code>. El runtime puede proponer,
+      pero la memoria solo se consolida tras revisión humana.
+    </p>
+  </section>
+
+  <section class="memory-grid">
+    <article class="memory-card">
+      <div class="memory-card-label">Propuestas nuevas</div>
+      <div class="memory-card-value">{{ summary.proposed }}</div>
+    </article>
+    <article class="memory-card">
+      <div class="memory-card-label">Aprobadas</div>
+      <div class="memory-card-value">{{ summary.approved }}</div>
+    </article>
+    <article class="memory-card">
+      <div class="memory-card-label">Aplicadas</div>
+      <div class="memory-card-value">{{ summary.applied }}</div>
+    </article>
+    <article class="memory-card">
+      <div class="memory-card-label">Rechazadas</div>
+      <div class="memory-card-value">{{ summary.rejected }}</div>
+    </article>
+  </section>
+
+  <article class="memory-panel">
+    <h2>Bandeja</h2>
+    {% if not memory_proposals_available %}
+    <div class="memory-empty">
+      La tabla <code>orquestacion_memoryproposal</code> no existe en esta base todavía. Ejecuta
+      <code>python manage.py migrate</code> en el entorno activo y vuelve a abrir esta bandeja.
+    </div>
+    {% endif %}
+    <form method="get" class="memory-toolbar">
+      <div class="memory-field">
+        <label for="memory-status">Estado</label>
+        <select id="memory-status" name="status" class="memory-select">
+          <option value="">Todos</option>
+          {% for code, label in status_options %}
+          <option value="{{ code }}" {% if filters.status == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="memory-field">
+        <label for="memory-section">Sección</label>
+        <select id="memory-section" name="section" class="memory-select">
+          <option value="">Todas</option>
+          {% for code, label in section_options %}
+          <option value="{{ code }}" {% if filters.section == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="memory-field">
+        <label for="memory-agent">Agente</label>
+        <select id="memory-agent" name="agent" class="memory-select">
+          <option value="">Todos</option>
+          {% for agent in agent_options %}
+          <option value="{{ agent.code }}" {% if filters.agent == agent.code %}selected{% endif %}>{{ agent.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="memory-actions">
+        <button type="submit" class="memory-btn primary">Aplicar filtros</button>
+        <a href="{% url 'orquestacion:memory_proposals' %}" class="memory-btn secondary">Limpiar</a>
+      </div>
+    </form>
+
+    {% if proposals %}
+    <table class="memory-table">
+      <thead>
+        <tr>
+          <th>Resumen</th>
+          <th>Origen</th>
+          <th>Estado</th>
+          <th>Detalle</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for proposal in proposals %}
+        <tr>
+          <td>
+            <strong>{{ proposal.summary }}</strong>
+            <div class="memory-subtle">{{ proposal.get_section_display }} · categoría: {{ proposal.category|default:"sin clasificar" }} · detecciones: {{ proposal.detected_count }}</div>
+          </td>
+          <td>
+            <div>{{ proposal.proposed_by_agent.name|default:"Sistema" }}</div>
+            <div class="memory-subtle">{{ proposal.get_source_type_display }}</div>
+          </td>
+          <td>
+            <span class="memory-pill {{ proposal.status }}">{{ proposal.get_status_display }}</span>
+            <div class="memory-subtle">Modo: {{ proposal.get_approval_mode_display }}</div>
+            <div class="memory-subtle">{{ proposal.last_detected_at|date:"d/m/Y H:i" }}</div>
+          </td>
+          <td>
+            <a href="{% url 'orquestacion:memory_proposal_detail' proposal.id %}" class="memory-btn secondary">Abrir</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% elif memory_proposals_available %}
+    <div class="memory-empty">No hay propuestas para los filtros seleccionados.</div>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

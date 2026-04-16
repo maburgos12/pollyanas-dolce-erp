@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - Cierre Producto{% endblock %}
+{% block page_title %}Reportes · Cierre Producto Point{% endblock %}
+{% block body_class %}page-reportes-cierre-producto{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326b">
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell">
+  <nav class="module-tabs">
+    <a class="module-tab" href="{% url 'reportes:ventas' %}">Ventas</a>
+    <a class="module-tab" href="{% url 'reportes:cierre_operativo' %}">Cierre diario</a>
+    <a class="module-tab active" href="{% url 'reportes:cierre_producto' %}">Cierre producto</a>
+    <a class="module-tab" href="{% url 'reportes:bi' %}">BI</a>
+    <a class="module-tab" href="{% url 'reportes:financiero' %}">Financiero</a>
+    <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
+    <a class="module-tab" href="{% url 'reportes:faltantes' %}">Faltantes</a>
+    <a class="module-tab" href="{% url 'reportes:proyectos_inversion' %}">Proyectos inversión</a>
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Point · Conciliación mensual</div>
+      <h1 class="bi-hero-title">Cierre teórico de producto terminado</h1>
+      <p class="bi-copy">Conciliación automática del mes: inventario inicial teórico + producción - venta equivalente - merma equivalente. En esta fase no entra inventario físico.</p>
+      <div class="bi-hero-highlights">
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Mes visible</div>
+          <div class="bi-hero-highlight-value">{{ selected_month_label }}</div>
+          <div class="bi-hero-highlight-meta">{% if closure %}{{ closure.lines.count|intcomma }} SKUs conciliados{% else %}Sin cierre construido{% endif %}</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Venta equivalente</div>
+          <div class="bi-hero-highlight-value">{{ total_sales|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">Incluye enteros + rebanadas regresadas a entero</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Inventario final</div>
+          <div class="bi-hero-highlight-value">{{ total_ending|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{% if catalog_issue_count %}{{ catalog_issue_count }} alertas de catálogo{% else %}Sin alertas de catálogo{% endif %}</div>
+        </article>
+      </div>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card">
+          <span class="bi-status-label">Estado</span>
+          <strong>{% if closure %}{{ closure.get_status_display }}{% else %}Pendiente{% endif %}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Inventario inicial</span>
+          <strong>{% if closure and closure.opening_reference_date %}{{ closure.get_opening_source_display }} · {{ closure.opening_reference_date|date:"Y-m-d" }}{% else %}Sin fuente construida{% endif %}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Cutoff upstream</span>
+          <strong>{% if closure and closure.upstream_sync_cutoff_at %}{{ closure.upstream_sync_cutoff_at|date:"Y-m-d H:i" }}{% else %}Sin corte{% endif %}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Bloqueo</span>
+          <strong>{% if closure and closure.is_locked %}Cierre protegido{% elif closure %}Pendiente de gobierno{% else %}Sin build{% endif %}</strong>
+        </article>
+      </div>
+
+      <form class="bi-filterbar is-closure" method="get">
+        <div class="bi-control">
+          <label for="month">Mes operativo</label>
+          <select id="month" name="month">
+            {% for option in month_options %}
+            <option value="{{ option.value }}" {% if option.value == selected_month %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bi-control">
+          <label>Alcance</label>
+          <div class="bi-pill is-muted">Point teórico</div>
+        </div>
+        <div class="bi-control">
+          <button type="submit">Ver cierre</button>
+        </div>
+      </form>
+
+      <form class="bi-build-strip" method="post">
+        {% csrf_token %}
+        <input type="hidden" name="month" value="{{ selected_month }}">
+        <input type="hidden" name="action" value="build">
+        <button type="submit" class="bi-build-button" {% if closure and not can_rebuild_closure %}disabled{% elif not closure and not can_build_closure %}disabled{% endif %}>
+          {% if closure %}Reconstruir cierre del mes{% else %}Construir cierre del mes{% endif %}
+        </button>
+        <div class="bi-subtle">
+          {% if closure %}
+            {% if can_rebuild_closure %}Rebuild permitido solo para gobierno autorizado.{% else %}El rebuild de este mes queda restringido a gobierno autorizado.{% endif %}
+          {% else %}
+            {% if can_build_closure %}Construcción operativa habilitada con movimientos Point materializados.{% else %}No tienes permisos para construir cierres mensuales.{% endif %}
+          {% endif %}
+        </div>
+      </form>
+
+      <div class="bi-summary-band">
+        <div class="bi-summary-chip">
+          <span>Modelo</span>
+          <strong>Solo teórico</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Conversión</span>
+          <strong>Rebanada → entero padre</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Fuente venta</span>
+          <strong>POINT_BRIDGE_SALES</strong>
+        </div>
+        {% if closure %}
+        <div class="bi-summary-chip">
+          <span>Exportar</span>
+          <strong><a class="bi-inline-link" href="{% url 'reportes:cierre_producto' %}?month={{ selected_month }}&export=csv">CSV</a> / <a class="bi-inline-link" href="{% url 'reportes:cierre_producto' %}?month={{ selected_month }}&export=xlsx">XLSX</a></strong>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  {% if closure %}
+  <section class="bi-kpi-grid">
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value">{{ total_opening|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Inventario inicial teórico</div>
+      <div class="bi-kpi-note">{% if closure.opening_reference_date %}Base de {{ closure.opening_reference_date|date:"Y-m-d" }}{% else %}Sin referencia{% endif %}</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value success">{{ total_production|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Producción del mes</div>
+      <div class="bi-kpi-note">Movimiento operativo consolidado desde Point</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value warning">{{ total_sales|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Venta equivalente</div>
+      <div class="bi-kpi-note">{{ total_derived_sales|floatformat:2|intcomma }} vienen de presentaciones derivadas</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if total_ending < 0 %}danger{% endif %}">{{ total_ending|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Inventario final teórico</div>
+      <div class="bi-kpi-note">{{ total_waste|floatformat:2|intcomma }} de merma equivalente en el mes</div>
+    </article>
+  </section>
+
+  <section class="bi-grid-feature">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Lectura operativa</div>
+          <h2 class="bi-panel-title">Señal del cierre mensual</h2>
+          <p class="bi-panel-copy">El tablero resume la composición del cierre teórico y deja visible qué parte proviene de venta/merma directa contra presentaciones derivadas.</p>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill {{ closure_status_tone }}">{{ closure.get_status_display }}</span>
+          {% if closure.built_by %}
+          <span class="bi-pill is-muted">Construido por {{ closure.built_by.username }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% if closure.is_locked and lock_event.locked_at %}
+      <div class="bi-note">
+        Bloqueado
+        {% if lock_event.locked_by %}por {{ lock_event.locked_by }}{% endif %}
+        el {{ lock_event.locked_at|slice:":16"|default:"sin marca de tiempo" }}.
+      </div>
+      {% endif %}
+      <div class="bi-insight-grid">
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Venta directa</div>
+          <div class="bi-insight-value">{{ total_direct_sales|floatformat:2|intcomma }}</div>
+          <div class="bi-insight-meta">Salida registrada como entero en Point/ERP.</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Venta derivada</div>
+          <div class="bi-insight-value">{{ total_derived_sales|floatformat:2|intcomma }}</div>
+          <div class="bi-insight-meta">Rebanadas homologadas a entero padre.</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Merma derivada</div>
+          <div class="bi-insight-value">{{ total_derived_waste|floatformat:2|intcomma }}</div>
+          <div class="bi-insight-meta">Merma de presentaciones derivadas llevada a la receta padre.</div>
+        </article>
+      </div>
+      {% if notes_rows %}
+      <div class="bi-note">
+        {% for row in notes_rows %}
+        <div>{{ row }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if unmatched_products %}
+      <div class="bi-note pending">
+        Productos Point sin homologación en el opening:
+        {% for product in unmatched_products %}
+          {{ product }}{% if not forloop.last %}, {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if closure and not closure.is_locked %}
+      <div class="bi-lock-callout">
+        <div>
+          <div class="bi-kicker">Gobernanza</div>
+          <strong>Cerrar y proteger mes</strong>
+          <div class="bi-subtle">Bloquea el mes cuando ya validaste que no requiere rebuild ni corrección de catálogo.</div>
+        </div>
+        <form method="post" class="bi-lock-form">
+          {% csrf_token %}
+          <input type="hidden" name="month" value="{{ selected_month }}">
+          <input type="hidden" name="action" value="lock">
+          <input type="text" name="approval_note" class="bi-lock-input" placeholder="Nota de aprobacion (opcional)">
+          <button type="submit" class="bi-lock-button" {% if not can_lock_closure or lock_guard_errors %}disabled{% endif %}>Bloquear cierre</button>
+        </form>
+      </div>
+      {% if not can_lock_closure %}
+      <div class="bi-note pending">Solo Dirección General o Administración pueden bloquear cierres mensuales.</div>
+      {% endif %}
+      {% if lock_guard_errors %}
+      <div class="bi-note pending">
+        Guardas activas:
+        {% for row in lock_guard_errors %}
+          {{ row }}{% if not forloop.last %} · {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endif %}
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Histórico cercano</div>
+          <h2 class="bi-panel-title">Construcciones recientes</h2>
+          <p class="bi-panel-copy">Visibilidad rápida de cierres disponibles para navegación mensual.</p>
+        </div>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in recent_closure_rows %}
+        <article class="bi-list-item {% if row.month_value == selected_month %}is-signal-success{% else %}is-signal-neutral{% endif %}">
+          <strong>{{ row.month_label }}</strong>
+          <div class="bi-subtle">{{ row.status }} · {{ row.line_count|intcomma }} recetas</div>
+          <div>{{ row.ending_inventory|floatformat:2|intcomma }} final · {{ row.sales_total|floatformat:2|intcomma }} venta</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{% url 'reportes:cierre_producto' %}?month={{ row.month_value }}">Abrir mes</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin cierres disponibles</strong><div class="bi-subtle">Construye el primer cierre desde esta misma vista.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Excepciones y guardas</div>
+        <h2 class="bi-panel-title">Estado operativo del mes</h2>
+        <p class="bi-panel-copy">Aquí se concentra lo que hoy impide o condiciona el bloqueo institucional del cierre.</p>
+      </div>
+      <div class="bi-panel-actions">
+        <span class="bi-pill {% if validation.lock_ready %}success{% else %}warning{% endif %}">
+          {% if validation.lock_ready %}Listo para lock{% else %}Con guardas activas{% endif %}
+        </span>
+      </div>
+    </div>
+    <div class="bi-list bi-list-dense">
+      {% for row in exception_rows %}
+      <article class="bi-list-item {% if row.tone == 'danger' %}is-signal-danger{% elif row.tone == 'warning' %}is-signal-warning{% elif row.tone == 'success' %}is-signal-success{% else %}is-signal-neutral{% endif %}">
+        <strong>{{ row.title }}</strong>
+        <div class="bi-subtle">{{ row.detail }}</div>
+      </article>
+      {% empty %}
+      <article class="bi-list-item is-signal-success">
+        <strong>Sin excepciones visibles</strong>
+        <div class="bi-subtle">El mes no presenta guardas relevantes fuera de la gobernanza normal.</div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Conversión</div>
+          <h2 class="bi-panel-title">Presentaciones derivadas consolidadas</h2>
+          <p class="bi-panel-copy">Top de recetas padre que absorbieron venta o merma proveniente de rebanadas u otras presentaciones derivadas.</p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="bi-table">
+          <thead>
+            <tr>
+              <th>Receta padre</th>
+              <th class="text-end">Venta derivada</th>
+              <th class="text-end">Merma derivada</th>
+              <th class="text-end">Final teórico</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for line in conversion_rows %}
+            <tr>
+              <td>
+                <strong>{{ line.receta_padre.nombre }}</strong>
+                {% if line.receta_padre.codigo_point %}<div class="bi-subtle">{{ line.receta_padre.codigo_point }}</div>{% endif %}
+              </td>
+              <td class="text-end">{{ line.venta_derivada_equivalente|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ line.merma_derivada_equivalente|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ line.inventario_final_teorico|floatformat:2|intcomma }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="4">No hubo conversiones derivadas visibles en este mes.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Riesgo de catálogo</div>
+          <h2 class="bi-panel-title">Incidencias visibles</h2>
+          <p class="bi-panel-copy">Esta sección apunta recetas con señales de homologación o catálogo que deben resolverse antes de institucionalizar el cierre.</p>
+        </div>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for line in catalog_issue_rows %}
+        <article class="bi-list-item is-signal-warning">
+          <strong>{{ line.receta_padre.nombre }}</strong>
+          <div class="bi-subtle">{{ line.catalog_issue_note|default:"Incidencia detectada en homologación." }}</div>
+          <div>{{ line.inventario_final_teorico|floatformat:2|intcomma }} final teórico</div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item is-signal-success">
+          <strong>Sin incidencias abiertas</strong>
+          <div class="bi-subtle">El mes visible no reporta alertas de catálogo en las líneas conciliadas.</div>
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Auditoría de líneas</div>
+        <h2 class="bi-panel-title">Detalle del cierre mensual</h2>
+        <p class="bi-panel-copy">Cada línea representa una receta padre conciliada. El detalle deja visible la fuente equivalente por ventas y merma derivada.</p>
+      </div>
+      <div class="bi-panel-actions">
+        <span class="bi-pill is-muted">{{ closure.lines.count|intcomma }} líneas</span>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="bi-table bi-table-compact bi-closure-table">
+        <colgroup>
+          <col class="col-receta-padre">
+          <col class="col-metric">
+          <col class="col-metric">
+          <col class="col-metric">
+          <col class="col-metric">
+          <col class="col-metric">
+          <col class="col-metric">
+          <col class="col-lectura">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Receta padre</th>
+            <th class="text-end">Inicial</th>
+            <th class="text-end">Producción</th>
+            <th class="text-end">Venta directa</th>
+            <th class="text-end">Venta derivada</th>
+            <th class="text-end">Merma total</th>
+            <th class="text-end">Final teórico</th>
+            <th>Lectura</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in closure_lines %}
+          <tr>
+            <td class="bi-closure-name-cell">
+              <strong>{{ line.receta_padre.nombre }}</strong>
+              {% if line.receta_padre.codigo_point %}<div class="bi-subtle">{{ line.receta_padre.codigo_point }}</div>{% endif %}
+            </td>
+            <td class="text-end bi-closure-metric-cell">{{ line.inventario_inicial_teorico|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ line.produccion_mes|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ line.venta_directa_enteros|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ line.venta_derivada_equivalente|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ line.merma_total_equivalente|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_teorico|floatformat:2|intcomma }}</td>
+            <td class="bi-closure-reading-cell">
+              {% if line.has_catalog_issue %}
+              <span class="bi-tone warning">Catálogo</span>
+              <div class="bi-subtle">{{ line.catalog_issue_note }}</div>
+              {% elif line.venta_derivada_equivalente or line.merma_derivada_equivalente %}
+              <span class="bi-tone neutral">Con derivadas</span>
+              <div class="bi-subtle">{{ line.source_sale_rows|intcomma }} ventas · {{ line.source_waste_rows|intcomma }} mermas</div>
+              {% else %}
+              <span class="bi-tone success">Directo</span>
+              <div class="bi-subtle">{{ line.source_snapshot_count|intcomma }} snapshots · {{ line.source_production_rows|intcomma }} producciones</div>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% else %}
+  <section class="bi-panel">
+    <div class="bi-empty">
+      <strong>No existe un cierre construido para {{ selected_month_label }}.</strong>
+      <div class="bi-subtle">Puedes construirlo desde esta vista siempre que el sistema tenga snapshot de inventario inicial del mes previo o un cierre anterior disponible.</div>
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

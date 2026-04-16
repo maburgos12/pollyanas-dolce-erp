@@ -1,0 +1,577 @@
+{% extends "base.html" %}
+
+{% block title %}Orquestación | ERP{% endblock %}
+{% block body_class %}orquestacion-body{% endblock %}
+
+{% block extra_css %}
+<style>
+  .orch-shell { display: grid; gap: 1.5rem; }
+  .orch-hero {
+    background: linear-gradient(135deg, #15243b 0%, #223d63 55%, #c28b4a 100%);
+    color: #fff;
+    border-radius: 24px;
+    padding: 1.75rem 1.75rem 1.5rem;
+    box-shadow: 0 24px 70px rgba(14, 23, 38, .18);
+  }
+  .orch-hero h1 { margin: 0 0 .5rem; font-size: 2rem; }
+  .orch-hero p { margin: 0; max-width: 65ch; color: rgba(255,255,255,.88); }
+  .orch-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .orch-card, .orch-panel {
+    background: #fff;
+    border: 1px solid rgba(21, 36, 59, .08);
+    border-radius: 20px;
+    box-shadow: 0 16px 40px rgba(12, 20, 34, .08);
+  }
+  .orch-card { padding: 1rem 1.1rem; }
+  .orch-card-label { font-size: .82rem; text-transform: uppercase; letter-spacing: .06em; color: #6d7785; margin-bottom: .45rem; }
+  .orch-card-value { font-size: 1.95rem; font-weight: 800; color: #15243b; }
+  .orch-card-note { color: #6d7785; font-size: .9rem; }
+  .orch-panels { display: grid; gap: 1rem; grid-template-columns: 1.25fr 1fr; }
+  .orch-stack { display: grid; gap: 1rem; }
+  .orch-panel { padding: 1.15rem 1.15rem 1rem; }
+  .orch-panel h2 { margin: 0 0 .9rem; font-size: 1.05rem; color: #15243b; }
+  .orch-table { width: 100%; border-collapse: collapse; }
+  .orch-table th, .orch-table td { text-align: left; padding: .7rem .55rem; border-top: 1px solid rgba(21, 36, 59, .08); vertical-align: top; }
+  .orch-table th { border-top: none; color: #6d7785; font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; }
+  .orch-kicker { color: #6d7785; font-size: .88rem; margin-bottom: .85rem; }
+  .orch-toolbar {
+    display: grid;
+    gap: .75rem;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    margin-bottom: 1rem;
+  }
+  .orch-field { display: grid; gap: .3rem; }
+  .orch-field label {
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #6d7785;
+    font-weight: 700;
+  }
+  .orch-select {
+    width: 100%;
+    border: 1px solid rgba(21, 36, 59, .12);
+    border-radius: 12px;
+    padding: .65rem .75rem;
+    color: #15243b;
+    background: #fff;
+  }
+  .orch-toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    align-items: end;
+  }
+  .orch-btn {
+    border: none;
+    border-radius: 12px;
+    padding: .7rem .95rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .orch-btn.primary { background: #15243b; color: #fff; }
+  .orch-btn.secondary { background: #eef2f7; color: #24364d; }
+  .orch-btn.inline {
+    padding: .45rem .7rem;
+    font-size: .82rem;
+    margin-top: .45rem;
+  }
+  .orch-metrics-inline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+    margin-bottom: .9rem;
+  }
+  .orch-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: .2rem .55rem;
+    font-size: .78rem;
+    font-weight: 700;
+    background: #eef2f7;
+    color: #24364d;
+  }
+  .orch-pill.active, .orch-pill.success, .orch-pill.executed, .orch-pill.resolved { background: #dff4e5; color: #12633a; }
+  .orch-pill.warning, .orch-pill.pending, .orch-pill.running, .orch-pill.under_review { background: #fff1d8; color: #8f5c00; }
+  .orch-pill.failed, .orch-pill.critical, .orch-pill.rejected, .orch-pill.cancelled, .orch-pill.retired { background: #f8e0e0; color: #9a2430; }
+  .orch-subtle { color: #6d7785; font-size: .88rem; }
+  .orch-agent-name { font-weight: 700; color: #15243b; }
+  .orch-empty {
+    border: 1px dashed rgba(21, 36, 59, .14);
+    border-radius: 16px;
+    padding: .95rem 1rem;
+    color: #6d7785;
+    background: #fafbfd;
+  }
+  @media (max-width: 1080px) {
+    .orch-panels { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="orch-shell">
+  <section class="orch-hero">
+    <h1>Orquestación operativa</h1>
+    <p>
+      Torre de control del organigrama de agentes del ERP. Esta vista consolida agentes activos, reglas, corridas,
+      sugerencias pendientes y huecos de cobertura sin ejecutar acciones sensibles por sí sola.
+    </p>
+  </section>
+
+  <section class="orch-grid">
+    <article class="orch-card">
+      <div class="orch-card-label">Agentes activos</div>
+      <div class="orch-card-value">{{ summary.agents_active }}</div>
+      <div class="orch-card-note">de {{ summary.agents_total }} definidos</div>
+    </article>
+    <article class="orch-card">
+      <div class="orch-card-label">Reglas activas</div>
+      <div class="orch-card-value">{{ summary.rules_active }}</div>
+      <div class="orch-card-note">delegación y disparadores vigentes</div>
+    </article>
+    <article class="orch-card">
+      <div class="orch-card-label">Tareas abiertas</div>
+      <div class="orch-card-value">{{ summary.tasks_open }}</div>
+      <div class="orch-card-note">pendientes, bloqueadas o en ejecución</div>
+    </article>
+    <article class="orch-card">
+      <div class="orch-card-label">Sugerencias pendientes</div>
+      <div class="orch-card-value">{{ summary.suggestions_pending }}</div>
+      <div class="orch-card-note">requieren revisión humana</div>
+    </article>
+    <article class="orch-card">
+      <div class="orch-card-label">Corridas exitosas</div>
+      <div class="orch-card-value">{{ summary.runs_today }}</div>
+      <div class="orch-card-note">registradas en la instancia actual</div>
+    </article>
+    <article class="orch-card">
+      <div class="orch-card-label">Huecos abiertos</div>
+      <div class="orch-card-value">{{ summary.gaps_open }}</div>
+      <div class="orch-card-note">cobertura o agentes por revisar</div>
+    </article>
+    <article class="orch-card">
+      <div class="orch-card-label">Memoria pendiente</div>
+      <div class="orch-card-value">{{ summary.memory_proposals_pending }}</div>
+      {% if memory_proposals_available %}
+      <div class="orch-card-note">propuestas en revisión antes de escribir memory.md</div>
+      {% else %}
+      <div class="orch-card-note">tabla no disponible aún; falta aplicar migraciones</div>
+      {% endif %}
+    </article>
+    <article class="orch-card">
+      <div class="orch-card-label">Hallazgos abiertos</div>
+      <div class="orch-card-value">{{ summary.quality_findings_open }}</div>
+      {% if quality_loop_available %}
+      <div class="orch-card-note">violaciones y gaps técnicos auditables desde el ERP</div>
+      {% else %}
+      <div class="orch-card-note">loop de calidad no disponible aún; faltan migraciones</div>
+      {% endif %}
+    </article>
+    <article class="orch-card">
+      <div class="orch-card-label">Remediaciones activas</div>
+      <div class="orch-card-value">{{ summary.remediation_pending }}</div>
+      <div class="orch-card-note">pendientes de implementación o validación</div>
+    </article>
+  </section>
+
+  <section class="orch-panels">
+    <div class="orch-stack">
+      <article class="orch-panel">
+        <h2>Agentes</h2>
+        <div class="orch-kicker">Catálogo base sembrado desde el mapa de capacidades del ERP.</div>
+        {% if agents %}
+        <table class="orch-table">
+          <thead>
+            <tr>
+              <th>Agente</th>
+              <th>Dominio</th>
+              <th>Estado</th>
+              <th>Capacidades</th>
+              <th>Área</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for agent in agents %}
+            <tr>
+              <td>
+                <div class="orch-agent-name">{{ agent.name }}</div>
+                <div class="orch-subtle">{{ agent.code }}</div>
+              </td>
+              <td>{{ agent.domain }}</td>
+              <td><span class="orch-pill {{ agent.status }}">{{ agent.get_status_display }}</span></td>
+              <td>{{ agent.capabilities_count }}</td>
+              <td>{{ agent.owner_department.nombre|default:"Sin área" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="orch-empty">No hay agentes configurados aún.</div>
+        {% endif %}
+      </article>
+
+      <article class="orch-panel">
+        <h2>Reglas activas</h2>
+        {% if rules %}
+        <table class="orch-table">
+          <thead>
+            <tr>
+              <th>Regla</th>
+              <th>Trigger</th>
+              <th>Delegación</th>
+              <th>Modo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rule in rules %}
+            <tr>
+              <td>
+                <div class="orch-agent-name">{{ rule.name }}</div>
+                <div class="orch-subtle">{{ rule.code }}</div>
+              </td>
+              <td>{{ rule.source_event|default:"Sin evento" }}</td>
+              <td>
+                <div>{{ rule.primary_agent.name }}</div>
+                {% if rule.secondary_agent %}
+                <div class="orch-subtle">apoyo: {{ rule.secondary_agent.name }}</div>
+                {% endif %}
+              </td>
+              <td><span class="orch-pill {% if rule.is_active %}active{% else %}retired{% endif %}">{{ rule.get_action_mode_display }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="orch-empty">No hay reglas configuradas todavía.</div>
+        {% endif %}
+      </article>
+
+      <article class="orch-panel">
+        <h2>Corridas recientes</h2>
+        <form method="get" class="orch-toolbar">
+          <div class="orch-field">
+            <label for="orch-rule-runs">Regla</label>
+            <select id="orch-rule-runs" name="rule" class="orch-select">
+              <option value="">Todas</option>
+              {% for option in rule_options %}
+              <option value="{{ option.code }}" {% if filters.rule == option.code %}selected{% endif %}>{{ option.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="orch-field">
+            <label for="orch-run-status">Estado de corrida</label>
+            <select id="orch-run-status" name="run_status" class="orch-select">
+              <option value="">Todos</option>
+              {% for code, label in run_status_options %}
+              <option value="{{ code }}" {% if filters.run_status == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="orch-field">
+            <label for="orch-run-decision-keep">Decisión sugerencia</label>
+            <select id="orch-run-decision-keep" name="decision" class="orch-select">
+              {% for code, label in decision_options %}
+              <option value="{{ code }}" {% if filters.decision == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="orch-toolbar-actions">
+            <button type="submit" class="orch-btn primary">Aplicar filtros</button>
+            <a href="{% url 'orquestacion:dashboard' %}" class="orch-btn secondary">Limpiar</a>
+          </div>
+        </form>
+        <div class="orch-metrics-inline">
+          {% for item in run_status_breakdown_items %}
+          <span class="orch-pill {{ item.code }}">{{ item.label }}: {{ item.count }}</span>
+          {% endfor %}
+        </div>
+        {% if recent_runs %}
+        <table class="orch-table">
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Origen</th>
+              <th>Estado</th>
+              <th>Regla</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in recent_runs %}
+            <tr>
+              <td>
+                <div class="orch-agent-name">{{ run.run_key }}</div>
+                <div class="orch-subtle">{{ run.started_at|date:"d/m/Y H:i" }}</div>
+              </td>
+              <td>{{ run.trigger_source }}</td>
+              <td><span class="orch-pill {{ run.status }}">{{ run.get_status_display }}</span></td>
+              <td>
+                <div>{{ run.rule.name|default:"Sin regla" }}</div>
+                {% if run.result_summary_json.message %}
+                <div class="orch-subtle">{{ run.result_summary_json.message }}</div>
+                {% endif %}
+              </td>
+              <td>
+                {% if run.source_url %}
+                <a href="{{ run.source_url }}" class="orch-btn secondary inline">{{ run.source_label }}</a>
+                {% else %}
+                <span class="orch-subtle">Sin enlace</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="orch-empty">Todavía no hay corridas registradas. El catálogo ya está listo para empezar a poblarlas.</div>
+        {% endif %}
+      </article>
+    </div>
+
+    <div class="orch-stack">
+      <article class="orch-panel">
+        <h2>Sugerencias</h2>
+        <form method="get" class="orch-toolbar">
+          <div class="orch-field">
+            <label for="orch-rule-suggestions">Regla</label>
+            <select id="orch-rule-suggestions" name="rule" class="orch-select">
+              <option value="">Todas</option>
+              {% for option in rule_options %}
+              <option value="{{ option.code }}" {% if filters.rule == option.code %}selected{% endif %}>{{ option.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="orch-field">
+            <label for="orch-severity">Severidad</label>
+            <select id="orch-severity" name="severity" class="orch-select">
+              <option value="">Todas</option>
+              {% for code, label in severity_options %}
+              <option value="{{ code }}" {% if filters.severity == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="orch-field">
+            <label for="orch-decision">Decisión</label>
+            <select id="orch-decision" name="decision" class="orch-select">
+              {% for code, label in decision_options %}
+              <option value="{{ code }}" {% if filters.decision == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <input type="hidden" name="run_status" value="{{ filters.run_status }}">
+          <div class="orch-toolbar-actions">
+            <button type="submit" class="orch-btn primary">Aplicar filtros</button>
+            <a href="{% url 'orquestacion:dashboard' %}" class="orch-btn secondary">Limpiar</a>
+          </div>
+        </form>
+        <div class="orch-metrics-inline">
+          {% for item in severity_breakdown_items %}
+          <span class="orch-pill {{ item.code }}">{{ item.label }}: {{ item.count }}</span>
+          {% endfor %}
+        </div>
+        <div class="orch-metrics-inline">
+          {% for item in decision_breakdown_items %}
+          <span class="orch-pill {{ item.code }}">{{ item.label }}: {{ item.count }}</span>
+          {% endfor %}
+        </div>
+        {% if filtered_suggestions %}
+        <table class="orch-table">
+          <thead>
+            <tr>
+              <th>Resumen</th>
+              <th>Regla</th>
+              <th>Agente</th>
+              <th>Severidad</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for suggestion in filtered_suggestions %}
+            <tr>
+              <td>
+                <div class="orch-agent-name">{{ suggestion.summary }}</div>
+                <div class="orch-subtle">{{ suggestion.recommended_action|default:"Sin acción recomendada" }}</div>
+              </td>
+              <td>
+                {% if suggestion.task.run.rule %}
+                <div>{{ suggestion.task.run.rule.name }}</div>
+                <div class="orch-subtle">{{ suggestion.task.run.rule.code }}</div>
+                {% else %}
+                <span class="orch-subtle">Sin regla</span>
+                {% endif %}
+              </td>
+              <td>{{ suggestion.task.agent.name }}</td>
+              <td>
+                <span class="orch-pill {{ suggestion.severity }}">{{ suggestion.get_severity_display }}</span>
+                <div class="orch-subtle">{{ suggestion.get_decision_status_display }}</div>
+              </td>
+              <td>
+                {% if suggestion.source_url %}
+                <a href="{{ suggestion.source_url }}" class="orch-btn secondary inline">{{ suggestion.source_label }}</a>
+                {% else %}
+                <span class="orch-subtle">Sin enlace</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="orch-empty">No hay sugerencias para los filtros seleccionados.</div>
+        {% endif %}
+      </article>
+
+      <article class="orch-panel">
+        <h2>Tareas abiertas</h2>
+        {% if open_tasks %}
+        <table class="orch-table">
+          <thead>
+            <tr>
+              <th>Tarea</th>
+              <th>Agente</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for task in open_tasks %}
+            <tr>
+              <td>
+                <div class="orch-agent-name">{{ task.title }}</div>
+                <div class="orch-subtle">{{ task.task_type }}</div>
+              </td>
+              <td>{{ task.agent.name }}</td>
+              <td><span class="orch-pill {{ task.status }}">{{ task.get_status_display }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="orch-empty">No hay tareas abiertas registradas todavía.</div>
+        {% endif %}
+      </article>
+
+      <article class="orch-panel">
+        <h2>Huecos de cobertura</h2>
+        {% if open_gaps %}
+        <table class="orch-table">
+          <thead>
+            <tr>
+              <th>Hallazgo</th>
+              <th>Agente sugerido</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for gap in open_gaps %}
+            <tr>
+              <td>
+                <div class="orch-agent-name">{{ gap.summary }}</div>
+                <div class="orch-subtle">{{ gap.gap_type }}</div>
+              </td>
+              <td>{{ gap.suggested_agent_name }}</td>
+              <td><span class="orch-pill {{ gap.status }}">{{ gap.get_status_display }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="orch-empty">No hay huecos abiertos. El organigrama actual cubre la base del piloto.</div>
+        {% endif %}
+      </article>
+
+      <article class="orch-panel">
+        <h2>Propuestas de memoria</h2>
+        <div class="orch-kicker">Hallazgos estables detectados por runtime o revisión técnica, pendientes de aprobación humana.</div>
+        {% if not memory_proposals_available %}
+        <div class="orch-empty">
+          La tabla de propuestas de memoria no existe en esta base todavía. Ejecuta <code>python manage.py migrate</code>
+          en el entorno activo y vuelve a cargar esta vista.
+        </div>
+        {% elif memory_proposals_pending %}
+        <table class="orch-table">
+          <thead>
+            <tr>
+              <th>Resumen</th>
+              <th>Agente</th>
+              <th>Estado</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for proposal in memory_proposals_pending %}
+            <tr>
+              <td>
+                <div class="orch-agent-name">{{ proposal.summary }}</div>
+                <div class="orch-subtle">{{ proposal.get_section_display }} · detecciones: {{ proposal.detected_count }}</div>
+              </td>
+              <td>{{ proposal.proposed_by_agent.name|default:"Sistema" }}</td>
+              <td><span class="orch-pill {{ proposal.status }}">{{ proposal.get_status_display }}</span></td>
+              <td>
+                <a href="{% url 'orquestacion:memory_proposal_detail' proposal.id %}" class="orch-btn secondary inline">Revisar propuesta</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <a href="{% url 'orquestacion:memory_proposals' %}" class="orch-btn primary inline">Abrir bandeja completa</a>
+        {% else %}
+        <div class="orch-empty">No hay propuestas de memoria pendientes en este momento.</div>
+        {% endif %}
+      </article>
+
+      <article class="orch-panel">
+        <h2>Loop de calidad y remediación</h2>
+        <div class="orch-kicker">Hallazgos persistentes del guard arquitectónico con remediación operable y cierre auditable.</div>
+        {% if not quality_loop_available %}
+        <div class="orch-empty">
+          Las tablas del loop de calidad aún no existen en esta base. Ejecuta <code>python manage.py migrate</code>
+          en el entorno activo para operar hallazgos y remediaciones desde el ERP.
+        </div>
+        {% elif quality_findings_open %}
+        <table class="orch-table">
+          <thead>
+            <tr>
+              <th>Hallazgo</th>
+              <th>Severidad</th>
+              <th>Remediación</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for finding in quality_findings_open %}
+            <tr>
+              <td>
+                <div class="orch-agent-name">{{ finding.statement }}</div>
+                <div class="orch-subtle">{{ finding.source_reference }} · detecciones: {{ finding.detected_count }}</div>
+              </td>
+              <td><span class="orch-pill {{ finding.severity }}">{{ finding.get_severity_display }}</span></td>
+              <td>
+                {% with remediation=finding.remediation_proposals.first %}
+                  {% if remediation %}
+                  <span class="orch-pill {{ remediation.status }}">{{ remediation.get_status_display }}</span>
+                  <div class="orch-subtle">{{ remediation.get_risk_level_display }} · {{ remediation.remediation_type }}</div>
+                  {% else %}
+                  <span class="orch-subtle">Sin propuesta</span>
+                  {% endif %}
+                {% endwith %}
+              </td>
+              <td><a href="{% url 'orquestacion:quality_finding_detail' finding.id %}" class="orch-btn secondary inline">Abrir hallazgo</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <a href="{% url 'orquestacion:quality_findings' %}" class="orch-btn primary inline">Abrir bandeja de calidad</a>
+        {% else %}
+        <div class="orch-empty">No hay hallazgos de calidad abiertos en este momento.</div>
+        {% endif %}
+      </article>
+    </div>
+  </section>
+</section>
+{% endblock %}

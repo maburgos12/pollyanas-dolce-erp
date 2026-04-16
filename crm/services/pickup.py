@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Max, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from core.audit import log_event
-from core.models import Sucursal, sucursales_operativas_q
+from core.models import Sucursal
 from crm.models import Cliente, PedidoCliente, PickupReservation, SeguimientoPedido
+from crm.services.sucursal_resolution import SucursalResolutionError, resolve_sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct
 from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
@@ -81,9 +84,12 @@ class PickupAvailabilityService:
 
     def __init__(self):
         configured_freshness = max(int(getattr(settings, "PICKUP_AVAILABILITY_FRESHNESS_MINUTES", 20)), 1)
-        sync_interval_hours = max(int(getattr(settings, "POINT_BRIDGE_SYNC_INTERVAL_HOURS", 0)), 0)
-        sync_interval_freshness = sync_interval_hours * 60
-        self.freshness_minutes = max(configured_freshness, sync_interval_freshness)
+        realtime_interval_minutes = max(int(os.getenv("POS_BRIDGE_REALTIME_INTERVAL_MINUTES", "0") or "0"), 0)
+        self.freshness_minutes = max(configured_freshness, realtime_interval_minutes) if realtime_interval_minutes else configured_freshness
+        self.expiry_sweep_debounce_seconds = max(
+            int(getattr(settings, "PICKUP_RESERVATION_EXPIRY_SWEEP_DEBOUNCE_SECONDS", 30)),
+            0,
+        )
         self.default_buffer_qty = self._decimal(getattr(settings, "PICKUP_STOCK_BUFFER_DEFAULT", "1"))
         self.low_stock_threshold = self._decimal(getattr(settings, "PICKUP_LOW_STOCK_THRESHOLD", "3"))
         self.default_ttl_minutes = max(int(getattr(settings, "PICKUP_RESERVATION_TTL_MINUTES", 15)), 1)
@@ -162,48 +168,11 @@ class PickupAvailabilityService:
         )
 
     def _resolve_sucursal(self, branch_code: str) -> tuple[Sucursal, PointBranch | None]:
-        raw_code = (branch_code or "").strip()
-        if not raw_code:
-            raise PickupReservationError("branch_code es obligatorio.", code="missing_branch_code")
-
-        operativas = Sucursal.objects.filter(sucursales_operativas_q())
-        sucursal = operativas.filter(codigo__iexact=raw_code).first()
-        if sucursal is None:
-            sucursal = operativas.filter(nombre__iexact=raw_code).first()
-        if sucursal is None:
-            target = normalizar_nombre(raw_code)
-            for row in operativas.only("id", "codigo", "nombre"):
-                if normalizar_nombre(row.nombre) == target or normalizar_nombre(row.codigo) == target:
-                    sucursal = row
-                    break
-        if sucursal is None:
-            target = normalizar_nombre(raw_code)
-            scored_matches: list[tuple[int, int, Sucursal]] = []
-            for row in operativas.only("id", "codigo", "nombre"):
-                codigo_norm = normalizar_nombre(row.codigo)
-                nombre_norm = normalizar_nombre(row.nombre)
-                score = 0
-                if codigo_norm and codigo_norm in target:
-                    score = max(score, 3)
-                if nombre_norm and nombre_norm in target:
-                    score = max(score, 2)
-                if score:
-                    scored_matches.append((score, row.id, row))
-            if scored_matches:
-                scored_matches.sort(key=lambda item: (-item[0], item[1]))
-                top_score = scored_matches[0][0]
-                top_matches = [row for score, _, row in scored_matches if score == top_score]
-                if len({row.id for row in top_matches}) == 1:
-                    sucursal = top_matches[0]
-        if sucursal is None:
-            raise PickupReservationError(
-                "Sucursal no encontrada o inactiva.",
-                code="branch_not_found",
-                payload={"branch_code": raw_code},
-            )
-
-        point_branch = self._resolve_point_branch(sucursal)
-        return sucursal, point_branch
+        try:
+            resolution = resolve_sucursal(branch_code)
+        except SucursalResolutionError as exc:
+            raise PickupReservationError(str(exc), code=exc.code, payload=exc.payload) from exc
+        return resolution.sucursal, resolution.point_branch
 
     def _resolve_point_branch(self, sucursal: Sucursal) -> PointBranch | None:
         branches = list(
@@ -304,8 +273,22 @@ class PickupAvailabilityService:
             expires_at__lt=now,
         ).update(status=PickupReservation.STATUS_EXPIRED, released_at=now)
 
-    def _reserved_qty(self, *, receta: Receta, sucursal: Sucursal) -> Decimal:
-        self.expire_stale_reservations()
+    def _expire_stale_reservations_if_due(self) -> int:
+        if self.expiry_sweep_debounce_seconds <= 0:
+            return self.expire_stale_reservations()
+        if not cache.add(
+            "crm:pickup:expire_stale_reservations",
+            timezone.now().isoformat(),
+            timeout=self.expiry_sweep_debounce_seconds,
+        ):
+            return 0
+        return self.expire_stale_reservations()
+
+    def _reserved_qty(self, *, receta: Receta, sucursal: Sucursal, debounce_expiration: bool = False) -> Decimal:
+        if debounce_expiration:
+            self._expire_stale_reservations_if_due()
+        else:
+            self.expire_stale_reservations()
         return (
             PickupReservation.objects.filter(
                 receta=receta,
@@ -322,7 +305,7 @@ class PickupAvailabilityService:
         receta = self._resolve_receta(product_code)
         sucursal, point_branch = self._resolve_sucursal(branch_code)
         point_product, snapshot = self._resolve_point_product(receta, point_branch)
-        reserved_qty = self._reserved_qty(receta=receta, sucursal=sucursal)
+        reserved_qty = self._reserved_qty(receta=receta, sucursal=sucursal, debounce_expiration=True)
         snapshot_stock_qty = snapshot.stock if snapshot else ZERO
         available_to_promise = max(snapshot_stock_qty - reserved_qty - self.default_buffer_qty, ZERO)
 

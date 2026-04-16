@@ -631,10 +631,12 @@ class Command(BaseCommand):
                 unmatched += 1
                 if apply and create_missing_insumos and point_name:
                     unit = _unit_from_point_text(row["unidad"])
+                    categoria = _safe(row["categoria"])[:120]
                     new_insumo = Insumo.objects.create(
                         nombre=point_name[:250],
                         codigo_point=point_code[:80],
                         nombre_point=point_name[:250],
+                        categoria=categoria,
                         unidad_base=unit,
                         activo=True,
                     )
@@ -678,6 +680,10 @@ class Command(BaseCommand):
                 if target.nombre_point != match.point_nombre[:250]:
                     target.nombre_point = match.point_nombre[:250]
                     changed_fields.append("nombre_point")
+                categoria = _safe(categoria_txt)[:120]
+                if categoria and target.categoria != categoria:
+                    target.categoria = categoria
+                    changed_fields.append("categoria")
                 if not target.unidad_base_id:
                     unit = _unit_from_point_text(unidad_txt)
                     if unit:

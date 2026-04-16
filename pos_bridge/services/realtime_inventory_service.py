@@ -65,19 +65,20 @@ class RealtimeInventoryService:
             job = self.sync_service.run_inventory_sync(
                 triggered_by=triggered_by,
                 branch_filter=branch,
+                capture_costs=False,
             )
             jobs.append(job)
 
         if self.webhook_url:
-            self._notify_ecommerce(jobs)
+            self._queue_ecommerce_notification(jobs)
         return jobs
 
-    def _notify_ecommerce(self, jobs: list[PointSyncJob]) -> None:
+    def _build_webhook_payload(self, jobs: list[PointSyncJob]) -> dict | None:
         successful = [job for job in jobs if job.status == PointSyncJob.STATUS_SUCCESS]
         if not successful:
-            return
+            return None
 
-        payload = {
+        return {
             "event": "inventory_updated",
             "timestamp": timezone.now().isoformat(),
             "sync_jobs": [
@@ -89,18 +90,31 @@ class RealtimeInventoryService:
                 for job in successful
             ],
         }
-        body = json.dumps(payload).encode("utf-8")
-        req = request.Request(
-            self.webhook_url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+
+    def _queue_ecommerce_notification(self, jobs: list[PointSyncJob]) -> None:
+        payload = self._build_webhook_payload(jobs)
+        if not payload:
+            return
         try:
-            with request.urlopen(req, timeout=10) as response:
-                logger.info("Webhook e-commerce enviado. status=%s", response.status)
-        except (error.URLError, TimeoutError, OSError) as exc:
-            logger.warning("No se pudo notificar al e-commerce: %s", exc)
+            from pos_bridge.tasks.celery_tasks import task_ecommerce_webhook_delivery
+
+            task_ecommerce_webhook_delivery.delay(webhook_url=self.webhook_url, payload=payload)
+            logger.info("Webhook e-commerce encolado para entrega asincrona.")
+        except Exception as exc:
+            logger.warning("No se pudo encolar webhook e-commerce, se intenta entrega directa: %s", exc)
+            deliver_ecommerce_webhook(webhook_url=self.webhook_url, payload=payload)
+
+
+def deliver_ecommerce_webhook(*, webhook_url: str, payload: dict, timeout_seconds: int = 5) -> None:
+    body = json.dumps(payload).encode("utf-8")
+    req = request.Request(
+        webhook_url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with request.urlopen(req, timeout=timeout_seconds) as response:
+        logger.info("Webhook e-commerce enviado. status=%s", response.status)
 
 
 def run_realtime_inventory_sync(*, force: bool = False, triggered_by=None) -> list[PointSyncJob]:

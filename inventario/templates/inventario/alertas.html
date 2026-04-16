@@ -5,6 +5,7 @@
 
 {% block content %}
 <nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:home' %}">Dashboard</a>
   <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
   <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
@@ -12,6 +13,40 @@
   <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Referencias</a>
   <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
 </nav>
+
+<section class="card">
+  <div class="card-header">Filtro rápido</div>
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label for="nivel" class="form-label">Nivel</label>
+      <select id="nivel" name="nivel" class="form-select">
+        <option value="alerta" {% if nivel == "alerta" %}selected{% endif %}>Alerta</option>
+        <option value="critico" {% if nivel == "critico" %}selected{% endif %}>Crítico</option>
+        <option value="bajo" {% if nivel == "bajo" %}selected{% endif %}>Bajo reorden</option>
+        <option value="ok" {% if nivel == "ok" %}selected{% endif %}>Stock suficiente</option>
+        <option value="all" {% if nivel == "all" %}selected{% endif %}>Todo</option>
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label for="q" class="form-label">Artículo o código</label>
+      <input id="q" name="q" type="text" class="form-control" value="{{ selected_q }}" placeholder="Buscar artículo, categoría o código Point">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-secondary">Aplicar</button>
+    </div>
+    {% if selected_q or nivel != "alerta" %}
+    <div class="col-auto">
+      <a class="btn btn-link" href="{% url 'inventario:alertas' %}">Limpiar</a>
+    </div>
+    <div class="col-12">
+      <div class="muted">
+        {% if selected_q %}Filtro activo: {{ selected_q }}{% else %}Filtro activo{% endif %}
+        · nivel {{ nivel }}
+      </div>
+    </div>
+    {% endif %}
+  </form>
+</section>
 
 <section class="card">
   <div class="card-header">Resumen de inventario</div>
@@ -37,7 +72,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Contexto operativo del módulo</div>
+  <div class="card-header">Contexto del módulo</div>
   <div class="table-responsive">
     <table class="table">
       <tbody>
@@ -71,7 +106,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Flujo del módulo</div>
+  <div class="card-header">Flujo operativo</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -283,7 +318,7 @@
 
 {% if upstream_dependency_rows %}
 <section class="card">
-  <div class="card-header">Dependencias upstream ERP</div>
+  <div class="card-header">Dependencias previas</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -320,7 +355,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Cadena documental ERP</div>
+  <div class="card-header">Cadena de control</div>
   <div class="erp-chain-grid">
     {% for step in enterprise_chain %}
     <article class="erp-chain-card tone-{{ step.tone|default:'neutral' }}">
@@ -336,7 +371,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Ruta troncal ERP</div>
+  <div class="card-header">Ruta operativa</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -374,7 +409,7 @@
 {% if critical_path_rows or executive_radar_rows or maturity_summary or erp_governance_rows %}
 <details class="erp-advanced-panel">
   <summary class="erp-advanced-summary">
-    <span>Ver análisis de trazabilidad y control</span>
+    <span>Ver análisis ampliado</span>
     <span class="muted">Prioridades, cierres y seguimiento</span>
   </summary>
   <div class="erp-advanced-body">
@@ -533,7 +568,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Control por frente</div>
+  <div class="card-header">Seguimiento por frente</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -570,7 +605,7 @@
 
 {% if downstream_handoff_rows %}
 <section class="card">
-  <div class="card-header">Entrega de inventario a downstream</div>
+  <div class="card-header">Entrega a otros frentes</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -603,7 +638,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Salud operativa ERP</div>
+  <div class="card-header">Salud operativa</div>
   <div class="kpi-mini">
     {% for card in operational_health_cards %}
     <div class="kpi-card">
@@ -721,7 +756,7 @@
         <tr>
           <th>Insumo</th>
           <th>Unid.</th>
-          <th>Uso ERP</th>
+          <th>Uso operativo</th>
           <th class="text-end">Stock actual</th>
           <th class="text-end">Stock min</th>
           <th class="text-end">Stock max</th>
@@ -730,7 +765,7 @@
           <th class="text-end">Días pedido</th>
           <th class="text-end">Consumo diario</th>
           <th class="text-end">Diferencia</th>
-          <th>Maestro ERP</th>
+          <th>Maestro</th>
           <th>Nivel</th>
         </tr>
       </thead>
@@ -738,7 +773,7 @@
         {% for e in rows %}
         <tr>
           <td>
-            {{ e.insumo.nombre }}
+            {{ e.insumo.display_name }}
             {% if e.canonical_variant_count > 1 %}
             <span class="badge-verde" style="margin-left: 8px;">Maestro · {{ e.canonical_variant_count }} variantes</span>
             {% endif %}

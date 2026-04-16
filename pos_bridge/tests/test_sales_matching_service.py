@@ -36,3 +36,15 @@ class PointSalesMatchingServiceTests(TestCase):
                 }
             )
         )
+
+    def test_is_non_recipe_sale_row_detects_resale_categories(self):
+        self.assertTrue(
+            self.service.is_non_recipe_sale_row(
+                {
+                    "family": "",
+                    "category": "Clarita",
+                    "name": "Agua Clarita 500ml",
+                    "sku": "0237",
+                }
+            )
+        )

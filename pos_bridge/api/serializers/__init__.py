@@ -1,3 +1,10 @@
+from pos_bridge.api.serializers.closures import (
+    ProductMonthClosureBuildSerializer,
+    ProductMonthClosureDetailSerializer,
+    ProductMonthClosureLineSerializer,
+    ProductMonthClosureLockSerializer,
+    ProductMonthClosureSerializer,
+)
 from pos_bridge.api.serializers.inventory import (
     CurrentStockSerializer,
     InventoryAvailabilitySerializer,
@@ -21,6 +28,11 @@ __all__ = [
     "PointInventorySnapshotSerializer",
     "PointProductSerializer",
     "PointSyncJobSerializer",
+    "ProductMonthClosureBuildSerializer",
+    "ProductMonthClosureDetailSerializer",
+    "ProductMonthClosureLineSerializer",
+    "ProductMonthClosureLockSerializer",
+    "ProductMonthClosureSerializer",
     "ProductRecipeSerializer",
     "SalesByGroupSerializer",
     "SalesSummarySerializer",

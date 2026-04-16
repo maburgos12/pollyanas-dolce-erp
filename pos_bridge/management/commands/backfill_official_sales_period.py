@@ -73,7 +73,10 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(self.style.SUCCESS("Rango oficial Point guardado en archivo"))
         except Exception as exc:
-            self.stdout.write(self.style.WARNING(f"SQLite no permitió guardar el cache mensual; quedó guardado en archivo. Detalle: {exc}"))
+            raise CommandError(
+                "Falló la persistencia del cache mensual oficial en PostgreSQL. "
+                "Se escribió el respaldo en archivo, pero la base canonica no quedó actualizada."
+            ) from exc
         self.stdout.write(f"Rango: {start_date.isoformat()} -> {end_date.isoformat()}")
         self.stdout.write(f"Venta: {parsed.summary['venta']}")
         self.stdout.write(f"Cantidad: {total_quantity}")

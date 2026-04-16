@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand
@@ -12,45 +11,12 @@ from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import PointProduct
 from recetas.models import Receta, RecetaAgrupacionAddon
 from recetas.utils.addon_grouping import calculate_grouped_addon_cost, upsert_addon_rule
-
-
-@dataclass(frozen=True, slots=True)
-class CuratedAddonApproval:
-    addon_codigo_point: str
-    base_codigo_point: str
-    reason: str
-
-
-SAFE_APPROVALS: tuple[CuratedAddonApproval, ...] = (
-    CuratedAddonApproval("SFRESAG", "0001", "Pay de queso grande con sabor fresa."),
-    CuratedAddonApproval("03SPOREB", "0003", "Pay de queso rebanada con sabor oreo."),
-    CuratedAddonApproval("SMANZANAREB", "0003", "Pay de queso rebanada con sabor manzana."),
-    CuratedAddonApproval("SOREOG", "0001", "Pay de queso grande con sabor oreo."),
-    CuratedAddonApproval("SOREOM", "0002", "Pay de queso mediano con sabor oreo."),
-    CuratedAddonApproval("SBROWNIEG", "0001", "Pay de queso grande con sabor brownie."),
-    CuratedAddonApproval("SBROWNIEM", "0002", "Pay de queso mediano con sabor brownie."),
-    CuratedAddonApproval("SFRESAPC", "0101", "Pastel de fresas con crema chico con topping fresa."),
-    CuratedAddonApproval("SFRESAPG", "0099", "Pastel de fresas con crema grande con topping fresa."),
-    CuratedAddonApproval("SFRESAPM", "0100", "Pastel de fresas con crema mediano con topping fresa."),
-    CuratedAddonApproval("SFRESAPMINI", "PFCMINI", "Pastel fresas con crema mini con topping fresa."),
-    CuratedAddonApproval("1412", "0056", "Pastel de Snickers chico con topping Snickers."),
-    CuratedAddonApproval("21254", "0054", "Pastel de Snickers grande con topping Snickers."),
-    CuratedAddonApproval("22145", "0055", "Pastel de Snickers mediano con topping Snickers."),
-    CuratedAddonApproval("214541", "0061", "Pastel de Crunch chico con topping Crunch."),
-    CuratedAddonApproval("21455", "0059", "Pastel de Crunch grande con topping Crunch."),
-    CuratedAddonApproval("21125", "0060", "Pastel de Crunch mediano con topping Crunch."),
-    CuratedAddonApproval("1125", "0064", "Pastel de zanahoria grande con topping zanahoria."),
-    CuratedAddonApproval("21445", "0065", "Pastel de zanahoria mediano con topping zanahoria."),
-    CuratedAddonApproval("21245", "0105", "Pastel de 3 leches mediano con topping 3 leches."),
+from recetas.utils.commercial_composition import (
+    EXPLICIT_DUPLICATE_ALLOWED_CODES,
+    KNOWN_BLOCKED_CODES,
+    SAFE_APPROVAL_SPECS,
+    ensure_curated_commercial_mappings,
 )
-
-KNOWN_BLOCKED_CODES: dict[str, str] = {
-    "1254": "SKU duplicado en Point entre TOPPING ZANAHORIA C y TOPPING CRUNCH MINI.",
-}
-
-EXPLICIT_DUPLICATE_ALLOWED_CODES: dict[str, str] = {
-    "SMANZANAREB": "DG confirmó que corresponde a Pay de queso rebanada con sabor manzana de temporada.",
-}
 
 
 class Command(BaseCommand):
@@ -65,6 +31,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         dry_run = bool(options.get("dry_run"))
         settings = load_point_bridge_settings()
+        ensure_curated_commercial_mappings()
         duplicate_skus = {
             row["sku"]
             for row in PointProduct.objects.values("sku")
@@ -89,7 +56,7 @@ class Command(BaseCommand):
                     }
                 )
 
-        for item in SAFE_APPROVALS:
+        for item in SAFE_APPROVAL_SPECS:
             addon_code = item.addon_codigo_point.strip().upper()
             base_code = item.base_codigo_point.strip().upper()
             if addon_code in duplicate_skus and addon_code not in EXPLICIT_DUPLICATE_ALLOWED_CODES:

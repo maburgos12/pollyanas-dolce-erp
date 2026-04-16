@@ -1,0 +1,227 @@
+{
+  "generated_at": "2026-03-24T01:02:26.930466+00:00",
+  "dry_run": true,
+  "approved": [
+    {
+      "addon_codigo_point": "SFRESAG",
+      "addon_nombre": "Sabor Fresa Grande Pay",
+      "base_codigo_point": "0001",
+      "base_nombre": "Pay de Queso Grande",
+      "status": "APPROVED",
+      "reason": "Pay de queso grande con sabor fresa.",
+      "base_cost": "160.560480",
+      "addon_cost": "73.789810",
+      "grouped_cost": "234.350290"
+    },
+    {
+      "addon_codigo_point": "03SPOREB",
+      "addon_nombre": "Sabor Oreo Rebanada",
+      "base_codigo_point": "0003",
+      "base_nombre": "Pay de Queso Rebanada",
+      "status": "DETECTED",
+      "reason": "Pay de queso rebanada con sabor oreo.",
+      "base_cost": "20.070060",
+      "addon_cost": "0.000000",
+      "grouped_cost": "20.070060"
+    },
+    {
+      "addon_codigo_point": "SOREOG",
+      "addon_nombre": "Sabor Oreo Grande",
+      "base_codigo_point": "0001",
+      "base_nombre": "Pay de Queso Grande",
+      "status": "DETECTED",
+      "reason": "Pay de queso grande con sabor oreo.",
+      "base_cost": "160.560480",
+      "addon_cost": "0.000000",
+      "grouped_cost": "160.560480"
+    },
+    {
+      "addon_codigo_point": "SOREOM",
+      "addon_nombre": "Sabor Oreo Mediano",
+      "base_codigo_point": "0002",
+      "base_nombre": "Pay de Queso Mediano",
+      "status": "DETECTED",
+      "reason": "Pay de queso mediano con sabor oreo.",
+      "base_cost": "87.478724",
+      "addon_cost": "0.000000",
+      "grouped_cost": "87.478724"
+    },
+    {
+      "addon_codigo_point": "SBROWNIEG",
+      "addon_nombre": "Sabor Brownie Grande",
+      "base_codigo_point": "0001",
+      "base_nombre": "Pay de Queso Grande",
+      "status": "DETECTED",
+      "reason": "Pay de queso grande con sabor brownie.",
+      "base_cost": "160.560480",
+      "addon_cost": "0.000000",
+      "grouped_cost": "160.560480"
+    },
+    {
+      "addon_codigo_point": "SBROWNIEM",
+      "addon_nombre": "Sabor Brownie Mediano",
+      "base_codigo_point": "0002",
+      "base_nombre": "Pay de Queso Mediano",
+      "status": "DETECTED",
+      "reason": "Pay de queso mediano con sabor brownie.",
+      "base_cost": "87.478724",
+      "addon_cost": "0.000000",
+      "grouped_cost": "87.478724"
+    },
+    {
+      "addon_codigo_point": "SFRESAPC",
+      "addon_nombre": "TOPPING FRESA C",
+      "base_codigo_point": "0101",
+      "base_nombre": "Pastel de Fresas Con Crema Chico",
+      "status": "DETECTED",
+      "reason": "Pastel de fresas con crema chico con topping fresa.",
+      "base_cost": "131.921320",
+      "addon_cost": "0.000000",
+      "grouped_cost": "131.921320"
+    },
+    {
+      "addon_codigo_point": "SFRESAPG",
+      "addon_nombre": "TOPPING FRESA G",
+      "base_codigo_point": "0099",
+      "base_nombre": "Pastel de Fresas Con Crema Grande",
+      "status": "DETECTED",
+      "reason": "Pastel de fresas con crema grande con topping fresa.",
+      "base_cost": "272.832816",
+      "addon_cost": "0.000000",
+      "grouped_cost": "272.832816"
+    },
+    {
+      "addon_codigo_point": "SFRESAPM",
+      "addon_nombre": "TOPPING FRESA M",
+      "base_codigo_point": "0100",
+      "base_nombre": "Pastel de Fresas Con Crema Mediano",
+      "status": "DETECTED",
+      "reason": "Pastel de fresas con crema mediano con topping fresa.",
+      "base_cost": "185.848575",
+      "addon_cost": "0.000000",
+      "grouped_cost": "185.848575"
+    },
+    {
+      "addon_codigo_point": "SFRESAPMINI",
+      "addon_nombre": "TOPPING FRESA MINI",
+      "base_codigo_point": "PFCMINI",
+      "base_nombre": "Pastel Fresas Con Crema - Mini",
+      "status": "DETECTED",
+      "reason": "Pastel fresas con crema mini con topping fresa.",
+      "base_cost": "216.067435",
+      "addon_cost": "0.000000",
+      "grouped_cost": "216.067435"
+    },
+    {
+      "addon_codigo_point": "1412",
+      "addon_nombre": "TOPPING SNICKER CH",
+      "base_codigo_point": "0056",
+      "base_nombre": "Pastel de Snickers Chico",
+      "status": "DETECTED",
+      "reason": "Pastel de Snickers chico con topping Snickers.",
+      "base_cost": "153.325614",
+      "addon_cost": "0.000000",
+      "grouped_cost": "153.325614"
+    },
+    {
+      "addon_codigo_point": "21254",
+      "addon_nombre": "TOPPING SNICKER G",
+      "base_codigo_point": "0054",
+      "base_nombre": "Pastel de Snickers Grande",
+      "status": "DETECTED",
+      "reason": "Pastel de Snickers grande con topping Snickers.",
+      "base_cost": "283.517134",
+      "addon_cost": "0.000000",
+      "grouped_cost": "283.517134"
+    },
+    {
+      "addon_codigo_point": "22145",
+      "addon_nombre": "TOPPING SNICKER M",
+      "base_codigo_point": "0055",
+      "base_nombre": "Pastel de Snickers Mediano",
+      "status": "DETECTED",
+      "reason": "Pastel de Snickers mediano con topping Snickers.",
+      "base_cost": "214.623907",
+      "addon_cost": "0.000000",
+      "grouped_cost": "214.623907"
+    },
+    {
+      "addon_codigo_point": "214541",
+      "addon_nombre": "TOPPING CRUNCH C",
+      "base_codigo_point": "0061",
+      "base_nombre": "Pastel de Crunch Chico",
+      "status": "DETECTED",
+      "reason": "Pastel de Crunch chico con topping Crunch.",
+      "base_cost": "131.783624",
+      "addon_cost": "0.000000",
+      "grouped_cost": "131.783624"
+    },
+    {
+      "addon_codigo_point": "21455",
+      "addon_nombre": "TOPPING CRUNCH G",
+      "base_codigo_point": "0059",
+      "base_nombre": "Pastel de Crunch Grande",
+      "status": "DETECTED",
+      "reason": "Pastel de Crunch grande con topping Crunch.",
+      "base_cost": "251.043214",
+      "addon_cost": "0.000000",
+      "grouped_cost": "251.043214"
+    },
+    {
+      "addon_codigo_point": "21125",
+      "addon_nombre": "TOPPING CRUNCH M",
+      "base_codigo_point": "0060",
+      "base_nombre": "Pastel de Crunch Mediano",
+      "status": "DETECTED",
+      "reason": "Pastel de Crunch mediano con topping Crunch.",
+      "base_cost": "188.609792",
+      "addon_cost": "0.000000",
+      "grouped_cost": "188.609792"
+    },
+    {
+      "addon_codigo_point": "1125",
+      "addon_nombre": "TOPPING ZANAHORIA G",
+      "base_codigo_point": "0064",
+      "base_nombre": "Pastel de Zanahoria Grande",
+      "status": "DETECTED",
+      "reason": "Pastel de zanahoria grande con topping zanahoria.",
+      "base_cost": "268.388354",
+      "addon_cost": "0.000000",
+      "grouped_cost": "268.388354"
+    },
+    {
+      "addon_codigo_point": "21445",
+      "addon_nombre": "TOPPING ZANAHORIA M",
+      "base_codigo_point": "0065",
+      "base_nombre": "Pastel de Zanahoria Mediano",
+      "status": "DETECTED",
+      "reason": "Pastel de zanahoria mediano con topping zanahoria.",
+      "base_cost": "187.520428",
+      "addon_cost": "0.000000",
+      "grouped_cost": "187.520428"
+    },
+    {
+      "addon_codigo_point": "21245",
+      "addon_nombre": "TOPPING 3 LECHES",
+      "base_codigo_point": "0105",
+      "base_nombre": "Pastel de 3 Leches Mediano",
+      "status": "DETECTED",
+      "reason": "Pastel de 3 leches mediano con topping 3 leches.",
+      "base_cost": "131.984228",
+      "addon_cost": "0.000000",
+      "grouped_cost": "131.984228"
+    }
+  ],
+  "skipped": [
+    {
+      "addon_codigo_point": "1254",
+      "base_codigo_point": "",
+      "reason": "SKU duplicado en Point entre TOPPING ZANAHORIA C y TOPPING CRUNCH MINI."
+    },
+    {
+      "addon_codigo_point": "SMANZANAREB",
+      "base_codigo_point": "0003",
+      "reason": "SKU duplicado en Point; requiere identidad por external_id."
+    }
+  ]
+}

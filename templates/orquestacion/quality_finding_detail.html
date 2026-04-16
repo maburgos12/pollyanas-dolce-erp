@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle de hallazgo | ERP{% endblock %}
+
+{% block extra_css %}
+<style>
+  .quality-detail-shell { display: grid; gap: 1rem; }
+  .quality-detail-hero {
+    background: linear-gradient(135deg, #15243b 0%, #23486a 58%, #b17b40 100%);
+    color: #fff;
+    border-radius: 24px;
+    padding: 1.5rem 1.65rem;
+  }
+  .quality-detail-hero h1 { margin: 0 0 .35rem; }
+  .quality-detail-grid { display: grid; gap: 1rem; grid-template-columns: 1.35fr .95fr; }
+  .quality-panel {
+    background: #fff;
+    border: 1px solid rgba(21, 36, 59, .08);
+    border-radius: 20px;
+    box-shadow: 0 16px 40px rgba(12, 20, 34, .08);
+    padding: 1.2rem;
+  }
+  .quality-panel h2 { margin: 0 0 .85rem; color: #15243b; }
+  .quality-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: .2rem .55rem;
+    font-size: .78rem;
+    font-weight: 700;
+    background: #eef2f7;
+    color: #24364d;
+  }
+  .quality-pill.warning, .quality-pill.proposed, .quality-pill.accepted, .quality-pill.implemented { background: #fff1d8; color: #8f5c00; }
+  .quality-pill.high, .quality-pill.critical, .quality-pill.rejected { background: #f8e0e0; color: #9a2430; }
+  .quality-pill.resolved, .quality-pill.validated { background: #dff4e5; color: #12633a; }
+  .quality-meta { display: grid; gap: .75rem; }
+  .quality-meta-item strong { display: block; color: #15243b; margin-bottom: .2rem; }
+  .quality-subtle { color: #6d7785; font-size: .9rem; }
+  .quality-form { display: grid; gap: .85rem; }
+  .quality-textarea {
+    width: 100%;
+    min-height: 150px;
+    border: 1px solid rgba(21, 36, 59, .12);
+    border-radius: 12px;
+    padding: .7rem .8rem;
+    font: inherit;
+    resize: vertical;
+  }
+  .quality-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
+  .quality-btn {
+    border: none;
+    border-radius: 12px;
+    padding: .75rem 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .quality-btn.primary { background: #15243b; color: #fff; }
+  .quality-btn.secondary { background: #eef2f7; color: #24364d; }
+  .quality-btn.danger { background: #9a2430; color: #fff; }
+  .quality-list { margin: 0; padding-left: 1.1rem; color: #24364d; }
+  @media (max-width: 980px) {
+    .quality-detail-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="quality-detail-shell">
+  <section class="quality-detail-hero">
+    <h1>{{ finding.code }}</h1>
+    <p>
+      <span class="quality-pill {{ finding.status }}">{{ finding.get_status_display }}</span>
+      <span class="quality-pill {{ finding.severity }}" style="margin-left: .4rem;">{{ finding.get_severity_display }}</span>
+      <span class="quality-subtle" style="color: rgba(255,255,255,.88); margin-left: .5rem;">
+        {{ finding.get_category_display }} · {{ finding.get_source_type_display }}
+      </span>
+    </p>
+  </section>
+
+  <section class="quality-detail-grid">
+    <article class="quality-panel">
+      <h2>Hallazgo</h2>
+      <div class="quality-meta">
+        <div class="quality-meta-item">
+          <strong>Statement</strong>
+          <div>{{ finding.statement }}</div>
+        </div>
+        <div class="quality-meta-item">
+          <strong>Referencia de origen</strong>
+          <div>{{ finding.source_reference }}</div>
+        </div>
+        <div class="quality-meta-item">
+          <strong>Evidencia</strong>
+          {% if finding.evidence_refs_json %}
+          <ul class="quality-list">
+            {% for ref in finding.evidence_refs_json %}
+            <li><code>{{ ref }}</code></li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <div class="quality-subtle">Sin evidencia registrada.</div>
+          {% endif %}
+        </div>
+        <div class="quality-meta-item">
+          <strong>Memoria asociada</strong>
+          {% if finding.memory_proposal %}
+          <a href="{% url 'orquestacion:memory_proposal_detail' finding.memory_proposal.id %}">{{ finding.memory_proposal.summary }}</a>
+          <div class="quality-subtle">{{ finding.memory_proposal.get_status_display }} · {{ finding.memory_proposal.category|default:"sin clasificar" }}</div>
+          {% else %}
+          <div class="quality-subtle">Todavía no existe propuesta de memoria asociada.</div>
+          {% endif %}
+        </div>
+      </div>
+    </article>
+
+    <article class="quality-panel">
+      <h2>Auditoría rápida</h2>
+      <div class="quality-meta">
+        <div class="quality-meta-item">
+          <strong>Bloqueo</strong>
+          <div>{% if finding.is_blocking %}Sí{% else %}No{% endif %}</div>
+          <div class="quality-subtle">{% if finding.is_blocking %}Debe corregirse antes de consolidar cambios visibles.{% else %}Se registra y se corrige, pero no bloquea por sí solo la corrida local.{% endif %}</div>
+        </div>
+        <div class="quality-meta-item">
+          <strong>Detecciones</strong>
+          <div>{{ finding.detected_count }}</div>
+        </div>
+        <div class="quality-meta-item">
+          <strong>Primera detección</strong>
+          <div>{{ finding.first_seen_at|date:"d/m/Y H:i" }}</div>
+        </div>
+        <div class="quality-meta-item">
+          <strong>Última detección</strong>
+          <div>{{ finding.last_seen_at|date:"d/m/Y H:i" }}</div>
+        </div>
+        <div class="quality-meta-item">
+          <strong>Resuelto en</strong>
+          <div>{{ finding.resolved_at|date:"d/m/Y H:i"|default:"Pendiente" }}</div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="quality-detail-grid">
+    <article class="quality-panel">
+      <h2>Remediación propuesta</h2>
+      {% if remediation %}
+      <div class="quality-meta">
+        <div class="quality-meta-item">
+          <strong>Resumen</strong>
+          <div>{{ remediation.summary }}</div>
+          <div class="quality-subtle"><span class="quality-pill {{ remediation.status }}">{{ remediation.get_status_display }}</span> · {{ remediation.get_risk_level_display }}</div>
+        </div>
+        <div class="quality-meta-item">
+          <strong>Fix sugerido</strong>
+          <div>{{ remediation.suggested_fix }}</div>
+        </div>
+        <div class="quality-meta-item">
+          <strong>Archivos objetivo</strong>
+          {% if remediation.target_files_json %}
+          <ul class="quality-list">
+            {% for path in remediation.target_files_json %}
+            <li><code>{{ path }}</code></li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <div class="quality-subtle">Sin archivos objetivo.</div>
+          {% endif %}
+        </div>
+        <div class="quality-meta-item">
+          <strong>Pruebas sugeridas</strong>
+          {% if remediation.suggested_tests_json %}
+          <ul class="quality-list">
+            {% for test_cmd in remediation.suggested_tests_json %}
+            <li><code>{{ test_cmd }}</code></li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <div class="quality-subtle">Sin pruebas sugeridas.</div>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <div class="quality-subtle">Este hallazgo todavía no tiene una remediación asociada.</div>
+      {% endif %}
+    </article>
+
+    <article class="quality-panel">
+      <h2>Operación</h2>
+      {% if can_manage %}
+      <form method="post" class="quality-form">
+        {% csrf_token %}
+        <div class="quality-actions">
+          <button type="submit" name="action" value="rerun_guard" class="quality-btn primary">Rerun quality guards y validar</button>
+          {% if remediation %}
+            {% if remediation.status == 'proposed' %}
+            <button type="submit" name="action" value="accept_remediation" class="quality-btn secondary">Aceptar remediación</button>
+            {% endif %}
+            {% if remediation.status == 'accepted' %}
+            <button type="submit" name="action" value="mark_implemented" class="quality-btn secondary">Marcar implementada</button>
+            {% endif %}
+          {% endif %}
+          <a href="{% url 'orquestacion:quality_findings' %}" class="quality-btn secondary">Volver a bandeja</a>
+        </div>
+        {% if remediation and remediation.status != 'validated' %}
+        <label>
+          Motivo de rechazo
+          <textarea name="rejection_reason" class="quality-textarea">{{ remediation.details_json.rejection_reason }}</textarea>
+        </label>
+        <div class="quality-actions">
+          <button type="submit" name="action" value="reject_remediation" class="quality-btn danger">Rechazar remediación</button>
+        </div>
+        {% endif %}
+      </form>
+      {% else %}
+      <div class="quality-subtle">Solo DG/Admin puede operar remediaciones o relanzar el guard.</div>
+      {% endif %}
+    </article>
+  </section>
+</section>
+{% endblock %}

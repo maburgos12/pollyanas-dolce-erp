@@ -6,7 +6,7 @@
 <style>
   .dg-shell {
     display: grid;
-    gap: 12px;
+    gap: 10px;
     width: min(100%, 1360px);
     margin: 0 auto;
   }
@@ -21,11 +21,11 @@
   .dg-topbar,
   .dg-panel {
     border-radius: 22px;
-    padding: 15px 17px;
+    padding: 13px 15px;
   }
   .dg-topbar {
     display: grid;
-    grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+    grid-template-columns: 1fr;
     gap: 12px;
     align-items: start;
   }
@@ -51,12 +51,12 @@
   .dg-topbar-meta {
     display: grid;
     gap: 10px;
-    justify-items: end;
+    justify-items: stretch;
   }
   .dg-topbar-meta-line {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 8px;
     align-items: center;
   }
@@ -88,7 +88,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    justify-content: flex-end;
+    justify-content: flex-start;
   }
   .dg-action-row .btn {
     min-height: 36px;
@@ -132,7 +132,7 @@
   .dg-grid-2,
   .dg-grid-3 {
     display: grid;
-    gap: 12px;
+    gap: 10px;
   }
   .dg-kpi-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -149,7 +149,7 @@
   .dg-kpi-card,
   .dg-status-card {
     border-radius: 18px;
-    padding: 13px 14px;
+    padding: 11px 12px;
   }
   .dg-metric-label {
     font-size: 0.72rem;
@@ -192,6 +192,18 @@
     gap: 12px;
     margin-bottom: 10px;
   }
+  .dg-panel-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .dg-panel-actions .btn {
+    min-height: 34px;
+    padding-inline: 12px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+  }
   .dg-panel-title {
     margin: 0;
     font-family: "Playfair Display", serif;
@@ -201,14 +213,15 @@
   .dg-panel-subtitle {
     margin: 4px 0 0;
     color: #78655b;
-    font-size: 0.88rem;
+    font-size: 0.84rem;
+    max-width: 52ch;
   }
   .dg-list {
     display: grid;
     gap: 8px;
   }
   .dg-list.is-scroll {
-    max-height: 320px;
+    max-height: 220px;
     overflow: auto;
     padding-right: 2px;
   }
@@ -221,7 +234,12 @@
     border-radius: 14px;
     background: rgba(255, 249, 245, 0.92);
     border: 1px solid rgba(170, 121, 96, 0.1);
+    border-left: 4px solid rgba(170, 121, 96, 0.18);
   }
+  .dg-list-item.is-danger { border-left-color: rgba(154, 47, 47, 0.74); }
+  .dg-list-item.is-warning { border-left-color: rgba(145, 93, 21, 0.72); }
+  .dg-list-item.is-success { border-left-color: rgba(29, 106, 81, 0.72); }
+  .dg-list-item.is-neutral { border-left-color: rgba(133, 117, 109, 0.6); }
   .dg-list-item-label {
     font-weight: 700;
     color: #42271d;
@@ -306,10 +324,10 @@
   }
   .dg-chart-surface {
     width: 100%;
-    min-height: 180px;
+    min-height: 164px;
   }
   .dg-chart-surface.is-short {
-    min-height: 150px;
+    min-height: 138px;
   }
   .dg-chart-legend {
     display: flex;
@@ -353,6 +371,32 @@
     color: #2f1d18;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
+  }
+  .dg-compact-row-stack {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+  .dg-meter {
+    position: relative;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(167, 113, 95, 0.10);
+  }
+  .dg-meter-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 999px;
+  }
+  .dg-meter-fill.is-sales {
+    background: linear-gradient(90deg, rgba(214, 90, 113, 0.95), rgba(214, 90, 113, 0.56));
+  }
+  .dg-meter-fill.is-waste {
+    background: linear-gradient(90deg, rgba(177, 75, 75, 0.92), rgba(177, 75, 75, 0.54));
+  }
+  .dg-meter-fill.is-risk {
+    background: linear-gradient(90deg, rgba(145, 93, 21, 0.9), rgba(145, 93, 21, 0.56));
   }
   .dg-small-table td {
     padding: 8px 0;
@@ -407,7 +451,7 @@
     grid-template-columns: 1.2fr 0.8fr;
   }
   .dg-filters-compact {
-    grid-template-columns: repeat(4, minmax(120px, 1fr)) auto;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 8px;
   }
   .dg-filters-compact .dg-filter-meta {
@@ -416,6 +460,12 @@
   .dg-mini-stack {
     display: grid;
     gap: 8px;
+  }
+  .dg-alert-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
   }
   .dg-mini-card {
     padding: 10px 12px;
@@ -433,6 +483,9 @@
     color: #755f56;
     font-size: 0.9rem;
   }
+  .dg-mini-card.is-danger strong { color: #9a2f2f; }
+  .dg-mini-card.is-warning strong { color: #915d15; }
+  .dg-mini-card.is-success strong { color: #1d6a51; }
   .dg-headline-row {
     display: flex;
     flex-wrap: wrap;
@@ -441,6 +494,46 @@
   }
   .dg-note {
     font-size: 0.92rem;
+  }
+  .dg-summary-inline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    color: #7c665c;
+    font-size: 0.87rem;
+  }
+  .dg-summary-inline strong {
+    color: #3d261d;
+  }
+
+  .dg-inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .dg-inline-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #7a2853;
+    font-size: 0.82rem;
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .dg-inline-link:hover,
+  .dg-inline-link:focus-visible {
+    color: #5f1f43;
+    text-decoration: underline;
+  }
+  .dg-summary-inline.is-top {
+    margin-top: 4px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(167, 113, 95, 0.12);
+    background: rgba(255, 255, 255, 0.88);
   }
   .dg-chart-surface {
     min-height: 170px;
@@ -469,6 +562,7 @@
     .dg-kpi-grid--4,
     .dg-grid-3--compact,
     .dg-grid-2--compact,
+    .dg-alert-grid,
     .dg-filters-compact {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -484,11 +578,15 @@
     .dg-kpi-grid--4,
     .dg-grid-3--compact,
     .dg-grid-2--compact,
+    .dg-alert-grid,
     .dg-filters-compact {
       grid-template-columns: 1fr;
     }
     .dg-title {
       font-size: 1.5rem;
+    }
+    .dg-panel-actions {
+      justify-content: flex-start;
     }
   }
 </style>
@@ -497,23 +595,22 @@
 <div class="module-shell dg-shell">
   <section class="dg-topbar">
     <div>
-      <div class="dg-eyebrow">Dirección General · Cockpit DG consolidado</div>
-      <h1 class="dg-title">Operación diaria con fuente Point</h1>
-      <p class="dg-subtitle">Primero lectura comercial real de Point. Después contexto ERP. Producción directa, transferencias y merma quedan separadas para no contaminar la lectura ejecutiva.</p>
+      <div class="dg-eyebrow">Dirección general</div>
+      <h1 class="dg-title">Operación diaria</h1>
+      <p class="dg-subtitle">Venta, merma y excepciones del corte actual.</p>
       <div class="dg-headline-row">
-        <span class="dg-date-pill">Corte Point {{ point_exec_summary.closure_date|date:"Y-m-d" }}</span>
+        <span class="dg-date-pill">Corte {{ point_exec_summary.closure_date|date:"Y-m-d" }}</span>
         <span class="dg-chip {% if point_exec_summary.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
-          {% if point_exec_summary.ticket_data_available %}Tickets confirmados{% else %}Tickets incompletos{% endif %}
+          Ticket promedio {% if point_exec_summary.ticket_data_available %}${{ point_exec_summary.latest_avg_ticket|floatformat:2 }}{% else %}N/D{% endif %}
         </span>
-        <span class="dg-chip {% if point_waste_summary.available %}is-success{% else %}is-warning{% endif %}">
-          Mermas {{ point_waste_summary.source_label }}
+        <span class="dg-chip {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">
+          Merma {{ point_waste_summary.total_qty|floatformat:2 }}
         </span>
       </div>
     </div>
     <div class="dg-topbar-meta">
       <div class="dg-action-row">
         <a class="btn btn-secondary" href="{% url 'recetas:produccion_cedis_weekly_dashboard' %}">Producción CEDIS semanal</a>
-        <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Reabasto CEDIS</a>
         <a class="btn btn-secondary" href="{% url 'recetas:dg_operacion_dashboard_export' %}?format=xlsx&dg_start_date={{ dg_start_date }}&dg_end_date={{ dg_end_date }}&dg_group_by={{ dg_group_by }}&fecha_operacion={{ fecha_operacion|date:'Y-m-d' }}">Exportar XLSX</a>
       </div>
       <form method="get" class="dg-filters dg-filters-compact">
@@ -525,18 +622,23 @@
           <option value="month" {% if dg_group_by == "month" %}selected{% endif %}>Plan por mes</option>
         </select>
         <input type="date" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}" aria-label="Fecha operación Point">
-        <button class="btn btn-primary" type="submit">Actualizar</button>
+        <button class="btn btn-primary" type="submit">Aplicar filtros</button>
       </form>
+      <div class="dg-summary-inline is-top">
+        <span><strong>Fecha visible</strong> {{ point_exec_summary.closure_date|date:"Y-m-d" }}</span>
+        <span><strong>Corte</strong> Red comercial</span>
+        <span><strong>Planes</strong> {{ dg_group_by|default:"day"|capfirst }}</span>
+      </div>
     </div>
   </section>
 
   <section class="dg-panel dg-panel-tight">
-    <div class="dg-section-title">Bloque 1 · Comercial Point</div>
+    <div class="dg-section-title">Comercial</div>
     <div class="dg-kpi-grid dg-kpi-grid--4">
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Venta último corte</div>
         <div class="dg-metric-value">${{ point_exec_summary.latest_sales_amount|floatformat:2 }}</div>
-        <div class="dg-metric-foot">{{ point_exec_summary.latest_units|floatformat:0 }} unidades · {{ point_exec_summary.closure_date|date:"d/m/Y" }}</div>
+        <div class="dg-metric-foot">{{ point_exec_summary.latest_units|floatformat:0 }} unidades · corte {{ point_exec_summary.closure_date|date:"d/m/Y" }}</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Tickets último corte</div>
@@ -548,7 +650,7 @@
         <div class="dg-metric-value {% if point_exec_summary.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
           {% if point_exec_summary.ticket_data_available %}${{ point_exec_summary.latest_avg_ticket|floatformat:2 }}{% else %}N/D{% endif %}
         </div>
-        <div class="dg-metric-foot">{% if point_exec_summary.ticket_data_available %}Promedio real de Point del último corte{% else %}Point no entregó tickets válidos{% endif %}</div>
+        <div class="dg-metric-foot">{% if point_exec_summary.ticket_data_available %}promedio real del corte{% else %}sin tickets válidos{% endif %}</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Venta acumulada del mes</div>
@@ -559,7 +661,7 @@
   </section>
 
   <section class="dg-panel dg-panel-tight">
-    <div class="dg-section-title">Bloque 2 · Flujo central y pérdida Point</div>
+    <div class="dg-section-title">Centro y merma</div>
     <div class="dg-kpi-grid dg-kpi-grid--4">
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Producción directa a CEDIS</div>
@@ -572,7 +674,7 @@
         <div class="dg-metric-foot">{{ point_central_flow_summary.transfer_rows }} líneas · {{ point_central_flow_summary.transfer_item_count }} items</div>
       </article>
       <article class="dg-kpi-card">
-        <div class="dg-metric-label">Merma Point del corte</div>
+        <div class="dg-metric-label">Merma del corte</div>
         <div class="dg-metric-value {% if point_waste_summary.total_qty > 0 %}is-danger{% else %}is-success{% endif %}">{{ point_waste_summary.total_qty|floatformat:2 }}</div>
         <div class="dg-metric-foot">${{ point_waste_summary.total_cost|floatformat:2 }} · {{ point_waste_summary.branch_count }} sucursales / frentes</div>
       </article>
@@ -586,54 +688,86 @@
     </div>
   </section>
 
-  <section class="dg-grid-3 dg-grid-3--compact">
+  <section class="dg-grid-2 dg-grid-2--compact">
     <article class="dg-panel">
       <div class="dg-panel-header">
         <div>
-          <h2 class="dg-panel-title">Top sucursales del último corte</h2>
-          <p class="dg-panel-subtitle">La primera lectura comercial debe empezar por monto, tickets y ticket promedio por sucursal.</p>
+          <h2 class="dg-panel-title">Top sucursales</h2>
+          <p class="dg-panel-subtitle">Monto y ticket promedio por sucursal.</p>
         </div>
-        <span class="dg-pill">{{ point_exec_summary.source_label }}</span>
+        <div class="dg-panel-actions">
+          <span class="dg-pill">{{ point_exec_summary.source_label }}</span>
+          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months=6">Abrir ventas</a>
+        </div>
       </div>
       {% if point_exec_summary.top_branches %}
       <div class="dg-compact-grid">
-        {% for row in point_exec_summary.top_branches %}
+        {% for row in point_exec_summary.top_branches|slice:":3" %}
         <div class="dg-compact-row">
-          <div>
+          <div class="dg-compact-row-stack">
             <div class="dg-list-item-label">{{ row.branch__erp_branch__codigo }} · {{ row.branch__erp_branch__nombre }}</div>
             <div class="dg-list-item-meta">{{ row.total_tickets }} tickets · ticket promedio ${{ row.avg_ticket|floatformat:2 }}</div>
+            <div class="dg-meter">
+              <span class="dg-meter-fill is-sales" style="width:{% widthratio row.total_amount point_exec_summary.latest_sales_amount 100 %}%"></span>
+            </div>
+            <div class="dg-inline-actions">
+              <a class="dg-inline-link" href="{% url 'control:discrepancias' %}?from={{ point_exec_summary.closure_date|date:'Y-m-d' }}&to={{ point_exec_summary.closure_date|date:'Y-m-d' }}&sucursal_id={{ row.branch__erp_branch_id }}">
+                Abrir control sucursal
+              </a>
+            </div>
           </div>
           <div class="dg-compact-row-value">${{ row.total_amount|floatformat:2 }}</div>
         </div>
         {% endfor %}
       </div>
+      <div class="dg-summary-inline" style="margin-top:10px;">
+        <span><strong>{{ point_exec_summary.top_branches|length }}</strong> sucursales visibles</span>
+        <span>monto relativo contra el corte total</span>
+      </div>
       {% else %}
-      <div class="dg-note">No hay sucursales con tickets válidos en el corte seleccionado.</div>
+      <div class="dg-note">Sin sucursales con tickets válidos en el corte seleccionado.</div>
       {% endif %}
     </article>
 
     <article class="dg-panel">
       <div class="dg-panel-header">
         <div>
-          <h2 class="dg-panel-title">Mermas Point del día operativo</h2>
-          <p class="dg-panel-subtitle">Pérdida real capturada en Point, incluyendo frentes como CEDIS si así aparecen en la plataforma.</p>
+          <h2 class="dg-panel-title">Mermas del día</h2>
+          <p class="dg-panel-subtitle">Pérdida visible en el corte actual.</p>
         </div>
-        <span class="dg-pill {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">{{ point_waste_summary.source_label }}</span>
+        <div class="dg-panel-actions">
+          <span class="dg-pill {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">{{ point_waste_summary.source_label }}</span>
+          <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}">Abrir control</a>
+        </div>
       </div>
       {% if point_waste_summary.top_branches %}
       <div class="dg-compact-grid">
-        {% for row in point_waste_summary.top_branches %}
+        {% for row in point_waste_summary.top_branches|slice:":3" %}
         <div class="dg-compact-row">
-          <div>
+          <div class="dg-compact-row-stack">
             <div class="dg-list-item-label">{{ row.branch_code }} · {{ row.branch_name }}</div>
             <div class="dg-list-item-meta">{{ row.total_rows }} registros · ${{ row.total_cost|floatformat:2 }}</div>
+            <div class="dg-meter">
+              <span class="dg-meter-fill is-waste" style="width:{% widthratio row.total_qty point_waste_summary.total_qty 100 %}%"></span>
+            </div>
+            {% if row.branch_id %}
+            <div class="dg-inline-actions">
+              <a class="dg-inline-link" href="{% url 'control:discrepancias' %}?from={{ point_waste_summary.closure_date|date:'Y-m-d' }}&to={{ point_waste_summary.closure_date|date:'Y-m-d' }}&sucursal_id={{ row.branch_id }}">
+                Revisar merma en control
+              </a>
+            </div>
+            {% endif %}
           </div>
           <div class="dg-compact-row-value">{{ row.total_qty|floatformat:2 }}</div>
         </div>
         {% endfor %}
       </div>
+      <div class="dg-summary-inline" style="margin-top:10px;">
+        <span><strong>{{ point_waste_summary.total_qty|floatformat:2 }}</strong> pzas en el corte</span>
+        <span><strong>${{ point_waste_summary.total_cost|floatformat:2 }}</strong> costo visible</span>
+      </div>
       {% else %}
-      <div class="dg-note">Point no reportó mermas en el último corte operativo.</div>
+      <div class="dg-note">Sin mermas visibles en el último corte.</div>
       {% endif %}
       <div class="dg-mini-stack" style="margin-top:12px;">
         {% for row in point_waste_summary.top_responsibles|slice:":3" %}
@@ -642,44 +776,24 @@
           <span>{{ row.total_qty|floatformat:2 }} pzas · ${{ row.total_cost|floatformat:2 }}</span>
         </div>
         {% empty %}
-        <div class="dg-note">Sin responsables con merma visible en este corte.</div>
+        <div class="dg-note">Sin responsables visibles en este corte.</div>
         {% endfor %}
       </div>
     </article>
 
-    <article class="dg-panel">
-      <div class="dg-panel-header">
-        <div>
-          <h2 class="dg-panel-title">Flujo central Point y contexto ERP</h2>
-          <p class="dg-panel-subtitle">Esto acompaña la lectura de Point, pero no la sustituye ni la mezcla.</p>
-        </div>
-        <span class="dg-pill">ERP</span>
-      </div>
-      <div class="dg-mini-stack">
-        <div class="dg-mini-card">
-          <strong>{{ plan_status_dashboard.status }}</strong>
-          <span>Plan de producción · {{ plan_status_dashboard.detail }}</span>
-        </div>
-        <div class="dg-mini-card">
-          <strong>{{ reabasto_stage }}</strong>
-          <span>Reabasto CEDIS · {{ reabasto_detail }}</span>
-        </div>
-        <div class="dg-mini-card">
-          <strong>{{ ventas_historicas_summary.status }}</strong>
-          <span>Histórico de ventas · {{ ventas_historicas_summary.detail }}</span>
-        </div>
-      </div>
-    </article>
   </section>
 
   <section class="dg-grid-2 dg-grid-2--compact">
     <article class="dg-panel dg-chart-card">
       <div class="dg-panel-header">
         <div>
-          <h2 class="dg-panel-title">Ventas Point últimas 6 semanas</h2>
-          <p class="dg-panel-subtitle">Gráfica principal para la lectura comercial del dueño.</p>
+          <h2 class="dg-panel-title">Ventas últimas 6 semanas</h2>
+          <p class="dg-panel-subtitle">Lectura comercial reciente.</p>
         </div>
-        <span class="dg-pill">{{ point_exec_summary.source_label }}</span>
+        <div class="dg-panel-actions">
+          <span class="dg-pill">{{ point_exec_summary.source_label }}</span>
+          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months=6">Abrir ventas</a>
+        </div>
       </div>
       <canvas id="dg-chart-sales-trend" class="dg-chart-surface is-short"></canvas>
       <div class="dg-chart-legend">
@@ -690,27 +804,53 @@
     <article class="dg-panel">
       <div class="dg-panel-header">
         <div>
-          <h2 class="dg-panel-title">Cuadre operativo Point</h2>
-          <p class="dg-panel-subtitle">Solo las sucursales que requieren atención por cierre pendiente o desviación.</p>
+          <h2 class="dg-panel-title">Cuadre operativo</h2>
+          <p class="dg-panel-subtitle">Sucursales que requieren atención.</p>
         </div>
-        <span class="dg-pill {% if point_closure_summary.tone == 'danger' %}is-danger{% elif point_closure_summary.tone == 'success' %}is-success{% else %}is-warning{% endif %}">
-          {{ point_closure_summary.status }}
-        </span>
+        <div class="dg-panel-actions">
+          <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}">Abrir control</a>
+          <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Abrir reabasto</a>
+        </div>
       </div>
       <div class="dg-list is-scroll">
-        {% for row in point_closure_summary.rows %}
+        <div class="dg-alert-grid">
+          <div class="dg-mini-card is-danger">
+            <strong>{{ point_closure_summary.critical }}</strong>
+            <span>desviación crítica</span>
+          </div>
+          <div class="dg-mini-card is-warning">
+            <strong>{{ point_closure_summary.without_closure }}</strong>
+            <span>sin cierre visible</span>
+          </div>
+          <div class="dg-mini-card is-success">
+            <strong>{{ point_closure_summary.minor }}</strong>
+            <span>observaciones menores</span>
+          </div>
+        </div>
+        {% for row in point_closure_summary.rows|slice:":5" %}
           {% if row.tone != 'success' %}
-          <div class="dg-list-item">
-            <div>
+          <div class="dg-list-item is-{{ row.tone }}">
+            <div class="dg-compact-row-stack">
               <div class="dg-list-item-label">{{ row.branch_label }}</div>
               <div class="dg-list-item-meta">Ventas {{ row.sold_units|floatformat:0 }} · tickets {{ row.sold_tickets }} · cierre {{ row.closing_units|floatformat:0 }}</div>
+              <div class="dg-meter">
+                <span class="dg-meter-fill is-risk" style="width:{% if row.tone == 'danger' %}100{% elif row.tone == 'warning' %}62{% else %}35{% endif %}%"></span>
+              </div>
+              <div class="dg-inline-actions">
+                <a class="dg-inline-link" href="{% url 'control:discrepancias' %}?from={{ point_closure_summary.closure_date|date:'Y-m-d' }}&to={{ point_closure_summary.closure_date|date:'Y-m-d' }}&sucursal_id={{ row.branch_id }}">
+                  Abrir discrepancia
+                </a>
+              </div>
             </div>
             <div class="{% if row.tone == 'danger' %}dg-tone-danger{% elif row.tone == 'warning' %}dg-tone-warning{% else %}dg-tone-neutral{% endif %}">{{ row.status }}</div>
           </div>
           {% endif %}
         {% empty %}
-        <div class="dg-note">No hay sucursales con excepciones de cuadre en este corte.</div>
+        <div class="dg-note">Sin sucursales con excepciones en este corte.</div>
         {% endfor %}
+      </div>
+      <div class="dg-summary-inline" style="margin-top:10px;">
+        <span><strong>{{ point_closure_summary.critical|add:point_closure_summary.without_closure|add:point_closure_summary.minor }}</strong> sucursales con excepción</span>
       </div>
     </article>
   </section>
@@ -722,9 +862,12 @@
           <h2 class="dg-panel-title">Ticket promedio por sucursal</h2>
           <p class="dg-panel-subtitle">Ranking para identificar dónde se monetiza mejor el tráfico del día.</p>
         </div>
-        <span class="dg-pill {% if point_chart_bundle.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
-          {% if point_chart_bundle.ticket_data_available %}Cobertura {{ point_chart_bundle.ticket_branch_count }} sucursales{% else %}Sin tickets válidos{% endif %}
-        </span>
+        <div class="dg-panel-actions">
+          <span class="dg-pill {% if point_chart_bundle.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
+            {% if point_chart_bundle.ticket_data_available %}Cobertura {{ point_chart_bundle.ticket_branch_count }} sucursales{% else %}Sin tickets válidos{% endif %}
+          </span>
+          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months=6">Abrir ventas</a>
+        </div>
       </div>
       <canvas id="dg-chart-ticket-ranking" class="dg-chart-surface is-short"></canvas>
       <div class="dg-chart-legend">
@@ -736,11 +879,14 @@
       <div class="dg-panel-header">
         <div>
           <h2 class="dg-panel-title">Merma por sucursal / frente</h2>
-          <p class="dg-panel-subtitle">Distribución del corte para ubicar dónde se concentra la pérdida.</p>
+          <p class="dg-panel-subtitle">Distribución de la pérdida del corte.</p>
         </div>
-        <span class="dg-pill {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">
-          {{ point_waste_summary.total_rows }} registros
-        </span>
+        <div class="dg-panel-actions">
+          <span class="dg-pill {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">
+            {{ point_waste_summary.total_rows }} registros
+          </span>
+          <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}">Detalle de merma</a>
+        </div>
       </div>
       {% if point_waste_summary.total_rows %}
       <canvas id="dg-chart-waste-share" class="dg-chart-surface is-short"></canvas>
@@ -748,7 +894,7 @@
         <span><i class="dg-chart-dot" style="background:#b14b4b;"></i>Participación por sucursal / frente</span>
       </div>
       {% else %}
-      <div class="dg-note">Point no reportó mermas en el último corte operativo.</div>
+      <div class="dg-note">Sin mermas visibles en el último corte.</div>
       {% endif %}
     </article>
   </section>

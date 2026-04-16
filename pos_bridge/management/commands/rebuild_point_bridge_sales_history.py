@@ -8,7 +8,9 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Count, Sum
 
+from core.cache_versions import bump_cache_scopes
 from pos_bridge.services.sync_service import PointSyncService
+from reportes.analytics_service import mark_analytics_dirty_for_range
 from recetas.models import VentaHistorica
 
 
@@ -83,6 +85,16 @@ class Command(BaseCommand):
             for row in grouped
         ]
         VentaHistorica.objects.bulk_create(to_create, batch_size=1000)
+        bump_cache_scopes("ventas", "dashboard")
+        if to_create:
+            mark_analytics_dirty_for_range(
+                start_date=min(row.fecha for row in to_create),
+                end_date=max(row.fecha for row in to_create),
+                include_sales=True,
+                include_production=True,
+                include_forecast=True,
+                reason="rebuild_point_bridge_sales_history",
+            )
 
         payload = {
             "dry_run": False,

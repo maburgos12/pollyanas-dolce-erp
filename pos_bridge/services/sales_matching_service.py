@@ -18,19 +18,40 @@ NON_RECIPE_FAMILIES = {
     "hielo",
 }
 
+RESALE_FAMILIES = {
+    "bebidas",
+    "hielo",
+}
+
 NON_RECIPE_CATEGORIES = {
     "accesorios de reposteria",
     "granmark",
     "alegria",
     "plasticos",
+    "pillines",
     "regalos",
     "letreros",
     "velas sparklers",
     "industrias lec",
     "te",
     "hielo y agua mar de cortez",
-    "otros postres",
 }
+
+RESALE_CATEGORIES = {
+    "industrias lec",
+    "te",
+    "hielo y agua mar de cortez",
+    "viva party",
+    "clarita",
+    "glow",
+}
+
+SERVICE_PRIORITY_TOKENS = (
+    "servicio",
+    "extra ",
+    "tarjeta",
+    "gift",
+)
 
 NON_RECIPE_TOKENS = (
     "manga",
@@ -43,6 +64,7 @@ NON_RECIPE_TOKENS = (
     "tarjeta",
     "pluma",
     "libreta",
+    "letrero",
     "vela",
     "bolsa",
     "caja ",
@@ -73,13 +95,43 @@ class PointSalesMatchingService:
         self._point_name_index_built = False
         self._point_name_to_receta: dict[str, Receta] = {}
 
+    def infer_cost_mode(self, payload: dict) -> str:
+        familia = normalizar_nombre(payload.get("family") or payload.get("Familia") or "")
+        categoria = normalizar_nombre(payload.get("category") or payload.get("Categoria") or "")
+        nombre = normalizar_nombre(payload.get("name") or payload.get("Nombre") or "")
+        code = normalizar_nombre(payload.get("sku") or payload.get("Codigo") or "")
+        joined = f"{nombre} {code}".strip()
+
+        if any(token in joined for token in SERVICE_PRIORITY_TOKENS):
+            return Receta.MODO_COSTEO_SERVICIO
+        if familia in RESALE_FAMILIES or categoria in RESALE_CATEGORIES:
+            return Receta.MODO_COSTEO_REVENTA
+        if self.is_non_recipe_sale_row(payload):
+            return Receta.MODO_COSTEO_SERVICIO
+        return Receta.MODO_COSTEO_FABRICADO
+
+    def infer_non_recipe_bucket(self, payload: dict) -> str:
+        familia = normalizar_nombre(payload.get("family") or payload.get("Familia") or "")
+        categoria = normalizar_nombre(payload.get("category") or payload.get("Categoria") or "")
+        nombre = normalizar_nombre(payload.get("name") or payload.get("Nombre") or "")
+        code = normalizar_nombre(payload.get("sku") or payload.get("Codigo") or "")
+        joined = f"{nombre} {code}".strip()
+
+        if familia in RESALE_FAMILIES or categoria in RESALE_CATEGORIES:
+            return "REVENTA"
+        if any(token in joined for token in SERVICE_PRIORITY_TOKENS):
+            return "SERVICIO"
+        return "ACCESORIO"
+
     def is_non_recipe_sale_row(self, payload: dict) -> bool:
         familia = normalizar_nombre(payload.get("family") or payload.get("Familia") or "")
         categoria = normalizar_nombre(payload.get("category") or payload.get("Categoria") or "")
         nombre = normalizar_nombre(payload.get("name") or payload.get("Nombre") or "")
         code = normalizar_nombre(payload.get("sku") or payload.get("Codigo") or "")
 
-        if familia in NON_RECIPE_FAMILIES or categoria in NON_RECIPE_CATEGORIES:
+        if familia in NON_RECIPE_FAMILIES or familia in RESALE_FAMILIES:
+            return True
+        if categoria in NON_RECIPE_CATEGORIES or categoria in RESALE_CATEGORIES:
             return True
 
         joined = f"{nombre} {code}".strip()
@@ -133,7 +185,7 @@ class PointSalesMatchingService:
 
         return None
 
-    def is_descriptive_product_name(self, *, point_name: str, family: str = "") -> bool:
+    def is_descriptive_product_name(self, *, point_name: str, family: str = "", category: str = "") -> bool:
         normalized_name = normalizar_nombre(point_name)
         if not normalized_name:
             return False
@@ -143,7 +195,11 @@ class PointSalesMatchingService:
         alpha_tokens = [token for token in normalized_name.split() if any(ch.isalpha() for ch in token)]
         if len(alpha_tokens) >= 2:
             return True
-        return bool((family or "").strip())
+        if (family or "").strip():
+            return True
+        # Single-word sellable items can still be safely bootstrapped when
+        # Point provides a concrete category (for example "Americano" in "Café").
+        return bool((category or "").strip()) and bool(alpha_tokens)
 
     def create_missing_product_recipe(
         self,
@@ -184,6 +240,14 @@ class PointSalesMatchingService:
             nombre=base_name[:250],
             codigo_point=code_raw,
             tipo=Receta.TIPO_PRODUCTO_FINAL,
+            modo_costeo=self.infer_cost_mode(
+                {
+                    "family": family,
+                    "category": category,
+                    "name": base_name,
+                    "sku": code_raw,
+                }
+            ),
             familia=(family or "")[:120],
             categoria=(category or "")[:120],
             temporalidad=temporalidad,

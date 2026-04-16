@@ -1,0 +1,22 @@
+product_code,product_name,product_family,product_category,status,derived_kind,units_per_parent,parent_size_hint,requires_direct_components,candidate_code,candidate_name,candidate_score,candidate_has_recipe_flag,candidate_bom_count,erp_insumo_id,erp_insumo_nombre,erp_preparation_recipe_exists,search_terms
+10063,ADEREZO AGRIDULCE,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+0085,CONTENEDOR INDIVIDUAL CUPCAKE,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+0330,DECORACION,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+0227,Extra 10,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,7502271913,SNICKERS MINI,25.0,False,0,,,False,0227
+0320,EXTRA 100,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+0228,Extra 15,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+0229,Extra 20,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+0230,Extra 25,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+0231,Extra 30,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+1315,EXTRA 50,Otros postres,Otros postres,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+0227,Extra Fresa Chico,Otros postres,Pastel Chico,MISSING_IN_POINT,,,,False,7502271913,SNICKERS MINI,21.05,False,0,,,False,0227
+0106,Pastel de 3 Leches Rebanada,Pastel,Rebanada,DERIVED_PRESENTATION,SLICE_FROM_PARENT,6,MEDIANO,True,,,,False,,,,False,
+0110,Pastel de 3 Pecados R,Pastel,Rebanada,DERIVED_PRESENTATION,SLICE_FROM_PARENT,10,MEDIANO,True,,,,False,,,,False,
+0063,Pastel de Crunch R,Pastel,Rebanada,DERIVED_PRESENTATION,SLICE_FROM_PARENT,10,MEDIANO,True,,,,False,,,,False,
+0103,Pastel de Fresas Con Crema R,Pastel,Rebanada,DERIVED_PRESENTATION,SLICE_FROM_PARENT,10,MEDIANO,True,0103,GOMA XANTANA 1 KG,40.69,False,0,,,False,0103
+0058,Pastel de Snickers Rebanada,Pastel,Rebanada,DERIVED_PRESENTATION,SLICE_FROM_PARENT,10,MEDIANO,True,,,,False,,,,False,
+0068,Pastel de Zanahoria R,Pastel,Rebanada,DERIVED_PRESENTATION,SLICE_FROM_PARENT,10,MEDIANO,True,50327008,COCO RALLADO P/PASTEL ZANAHORIA,21.62,False,0,,,False,pastel zanahoria
+0007,Pay de Plátano Rebanada,Pay,Rebanada,DERIVED_PRESENTATION,SLICE_FROM_PARENT,8,GRANDE,True,31201512,CINTA TRANSPARENTE,17.65,False,0,,,False,0007
+0003,Pay de Queso Rebanada,Pay,Rebanada,DERIVED_PRESENTATION,SLICE_FROM_PARENT,8,GRANDE,True,01801,Pay de Queso Horneado Mediano,78.05,True,2,456,Pay de Queso Horneado Mediano,True,pay queso
+00445,Vaso Galleta Chispas Chocolate Mini,Vasos Preparados,Vaso Preparado Mini,MISSING_IN_POINT,,,,False,,,,False,,,,False,
+00446,Vaso Galleta Chispas de Chocolate Gde,Vasos Preparados,Vasos Preparados Grande,MISSING_IN_POINT,,,,False,,,,False,,,,False,

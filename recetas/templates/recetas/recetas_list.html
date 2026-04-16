@@ -29,7 +29,7 @@
       </article>
       <article class="kpi-card">
         <div class="kpi-number is-warning">{{ health_summary.pendientes }}</div>
-        <div class="kpi-label">Por validar</div>
+        <div class="kpi-label">Pendientes operativos</div>
       </article>
       <article class="kpi-card">
         <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.blockers }}</div>
@@ -126,7 +126,7 @@
       <select class="form-select" name="health_status">
         <option value="" {% if not health_status %}selected{% endif %}>Estado: Todos</option>
         <option value="listas" {% if health_status == "listas" %}selected{% endif %}>Lista para operar</option>
-        <option value="pendientes" {% if health_status == "pendientes" %}selected{% endif %}>Por validar</option>
+        <option value="pendientes" {% if health_status == "pendientes" %}selected{% endif %}>Pendientes operativos</option>
         <option value="incompletas" {% if health_status == "incompletas" %}selected{% endif %}>Incompletas</option>
       </select>
       <div class="recipes-filter-submit">
@@ -148,7 +148,7 @@
           <select class="form-select" name="chain_status">
             <option value="" {% if not chain_status %}selected{% endif %}>Cadena: Todas</option>
             <option value="listas" {% if chain_status == "listas" %}selected{% endif %}>Lista para operar</option>
-            <option value="pendientes" {% if chain_status == "pendientes" %}selected{% endif %}>Por validar</option>
+            <option value="pendientes" {% if chain_status == "pendientes" %}selected{% endif %}>Pendientes operativos</option>
             <option value="incompletas" {% if chain_status == "incompletas" %}selected{% endif %}>Incompleta</option>
           </select>
           <select class="form-select" name="chain_checkpoint">
@@ -189,6 +189,68 @@
       </details>
     </form>
   </section>
+
+  {% if point_recipe_sync_panel %}
+  <section class="card recipes-context-shell">
+    <div class="recipes-context-grid">
+      <article class="card card-subtle recipes-context-card">
+        <div class="recipes-context-title">Última importación Point</div>
+        <p class="muted mb-0">
+          Job #{{ point_recipe_sync_panel.job_id }} · {{ point_recipe_sync_panel.job_status_label }}.
+          {{ point_recipe_sync_panel.summary.products_selected|default:0 }} producto(s) procesado(s),
+          {{ point_recipe_sync_panel.summary.recipes_completed_successfully|default:0 }} completo(s),
+          {{ point_recipe_sync_panel.summary.recipes_with_unresolved_inputs|default:0 }} con advertencias.
+        </p>
+      </article>
+      <article class="card card-subtle recipes-context-card">
+        <div class="recipes-context-title">Resultado operativo</div>
+        <p class="muted mb-0">
+          Nuevos productos: {{ point_recipe_sync_panel.summary.new_products_imported|default:0 }}.
+          Preparaciones hijas nuevas: {{ point_recipe_sync_panel.summary.new_preparations_imported|default:0 }}.
+          Insumos pendientes: {{ point_recipe_sync_panel.summary.unresolved_inputs_count|default:0 }}.
+        </p>
+      </article>
+      <article class="card card-subtle recipes-context-card">
+        <div class="recipes-context-title">Salud Point</div>
+        <p class="muted mb-0">
+          Retries: {{ point_recipe_sync_panel.summary.point_retry_events|default:0 }}.
+          Re-login: {{ point_recipe_sync_panel.summary.point_relogin_events|default:0 }}.
+          Nodos recursivos creados: {{ point_recipe_sync_panel.summary.recursive_nodes_created|default:0 }}.
+        </p>
+      </article>
+    </div>
+    {% if point_recipe_sync_panel.products %}
+    <div class="recipes-context-grid mt-3">
+      {% for item in point_recipe_sync_panel.products %}
+      <article class="card card-subtle recipes-context-card">
+        <div class="recipes-context-title">
+          {{ item.nombre }}
+          {% if item.codigo_point %}<span class="text-muted">· {{ item.codigo_point }}</span>{% endif %}
+        </div>
+        <p class="muted mb-2">{{ item.message }}</p>
+        <div class="recipes-inline-links">
+          <span class="badge {% if item.tone == 'success' %}bg-success{% elif item.tone == 'warning' %}bg-warning text-dark{% else %}bg-danger{% endif %}">{{ item.status_label }}</span>
+          {% if item.is_new_product %}<span class="badge bg-primary">Producto nuevo importado</span>{% endif %}
+          {% if item.created_preparations %}<span class="badge bg-info text-dark">Preparaciones hijas creadas: {{ item.created_preparations|length }}</span>{% endif %}
+          {% if item.unresolved_inputs %}<span class="badge bg-warning text-dark">Faltantes por resolver: {{ item.unresolved_inputs|length }}</span>{% endif %}
+        </div>
+        {% if item.created_preparations %}
+        <div class="text-muted mt-2">
+          Preparaciones creadas automáticamente:
+          {% for child in item.created_preparations %}
+            <strong>{{ child.nombre }}</strong>{% if child.codigo_point %} ({{ child.codigo_point }}){% endif %}{% if not forloop.last %}, {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    {% if point_recipe_sync_panel.products_more_count %}
+    <div class="text-muted mt-2">Hay {{ point_recipe_sync_panel.products_more_count }} producto(s) adicional(es) en la corrida más reciente.</div>
+    {% endif %}
+    {% endif %}
+  </section>
+  {% endif %}
 
   <section class="card recipes-context-shell">
     <div class="recipes-context-grid">
@@ -342,7 +404,16 @@
           {% if r.product_upstream_snapshot %}
           <div class="text-muted">Bases origen: <strong>{{ r.product_upstream_snapshot.upstream_base_count }}</strong> · Internos sin origen: <strong>{{ r.product_upstream_snapshot.internal_without_source_count }}</strong></div>
           {% endif %}
-          <div class="text-muted">Observaciones: {% if r.pendientes_count > 0 %}<strong>{{ r.pendientes_count }} por validar</strong>{% else %}<strong>0</strong>{% endif %}</div>
+          <div class="text-muted">
+            Observaciones:
+            {% if r.point_validation_status and not r.point_validation_status.is_candidate %}
+            <strong>{{ r.point_validation_status.label }}</strong>
+            {% elif r.pendientes_count > 0 %}
+            <strong>{{ r.pendientes_count }} por validar</strong>
+            {% else %}
+            <strong>0</strong>
+            {% endif %}
+          </div>
         </div>
       </details>
       {% endif %}

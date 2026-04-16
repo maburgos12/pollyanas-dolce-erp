@@ -599,11 +599,12 @@ class ComprasSolicitudImportConfirmSerializer(serializers.Serializer):
 
 
 class ForecastEstadisticoRequestSerializer(serializers.Serializer):
-    alcance = serializers.ChoiceField(choices=["mes", "semana", "fin_semana"], required=False, default="mes")
+    alcance = serializers.ChoiceField(choices=["dia", "mes", "semana", "fin_semana"], required=False, default="mes")
     periodo = serializers.CharField(max_length=7, required=False, allow_blank=True)
     fecha_base = serializers.DateField(required=False)
     sucursal_id = serializers.IntegerField(required=False, allow_null=True)
     incluir_preparaciones = serializers.BooleanField(required=False, default=False)
+    mix_adjustment_enabled = serializers.BooleanField(required=False, default=False)
     safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
     min_confianza_pct = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
     include_solicitud_compare = serializers.BooleanField(required=False, default=True)
@@ -638,10 +639,12 @@ class ForecastEstadisticoRequestSerializer(serializers.Serializer):
 
 
 class ForecastBacktestRequestSerializer(serializers.Serializer):
-    alcance = serializers.ChoiceField(choices=["mes", "semana", "fin_semana"], required=False, default="mes")
+    alcance = serializers.ChoiceField(choices=["dia", "mes", "semana", "fin_semana"], required=False, default="mes")
     fecha_base = serializers.DateField(required=False)
     sucursal_id = serializers.IntegerField(required=False, allow_null=True)
     incluir_preparaciones = serializers.BooleanField(required=False, default=False)
+    mix_adjustment_enabled = serializers.BooleanField(required=False, default=False)
+    include_mix_compare = serializers.BooleanField(required=False, default=True)
     safety_pct = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, default=0)
     min_confianza_pct = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
     escenario = serializers.ChoiceField(choices=["base", "bajo", "alto"], required=False, default="base")

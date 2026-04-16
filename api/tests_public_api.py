@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
+from unittest.mock import patch
 
+from django.core.cache import cache
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -12,6 +15,7 @@ from rest_framework.test import APITestCase
 
 from core.models import Sucursal
 from crm.models import Cliente, PedidoCliente
+from crm.services import PickupAvailabilityService
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
@@ -21,6 +25,7 @@ from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
 
 class PublicApiTests(APITestCase):
     def setUp(self):
+        cache.clear()
         self.unidad_kg = UnidadMedida.objects.create(
             codigo="kg",
             nombre="Kilogramo",
@@ -183,7 +188,7 @@ class PublicApiTests(APITestCase):
         payload = {
             "cliente_nombre": "Sucursal Centro",
             "descripcion": "Pedido publico de prueba",
-            "sucursal": "Centro",
+            "sucursal": "MATRIZ",
             "prioridad": PedidoCliente.PRIORIDAD_ALTA,
             "monto_estimado": "1250.50",
             "fecha_compromiso": "2026-02-25",
@@ -195,6 +200,21 @@ class PublicApiTests(APITestCase):
         self.assertEqual(pedido.prioridad, PedidoCliente.PRIORIDAD_ALTA)
         self.assertEqual(str(pedido.monto_estimado), "1250.50")
         self.assertIsNotNone(pedido.fecha_compromiso)
+        self.assertEqual(pedido.sucursal_ref_id, self.sucursal.id)
+        self.assertEqual(pedido.sucursal, self.sucursal.nombre)
+
+    def test_pedidos_create_resolves_point_branch_alias_to_erp_sucursal(self):
+        url = reverse("api_public_pedidos_create")
+        payload = {
+            "cliente_nombre": "Cliente Alias Point",
+            "descripcion": "Pedido desde alias Point",
+            "sucursal": self.point_branch.external_id,
+        }
+        response = self.client.post(url, payload, format="json", **self._auth_headers())
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        pedido = PedidoCliente.objects.get(id=response.data["id"])
+        self.assertEqual(pedido.sucursal_ref_id, self.sucursal.id)
+        self.assertEqual(pedido.sucursal, self.sucursal.nombre)
 
     def test_pedidos_create_invalid_fecha_compromiso_returns_400(self):
         url = reverse("api_public_pedidos_create")
@@ -388,11 +408,12 @@ class PublicApiTests(APITestCase):
     def test_pickup_availability_returns_unknown_when_snapshot_is_stale(self):
         PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - timedelta(minutes=5))
         url = reverse("api_public_pickup_availability")
-        response = self.client.get(
-            url,
-            {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
-            **self._auth_headers(),
-        )
+        with patch.dict(os.environ, {"POS_BRIDGE_REALTIME_INTERVAL_MINUTES": "0"}, clear=False):
+            response = self.client.get(
+                url,
+                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                **self._auth_headers(),
+            )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], "UNKNOWN")
         self.assertFalse(response.data["available"])
@@ -404,14 +425,35 @@ class PublicApiTests(APITestCase):
         PICKUP_LOW_STOCK_THRESHOLD="2",
         PICKUP_RESERVATION_TTL_MINUTES=15,
     )
-    def test_pickup_availability_uses_sync_interval_as_freshness_floor(self):
+    def test_pickup_availability_does_not_expand_freshness_to_daily_sync_window(self):
         PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - timedelta(hours=6))
         url = reverse("api_public_pickup_availability")
-        response = self.client.get(
-            url,
-            {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
-            **self._auth_headers(),
-        )
+        with patch.dict(os.environ, {"POS_BRIDGE_REALTIME_INTERVAL_MINUTES": "10"}, clear=False):
+            response = self.client.get(
+                url,
+                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                **self._auth_headers(),
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "UNKNOWN")
+        self.assertFalse(response.data["is_fresh"])
+
+    @override_settings(
+        PICKUP_AVAILABILITY_FRESHNESS_MINUTES=5,
+        POINT_BRIDGE_SYNC_INTERVAL_HOURS=24,
+        PICKUP_STOCK_BUFFER_DEFAULT="1",
+        PICKUP_LOW_STOCK_THRESHOLD="2",
+        PICKUP_RESERVATION_TTL_MINUTES=15,
+    )
+    def test_pickup_availability_uses_realtime_interval_as_floor(self):
+        PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - timedelta(minutes=8))
+        url = reverse("api_public_pickup_availability")
+        with patch.dict(os.environ, {"POS_BRIDGE_REALTIME_INTERVAL_MINUTES": "10"}, clear=False):
+            response = self.client.get(
+                url,
+                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                **self._auth_headers(),
+            )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], "AVAILABLE")
         self.assertTrue(response.data["is_fresh"])
@@ -431,6 +473,7 @@ class PublicApiTests(APITestCase):
             erp_branch=self.sucursal,
         )
         stale_job = PointSyncJob.objects.create(
+            id=self.snapshot_job_id + 1,
             job_type=PointSyncJob.JOB_TYPE_INVENTORY,
             status=PointSyncJob.STATUS_SUCCESS,
         )
@@ -467,3 +510,35 @@ class PublicApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "branch_not_found")
+
+    @override_settings(PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS=3)
+    def test_pickup_availability_uses_short_response_cache_for_repeated_reads(self):
+        url = reverse("api_public_pickup_availability")
+        availability = PickupAvailabilityService().get_availability(
+            product_code="01PSV",
+            branch_code="MATRIZ",
+            quantity="1",
+        )
+        with patch("api.public_views.PickupAvailabilityService.get_availability") as mocked_get:
+            mocked_get.return_value = availability
+            first = self.client.get(
+                url,
+                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                **self._auth_headers(),
+            )
+            second = self.client.get(
+                url,
+                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                **self._auth_headers(),
+            )
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(mocked_get.call_count, 1)
+
+    @override_settings(PICKUP_RESERVATION_EXPIRY_SWEEP_DEBOUNCE_SECONDS=30)
+    def test_pickup_availability_debounces_expired_reservation_sweep(self):
+        service = PickupAvailabilityService()
+        with patch.object(service, "expire_stale_reservations", wraps=service.expire_stale_reservations) as mocked_expire:
+            service.get_availability(product_code="01PSV", branch_code="MATRIZ", quantity="1")
+            service.get_availability(product_code="01PSV", branch_code="MATRIZ", quantity="1")
+        self.assertEqual(mocked_expire.call_count, 1)

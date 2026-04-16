@@ -26,7 +26,18 @@ ROLE_ORDER = [
 def _group_names(user: AbstractBaseUser) -> set[str]:
     if not user or not user.is_authenticated:
         return set()
-    return set(user.groups.values_list("name", flat=True))
+    cached = getattr(user, "_group_names_cache", None)
+    if cached is not None:
+        return set(cached)
+    prefetched = getattr(user, "_prefetched_objects_cache", {}) or {}
+    prefetched_groups = prefetched.get("groups")
+    if prefetched_groups is not None:
+        names = {str(group.name) for group in prefetched_groups}
+        setattr(user, "_group_names_cache", frozenset(names))
+        return names
+    names = set(user.groups.values_list("name", flat=True))
+    setattr(user, "_group_names_cache", frozenset(names))
+    return names
 
 
 def has_any_role(user: AbstractBaseUser, *roles: str) -> bool:
@@ -91,6 +102,24 @@ def can_view_reportes(user: AbstractBaseUser) -> bool:
     ) and not _is_locked(user, "lock_reportes")
 
 
+def can_view_product_closure(user: AbstractBaseUser) -> bool:
+    return can_view_reportes(user)
+
+
+def can_build_product_closure(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_PRODUCCION, ROLE_ALMACEN) and not _is_locked(
+        user, "lock_reportes"
+    )
+
+
+def can_rebuild_product_closure(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_reportes")
+
+
+def can_lock_product_closure(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_reportes")
+
+
 def can_view_maestros(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_COMPRAS, ROLE_ALMACEN, ROLE_LECTURA) and not _is_locked(
         user, "lock_maestros"
@@ -118,11 +147,35 @@ def can_manage_users(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_DG, ROLE_ADMIN)
 
 
+def can_view_orquestacion(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_auditoria")
+
+
+def can_manage_orquestacion(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_auditoria")
+
+
 def can_view_crm(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_VENTAS, ROLE_LECTURA) and not _is_locked(user, "lock_crm")
 
 
 def can_manage_crm(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_ADMIN, ROLE_VENTAS) and not _is_locked(user, "lock_crm")
+
+
+def can_view_ventas_eventos(user: AbstractBaseUser) -> bool:
+    return has_any_role(
+        user,
+        ROLE_DG,
+        ROLE_ADMIN,
+        ROLE_VENTAS,
+        ROLE_PRODUCCION,
+        ROLE_COMPRAS,
+        ROLE_LECTURA,
+    ) and not _is_locked(user, "lock_crm")
+
+
+def can_manage_ventas_eventos(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_ADMIN, ROLE_VENTAS) and not _is_locked(user, "lock_crm")
 
 

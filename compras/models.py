@@ -36,6 +36,10 @@ class SolicitudCompra(models.Model):
     cantidad = models.DecimalField(max_digits=18, decimal_places=3)
     fecha_requerida = models.DateField(default=timezone.localdate)
     estatus = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_BORRADOR)
+    fuera_de_catalogo = models.BooleanField(default=False)
+    cotizaciones_requeridas = models.PositiveSmallIntegerField(default=0)
+    cotizaciones_recibidas = models.PositiveSmallIntegerField(default=0)
+    justificacion_excepcion = models.CharField(max_length=255, blank=True, default="")
     creado_en = models.DateTimeField(default=timezone.now)
 
     class Meta:

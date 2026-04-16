@@ -1,20 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Inventario - Referencias ERP{% endblock %}
-{% block page_title %}Inventario · Referencias ERP{% endblock %}
+{% block title %}Inventario - Referencias{% endblock %}
+{% block page_title %}Inventario · Referencias{% endblock %}
 
 {% block content %}
 <nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:home' %}">Dashboard</a>
   <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
   <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
   <a class="module-tab" href="{% url 'inventario:alertas' %}">Alertas</a>
-  <a class="module-tab active" href="{% url 'inventario:aliases_catalog' %}">Referencias ERP</a>
+  <a class="module-tab active" href="{% url 'inventario:aliases_catalog' %}">Referencias</a>
   <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
 </nav>
 
 {% if erp_command_center %}
 <section class="card">
-  <div class="card-header">Centro de mando ERP</div>
+  <div class="card-header">Resumen del módulo</div>
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
@@ -40,7 +41,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Puerta de cierre ERP de referencias</div>
+  <div class="card-header">Cierre operativo de referencias</div>
   <div class="enterprise-flow-grid mb-3">
     {% for row in references_workflow_rows %}
     <article class="enterprise-flow-card">
@@ -66,7 +67,7 @@
   </div>
   <div class="enterprise-pill-grid enterprise-pill-grid-compact">
     <div class="enterprise-pill-card is-active">
-      <div class="enterprise-pill-title">Siguiente paso ERP</div>
+      <div class="enterprise-pill-title">Siguiente paso</div>
       <div class="enterprise-pill-text">{{ references_next_step_summary }}</div>
     </div>
     {% for card in reference_module_cards %}
@@ -80,7 +81,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Workflow ERP de referencias</div>
+  <div class="card-header">Flujo de referencias</div>
   <div class="enterprise-pill-grid">
     <div class="enterprise-pill-card is-active">
       <div class="enterprise-pill-title">01 Fuente operativa</div>
@@ -99,7 +100,7 @@
 
 {% if executive_radar_rows %}
 <section class="card">
-  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="card-header">Resumen de seguimiento</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -132,7 +133,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="card-header">Seguimiento por frente</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -198,7 +199,7 @@
 </section>
 
 <section class="card">
-      <div class="card-header">Gobierno operativo de referencias</div>
+      <div class="card-header">Control de referencias</div>
   <p class="muted">Herramientas para revisar referencias, consolidar artículos maestros y cerrar duplicados operativos dentro del catálogo.</p>
 
   <div class="table-responsive" style="margin-top:8px;">

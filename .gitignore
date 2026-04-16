@@ -8,7 +8,9 @@ __pycache__/
 venv/
 
 # Django
+*.sqlite
 *.sqlite3
+*.sqlite3-*
 staticfiles/
 media/
 
@@ -16,6 +18,7 @@ media/
 .env
 .env.*
 !.env.example
+.envrc
 
 # Logs
 logs/*.log
@@ -60,3 +63,13 @@ logs/bloque1_*
 # Output de tests
 output/playwright/
 output/spreadsheet/
+
+# Directorios locales de runtime / recuperación
+tmp/
+backups/
+test-results/
+.tmp/
+
+# Archivos operativos de jobs puntuales
+job588_*.csv
+job588_*.tsv

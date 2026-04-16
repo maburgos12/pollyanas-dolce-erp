@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 from django.db.models import Q
 from django.utils import timezone
 
+from core.branch_catalog import EXCLUDED_BRANCH_CODES
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator
 from pos_bridge.services.point_http_session_service import PointHttpSessionService
@@ -43,7 +44,12 @@ class PointSalesBranchIndicatorService:
 
     @staticmethod
     def canonical_branches(*, branch_filter: str | None = None) -> list[PointBranch]:
-        queryset = PointBranch.objects.filter(erp_branch__isnull=False).select_related("erp_branch").order_by("erp_branch_id", "id")
+        queryset = (
+            PointBranch.objects.filter(erp_branch__isnull=False)
+            .exclude(erp_branch__codigo__in=EXCLUDED_BRANCH_CODES)
+            .select_related("erp_branch")
+            .order_by("erp_branch_id", "id")
+        )
         if branch_filter:
             token = branch_filter.strip()
             queryset = queryset.filter(Q(name__icontains=token) | Q(external_id__iexact=token))

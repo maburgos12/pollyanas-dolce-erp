@@ -1,0 +1,11 @@
+scope_key,sucursal_id,sucursal_nombre,alcance,fecha_base,periods,status,base_mape,adjusted_mape,base_mae,adjusted_mae,base_bias_total,adjusted_bias_total,improved_cases,worsened_cases,tie_cases,improvement_rate_pct,mape_improvement_pct,base_fallback_rows,adjusted_fallback_rows,base_portfolio_stability_pct,adjusted_portfolio_stability_pct,base_effective_recent_samples,adjusted_effective_recent_samples,recommendation,activation_candidate
+COL,9,COL - Colosio,dia,2026-05-10,8,sin_base,,,,,,,,,,,,,,,,,,,
+COLOSIO,1,COLOSIO - Colosio,dia,2026-05-10,8,sin_base,,,,,,,,,,,,,,,,,,,
+CRUCERO,2,CRUCERO - Crucero,dia,2026-05-10,8,sin_base,,,,,,,,,,,,,,,,,,,
+EL_TUNEL,3,EL_TUNEL - EL TUNEL,dia,2026-05-10,8,ok,,,93.559,93.559,748.469,748.469,0,0,8,0.0,,0,0,,,,,mantener_desactivado,False
+GUAMUCHIL,10,GUAMUCHIL - Guamuchil,dia,2026-05-10,8,sin_base,,,,,,,,,,,,,,,,,,,
+LAS_GLORIAS,4,LAS_GLORIAS - Las Glorias,dia,2026-05-10,8,sin_base,,,,,,,,,,,,,,,,,,,
+LEYVA,5,LEYVA - Leyva,dia,2026-05-10,8,sin_base,,,,,,,,,,,,,,,,,,,
+MATRIZ,6,MATRIZ - Matriz,dia,2026-05-10,8,sin_base,,,,,,,,,,,,,,,,,,,
+PAYAN,7,PAYAN - Payán,dia,2026-05-10,8,sin_base,,,,,,,,,,,,,,,,,,,
+PLAZA_NIO,8,PLAZA_NIO - Plaza Nío,dia,2026-05-10,8,sin_base,,,,,,,,,,,,,,,,,,,

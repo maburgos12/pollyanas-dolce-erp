@@ -198,6 +198,22 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertAlmostEqual(categorias["Masa"]["estimado"], 25.0, places=2)
         self.assertAlmostEqual(categorias["Masa"]["ejecutado"], 30.0, places=2)
 
+    def test_dashboard_root_renders_executive_view(self):
+        response = self.client.get(reverse("compras:home"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Compras en control")
+        self.assertContains(response, "Solicitado visible")
+        self.assertContains(response, "Concentración por proveedor")
+        self.assertContains(response, "Plan de producción vs consumo real")
+        self.assertContains(response, self.proveedor.nombre)
+        self.assertContains(response, "Detalle auditable de compras")
+
+    def test_dashboard_root_preserves_consumo_ref_filter(self):
+        response = self.client.get(reverse("compras:home"), {"consumo_ref": "plan_ref"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["consumo_ref_filter"], "plan_ref")
+        self.assertContains(response, "Solo referencia plan")
+
     def test_solicitudes_view_context_preserva_categoria(self):
         url = reverse("compras:solicitudes")
         response = self.client.get(
@@ -212,6 +228,53 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertEqual(response.context["categoria_filter"], "Masa")
         self.assertEqual(len(response.context["solicitudes"]), 2)
         self.assertIn("categoria=Masa", response.context["current_query"])
+
+    def test_solicitudes_view_prefers_point_name_for_display(self):
+        self.insumo_masa_blank.nombre_point = "Harina Point Compras"
+        self.insumo_masa_blank.save(update_fields=["nombre_point"])
+
+        response = self.client.get(reverse("compras:solicitudes"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Harina Point Compras")
+
+    def test_solicitudes_view_filters_by_q(self):
+        response = self.client.get(
+            reverse("compras:solicitudes"),
+            {"q": self.solicitud_masa_blank.folio},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["q_filter"], self.solicitud_masa_blank.folio)
+        self.assertEqual(len(response.context["solicitudes"]), 1)
+        self.assertEqual(response.context["solicitudes"][0].id, self.solicitud_masa_blank.id)
+        self.assertIn(f"q={self.solicitud_masa_blank.folio}", response.context["current_query"])
+
+    def test_solicitudes_post_persists_policy_fields(self):
+        response = self.client.post(
+            reverse("compras:solicitudes"),
+            {
+                "area": "Compras",
+                "solicitante": "admin_test",
+                "insumo_id": str(self.insumo_masa_blank.id),
+                "cantidad": "4",
+                "fecha_requerida": self.fecha_base.isoformat(),
+                "estatus": SolicitudCompra.STATUS_BORRADOR,
+                "fuera_de_catalogo": "on",
+                "cotizaciones_requeridas": "3",
+                "cotizaciones_recibidas": "1",
+                "justificacion_excepcion": "Compra urgente fuera de catálogo.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        solicitud = SolicitudCompra.objects.exclude(id=self.solicitud_masa_blank.id).exclude(
+            id=self.solicitud_masa_explicit.id
+        ).exclude(id=self.solicitud_volumen.id).latest("id")
+        self.assertTrue(solicitud.fuera_de_catalogo)
+        self.assertEqual(solicitud.cotizaciones_requeridas, 3)
+        self.assertEqual(solicitud.cotizaciones_recibidas, 1)
+        self.assertEqual(solicitud.justificacion_excepcion, "Compra urgente fuera de catálogo.")
 
     def test_solicitudes_view_exposes_plan_scope_context(self):
         SolicitudCompra.objects.create(
@@ -377,7 +440,7 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertContains(response, "Bloqueos del plan")
         self.assertContains(response, "Etapa documental actual")
         self.assertContains(response, "Demanda crítica bloqueada")
-        self.assertContains(response, "Resumen de compras")
+        self.assertContains(response, "Resumen de solicitudes")
         self.assertContains(response, "Bloqueo prioritario por etapa")
         self.assertContains(response, "Criterios de cierre")
         self.assertContains(response, "Prioridades de atención")
@@ -963,7 +1026,7 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertGreaterEqual(blockers["Maestro incompleto"], 1)
         self.assertIn("master_blocker_class_cards", board)
         self.assertIn("master_blocker_detail_rows", board)
-        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Salud operativa")
         self.assertContains(response, "Corregir maestro ERP")
         self.assertContains(response, blocked.folio)
 
@@ -1322,7 +1385,7 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertIn("código Point", row["enterprise_missing"])
         self.assertTrue(row["is_operational_blocker"])
         self.assertEqual(row["operational_blocker_label"], "Bloquea compras")
-        self.assertContains(response, "estado ERP")
+        self.assertContains(response, "proveedor principal")
         self.assertContains(response, "Bloquea compras")
 
     def test_solicitudes_view_puede_filtrar_bloqueadas_erp(self):
@@ -2656,7 +2719,7 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertTrue(any(item["key"] == "ready_for_recepcion" for item in workflow_summary["gate_cards"]))
         self.assertIn("release_gate_rows", response.context)
         self.assertIn("release_gate_completion", response.context)
-        self.assertContains(response, "Resumen de compras")
+        self.assertContains(response, "Resumen de órdenes")
         self.assertContains(response, "Control Documental")
         self.assertContains(response, "Dependencias del flujo")
         self.assertContains(response, "Solicitudes / BOM")
@@ -2749,7 +2812,7 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
                 for item in board["blocker_cards"]
             )
         )
-        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Salud operativa")
         self.assertContains(response, "Plan producción")
         self.assertContains(response, "Bloqueada ERP")
         self.assertContains(response, "Bloqueos del maestro por clase")
@@ -2973,7 +3036,7 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertTrue(any(item["key"] == "applied_inventory" for item in workflow_summary["gate_cards"]))
         self.assertIn("release_gate_rows", response.context)
         self.assertIn("release_gate_completion", response.context)
-        self.assertContains(response, "Resumen de compras")
+        self.assertContains(response, "Resumen de recepciones")
         self.assertContains(response, "Control Documental")
         self.assertContains(response, "Dependencias del flujo")
         self.assertContains(response, "Solicitudes / BOM")
@@ -3071,7 +3134,7 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
                 for item in board["blocker_cards"]
             )
         )
-        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Salud operativa")
         self.assertContains(response, "Plan producción")
         self.assertContains(response, "Corregir datos recepción")
         self.assertContains(response, "Bloqueos del maestro por clase")

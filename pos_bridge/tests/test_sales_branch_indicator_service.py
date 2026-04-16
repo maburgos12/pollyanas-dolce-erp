@@ -36,6 +36,26 @@ class PointSalesBranchIndicatorServiceTests(TestCase):
         self.assertEqual(len(branches), 1)
         self.assertEqual(branches[0].id, numeric.id)
 
+    def test_canonical_branches_excludes_matrizdbg_alias_branch(self):
+        matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        matriz_dbg = Sucursal.objects.create(codigo="MATRIZDBG", nombre="Matriz DBG", activa=True)
+        PointBranch.objects.create(
+            external_id="1",
+            name="Matriz",
+            status=PointBranch.STATUS_ACTIVE,
+            erp_branch=matriz,
+        )
+        PointBranch.objects.create(
+            external_id="DBG1",
+            name="Matriz DBG",
+            status=PointBranch.STATUS_ACTIVE,
+            erp_branch=matriz_dbg,
+        )
+
+        branches = PointSalesBranchIndicatorService.canonical_branches()
+
+        self.assertEqual([(branch.external_id, branch.erp_branch.codigo) for branch in branches], [("1", "MATRIZ")])
+
     def test_persist_branch_day_upserts_indicator(self):
         sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
         branch = PointBranch.objects.create(external_id="1", name="Matriz", erp_branch=sucursal)

@@ -1,0 +1,637 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - Simulador de Expansión{% endblock %}
+{% block page_title %}Reportes · Simulador de Expansión{% endblock %}
+{% block body_class %}page-reportes-investment-projects{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406c">
+{% endblock %}
+
+{% block content %}
+<div class="investment-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="investment-header">
+    <article class="investment-hero">
+      <div class="investment-kicker">Principal</div>
+      <h1 class="investment-title">Simulador para abrir nuevas sucursales</h1>
+      <p class="investment-copy">La pantalla principal del módulo ahora sirve para responder una sola pregunta: ¿conviene abrir una nueva sucursal hoy? Captura una base comparable, ejecuta la simulación y obtén una recomendación clara para dirección.</p>
+      <div class="investment-meta">
+        <span class="investment-pill">Inputs arriba</span>
+        <span class="investment-pill">Resultado abajo</span>
+        <span class="investment-pill">Decisión rápida</span>
+      </div>
+    </article>
+    <aside class="investment-side">
+      <div class="investment-actions">
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_sucursales' %}">Ver sucursales</a>
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_calibracion' %}">Ir a calibración</a>
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:gastos_operativos_importar' %}">Cargar gasto mensual</a>
+      </div>
+      <div class="investment-muted">La recomendación combina política financiera global, sucursal base, inversión estimada, renta nueva, ajuste comercial y escenario. Si falta algún dato histórico, la interfaz lo expone antes de sugerir abrir.</div>
+    </aside>
+  </section>
+
+  {% if strategic_alerts %}
+  <section class="investment-alert-stack">
+    {% for alert in strategic_alerts %}
+    <article class="investment-alert {% if alert.severity == 'CRITICAL' %}is-critical{% endif %}">
+      <strong>{{ alert.code }}</strong>
+      <span>{{ alert.message }}</span>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="investment-kpis">
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Recomendación global</div>
+      <div class="investment-kpi-value">{{ global_summary.global_recommendation.decision }}</div>
+      <div class="investment-kpi-note">{{ global_summary.global_recommendation.explanation }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Capacidad actual</div>
+      <div class="investment-kpi-value">${{ global_summary.metrics.capacity_investment|floatformat:2|intcomma }}</div>
+      <div class="investment-kpi-note">Flujo libre total ${{ global_summary.metrics.free_cashflow_total|floatformat:2|intcomma }}</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Sucursales fuertes</div>
+      <div class="investment-kpi-value">{{ global_summary.counts.expand|intcomma }}</div>
+      <div class="investment-kpi-note">Bases que hoy soportan replicación</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Sucursales en riesgo</div>
+      <div class="investment-kpi-value">{{ global_summary.counts.risk|intcomma }}</div>
+      <div class="investment-kpi-note">Hay que estabilizarlas antes de crecer</div>
+    </article>
+  </section>
+
+  <section class="investment-grid-2">
+    <article class="investment-form-card">
+      <div class="investment-panel-head">
+        <div>
+          <div class="investment-kicker">Simulación</div>
+          <h2 class="investment-panel-title">Nueva sucursal</h2>
+        </div>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="run_expansion_forecast">
+        <div class="investment-field-grid">
+          <div class="investment-field">
+            <label for="base_project_id">Sucursal base</label>
+            <select id="base_project_id" name="base_project_id">
+              <option value="">Portafolio comparable</option>
+              {% for project in base_projects %}
+              <option value="{{ project.id }}" {% if forecast_form.base_project_id == project.id|stringformat:"s" %}selected{% endif %}>{{ project.nombre_proyecto }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="investment-field">
+            <label for="scenario">Escenario</label>
+            <select id="scenario" name="scenario">
+              {% for key, label in forecast_scenarios %}
+              <option value="{{ key }}" {% if forecast_form.scenario == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="investment-field">
+            <label for="investment_estimate">Inversión estimada</label>
+            <input id="investment_estimate" type="number" step="0.01" name="investment_estimate" value="{{ forecast_form.investment_estimate }}" placeholder="0.00">
+          </div>
+          <div class="investment-field">
+            <label for="monthly_rent_reference">Renta mensual</label>
+            <input id="monthly_rent_reference" type="number" step="0.01" name="monthly_rent_reference" value="{{ forecast_form.monthly_rent_reference }}" placeholder="Supuesto referencial">
+          </div>
+          <div class="investment-field">
+            <label for="sales_adjustment_reference">Ajuste de ventas (%)</label>
+            <input id="sales_adjustment_reference" type="number" step="0.01" name="sales_adjustment_reference" value="{{ forecast_form.sales_adjustment_reference }}" placeholder="Supuesto referencial">
+          </div>
+        </div>
+        <div class="investment-help">La simulación parte del histórico real de la sucursal base. La renta capturada agrega presión mensual al gasto proyectado y el ajuste de ventas modifica directamente la base comercial antes de aplicar el escenario.</div>
+        <div class="investment-form-actions">
+          <button class="investment-button" type="submit">Evaluar apertura</button>
+        </div>
+      </form>
+    </article>
+
+    <article class="investment-panel">
+      <div class="investment-panel-head">
+        <div>
+          <div class="investment-kicker">Contexto</div>
+          <h2 class="investment-panel-title">Qué está sosteniendo la decisión</h2>
+        </div>
+      </div>
+      <div class="investment-stats-list">
+        <div class="investment-stat-line">
+          <span class="investment-muted">Máx. deuda / ingreso</span>
+          <strong>{{ global_summary.policy.max_debt_to_income_ratio|floatformat:2 }}%</strong>
+        </div>
+        <div class="investment-stat-line">
+          <span class="investment-muted">Máx. payback promedio</span>
+          <strong>{{ global_summary.policy.max_average_payback_months|floatformat:2 }} meses</strong>
+        </div>
+        <div class="investment-stat-line">
+          <span class="investment-muted">Flujo libre mínimo</span>
+          <strong>${{ global_summary.policy.min_free_cashflow_total|floatformat:2|intcomma }}</strong>
+        </div>
+      </div>
+      <div class="investment-grid-2 investment-grid-2--compact" style="margin-top:1rem;">
+        <div>
+          <div class="investment-muted" style="margin-bottom:0.5rem;">Mejores bases</div>
+          <div class="investment-portfolio-list">
+            {% for row in recommended_bases %}
+            <article class="investment-project-row">
+              <div class="investment-project-top">
+                <strong>{{ row.project.nombre_proyecto }}</strong>
+                <span class="investment-status-pill is-active">{{ row.classification }}</span>
+              </div>
+              <div class="investment-muted">Health {{ row.health_score }}/100 · ROI {{ row.roi|floatformat:2 }}%</div>
+            </article>
+            {% empty %}
+            <div class="investment-empty">Aún no hay bases fuertes disponibles.</div>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <div class="investment-muted" style="margin-bottom:0.5rem;">Riesgos del portafolio</div>
+          <div class="investment-portfolio-list">
+            {% for row in risk_bases %}
+            <article class="investment-project-row">
+              <div class="investment-project-top">
+                <strong>{{ row.project.nombre_proyecto }}</strong>
+                <span class="investment-status-pill is-warning">{{ row.classification }}</span>
+              </div>
+              <div class="investment-muted">Flujo 3m ${{ row.average_free_cashflow_3m|default:0|floatformat:2|intcomma }}</div>
+            </article>
+            {% empty %}
+            <div class="investment-empty">No hay alertas críticas del portafolio.</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+	  {% if opening_recommendation %}
+	  <section class="investment-grid-2">
+	    <article class="investment-decision-card {% if opening_recommendation.decision == 'ABRIR' %}is-positive{% elif opening_recommendation.decision == 'NO_ABRIR' %}is-danger{% else %}is-warning{% endif %}">
+      <div class="investment-kicker">Resultado final</div>
+      <div class="investment-title">
+        {% if opening_recommendation.decision == 'ABRIR' %}
+        RECOMENDADO
+        {% elif opening_recommendation.decision == 'NO_ABRIR' %}
+        NO ABRIR
+        {% else %}
+        RIESGOSO
+        {% endif %}
+      </div>
+      <div class="investment-copy">{{ opening_recommendation.explanation }}</div>
+      <div class="investment-mini-kpis">
+        <div class="investment-mini-kpi">
+          <span class="investment-muted">Sucursales sugeridas</span>
+          <strong>{{ opening_recommendation.recommended_branch_count }}</strong>
+        </div>
+        <div class="investment-mini-kpi">
+          <span class="investment-muted">Inversión sugerida</span>
+          <strong>${{ opening_recommendation.suggested_investment|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="investment-mini-kpi">
+          <span class="investment-muted">Riesgo</span>
+          <strong>{{ forecast_payload.outputs.risk_level }}</strong>
+        </div>
+	      </div>
+	    </article>
+
+	    <article class="investment-panel">
+      <div class="investment-panel-head">
+        <div>
+          <div class="investment-kicker">Salida</div>
+          <h2 class="investment-panel-title">Resumen del escenario</h2>
+        </div>
+      </div>
+	      <div class="investment-grid-2 investment-grid-2--compact">
+        <div class="investment-chart-card investment-chart-card--summary">
+          <div class="investment-kpi-label">Ventas estimadas</div>
+          <div class="investment-kpi-value">${{ forecast_payload.outputs.projected_sales|default:0|floatformat:2|intcomma }}</div>
+        </div>
+        <div class="investment-chart-card investment-chart-card--summary">
+          <div class="investment-kpi-label">Gasto operativo</div>
+          <div class="investment-kpi-value">${{ forecast_payload.outputs.projected_operating_expenses|default:0|floatformat:2|intcomma }}</div>
+        </div>
+        <div class="investment-chart-card investment-chart-card--summary">
+          <div class="investment-kpi-label">Utilidad operativa</div>
+          <div class="investment-kpi-value">${{ forecast_payload.outputs.projected_operating_profit|default:0|floatformat:2|intcomma }}</div>
+        </div>
+        <div class="investment-chart-card investment-chart-card--summary">
+          <div class="investment-kpi-label">Flujo libre</div>
+          <div class="investment-kpi-value">${{ forecast_payload.outputs.projected_free_cashflow|default:0|floatformat:2|intcomma }}</div>
+        </div>
+        <div class="investment-chart-card investment-chart-card--summary">
+          <div class="investment-kpi-label">Flujo para recuperación</div>
+          <div class="investment-kpi-value">${{ forecast_payload.outputs.projected_recovery_cashflow|default:0|floatformat:2|intcomma }}</div>
+        </div>
+        <div class="investment-chart-card investment-chart-card--summary">
+          <div class="investment-kpi-label">ROI esperado</div>
+          <div class="investment-kpi-value">{% if forecast_payload.outputs.projected_roi_pct %}{{ forecast_payload.outputs.projected_roi_pct|floatformat:2 }}%{% else %}N/D{% endif %}</div>
+        </div>
+        <div class="investment-chart-card investment-chart-card--summary">
+          <div class="investment-kpi-label">Payback esperado</div>
+          <div class="investment-kpi-value">{% if forecast_payload.outputs.projected_payback_months %}{{ forecast_payload.outputs.projected_payback_months|floatformat:2 }} meses{% else %}N/D{% endif %}</div>
+        </div>
+        <div class="investment-chart-card investment-chart-card--summary">
+          <div class="investment-kpi-label">Fecha estimada de cierre</div>
+          <div class="investment-kpi-value">{{ forecast_payload.outputs.projected_close_date|default:"No disponible" }}</div>
+        </div>
+	        <div class="investment-chart-card investment-chart-card--summary">
+	          <div class="investment-kpi-label">Health score estimado</div>
+	          <div class="investment-kpi-value">{{ forecast_payload.outputs.projected_health_score|default:0 }}/100</div>
+	        </div>
+	      </div>
+
+	      <div class="investment-grid-2 investment-grid-2--compact" style="margin-top:1rem;">
+	        <div class="investment-assumption-box">
+	          <strong>Guardar escenario ejecutivo</strong>
+	          <div class="investment-muted">Guarda sólo simulaciones completas para compararlas, marcarlas como candidatas y retomarlas después sin recalcular.</div>
+	          {% if active_saved_simulation %}
+	          <div class="investment-inline-note">
+	            <span class="investment-pill">Guardada</span>
+	            <span class="investment-muted">{{ active_saved_simulation.name }} · {{ active_saved_simulation.status|lower|capfirst }}</span>
+	          </div>
+	          {% endif %}
+	          <form method="post" class="investment-stacked-form">
+	            {% csrf_token %}
+	            <input type="hidden" name="action" value="save_current_simulation">
+	            <input type="hidden" name="base_project_id" value="{{ forecast_form.base_project_id }}">
+	            <input type="hidden" name="scenario" value="{{ forecast_form.scenario }}">
+	            <input type="hidden" name="investment_estimate" value="{{ forecast_form.investment_estimate }}">
+	            <input type="hidden" name="monthly_rent_reference" value="{{ forecast_form.monthly_rent_reference }}">
+	            <input type="hidden" name="sales_adjustment_reference" value="{{ forecast_form.sales_adjustment_reference }}">
+	            <div class="investment-field-grid investment-field-grid--compact">
+	              <div class="investment-field">
+	                <label for="scenario_status">Estatus</label>
+	                <select id="scenario_status" name="scenario_status">
+	                  {% for value, label in saved_status_choices %}
+	                  <option value="{{ value }}" {% if active_saved_simulation and active_saved_simulation.status == value %}selected{% endif %}>{{ label }}</option>
+	                  {% endfor %}
+	                </select>
+	              </div>
+	              <div class="investment-field investment-field--wide">
+	                <label for="executive_note">Nota ejecutiva</label>
+	                <input id="executive_note" type="text" name="executive_note" value="{% if active_saved_simulation %}{{ active_saved_simulation.executive_note }}{% endif %}" placeholder="Qué observó dirección o por qué conviene/no conviene">
+	              </div>
+	            </div>
+	            <div class="investment-form-actions">
+	              <button class="investment-button" type="submit">Guardar simulación</button>
+	            </div>
+	          </form>
+	        </div>
+
+	        <div class="investment-assumption-box">
+	          <strong>Exportación ejecutiva</strong>
+	          <div class="investment-muted">Descarga el caso actual con comparación, sensibilidad, reglas visibles y trazabilidad de supuestos.</div>
+	          <form method="post" class="investment-inline-actions">
+	            {% csrf_token %}
+	            <input type="hidden" name="action" value="export_current_simulation">
+	            <input type="hidden" name="base_project_id" value="{{ forecast_form.base_project_id }}">
+	            <input type="hidden" name="scenario" value="{{ forecast_form.scenario }}">
+	            <input type="hidden" name="investment_estimate" value="{{ forecast_form.investment_estimate }}">
+	            <input type="hidden" name="monthly_rent_reference" value="{{ forecast_form.monthly_rent_reference }}">
+	            <input type="hidden" name="sales_adjustment_reference" value="{{ forecast_form.sales_adjustment_reference }}">
+	            <button class="investment-action-link" type="submit" name="export_format" value="pdf">Exportar PDF</button>
+	            <button class="investment-action-link is-ghost" type="submit" name="export_format" value="xlsx">Exportar Excel</button>
+	          </form>
+	        </div>
+	      </div>
+
+	      {% if comparison_rows %}
+	      <div class="investment-assumption-box">
+	        <strong>Comparación contra la sucursal base</strong>
+	        <div class="investment-muted">La comparación usa el histórico real de la base seleccionada frente al proyecto nuevo proyectado.</div>
+	        <div class="investment-table-wrap">
+	          <table class="investment-compare-table">
+	            <thead>
+	              <tr>
+	                <th>Métrica</th>
+	                <th>Base</th>
+	                <th>Proyecto nuevo</th>
+	                <th>Diferencia</th>
+	              </tr>
+	            </thead>
+	            <tbody>
+	              {% for row in comparison_rows %}
+	              <tr>
+	                <th>{{ row.label }}</th>
+	                <td>{{ row.base_display }}</td>
+	                <td>{{ row.projected_display }}</td>
+	                <td><span class="investment-delta {{ row.delta_class }}">{{ row.delta_display }}</span></td>
+	              </tr>
+	              {% endfor %}
+	            </tbody>
+	          </table>
+	        </div>
+	      </div>
+	      {% endif %}
+
+	      {% if sensitivity_rows %}
+	      <div class="investment-assumption-box">
+	        <strong>Sensibilidad comercial</strong>
+	        <div class="investment-muted">Se reutiliza el mismo motor del simulador y sólo cambia el supuesto de ventas para medir tolerancia.</div>
+	        <div class="investment-table-wrap">
+	          <table class="investment-compare-table investment-compare-table--compact">
+	            <thead>
+	              <tr>
+	                <th>Escenario</th>
+	                <th>Ajuste ventas</th>
+	                <th>Flujo libre</th>
+	                <th>Payback</th>
+	                <th>ROI</th>
+	                <th>Recomendación</th>
+	              </tr>
+	            </thead>
+	            <tbody>
+	              {% for row in sensitivity_rows %}
+	              <tr>
+	                <th>{{ row.label }}</th>
+	                <td>{{ row.adjustment_pct|floatformat:2 }}%</td>
+	                <td>{{ row.free_cashflow_display }}</td>
+	                <td>{{ row.payback_display }}</td>
+	                <td>{{ row.roi_display }}</td>
+	                <td><span class="investment-delta {{ row.recommendation_class }}">{{ row.recommendation_display }}</span></td>
+	              </tr>
+	              {% endfor %}
+	            </tbody>
+	          </table>
+	        </div>
+	      </div>
+	      {% endif %}
+
+	      <div class="investment-grid-2 investment-grid-2--compact" style="margin-top:1rem;">
+	        <div class="investment-assumption-box">
+	          <strong>Datos históricos usados</strong>
+          <div class="investment-stats-list">
+            <div class="investment-stat-line">
+              <span class="investment-muted">Base usada</span>
+              <strong>{{ forecast_payload.historical_reference.source_project_name }}</strong>
+            </div>
+            <div class="investment-stat-line">
+              <span class="investment-muted">Meses tomados</span>
+              <strong>{{ forecast_payload.historical_reference.months_used|default:"0" }}</strong>
+            </div>
+            <div class="investment-stat-line">
+              <span class="investment-muted">Ventas base</span>
+              <strong>${{ forecast_payload.historical_reference.sales_base|default:0|floatformat:2|intcomma }}</strong>
+            </div>
+            <div class="investment-stat-line">
+              <span class="investment-muted">Margen operativo base</span>
+              <strong>{% if forecast_payload.historical_reference.operating_margin_pct %}{{ forecast_payload.historical_reference.operating_margin_pct|floatformat:2 }}%{% else %}N/D{% endif %}</strong>
+            </div>
+            <div class="investment-stat-line">
+              <span class="investment-muted">Gasto operativo base</span>
+              <strong>${{ forecast_payload.historical_reference.operating_expenses_base|default:0|floatformat:2|intcomma }}</strong>
+            </div>
+            <div class="investment-stat-line">
+              <span class="investment-muted">Servicio deuda base</span>
+              <strong>${{ forecast_payload.historical_reference.debt_service_base|default:0|floatformat:2|intcomma }}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="investment-assumption-box">
+          <strong>Supuestos del usuario</strong>
+          <div class="investment-stats-list">
+            <div class="investment-stat-line">
+              <span class="investment-muted">Inversión estimada</span>
+              <strong>${{ forecast_payload.inputs.investment_estimate|default:0|floatformat:2|intcomma }}</strong>
+            </div>
+            <div class="investment-stat-line">
+              <span class="investment-muted">Renta mensual nueva</span>
+              <strong>${{ forecast_payload.inputs.monthly_rent|default:0|floatformat:2|intcomma }}</strong>
+            </div>
+            <div class="investment-stat-line">
+              <span class="investment-muted">Ajuste de ventas</span>
+              <strong>{% if forecast_payload.inputs.sales_adjustment_pct is not None %}{{ forecast_payload.inputs.sales_adjustment_pct|floatformat:2 }}%{% else %}0.00%{% endif %}</strong>
+            </div>
+            <div class="investment-stat-line">
+              <span class="investment-muted">Escenario</span>
+              <strong>{{ forecast_payload.scenario_label }}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+	      <div class="investment-assumption-box">
+	        <strong>Recomendación basada en</strong>
+	        <div class="investment-rule-list">
+	          {% for rule in opening_recommendation.decision_rules %}
+	          <div class="investment-rule-item {% if rule.passed %}is-pass{% else %}is-fail{% endif %}">
+	            <span class="investment-rule-icon">{% if rule.passed %}&#10003;{% else %}&#10007;{% endif %}</span>
+	            <div>
+	              <strong>{{ rule.label }}</strong>
+	              <span>{{ rule.detail }}</span>
+	            </div>
+	          </div>
+	          {% endfor %}
+	        </div>
+	      </div>
+
+      {% if forecast_payload.assumptions %}
+      <div class="investment-assumption-box">
+        <strong>Trazabilidad del modelo</strong>
+        <ul class="investment-list">
+          {% for item in forecast_payload.assumptions %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+      {% if forecast_payload.data_gaps %}
+      <div class="investment-alert-stack" style="margin-top:1rem;">
+        {% for gap in forecast_payload.data_gaps %}
+        <div class="investment-alert"><strong>Dato pendiente</strong><span>{{ gap }}</span></div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </article>
+  </section>
+  {% else %}
+	  <section class="investment-panel">
+	    <div class="investment-panel-head">
+      <div>
+        <div class="investment-kicker">Resultado</div>
+        <h2 class="investment-panel-title">Aquí aparecerá la decisión</h2>
+      </div>
+    </div>
+    <div class="investment-empty">Selecciona una sucursal base, define inversión y escenario, y ejecuta la simulación para obtener una recomendación clara de apertura.</div>
+	  </section>
+	  {% endif %}
+
+	  {% if comparison_matrix %}
+	  <section class="investment-panel">
+	    <div class="investment-panel-head">
+	      <div>
+	        <div class="investment-kicker">Comparación</div>
+	        <h2 class="investment-panel-title">Escenarios guardados lado a lado</h2>
+	      </div>
+	    </div>
+	    <div class="investment-table-wrap">
+	      <table class="investment-compare-table">
+	        <thead>
+	          <tr>
+	            <th>Métrica</th>
+	            {% for scenario in comparison_matrix.scenarios %}
+	            <th>{{ scenario.name }}</th>
+	            {% endfor %}
+	          </tr>
+	        </thead>
+	        <tbody>
+	          {% for row in comparison_matrix.rows %}
+	          <tr>
+	            <th>{{ row.label }}</th>
+	            {% for value in row.values %}
+	            <td>{{ value.display }}</td>
+	            {% endfor %}
+	          </tr>
+	          {% endfor %}
+	        </tbody>
+	      </table>
+	    </div>
+	  </section>
+	  {% endif %}
+
+	  <section class="investment-grid-2">
+	    <article class="investment-panel">
+	      <div class="investment-panel-head">
+	        <div>
+	          <div class="investment-kicker">Historial</div>
+	          <h2 class="investment-panel-title">Simulaciones recientes</h2>
+	        </div>
+	      </div>
+	      {% if candidate_simulations %}
+	      <div class="investment-chip-group">
+	        {% for row in candidate_simulations %}
+	        <span class="investment-pill">{{ row.branch_label }} · {{ row.recommendation_label }} · {{ row.status|lower|capfirst }}</span>
+	        {% endfor %}
+	      </div>
+	      {% endif %}
+	      <form method="get" class="investment-stacked-form">
+	        <div class="investment-history-list">
+	          {% for row in recent_simulations %}
+	          <article class="investment-history-card">
+	            <div class="investment-history-top">
+	              <label class="investment-compare-pick">
+	                <input type="checkbox" name="compare_simulation" value="{{ row.id }}" {% if row.id in selected_compare_ids %}checked{% endif %}>
+	                <span>Comparar</span>
+	              </label>
+	              <span class="investment-delta {% if row.recommendation == 'ABRIR' %}is-positive{% elif row.recommendation == 'NO_ABRIR' %}is-negative{% else %}is-warning{% endif %}">{{ row.recommendation_label }}</span>
+	            </div>
+	            <strong>{{ row.name }}</strong>
+	            <div class="investment-muted">{{ row.branch_label }} · {{ row.created_at|date:"Y-m-d H:i" }}</div>
+	            <div class="investment-history-grid">
+	              <span>Inversión {{ row.investment_estimate|default:0|floatformat:2|intcomma }}</span>
+	              <span>Escenario {{ row.scenario_label }}</span>
+	              <span>Payback {% if row.projected_payback_months %}{{ row.projected_payback_months|floatformat:2 }} meses{% else %}N/D{% endif %}</span>
+	              <span>ROI {% if row.projected_roi_pct %}{{ row.projected_roi_pct|floatformat:2 }}%{% else %}N/D{% endif %}</span>
+	            </div>
+	            <div class="investment-inline-note">
+	              <span class="investment-status-pill {% if row.status == 'CANDIDATO' or row.status == 'APROBADO_PRELIMINAR' %}is-active{% elif row.status == 'DESCARTADO' %}is-danger{% else %}is-warning{% endif %}">{{ row.status|lower|capfirst }}</span>
+	              {% if row.executive_note %}<span class="investment-muted">{{ row.executive_note }}</span>{% endif %}
+	            </div>
+	            <div class="investment-inline-actions">
+	              <a class="investment-action-link is-ghost" href="?load_simulation={{ row.id }}">Reabrir</a>
+	              <a class="investment-action-link is-ghost" href="?duplicate_simulation={{ row.id }}">Duplicar</a>
+	              <a class="investment-action-link is-ghost" href="?export_saved_simulation={{ row.id }}&export_format=pdf">PDF</a>
+	              <a class="investment-action-link is-ghost" href="?export_saved_simulation={{ row.id }}&export_format=xlsx">Excel</a>
+	            </div>
+	            <div class="investment-muted">Reabre el escenario para ajustar estatus y nota ejecutiva sin perder trazabilidad.</div>
+	          </article>
+	          {% empty %}
+	          <div class="investment-empty">Todavía no hay simulaciones guardadas. Corre una simulación y guárdala para construir pipeline real de aperturas.</div>
+	          {% endfor %}
+	        </div>
+	        {% if recent_simulations %}
+	        <div class="investment-form-actions">
+	          <button class="investment-button is-secondary" type="submit">Comparar seleccionados</button>
+	        </div>
+	        {% endif %}
+	      </form>
+	    </article>
+
+	    <article class="investment-panel">
+	      <div class="investment-panel-head">
+	        <div>
+	          <div class="investment-kicker">Operación viva</div>
+	          <h2 class="investment-panel-title">Carga mensual de gasto operativo</h2>
+	        </div>
+	      </div>
+	      <div class="investment-assumption-box">
+	        <strong>Flujo oficial de OPEX</strong>
+	        <div class="investment-muted">El módulo no inventa gastos. La carga mensual valida estructura, rechaza presupuesto como real, registra errores y refresca proyectos afectados.</div>
+	        <div class="investment-inline-actions">
+	          <a class="investment-action-link" href="{% url 'reportes:gastos_operativos_importar' %}">Subir archivo mensual</a>
+	        </div>
+	      </div>
+	      <div class="investment-history-list investment-history-list--compact">
+	        {% for run in latest_import_runs %}
+	        <article class="investment-history-card">
+	          <div class="investment-history-top">
+	            <strong>{{ run.original_filename }}</strong>
+	            <span class="investment-status-pill {% if run.status == 'SUCCESS' %}is-active{% elif run.status == 'DUPLICATE' %}is-warning{% else %}is-danger{% endif %}">{{ run.get_status_display }}</span>
+	          </div>
+	          <div class="investment-muted">
+	            {% if run.processed_at %}{{ run.processed_at|date:"Y-m-d H:i" }}{% else %}Pendiente{% endif %}
+	            · {{ run.loaded_rows }} aplicado(s)
+	            · {{ run.project_refresh_count }} proyecto(s) refrescado(s)
+	          </div>
+	          <div class="investment-chip-group">
+	            {% for branch in run.affected_branches %}
+	            <span class="investment-pill">{{ branch }}</span>
+	            {% empty %}
+	            <span class="investment-muted">Sin sucursales afectadas</span>
+	            {% endfor %}
+	          </div>
+	          {% if run.error_log %}
+	          <ul class="investment-list">
+	            {% for error in run.error_log|slice:":2" %}
+	            <li>{{ error.message }}</li>
+	            {% endfor %}
+	          </ul>
+	          {% endif %}
+	        </article>
+	        {% empty %}
+	        <div class="investment-empty">Todavía no hay cargas recientes visibles.</div>
+	        {% endfor %}
+	      </div>
+	    </article>
+	  </section>
+
+	  <section class="investment-panel">
+	    <div class="investment-panel-head">
+	      <div>
+	        <div class="investment-kicker">Bitácora</div>
+	        <h2 class="investment-panel-title">Acciones recientes del módulo</h2>
+	      </div>
+	    </div>
+	    <div class="investment-history-list investment-history-list--compact">
+	      {% for item in recent_activity %}
+	      <article class="investment-history-card">
+	        <div class="investment-history-top">
+	          <strong>{{ item.action }}</strong>
+	          <span class="investment-muted">{{ item.timestamp|date:"Y-m-d H:i" }}</span>
+	        </div>
+	        <div class="investment-muted">{{ item.model }} · {{ item.object_id }}</div>
+	        <div class="investment-muted">{% if item.user %}{{ item.user.get_full_name|default:item.user.username }}{% else %}Sistema{% endif %}</div>
+	      </article>
+	      {% empty %}
+	      <div class="investment-empty">Sin acciones recientes visibles.</div>
+	      {% endfor %}
+	    </div>
+	  </section>
+</div>
+{% endblock %}

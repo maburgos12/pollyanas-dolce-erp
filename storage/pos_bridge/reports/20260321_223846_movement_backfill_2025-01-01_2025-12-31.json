@@ -1,0 +1,689 @@
+{
+  "start_date": "2025-01-01",
+  "end_date": "2025-12-31",
+  "branch_filter": "",
+  "chunk_mode": "month",
+  "chunk_size": 1,
+  "stop_on_error": false,
+  "includes": {
+    "waste": true,
+    "production": true,
+    "transfers": true
+  },
+  "totals": {
+    "chunks_processed": 12,
+    "chunks_failed": 0,
+    "waste_jobs": 12,
+    "production_jobs": 12,
+    "transfer_jobs": 12,
+    "waste_lines_seen": 2716,
+    "production_lines_seen": 17618,
+    "transfer_lines_seen": 92838,
+    "inventory_entries_created": 18479,
+    "cedis_entries_created": 10426,
+    "mermas_created": 2716,
+    "unmatched_items": 1862
+  },
+  "chunks": [
+    {
+      "start_date": "2025-01-01",
+      "end_date": "2025-01-31",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 247,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 82,
+            "waste_lines_created": 82,
+            "waste_lines_updated": 0,
+            "mermas_created": 82,
+            "mermas_updated": 0,
+            "unmatched_items": 1
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 248,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1329,
+            "production_lines_created": 1329,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 499,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 585,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 205,
+            "unmatched_items": 40
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 249,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 6782,
+            "transfer_lines_created": 6782,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 882,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 276,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 5536,
+            "unmatched_items": 88
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-02-01",
+      "end_date": "2025-02-28",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 250,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 95,
+            "waste_lines_created": 95,
+            "waste_lines_updated": 0,
+            "mermas_created": 95,
+            "mermas_updated": 0,
+            "unmatched_items": 0
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 251,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1193,
+            "production_lines_created": 1193,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 434,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 503,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 210,
+            "unmatched_items": 46
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 252,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 6567,
+            "transfer_lines_created": 6567,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 802,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 336,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 5356,
+            "unmatched_items": 73
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-03-01",
+      "end_date": "2025-03-31",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 253,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 192,
+            "waste_lines_created": 192,
+            "waste_lines_updated": 0,
+            "mermas_created": 192,
+            "mermas_updated": 0,
+            "unmatched_items": 1
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 254,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1438,
+            "production_lines_created": 1438,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 565,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 596,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 211,
+            "unmatched_items": 66
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 255,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 7348,
+            "transfer_lines_created": 7348,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 956,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 350,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 5965,
+            "unmatched_items": 77
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-04-01",
+      "end_date": "2025-04-30",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 256,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 205,
+            "waste_lines_created": 205,
+            "waste_lines_updated": 0,
+            "mermas_created": 205,
+            "mermas_updated": 0,
+            "unmatched_items": 10
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 257,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1416,
+            "production_lines_created": 1416,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 546,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 593,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 210,
+            "unmatched_items": 67
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 258,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 7390,
+            "transfer_lines_created": 7390,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 950,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 317,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 6058,
+            "unmatched_items": 65
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-05-01",
+      "end_date": "2025-05-31",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 259,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 226,
+            "waste_lines_created": 226,
+            "waste_lines_updated": 0,
+            "mermas_created": 226,
+            "mermas_updated": 0,
+            "unmatched_items": 18
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 260,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1455,
+            "production_lines_created": 1455,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 551,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 617,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 219,
+            "unmatched_items": 68
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 261,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 8477,
+            "transfer_lines_created": 8477,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 1057,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 194,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 7133,
+            "unmatched_items": 93
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-06-01",
+      "end_date": "2025-06-30",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 262,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 327,
+            "waste_lines_created": 327,
+            "waste_lines_updated": 0,
+            "mermas_created": 327,
+            "mermas_updated": 0,
+            "unmatched_items": 14
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 263,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1380,
+            "production_lines_created": 1380,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 562,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 555,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 190,
+            "unmatched_items": 73
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 264,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 7935,
+            "transfer_lines_created": 7935,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 914,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 297,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 6644,
+            "unmatched_items": 80
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-07-01",
+      "end_date": "2025-07-31",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 265,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 356,
+            "waste_lines_created": 356,
+            "waste_lines_updated": 0,
+            "mermas_created": 356,
+            "mermas_updated": 0,
+            "unmatched_items": 10
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 266,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1566,
+            "production_lines_created": 1566,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 618,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 639,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 225,
+            "unmatched_items": 84
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 267,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 8257,
+            "transfer_lines_created": 8257,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 998,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 217,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 6957,
+            "unmatched_items": 85
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-08-01",
+      "end_date": "2025-08-31",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 268,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 317,
+            "waste_lines_created": 317,
+            "waste_lines_updated": 0,
+            "mermas_created": 317,
+            "mermas_updated": 0,
+            "unmatched_items": 8
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 269,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1677,
+            "production_lines_created": 1677,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 604,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 736,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 255,
+            "unmatched_items": 82
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 270,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 8069,
+            "transfer_lines_created": 8069,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 1040,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 160,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 6781,
+            "unmatched_items": 88
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-09-01",
+      "end_date": "2025-09-30",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 271,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 204,
+            "waste_lines_created": 204,
+            "waste_lines_updated": 0,
+            "mermas_created": 204,
+            "mermas_updated": 0,
+            "unmatched_items": 5
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 272,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1600,
+            "production_lines_created": 1600,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 570,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 697,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 262,
+            "unmatched_items": 71
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 273,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 7943,
+            "transfer_lines_created": 7943,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 1070,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 218,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 6575,
+            "unmatched_items": 80
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-10-01",
+      "end_date": "2025-10-31",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 274,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 271,
+            "waste_lines_created": 271,
+            "waste_lines_updated": 0,
+            "mermas_created": 271,
+            "mermas_updated": 0,
+            "unmatched_items": 5
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 275,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1580,
+            "production_lines_created": 1580,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 574,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 700,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 228,
+            "unmatched_items": 78
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 276,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 8095,
+            "transfer_lines_created": 8095,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 1089,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 137,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 6791,
+            "unmatched_items": 78
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-11-01",
+      "end_date": "2025-11-30",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 277,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 242,
+            "waste_lines_created": 242,
+            "waste_lines_updated": 0,
+            "mermas_created": 242,
+            "mermas_updated": 0,
+            "unmatched_items": 7
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 278,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1423,
+            "production_lines_created": 1423,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 506,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 632,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 219,
+            "unmatched_items": 66
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 279,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 7498,
+            "transfer_lines_created": 7498,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 931,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 174,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 6318,
+            "unmatched_items": 75
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2025-12-01",
+      "end_date": "2025-12-31",
+      "jobs": [
+        {
+          "type": "waste",
+          "job_id": 280,
+          "status": "SUCCESS",
+          "summary": {
+            "waste_lines_seen": 199,
+            "waste_lines_created": 199,
+            "waste_lines_updated": 0,
+            "mermas_created": 199,
+            "mermas_updated": 0,
+            "unmatched_items": 4
+          },
+          "error_message": ""
+        },
+        {
+          "type": "production",
+          "job_id": 281,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1561,
+            "production_lines_created": 1561,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 562,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 684,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 244,
+            "unmatched_items": 71
+          },
+          "error_message": ""
+        },
+        {
+          "type": "transfers",
+          "job_id": 282,
+          "status": "SUCCESS",
+          "summary": {
+            "transfer_lines_seen": 8477,
+            "transfer_lines_created": 8477,
+            "transfer_lines_updated": 0,
+            "inventory_entries_created": 1199,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 213,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 6980,
+            "unmatched_items": 85
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    }
+  ]
+}

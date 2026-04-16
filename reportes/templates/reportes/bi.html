@@ -6,33 +6,67 @@
 {% block body_class %}page-reportes-bi{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}">
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260402a">
 {% endblock %}
 
 {% block content %}
 <div class="module-shell bi-shell">
   <nav class="module-tabs">
-    <a class="module-tab" href="{% url 'reportes:costo_receta' %}">Costo receta</a>
+    <a class="module-tab" href="{% url 'reportes:ventas' %}">Ventas</a>
+    <a class="module-tab" href="{% url 'reportes:cierre_operativo' %}">Cierre diario</a>
+    <a class="module-tab" href="{% url 'reportes:cierre_producto' %}">Cierre producto</a>
+    <a class="module-tab" href="{% url 'reportes:financiero' %}">Financiero</a>
     <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
     <a class="module-tab" href="{% url 'reportes:faltantes' %}">Faltantes</a>
     <a class="module-tab active" href="{% url 'reportes:bi' %}">BI</a>
+    <a class="module-tab" href="{% url 'reportes:proyectos_inversion' %}">Proyectos inversión</a>
   </nav>
 
   <section class="bi-hero">
-    <div>
+    <div class="bi-hero-main">
       <div class="bi-kicker">Dirección general</div>
       <h1 class="bi-hero-title">Tablero ejecutivo del negocio</h1>
-      <p class="bi-copy">Lectura ejecutiva compacta con fuente real Point/ERP: venta, tendencia, rentabilidad, producción y flujo central. Lo detallado queda como auditoría desplegable.</p>
+      <p class="bi-copy">Corte, tendencia, rentabilidad, producción y flujo mensual.</p>
+      <div class="bi-hero-highlights">
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Último corte</div>
+          <div class="bi-hero-highlight-value">${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }} piezas</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">MTD visible</div>
+          <div class="bi-hero-highlight-value">{% if yoy_panel.hero_row %}${{ yoy_panel.hero_row.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
+          <div class="bi-hero-highlight-meta">{{ yoy_panel.hero_note }}</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Forecast</div>
+          <div class="bi-hero-highlight-value">${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas</div>
+        </article>
+      </div>
     </div>
     <div class="bi-hero-side">
-      <div class="bi-pill-row">
-        <span class="bi-pill">Corte ventas: {{ daily_sales_snapshot.date_label }}</span>
-        <span class="bi-pill">Costeo MP: {{ profitability_panel.latest_week|default:"Sin corte" }}</span>
-        <span class="bi-pill">Comparativo: {{ yoy_panel.hero_note }}</span>
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card">
+          <span class="bi-status-label">Corte ventas</span>
+          <strong>{{ daily_sales_snapshot.date_label }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Tickets corte</span>
+          <strong>{{ daily_sales_snapshot.total_tickets|intcomma }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Sucursales</span>
+          <strong>{{ daily_sales_snapshot.present_required_branch_count|intcomma }}/{{ daily_sales_snapshot.required_branch_count|intcomma }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Variación mes</span>
+          <strong>{% with hero=yoy_panel.hero_row %}{% if hero and hero.amount_delta_pct is not None %}{{ hero.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}{% endwith %}</strong>
+        </article>
       </div>
       <form class="bi-filterbar" method="get">
         <div class="bi-control">
-          <label for="period_days">Horizonte venta</label>
+          <label for="period_days">Fecha base</label>
           <select id="period_days" name="period_days">
             <option value="30" {% if request.GET.period_days == "30" %}selected{% endif %}>30 días</option>
             <option value="60" {% if request.GET.period_days == "60" %}selected{% endif %}>60 días</option>
@@ -41,7 +75,7 @@
           </select>
         </div>
         <div class="bi-control">
-          <label for="months">Meses visibles</label>
+          <label for="months">Ventana mensual</label>
           <select id="months" name="months">
             <option value="6" {% if request.GET.months == "6" or not request.GET.months %}selected{% endif %}>6 meses</option>
             <option value="9" {% if request.GET.months == "9" %}selected{% endif %}>9 meses</option>
@@ -49,19 +83,36 @@
           </select>
         </div>
         <div class="bi-control">
-          <label>Estado venta</label>
-          <div class="bi-pill {{ daily_sales_snapshot.comparison_tone|default:'warning' }}">{{ daily_sales_snapshot.comparison_label }}</div>
+          <label for="branch_id">Sucursal</label>
+          <select id="branch_id" name="branch_id">
+            <option value="">Top de red</option>
+            {% for option in branch_contribution_panel.branch_options %}
+            <option value="{{ option.branch_id }}" {% if selected_branch_id == option.branch_id %}selected{% endif %}>{{ option.branch_label }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="bi-control">
-          <label>Base</label>
-          <div class="bi-pill {% if forecast_panel.has_atypical_history %}warning{% else %}success{% endif %}">
-            {{ forecast_panel.baseline_label }}
-          </div>
-        </div>
-        <div class="bi-control">
-          <button type="submit">Actualizar BI</button>
+          <button type="submit">Aplicar filtros</button>
         </div>
       </form>
+      <div class="bi-summary-band">
+        <div class="bi-summary-chip">
+          <span>Lectura</span>
+          <strong>Red completa</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Forecast</span>
+          <strong>{{ forecast_panel.baseline_label }}</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Costo</span>
+          <strong>Margen MP</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Portafolio</span>
+          <strong>Total visible</strong>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -69,7 +120,7 @@
     <article class="bi-kpi-card">
       <div class="bi-kpi-value">${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}</div>
       <div class="bi-kpi-label">Venta último corte</div>
-      <div class="bi-kpi-note">{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }} piezas · {{ daily_sales_snapshot.branch_count|intcomma }} sucursales · {{ daily_sales_snapshot.source_label }}</div>
+      <div class="bi-kpi-note">{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }} piezas · {{ daily_sales_snapshot.present_required_branch_count|intcomma }}/{{ daily_sales_snapshot.required_branch_count|intcomma }} sucursales obligatorias · {{ daily_sales_snapshot.source_label }}</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if not daily_sales_snapshot.tickets_available %}warning{% endif %}">
@@ -103,18 +154,873 @@
       {% endwith %}
     </article>
   </section>
+  {% if daily_sales_snapshot.official_cut_applied %}
+  <section class="bi-section-full">
+    <div class="bi-note bi-note-compact bi-note-success">
+      <strong>Corte oficial aplicado.</strong>
+      El total visible usa el corte oficial conciliado del día.
+      {% if daily_sales_snapshot.raw_total_amount and daily_sales_snapshot.raw_total_amount != daily_sales_snapshot.total_amount %}
+        Point crudo trae ${{ daily_sales_snapshot.raw_total_amount|floatformat:2|intcomma }} y el corte oficial valida ${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}.
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+  {% if daily_sales_snapshot.missing_required_branch_count %}
+  <section class="bi-section-full">
+    <div class="bi-note bi-note-compact bi-note-danger">
+      <strong>{{ daily_sales_snapshot.status }}.</strong>
+      {{ daily_sales_snapshot.detail }}
+    </div>
+  </section>
+  {% endif %}
 
-  <section class="bi-grid-2">
+  <section class="bi-section-full">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Resultado {{ budget_operating_panel.year }}</div>
+          <h2 class="bi-panel-title">
+            {% if budget_operating_panel.show_budget_primary %}
+            Meta de venta, costo, gasto y resultado
+            {% else %}
+            Operación mensual con presupuesto en auditoría
+            {% endif %}
+          </h2>
+          <p class="bi-panel-copy">
+            {% if budget_operating_panel.show_budget_primary %}
+            Lectura simple del negocio: venta planeada, costo de producto, gasto recurrente y resultado. Todo sale de la base verificada.
+            {% else %}
+            La lectura principal queda anclada en operación real. El presupuesto maestro se mueve a auditoría hasta reconstruirlo desde hojas detalladas confiables.
+            {% endif %}
+          </p>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill">Presupuesto {{ budget_operating_panel.latest_budget_label }}</span>
+          <span class="bi-pill">Operación {{ budget_operating_panel.latest_finance_label }}</span>
+        </div>
+      </div>
+      <div class="bi-panel-stack">
+        {% if not budget_operating_panel.show_budget_primary %}
+        <div class="bi-note bi-note-compact bi-note-danger">
+          <strong>{{ budget_operating_panel.budget_confidence_label }}.</strong>
+          {{ budget_operating_panel.budget_confidence_note }}
+        </div>
+        {% endif %}
+        <div class="bi-metric-strip">
+          {% if budget_operating_panel.show_budget_primary %}
+          <div class="bi-metric">
+            <div class="bi-metric-label">Meta de venta YTD</div>
+            <div class="bi-metric-value">${{ budget_operating_panel.ytd_sales_budget|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">
+              Venta real ${{ budget_operating_panel.ytd_sales|floatformat:2|intcomma }}
+              {% if budget_operating_panel.ytd_sales_budget_variance_pct is not None %}
+                · Variación {{ budget_operating_panel.ytd_sales_budget_variance_pct|floatformat:1 }}%
+              {% endif %}
+            </div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Costo producto YTD</div>
+            <div class="bi-metric-value">${{ budget_operating_panel.ytd_product_cost_budget|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">
+              {% if budget_operating_panel.ytd_product_cost_budget_mix_pct is not None %}{{ budget_operating_panel.ytd_product_cost_budget_mix_pct|floatformat:1 }}% de la meta{% endif %}
+              · real {% if budget_operating_panel.ytd_actual_product_cost_mix_pct is not None %}{{ budget_operating_panel.ytd_actual_product_cost_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+            </div>
+            <div class="bi-inline-health">
+              <span class="bi-tone {{ budget_operating_panel.ytd_product_cost_signal.tone|default:'neutral' }}">{{ budget_operating_panel.ytd_product_cost_signal.label }}</span>
+            </div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Gasto recurrente YTD</div>
+            <div class="bi-metric-value">${{ budget_operating_panel.ytd_recurrent_expense_budget|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">
+              {% if budget_operating_panel.ytd_recurrent_expense_budget_mix_pct is not None %}{{ budget_operating_panel.ytd_recurrent_expense_budget_mix_pct|floatformat:1 }}% de la meta{% endif %}
+              · real {% if budget_operating_panel.ytd_actual_expense_mix_pct is not None %}{{ budget_operating_panel.ytd_actual_expense_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+            </div>
+            <div class="bi-inline-health">
+              <span class="bi-tone {{ budget_operating_panel.ytd_expense_signal.tone|default:'neutral' }}">{{ budget_operating_panel.ytd_expense_signal.label }}</span>
+            </div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Resultado YTD</div>
+            <div class="bi-metric-value">${{ budget_operating_panel.ytd_budget_result|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">
+              {% if budget_operating_panel.ytd_budget_result_margin_pct is not None %}Margen pres. {{ budget_operating_panel.ytd_budget_result_margin_pct|floatformat:1 }}%{% endif %}
+              · real {% if budget_operating_panel.ytd_actual_result_margin_pct is not None %}{{ budget_operating_panel.ytd_actual_result_margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+            </div>
+            <div class="bi-inline-health">
+              <span class="bi-tone {{ budget_operating_panel.ytd_margin_signal.tone|default:'neutral' }}">{{ budget_operating_panel.ytd_margin_signal.label }}</span>
+              <span class="bi-pill {{ budget_operating_panel.ytd_health_signal.tone|default:'warning' }}">{{ budget_operating_panel.ytd_health_signal.label }}</span>
+            </div>
+          </div>
+          {% else %}
+          <div class="bi-metric">
+            <div class="bi-metric-label">Venta operativa YTD</div>
+            <div class="bi-metric-value">${{ budget_operating_panel.ytd_sales|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">Corte a {{ budget_operating_panel.ytd_cutoff_label }}</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Venta costeada YTD</div>
+            <div class="bi-metric-value">${{ budget_operating_panel.ytd_costed_sales|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">
+              {% if budget_operating_panel.ytd_costed_coverage_pct is not None %}
+                Cobertura {{ budget_operating_panel.ytd_costed_coverage_pct|floatformat:1 }}%
+              {% else %}
+                Sin cobertura
+              {% endif %}
+            </div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Costo fabricación YTD</div>
+            <div class="bi-metric-value">${{ budget_operating_panel.ytd_manufacturing|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">Costo de producto fabricado visible</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Utilidad operativa YTD</div>
+            <div class="bi-metric-value">${{ budget_operating_panel.ytd_operating_profit|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">Snapshot hasta {{ budget_operating_panel.latest_finance_label }}</div>
+          </div>
+          {% endif %}
+        </div>
+        <div class="bi-note bi-note-compact">
+          Así se calcula:
+          <strong>meta de venta - costo producto - gasto recurrente = resultado</strong>.
+          {{ budget_operating_panel.coverage_note }}
+        </div>
+        {% if budget_operating_panel.show_budget_primary %}
+        <details class="bi-details bi-details-nested">
+          <summary>Ver detalle técnico y auditoría</summary>
+          <div class="bi-details-body">
+            <div class="bi-source-grid">
+              <article class="bi-source-card is-master">
+                <div class="bi-kicker">Empresa consolidada</div>
+                <strong class="bi-source-title">Presupuesto maestro</strong>
+                <div class="bi-source-amount">${{ budget_operating_panel.ytd_budget_master|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Real YTD ${{ budget_operating_panel.ytd_actual_master|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">
+                  {% if budget_operating_panel.global_mode == "master_source" %}
+                  Fuente maestra única
+                  {% else %}
+                  Global reconstruido por suma de fuentes
+                  {% endif %}
+                </div>
+              </article>
+              <article class="bi-source-card is-operating">
+                <div class="bi-kicker">Lectura operativa</div>
+                <strong class="bi-source-title">Costo + gasto verificado</strong>
+                <div class="bi-source-amount">${{ budget_operating_panel.ytd_structured_budget_total|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Venta YTD ${{ budget_operating_panel.ytd_sales_budget|floatformat:2|intcomma }} · Resultado ${{ budget_operating_panel.ytd_budget_result|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Se excluyen filas resumen, CAPEX, duplicados y partidas no recurrentes del staging detallado.</div>
+              </article>
+              {% for source in budget_operating_panel.source_groups %}
+              <article class="bi-source-card">
+                <div class="bi-kicker">Desglose fuente</div>
+                <strong class="bi-source-title">{{ source.label }}</strong>
+                <div class="bi-source-amount">${{ source.ytd_budget|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Real YTD ${{ source.ytd_actual|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">
+                  {% if source.variance_pct is not None %}Variación {{ source.variance_pct|floatformat:1 }}%{% else %}Sin base comparable{% endif %}
+                  · Corte {{ source.latest_month_label }}
+                </div>
+              </article>
+              {% endfor %}
+              <article class="bi-source-card {% if not budget_operating_panel.branch_budget_panel.available %}is-ghost{% endif %}">
+                <div class="bi-kicker">{{ budget_operating_panel.branch_budget_panel.title }}</div>
+                <strong class="bi-source-title">{% if budget_operating_panel.branch_budget_panel.available %}Detalle cargado{% else %}Detalle no importado{% endif %}</strong>
+                <div class="bi-source-empty">{% if budget_operating_panel.branch_budget_panel.available %}OK{% else %}Pendiente{% endif %}</div>
+                <div class="bi-subtle">{{ budget_operating_panel.branch_budget_panel.note }}</div>
+              </article>
+            </div>
+            {% if budget_operating_panel.audit_exceptions %}
+            <div class="bi-source-grid">
+              {% for row in budget_operating_panel.audit_exceptions %}
+              <article class="bi-source-card">
+                <div class="bi-kicker">Discrepancia en GENERAL</div>
+                <strong class="bi-source-title">{{ row.concept }}</strong>
+                <div class="bi-source-amount">${{ row.ytd_gap|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Actual muestra ${{ row.sample_current|floatformat:2|intcomma }} · correcto en detalle ${{ row.sample_expected|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Meses: {{ row.months|join:", " }}</div>
+              </article>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </details>
+        {% else %}
+        <details class="bi-details bi-details-nested">
+          <summary>Abrir auditoría de presupuesto 2026</summary>
+          <div class="bi-details-body">
+            <div class="bi-source-grid">
+              <article class="bi-source-card is-master">
+                <div class="bi-kicker">Empresa consolidada</div>
+                <strong class="bi-source-title">Presupuesto maestro</strong>
+                <div class="bi-source-amount">${{ budget_operating_panel.ytd_budget_master|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Real YTD ${{ budget_operating_panel.ytd_actual_master|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">
+                  {% if budget_operating_panel.global_mode == "master_source" %}
+                  Fuente maestra única
+                  {% else %}
+                  Global reconstruido por suma de fuentes
+                  {% endif %}
+                </div>
+              </article>
+              <article class="bi-source-card is-operating">
+                <div class="bi-kicker">Lectura operativa derivada</div>
+                <strong class="bi-source-title">Presupuesto operativo derivado</strong>
+                <div class="bi-source-amount">${{ budget_operating_panel.ytd_budget|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Real YTD ${{ budget_operating_panel.ytd_actual|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Se excluyen renglones resumen del maestro. Sigue en revisión.</div>
+              </article>
+              {% for source in budget_operating_panel.source_groups %}
+              <article class="bi-source-card">
+                <div class="bi-kicker">Desglose fuente</div>
+                <strong class="bi-source-title">{{ source.label }}</strong>
+                <div class="bi-source-amount">${{ source.ytd_budget|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">Real YTD ${{ source.ytd_actual|floatformat:2|intcomma }}</div>
+                <div class="bi-subtle">
+                  {% if source.variance_pct is not None %}Variación {{ source.variance_pct|floatformat:1 }}%{% else %}Sin base comparable{% endif %}
+                  · Corte {{ source.latest_month_label }}
+                </div>
+              </article>
+              {% endfor %}
+              <article class="bi-source-card is-ghost">
+                <div class="bi-kicker">{{ budget_operating_panel.branch_budget_panel.title }}</div>
+                <strong class="bi-source-title">Detalle no importado</strong>
+                <div class="bi-source-empty">Pendiente</div>
+                <div class="bi-subtle">{{ budget_operating_panel.branch_budget_panel.note }}</div>
+              </article>
+            </div>
+          </div>
+        </details>
+        {% endif %}
+        {% if budget_operating_panel.pricing_action_rows %}
+        <div class="bi-summary-band">
+          {% for row in budget_operating_panel.pricing_action_rows|slice:":4" %}
+          <div class="bi-summary-chip">
+            <span>{{ row.label }}</span>
+            <strong>{{ row.count|intcomma }}</strong>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <form class="bi-filterbar bi-filterbar-budget" method="get">
+          <input type="hidden" name="period_days" value="{{ period_days }}">
+          <input type="hidden" name="months" value="{{ months_window }}">
+          {% if selected_branch_id %}
+          <input type="hidden" name="branch_id" value="{{ selected_branch_id }}">
+          {% endif %}
+          {% if selected_action %}
+          <input type="hidden" name="action" value="{{ selected_action }}">
+          {% endif %}
+          <div class="bi-control">
+            <label for="budget_month">Mes a revisar</label>
+            <select id="budget_month" name="budget_month">
+              {% for option in budget_operating_panel.month_options %}
+              <option value="{{ option.value }}"{% if budget_operating_panel.selected_month == option.value %} selected{% endif %}>
+                {{ option.label }}{% if option.has_finance %} · con operación{% elif option.has_budget %} · solo presupuesto{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="bi-control">
+            <label>Lectura</label>
+            <div class="bi-pill is-muted">
+              {% if budget_operating_panel.selected_row and budget_operating_panel.selected_row.finance_close_complete %}
+              Mes cerrado y comparable
+              {% elif budget_operating_panel.selected_row and budget_operating_panel.selected_row.has_finance %}
+              Venta real disponible · cierre pendiente
+              {% else %}
+              Solo presupuesto
+              {% endif %}
+            </div>
+          </div>
+          <div class="bi-control">
+            <button type="submit">Ver mes</button>
+          </div>
+        </form>
+        {% with row=budget_operating_panel.selected_row %}
+        {% if row %}
+        <article class="bi-budget-focus-card">
+          <div class="bi-budget-focus-head">
+            <div class="bi-budget-story-head">
+              <div>
+                <div class="bi-kicker">Mes seleccionado</div>
+                <strong class="bi-budget-story-month">{{ row.month_label }}</strong>
+              </div>
+              <div class="bi-budget-story-signals">
+                <span class="bi-tone {{ row.sales_signal.tone|default:'neutral' }}">{{ row.sales_signal.label }}</span>
+                <span class="bi-pill {{ row.health_signal.tone|default:'warning' }}">
+                  {% if row.finance_close_complete %}{{ row.health_signal.label }}{% else %}Lectura parcial{% endif %}
+                </span>
+                <span class="bi-pill {% if row.finance_close_complete %}success{% else %}warning{% endif %}">
+                  {% if row.finance_close_complete %}Cierre completo{% else %}Cierre pendiente{% endif %}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="bi-note bi-note-compact">
+            <strong>Lectura global del mes:</strong>
+            {% if row.finance_close_complete %}
+              la venta real va en
+              <strong>{% if row.sales_budget_attainment_pct is not None %}{{ row.sales_budget_attainment_pct|floatformat:1 }}% de la meta{% else %}N/D{% endif %}</strong>,
+              el costo real pesa
+              <strong>{% if row.actual_product_cost_mix_pct is not None %}{{ row.actual_product_cost_mix_pct|floatformat:1 }}% del ingreso{% else %}N/D{% endif %}</strong>,
+              el gasto recurrente pesa
+              <strong>{% if row.actual_expense_mix_pct is not None %}{{ row.actual_expense_mix_pct|floatformat:1 }}% del ingreso{% else %}N/D{% endif %}</strong>
+              y el margen real queda en
+              <strong>{% if row.operating_margin_pct is not None %}{{ row.operating_margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}</strong>.
+            {% elif row.has_finance %}
+              hay <strong>venta real confirmada</strong>
+              {% if row.actual_product_cost_mix_pct is not None %}
+              y <strong>costo real de producto en {{ row.actual_product_cost_mix_pct|floatformat:1 }}% del ingreso</strong>
+              {% endif %},
+              pero el <strong>cierre financiero sigue pendiente</strong> porque falta gasto recurrente real completo.
+              Por eso aquí todavía <strong>no</strong> estamos calificando el margen del mes como sano o completo.
+            {% else %}
+              este mes todavía está en
+              <strong>solo presupuesto</strong>.
+            {% endif %}
+          </div>
+          <div class="bi-budget-focus-compare">
+            <div class="bi-budget-story-compare-item">
+              <span>Meta de venta</span>
+              <strong>${{ row.sales_budget_total|floatformat:0|intcomma }}</strong>
+            </div>
+            <div class="bi-budget-story-compare-item">
+              <span>Venta total real</span>
+              <strong>${{ row.sales_total|floatformat:0|intcomma }}</strong>
+            </div>
+            <div class="bi-budget-story-compare-item">
+              <span>Margen bruto real</span>
+              <strong>{% if row.has_finance and row.manufacturing_total > 0 %}${{ row.gross_margin_total|floatformat:0|intcomma }}{% else %}Pendiente{% endif %}</strong>
+              <div class="bi-subtle">
+                {% if row.gross_margin_pct is not None %}
+                {{ row.gross_margin_pct|floatformat:1 }}% · {{ row.gross_margin_signal.label }}
+                {% else %}
+                Sin lectura
+                {% endif %}
+              </div>
+            </div>
+            <div class="bi-budget-story-compare-item {% if row.sales_gap_total < 0 %}is-danger{% elif row.sales_gap_total > 0 %}is-success{% endif %}">
+              <span>Diferencia vs meta</span>
+              <strong>{% if row.sales_gap_total > 0 %}+{% endif %}${{ row.sales_gap_total|floatformat:0|intcomma }}</strong>
+              <div class="bi-subtle">{% if row.sales_gap_pct is not None %}{{ row.sales_gap_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+            </div>
+            <div class="bi-budget-story-compare-item">
+              <span>Cumplimiento</span>
+              <strong>{% if row.sales_budget_attainment_pct is not None %}{{ row.sales_budget_attainment_pct|floatformat:1 }}%{% else %}N/D{% endif %}</strong>
+            </div>
+          </div>
+          <div class="bi-note bi-note-compact">
+            <strong>Lectura costo vs precio global:</strong>
+            {% if row.has_finance and row.actual_product_cost_mix_pct is not None and row.gross_margin_pct is not None %}
+              del total vendido real, el <strong>costo de producción pesa {{ row.actual_product_cost_mix_pct|floatformat:1 }}%</strong>
+              y deja un <strong>margen bruto real de {{ row.gross_margin_pct|floatformat:1 }}%</strong>.
+              Estado actual:
+              <span class="bi-tone {{ row.gross_margin_signal.tone|default:'neutral' }}">{{ row.gross_margin_signal.label }}</span>.
+            {% else %}
+              todavía no hay base suficiente para leer costo real contra venta real.
+            {% endif %}
+          </div>
+          <div class="table-responsive">
+            <table class="bi-table bi-budget-focus-table">
+              <thead>
+                <tr>
+                  <th>Concepto</th>
+                  <th class="text-end">Presup.</th>
+                  <th class="text-end">Real</th>
+                  <th class="text-end">Relación ingreso</th>
+                  <th>Salud</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Venta total</td>
+                  <td class="text-end">${{ row.sales_budget_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">${{ row.sales_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{% if row.sales_budget_attainment_pct is not None %}{{ row.sales_budget_attainment_pct|floatformat:1 }}% de meta{% else %}N/D{% endif %}</td>
+                  <td><span class="bi-tone {{ row.sales_signal.tone|default:'neutral' }}">{{ row.sales_signal.label }}</span></td>
+                </tr>
+                <tr>
+                  <td>Costo producto</td>
+                  <td class="text-end">${{ row.product_cost_budget_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{% if row.has_finance and row.manufacturing_total > 0 %}${{ row.manufacturing_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
+                  <td class="text-end">
+                    {% if row.product_cost_budget_mix_pct is not None %}Pres. {{ row.product_cost_budget_mix_pct|floatformat:1 }}%{% endif %}
+                    {% if row.actual_product_cost_mix_pct is not None %}<br>{% if row.finance_close_complete %}Real{% else %}Real parcial{% endif %} {{ row.actual_product_cost_mix_pct|floatformat:1 }}%{% endif %}
+                  </td>
+                  <td><span class="bi-tone {{ row.product_cost_signal.tone|default:'neutral' }}">{{ row.product_cost_signal.label }}</span></td>
+                </tr>
+                <tr>
+                  <td>Margen bruto real</td>
+                  <td class="text-end">N/D</td>
+                  <td class="text-end">{% if row.has_finance and row.manufacturing_total > 0 %}${{ row.gross_margin_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
+                  <td class="text-end">
+                    {% if row.gross_margin_pct is not None %}Real {{ row.gross_margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+                  </td>
+                  <td><span class="bi-tone {{ row.gross_margin_signal.tone|default:'neutral' }}">{{ row.gross_margin_signal.label }}</span></td>
+                </tr>
+                <tr>
+                  <td>Gasto recurrente</td>
+                  <td class="text-end">${{ row.recurrent_expense_budget_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{% if row.finance_close_complete %}${{ row.operating_expense_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
+                  <td class="text-end">
+                    {% if row.recurrent_expense_budget_mix_pct is not None %}Pres. {{ row.recurrent_expense_budget_mix_pct|floatformat:1 }}%{% endif %}
+                    {% if row.finance_close_complete and row.actual_expense_mix_pct is not None %}<br>Real {{ row.actual_expense_mix_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
+                  </td>
+                  <td><span class="bi-tone {{ row.expense_signal.tone|default:'neutral' }}">{{ row.expense_signal.label }}</span></td>
+                </tr>
+                <tr>
+                  <td>Resultado</td>
+                  <td class="text-end">${{ row.budget_result_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{% if row.finance_close_complete %}${{ row.operating_profit_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
+                  <td class="text-end">
+                    {% if row.budget_result_margin_pct is not None %}Pres. {{ row.budget_result_margin_pct|floatformat:1 }}%{% endif %}
+                    {% if row.finance_close_complete and row.operating_margin_pct is not None %}<br>Real {{ row.operating_margin_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
+                  </td>
+                  <td><span class="bi-tone {{ row.margin_signal.tone|default:'neutral' }}">{{ row.margin_signal.label }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="bi-branch-mix">
+            <span class="bi-mix-pill">No receta ${{ row.non_recipe_total|floatformat:0|intcomma }}</span>
+            <span class="bi-mix-pill">Fab. ${{ row.manufacturing_total|floatformat:0|intcomma }}</span>
+            <span class="bi-mix-pill">Comercial ${{ row.commercial_total|floatformat:0|intcomma }}</span>
+            <span class="bi-mix-pill">Corporativo ${{ row.corporate_total|floatformat:0|intcomma }}</span>
+          </div>
+        </article>
+        {% endif %}
+        {% endwith %}
+        <div class="bi-budget-summary">
+          <div class="bi-kicker">Resumen mensual {{ budget_operating_panel.year }}</div>
+          <div class="table-responsive">
+            <table class="bi-table bi-budget-summary-table">
+              <thead>
+                <tr>
+                  <th>Mes</th>
+                  <th class="text-end">Meta</th>
+                  <th class="text-end">Venta real</th>
+                  <th class="text-end">Dif.</th>
+                  <th class="text-end">Cumpl.</th>
+                  <th class="text-end">Margen real</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in budget_operating_panel.rows_summary %}
+                <tr{% if budget_operating_panel.selected_month == row.period.month %} class="is-selected"{% endif %}>
+                  <td>{{ row.month_label }}</td>
+                  <td class="text-end">${{ row.sales_budget_total|floatformat:0|intcomma }}</td>
+                  <td class="text-end">{% if row.has_finance %}${{ row.sales_total|floatformat:0|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_finance %}{% if row.sales_gap_total > 0 %}+{% endif %}${{ row.sales_gap_total|floatformat:0|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.sales_budget_attainment_pct is not None %}{{ row.sales_budget_attainment_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.finance_close_complete and row.operating_margin_pct is not None %}{{ row.operating_margin_pct|floatformat:1 }}%{% elif row.has_finance %}Pend.{% else %}N/D{% endif %}</td>
+                  <td>
+                    {% if row.finance_close_complete %}
+                    <span class="bi-tone {{ row.health_signal.tone|default:'neutral' }}">{{ row.health_signal.label }}</span>
+                    {% elif row.has_finance %}
+                    <span class="bi-tone warning">Lectura parcial</span>
+                    {% else %}
+                    <span class="bi-tone neutral">Solo presupuesto</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <details class="bi-details">
+          <summary>{% if budget_operating_panel.show_budget_primary %}Abrir matriz mensual 2026{% else %}Abrir matriz financiera y de auditoría 2026{% endif %}</summary>
+          <div class="bi-details-body table-responsive">
+            <table class="bi-table bi-table-budget-monthly">
+              <thead>
+                <tr>
+                  <th>Mes</th>
+                  <th class="text-end">Venta presup.</th>
+                  <th class="text-end">Venta real</th>
+                  <th class="text-end">Costo prod. pres.</th>
+                  <th class="text-end">Costo prod. real</th>
+                  <th class="text-end">Gasto rec. pres.</th>
+                  <th class="text-end">Gasto real</th>
+                  <th class="text-end">Resultado pres.</th>
+                  <th class="text-end">Resultado real</th>
+                  <th class="text-end">No receta</th>
+                  <th class="text-end">Cobertura</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in budget_operating_panel.rows %}
+                <tr>
+                  <td>{{ row.month_label }}</td>
+                  <td class="text-end">{% if row.has_budget %}${{ row.sales_budget_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_finance %}${{ row.sales_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_budget %}${{ row.product_cost_budget_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_finance %}${{ row.manufacturing_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_budget %}${{ row.recurrent_expense_budget_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_finance %}${{ row.operating_expense_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_budget %}${{ row.budget_result_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_finance %}${{ row.operating_profit_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_finance %}${{ row.non_recipe_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.costed_coverage_pct is not None %}{{ row.costed_coverage_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-section-full">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Sucursal {{ branch_pricing_panel.selected_branch_code|default:"" }}</div>
+          <h2 class="bi-panel-title">Pricing por tienda</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill">{{ branch_pricing_panel.selected_branch_label }}</span>
+          <span class="bi-pill">{{ branch_pricing_panel.latest_period_label }}</span>
+          {% if branch_pricing_panel.selected_branch_id %}
+          <form method="get" class="bi-filter-inline">
+            <input type="hidden" name="period_days" value="{{ period_days }}">
+            <input type="hidden" name="months" value="{{ months_window }}">
+            <input type="hidden" name="branch_id" value="{{ branch_pricing_panel.selected_branch_id }}">
+            <select name="action" class="form-select form-select-sm" onchange="this.form.submit()">
+              <option value="">Todas las acciones</option>
+              {% for action in branch_pricing_panel.available_actions %}
+              <option value="{{ action }}"{% if branch_pricing_panel.selected_action == action %} selected{% endif %}>{{ action }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&branch_id={{ branch_pricing_panel.selected_branch_id }}{% if branch_pricing_panel.selected_action %}&action={{ branch_pricing_panel.selected_action|urlencode }}{% endif %}&export=csv">CSV</a>
+          <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&branch_id={{ branch_pricing_panel.selected_branch_id }}{% if branch_pricing_panel.selected_action %}&action={{ branch_pricing_panel.selected_action|urlencode }}{% endif %}&export=xlsx">Excel</a>
+          <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&branch_id={{ branch_pricing_panel.selected_branch_id }}{% if branch_pricing_panel.selected_action %}&action={{ branch_pricing_panel.selected_action|urlencode }}{% endif %}&export=pdf">PDF</a>
+          {% endif %}
+        </div>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-note bi-note-compact">{{ branch_pricing_panel.basis_note }}</div>
+        <div class="bi-list bi-list-compact">
+          {% for row in branch_pricing_panel.top_actions %}
+          <article class="bi-list-item is-tight {% if row.bucket == 'Subir precio' or row.bucket == 'Corregir costo' %}is-signal-danger{% elif row.bucket == 'Promover' %}is-signal-warning{% else %}is-signal-success{% endif %}">
+            <strong>{{ row.label }}</strong>
+            <div class="bi-subtle">{{ row.categoria|default:row.familia }}</div>
+            <div>Venta ${{ row.sales_total|floatformat:2|intcomma }} · contribución ${{ row.contribution_total|floatformat:2|intcomma }} · margen {% if row.contribution_pct is not None %}{{ row.contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+            <div class="bi-subtle">{{ row.bucket }} · {{ row.recommendation }}</div>
+          </article>
+          {% empty %}
+          <article class="bi-list-item">
+            <strong>Sin detalle de pricing</strong>
+            <div class="bi-subtle">Selecciona una sucursal con snapshot visible para leer decisiones por tienda.</div>
+          </article>
+          {% endfor %}
+        </div>
+        <details class="bi-details">
+          <summary>Ver ranking de productos de la sucursal</summary>
+          <div class="bi-details-body table-responsive">
+            <table class="bi-table">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th class="text-end">Venta</th>
+                  <th class="text-end">Costo</th>
+                  <th class="text-end">Gasto comercial</th>
+                  <th class="text-end">Contribución</th>
+                  <th class="text-end">Margen %</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in branch_pricing_panel.rows %}
+                <tr>
+                  <td><strong>{{ row.label }}</strong><div class="bi-subtle">{{ row.categoria|default:row.familia }}</div></td>
+                  <td class="text-end">${{ row.sales_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">${{ row.cost_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">${{ row.commercial_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">${{ row.contribution_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{% if row.contribution_pct is not None %}{{ row.contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                  <td>
+                    <span class="bi-tone {% if row.bucket == 'Defender' %}success{% elif row.bucket == 'Promover' %}warning{% elif row.bucket == 'Subir precio' or row.bucket == 'Corregir costo' or row.bucket == 'Reformular' %}danger{% else %}neutral{% endif %}">
+                      {{ row.bucket }}
+                    </span>
+                    <div class="bi-subtle">{{ row.recommendation }}</div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-section-full">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Sucursales {{ branch_contribution_panel.year }}</div>
+          <h2 class="bi-panel-title">Rendimiento por sucursal</h2>
+          <p class="bi-panel-copy">Lectura ejecutiva primero: tarjetas comparativas, barras de peso y mezcla comercial. La matriz tabular queda solo para auditoría puntual.</p>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill">YTD a {{ branch_contribution_panel.ytd_cutoff_label }}</span>
+          <span class="bi-pill">Detalle {{ branch_contribution_panel.latest_period_label }}</span>
+          <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&export=branches_csv">CSV</a>
+          <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&export=branches_xlsx">Excel</a>
+          <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?period_days={{ period_days }}&months={{ months_window }}&export=branches_pdf">PDF</a>
+        </div>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-note bi-note-compact">{{ branch_contribution_panel.basis_note }}</div>
+        <div class="bi-grid-2 bi-grid-tight">
+          <div class="bi-list bi-list-compact">
+            {% for row in branch_contribution_panel.top_rows %}
+            <article class="bi-list-item is-tight is-signal-success">
+              <strong>{{ row.branch_label }}</strong>
+              <div class="bi-subtle">Venta YTD ${{ row.sales_total|floatformat:2|intcomma }} · contribución ${{ row.contribution_total|floatformat:2|intcomma }}</div>
+              <div>Margen contribución {% if row.contribution_pct is not None %}{{ row.contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %} · fabricado {% if row.fabricated_mix_pct is not None %}{{ row.fabricated_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+              {% if row.top_support %}
+              <div class="bi-subtle">Sostienen {{ row.top_support.0.label }}{% if row.top_support|length > 1 %} y {{ row.top_support.1.label }}{% endif %}</div>
+              {% endif %}
+            </article>
+            {% empty %}
+            <article class="bi-list-item">
+              <strong>Sin lectura por sucursal</strong>
+              <div class="bi-subtle">Aún no hay snapshots de contribución por sucursal para el año visible.</div>
+            </article>
+            {% endfor %}
+          </div>
+          <div class="bi-list bi-list-compact">
+            {% for row in branch_contribution_panel.alert_rows %}
+            <article class="bi-list-item is-tight is-signal-danger">
+              <strong>{{ row.branch_label }}</strong>
+              <div class="bi-subtle">Venta YTD ${{ row.sales_total|floatformat:2|intcomma }} · contribución ${{ row.contribution_total|floatformat:2|intcomma }}</div>
+              <div>Margen contribución {% if row.contribution_pct is not None %}{{ row.contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %} · no receta ${{ row.non_recipe_total|floatformat:2|intcomma }}</div>
+              {% if row.top_drag %}
+              <div class="bi-subtle">Arrastran {{ row.top_drag.0.label }}{% if row.top_drag|length > 1 %} y {{ row.top_drag.1.label }}{% endif %}</div>
+              {% endif %}
+            </article>
+            {% empty %}
+            <article class="bi-list-item">
+              <strong>Sin sucursales en rojo</strong>
+              <div class="bi-subtle">No hay sucursales con contribución negativa en la ventana YTD visible.</div>
+            </article>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="bi-grid-2 bi-grid-tight">
+          <div class="bi-list bi-list-compact">
+            {% for row in branch_contribution_panel.improving_rows %}
+            <article class="bi-list-item is-tight is-signal-success">
+              <strong>{{ row.branch_label }}</strong>
+              <div class="bi-subtle">Último mes vs prom. YTD contribución {% if row.latest_month_contribution_vs_ytd_avg_pct is not None %}{{ row.latest_month_contribution_vs_ytd_avg_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+              <div>Brecha margen {% if row.latest_month_margin_delta_pp is not None %}{{ row.latest_month_margin_delta_pp|floatformat:1 }} pp{% else %}N/D{% endif %} · semáforo {{ row.rank_tone|default:"N/D" }}</div>
+            </article>
+            {% empty %}
+            <article class="bi-list-item">
+              <strong>Sin mejora material</strong>
+              <div class="bi-subtle">Aún no hay suficiente historia para comparar contra el promedio YTD.</div>
+            </article>
+            {% endfor %}
+          </div>
+          <div class="bi-list bi-list-compact">
+            {% for row in branch_contribution_panel.deteriorating_rows %}
+            <article class="bi-list-item is-tight is-signal-danger">
+              <strong>{{ row.branch_label }}</strong>
+              <div class="bi-subtle">Último mes vs prom. YTD contribución {% if row.latest_month_contribution_vs_ytd_avg_pct is not None %}{{ row.latest_month_contribution_vs_ytd_avg_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+              <div>Brecha margen {% if row.latest_month_margin_delta_pp is not None %}{{ row.latest_month_margin_delta_pp|floatformat:1 }} pp{% else %}N/D{% endif %} · semáforo {{ row.rank_tone|default:"N/D" }}</div>
+            </article>
+            {% empty %}
+            <article class="bi-list-item">
+              <strong>Sin deterioro material</strong>
+              <div class="bi-subtle">Aún no hay suficiente historia para comparar contra el promedio YTD.</div>
+            </article>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="bi-branch-visual-grid">
+          {% for row in branch_contribution_panel.rows %}
+          <article class="bi-branch-card bi-branch-card-{{ row.rank_tone|default:'neutral' }}">
+            <div class="bi-branch-card-head">
+              <div>
+                <strong>{{ row.branch_label }}</strong>
+                <div class="bi-subtle">{{ row.branch_code }} · YTD a {{ branch_contribution_panel.ytd_cutoff_label }}</div>
+              </div>
+              <span class="bi-tone {{ row.rank_tone|default:'neutral' }}">
+                {% if row.rank_tone == 'success' %}Sana{% elif row.rank_tone == 'warning' %}Vigilar{% elif row.rank_tone == 'danger' %}Atender{% else %}Neutra{% endif %}
+              </span>
+            </div>
+            <div class="bi-branch-card-metrics">
+              <div class="bi-metric">
+                <div class="bi-metric-label">Venta YTD</div>
+                <div class="bi-metric-value">${{ row.sales_total|floatformat:0|intcomma }}</div>
+                <div class="bi-subtle">Último mes ${{ row.latest_month_sales_total|floatformat:0|intcomma }}</div>
+              </div>
+              <div class="bi-metric">
+                <div class="bi-metric-label">Contribución</div>
+                <div class="bi-metric-value">${{ row.contribution_total|floatformat:0|intcomma }}</div>
+                <div class="bi-subtle">Margen {% if row.contribution_pct is not None %}{{ row.contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+              </div>
+              <div class="bi-metric">
+                <div class="bi-metric-label">Brecha último mes</div>
+                <div class="bi-metric-value {% if row.latest_month_contribution_vs_ytd_avg_pct is not None and row.latest_month_contribution_vs_ytd_avg_pct < 0 %}danger{% elif row.latest_month_contribution_vs_ytd_avg_pct is not None %}success{% else %}warning{% endif %}">
+                  {% if row.latest_month_contribution_vs_ytd_avg_pct is not None %}{{ row.latest_month_contribution_vs_ytd_avg_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+                </div>
+                <div class="bi-subtle">vs promedio YTD</div>
+              </div>
+            </div>
+            <div class="bi-branch-bars">
+              <div class="bi-branch-bar">
+                <div class="bi-branch-bar-label">Peso en venta</div>
+                <div class="bi-bar-track"><div class="bi-bar-fill is-wine" style="width: {{ row.sales_share_pct|default:0|floatformat:1 }}%;"></div></div>
+                <div class="bi-branch-bar-value">{% if row.sales_share_pct is not None %}{{ row.sales_share_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+              </div>
+              <div class="bi-branch-bar">
+                <div class="bi-branch-bar-label">Peso en contribución</div>
+                <div class="bi-bar-track"><div class="bi-bar-fill is-green" style="width: {{ row.contribution_share_pct|default:0|floatformat:1 }}%;"></div></div>
+                <div class="bi-branch-bar-value">{% if row.contribution_share_pct is not None %}{{ row.contribution_share_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+              </div>
+            </div>
+            <div class="bi-branch-mix">
+              <span class="bi-mix-pill">Fabricado {% if row.fabricated_mix_pct is not None %}{{ row.fabricated_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</span>
+              <span class="bi-mix-pill">Reventa {% if row.resale_mix_pct is not None %}{{ row.resale_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</span>
+              <span class="bi-mix-pill">No receta {% if row.non_recipe_mix_pct is not None %}{{ row.non_recipe_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</span>
+            </div>
+            <div class="bi-branch-card-foot">
+              <div class="bi-subtle">Reventa residual ${{ row.non_recipe_resale_total|floatformat:0|intcomma }} · Accesorio ${{ row.non_recipe_accessory_total|floatformat:0|intcomma }} · Servicio ${{ row.non_recipe_service_total|floatformat:0|intcomma }}</div>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+        <details class="bi-details">
+          <summary>Abrir auditoría completa por sucursal</summary>
+          <div class="bi-details-body">
+            <div class="bi-branch-audit-grid">
+              {% for row in branch_contribution_panel.rows %}
+              <article class="bi-branch-audit-card">
+                <div class="bi-branch-audit-head">
+                  <div>
+                    <strong>{{ row.branch_label }}</strong>
+                    <div class="bi-subtle">{{ row.branch_code }} · YTD a {{ branch_contribution_panel.ytd_cutoff_label }}</div>
+                  </div>
+                  <span class="bi-tone {{ row.rank_tone|default:'neutral' }}">
+                    {% if row.rank_tone == 'success' %}Sana{% elif row.rank_tone == 'warning' %}Vigilar{% elif row.rank_tone == 'danger' %}Atender{% else %}Neutra{% endif %}
+                  </span>
+                </div>
+                <div class="bi-branch-audit-metrics">
+                  <div class="bi-metric">
+                    <div class="bi-metric-label">Venta YTD</div>
+                    <div class="bi-metric-value">${{ row.sales_total|floatformat:0|intcomma }}</div>
+                    <div class="bi-subtle">Costo ${{ row.cost_total|floatformat:0|intcomma }}</div>
+                  </div>
+                  <div class="bi-metric">
+                    <div class="bi-metric-label">Contribución</div>
+                    <div class="bi-metric-value">${{ row.contribution_total|floatformat:0|intcomma }}</div>
+                    <div class="bi-subtle">Margen {% if row.contribution_pct is not None %}{{ row.contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+                  </div>
+                  <div class="bi-metric">
+                    <div class="bi-metric-label">Último mes</div>
+                    <div class="bi-metric-value">${{ row.latest_month_contribution_total|floatformat:0|intcomma }}</div>
+                    <div class="bi-subtle">Venta ${{ row.latest_month_sales_total|floatformat:0|intcomma }}</div>
+                  </div>
+                  <div class="bi-metric">
+                    <div class="bi-metric-label">Brecha vs YTD</div>
+                    <div class="bi-metric-value {% if row.latest_month_contribution_vs_ytd_avg_pct is not None and row.latest_month_contribution_vs_ytd_avg_pct < 0 %}danger{% elif row.latest_month_contribution_vs_ytd_avg_pct is not None %}success{% else %}warning{% endif %}">
+                      {% if row.latest_month_contribution_vs_ytd_avg_pct is not None %}{{ row.latest_month_contribution_vs_ytd_avg_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+                    </div>
+                    <div class="bi-subtle">Margen {% if row.latest_month_margin_delta_pp is not None %}{{ row.latest_month_margin_delta_pp|floatformat:1 }} pp{% else %}N/D{% endif %}</div>
+                  </div>
+                </div>
+                <div class="bi-branch-mix">
+                  <span class="bi-mix-pill">Fabricado {% if row.fabricated_mix_pct is not None %}{{ row.fabricated_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</span>
+                  <span class="bi-mix-pill">Reventa {% if row.resale_mix_pct is not None %}{{ row.resale_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</span>
+                  <span class="bi-mix-pill">No receta ${{ row.non_recipe_total|floatformat:0|intcomma }}</span>
+                  <span class="bi-mix-pill">Residual ${{ row.non_recipe_resale_total|floatformat:0|intcomma }}</span>
+                  <span class="bi-mix-pill">Accesorio ${{ row.non_recipe_accessory_total|floatformat:0|intcomma }}</span>
+                  <span class="bi-mix-pill">Servicio ${{ row.non_recipe_service_total|floatformat:0|intcomma }}</span>
+                </div>
+                <div class="bi-branch-audit-foot">
+                  {% if row.top_support %}
+                  <div class="bi-subtle">Sostienen: {{ row.top_support.0.label }}{% if row.top_support|length > 1 %}, {{ row.top_support.1.label }}{% endif %}</div>
+                  {% endif %}
+                  {% if row.top_drag %}
+                  <div class="bi-subtle">Arrastran: {{ row.top_drag.0.label }}{% if row.top_drag|length > 1 %}, {{ row.top_drag.1.label }}{% endif %}</div>
+                  {% endif %}
+                </div>
+              </article>
+              {% endfor %}
+            </div>
+            <details class="bi-details bi-details-nested">
+              <summary>Abrir matriz tabular cruda</summary>
+              <div class="bi-details-body table-responsive">
+                <table class="bi-table bi-table-audit-branches">
+                  <thead>
+                    <tr>
+                      <th>Sucursal</th>
+                      <th class="text-end">Venta YTD</th>
+                      <th class="text-end">Costo producto</th>
+                      <th class="text-end">Gasto comercial</th>
+                      <th class="text-end">Contribución</th>
+                      <th class="text-end">Margen %</th>
+                      <th class="text-end">Fabricado</th>
+                      <th class="text-end">Reventa</th>
+                      <th class="text-end">No receta</th>
+                      <th class="text-end">Reventa residual</th>
+                      <th class="text-end">Accesorio</th>
+                      <th class="text-end">Servicio</th>
+                      <th>Último mes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in branch_contribution_panel.rows %}
+                    <tr>
+                      <td><strong>{{ row.branch_label }}</strong><div class="bi-subtle">{{ row.branch_code }}</div></td>
+                      <td class="text-end">${{ row.sales_total|floatformat:2|intcomma }}</td>
+                      <td class="text-end">${{ row.cost_total|floatformat:2|intcomma }}</td>
+                      <td class="text-end">${{ row.commercial_total|floatformat:2|intcomma }}</td>
+                      <td class="text-end">${{ row.contribution_total|floatformat:2|intcomma }}</td>
+                      <td class="text-end">{% if row.contribution_pct is not None %}{{ row.contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                      <td class="text-end">{% if row.fabricated_mix_pct is not None %}{{ row.fabricated_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                      <td class="text-end">{% if row.resale_mix_pct is not None %}{{ row.resale_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+                      <td class="text-end">${{ row.non_recipe_total|floatformat:2|intcomma }}</td>
+                      <td class="text-end">${{ row.non_recipe_resale_total|floatformat:2|intcomma }}</td>
+                      <td class="text-end">${{ row.non_recipe_accessory_total|floatformat:2|intcomma }}</td>
+                      <td class="text-end">${{ row.non_recipe_service_total|floatformat:2|intcomma }}</td>
+                      <td>
+                        <div class="bi-subtle">Venta ${{ row.latest_month_sales_total|floatformat:2|intcomma }} · contribución ${{ row.latest_month_contribution_total|floatformat:2|intcomma }}</div>
+                        <div class="bi-subtle">Margen {% if row.latest_month_contribution_pct is not None %}{{ row.latest_month_contribution_pct|floatformat:1 }}%{% else %}N/D{% endif %} · semáforo {{ row.rank_tone|default:"N/D" }}</div>
+                        <div class="bi-subtle">Vs prom. YTD venta {% if row.latest_month_sales_vs_ytd_avg_pct is not None %}{{ row.latest_month_sales_vs_ytd_avg_pct|floatformat:1 }}%{% else %}N/D{% endif %} · contribución {% if row.latest_month_contribution_vs_ytd_avg_pct is not None %}{{ row.latest_month_contribution_vs_ytd_avg_pct|floatformat:1 }}%{% else %}N/D{% endif %}</div>
+                        <div class="bi-subtle">Brecha margen {% if row.latest_month_margin_delta_pp is not None %}{{ row.latest_month_margin_delta_pp|floatformat:1 }} pp{% else %}N/D{% endif %}</div>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        </details>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-grid-feature">
     <article class="bi-panel">
       <div class="bi-panel-head">
         <div>
           <div class="bi-kicker">Pronóstico</div>
           <h2 class="bi-panel-title">Tendencia semanal de venta</h2>
-          <p class="bi-panel-copy">Venta y piezas recientes para anticipar la próxima semana. Los picos fuera de patrón quedan marcados, no promediados.</p>
         </div>
-        <span class="bi-pill {% if forecast_panel.has_atypical_history %}warning{% else %}success{% endif %}">
-          {% if forecast_panel.has_atypical_history %}Con semanas atípicas{% else %}Tendencia estable{% endif %}
-        </span>
+        <div class="bi-panel-actions">
+          <span class="bi-pill {% if forecast_panel.has_atypical_history %}warning{% else %}success{% endif %}">
+            {% if forecast_panel.has_atypical_history %}Con semanas atípicas{% else %}Tendencia estable{% endif %}
+          </span>
+          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months={{ months_window }}">Abrir ventas</a>
+        </div>
       </div>
       <div class="bi-panel-stack">
         <div class="bi-chart-stage">
@@ -137,6 +1043,7 @@
             <div class="bi-subtle">{{ forecast_panel.forecast_tickets|intcomma }} tickets</div>
           </div>
         </div>
+        <div class="bi-subtle">{{ forecast_panel.high_scenario_note }}</div>
         {% if forecast_panel.atypical_rows %}
         <div class="bi-note pending">
           Semanas atípicas detectadas:
@@ -189,13 +1096,15 @@
         <div>
           <div class="bi-kicker">Comparativo</div>
           <h2 class="bi-panel-title">Mes contra mismo mes del año anterior</h2>
-          <p class="bi-panel-copy">Meses cerrados contra meses cerrados. Si el mes actual sigue abierto, se compara al mismo corte del año previo.</p>
         </div>
-        {% with hero=yoy_panel.hero_row %}
-        <span class="bi-pill {% if hero and hero.amount_delta_pct is not None and hero.amount_delta_pct < 0 %}danger{% elif hero and hero.amount_delta_pct is not None %}success{% else %}warning{% endif %}">
-          {{ yoy_panel.hero_note }}
-        </span>
-        {% endwith %}
+        <div class="bi-panel-actions">
+          {% with hero=yoy_panel.hero_row %}
+          <span class="bi-pill {% if hero and hero.amount_delta_pct is not None and hero.amount_delta_pct < 0 %}danger{% elif hero and hero.amount_delta_pct is not None %}success{% else %}warning{% endif %}">
+            {{ yoy_panel.hero_note }}
+          </span>
+          {% endwith %}
+          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months={{ months_window }}">Abrir ventas</a>
+        </div>
       </div>
       <div class="bi-panel-stack">
         <div class="bi-chart-stage">
@@ -266,15 +1175,17 @@
     </article>
   </section>
 
-  <section class="bi-grid-2">
+  <section class="bi-grid-feature">
     <article class="bi-panel">
       <div class="bi-panel-head">
         <div>
           <div class="bi-kicker">Rentabilidad</div>
           <h2 class="bi-panel-title">Margen vs volumen por producto</h2>
-          <p class="bi-panel-copy">Qué defender, qué promover y qué revisar según margen de MP y volumen real.</p>
         </div>
-        <span class="bi-pill">Ventana {{ profitability_panel.lookback_days }} días</span>
+        <div class="bi-panel-actions">
+          <span class="bi-pill">Ventana {{ profitability_panel.lookback_days }} días</span>
+          <a class="btn btn-secondary" href="{% url 'reportes:financiero' %}?bucket=Promocionar">Promociones</a>
+        </div>
       </div>
       <div class="bi-panel-stack">
         <div class="bi-chart-stage compact">
@@ -282,13 +1193,18 @@
         </div>
         <div class="bi-grid-2 bi-grid-tight">
           <div class="bi-list bi-list-compact">
-            {% for row in profitability_panel.promo_candidates %}
-            <article class="bi-list-item">
-              <strong>{{ row.label }}</strong>
-              <div class="bi-subtle">{{ row.categoria|default:row.familia }}</div>
-              <div>Margen {{ row.margin_pct|floatformat:1 }}% · {{ row.quantity|floatformat:0|intcomma }} piezas</div>
-              <div class="bi-subtle">{{ row.recommendation }}</div>
-            </article>
+            {% for row in profitability_panel.promo_candidates|slice:":2" %}
+                <article class="bi-list-item is-tight is-signal-warning">
+                  <strong>{{ row.label }}</strong>
+                  <div class="bi-subtle">{{ row.categoria|default:row.familia }}</div>
+                  <div>Margen {{ row.margin_pct|floatformat:1 }}% · costo/venta {{ row.cost_pct|floatformat:1 }}% · {{ row.quantity|floatformat:0|intcomma }} piezas</div>
+                  <div class="bi-subtle">Promoción sugerida</div>
+                  <div class="bi-inline-actions">
+                    <a class="bi-inline-link" href="{% url 'reportes:financiero' %}?familia={{ row.familia|urlencode }}&categoria={{ row.categoria|default:''|urlencode }}&bucket=Promocionar&q={{ row.label|urlencode }}">
+                      Abrir en financiero
+                    </a>
+                  </div>
+                </article>
             {% empty %}
             <article class="bi-list-item">
               <strong>Sin promoción sugerida</strong>
@@ -296,10 +1212,22 @@
             </article>
             {% endfor %}
           </div>
-          <div class="bi-note bi-note-compact">{{ profitability_panel.basis_note }}</div>
+        <div class="bi-insight-grid">
+          <article class="bi-insight-card">
+            <div class="bi-insight-label">Productos costados</div>
+            <div class="bi-insight-value">{{ profitability_panel.rows|length }}</div>
+            <div class="bi-insight-meta">ranking visible</div>
+          </article>
+          <article class="bi-insight-card">
+            <div class="bi-insight-label">Promos sugeridas</div>
+            <div class="bi-insight-value">{{ profitability_panel.promo_candidates|length }}</div>
+            <div class="bi-insight-meta">oportunidades visibles</div>
+          </article>
+        </div>
         </div>
         <details class="bi-details">
           <summary>Ver ranking auditable de rentabilidad</summary>
+          <div class="bi-note bi-note-compact">{{ profitability_panel.basis_note }}</div>
           <div class="bi-details-body table-responsive">
             <table class="bi-table">
               <thead>
@@ -308,6 +1236,7 @@
                   <th class="text-end">Venta $</th>
                   <th class="text-end">Piezas</th>
                   <th class="text-end">Costo MP</th>
+                  <th class="text-end">Costo %</th>
                   <th class="text-end">Margen $</th>
                   <th class="text-end">Margen %</th>
                   <th>Acción</th>
@@ -320,6 +1249,7 @@
                   <td class="text-end">${{ row.revenue|floatformat:2|intcomma }}</td>
                   <td class="text-end">{{ row.quantity|floatformat:0|intcomma }}</td>
                   <td class="text-end">${{ row.cost_total|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{% if row.cost_pct is not None %}{{ row.cost_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
                   <td class="text-end">${{ row.margin|floatformat:2|intcomma }}</td>
                   <td class="text-end">{% if row.margin_pct is not None %}{{ row.margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
                   <td>
@@ -342,12 +1272,14 @@
         <div>
           <div class="bi-kicker">Producción</div>
           <h2 class="bi-panel-title">Producido contra vendido</h2>
-          <p class="bi-panel-copy">Gap semanal y categorías donde ya se ve sobreproducción o déficit.</p>
         </div>
-        <span class="bi-pill">{{ production_sales_panel.week_label }}</span>
+        <div class="bi-panel-actions">
+          <span class="bi-pill">{{ production_sales_panel.week_label }}</span>
+          <a class="btn btn-secondary" href="{% url 'recetas:produccion_cedis_weekly_dashboard' %}">Abrir CEDIS</a>
+        </div>
       </div>
       <div class="bi-panel-stack">
-        <div class="bi-grid-2">
+      <div class="bi-grid-2 bi-grid-tight">
           <div class="bi-chart-stage compact">
             <canvas id="productionWeeklyChart" aria-label="Producción contra venta por semana" role="img"></canvas>
           </div>
@@ -376,9 +1308,26 @@
           </div>
         </div>
         {% endwith %}
-        <div class="bi-note bi-note-compact">{{ production_sales_panel.basis_note }}</div>
+        <div class="bi-insight-grid">
+          <article class="bi-insight-card">
+            <div class="bi-insight-label">Semana visible</div>
+            <div class="bi-insight-value">{{ production_sales_panel.week_label }}</div>
+            <div class="bi-insight-meta">comparativo reciente</div>
+          </article>
+          <article class="bi-insight-card">
+            <div class="bi-insight-label">Categorías activas</div>
+            <div class="bi-insight-value">{{ production_sales_panel.category_rows|length }}</div>
+            <div class="bi-insight-meta">familias con lectura útil</div>
+          </article>
+          <article class="bi-insight-card">
+            <div class="bi-insight-label">Cobertura</div>
+            <div class="bi-insight-value">{{ production_sales_panel.weekly_rows|length }}</div>
+            <div class="bi-insight-meta">semanas visibles</div>
+          </article>
+        </div>
         <details class="bi-details">
           <summary>Ver detalle auditable de producción y categorías</summary>
+          <div class="bi-note bi-note-compact">{{ production_sales_panel.basis_note }}</div>
           <div class="bi-details-body bi-grid-2">
             <div class="table-responsive">
               <table class="bi-table">
@@ -439,9 +1388,11 @@
         <div>
           <div class="bi-kicker">Flujo central</div>
           <h2 class="bi-panel-title">Flujo histórico mensual del centro</h2>
-          <p class="bi-panel-copy">Abasto central disponible contra venta y merma. Si no existe snapshot real, el sistema lo declara y no inventa saldos.</p>
         </div>
-        <span class="bi-pill">Corte común {{ central_flow_panel.cutoff_date }}</span>
+        <div class="bi-panel-actions">
+          <span class="bi-pill">Corte común {{ central_flow_panel.cutoff_date }}</span>
+          <a class="btn btn-secondary" href="{% url 'inventario:dashboard' %}?focus=reorder">Abrir inventario</a>
+        </div>
       </div>
       <div class="bi-panel-stack">
         <div class="bi-chart-stage compact">
@@ -473,15 +1424,28 @@
         </div>
         {% endwith %}
       </div>
-      {% if inventory_ledger_panel.omitted_months %}
-      <div class="bi-note pending">
-        Datos pendientes por solicitar al usuario:
-        Puente real de inventario antes de {{ inventory_ledger_panel.snapshot_coverage_start|date:"Y-m" }} requiere snapshots históricos o ledger completo con salidas. Meses omitidos: {{ inventory_ledger_panel.omitted_months|join:", " }}.
+      <div class="bi-insight-grid">
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Cobertura</div>
+          <div class="bi-insight-value">
+            {% if inventory_ledger_panel.snapshot_coverage_start %}Snapshot desde {{ inventory_ledger_panel.snapshot_coverage_start|date:"Y-m" }}{% else %}Sin snapshot{% endif %}
+          </div>
+          <div class="bi-insight-meta">flujo diario desde {{ central_flow_panel.flow_coverage_start|date:"Y-m"|default:"N/D" }}</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Cobertura visible</div>
+          <div class="bi-insight-value">{{ central_flow_panel.complete_months }} / {{ central_flow_panel.rows|length }}</div>
+          <div class="bi-insight-meta">{% if inventory_ledger_panel.omitted_months %}sin snapshot: {{ inventory_ledger_panel.omitted_months|join:", " }}{% else %}sin omisiones{% endif %}</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Fuente actual</div>
+          <div class="bi-insight-value">{% with flow_row=central_flow_panel.rows|last %}{{ flow_row.central_source|default:"N/D" }}{% endwith %}</div>
+          <div class="bi-insight-meta">centro usado en el mes visible</div>
+        </article>
       </div>
-      {% endif %}
-      <div class="bi-note bi-note-compact">{{ central_flow_panel.basis_note }}</div>
       <details class="bi-details">
         <summary>Ver detalle auditable del flujo central</summary>
+        <div class="bi-note bi-note-compact">{{ central_flow_panel.basis_note }}</div>
         <div class="bi-details-body table-responsive">
           {% if central_flow_panel.rows %}
           <table class="bi-table">
@@ -531,18 +1495,32 @@
     <article class="bi-panel">
       <div class="bi-panel-head">
         <div>
-          <div class="bi-kicker">Lectura diaria</div>
-          <h2 class="bi-panel-title">Sucursales que se salen del comparable</h2>
-          <p class="bi-panel-copy">Lectura rápida contra el último día equivalente de semana.</p>
+          <h2 class="bi-panel-title">Sucursales en alerta</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months={{ months_window }}">Detalle comercial</a>
         </div>
       </div>
-      <div class="bi-list bi-list-tight">
-        {% for row in branch_weekday_rows %}
-        <article class="bi-list-item">
+      <div class="bi-summary-band">
+        <div class="bi-summary-chip">
+          <span>Alertas visibles</span>
+          <strong>{{ branch_weekday_rows|length }}</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Tickets del corte</span>
+          <strong>{{ daily_sales_snapshot.total_tickets|intcomma }}</strong>
+        </div>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in branch_weekday_rows|slice:":3" %}
+        <article class="bi-list-item is-tight is-signal-{{ row.tone|default:'neutral' }}">
           <strong>{{ row.branch_code }}</strong>
           <div class="bi-subtle">{{ row.branch_name }}</div>
           <div>${{ row.amount|floatformat:2|intcomma }} · {{ row.units|floatformat:0|intcomma }} piezas · {{ row.tickets|intcomma }} tickets</div>
           <div class="bi-subtle"><span class="bi-tone {{ row.tone }}">{{ row.status }}</span> {{ row.detail }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Abrir sucursal</a>
+          </div>
         </article>
         {% empty %}
         <article class="bi-list-item"><strong>Sin alertas de sucursal</strong><div class="bi-subtle">No hay suficiente referencia comparable reciente.</div></article>
@@ -553,17 +1531,34 @@
     <article class="bi-panel">
       <div class="bi-panel-head">
         <div>
-          <div class="bi-kicker">Lectura diaria</div>
-          <h2 class="bi-panel-title">Productos que se desvían del patrón</h2>
-          <p class="bi-panel-copy">Productos relevantes arriba o abajo contra su referencia comparable más reciente.</p>
+          <h2 class="bi-panel-title">Productos en alerta</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months={{ months_window }}">Abrir ventas</a>
+          <a class="btn btn-secondary" href="{% url 'reportes:financiero' %}?bucket=Ajustar%20margen">Cruzar margen</a>
         </div>
       </div>
-      <div class="bi-list bi-list-tight">
-        {% for row in product_weekday_rows %}
-        <article class="bi-list-item">
+      <div class="bi-summary-band">
+        <div class="bi-summary-chip">
+          <span>Productos visibles</span>
+          <strong>{{ product_weekday_rows|length }}</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Piezas del corte</span>
+          <strong>{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }}</strong>
+        </div>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in product_weekday_rows|slice:":3" %}
+        <article class="bi-list-item is-tight is-signal-{{ row.tone|default:'neutral' }}">
           <strong>{{ row.recipe_name }}</strong>
           <div>{{ row.units|floatformat:0|intcomma }} piezas · ${{ row.amount|floatformat:2|intcomma }} · {{ row.branch_count|intcomma }} sucursales</div>
           <div class="bi-subtle"><span class="bi-tone {{ row.tone }}">{{ row.status }}</span> {{ row.detail }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">
+              Cruzar con rentabilidad
+            </a>
+          </div>
         </article>
         {% empty %}
         <article class="bi-list-item"><strong>Sin alertas de producto</strong><div class="bi-subtle">No hay suficiente referencia comparable reciente.</div></article>

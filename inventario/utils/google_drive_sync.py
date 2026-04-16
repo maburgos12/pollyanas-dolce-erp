@@ -383,6 +383,7 @@ def sync_almacen_from_drive(
     alias_threshold: int = 95,
     create_missing_insumos: bool = True,
     dry_run: bool = False,
+    trace_context: dict | None = None,
 ) -> DriveSyncResult:
     include_sources = include_sources or {"inventario", "entradas", "salidas", "merma"}
 
@@ -472,6 +473,7 @@ def sync_almacen_from_drive(
             alias_threshold=alias_threshold,
             create_missing_insumos=create_missing_insumos,
             dry_run=dry_run,
+            trace_context=trace_context,
         )
 
     return DriveSyncResult(

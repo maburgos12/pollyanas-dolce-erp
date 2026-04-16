@@ -5,7 +5,8 @@ from . import views
 app_name = "logistica"
 
 urlpatterns = [
-    path("", views.rutas, name="rutas"),
-    path("rutas/", views.rutas, name="rutas_alt"),
+    path("", views.dashboard, name="home"),
+    path("rutas/", views.rutas, name="rutas"),
+    path("dashboard/", views.dashboard, name="dashboard"),
     path("rutas/<int:pk>/", views.ruta_detail, name="ruta_detail"),
 ]

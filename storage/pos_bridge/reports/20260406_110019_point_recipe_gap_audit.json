@@ -1,0 +1,662 @@
+{
+  "generated_at": "2026-04-06T11:00:19.675572+00:00",
+  "summary": {
+    "workspace": "Matriz",
+    "products_seen": 150,
+    "products_skipped_non_recipe": 87,
+    "products_with_product_bom": 42,
+    "products_missing_recipe_in_point": 21,
+    "products_audited": 21,
+    "products_derived_presentations": 8,
+    "corroborated_from_insumos": 0,
+    "possible_matches_requiring_review": 0,
+    "internal_candidates_without_bom": 0,
+    "missing_without_candidates": 13
+  },
+  "items": [
+    {
+      "product": {
+        "pk_producto": 291,
+        "codigo": "10063",
+        "nombre": "ADEREZO AGRIDULCE",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 444,
+        "codigo": "0085",
+        "nombre": "CONTENEDOR INDIVIDUAL CUPCAKE",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 434,
+        "codigo": "0330",
+        "nombre": "DECORACION",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 267,
+        "codigo": "0227",
+        "nombre": "Extra 10",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": {
+        "pk_articulo": 456,
+        "codigo": "7502271913",
+        "nombre": "SNICKERS MINI",
+        "categoria": "CHOCOLATES",
+        "has_recipe_flag": false,
+        "score": 25.0,
+        "search_terms": [
+          "0227"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 456,
+          "codigo": "7502271913",
+          "nombre": "SNICKERS MINI",
+          "categoria": "CHOCOLATES",
+          "has_recipe_flag": false,
+          "score": 25.0,
+          "search_terms": [
+            "0227"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 404,
+        "codigo": "0320",
+        "nombre": "EXTRA 100",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 268,
+        "codigo": "0228",
+        "nombre": "Extra 15",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 269,
+        "codigo": "0229",
+        "nombre": "Extra 20",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 270,
+        "codigo": "0230",
+        "nombre": "Extra 25",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 271,
+        "codigo": "0231",
+        "nombre": "Extra 30",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 403,
+        "codigo": "1315",
+        "nombre": "EXTRA 50",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 266,
+        "codigo": "0227",
+        "nombre": "Extra Fresa Chico",
+        "familia": "Otros postres",
+        "categoria": "Pastel Chico",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": {
+        "pk_articulo": 456,
+        "codigo": "7502271913",
+        "nombre": "SNICKERS MINI",
+        "categoria": "CHOCOLATES",
+        "has_recipe_flag": false,
+        "score": 21.05,
+        "search_terms": [
+          "0227"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 456,
+          "codigo": "7502271913",
+          "nombre": "SNICKERS MINI",
+          "categoria": "CHOCOLATES",
+          "has_recipe_flag": false,
+          "score": 21.05,
+          "search_terms": [
+            "0227"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 106,
+        "codigo": "0106",
+        "nombre": "Pastel de 3 Leches Rebanada",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "DERIVED_PRESENTATION",
+      "derived_rule": {
+        "kind": "SLICE_FROM_PARENT",
+        "units_per_parent": 6,
+        "parent_size_hint": "MEDIANO",
+        "requires_direct_components": true,
+        "recommended_action": "Ligar a receta padre y mantener empaque/etiqueta como componentes directos del SKU derivado."
+      },
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 110,
+        "codigo": "0110",
+        "nombre": "Pastel de 3 Pecados R",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "DERIVED_PRESENTATION",
+      "derived_rule": {
+        "kind": "SLICE_FROM_PARENT",
+        "units_per_parent": 10,
+        "parent_size_hint": "MEDIANO",
+        "requires_direct_components": true,
+        "recommended_action": "Ligar a receta padre y mantener empaque/etiqueta como componentes directos del SKU derivado."
+      },
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 63,
+        "codigo": "0063",
+        "nombre": "Pastel de Crunch R",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "DERIVED_PRESENTATION",
+      "derived_rule": {
+        "kind": "SLICE_FROM_PARENT",
+        "units_per_parent": 10,
+        "parent_size_hint": "MEDIANO",
+        "requires_direct_components": true,
+        "recommended_action": "Ligar a receta padre y mantener empaque/etiqueta como componentes directos del SKU derivado."
+      },
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 103,
+        "codigo": "0103",
+        "nombre": "Pastel de Fresas Con Crema R",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "DERIVED_PRESENTATION",
+      "derived_rule": {
+        "kind": "SLICE_FROM_PARENT",
+        "units_per_parent": 10,
+        "parent_size_hint": "MEDIANO",
+        "requires_direct_components": true,
+        "recommended_action": "Ligar a receta padre y mantener empaque/etiqueta como componentes directos del SKU derivado."
+      },
+      "best_candidate": {
+        "pk_articulo": 342,
+        "codigo": "0103",
+        "nombre": "GOMA XANTANA 1 KG",
+        "categoria": "AZUCARES",
+        "has_recipe_flag": false,
+        "score": 40.69,
+        "search_terms": [
+          "0103"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 342,
+          "codigo": "0103",
+          "nombre": "GOMA XANTANA 1 KG",
+          "categoria": "AZUCARES",
+          "has_recipe_flag": false,
+          "score": 40.69,
+          "search_terms": [
+            "0103"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 58,
+        "codigo": "0058",
+        "nombre": "Pastel de Snickers Rebanada",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "DERIVED_PRESENTATION",
+      "derived_rule": {
+        "kind": "SLICE_FROM_PARENT",
+        "units_per_parent": 10,
+        "parent_size_hint": "MEDIANO",
+        "requires_direct_components": true,
+        "recommended_action": "Ligar a receta padre y mantener empaque/etiqueta como componentes directos del SKU derivado."
+      },
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 68,
+        "codigo": "0068",
+        "nombre": "Pastel de Zanahoria R",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "DERIVED_PRESENTATION",
+      "derived_rule": {
+        "kind": "SLICE_FROM_PARENT",
+        "units_per_parent": 10,
+        "parent_size_hint": "MEDIANO",
+        "requires_direct_components": true,
+        "recommended_action": "Ligar a receta padre y mantener empaque/etiqueta como componentes directos del SKU derivado."
+      },
+      "best_candidate": {
+        "pk_articulo": 333,
+        "codigo": "50327008",
+        "nombre": "COCO RALLADO P/PASTEL ZANAHORIA",
+        "categoria": "FRUTAS",
+        "has_recipe_flag": false,
+        "score": 21.62,
+        "search_terms": [
+          "pastel zanahoria"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 333,
+          "codigo": "50327008",
+          "nombre": "COCO RALLADO P/PASTEL ZANAHORIA",
+          "categoria": "FRUTAS",
+          "has_recipe_flag": false,
+          "score": 21.62,
+          "search_terms": [
+            "pastel zanahoria"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 7,
+        "codigo": "0007",
+        "nombre": "Pay de Plátano Rebanada",
+        "familia": "Pay",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "DERIVED_PRESENTATION",
+      "derived_rule": {
+        "kind": "SLICE_FROM_PARENT",
+        "units_per_parent": 8,
+        "parent_size_hint": "GRANDE",
+        "requires_direct_components": true,
+        "recommended_action": "Ligar a receta padre y mantener empaque/etiqueta como componentes directos del SKU derivado."
+      },
+      "best_candidate": {
+        "pk_articulo": 380,
+        "codigo": "31201512",
+        "nombre": "CINTA TRANSPARENTE",
+        "categoria": "DESECHABLES",
+        "has_recipe_flag": false,
+        "score": 17.65,
+        "search_terms": [
+          "0007"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 380,
+          "codigo": "31201512",
+          "nombre": "CINTA TRANSPARENTE",
+          "categoria": "DESECHABLES",
+          "has_recipe_flag": false,
+          "score": 17.65,
+          "search_terms": [
+            "0007"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 313,
+          "codigo": "0007501024",
+          "nombre": "KISSES LECHE",
+          "categoria": "CHOCOLATES",
+          "has_recipe_flag": false,
+          "score": 12.5,
+          "search_terms": [
+            "0007"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 3,
+        "codigo": "0003",
+        "nombre": "Pay de Queso Rebanada",
+        "familia": "Pay",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "DERIVED_PRESENTATION",
+      "derived_rule": {
+        "kind": "SLICE_FROM_PARENT",
+        "units_per_parent": 8,
+        "parent_size_hint": "GRANDE",
+        "requires_direct_components": true,
+        "recommended_action": "Ligar a receta padre y mantener empaque/etiqueta como componentes directos del SKU derivado."
+      },
+      "best_candidate": {
+        "pk_articulo": 436,
+        "codigo": "01801",
+        "nombre": "Pay de Queso Horneado Mediano",
+        "categoria": "PAN",
+        "has_recipe_flag": true,
+        "score": 78.05,
+        "search_terms": [
+          "pay queso"
+        ],
+        "bom_count": 2,
+        "bom_preview": [
+          {
+            "codigo": "01BPQ19",
+            "nombre": "Batida pay de queso",
+            "cantidad": 800.0,
+            "unidad": "ML"
+          },
+          {
+            "codigo": "01BTPM20",
+            "nombre": "Base Tarta Pay Mediano",
+            "cantidad": 1.0,
+            "unidad": "U"
+          }
+        ],
+        "erp_insumo_id": 456,
+        "erp_insumo_nombre": "Pay de Queso Horneado Mediano",
+        "erp_preparation_recipe_exists": true
+      },
+      "candidates": [
+        {
+          "pk_articulo": 436,
+          "codigo": "01801",
+          "nombre": "Pay de Queso Horneado Mediano",
+          "categoria": "PAN",
+          "has_recipe_flag": true,
+          "score": 78.05,
+          "search_terms": [
+            "pay queso"
+          ],
+          "bom_count": 2,
+          "bom_preview": [
+            {
+              "codigo": "01BPQ19",
+              "nombre": "Batida pay de queso",
+              "cantidad": 800.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "01BTPM20",
+              "nombre": "Base Tarta Pay Mediano",
+              "cantidad": 1.0,
+              "unidad": "U"
+            }
+          ],
+          "erp_insumo_id": 456,
+          "erp_insumo_nombre": "Pay de Queso Horneado Mediano",
+          "erp_preparation_recipe_exists": true
+        },
+        {
+          "pk_articulo": 346,
+          "codigo": "01800",
+          "nombre": "Pay de Queso Horneado Grande",
+          "categoria": "PAN",
+          "has_recipe_flag": true,
+          "score": 78.05,
+          "search_terms": [
+            "pay queso"
+          ],
+          "bom_count": 2,
+          "bom_preview": [
+            {
+              "codigo": "01BPQ19",
+              "nombre": "Batida pay de queso",
+              "cantidad": 1400.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "01BTPG20",
+              "nombre": "Base Tarta Pay Grande",
+              "cantidad": 1.0,
+              "unidad": "U"
+            }
+          ],
+          "erp_insumo_id": 432,
+          "erp_insumo_nombre": "Pay de Queso Horneado Grande",
+          "erp_preparation_recipe_exists": true
+        },
+        {
+          "pk_articulo": 377,
+          "codigo": "01BPQ19",
+          "nombre": "Batida pay de queso",
+          "categoria": "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)",
+          "has_recipe_flag": true,
+          "score": 64.52,
+          "search_terms": [
+            "pay queso"
+          ],
+          "bom_count": 5,
+          "bom_preview": [
+            {
+              "codigo": "004",
+              "nombre": "LECHERA",
+              "cantidad": 211.0,
+              "unidad": "Gr"
+            },
+            {
+              "codigo": "006",
+              "nombre": "MEDIA CREMA",
+              "cantidad": 163.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "005",
+              "nombre": "QUESO CREMA",
+              "cantidad": 139.0,
+              "unidad": "Gr"
+            }
+          ],
+          "erp_insumo_id": 222,
+          "erp_insumo_nombre": "Batida Queso Pay",
+          "erp_preparation_recipe_exists": true
+        },
+        {
+          "pk_articulo": 318,
+          "codigo": "OTS000313",
+          "nombre": "DECO MEZCLA CORAZON PERLA ROSA GRANILLO 1KG",
+          "categoria": "AZUCARES",
+          "has_recipe_flag": false,
+          "score": 19.05,
+          "search_terms": [
+            "0003"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 441,
+        "codigo": "00445",
+        "nombre": "Vaso Galleta Chispas Chocolate Mini",
+        "familia": "Vasos Preparados",
+        "categoria": "Vaso Preparado Mini",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 442,
+        "codigo": "00446",
+        "nombre": "Vaso Galleta Chispas de Chocolate Gde",
+        "familia": "Vasos Preparados",
+        "categoria": "Vasos Preparados Grande",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "derived_rule": null,
+      "best_candidate": null,
+      "candidates": []
+    }
+  ]
+}

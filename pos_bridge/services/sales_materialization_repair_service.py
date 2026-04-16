@@ -6,10 +6,14 @@ from datetime import date
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Q
 
+from core.cache_versions import bump_cache_scopes
 from pos_bridge.models import PointDailySale
+from reportes.analytics_service import mark_analytics_dirty_for_range
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import VentaHistorica
+from ventas.models import VentaAutoritativaPoint
 
 
 @dataclass
@@ -46,11 +50,16 @@ class BridgeSalesMaterializationRepairService:
         return "RESOLVED", receta
 
     @transaction.atomic
-    def repair(self, *, start_date: date, end_date: date) -> SalesMaterializationRepairResult:
+    def repair(self, *, start_date: date, end_date: date, branch_filter: str | None = None) -> SalesMaterializationRepairResult:
         sales_qs = (
             PointDailySale.objects.select_related("branch__erp_branch", "product", "receta")
             .filter(sale_date__gte=start_date, sale_date__lte=end_date)
             .order_by("sale_date", "branch_id", "product_id", "id")
+        )
+        if branch_filter:
+            sales_qs = sales_qs.filter(Q(branch__external_id=branch_filter) | Q(branch__name__iexact=branch_filter))
+        target_erp_branch_ids = list(
+            sales_qs.exclude(branch__erp_branch__isnull=True).values_list("branch__erp_branch_id", flat=True).distinct()
         )
 
         scanned_rows = 0
@@ -114,6 +123,7 @@ class BridgeSalesMaterializationRepairService:
             fuente=self.SALES_HISTORY_SOURCE,
             fecha__gte=start_date,
             fecha__lte=end_date,
+            **({"sucursal_id__in": target_erp_branch_ids} if target_erp_branch_ids else {}),
         ).delete()
 
         rows_to_create = [
@@ -128,8 +138,48 @@ class BridgeSalesMaterializationRepairService:
             )
             for payload in buckets.values()
         ]
+        authoritative_rows = (
+            VentaAutoritativaPoint.objects.select_related("branch", "product")
+            .filter(
+                sale_date__gte=start_date,
+                sale_date__lte=end_date,
+                branch__isnull=False,
+                product__isnull=False,
+                **({"branch_id__in": target_erp_branch_ids} if target_erp_branch_ids else {}),
+            )
+            .order_by("sale_date", "branch_id", "product_id", "id")
+        )
+        authoritative_keys: set[tuple[int, int, date]] = set()
+        for row in authoritative_rows:
+            if row.branch_id is None or row.product_id is None:
+                continue
+            key = (row.product_id, row.branch_id, row.sale_date)
+            authoritative_keys.add(key)
+            rows_to_create = [item for item in rows_to_create if not (
+                item.receta_id == row.product_id and item.sucursal_id == row.branch_id and item.fecha == row.sale_date
+            )]
+            rows_to_create.append(
+                VentaHistorica(
+                    receta=row.product,
+                    sucursal=row.branch,
+                    fecha=row.sale_date,
+                    cantidad=Decimal(str(row.quantity or 0)),
+                    tickets=0,
+                    monto_total=Decimal(str(row.total_amount or 0)),
+                    fuente=self.SALES_HISTORY_SOURCE,
+                )
+        )
         if rows_to_create:
             VentaHistorica.objects.bulk_create(rows_to_create, batch_size=500)
+            bump_cache_scopes("ventas", "dashboard")
+            mark_analytics_dirty_for_range(
+                start_date=min(row.fecha for row in rows_to_create),
+                end_date=max(row.fecha for row in rows_to_create),
+                include_sales=True,
+                include_production=True,
+                include_forecast=True,
+                reason="sales_materialization_repair",
+            )
 
         return SalesMaterializationRepairResult(
             scanned_rows=scanned_rows,

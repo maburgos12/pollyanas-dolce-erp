@@ -1,7 +1,9 @@
 from core.access import (
     can_capture_piso,
+    can_manage_orquestacion,
     can_view_audit,
     can_manage_users,
+    can_view_orquestacion,
     can_manage_crm,
     can_manage_compras,
     can_manage_inventario,
@@ -15,6 +17,8 @@ from core.access import (
     can_view_recetas,
     can_view_rrhh,
     can_view_reportes,
+    can_view_ventas_eventos,
+    can_manage_ventas_eventos,
     is_branch_capture_only,
 )
 
@@ -31,6 +35,8 @@ def ui_access(request):
             "can_manage_inventario": can_manage_inventario(user),
             "can_view_reportes": can_view_reportes(user),
             "can_view_audit": can_view_audit(user),
+            "can_view_orquestacion": can_view_orquestacion(user),
+            "can_manage_orquestacion": can_manage_orquestacion(user),
             "can_manage_users": can_manage_users(user),
             "can_view_crm": can_view_crm(user),
             "can_manage_crm": can_manage_crm(user),
@@ -39,6 +45,8 @@ def ui_access(request):
             "can_view_rrhh": can_view_rrhh(user),
             "can_manage_rrhh": can_manage_rrhh(user),
             "can_capture_piso": can_capture_piso(user),
+            "can_view_ventas_eventos": can_view_ventas_eventos(user),
+            "can_manage_ventas_eventos": can_manage_ventas_eventos(user),
             "branch_capture_only": is_branch_capture_only(user),
         }
     }

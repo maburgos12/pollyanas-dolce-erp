@@ -2,10 +2,39 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from recetas.models import Receta, RecetaPresentacionDerivada
+from django.db.models import Q
+from django.db.models import DecimalField
+
+from maestros.utils.canonical_catalog import latest_costo_canonico
+from recetas.models import LineaReceta, Receta, RecetaPresentacionDerivada
+from recetas.utils.costeo_snapshot import convert_unit_cost, resolve_insumo_unit_cost
+from recetas.utils.normalizacion import normalizar_nombre
 
 
 ZERO = Decimal("0")
+LINE_COST_OUTPUT_FIELD = DecimalField(max_digits=24, decimal_places=6)
+
+
+def _resolve_line_total_cost(linea: LineaReceta) -> Decimal:
+    if linea.tipo_linea == LineaReceta.TIPO_SUBSECCION:
+        return ZERO
+
+    if linea.insumo_id:
+        quantity = Decimal(str(linea.cantidad or 0))
+        if quantity <= 0:
+            return ZERO
+
+        unit_cost = Decimal(str(linea.costo_unitario_snapshot or 0))
+        if unit_cost <= 0:
+            from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost
+
+            resolved_cost, _ = resolve_line_snapshot_cost(linea)
+            unit_cost = Decimal(str(resolved_cost or 0))
+        if unit_cost <= 0:
+            return ZERO
+        return quantity * unit_cost
+
+    return Decimal(str(linea.costo_linea_excel or 0))
 
 
 def get_active_derived_relation(receta: Receta) -> RecetaPresentacionDerivada | None:
@@ -24,8 +53,8 @@ def get_active_derived_relation(receta: Receta) -> RecetaPresentacionDerivada | 
 
 def get_direct_components_cost(receta: Receta) -> Decimal:
     total = ZERO
-    for linea in receta.lineas.all():
-        total += Decimal(str(linea.costo_total_estimado or 0))
+    for linea in receta.lineas.exclude(match_status=LineaReceta.STATUS_REJECTED).all():
+        total += _resolve_line_total_cost(linea)
     return total
 
 
@@ -68,3 +97,189 @@ def build_upstream_snapshot(receta: Receta) -> dict[str, object] | None:
         "direct_components_cost": direct_cost,
         "notes": relation.notas,
     }
+
+
+def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> dict[int, Decimal]:
+    requested_ids = {int(recipe_id) for recipe_id in recipe_ids if int(recipe_id or 0) > 0}
+    if not requested_ids:
+        return {}
+
+    discovered_ids = set(requested_ids)
+    frontier = set(requested_ids)
+    direct_cost_by_recipe: dict[int, Decimal] = {}
+    relation_by_recipe: dict[int, tuple[int, Decimal]] = {}
+    insumo_cost_cache: dict[int, tuple[Decimal | None, object | None, str]] = {}
+
+    def prime_insumo_cost_cache(lineas: list[LineaReceta]) -> None:
+        missing_insumos = {
+            int(linea.insumo_id): linea.insumo
+            for linea in lineas
+            if linea.insumo_id and int(linea.insumo_id) not in insumo_cost_cache and linea.insumo is not None
+        }
+        if not missing_insumos:
+            return
+
+        derived_recipe_ids: set[int] = set()
+        point_codes: set[str] = set()
+        normalized_names: set[str] = set()
+        for insumo in missing_insumos.values():
+            derived_code = (insumo.codigo or "").strip()
+            if derived_code.startswith("DERIVADO:RECETA:") and derived_code.endswith(":PREPARACION"):
+                parts = derived_code.split(":")
+                if len(parts) >= 3 and parts[2].isdigit():
+                    derived_recipe_ids.add(int(parts[2]))
+            if (insumo.codigo_point or "").strip():
+                point_codes.add((insumo.codigo_point or "").strip())
+            for raw_name in (insumo.nombre, insumo.nombre_point):
+                normalized_name = normalizar_nombre(raw_name or "")
+                if normalized_name:
+                    normalized_names.add(normalized_name)
+
+        prep_q = Q()
+        if derived_recipe_ids:
+            prep_q |= Q(id__in=sorted(derived_recipe_ids))
+        if point_codes:
+            prep_q |= Q(codigo_point__in=sorted(point_codes))
+        if normalized_names:
+            prep_q |= Q(nombre_normalizado__in=sorted(normalized_names))
+        prep_recipes = (
+            Receta.objects.filter(tipo=Receta.TIPO_PREPARACION)
+            .filter(prep_q)
+            .select_related("rendimiento_unidad")
+            if prep_q
+            else Receta.objects.none()
+        )
+        prep_by_id = {recipe.id: recipe for recipe in prep_recipes}
+        prep_by_code = {
+            (recipe.codigo_point or "").strip().upper(): recipe
+            for recipe in prep_by_id.values()
+            if (recipe.codigo_point or "").strip()
+        }
+        prep_by_name = {
+            (recipe.nombre_normalizado or "").strip(): recipe
+            for recipe in prep_by_id.values()
+            if (recipe.nombre_normalizado or "").strip()
+        }
+
+        for insumo_id, insumo in missing_insumos.items():
+            prep_recipe = None
+            derived_code = (insumo.codigo or "").strip()
+            if derived_code.startswith("DERIVADO:RECETA:") and derived_code.endswith(":PREPARACION"):
+                parts = derived_code.split(":")
+                if len(parts) >= 3 and parts[2].isdigit():
+                    prep_recipe = prep_by_id.get(int(parts[2]))
+            if prep_recipe is None and (insumo.codigo_point or "").strip():
+                prep_recipe = prep_by_code.get((insumo.codigo_point or "").strip().upper())
+            if prep_recipe is None:
+                for raw_name in (insumo.nombre, insumo.nombre_point):
+                    normalized_name = normalizar_nombre(raw_name or "")
+                    if normalized_name:
+                        prep_recipe = prep_by_name.get(normalized_name)
+                    if prep_recipe is not None:
+                        break
+            if prep_recipe and prep_recipe.costo_por_unidad_rendimiento and prep_recipe.costo_por_unidad_rendimiento > 0:
+                insumo_cost_cache[insumo_id] = (
+                    Decimal(str(prep_recipe.costo_por_unidad_rendimiento)),
+                    prep_recipe.rendimiento_unidad,
+                    "RECETA_PREPARACION",
+                )
+                continue
+            latest_cost = latest_costo_canonico(insumo)
+            if latest_cost is not None and latest_cost > 0:
+                insumo_cost_cache[insumo_id] = (
+                    Decimal(str(latest_cost)),
+                    insumo.unidad_base,
+                    "COSTO_CANONICO",
+                )
+                continue
+            insumo_cost_cache[insumo_id] = resolve_insumo_unit_cost(insumo)
+
+    def resolve_line_total_cost_cached(linea: LineaReceta) -> Decimal:
+        if linea.tipo_linea == LineaReceta.TIPO_SUBSECCION:
+            return ZERO
+        if not linea.insumo_id:
+            return Decimal(str(linea.costo_linea_excel or 0))
+
+        quantity = Decimal(str(linea.cantidad or 0))
+        if quantity <= 0:
+            return ZERO
+
+        unit_cost = Decimal(str(linea.costo_unitario_snapshot or 0))
+        if unit_cost <= 0:
+            cached = insumo_cost_cache.get(int(linea.insumo_id))
+            if cached is None:
+                cached = resolve_insumo_unit_cost(linea.insumo)
+                insumo_cost_cache[int(linea.insumo_id)] = cached
+            resolved_cost, source_unit, _source_label = cached
+            if resolved_cost is None or resolved_cost <= 0:
+                return ZERO
+            target_unit = linea.unidad or linea.insumo.unidad_base or source_unit
+            if target_unit is None or source_unit is None:
+                return ZERO
+            converted = convert_unit_cost(
+                resolved_cost,
+                source_unit=source_unit,
+                target_unit=target_unit,
+            )
+            if converted is not None and converted > 0:
+                unit_cost = Decimal(str(converted))
+            elif getattr(source_unit, "id", None) == getattr(target_unit, "id", None):
+                unit_cost = Decimal(str(resolved_cost))
+        if unit_cost <= 0:
+            return ZERO
+        return quantity * unit_cost
+
+    while frontier:
+        lineas = list(
+            LineaReceta.objects.filter(receta_id__in=frontier)
+            .exclude(match_status=LineaReceta.STATUS_REJECTED)
+            .exclude(tipo_linea=LineaReceta.TIPO_SUBSECCION)
+            .select_related("insumo", "unidad", "insumo__unidad_base")
+        )
+        prime_insumo_cost_cache(lineas)
+        line_totals: dict[int, Decimal] = {}
+        for linea in lineas:
+            recipe_id = int(linea.receta_id)
+            line_totals.setdefault(recipe_id, ZERO)
+            line_totals[recipe_id] += resolve_line_total_cost_cached(linea)
+        direct_cost_by_recipe.update(line_totals)
+
+        next_frontier: set[int] = set()
+        for row in (
+            RecetaPresentacionDerivada.objects.filter(receta_derivada_id__in=frontier, activo=True)
+            .order_by("receta_derivada_id", "id")
+            .values("receta_derivada_id", "receta_padre_id", "unidades_por_padre")
+        ):
+            recipe_id = int(row["receta_derivada_id"])
+            if recipe_id in relation_by_recipe:
+                continue
+            parent_id = int(row["receta_padre_id"])
+            units = Decimal(str(row["unidades_por_padre"] or 0))
+            relation_by_recipe[recipe_id] = (parent_id, units)
+            if parent_id not in discovered_ids:
+                discovered_ids.add(parent_id)
+                next_frontier.add(parent_id)
+        frontier = next_frontier
+
+    memo: dict[int, Decimal] = {}
+    visiting: set[int] = set()
+
+    def resolve(recipe_id: int) -> Decimal:
+        if recipe_id in memo:
+            return memo[recipe_id]
+        if recipe_id in visiting:
+            return direct_cost_by_recipe.get(recipe_id, ZERO)
+        visiting.add(recipe_id)
+        total = direct_cost_by_recipe.get(recipe_id, ZERO)
+        relation = relation_by_recipe.get(recipe_id)
+        if relation:
+            parent_id, units = relation
+            if units > ZERO:
+                parent_total = resolve(parent_id)
+                if parent_total > ZERO:
+                    total += parent_total / units
+        visiting.discard(recipe_id)
+        memo[recipe_id] = total
+        return total
+
+    return {recipe_id: resolve(recipe_id) for recipe_id in requested_ids}

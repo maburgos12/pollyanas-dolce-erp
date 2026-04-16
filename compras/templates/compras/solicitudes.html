@@ -12,7 +12,7 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Resumen de compras</div>
+  <div class="card-header">Resumen de solicitudes</div>
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
@@ -35,14 +35,14 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Contexto documental del módulo</div>
+  <div class="card-header">Contexto operativo</div>
   <div class="table-responsive">
     <table class="table table-striped align-middle">
       <tbody>
         <tr>
           <th style="width:22%;">Documento</th>
           <td style="width:28%;">Solicitudes de compra</td>
-          <th style="width:22%;">Fuente de control</th>
+          <th style="width:22%;">Base de control</th>
           <td style="width:28%;">Plan de producción, reabasto, maestro de artículos y presupuesto vigente.</td>
         </tr>
         <tr>
@@ -911,9 +911,16 @@
     <select class="input-field" name="estatus">
       {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
     </select>
+    <label class="inline-check">
+      <input type="checkbox" name="fuera_de_catalogo">
+      Fuera de catálogo
+    </label>
+    <input class="input-field" type="number" min="0" step="1" name="cotizaciones_requeridas" value="0" placeholder="Cotizaciones requeridas">
+    <input class="input-field" type="number" min="0" step="1" name="cotizaciones_recibidas" value="0" placeholder="Cotizaciones recibidas">
+    <input class="input-field" type="text" name="justificacion_excepcion" maxlength="255" placeholder="Justificación / evidencia de excepción">
     <button class="btn btn-primary" type="submit">Guardar solicitud</button>
   </form>
-  <p id="stock-hint" class="muted mb-0">Selecciona un insumo para ver stock, seguridad, tránsito, lead time, sugerencia, proveedor principal y estado ERP.</p>
+  <p id="stock-hint" class="muted mb-0">Selecciona un insumo para ver stock, seguridad, tránsito, lead time, sugerencia y proveedor principal. Si la compra sale del catálogo o exige cotizaciones, documéntalo aquí para que DG y el orquestador lo sigan dentro del ERP.</p>
 
   <hr style="margin: 18px 0;">
   <div class="card-header" style="padding:0 0 12px 0;border:0;">Carga operativa de solicitudes</div>
@@ -1010,6 +1017,7 @@
               <th>Solicitante</th>
               <th>Proveedor</th>
               <th>Estatus</th>
+              <th>Política</th>
               <th>Validación</th>
             </tr>
           </thead>
@@ -1060,6 +1068,15 @@
                   <option value="{{ value }}" {% if row.estatus == value %}selected{% endif %}>{{ label }}</option>
                   {% endfor %}
                 </select>
+              </td>
+              <td>
+                <label class="inline-check">
+                  <input type="checkbox" name="row_{{ row.row_id }}_fuera_de_catalogo" {% if row.fuera_de_catalogo %}checked{% endif %}>
+                  Fuera catálogo
+                </label>
+                <input class="input-field" type="number" min="0" step="1" name="row_{{ row.row_id }}_cotizaciones_requeridas" value="{{ row.cotizaciones_requeridas }}" placeholder="Req.">
+                <input class="input-field" type="number" min="0" step="1" name="row_{{ row.row_id }}_cotizaciones_recibidas" value="{{ row.cotizaciones_recibidas }}" placeholder="Rec.">
+                <input class="input-field" type="text" maxlength="255" name="row_{{ row.row_id }}_justificacion_excepcion" value="{{ row.justificacion_excepcion }}" placeholder="Justificación">
               </td>
               <td>
                 {% if row.notes %}
@@ -1133,7 +1150,7 @@
 </details>
 
 <section class="card">
-  <div class="card-header">Salud operativa ERP</div>
+  <div class="card-header">Salud operativa</div>
   <p class="muted">Resumen operativo para saber qué solicitudes corregir, cuáles validar y cuáles ya pueden convertirse en OC.</p>
   <div class="kpi-grid kpi-mini">
     {% for item in enterprise_board.next_step_cards %}
@@ -1353,6 +1370,10 @@
         {% endfor %}
       </select>
     </div>
+    <div>
+      <label for="q">Búsqueda rápida</label>
+      <input id="q" class="input-field" type="text" name="q" value="{{ q_filter }}" placeholder="Folio, artículo, proveedor o solicitante">
+    </div>
     <div class="align-items-end d-flex gap-2">
       <button class="btn btn-primary" type="submit">Aplicar filtros</button>
       <a href="{% url 'compras:solicitudes' %}" class="btn btn-secondary">Limpiar</a>
@@ -1362,6 +1383,7 @@
     Periodo activo: <strong>{{ periodo_label }}</strong>
     {% if categoria_filter %} · Categoría: <strong>{{ categoria_filter }}</strong>{% endif %}
     {% if estatus_filter != 'ALL' %} · Estatus: <strong>{{ estatus_filter }}</strong>{% endif %}
+    {% if q_filter %} · Búsqueda: <strong>{{ q_filter }}</strong>{% endif %}
     · Clase maestro: <strong>{% if master_class_filter == 'all' %}Todas{% else %}{{ master_class_filter }}{% endif %}</strong>
     · Faltante maestro: <strong>{% if master_missing_filter == 'all' %}Todos{% else %}{{ master_missing_filter }}{% endif %}</strong>
     · Consumo: <strong>{% if consumo_ref_filter == 'plan_ref' %}Solo referencia plan{% else %}Todos{% endif %}</strong>
@@ -1987,10 +2009,10 @@
       </div>
   </section>
   <div class="toolbar">
-    <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=bajo&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
-    <a href="{% url 'compras:solicitudes' %}?reabasto=ok&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
+    <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}{% if q_filter %}&q={{ q_filter|urlencode }}{% endif %}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}{% if q_filter %}&q={{ q_filter|urlencode }}{% endif %}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=bajo&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}{% if q_filter %}&q={{ q_filter|urlencode }}{% endif %}" class="btn {% if reabasto_filter == 'bajo' %}btn-primary{% else %}btn-secondary{% endif %}">Bajo reorden</a>
+    <a href="{% url 'compras:solicitudes' %}?reabasto=ok&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}{% if q_filter %}&q={{ q_filter|urlencode }}{% endif %}" class="btn {% if reabasto_filter == 'ok' %}btn-primary{% else %}btn-secondary{% endif %}">Suficiente</a>
     <a href="{% url 'compras:solicitudes_print' %}{% if current_query %}?{{ current_query }}{% endif %}" target="_blank" class="btn btn-secondary">Imprimir solicitud compras</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=csv{% else %}?export=csv{% endif %}" class="btn btn-secondary">Exportar CSV</a>
     <a href="{% url 'compras:solicitudes' %}{% if current_query %}?{{ current_query }}&export=xlsx{% else %}?export=xlsx{% endif %}" class="btn btn-secondary">Exportar XLSX</a>
@@ -2013,6 +2035,7 @@
           <th>Origen</th>
           <th>Insumo</th>
           <th>Proveedor sugerido</th>
+          <th>Política</th>
           <th>Reabasto</th>
           <th class="text-end">Cantidad</th>
           <th class="text-end">Costo unitario</th>
@@ -2040,8 +2063,29 @@
               <span class="badge-verde">Captura directa</span>
             {% endif %}
           </td>
-          <td>{{ s.insumo.nombre }}</td>
+          <td>{{ s.insumo.display_name }}</td>
           <td>{{ s.proveedor_sugerido.nombre|default:"-" }}</td>
+          <td>
+            {% if s.fuera_de_catalogo %}
+              <span class="badge-rojo">Fuera catálogo</span>
+            {% else %}
+              <span class="badge-verde">Catálogo ERP</span>
+            {% endif %}
+            {% if s.cotizaciones_requeridas > 0 %}
+              <div>
+                {% if s.cotizaciones_recibidas >= s.cotizaciones_requeridas %}
+                  <span class="badge-verde">Cotizaciones {{ s.cotizaciones_recibidas }}/{{ s.cotizaciones_requeridas }}</span>
+                {% else %}
+                  <span class="badge-amarillo">Cotizaciones {{ s.cotizaciones_recibidas }}/{{ s.cotizaciones_requeridas }}</span>
+                {% endif %}
+              </div>
+            {% else %}
+              <div class="muted">Sin requisito documental</div>
+            {% endif %}
+            {% if s.justificacion_excepcion %}
+              <div class="muted">{{ s.justificacion_excepcion }}</div>
+            {% endif %}
+          </td>
           <td>
             {% if s.reabasto_nivel == 'critico' %}
               <span class="badge-rojo" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
@@ -2208,7 +2252,7 @@
       function onInsumoChange() {
         const selected = insumoSelect.options[insumoSelect.selectedIndex];
         if (!selected || !selected.value) {
-          stockHint.textContent = "Selecciona un insumo para ver stock, seguridad, tránsito, lead time, sugerencia y estado ERP.";
+          stockHint.textContent = "Selecciona un insumo para ver stock, seguridad, tránsito, lead time, sugerencia y proveedor principal.";
           return;
         }
 

@@ -12,6 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.audit import log_event
+from core.branch_catalog import eligible_operational_branch_qs
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot
 from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
@@ -582,9 +583,13 @@ class Command(BaseCommand):
 
     def _build_branch_status_report(self, *, freshness_seconds: int) -> list[dict]:
         now = timezone.now()
+        eligible_by_code = {
+            (branch.codigo or "").strip().upper(): branch
+            for branch in eligible_operational_branch_qs(reference_date=now.date()).only("id", "codigo", "nombre")
+        }
         rows = []
         for branch_code in TARGET_BRANCH_CODES:
-            sucursal = Sucursal.objects.filter(codigo__iexact=branch_code, activa=True).first()
+            sucursal = eligible_by_code.get(branch_code.upper())
             point_branch = PointBranch.objects.filter(erp_branch=sucursal).order_by("id").first() if sucursal else None
             snapshot = (
                 PointInventorySnapshot.objects.filter(branch=point_branch).order_by("-captured_at", "-id").first()

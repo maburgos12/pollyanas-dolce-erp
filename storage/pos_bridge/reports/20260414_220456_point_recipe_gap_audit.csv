@@ -1,0 +1,2 @@
+product_code,product_name,product_family,product_category,status,derived_kind,units_per_parent,parent_size_hint,requires_direct_components,candidate_code,candidate_name,candidate_score,candidate_has_recipe_flag,candidate_bom_count,erp_insumo_id,erp_insumo_nombre,erp_preparation_recipe_exists,search_terms
+00446,Vaso Choco Oreo Mini,Vasos Preparados,Vaso Preparado Mini,MISSING_IN_POINT,,,,False,,,,False,,,,False,

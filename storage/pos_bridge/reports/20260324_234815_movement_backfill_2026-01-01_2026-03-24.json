@@ -1,0 +1,81 @@
+{
+  "start_date": "2026-01-01",
+  "end_date": "2026-03-24",
+  "branch_filter": "",
+  "chunk_mode": "month",
+  "chunk_size": 1,
+  "stop_on_error": false,
+  "includes": {
+    "waste": false,
+    "production": true,
+    "transfers": false
+  },
+  "totals": {
+    "chunks_processed": 3,
+    "chunks_failed": 2,
+    "waste_jobs": 0,
+    "production_jobs": 3,
+    "transfer_jobs": 0,
+    "waste_lines_seen": 0,
+    "production_lines_seen": 1340,
+    "transfer_lines_seen": 0,
+    "inventory_entries_created": 512,
+    "cedis_entries_created": 612,
+    "mermas_created": 0,
+    "unmatched_items": 27
+  },
+  "chunks": [
+    {
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-31",
+      "jobs": [
+        {
+          "type": "production",
+          "job_id": 372,
+          "status": "FAILED",
+          "summary": {},
+          "error_message": "Error no controlado en sync de producci\u00f3n Point: PointProductionLine matching query does not exist."
+        }
+      ],
+      "has_failure": true
+    },
+    {
+      "start_date": "2026-02-01",
+      "end_date": "2026-02-28",
+      "jobs": [
+        {
+          "type": "production",
+          "job_id": 373,
+          "status": "SUCCESS",
+          "summary": {
+            "production_lines_seen": 1340,
+            "production_lines_created": 1340,
+            "production_lines_updated": 0,
+            "inventory_entries_created": 512,
+            "inventory_entries_updated": 0,
+            "cedis_entries_created": 612,
+            "cedis_entries_updated": 0,
+            "skipped_non_storage_branch": 189,
+            "unmatched_items": 27
+          },
+          "error_message": ""
+        }
+      ],
+      "has_failure": false
+    },
+    {
+      "start_date": "2026-03-01",
+      "end_date": "2026-03-24",
+      "jobs": [
+        {
+          "type": "production",
+          "job_id": 374,
+          "status": "FAILED",
+          "summary": {},
+          "error_message": "Error no controlado en sync de producci\u00f3n Point: disk I/O error"
+        }
+      ],
+      "has_failure": true
+    }
+  ]
+}

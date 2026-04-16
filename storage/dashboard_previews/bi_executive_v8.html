@@ -1,0 +1,1890 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reportes - BI Ejecutivo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260321-05">
+    
+<link rel="stylesheet" href="/static/css/bi_dashboard.css">
+
+</head>
+<body class="page-reportes-bi">
+    <div class="layout-wrapper">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3.5 10.5 12 5l8.5 5.5L12 16 3.5 10.5Z"/>
+                        <path d="M3.5 14 12 19l8.5-5"/>
+                    </svg>
+                </div>
+                <div class="sidebar-brand">Pollyana's Dolce</div>
+                <div class="sidebar-tagline">Operación y control</div>
+            </div>
+
+            <nav>
+                
+                <div class="sidebar-section-label">Dirección</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    <li>
+                        <a href="/dashboard/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>
+                            </span>
+                            <span>Dashboard</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/recetas/dg-operacion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="7" width="3" height="10" rx="1"/><rect x="16" y="4" width="3" height="13" rx="1"/></svg>
+                            </span>
+                            <span>Operación DG</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/reportes/bi/" class="active">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>BI ejecutivo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Operación diaria</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/maestros/proveedores/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4L11 7h7.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-10Z"/></svg>
+                            </span>
+                            <span>Maestros</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/recetas/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+                            </span>
+                            <span>Recetas</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/plan-produccion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>
+                            </span>
+                            <span>Plan de producción</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/reabasto-cedis/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/><path d="M7 12h6"/><path d="m10 9 3 3-3 3"/></svg>
+                            </span>
+                            <span>Reabasto CEDIS</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/compras/solicitudes/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/></svg>
+                            </span>
+                            <span>Compras</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/inventario/existencias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
+                            </span>
+                            <span>Inventario</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/inventario/importar/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M4 15.5A2.5 2.5 0 0 0 6.5 18h11A2.5 2.5 0 0 0 20 15.5"/></svg>
+                            </span>
+                            <span>Cortes de almacén</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/captura-movil/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10 6.5h4"/><circle cx="12" cy="18" r="1"/></svg>
+                            </span>
+                            <span>Captura de piso</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Análisis y soporte</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/reportes/costo-receta/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>Reportes</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/crm/pedidos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            </span>
+                            <span>CRM</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/logistica/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v8H3z"/><path d="M14 10h3l3 3v2h-6z"/><circle cx="7" cy="17.5" r="1.5"/><circle cx="18" cy="17.5" r="1.5"/></svg>
+                            </span>
+                            <span>Logística</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/rrhh/empleados/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8h3M21.5 6.5v3"/></svg>
+                            </span>
+                            <span>RRHH</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/activos/dashboard/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/><path d="M8 14h3M13 14h3"/></svg>
+                            </span>
+                            <span>Activos</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/discrepancias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20V9"/><path d="M12 20V4"/><path d="M17 20v-7"/><path d="m6 11 5-5 6 3"/></svg>
+                            </span>
+                            <span>Control operativo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Gobierno</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/auditoria/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10l2 2v14H5V6l2-2Z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+                            </span>
+                            <span>Bitácora</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/integraciones/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="7" height="12" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 12h4"/></svg>
+                            </span>
+                            <span>Integraciones</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/usuarios-accesos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-1.5a3.5 3.5 0 0 0-3.5-3.5H6.5A3.5 3.5 0 0 0 3 19.5V21"/><circle cx="9.5" cy="8" r="3.5"/><path d="M18 8v6M15 11h6"/></svg>
+                            </span>
+                            <span>Accesos</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/admin/">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.2 1.2 0 0 1-1.7 1.7l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V19a1.2 1.2 0 0 1-2.4 0v-.2a1 1 0 0 0-.7-1 1 1 0 0 0-1 .2l-.2.1a1.2 1.2 0 1 1-1.7-1.7l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H5a1.2 1.2 0 0 1 0-2.4h.2a1 1 0 0 0 1-.7 1 1 0 0 0-.2-1l-.1-.2a1.2 1.2 0 1 1 1.7-1.7l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V5a1.2 1.2 0 1 1 2.4 0v.2a1 1 0 0 0 .7 1 1 1 0 0 0 1-.2l.2-.1a1.2 1.2 0 0 1 1.7 1.7l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2a1.2 1.2 0 0 1 0 2.4h-.2a1 1 0 0 0-1 .7Z"/></svg>
+                            </span>
+                            <span>Administración</span>
+                        </a>
+                    </li>
+                </ul>
+                
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-user">Sesión activa</div>
+                <div class="sidebar-user-name">maburgos</div>
+                <a href="/logout/" class="logout-link">Cerrar sesión</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="header">
+                <h1 class="header-title">Reportes · BI Ejecutivo</h1>
+                <div class="header-meta">
+                    <span class="header-context-pill">Operación diaria</span>
+                    <button id="densityToggle" class="btn btn-secondary btn-sm density-toggle" type="button" aria-pressed="false">
+                        Modo compacto
+                    </button>
+                    <span>Miércoles, 25 de Marzo de 2026</span>
+                </div>
+            </header>
+
+            <div class="container">
+                
+                
+<div class="module-shell bi-shell">
+  <nav class="module-tabs">
+    <a class="module-tab" href="/reportes/costo-receta/">Costo receta</a>
+    <a class="module-tab" href="/reportes/consumo/">Consumo</a>
+    <a class="module-tab" href="/reportes/faltantes/">Faltantes</a>
+    <a class="module-tab active" href="/reportes/bi/">BI</a>
+  </nav>
+
+  <section class="bi-hero">
+    <div>
+      <div class="bi-kicker">Dirección general</div>
+      <h1 class="bi-hero-title">Tablero ejecutivo del negocio</h1>
+      <p class="bi-copy">Lectura compacta para decidir rápido: ventas, tendencia, rentabilidad, producción y flujo central con fuente real Point/ERP. Las tablas quedan como auditoría, no como vista principal.</p>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-pill-row">
+        <span class="bi-pill">Corte ventas: 2026-03-20</span>
+        <span class="bi-pill">Costeo MP: 23 de Marzo de 2026</span>
+        <span class="bi-pill">Comparativo: 2026-03 · comparación al mismo corte del año previo</span>
+      </div>
+      <form class="bi-filterbar" method="get">
+        <div class="bi-control">
+          <label for="period_days">Horizonte venta</label>
+          <select id="period_days" name="period_days">
+            <option value="30" >30 días</option>
+            <option value="60" >60 días</option>
+            <option value="90" selected>90 días</option>
+            <option value="180" >180 días</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="months">Meses visibles</label>
+          <select id="months" name="months">
+            <option value="6" selected>6 meses</option>
+            <option value="9" >9 meses</option>
+            <option value="12" >12 meses</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <label>Estado venta</label>
+          <div class="bi-pill success">Arriba</div>
+        </div>
+        <div class="bi-control">
+          <label>Base</label>
+          <div class="bi-pill warning">
+            3 semana(s) base
+          </div>
+        </div>
+        <div class="bi-control">
+          <button type="submit">Actualizar BI</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="bi-kpi-grid">
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value">$103,606.00</div>
+      <div class="bi-kpi-label">Venta último corte</div>
+      <div class="bi-kpi-note">773 piezas · 8 sucursales · Point directo</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value ">
+        $292.67
+      </div>
+      <div class="bi-kpi-label">Ticket promedio</div>
+      <div class="bi-kpi-note">
+        
+          354 tickets confirmados
+        
+      </div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value success">$671,598.75</div>
+      <div class="bi-kpi-label">Pronóstico próxima semana</div>
+      <div class="bi-kpi-note">5,121 piezas · 23 Mar → 29 Mar</div>
+    </article>
+    <article class="bi-kpi-card">
+      
+      <div class="bi-kpi-value danger">
+        
+          -14.5%
+        
+      </div>
+      <div class="bi-kpi-label">Mes vs año anterior</div>
+      <div class="bi-kpi-note">2026-03 · comparación al mismo corte del año previo</div>
+      
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Pronóstico</div>
+          <h2 class="bi-panel-title">Tendencia semanal de venta</h2>
+          <p class="bi-panel-copy">Venta y piezas recientes para anticipar la próxima semana. Los picos fuera de patrón quedan marcados sin contaminar la base pronosticada.</p>
+        </div>
+        <span class="bi-pill warning">
+          Con semanas atípicas
+        </span>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-chart-stage">
+          <canvas id="forecastTrendChart" aria-label="Tendencia semanal de ventas y piezas" role="img"></canvas>
+        </div>
+        <div class="bi-metric-strip">
+          <div class="bi-metric">
+            <div class="bi-metric-label">Escenario base</div>
+            <div class="bi-metric-value">$671,598.75</div>
+            <div class="bi-subtle">5,121 piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Escenario alto</div>
+            <div class="bi-metric-value">$1,017,679.89</div>
+            <div class="bi-subtle">8,650 piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Ticket esperado</div>
+            <div class="bi-metric-value">$254.78</div>
+            <div class="bi-subtle">2,636 tickets</div>
+          </div>
+        </div>
+        
+        <div class="bi-note pending">
+          Semanas atípicas detectadas:
+          
+            09 Feb → 15 Feb (pico de piezas)
+          
+        </div>
+        
+        <details class="bi-details">
+          <summary>Ver detalle auditable del pronóstico</summary>
+          <div class="bi-details-body table-responsive">
+            <table class="bi-table">
+              <thead>
+                <tr>
+                  <th>Semana</th>
+                  <th class="text-end">Venta $</th>
+                  <th class="text-end">Piezas</th>
+                  <th class="text-end">Tickets</th>
+                  <th class="text-end">Ticket prom.</th>
+                  <th>Lectura</th>
+                </tr>
+              </thead>
+              <tbody>
+                
+                <tr>
+                  <td>16 Mar → 22 Mar</td>
+                  <td class="text-end">$484,225.95</td>
+                  <td class="text-end">3,693</td>
+                  <td class="text-end">2,485</td>
+                  <td class="text-end">$194.86</td>
+                  <td>
+                    
+                      <span class="bi-tone success">Base normal</span>
+                    
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td>09 Mar → 15 Mar</td>
+                  <td class="text-end">$782,578.92</td>
+                  <td class="text-end">6,029</td>
+                  <td class="text-end">2,777</td>
+                  <td class="text-end">$281.81</td>
+                  <td>
+                    
+                      <span class="bi-tone success">Base normal</span>
+                    
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td>02 Mar → 08 Mar</td>
+                  <td class="text-end">$747,991.38</td>
+                  <td class="text-end">5,640</td>
+                  <td class="text-end">2,648</td>
+                  <td class="text-end">$282.47</td>
+                  <td>
+                    
+                      <span class="bi-tone success">Base normal</span>
+                    
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td>23 Feb → 01 Mar</td>
+                  <td class="text-end">$788,828.87</td>
+                  <td class="text-end">5,860</td>
+                  <td class="text-end">2,675</td>
+                  <td class="text-end">$294.89</td>
+                  <td>
+                    
+                      <span class="bi-tone success">Base normal</span>
+                    
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td>16 Feb → 22 Feb</td>
+                  <td class="text-end">$713,319.46</td>
+                  <td class="text-end">5,713</td>
+                  <td class="text-end">2,497</td>
+                  <td class="text-end">$285.67</td>
+                  <td>
+                    
+                      <span class="bi-tone success">Base normal</span>
+                    
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td>09 Feb → 15 Feb</td>
+                  <td class="text-end">$1,017,679.89</td>
+                  <td class="text-end">8,650</td>
+                  <td class="text-end">3,385</td>
+                  <td class="text-end">$300.64</td>
+                  <td>
+                    
+                      <span class="bi-tone warning">Atípica</span>
+                      <div class="bi-subtle">pico de piezas</div>
+                    
+                  </td>
+                </tr>
+                
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Comparativo</div>
+          <h2 class="bi-panel-title">Mes contra mismo mes del año anterior</h2>
+          <p class="bi-panel-copy">Meses cerrados contra meses cerrados. El mes actual se compara solo hasta el mismo corte para evitar inflar o recortar artificialmente.</p>
+        </div>
+        
+        <span class="bi-pill danger">
+          2026-03 · comparación al mismo corte del año previo
+        </span>
+        
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-chart-stage">
+          <canvas id="yoyMonthlyChart" aria-label="Comparativo mensual contra año anterior" role="img"></canvas>
+        </div>
+        
+        <div class="bi-metric-strip">
+          <div class="bi-metric">
+            <div class="bi-metric-label">Mes visible</div>
+            <div class="bi-metric-value">2026-03</div>
+            <div class="bi-subtle">Mismo corte del año previo</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Venta actual</div>
+            <div class="bi-metric-value">$2,466,730.33</div>
+            <div class="bi-subtle">18,643 piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Año anterior</div>
+            <div class="bi-metric-value">
+              $2,886,574.31
+            </div>
+            <div class="bi-subtle">
+              Variación -14.5%
+            </div>
+          </div>
+        </div>
+        
+        <details class="bi-details">
+          <summary>Ver detalle auditable mensual</summary>
+          <div class="bi-details-body table-responsive">
+            <table class="bi-table">
+              <thead>
+                <tr>
+                  <th>Mes</th>
+                  <th class="text-end">Venta $</th>
+                  <th class="text-end">Año anterior $</th>
+                  <th class="text-end">Dif. %</th>
+                  <th class="text-end">Piezas</th>
+                  <th class="text-end">Año anterior pzas</th>
+                  <th class="text-end">Dif. %</th>
+                  <th class="text-end">Ticket prom.</th>
+                </tr>
+              </thead>
+              <tbody>
+                
+                <tr>
+                  <td>
+                    2025-10
+                    
+                  </td>
+                  <td class="text-end">$3,445,250.00</td>
+                  <td class="text-end">$3,287,710.95</td>
+                  <td class="text-end">4.8%</td>
+                  <td class="text-end">26,971</td>
+                  <td class="text-end">26,688</td>
+                  <td class="text-end">1.1%</td>
+                  <td class="text-end">$0.00</td>
+                </tr>
+                
+                <tr>
+                  <td>
+                    2025-11
+                    
+                  </td>
+                  <td class="text-end">$3,246,992.48</td>
+                  <td class="text-end">$3,315,093.40</td>
+                  <td class="text-end">-2.1%</td>
+                  <td class="text-end">23,292</td>
+                  <td class="text-end">25,330</td>
+                  <td class="text-end">-8.0%</td>
+                  <td class="text-end">$0.00</td>
+                </tr>
+                
+                <tr>
+                  <td>
+                    2025-12
+                    
+                  </td>
+                  <td class="text-end">$4,824,468.91</td>
+                  <td class="text-end">$4,937,038.00</td>
+                  <td class="text-end">-2.3%</td>
+                  <td class="text-end">30,202</td>
+                  <td class="text-end">33,234</td>
+                  <td class="text-end">-9.1%</td>
+                  <td class="text-end">$0.00</td>
+                </tr>
+                
+                <tr>
+                  <td>
+                    2026-01
+                    
+                  </td>
+                  <td class="text-end">$3,519,376.01</td>
+                  <td class="text-end">$3,776,663.00</td>
+                  <td class="text-end">-6.8%</td>
+                  <td class="text-end">25,644</td>
+                  <td class="text-end">27,245</td>
+                  <td class="text-end">-5.9%</td>
+                  <td class="text-end">$305.42</td>
+                </tr>
+                
+                <tr>
+                  <td>
+                    2026-02
+                    
+                  </td>
+                  <td class="text-end">$3,288,678.19</td>
+                  <td class="text-end">$3,714,458.22</td>
+                  <td class="text-end">-11.5%</td>
+                  <td class="text-end">25,786</td>
+                  <td class="text-end">29,070</td>
+                  <td class="text-end">-11.3%</td>
+                  <td class="text-end">$295.98</td>
+                </tr>
+                
+                <tr>
+                  <td>
+                    2026-03
+                    
+                      <div class="bi-subtle">Mes parcial</div>
+                    
+                  </td>
+                  <td class="text-end">$2,466,730.33</td>
+                  <td class="text-end">$2,886,574.31</td>
+                  <td class="text-end">-14.5%</td>
+                  <td class="text-end">18,643</td>
+                  <td class="text-end">22,442</td>
+                  <td class="text-end">-16.9%</td>
+                  <td class="text-end">$284.64</td>
+                </tr>
+                
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Rentabilidad</div>
+          <h2 class="bi-panel-title">Margen vs volumen por producto</h2>
+          <p class="bi-panel-copy">Cada punto compara qué tanto vende un producto contra qué tanto margen deja sobre materia prima. Aquí se detecta qué defender, qué empujar y qué revisar.</p>
+        </div>
+        <span class="bi-pill">Ventana 28 días</span>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-chart-stage">
+          <canvas id="profitabilityScatterChart" aria-label="Rentabilidad por producto" role="img"></canvas>
+        </div>
+        <div class="bi-grid-2">
+          <div class="bi-list">
+            
+            <article class="bi-list-item">
+              <strong>Bollo Chocolate</strong>
+              <div class="bi-subtle">Bollo</div>
+              <div>Margen 73.1% · 483 piezas</div>
+              <div class="bi-subtle">Promoción táctica inmediata</div>
+            </article>
+            
+            <article class="bi-list-item">
+              <strong>Bollo Vainilla</strong>
+              <div class="bi-subtle">Bollo</div>
+              <div>Margen 76.5% · 385 piezas</div>
+              <div class="bi-subtle">Promoción táctica inmediata</div>
+            </article>
+            
+            <article class="bi-list-item">
+              <strong>Litro crema</strong>
+              <div class="bi-subtle"></div>
+              <div>Margen 100.0% · 6 piezas</div>
+              <div class="bi-subtle">Promoción táctica inmediata</div>
+            </article>
+            
+            <article class="bi-list-item">
+              <strong>Bollo Lotus</strong>
+              <div class="bi-subtle"></div>
+              <div>Margen 100.0% · 303 piezas</div>
+              <div class="bi-subtle">Promoción táctica inmediata</div>
+            </article>
+            
+            <article class="bi-list-item">
+              <strong>Bollo Zanahoria</strong>
+              <div class="bi-subtle">Bollo</div>
+              <div>Margen 66.8% · 420 piezas</div>
+              <div class="bi-subtle">Promoción táctica inmediata</div>
+            </article>
+            
+            <article class="bi-list-item">
+              <strong>Pay de Queso Grande</strong>
+              <div class="bi-subtle">Pay Grande</div>
+              <div>Margen 67.4% · 522 piezas</div>
+              <div class="bi-subtle">Promoción táctica inmediata</div>
+            </article>
+            
+            <article class="bi-list-item">
+              <strong>Empanada de Manzana</strong>
+              <div class="bi-subtle">Empanadas</div>
+              <div>Margen 79.1% · 694 piezas</div>
+              <div class="bi-subtle">Promoción táctica inmediata</div>
+            </article>
+            
+            <article class="bi-list-item">
+              <strong>Galleta Nutella</strong>
+              <div class="bi-subtle"></div>
+              <div>Margen 100.0% · 319 piezas</div>
+              <div class="bi-subtle">Promoción táctica inmediata</div>
+            </article>
+            
+          </div>
+          <div class="bi-note">Margen calculado solo con materia prima costada en la última semana disponible. Mano de obra e indirectos siguen fuera del modelo.</div>
+        </div>
+        <details class="bi-details">
+          <summary>Ver ranking auditable de rentabilidad</summary>
+          <div class="bi-details-body table-responsive">
+            <table class="bi-table">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th class="text-end">Venta $</th>
+                  <th class="text-end">Piezas</th>
+                  <th class="text-end">Costo MP</th>
+                  <th class="text-end">Margen $</th>
+                  <th class="text-end">Margen %</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                
+                <tr>
+                  <td><strong>Pastel de Fresas Con Crema Mediano</strong><div class="bi-subtle">Pastel Mediano</div></td>
+                  <td class="text-end">$376,222.00</td>
+                  <td class="text-end">768</td>
+                  <td class="text-end">$142,731.71</td>
+                  <td class="text-end">$233,490.29</td>
+                  <td class="text-end">62.1%</td>
+                  <td>
+                    <span class="bi-tone danger">
+                      Ajustar margen
+                    </span>
+                    <div class="bi-subtle">Revisar costo o subir precio</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de 3 Pecados Mediano</strong><div class="bi-subtle">Pastel Mediano</div></td>
+                  <td class="text-end">$380,142.00</td>
+                  <td class="text-end">777</td>
+                  <td class="text-end">$161,672.75</td>
+                  <td class="text-end">$218,469.25</td>
+                  <td class="text-end">57.5%</td>
+                  <td>
+                    <span class="bi-tone danger">
+                      Ajustar margen
+                    </span>
+                    <div class="bi-subtle">Revisar costo o subir precio</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pay de Queso Grande</strong><div class="bi-subtle">Pay Grande</div></td>
+                  <td class="text-end">$257,005.02</td>
+                  <td class="text-end">522</td>
+                  <td class="text-end">$83,812.57</td>
+                  <td class="text-end">$173,192.45</td>
+                  <td class="text-end">67.4%</td>
+                  <td>
+                    <span class="bi-tone warning">
+                      Promocionar
+                    </span>
+                    <div class="bi-subtle">Promoción táctica inmediata</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pay de Queso Mediano</strong><div class="bi-subtle">Pay Mediano</div></td>
+                  <td class="text-end">$201,849.58</td>
+                  <td class="text-end">513</td>
+                  <td class="text-end">$44,876.59</td>
+                  <td class="text-end">$156,972.99</td>
+                  <td class="text-end">77.8%</td>
+                  <td>
+                    <span class="bi-tone warning">
+                      Promocionar
+                    </span>
+                    <div class="bi-subtle">Promoción táctica inmediata</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de Fresas Con Crema Chico</strong><div class="bi-subtle">Pastel Chico</div></td>
+                  <td class="text-end">$126,965.00</td>
+                  <td class="text-end">379</td>
+                  <td class="text-end">$49,998.18</td>
+                  <td class="text-end">$76,966.82</td>
+                  <td class="text-end">60.6%</td>
+                  <td>
+                    <span class="bi-tone danger">
+                      Ajustar margen
+                    </span>
+                    <div class="bi-subtle">Revisar costo o subir precio</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de 3 Pecados Chico</strong><div class="bi-subtle">Pastel Chico</div></td>
+                  <td class="text-end">$132,540.50</td>
+                  <td class="text-end">390</td>
+                  <td class="text-end">$56,027.87</td>
+                  <td class="text-end">$76,512.63</td>
+                  <td class="text-end">57.7%</td>
+                  <td>
+                    <span class="bi-tone danger">
+                      Ajustar margen
+                    </span>
+                    <div class="bi-subtle">Revisar costo o subir precio</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de Snickers Mediano</strong><div class="bi-subtle">Pastel Mediano</div></td>
+                  <td class="text-end">$126,875.00</td>
+                  <td class="text-end">254</td>
+                  <td class="text-end">$54,514.47</td>
+                  <td class="text-end">$72,360.53</td>
+                  <td class="text-end">57.0%</td>
+                  <td>
+                    <span class="bi-tone danger">
+                      Ajustar margen
+                    </span>
+                    <div class="bi-subtle">Revisar costo o subir precio</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de 3 Leches Mediano</strong><div class="bi-subtle">Pastel Mediano</div></td>
+                  <td class="text-end">$100,485.00</td>
+                  <td class="text-end">231</td>
+                  <td class="text-end">$30,488.36</td>
+                  <td class="text-end">$69,996.64</td>
+                  <td class="text-end">69.7%</td>
+                  <td>
+                    <span class="bi-tone success">
+                      Defender
+                    </span>
+                    <div class="bi-subtle">Defender precio y disponibilidad</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de Crunch Mediano</strong><div class="bi-subtle">Pastel Mediano</div></td>
+                  <td class="text-end">$101,430.00</td>
+                  <td class="text-end">207</td>
+                  <td class="text-end">$39,042.23</td>
+                  <td class="text-end">$62,387.77</td>
+                  <td class="text-end">61.5%</td>
+                  <td>
+                    <span class="bi-tone danger">
+                      Ajustar margen
+                    </span>
+                    <div class="bi-subtle">Revisar costo o subir precio</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pay de Queso Rebanada</strong><div class="bi-subtle"></div></td>
+                  <td class="text-end">$85,610.00</td>
+                  <td class="text-end">1,224</td>
+                  <td class="text-end">$24,565.75</td>
+                  <td class="text-end">$61,044.25</td>
+                  <td class="text-end">71.3%</td>
+                  <td>
+                    <span class="bi-tone success">
+                      Defender
+                    </span>
+                    <div class="bi-subtle">Defender precio y disponibilidad</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de Zanahoria Mediano</strong><div class="bi-subtle">Pastel Mediano</div></td>
+                  <td class="text-end">$92,312.00</td>
+                  <td class="text-end">210</td>
+                  <td class="text-end">$39,379.29</td>
+                  <td class="text-end">$52,932.71</td>
+                  <td class="text-end">57.3%</td>
+                  <td>
+                    <span class="bi-tone danger">
+                      Ajustar margen
+                    </span>
+                    <div class="bi-subtle">Revisar costo o subir precio</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de Snickers Chico</strong><div class="bi-subtle">Pastel Chico</div></td>
+                  <td class="text-end">$60,400.00</td>
+                  <td class="text-end">151</td>
+                  <td class="text-end">$23,152.17</td>
+                  <td class="text-end">$37,247.83</td>
+                  <td class="text-end">61.7%</td>
+                  <td>
+                    <span class="bi-tone danger">
+                      Ajustar margen
+                    </span>
+                    <div class="bi-subtle">Revisar costo o subir precio</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de Fresas Con Crema Grande</strong><div class="bi-subtle">Pastel Grande</div></td>
+                  <td class="text-end">$60,900.00</td>
+                  <td class="text-end">87</td>
+                  <td class="text-end">$23,736.45</td>
+                  <td class="text-end">$37,163.55</td>
+                  <td class="text-end">61.0%</td>
+                  <td>
+                    <span class="bi-tone neutral">
+                      Revisar portafolio
+                    </span>
+                    <div class="bi-subtle">Depurar, reformular o sacar de foco</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de Crunch Chico</strong><div class="bi-subtle">Pastel Chico</div></td>
+                  <td class="text-end">$58,320.00</td>
+                  <td class="text-end">162</td>
+                  <td class="text-end">$21,348.95</td>
+                  <td class="text-end">$36,971.05</td>
+                  <td class="text-end">63.4%</td>
+                  <td>
+                    <span class="bi-tone danger">
+                      Ajustar margen
+                    </span>
+                    <div class="bi-subtle">Revisar costo o subir precio</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de 3 Pecados Grande</strong><div class="bi-subtle">Pastel Grande</div></td>
+                  <td class="text-end">$58,800.00</td>
+                  <td class="text-end">84</td>
+                  <td class="text-end">$25,010.06</td>
+                  <td class="text-end">$33,789.94</td>
+                  <td class="text-end">57.5%</td>
+                  <td>
+                    <span class="bi-tone neutral">
+                      Revisar portafolio
+                    </span>
+                    <div class="bi-subtle">Depurar, reformular o sacar de foco</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de Zanahoria Chico</strong><div class="bi-subtle">Pastel Chico</div></td>
+                  <td class="text-end">$46,860.00</td>
+                  <td class="text-end">142</td>
+                  <td class="text-end">$19,304.54</td>
+                  <td class="text-end">$27,555.46</td>
+                  <td class="text-end">58.8%</td>
+                  <td>
+                    <span class="bi-tone neutral">
+                      Revisar portafolio
+                    </span>
+                    <div class="bi-subtle">Depurar, reformular o sacar de foco</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Pastel de 3 Leches Individual</strong><div class="bi-subtle">Individual</div></td>
+                  <td class="text-end">$36,225.00</td>
+                  <td class="text-end">483</td>
+                  <td class="text-end">$8,862.23</td>
+                  <td class="text-end">$27,362.77</td>
+                  <td class="text-end">75.5%</td>
+                  <td>
+                    <span class="bi-tone success">
+                      Defender
+                    </span>
+                    <div class="bi-subtle">Defender precio y disponibilidad</div>
+                  </td>
+                </tr>
+                
+                <tr>
+                  <td><strong>Cheesecakes Lotus Individual</strong><div class="bi-subtle">Individual</div></td>
+                  <td class="text-end">$18,900.00</td>
+                  <td class="text-end">140</td>
+                  <td class="text-end">$0.00</td>
+                  <td class="text-end">$18,900.00</td>
+                  <td class="text-end">100.0%</td>
+                  <td>
+                    <span class="bi-tone warning">
+                      Promocionar
+                    </span>
+                    <div class="bi-subtle">Promoción táctica</div>
+                  </td>
+                </tr>
+                
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Producción</div>
+          <h2 class="bi-panel-title">Producido contra vendido</h2>
+          <p class="bi-panel-copy">La primera gráfica muestra el gap semanal. La segunda explica en qué categorías está la sobreproducción o el déficit del corte actual.</p>
+        </div>
+        <span class="bi-pill">16 Mar → 22 Mar</span>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-grid-2">
+          <div class="bi-chart-stage compact">
+            <canvas id="productionWeeklyChart" aria-label="Producción contra venta por semana" role="img"></canvas>
+          </div>
+          <div class="bi-chart-stage compact">
+            <canvas id="productionCategoryChart" aria-label="Producción contra venta por categoría" role="img"></canvas>
+          </div>
+        </div>
+        
+        <div class="bi-metric-strip">
+          <div class="bi-metric">
+            <div class="bi-metric-label">Producción semana</div>
+            <div class="bi-metric-value">1,876</div>
+            <div class="bi-subtle">piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Venta semana</div>
+            <div class="bi-metric-value">2,053</div>
+            <div class="bi-subtle">piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Gap</div>
+            <div class="bi-metric-value danger">
+              -177
+            </div>
+            <div class="bi-subtle">producción menos venta</div>
+          </div>
+        </div>
+        
+        <div class="bi-note">Compara producción central directa Point contra venta Point de la semana. Antes de la separación operativa de CEDIS, la fuente central histórica se toma desde MATRIZ; después, desde CEDIS. Transferencias internas se analizan aparte.</div>
+        <details class="bi-details">
+          <summary>Ver detalle auditable de producción y categorías</summary>
+          <div class="bi-details-body bi-grid-2">
+            <div class="table-responsive">
+              <table class="bi-table">
+                <thead>
+                  <tr>
+                    <th>Semana</th>
+                    <th class="text-end">Producción</th>
+                    <th class="text-end">Venta</th>
+                    <th class="text-end">Diferencia</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  
+                  <tr>
+                    <td>23 Feb → 01 Mar</td>
+                    <td class="text-end">1,913</td>
+                    <td class="text-end">3,190</td>
+                    <td class="text-end">-1,277</td>
+                  </tr>
+                  
+                  <tr>
+                    <td>02 Mar → 08 Mar</td>
+                    <td class="text-end">2,188</td>
+                    <td class="text-end">3,081</td>
+                    <td class="text-end">-893</td>
+                  </tr>
+                  
+                  <tr>
+                    <td>09 Mar → 15 Mar</td>
+                    <td class="text-end">2,509</td>
+                    <td class="text-end">3,356</td>
+                    <td class="text-end">-847</td>
+                  </tr>
+                  
+                  <tr>
+                    <td>16 Mar → 22 Mar</td>
+                    <td class="text-end">1,876</td>
+                    <td class="text-end">2,053</td>
+                    <td class="text-end">-177</td>
+                  </tr>
+                  
+                </tbody>
+              </table>
+            </div>
+            <div class="table-responsive">
+              <table class="bi-table">
+                <thead>
+                  <tr>
+                    <th>Categoría</th>
+                    <th class="text-end">Producción</th>
+                    <th class="text-end">Venta</th>
+                    <th class="text-end">Diferencia</th>
+                    <th>Estatus</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  
+                  <tr>
+                    <td>Rebanada</td>
+                    <td class="text-end">0</td>
+                    <td class="text-end">230</td>
+                    <td class="text-end">-230</td>
+                    <td><span class="bi-tone danger">Déficit</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Galletas</td>
+                    <td class="text-end">31</td>
+                    <td class="text-end">194</td>
+                    <td class="text-end">-163</td>
+                    <td><span class="bi-tone danger">Déficit</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Pastel Mediano</td>
+                    <td class="text-end">531</td>
+                    <td class="text-end">403</td>
+                    <td class="text-end">128</td>
+                    <td><span class="bi-tone warning">Sobreproducción</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Empanadas</td>
+                    <td class="text-end">0</td>
+                    <td class="text-end">118</td>
+                    <td class="text-end">-118</td>
+                    <td><span class="bi-tone danger">Déficit</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Pastel Chico</td>
+                    <td class="text-end">285</td>
+                    <td class="text-end">188</td>
+                    <td class="text-end">97</td>
+                    <td><span class="bi-tone warning">Sobreproducción</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Pay Grande</td>
+                    <td class="text-end">177</td>
+                    <td class="text-end">87</td>
+                    <td class="text-end">90</td>
+                    <td><span class="bi-tone warning">Sobreproducción</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Pastel de 3 Pecados R</td>
+                    <td class="text-end">0</td>
+                    <td class="text-end">67</td>
+                    <td class="text-end">-67</td>
+                    <td><span class="bi-tone danger">Déficit</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Pay Mediano</td>
+                    <td class="text-end">125</td>
+                    <td class="text-end">76</td>
+                    <td class="text-end">49</td>
+                    <td><span class="bi-tone warning">Sobreproducción</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Mini</td>
+                    <td class="text-end">117</td>
+                    <td class="text-end">70</td>
+                    <td class="text-end">47</td>
+                    <td><span class="bi-tone warning">Sobreproducción</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Pastel de Zanahoria R</td>
+                    <td class="text-end">0</td>
+                    <td class="text-end">47</td>
+                    <td class="text-end">-47</td>
+                    <td><span class="bi-tone danger">Déficit</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Bollo</td>
+                    <td class="text-end">373</td>
+                    <td class="text-end">333</td>
+                    <td class="text-end">40</td>
+                    <td><span class="bi-tone warning">Sobreproducción</span></td>
+                  </tr>
+                  
+                  <tr>
+                    <td>Individual</td>
+                    <td class="text-end">174</td>
+                    <td class="text-end">156</td>
+                    <td class="text-end">18</td>
+                    <td><span class="bi-tone success">Balanceado</span></td>
+                  </tr>
+                  
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Flujo central</div>
+        <h2 class="bi-panel-title">Flujo histórico mensual del centro</h2>
+        <p class="bi-panel-copy">Abasto central disponible contra venta y merma. Si existe snapshot real, también se muestra el cierre; si no existe, el sistema lo declara y no inventa saldos.</p>
+      </div>
+      <span class="bi-pill">Corte común 20 de Marzo de 2026</span>
+    </div>
+    <div class="bi-panel-stack">
+      <div class="bi-chart-stage">
+        <canvas id="centralFlowChart" aria-label="Flujo central histórico mensual" role="img"></canvas>
+      </div>
+      <div class="bi-grid-4">
+        
+        <div class="bi-metric">
+          <div class="bi-metric-label">Fuente central</div>
+          <div class="bi-metric-value">CEDIS</div>
+          <div class="bi-subtle">según etapa operativa</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Abasto total</div>
+          <div class="bi-metric-value">6,347</div>
+          <div class="bi-subtle">producción + transferencias</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Venta</div>
+          <div class="bi-metric-value">16,307</div>
+          <div class="bi-subtle">piezas Point</div>
+        </div>
+        <div class="bi-metric">
+          <div class="bi-metric-label">Neto del mes</div>
+          <div class="bi-metric-value danger">
+            -9,968
+          </div>
+          <div class="bi-subtle">abasto menos venta y merma</div>
+        </div>
+        
+      </div>
+      
+      <div class="bi-note pending">
+        Datos pendientes por solicitar al usuario:
+        Puente real de inventario antes de 2026-03 requiere snapshots históricos o ledger completo con salidas. Meses omitidos: 2025-10, 2025-11, 2025-12, 2026-01, 2026-02.
+      </div>
+      
+      <div class="bi-note">Flujo central histórico calculado desde registros diarios disponibles: producción central (MATRIZ antes de CEDIS, CEDIS después), transferencias recibidas a CEDIS, venta Point y merma Point. Solo cuando existe snapshot real se muestra cierre de inventario.</div>
+      <details class="bi-details">
+        <summary>Ver detalle auditable del flujo central</summary>
+        <div class="bi-details-body table-responsive">
+          
+          <table class="bi-table">
+            <thead>
+              <tr>
+                <th>Mes</th>
+                <th>Fuente central</th>
+                <th class="text-end">Prod. directa</th>
+                <th class="text-end">Transfer. a CEDIS</th>
+                <th class="text-end">Abasto total</th>
+                <th class="text-end">Venta</th>
+                <th class="text-end">Merma</th>
+                <th class="text-end">Neto</th>
+                <th class="text-end">Cierre real</th>
+                <th class="text-end">Brecha vs cierre</th>
+              </tr>
+            </thead>
+            <tbody>
+              
+              <tr>
+                <td>2025-10</td>
+                <td>CEDIS</td>
+                <td class="text-end">11,851</td>
+                <td class="text-end">2,271</td>
+                <td class="text-end">14,122</td>
+                <td class="text-end">26,971</td>
+                <td class="text-end">323</td>
+                <td class="text-end">-13,172</td>
+                <td class="text-end"><span class="bi-subtle">Sin snapshot</span></td>
+                <td class="text-end"><span class="bi-subtle">N/D</span></td>
+              </tr>
+              
+              <tr>
+                <td>2025-11</td>
+                <td>CEDIS</td>
+                <td class="text-end">9,400</td>
+                <td class="text-end">2,075</td>
+                <td class="text-end">11,475</td>
+                <td class="text-end">23,292</td>
+                <td class="text-end">358</td>
+                <td class="text-end">-12,175</td>
+                <td class="text-end"><span class="bi-subtle">Sin snapshot</span></td>
+                <td class="text-end"><span class="bi-subtle">N/D</span></td>
+              </tr>
+              
+              <tr>
+                <td>2025-12</td>
+                <td>CEDIS</td>
+                <td class="text-end">14,733</td>
+                <td class="text-end">3,071</td>
+                <td class="text-end">17,804</td>
+                <td class="text-end">30,202</td>
+                <td class="text-end">470</td>
+                <td class="text-end">-12,868</td>
+                <td class="text-end"><span class="bi-subtle">Sin snapshot</span></td>
+                <td class="text-end"><span class="bi-subtle">N/D</span></td>
+              </tr>
+              
+              <tr>
+                <td>2026-01</td>
+                <td>CEDIS</td>
+                <td class="text-end">10,810</td>
+                <td class="text-end">22</td>
+                <td class="text-end">10,832</td>
+                <td class="text-end">25,644</td>
+                <td class="text-end">0</td>
+                <td class="text-end">-14,812</td>
+                <td class="text-end"><span class="bi-subtle">Sin snapshot</span></td>
+                <td class="text-end"><span class="bi-subtle">N/D</span></td>
+              </tr>
+              
+              <tr>
+                <td>2026-02</td>
+                <td>CEDIS</td>
+                <td class="text-end">9,954</td>
+                <td class="text-end">0</td>
+                <td class="text-end">9,954</td>
+                <td class="text-end">25,786</td>
+                <td class="text-end">0</td>
+                <td class="text-end">-15,832</td>
+                <td class="text-end"><span class="bi-subtle">Sin snapshot</span></td>
+                <td class="text-end"><span class="bi-subtle">N/D</span></td>
+              </tr>
+              
+              <tr>
+                <td>2026-03<div class="bi-subtle">Mes parcial</div></td>
+                <td>CEDIS</td>
+                <td class="text-end">6,340</td>
+                <td class="text-end">7</td>
+                <td class="text-end">6,347</td>
+                <td class="text-end">16,307</td>
+                <td class="text-end">8</td>
+                <td class="text-end">-9,968</td>
+                <td class="text-end">1,052</td>
+                <td class="text-end">-5,006</td>
+              </tr>
+              
+            </tbody>
+          </table>
+          
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Lectura diaria</div>
+          <h2 class="bi-panel-title">Sucursales que se salen del comparable</h2>
+          <p class="bi-panel-copy">Comparación contra el último día con el mismo día de semana para detectar si algo ya viene arriba o abajo antes de cerrar el periodo.</p>
+        </div>
+      </div>
+      <div class="bi-list">
+        
+        <article class="bi-list-item">
+          <strong>2</strong>
+          <div class="bi-subtle">CRUCERO</div>
+          <div>$4,676.00 · 34 piezas · 0 tickets</div>
+          <div class="bi-subtle"><span class="bi-tone danger">Abajo del comparable</span> Cae 45.5% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+        <article class="bi-list-item">
+          <strong>7</strong>
+          <div class="bi-subtle">PLAZA NÍO</div>
+          <div>$6,971.00 · 49 piezas · 0 tickets</div>
+          <div class="bi-subtle"><span class="bi-tone danger">Abajo del comparable</span> Cae 27.5% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+        <article class="bi-list-item">
+          <strong>4</strong>
+          <div class="bi-subtle">PAYÁN</div>
+          <div>$13,732.00 · 93 piezas · 0 tickets</div>
+          <div class="bi-subtle"><span class="bi-tone warning">Dentro de rango</span> Variación de -10.9% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+        <article class="bi-list-item">
+          <strong>1</strong>
+          <div class="bi-subtle">MATRIZ</div>
+          <div>$37,550.00 · 305 piezas · 0 tickets</div>
+          <div class="bi-subtle"><span class="bi-tone warning">Dentro de rango</span> Variación de 3.1% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+        <article class="bi-list-item">
+          <strong>6</strong>
+          <div class="bi-subtle">LEYVA</div>
+          <div>$11,408.00 · 78 piezas · 0 tickets</div>
+          <div class="bi-subtle"><span class="bi-tone warning">Dentro de rango</span> Variación de 2.0% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Lectura diaria</div>
+          <h2 class="bi-panel-title">Productos que se desvían del patrón</h2>
+          <p class="bi-panel-copy">Sirve para encontrar rápidamente si un producto relevante viene arriba o abajo contra su última referencia comparable.</p>
+        </div>
+      </div>
+      <div class="bi-list">
+        
+        <article class="bi-list-item">
+          <strong>Piñatero Mini</strong>
+          <div>1 piezas · $190.00 · 1 sucursales</div>
+          <div class="bi-subtle"><span class="bi-tone danger">Abajo del comparable</span> Cae 80.0% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+        <article class="bi-list-item">
+          <strong>Empanada de Manzana</strong>
+          <div>13 piezas · $130.00 · 1 sucursales</div>
+          <div class="bi-subtle"><span class="bi-tone danger">Abajo del comparable</span> Cae 68.3% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+        <article class="bi-list-item">
+          <strong>Galleta Lotus</strong>
+          <div>3 piezas · $144.00 · 2 sucursales</div>
+          <div class="bi-subtle"><span class="bi-tone danger">Abajo del comparable</span> Cae 62.5% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+        <article class="bi-list-item">
+          <strong>Bollo Red Velvet</strong>
+          <div>6 piezas · $180.00 · 5 sucursales</div>
+          <div class="bi-subtle"><span class="bi-tone danger">Abajo del comparable</span> Cae 60.0% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+        <article class="bi-list-item">
+          <strong>Galleta Red Velvet</strong>
+          <div>5 piezas · $150.00 · 3 sucursales</div>
+          <div class="bi-subtle"><span class="bi-tone danger">Abajo del comparable</span> Cae 58.3% contra el último mismo día de semana (2026-03-13).</div>
+        </article>
+        
+      </div>
+    </article>
+  </section>
+</div>
+
+            </div>
+        </main>
+    </div>
+    <script>
+      (() => {
+        const key = "ui_density_mode";
+        const body = document.body;
+        const toggle = document.getElementById("densityToggle");
+        if (!toggle) return;
+
+        const applyMode = (mode) => {
+          const compact = mode === "compact";
+          body.classList.toggle("ui-compact", compact);
+          toggle.setAttribute("aria-pressed", compact ? "true" : "false");
+          toggle.textContent = compact ? "Modo normal" : "Modo compacto";
+        };
+
+        const saved = localStorage.getItem(key);
+        applyMode(saved || "normal");
+
+        toggle.addEventListener("click", () => {
+          const compact = !body.classList.contains("ui-compact");
+          const mode = compact ? "compact" : "normal";
+          localStorage.setItem(key, mode);
+          applyMode(mode);
+        });
+      })();
+    </script>
+    
+<script id="forecast-weekly-data" type="application/json">[{"week_label": "16 Mar \u2192 22 Mar", "amount": "484225.95", "quantity": "3693.00", "tickets": 2485, "avg_ticket": "194.86", "atypical": false, "atypical_reason": ""}, {"week_label": "09 Mar \u2192 15 Mar", "amount": "782578.92", "quantity": "6029.00", "tickets": 2777, "avg_ticket": "281.81", "atypical": false, "atypical_reason": ""}, {"week_label": "02 Mar \u2192 08 Mar", "amount": "747991.38", "quantity": "5640.00", "tickets": 2648, "avg_ticket": "282.47", "atypical": false, "atypical_reason": ""}, {"week_label": "23 Feb \u2192 01 Mar", "amount": "788828.87", "quantity": "5860.00", "tickets": 2675, "avg_ticket": "294.89", "atypical": false, "atypical_reason": ""}, {"week_label": "16 Feb \u2192 22 Feb", "amount": "713319.46", "quantity": "5713.00", "tickets": 2497, "avg_ticket": "285.67", "atypical": false, "atypical_reason": ""}, {"week_label": "09 Feb \u2192 15 Feb", "amount": "1017679.89", "quantity": "8650.00", "tickets": 3385, "avg_ticket": "300.64", "atypical": true, "atypical_reason": "pico de piezas"}]</script>
+<script id="yoy-monthly-data" type="application/json">[{"month_label": "2025-10", "is_partial": false, "amount": "3445250.00", "quantity": "26971.00", "tickets": 0, "avg_ticket": "0.00", "prev_amount": "3287710.95", "prev_quantity": "26688.00", "prev_tickets": 0, "prev_avg_ticket": "0.00", "prev_official_available": true, "amount_delta": "157539.05", "qty_delta": "283.00", "amount_delta_pct": "4.791754883439494582089097583", "qty_delta_pct": "1.060401678657074340527577938"}, {"month_label": "2025-11", "is_partial": false, "amount": "3246992.48", "quantity": "23292.00", "tickets": 0, "avg_ticket": "0.00", "prev_amount": "3315093.40", "prev_quantity": "25330.00", "prev_tickets": 0, "prev_avg_ticket": "0.00", "prev_official_available": true, "amount_delta": "-68100.92", "qty_delta": "-2038.00", "amount_delta_pct": "-2.054268516235470168050167154", "qty_delta_pct": "-8.045795499407816818002368733"}, {"month_label": "2025-12", "is_partial": false, "amount": "4824468.91", "quantity": "30202.00", "tickets": 0, "avg_ticket": "0.00", "prev_amount": "4937038.00", "prev_quantity": "33234.00", "prev_tickets": 0, "prev_avg_ticket": "0.00", "prev_official_available": true, "amount_delta": "-112569.09", "qty_delta": "-3032.00", "amount_delta_pct": "-2.280093651294561637969973089", "qty_delta_pct": "-9.123187097550701089245952940"}, {"month_label": "2026-01", "is_partial": false, "amount": "3519376.01", "quantity": "25644.00", "tickets": 11523, "avg_ticket": "305.42", "prev_amount": "3776663.00", "prev_quantity": "27245.00", "prev_tickets": 616, "prev_avg_ticket": "6130.95", "prev_official_available": true, "amount_delta": "-257286.99", "qty_delta": "-1601.00", "amount_delta_pct": "-6.812548273436099540785079315", "qty_delta_pct": "-5.876307579372361901266287392"}, {"month_label": "2026-02", "is_partial": false, "amount": "3288678.19", "quantity": "25786.00", "tickets": 11111, "avg_ticket": "295.98", "prev_amount": "3714458.22", "prev_quantity": "29070.00", "prev_tickets": 0, "prev_avg_ticket": "0.00", "prev_official_available": true, "amount_delta": "-425780.03", "qty_delta": "-3284.00", "amount_delta_pct": "-11.46277612458917359958890586", "qty_delta_pct": "-11.29686962504299965600275198"}, {"month_label": "2026-03", "is_partial": true, "amount": "2466730.33", "quantity": "18643.00", "tickets": 8666, "avg_ticket": "284.64", "prev_amount": "2886574.31", "prev_quantity": "22442.00", "prev_tickets": 0, "prev_avg_ticket": null, "prev_official_available": true, "amount_delta": "-419843.98", "qty_delta": "-3799.00", "amount_delta_pct": "-14.54471407666619190551862148", "qty_delta_pct": "-16.92808127617859370822564834"}]</script>
+<script id="profitability-data" type="application/json">[{"receta_id": 51, "label": "Pastel de Fresas Con Crema Mediano", "familia": "Pastel", "categoria": "Pastel Mediano", "revenue": "376222.00", "quantity": "768.00", "unit_cost": "185.85", "cost_total": "142731.71", "margin": "233490.29", "margin_pct": "62.06", "prev_quantity": "805.00", "trend_pct": "-4.60", "bucket": "Ajustar margen", "recommendation": "Revisar costo o subir precio"}, {"receta_id": 55, "label": "Pastel de 3 Pecados Mediano", "familia": "Pastel", "categoria": "Pastel Mediano", "revenue": "380142.00", "quantity": "777.00", "unit_cost": "208.07", "cost_total": "161672.75", "margin": "218469.25", "margin_pct": "57.47", "prev_quantity": "900.00", "trend_pct": "-13.67", "bucket": "Ajustar margen", "recommendation": "Revisar costo o subir precio"}, {"receta_id": 163, "label": "Pay de Queso Grande", "familia": "Pay", "categoria": "Pay Grande", "revenue": "257005.02", "quantity": "522.00", "unit_cost": "160.56", "cost_total": "83812.57", "margin": "173192.45", "margin_pct": "67.39", "prev_quantity": "681.00", "trend_pct": "-23.35", "bucket": "Promocionar", "recommendation": "Promoci\u00f3n t\u00e1ctica inmediata"}, {"receta_id": 164, "label": "Pay de Queso Mediano", "familia": "Pay", "categoria": "Pay Mediano", "revenue": "201849.58", "quantity": "513.00", "unit_cost": "87.48", "cost_total": "44876.59", "margin": "156972.99", "margin_pct": "77.77", "prev_quantity": "593.00", "trend_pct": "-13.49", "bucket": "Promocionar", "recommendation": "Promoci\u00f3n t\u00e1ctica inmediata"}, {"receta_id": 50, "label": "Pastel de Fresas Con Crema Chico", "familia": "Pastel", "categoria": "Pastel Chico", "revenue": "126965.00", "quantity": "379.00", "unit_cost": "131.92", "cost_total": "49998.18", "margin": "76966.82", "margin_pct": "60.62", "prev_quantity": "434.00", "trend_pct": "-12.67", "bucket": "Ajustar margen", "recommendation": "Revisar costo o subir precio"}, {"receta_id": 54, "label": "Pastel de 3 Pecados Chico", "familia": "Pastel", "categoria": "Pastel Chico", "revenue": "132540.50", "quantity": "390.00", "unit_cost": "143.66", "cost_total": "56027.87", "margin": "76512.63", "margin_pct": "57.73", "prev_quantity": "461.00", "trend_pct": "-15.40", "bucket": "Ajustar margen", "recommendation": "Revisar costo o subir precio"}, {"receta_id": 69, "label": "Pastel de Snickers Mediano", "familia": "Pastel", "categoria": "Pastel Mediano", "revenue": "126875.00", "quantity": "254.00", "unit_cost": "214.62", "cost_total": "54514.47", "margin": "72360.53", "margin_pct": "57.03", "prev_quantity": "253.00", "trend_pct": "0.40", "bucket": "Ajustar margen", "recommendation": "Revisar costo o subir precio"}, {"receta_id": 71, "label": "Pastel de 3 Leches Mediano", "familia": "Pastel", "categoria": "Pastel Mediano", "revenue": "100485.00", "quantity": "231.00", "unit_cost": "131.98", "cost_total": "30488.36", "margin": "69996.64", "margin_pct": "69.66", "prev_quantity": "220.00", "trend_pct": "5.00", "bucket": "Defender", "recommendation": "Defender precio y disponibilidad"}, {"receta_id": 64, "label": "Pastel de Crunch Mediano", "familia": "Pastel", "categoria": "Pastel Mediano", "revenue": "101430.00", "quantity": "207.00", "unit_cost": "188.61", "cost_total": "39042.23", "margin": "62387.77", "margin_pct": "61.51", "prev_quantity": "234.00", "trend_pct": "-11.54", "bucket": "Ajustar margen", "recommendation": "Revisar costo o subir precio"}, {"receta_id": 167, "label": "Pay de Queso Rebanada", "familia": "", "categoria": "", "revenue": "85610.00", "quantity": "1224.00", "unit_cost": "20.07", "cost_total": "24565.75", "margin": "61044.25", "margin_pct": "71.31", "prev_quantity": "1263.00", "trend_pct": "-3.09", "bucket": "Defender", "recommendation": "Defender precio y disponibilidad"}, {"receta_id": 60, "label": "Pastel de Zanahoria Mediano", "familia": "Pastel", "categoria": "Pastel Mediano", "revenue": "92312.00", "quantity": "210.00", "unit_cost": "187.52", "cost_total": "39379.29", "margin": "52932.71", "margin_pct": "57.34", "prev_quantity": "206.00", "trend_pct": "1.94", "bucket": "Ajustar margen", "recommendation": "Revisar costo o subir precio"}, {"receta_id": 68, "label": "Pastel de Snickers Chico", "familia": "Pastel", "categoria": "Pastel Chico", "revenue": "60400.00", "quantity": "151.00", "unit_cost": "153.33", "cost_total": "23152.17", "margin": "37247.83", "margin_pct": "61.67", "prev_quantity": "180.00", "trend_pct": "-16.11", "bucket": "Ajustar margen", "recommendation": "Revisar costo o subir precio"}, {"receta_id": 52, "label": "Pastel de Fresas Con Crema Grande", "familia": "Pastel", "categoria": "Pastel Grande", "revenue": "60900.00", "quantity": "87.00", "unit_cost": "272.83", "cost_total": "23736.45", "margin": "37163.55", "margin_pct": "61.02", "prev_quantity": "90.00", "trend_pct": "-3.33", "bucket": "Revisar portafolio", "recommendation": "Depurar, reformular o sacar de foco"}, {"receta_id": 63, "label": "Pastel de Crunch Chico", "familia": "Pastel", "categoria": "Pastel Chico", "revenue": "58320.00", "quantity": "162.00", "unit_cost": "131.78", "cost_total": "21348.95", "margin": "36971.05", "margin_pct": "63.39", "prev_quantity": "171.00", "trend_pct": "-5.26", "bucket": "Ajustar margen", "recommendation": "Revisar costo o subir precio"}, {"receta_id": 56, "label": "Pastel de 3 Pecados Grande", "familia": "Pastel", "categoria": "Pastel Grande", "revenue": "58800.00", "quantity": "84.00", "unit_cost": "297.74", "cost_total": "25010.06", "margin": "33789.94", "margin_pct": "57.47", "prev_quantity": "86.00", "trend_pct": "-2.33", "bucket": "Revisar portafolio", "recommendation": "Depurar, reformular o sacar de foco"}, {"receta_id": 59, "label": "Pastel de Zanahoria Chico", "familia": "Pastel", "categoria": "Pastel Chico", "revenue": "46860.00", "quantity": "142.00", "unit_cost": "135.95", "cost_total": "19304.54", "margin": "27555.46", "margin_pct": "58.80", "prev_quantity": "172.00", "trend_pct": "-17.44", "bucket": "Revisar portafolio", "recommendation": "Depurar, reformular o sacar de foco"}, {"receta_id": 73, "label": "Pastel de 3 Leches Individual", "familia": "Pastel", "categoria": "Individual", "revenue": "36225.00", "quantity": "483.00", "unit_cost": "18.35", "cost_total": "8862.23", "margin": "27362.77", "margin_pct": "75.54", "prev_quantity": "466.00", "trend_pct": "3.65", "bucket": "Defender", "recommendation": "Defender precio y disponibilidad"}, {"receta_id": 437, "label": "Cheesecakes Lotus Individual", "familia": "Cheesecakes", "categoria": "Individual", "revenue": "18900.00", "quantity": "140.00", "unit_cost": "0.00", "cost_total": "0.00", "margin": "18900.00", "margin_pct": "100.00", "prev_quantity": "134.00", "trend_pct": "4.48", "bucket": "Promocionar", "recommendation": "Promoci\u00f3n t\u00e1ctica"}]</script>
+<script id="production-weekly-data" type="application/json">[{"week_label": "23 Feb \u2192 01 Mar", "sold_units": "3190.00", "produced_units": "1913.00", "delta_units": "-1277.00"}, {"week_label": "02 Mar \u2192 08 Mar", "sold_units": "3081.00", "produced_units": "2188.00", "delta_units": "-893.00"}, {"week_label": "09 Mar \u2192 15 Mar", "sold_units": "3356.00", "produced_units": "2509.00", "delta_units": "-847.00"}, {"week_label": "16 Mar \u2192 22 Mar", "sold_units": "2053.00", "produced_units": "1876.00", "delta_units": "-177.00"}]</script>
+<script id="production-category-data" type="application/json">[{"label": "Rebanada", "produced_units": "0.00", "sold_units": "230.00", "delta_units": "-230.00", "status": "D\u00e9ficit", "tone": "danger"}, {"label": "Galletas", "produced_units": "31.00", "sold_units": "194.00", "delta_units": "-163.00", "status": "D\u00e9ficit", "tone": "danger"}, {"label": "Pastel Mediano", "produced_units": "531.00", "sold_units": "403.00", "delta_units": "128.00", "status": "Sobreproducci\u00f3n", "tone": "warning"}, {"label": "Empanadas", "produced_units": "0.00", "sold_units": "118.00", "delta_units": "-118.00", "status": "D\u00e9ficit", "tone": "danger"}, {"label": "Pastel Chico", "produced_units": "285.00", "sold_units": "188.00", "delta_units": "97.00", "status": "Sobreproducci\u00f3n", "tone": "warning"}, {"label": "Pay Grande", "produced_units": "177.00", "sold_units": "87.00", "delta_units": "90.00", "status": "Sobreproducci\u00f3n", "tone": "warning"}, {"label": "Pastel de 3 Pecados R", "produced_units": "0.00", "sold_units": "67.00", "delta_units": "-67.00", "status": "D\u00e9ficit", "tone": "danger"}, {"label": "Pay Mediano", "produced_units": "125.00", "sold_units": "76.00", "delta_units": "49.00", "status": "Sobreproducci\u00f3n", "tone": "warning"}, {"label": "Mini", "produced_units": "117.00", "sold_units": "70.00", "delta_units": "47.00", "status": "Sobreproducci\u00f3n", "tone": "warning"}, {"label": "Pastel de Zanahoria R", "produced_units": "0.00", "sold_units": "47.00", "delta_units": "-47.00", "status": "D\u00e9ficit", "tone": "danger"}, {"label": "Bollo", "produced_units": "373.00", "sold_units": "333.00", "delta_units": "40.00", "status": "Sobreproducci\u00f3n", "tone": "warning"}, {"label": "Individual", "produced_units": "174.00", "sold_units": "156.00", "delta_units": "18.00", "status": "Balanceado", "tone": "success"}]</script>
+<script id="central-flow-data" type="application/json">[{"month_label": "2025-10", "is_partial": false, "central_source": "CEDIS", "production_units": "11851.00", "transfer_units": "2270.97", "supply_units": "14121.97", "sold_units": "26971.00", "waste_units": "323.00", "net_units": "-13172.03", "actual_closing": null, "variance_units": null, "has_snapshot": false}, {"month_label": "2025-11", "is_partial": false, "central_source": "CEDIS", "production_units": "9400.00", "transfer_units": "2075.00", "supply_units": "11475.00", "sold_units": "23292.00", "waste_units": "358.00", "net_units": "-12175.00", "actual_closing": null, "variance_units": null, "has_snapshot": false}, {"month_label": "2025-12", "is_partial": false, "central_source": "CEDIS", "production_units": "14733.00", "transfer_units": "3071.16", "supply_units": "17804.16", "sold_units": "30202.00", "waste_units": "470.00", "net_units": "-12867.84", "actual_closing": null, "variance_units": null, "has_snapshot": false}, {"month_label": "2026-01", "is_partial": false, "central_source": "CEDIS", "production_units": "10810.00", "transfer_units": "22.00", "supply_units": "10832.00", "sold_units": "25644.00", "waste_units": "0.00", "net_units": "-14812.00", "actual_closing": null, "variance_units": null, "has_snapshot": false}, {"month_label": "2026-02", "is_partial": false, "central_source": "CEDIS", "production_units": "9954.00", "transfer_units": "0.00", "supply_units": "9954.00", "sold_units": "25786.00", "waste_units": "0.00", "net_units": "-15832.00", "actual_closing": null, "variance_units": null, "has_snapshot": false}, {"month_label": "2026-03", "is_partial": true, "central_source": "CEDIS", "production_units": "6340.00", "transfer_units": "7.00", "supply_units": "6347.00", "sold_units": "16307.00", "waste_units": "8.00", "net_units": "-9968.00", "actual_closing": "1052.00", "variance_units": "-5005.70", "has_snapshot": true}]</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  (() => {
+    const parse = (id) => {
+      const node = document.getElementById(id);
+      return node ? JSON.parse(node.textContent) : [];
+    };
+    const asNumber = (value) => {
+      if (value === null || value === undefined || value === "") return 0;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const moneyTick = (value) => {
+      if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+      if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(0)}k`;
+      return `$${value.toFixed(0)}`;
+    };
+    const intTick = (value) => {
+      if (Math.abs(value) >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+      if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(0)}k`;
+      return `${value.toFixed(0)}`;
+    };
+    const theme = {
+      wine: "#922456",
+      forest: "#236d53",
+      amber: "#b38a25",
+      slate: "#6f6170",
+      blush: "rgba(146, 36, 86, 0.14)",
+      greenSoft: "rgba(35, 109, 83, 0.16)",
+      amberSoft: "rgba(179, 138, 37, 0.18)",
+      red: "#bc3b3b",
+      border: "rgba(145, 36, 86, 0.10)"
+    };
+    const renderFallbackBarList = (canvas, rows) => {
+      if (!canvas || !rows.length) return;
+      const host = canvas.parentElement;
+      canvas.style.display = "none";
+      const max = Math.max(...rows.map((row) => Math.abs(asNumber(row.value))), 1);
+      host.innerHTML = `
+        <div class="bi-chart-fallback">
+          <div class="bi-bar-list">
+            ${rows.map((row) => `
+              <div class="bi-bar-row">
+                <span>${row.label}</span>
+                <div class="bi-bar-track">
+                  <div class="bi-bar-fill ${row.tone || "is-wine"}" style="width:${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%"></div>
+                </div>
+                <strong>${row.display}</strong>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    };
+
+    const baseOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          labels: {
+            usePointStyle: true,
+            boxWidth: 10,
+            color: "#6f6170",
+            font: { size: 12, weight: "600" }
+          }
+        },
+        tooltip: {
+          backgroundColor: "rgba(49, 28, 38, 0.96)",
+          titleColor: "#fff5f8",
+          bodyColor: "#fff5f8",
+          padding: 12,
+          cornerRadius: 12
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: "rgba(145, 36, 86, 0.06)" },
+          ticks: { color: "#7c6971" }
+        },
+        y: {
+          grid: { color: "rgba(145, 36, 86, 0.06)" },
+          ticks: { color: "#7c6971" }
+        }
+      }
+    };
+
+    const forecastRows = parse("forecast-weekly-data");
+    const yoyRows = parse("yoy-monthly-data");
+    const profitabilityRows = parse("profitability-data");
+    const productionWeeklyRows = parse("production-weekly-data");
+    const productionCategoryRows = parse("production-category-data");
+    const centralFlowRows = parse("central-flow-data");
+    const hasChartJs = typeof window.Chart === "function";
+
+    const forecastCtx = document.getElementById("forecastTrendChart");
+    if (forecastCtx && forecastRows.length && hasChartJs) {
+      new Chart(forecastCtx, {
+        type: "line",
+        data: {
+          labels: forecastRows.map((row) => row.week_label),
+          datasets: [
+            {
+              label: "Venta $",
+              type: "line",
+              data: forecastRows.map((row) => asNumber(row.amount)),
+              borderColor: theme.wine,
+              backgroundColor: theme.blush,
+              tension: 0.32,
+              borderWidth: 3,
+              pointRadius: forecastRows.map((row) => row.atypical ? 5 : 3),
+              pointBackgroundColor: forecastRows.map((row) => row.atypical ? theme.amber : theme.wine),
+              fill: true,
+              yAxisID: "yMoney"
+            },
+            {
+              label: "Piezas",
+              type: "bar",
+              data: forecastRows.map((row) => asNumber(row.quantity)),
+              backgroundColor: theme.greenSoft,
+              borderColor: theme.forest,
+              borderWidth: 1,
+              yAxisID: "yUnits"
+            }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          plugins: {
+            ...baseOptions.plugins,
+            tooltip: {
+              ...baseOptions.plugins.tooltip,
+              callbacks: {
+                label(context) {
+                  const label = context.dataset.label || "";
+                  const value = context.parsed.y || 0;
+                  return label.includes("$") ? `${label}: ${moneyTick(value)}` : `${label}: ${intTick(value)}`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: baseOptions.scales.x,
+            yMoney: {
+              ...baseOptions.scales.y,
+              position: "left",
+              ticks: { color: "#7c6971", callback(value) { return moneyTick(Number(value)); } }
+            },
+            yUnits: {
+              ...baseOptions.scales.y,
+              position: "right",
+              grid: { display: false },
+              ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } }
+            }
+          }
+        }
+      });
+    } else if (forecastCtx && forecastRows.length) {
+      renderFallbackBarList(forecastCtx, forecastRows.map((row) => ({
+        label: row.week_label,
+        value: asNumber(row.amount),
+        display: `${moneyTick(asNumber(row.amount))} · ${intTick(asNumber(row.quantity))} pzas`,
+        tone: row.atypical ? "is-amber" : "is-wine",
+      })));
+    }
+
+    const yoyCtx = document.getElementById("yoyMonthlyChart");
+    if (yoyCtx && yoyRows.length && hasChartJs) {
+      new Chart(yoyCtx, {
+        type: "bar",
+        data: {
+          labels: yoyRows.map((row) => row.month_label),
+          datasets: [
+            {
+              label: "Venta actual",
+              data: yoyRows.map((row) => asNumber(row.amount)),
+              backgroundColor: theme.blush,
+              borderColor: theme.wine,
+              borderWidth: 1.2
+            },
+            {
+              label: "Año anterior",
+              data: yoyRows.map((row) => asNumber(row.prev_amount)),
+              backgroundColor: theme.greenSoft,
+              borderColor: theme.forest,
+              borderWidth: 1.2
+            }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          plugins: {
+            ...baseOptions.plugins,
+            tooltip: {
+              ...baseOptions.plugins.tooltip,
+              callbacks: {
+                label(context) {
+                  return `${context.dataset.label}: ${moneyTick(context.parsed.y || 0)}`;
+                },
+                afterBody(items) {
+                  const row = yoyRows[items[0].dataIndex];
+                  const delta = row.amount_delta_pct;
+                  return delta === null || delta === undefined ? [] : [`Diferencia: ${Number(delta).toFixed(1)}%`];
+                }
+              }
+            }
+          },
+          scales: {
+            ...baseOptions.scales,
+            y: {
+              ...baseOptions.scales.y,
+              ticks: { color: "#7c6971", callback(value) { return moneyTick(Number(value)); } }
+            }
+          }
+        }
+      });
+    } else if (yoyCtx && yoyRows.length) {
+      renderFallbackBarList(yoyCtx, yoyRows.map((row) => ({
+        label: row.month_label,
+        value: asNumber(row.amount),
+        display: `${moneyTick(asNumber(row.amount))} vs ${row.prev_amount ? moneyTick(asNumber(row.prev_amount)) : "N/D"}`,
+        tone: (row.amount_delta_pct || 0) >= 0 ? "is-green" : "is-red",
+      })));
+    }
+
+    const profitabilityCtx = document.getElementById("profitabilityScatterChart");
+    if (profitabilityCtx && profitabilityRows.length && hasChartJs) {
+      new Chart(profitabilityCtx, {
+        type: "bubble",
+        data: {
+          datasets: [
+            {
+              label: "Defender",
+              data: profitabilityRows.filter((row) => row.bucket === "Defender").map((row) => ({
+                x: asNumber(row.quantity), y: asNumber(row.margin_pct), r: Math.max(6, Math.min(18, asNumber(row.revenue) / 15000)), label: row.label
+              })),
+              backgroundColor: "rgba(35, 109, 83, 0.24)", borderColor: theme.forest
+            },
+            {
+              label: "Promocionar",
+              data: profitabilityRows.filter((row) => row.bucket === "Promocionar").map((row) => ({
+                x: asNumber(row.quantity), y: asNumber(row.margin_pct), r: Math.max(6, Math.min(18, asNumber(row.revenue) / 15000)), label: row.label
+              })),
+              backgroundColor: "rgba(179, 138, 37, 0.24)", borderColor: theme.amber
+            },
+            {
+              label: "Revisar",
+              data: profitabilityRows.filter((row) => row.bucket !== "Defender" && row.bucket !== "Promocionar").map((row) => ({
+                x: asNumber(row.quantity), y: asNumber(row.margin_pct), r: Math.max(6, Math.min(18, asNumber(row.revenue) / 15000)), label: row.label
+              })),
+              backgroundColor: "rgba(188, 59, 59, 0.22)", borderColor: theme.red
+            }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          plugins: {
+            ...baseOptions.plugins,
+            tooltip: {
+              ...baseOptions.plugins.tooltip,
+              callbacks: {
+                label(context) {
+                  const point = context.raw;
+                  return `${point.label}: ${intTick(point.x)} piezas · ${point.y.toFixed(1)}% margen`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              ...baseOptions.scales.x,
+              title: { display: true, text: "Volumen (piezas)", color: "#7c6971" },
+              ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } }
+            },
+            y: {
+              ...baseOptions.scales.y,
+              title: { display: true, text: "Margen %", color: "#7c6971" },
+              ticks: { color: "#7c6971", callback(value) { return `${Number(value).toFixed(0)}%`; } }
+            }
+          }
+        }
+      });
+    } else if (profitabilityCtx && profitabilityRows.length) {
+      renderFallbackBarList(profitabilityCtx, profitabilityRows.slice(0, 8).map((row) => ({
+        label: row.label,
+        value: asNumber(row.margin_pct),
+        display: `${Number(row.margin_pct || 0).toFixed(1)}% · ${intTick(asNumber(row.quantity))}`,
+        tone: row.bucket === "Promocionar" ? "is-amber" : row.bucket === "Defender" ? "is-green" : "is-red",
+      })));
+    }
+
+    const productionWeeklyCtx = document.getElementById("productionWeeklyChart");
+    if (productionWeeklyCtx && productionWeeklyRows.length && hasChartJs) {
+      new Chart(productionWeeklyCtx, {
+        type: "bar",
+        data: {
+          labels: productionWeeklyRows.map((row) => row.week_label),
+          datasets: [
+            { label: "Producción", data: productionWeeklyRows.map((row) => asNumber(row.produced_units)), backgroundColor: theme.greenSoft, borderColor: theme.forest, borderWidth: 1.1 },
+            { label: "Venta", data: productionWeeklyRows.map((row) => asNumber(row.sold_units)), backgroundColor: theme.blush, borderColor: theme.wine, borderWidth: 1.1 }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          scales: {
+            ...baseOptions.scales,
+            y: { ...baseOptions.scales.y, ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } } }
+          }
+        }
+      });
+    } else if (productionWeeklyCtx && productionWeeklyRows.length) {
+      renderFallbackBarList(productionWeeklyCtx, productionWeeklyRows.map((row) => ({
+        label: row.week_label,
+        value: asNumber(row.delta_units),
+        display: `${intTick(asNumber(row.produced_units))} prod / ${intTick(asNumber(row.sold_units))} vend`,
+        tone: asNumber(row.delta_units) >= 0 ? "is-green" : "is-red",
+      })));
+    }
+
+    const productionCategoryCtx = document.getElementById("productionCategoryChart");
+    if (productionCategoryCtx && productionCategoryRows.length && hasChartJs) {
+      new Chart(productionCategoryCtx, {
+        type: "bar",
+        data: {
+          labels: productionCategoryRows.map((row) => row.label),
+          datasets: [
+            { label: "Producción", data: productionCategoryRows.map((row) => asNumber(row.produced_units)), backgroundColor: theme.greenSoft, borderColor: theme.forest, borderWidth: 1.1 },
+            { label: "Venta", data: productionCategoryRows.map((row) => asNumber(row.sold_units)), backgroundColor: theme.blush, borderColor: theme.wine, borderWidth: 1.1 }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          indexAxis: "y",
+          scales: {
+            x: { ...baseOptions.scales.x, ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } } },
+            y: { ...baseOptions.scales.y, ticks: { color: "#7c6971" } }
+          }
+        }
+      });
+    } else if (productionCategoryCtx && productionCategoryRows.length) {
+      renderFallbackBarList(productionCategoryCtx, productionCategoryRows.slice(0, 10).map((row) => ({
+        label: row.label,
+        value: asNumber(row.delta_units),
+        display: `${intTick(asNumber(row.delta_units))} delta`,
+        tone: row.tone === "danger" ? "is-red" : row.tone === "warning" ? "is-amber" : "is-green",
+      })));
+    }
+
+    const centralCtx = document.getElementById("centralFlowChart");
+    if (centralCtx && centralFlowRows.length && hasChartJs) {
+      new Chart(centralCtx, {
+        type: "bar",
+        data: {
+          labels: centralFlowRows.map((row) => row.month_label),
+          datasets: [
+            { type: "bar", label: "Abasto total", data: centralFlowRows.map((row) => asNumber(row.supply_units)), backgroundColor: theme.greenSoft, borderColor: theme.forest, borderWidth: 1.1 },
+            { type: "bar", label: "Venta", data: centralFlowRows.map((row) => asNumber(row.sold_units)), backgroundColor: theme.blush, borderColor: theme.wine, borderWidth: 1.1 },
+            { type: "line", label: "Neto", data: centralFlowRows.map((row) => asNumber(row.net_units)), borderColor: theme.amber, backgroundColor: "rgba(179, 138, 37, 0.18)", borderWidth: 3, tension: 0.2 }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          scales: {
+            ...baseOptions.scales,
+            y: { ...baseOptions.scales.y, ticks: { color: "#7c6971", callback(value) { return intTick(Number(value)); } } }
+          }
+        }
+      });
+    } else if (centralCtx && centralFlowRows.length) {
+      renderFallbackBarList(centralCtx, centralFlowRows.map((row) => ({
+        label: row.month_label,
+        value: asNumber(row.net_units),
+        display: `${intTick(asNumber(row.supply_units))} abasto / ${intTick(asNumber(row.sold_units))} venta`,
+        tone: asNumber(row.net_units) >= 0 ? "is-green" : "is-red",
+      })));
+    }
+  })();
+</script>
+
+</body>
+</html>

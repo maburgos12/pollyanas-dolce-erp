@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - Comparativo de Proyectos{% endblock %}
+{% block page_title %}Reportes · Comparativo de Proyectos{% endblock %}
+{% block body_class %}page-reportes-investment-projects-comparison{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406b">
+{% endblock %}
+
+{% block content %}
+<div class="investment-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="investment-header">
+    <article class="investment-hero">
+      <div class="investment-kicker">Comparativo multi-sucursal</div>
+      <h1 class="investment-title">Ranking ejecutivo de proyectos</h1>
+      <p class="investment-copy">Comparativo transversal por ROI, payback, cash-on-cash, velocidad de recuperación y health score para aperturas y expansiones.</p>
+    </article>
+    <aside class="investment-side">
+      <form method="get">
+        <div class="investment-field-grid">
+          <div class="investment-field">
+            <label for="cmp_tipo_proyecto">Tipo</label>
+            <select id="cmp_tipo_proyecto" name="tipo_proyecto">
+              <option value="">Todos</option>
+              {% for key, label in project_types %}
+              <option value="{{ key }}"{% if comparison_filters.tipo_proyecto == key %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="investment-field">
+            <label for="cmp_estatus">Estatus</label>
+            <select id="cmp_estatus" name="estatus">
+              <option value="">Todos</option>
+              {% for key, label in project_statuses %}
+              <option value="{{ key }}"{% if comparison_filters.estatus == key %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="investment-field">
+            <label for="cmp_fecha_inicio_desde">Desde</label>
+            <input id="cmp_fecha_inicio_desde" type="date" name="fecha_inicio_desde" value="{% if comparison_filters.fecha_inicio_desde %}{{ comparison_filters.fecha_inicio_desde|date:'Y-m-d' }}{% endif %}">
+          </div>
+          <div class="investment-field">
+            <label for="cmp_fecha_inicio_hasta">Hasta</label>
+            <input id="cmp_fecha_inicio_hasta" type="date" name="fecha_inicio_hasta" value="{% if comparison_filters.fecha_inicio_hasta %}{{ comparison_filters.fecha_inicio_hasta|date:'Y-m-d' }}{% endif %}">
+          </div>
+          <div class="investment-field" style="grid-column:1 / -1;">
+            <label for="cmp_sort_by">Ordenar por</label>
+            <select id="cmp_sort_by" name="sort_by">
+              {% for key, label in sort_options %}
+              <option value="{{ key }}"{% if comparison_filters.sort_by == key %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="investment-form-actions">
+          <button class="investment-button" type="submit">Aplicar filtros</button>
+          <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_comparativo' %}">Limpiar</a>
+        </div>
+      </form>
+    </aside>
+  </section>
+
+  <article class="investment-panel">
+    <div class="investment-panel-head">
+      <div>
+        <div class="investment-kicker">Ranking</div>
+        <h2 class="investment-panel-title">Comparativo ejecutivo</h2>
+      </div>
+    </div>
+    <div class="investment-table-wrap">
+      <table class="investment-table">
+        <thead>
+          <tr>
+            <th>Proyecto</th>
+            <th>Sucursal</th>
+            <th>Estatus</th>
+            <th>ROI</th>
+            <th>Payback</th>
+            <th>Cash-on-cash</th>
+            <th>Vel. recuperación</th>
+            <th>Health</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in comparison_rows %}
+          <tr>
+            <td><a class="investment-inline-link" href="{% url 'reportes:proyecto_inversion_detail' row.project.pk %}">{{ row.project.nombre_proyecto }}</a></td>
+            <td>{% if row.project.sucursal_relacionada %}{{ row.project.sucursal_relacionada.codigo }} · {{ row.project.sucursal_relacionada.nombre }}{% else %}Pendiente{% endif %}</td>
+            <td>{{ row.project.get_estatus_display }}</td>
+            <td>{{ row.roi|floatformat:2 }}%</td>
+            <td>{{ row.payback|floatformat:2 }} meses</td>
+            <td>{{ row.cash_on_cash|floatformat:2 }}%</td>
+            <td>{{ row.recovery_speed|floatformat:2 }}%</td>
+            <td><span class="investment-status-pill {% if row.health_score > 80 %}is-active{% elif row.health_score >= 50 %}is-warning{% else %}is-danger{% endif %}">{{ row.health_score }}/100</span></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="8">No hay proyectos que cumplan los filtros actuales.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</div>
+{% endblock %}

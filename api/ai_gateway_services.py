@@ -1493,7 +1493,7 @@ def build_gateway_openapi_spec(
             "title": "Pollyana ERP AI Gateway",
             "version": "1.0.0",
             "description": (
-                "Contrato OpenAPI para importar acciones del ERP dentro de Onyx. "
+                "Contrato OpenAPI para importar acciones del ERP dentro del chat nativo. "
                 "El ERP sigue siendo la unica fuente de verdad y las acciones seguras "
                 "requieren aprobacion humana cuando aplique."
             ),

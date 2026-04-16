@@ -236,7 +236,7 @@
       <div class="meta-box"><strong>Solicitudes:</strong> {{ solicitudes|length }}</div>
     </div>
     <div class="workflow">
-      <div class="workflow-title">Workflow ERP del documento</div>
+      <div class="workflow-title">Flujo del documento</div>
       <div class="workflow-grid">
         <div class="workflow-step">
           <strong>01 · Solicitud</strong>
@@ -274,7 +274,7 @@
         <tr>
           <td>{{ forloop.counter }}</td>
           <td>{{ s.folio }}</td>
-          <td>{{ s.insumo.nombre }}</td>
+          <td>{{ s.insumo.display_name }}</td>
           <td>{{ s.proveedor_sugerido.nombre|default:"-" }}</td>
           <td class="text-end">{{ s.cantidad|floatformat:3 }}</td>
           <td class="text-end">${{ s.costo_unitario|floatformat:2 }}</td>

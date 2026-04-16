@@ -2,27 +2,732 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import TruncDate
 from django.http import HttpResponse
 from django.urls import reverse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
-from core.access import can_view_audit
+from core.access import can_manage_orquestacion, can_view_audit
 from core.audit import log_event
-from core.models import AuditLog
+from core.models import AuditLog, Sucursal
 from inventario.models import AlmacenSyncRun
 from maestros.models import Insumo, InsumoAlias, PointPendingMatch, Proveedor
+from pos_bridge.models import (
+    PointDailySale,
+    PointInventorySnapshot,
+    PointProductionLine,
+    PointSalesDailyProductFact,
+    PointSalesQualityAlert,
+    PointSyncJob,
+    PointTransferLine,
+    PointWasteLine,
+)
 from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
 from recetas.utils.normalizacion import normalizar_nombre
+from reportes.dashboard_full_dataset import get_materialized_dashboard_full_payload
+from reportes.dashboard_sales_dataset import get_dashboard_sales_dataset
+from reportes.models import (
+    AnalyticAuditLog,
+    AnalyticRefreshWindow,
+    CorteOficialDiario,
+    DashboardFullSnapshot,
+    FactInventarioDiario,
+    FactProduccionDiaria,
+    FactVentaDiaria,
+    OperationsMetricSnapshot,
+)
+from ventas.models import VentaAutoritativaPoint
 
 from .models import PublicApiAccessLog, PublicApiClient
+
+
+try:
+    from django_celery_beat.models import PeriodicTask
+except Exception:  # pragma: no cover - defensive in case beat is not installed in a stripped env
+    PeriodicTask = None
+
+
+POINT_OFFICIAL_SALES_ENDPOINT = "/Report/PrintReportes?idreporte=3"
+POINT_RECENT_SALES_ENDPOINT = "/Report/VentasCategorias"
+INTEGRATIONS_ANALYTICS_REFRESH_LOCK_KEY = "integraciones:analytics-refresh-lock"
+INTEGRATIONS_OPERATIONAL_REFRESH_LOCK_KEY = "integraciones:operational-refresh-lock"
+INTEGRATIONS_REFRESH_LOCK_SECONDS = 15 * 60
+INTEGRATIONS_EXECUTIVE_TARGET_LAG_DAYS = 1
+INTEGRATIONS_EXECUTIVE_PRE_CUTOFF_LAG_DAYS = 2
+INTEGRATIONS_EXECUTIVE_ANALYTICS_GRACE_MINUTES = 45
+INTEGRATIONS_EXECUTIVE_FAILURE_LOOKBACK_HOURS = 24
+
+EXECUTIVE_STATUS_OK = "OK"
+EXECUTIVE_STATUS_PARTIAL = "PARCIAL_ESPERADO"
+EXECUTIVE_STATUS_DELAYED = "ATRASO_TECNICO"
+EXECUTIVE_STATUS_CRITICAL = "FALLA_CRITICA"
+
+
+def _to_iso_date(value) -> str:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return ""
+
+
+def _coerce_local_date(value):
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return value
+    if hasattr(value, "date"):
+        return value.date()
+    return value
+
+
+def _latest_sync_job(job_type: str):
+    return PointSyncJob.objects.filter(job_type=job_type).order_by("-started_at", "-id").first()
+
+
+def _latest_success_sync_job(job_type: str):
+    return (
+        PointSyncJob.objects.filter(job_type=job_type, status=PointSyncJob.STATUS_SUCCESS)
+        .order_by("-finished_at", "-started_at", "-id")
+        .first()
+    )
+
+
+def _latest_failed_sync_job(job_type: str):
+    return (
+        PointSyncJob.objects.filter(job_type=job_type, status=PointSyncJob.STATUS_FAILED)
+        .order_by("-finished_at", "-started_at", "-id")
+        .first()
+    )
+
+
+def _layer_health(*, latest_date, reference_date: date, max_lag_days: int = 1, allow_partial: bool = False) -> tuple[str, str]:
+    latest_date = _coerce_local_date(latest_date)
+    if not latest_date:
+        return ("danger", "Sin datos")
+    lag_days = max((reference_date - latest_date).days, 0)
+    if lag_days <= 0:
+        return ("success", "Al día")
+    if lag_days <= max_lag_days:
+        return ("warning", "Atraso esperado" if not allow_partial else "Parcial esperado")
+    return ("danger", f"Atraso {lag_days}d")
+
+
+def _fmt_schedule(task: object | None) -> str:
+    if not task:
+        return "Sin schedule"
+    crontab = getattr(task, "crontab", None)
+    if not crontab:
+        return "Schedule no cron"
+    hour = str(crontab.hour or "*")
+    minute = str(crontab.minute or "*")
+    return f"{hour.zfill(2) if hour.isdigit() else hour}:{minute.zfill(2) if minute.isdigit() else minute}"
+
+
+def _parse_schedule_label_to_time(label: str | None) -> time | None:
+    if not label or ":" not in label:
+        return None
+    hour, minute = label.split(":", 1)
+    if not (hour.isdigit() and minute.isdigit()):
+        return None
+    try:
+        return time(int(hour), int(minute))
+    except ValueError:
+        return None
+
+
+def _build_manual_action_status(*, lock_key: str, action_prefix: str) -> dict[str, object]:
+    action_names = [
+        f"{action_prefix}_REQUESTED",
+        f"{action_prefix}_COMPLETED",
+        f"{action_prefix}_FAILED",
+    ]
+    latest_event = (
+        AuditLog.objects.filter(action__in=action_names)
+        .order_by("-timestamp", "-id")
+        .first()
+    )
+    if cache.get(lock_key):
+        tone = "warning"
+        status = "EN_PROGRESO"
+    elif latest_event and latest_event.action.endswith("_FAILED"):
+        tone = "danger"
+        status = "ERROR"
+    elif latest_event and latest_event.action.endswith("_COMPLETED"):
+        tone = "success"
+        status = "COMPLETADO"
+    elif latest_event and latest_event.action.endswith("_REQUESTED"):
+        tone = "warning"
+        status = "EN_COLA"
+    else:
+        tone = "neutral"
+        status = "SIN_EJECUCION"
+    return {
+        "status": status,
+        "tone": tone,
+        "latest_event": latest_event,
+    }
+
+
+def _build_monitor_quick_links() -> list[dict[str, str]]:
+    return [
+        {"label": "Dashboard BI", "url": reverse("reportes:bi")},
+        {"label": "Ventas", "url": reverse("reportes:ventas")},
+        {"label": "Cierre producto", "url": reverse("reportes:cierre_producto")},
+        {"label": "Jobs Point", "url": "/admin/pos_bridge/pointsyncjob/"},
+        {"label": "Bitácora", "url": reverse("audit_log")},
+    ]
+
+
+def _build_sales_monitor_cards(*, reference_date: date) -> list[dict[str, object]]:
+    latest_point_daily_sale = PointDailySale.objects.order_by("-sale_date").values_list("sale_date", flat=True).first()
+    latest_v2_product = PointSalesDailyProductFact.objects.order_by("-sale_date").values_list("sale_date", flat=True).first()
+    latest_authoritative = VentaAutoritativaPoint.objects.order_by("-sale_date").values_list("sale_date", flat=True).first()
+    latest_fact = FactVentaDiaria.objects.order_by("-fecha").values_list("fecha", flat=True).first()
+    dashboard_dataset = get_dashboard_sales_dataset(months=6)
+    dashboard_snapshot = dict(dashboard_dataset.get("daily_sales_snapshot") or {})
+    latest_dashboard_date = dashboard_snapshot.get("date")
+    latest_dashboard_generated_at = DashboardFullSnapshot.objects.filter(months_window=6).values_list("generated_at", flat=True).first()
+
+    cards = [
+        {
+            "key": "point_daily_sale",
+            "label": "PointDailySale",
+            "detail": "Staging diario Point legacy/oficial",
+            "latest_date": latest_point_daily_sale,
+            "latest_generated_at": PointDailySale.objects.order_by("-updated_at").values_list("updated_at", flat=True).first(),
+            "extra": f"{PointDailySale.objects.filter(sale_date=latest_point_daily_sale).count()} filas" if latest_point_daily_sale else "Sin filas",
+        },
+        {
+            "key": "point_sales_v2",
+            "label": "PointSalesDailyProductFact",
+            "detail": "Fact v2 por producto",
+            "latest_date": latest_v2_product,
+            "latest_generated_at": PointSalesDailyProductFact.objects.order_by("-updated_at").values_list("updated_at", flat=True).first(),
+            "extra": f"{PointSalesDailyProductFact.objects.filter(sale_date=latest_v2_product).count()} filas" if latest_v2_product else "Sin filas",
+        },
+        {
+            "key": "authoritative_sales",
+            "label": "VentaAutoritativaPoint",
+            "detail": "Fuente autoritativa Point",
+            "latest_date": latest_authoritative,
+            "latest_generated_at": VentaAutoritativaPoint.objects.order_by("-imported_at").values_list("imported_at", flat=True).first(),
+            "extra": f"{VentaAutoritativaPoint.objects.filter(sale_date=latest_authoritative).count()} filas" if latest_authoritative else "Sin filas",
+        },
+        {
+            "key": "fact_venta_diaria",
+            "label": "FactVentaDiaria",
+            "detail": "Fact analítico consumido por dashboard",
+            "latest_date": latest_fact,
+            "latest_generated_at": FactVentaDiaria.objects.order_by("-actualizado_en").values_list("actualizado_en", flat=True).first(),
+            "extra": f"{FactVentaDiaria.objects.filter(fecha=latest_fact).count()} filas" if latest_fact else "Sin filas",
+        },
+        {
+            "key": "dashboard_materialized",
+            "label": "Dashboard materializado",
+            "detail": "Snapshot visible en BI ejecutivo (6 meses)",
+            "latest_date": latest_dashboard_date,
+            "latest_generated_at": latest_dashboard_generated_at,
+            "extra": (
+                f"${Decimal(str(dashboard_snapshot.get('total_amount') or 0)):.2f} · "
+                f"{int(dashboard_snapshot.get('branch_count') or 0)} sucursales"
+                if latest_dashboard_date
+                else "Sin snapshot"
+            ),
+            "note": dashboard_snapshot.get("comparison_detail") or "",
+        },
+    ]
+    for card in cards:
+        tone, status = _layer_health(
+            latest_date=card.get("latest_date"),
+            reference_date=reference_date,
+            max_lag_days=1,
+            allow_partial=card["key"] == "dashboard_materialized",
+        )
+        card["tone"] = tone
+        card["status"] = status
+        card["latest_date_label"] = _to_iso_date(card.get("latest_date")) or "Sin fecha"
+        card["latest_generated_label"] = (
+            timezone.localtime(card["latest_generated_at"]).strftime("%Y-%m-%d %H:%M")
+            if card.get("latest_generated_at")
+            else "Sin ejecución"
+        )
+    return cards
+
+
+def _build_pipeline_monitor_rows(*, reference_date: date) -> list[dict[str, object]]:
+    analytics_latest = DashboardFullSnapshot.objects.order_by("-generated_at").first()
+    latest_pending_window = (
+        AnalyticRefreshWindow.objects.filter(status__in=[AnalyticRefreshWindow.STATUS_PENDING, AnalyticRefreshWindow.STATUS_ERROR])
+        .order_by("date_from", "dataset", "id")
+        .first()
+    )
+    latest_sales_dataset = get_materialized_dashboard_full_payload(months_window=6) or {}
+    latest_sales_snapshot = dict(latest_sales_dataset.get("daily_sales_snapshot") or {})
+    rows = [
+        {
+            "label": "Ventas Point",
+            "job_type": PointSyncJob.JOB_TYPE_SALES,
+            "latest_data_date": PointDailySale.objects.order_by("-sale_date").values_list("sale_date", flat=True).first(),
+            "detail": "Extracción oficial/legacy y facts v2 de ventas.",
+        },
+        {
+            "label": "Inventario Point",
+            "job_type": PointSyncJob.JOB_TYPE_INVENTORY,
+            "latest_data_date": PointInventorySnapshot.objects.order_by("-captured_at").values_list("captured_at", flat=True).first(),
+            "detail": "Snapshots Point e inventario analítico diario.",
+        },
+        {
+            "label": "Mermas Point",
+            "job_type": PointSyncJob.JOB_TYPE_WASTE,
+            "latest_data_date": PointWasteLine.objects.order_by("-movement_at").values_list("movement_at", flat=True).first(),
+            "detail": "Movimientos de merma desde Point.",
+        },
+        {
+            "label": "Producción Point",
+            "job_type": PointSyncJob.JOB_TYPE_PRODUCTION,
+            "latest_data_date": PointProductionLine.objects.order_by("-production_date").values_list("production_date", flat=True).first(),
+            "detail": "Producción operativa y fact de producción.",
+        },
+        {
+            "label": "Transferencias Point",
+            "job_type": PointSyncJob.JOB_TYPE_TRANSFERS,
+            "latest_data_date": PointTransferLine.objects.order_by("-received_at", "-registered_at").values_list("received_at", "registered_at").first(),
+            "detail": "Transferencias entre sucursales.",
+        },
+        {
+            "label": "Analytics",
+            "job_type": "",
+            "latest_data_date": analytics_latest.generated_at if analytics_latest else None,
+            "detail": (
+                f"{AnalyticRefreshWindow.objects.filter(status=AnalyticRefreshWindow.STATUS_PENDING).count()} ventana(s) pendientes"
+                if latest_pending_window
+                else "Sin ventanas pendientes"
+            ),
+        },
+        {
+            "label": "Dashboard ejecutivo",
+            "job_type": "",
+            "latest_data_date": latest_sales_snapshot.get("date"),
+            "detail": "Payload visible para BI y snapshot materializado.",
+        },
+    ]
+    for row in rows:
+        if row["job_type"]:
+            latest_job = _latest_sync_job(row["job_type"])
+            latest_success = _latest_success_sync_job(row["job_type"])
+            latest_failed = _latest_failed_sync_job(row["job_type"])
+            row["last_run_at"] = latest_job.started_at if latest_job else None
+            row["last_run_status"] = latest_job.status if latest_job else "SIN_JOB"
+            row["last_success_at"] = latest_success.finished_at or latest_success.started_at if latest_success else None
+            row["last_error_at"] = latest_failed.finished_at or latest_failed.started_at if latest_failed else None
+            row["last_error_message"] = latest_failed.error_message if latest_failed else ""
+        else:
+            row["last_run_at"] = analytics_latest.generated_at if analytics_latest else None
+            row["last_run_status"] = "SUCCESS" if analytics_latest else "SIN_JOB"
+            row["last_success_at"] = analytics_latest.generated_at if analytics_latest else None
+            latest_audit_error = (
+                AnalyticAuditLog.objects.filter(status__in=[AnalyticAuditLog.STATUS_WARNING, AnalyticAuditLog.STATUS_ERROR])
+                .order_by("-created_at", "-id")
+                .first()
+            )
+            row["last_error_at"] = latest_audit_error.created_at if latest_audit_error else None
+            row["last_error_message"] = latest_audit_error.message if latest_audit_error else ""
+
+        latest_date = _coerce_local_date(row.get("latest_data_date"))
+        if isinstance(row.get("latest_data_date"), tuple):
+            latest_date = _coerce_local_date(next((value for value in row["latest_data_date"] if value), None))
+        row["latest_data_date"] = latest_date
+        tone, status = _layer_health(latest_date=latest_date, reference_date=reference_date, max_lag_days=1)
+        row["tone"] = tone
+        row["health_status"] = status if row["label"] != "Analytics" else ("Con pendientes" if latest_pending_window else "Al día")
+        row["latest_data_label"] = _to_iso_date(latest_date) or "Sin fecha"
+        row["last_run_label"] = timezone.localtime(row["last_run_at"]).strftime("%Y-%m-%d %H:%M") if row.get("last_run_at") else "Sin corrida"
+        row["last_success_label"] = timezone.localtime(row["last_success_at"]).strftime("%Y-%m-%d %H:%M") if row.get("last_success_at") else "Sin éxito"
+        row["last_error_label"] = timezone.localtime(row["last_error_at"]).strftime("%Y-%m-%d %H:%M") if row.get("last_error_at") else "Sin error"
+    return rows
+
+
+def _build_schedule_rows() -> list[dict[str, object]]:
+    schedule_specs = [
+        ("ventas", "Sync ventas Point", "pos_bridge.daily_sales_sync"),
+        ("inventario", "Sync inventario Point", "pos_bridge.inventory_sync"),
+        ("waste", "Sync mermas Point", "pos_bridge.waste_sync"),
+        ("production", "Sync producción Point", "pos_bridge.production_sync"),
+        ("transfers", "Sync transferencias Point", "pos_bridge.transfer_sync"),
+        ("analytics", "Refresh analytics operativo", "reportes.operations_automation_cycle"),
+    ]
+    if PeriodicTask is None:
+        return []
+    by_task_name = {
+        row.task: row
+        for row in PeriodicTask.objects.select_related("crontab").filter(task__in=[item[2] for item in schedule_specs])
+    }
+    rows: list[dict[str, object]] = []
+    for key, label, task_name in schedule_specs:
+        schedule = by_task_name.get(task_name)
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "task": task_name,
+                "enabled": bool(schedule and schedule.enabled),
+                "schedule_label": _fmt_schedule(schedule),
+                "last_run_at": getattr(schedule, "last_run_at", None),
+                "last_run_label": timezone.localtime(schedule.last_run_at).strftime("%Y-%m-%d %H:%M") if getattr(schedule, "last_run_at", None) else "Sin corrida",
+            }
+        )
+    return rows
+
+
+def _build_executive_semaphore(
+    *,
+    reference_date: date,
+    now=None,
+    sales_cards: list[dict[str, object]] | None = None,
+    pipeline_rows: list[dict[str, object]] | None = None,
+    pending_windows: list[AnalyticRefreshWindow] | None = None,
+    quality_alerts: list[PointSalesQualityAlert] | None = None,
+    recent_point_jobs: list[PointSyncJob] | None = None,
+    analytic_audits: list[AnalyticAuditLog] | None = None,
+    schedule_rows: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    now_local = timezone.localtime(now or timezone.now())
+    schedule_rows = schedule_rows if schedule_rows is not None else _build_schedule_rows()
+    sales_cards = sales_cards if sales_cards is not None else _build_sales_monitor_cards(reference_date=reference_date)
+    pipeline_rows = pipeline_rows if pipeline_rows is not None else _build_pipeline_monitor_rows(reference_date=reference_date)
+    pending_windows = pending_windows if pending_windows is not None else list(
+        AnalyticRefreshWindow.objects.filter(
+            status__in=[AnalyticRefreshWindow.STATUS_PENDING, AnalyticRefreshWindow.STATUS_ERROR]
+        ).order_by("date_from", "dataset", "id")[:20]
+    )
+    quality_alerts = quality_alerts if quality_alerts is not None else list(
+        PointSalesQualityAlert.objects.order_by("-created_at", "-id")[:20]
+    )
+    recent_point_jobs = recent_point_jobs if recent_point_jobs is not None else list(
+        PointSyncJob.objects.order_by("-started_at", "-id")[:20]
+    )
+    analytic_audits = analytic_audits if analytic_audits is not None else list(
+        AnalyticAuditLog.objects.order_by("-created_at", "-id")[:20]
+    )
+
+    schedules_by_key = {row.get("key"): row for row in schedule_rows}
+    analytics_cutoff_time = (
+        _parse_schedule_label_to_time((schedules_by_key.get("analytics") or {}).get("schedule_label"))
+        or time(3, 35)
+    )
+    cutoff_dt = timezone.make_aware(
+        datetime.combine(reference_date, analytics_cutoff_time),
+        timezone.get_current_timezone(),
+    ) + timedelta(minutes=INTEGRATIONS_EXECUTIVE_ANALYTICS_GRACE_MINUTES)
+    cutover_reached = now_local >= cutoff_dt
+
+    target_cut_date = reference_date - timedelta(days=INTEGRATIONS_EXECUTIVE_TARGET_LAG_DAYS)
+    minimum_expected_date = reference_date - timedelta(
+        days=INTEGRATIONS_EXECUTIVE_TARGET_LAG_DAYS if cutover_reached else INTEGRATIONS_EXECUTIVE_PRE_CUTOFF_LAG_DAYS
+    )
+
+    cards_by_key = {card.get("key"): card for card in sales_cards}
+    point_daily_date = _coerce_local_date((cards_by_key.get("point_daily_sale") or {}).get("latest_date"))
+    point_v2_date = _coerce_local_date((cards_by_key.get("point_sales_v2") or {}).get("latest_date"))
+    authoritative_date = _coerce_local_date((cards_by_key.get("authoritative_sales") or {}).get("latest_date"))
+    fact_date = _coerce_local_date((cards_by_key.get("fact_venta_diaria") or {}).get("latest_date"))
+    dashboard_date = _coerce_local_date((cards_by_key.get("dashboard_materialized") or {}).get("latest_date"))
+    point_date = max((item for item in [point_daily_date, point_v2_date] if item), default=None)
+
+    latest_sales_success = next(
+        (
+            job
+            for job in recent_point_jobs
+            if job.job_type == PointSyncJob.JOB_TYPE_SALES and job.status == PointSyncJob.STATUS_SUCCESS
+        ),
+        None,
+    )
+    latest_sales_failure = next(
+        (
+            job
+            for job in recent_point_jobs
+            if job.job_type == PointSyncJob.JOB_TYPE_SALES and job.status == PointSyncJob.STATUS_FAILED
+        ),
+        None,
+    )
+
+    active_point_failure = bool(
+        latest_sales_failure
+        and (
+            not latest_sales_success
+            or latest_sales_failure.started_at >= latest_sales_success.started_at
+        )
+    )
+
+    lookback_threshold = now_local - timedelta(hours=INTEGRATIONS_EXECUTIVE_FAILURE_LOOKBACK_HOURS)
+    recent_critical_alert = next(
+        (
+            alert
+            for alert in quality_alerts
+            if alert.severity == PointSalesQualityAlert.SEVERITY_CRITICAL
+            and alert.created_at >= lookback_threshold
+        ),
+        None,
+    )
+    recent_analytic_error = next(
+        (
+            audit
+            for audit in analytic_audits
+            if audit.status == AnalyticAuditLog.STATUS_ERROR
+            and audit.created_at >= lookback_threshold
+        ),
+        None,
+    )
+    has_window_error = any(window.status == AnalyticRefreshWindow.STATUS_ERROR for window in pending_windows)
+    has_pending_sales_window = any(window.dataset == AnalyticRefreshWindow.DATASET_SALES for window in pending_windows)
+
+    point_ok_target = bool(point_date and point_date >= target_cut_date)
+    fact_ok_target = bool(fact_date and fact_date >= target_cut_date)
+    dashboard_ok_target = bool(dashboard_date and dashboard_date >= target_cut_date)
+    point_ok_minimum = bool(point_date and point_date >= minimum_expected_date)
+    fact_ok_minimum = bool(fact_date and fact_date >= minimum_expected_date)
+    dashboard_ok_minimum = bool(dashboard_date and dashboard_date >= minimum_expected_date)
+
+    if not point_ok_target:
+        blocking_layer = "Point ventas"
+    elif not fact_ok_target:
+        blocking_layer = "Analytics / FactVentaDiaria"
+    elif not dashboard_ok_target:
+        blocking_layer = "Dashboard materializado"
+    elif has_pending_sales_window:
+        blocking_layer = "Analytics pendiente"
+    else:
+        blocking_layer = "Sin bloqueo"
+
+    if recent_critical_alert:
+        status_code = EXECUTIVE_STATUS_CRITICAL
+        tone = "danger"
+        title = "Falla crítica en pipeline de ventas"
+        summary = recent_critical_alert.detalle or recent_critical_alert.alert_type
+        recommended_action = {
+            "kind": "refresh_operations",
+            "label": "Investigar Point y correr ciclo operativo",
+            "detail": "Existe una alerta crítica reciente. El refresh solo de analytics no es suficiente.",
+        }
+    elif active_point_failure and not point_ok_target:
+        status_code = EXECUTIVE_STATUS_CRITICAL
+        tone = "danger"
+        title = "Point ventas frenó el corte"
+        summary = latest_sales_failure.error_message or "El último job de ventas falló y el corte esperado no ha entrado."
+        recommended_action = {
+            "kind": "refresh_operations",
+            "label": "Investigar Point y correr ciclo operativo",
+            "detail": "El bloqueo está en la extracción de ventas o su ciclo operativo.",
+        }
+    elif (recent_analytic_error or has_window_error) and (not fact_ok_target or not dashboard_ok_target):
+        status_code = EXECUTIVE_STATUS_CRITICAL
+        tone = "danger"
+        title = "Analytics/materialización con error"
+        summary = (
+            (recent_analytic_error.message if recent_analytic_error else "")
+            or "Hay errores analíticos abiertos y el corte esperado aún no llega a facts/dashboard."
+        )
+        recommended_action = {
+            "kind": "refresh_analytics",
+            "label": "Investigar analytics y refrescar dashboard",
+            "detail": "El staging ya existe, pero la capa analítica o la materialización siguen con error.",
+        }
+    elif point_ok_target and fact_ok_target and dashboard_ok_target:
+        status_code = EXECUTIVE_STATUS_OK
+        tone = "success"
+        title = "Corte operativo al día"
+        summary = f"El dashboard ya refleja el corte esperado {target_cut_date.isoformat()}."
+        recommended_action = {
+            "kind": "none",
+            "label": "Sin acción",
+            "detail": "Sólo monitoreo. No se requiere intervención manual.",
+        }
+    elif not cutover_reached and point_ok_minimum and fact_ok_minimum and dashboard_ok_minimum:
+        status_code = EXECUTIVE_STATUS_PARTIAL
+        tone = "warning"
+        title = "Corte parcial dentro de ventana normal"
+        summary = (
+            f"Aún estamos dentro de la ventana operativa. El corte objetivo {target_cut_date.isoformat()} "
+            f"se espera después de {cutoff_dt.strftime('%H:%M')}."
+        )
+        recommended_action = {
+            "kind": "wait",
+            "label": "Esperar ventana normal",
+            "detail": "Todavía no conviene forzar refresh; el atraso es esperable por horario.",
+        }
+    else:
+        status_code = EXECUTIVE_STATUS_DELAYED
+        tone = "danger" if cutover_reached else "warning"
+        title = "Atraso técnico en el corte"
+        summary = (
+            f"El corte esperado {target_cut_date.isoformat()} no está completo. "
+            f"La capa más atrasada es {blocking_layer}."
+        )
+        if point_ok_target and not dashboard_ok_target:
+            recommended_action = {
+                "kind": "refresh_analytics",
+                "label": "Refrescar analytics/dashboard",
+                "detail": "Point ya trae el corte, pero facts o dashboard aún no lo materializan.",
+            }
+        else:
+            recommended_action = {
+                "kind": "refresh_operations",
+                "label": "Correr ciclo operativo completo",
+                "detail": "La extracción o materialización de ventas sigue atrás del corte esperado.",
+            }
+
+    latest_sales_success_label = (
+        timezone.localtime(latest_sales_success.finished_at or latest_sales_success.started_at).strftime("%Y-%m-%d %H:%M")
+        if latest_sales_success
+        else "Sin éxito reciente"
+    )
+    detail_line = (
+        f"Dashboard ve {dashboard_date.isoformat() if dashboard_date else 'sin fecha'} · "
+        f"Facts ven {fact_date.isoformat() if fact_date else 'sin fecha'} · "
+        f"Point ve {point_date.isoformat() if point_date else 'sin fecha'} · "
+        f"Autoritativa {authoritative_date.isoformat() if authoritative_date else 'sin fecha'} · "
+        f"Último job ventas OK {latest_sales_success_label}"
+    )
+
+    return {
+        "status_code": status_code,
+        "tone": tone,
+        "title": title,
+        "summary": summary,
+        "target_cut_date": target_cut_date,
+        "minimum_expected_date": minimum_expected_date,
+        "dashboard_date": dashboard_date,
+        "fact_date": fact_date,
+        "point_date": point_date,
+        "authoritative_date": authoritative_date,
+        "blocking_layer": blocking_layer,
+        "recommended_action": recommended_action,
+        "detail_line": detail_line,
+        "cutoff_label": cutoff_dt.strftime("%H:%M"),
+        "cutover_reached": cutover_reached,
+    }
+
+
+def _build_monitor_context(*, reference_date: date) -> dict[str, object]:
+    sales_cards = _build_sales_monitor_cards(reference_date=reference_date)
+    pipeline_rows = _build_pipeline_monitor_rows(reference_date=reference_date)
+    pending_windows = list(
+        AnalyticRefreshWindow.objects.filter(
+            status__in=[AnalyticRefreshWindow.STATUS_PENDING, AnalyticRefreshWindow.STATUS_ERROR]
+        ).order_by("date_from", "dataset", "id")[:20]
+    )
+    audit_rows = list(AnalyticAuditLog.objects.order_by("-created_at", "-id")[:20])
+    quality_alerts = list(PointSalesQualityAlert.objects.order_by("-created_at", "-id")[:20])
+    recent_point_jobs = list(
+        PointSyncJob.objects.order_by("-started_at", "-id")[:20]
+    )
+    schedule_rows = _build_schedule_rows()
+    dashboard_snapshot = get_dashboard_sales_dataset(months=6).get("daily_sales_snapshot") or {}
+    materialized_payload = get_materialized_dashboard_full_payload(months_window=6) or {}
+    materialized_snapshot = materialized_payload.get("daily_sales_snapshot") or {}
+    latest_corte = CorteOficialDiario.objects.order_by("-corte_date").first()
+    operations_metric = OperationsMetricSnapshot.objects.order_by("-fecha").first()
+    branch_options = list(
+        Sucursal.objects.filter(activa=True).order_by("codigo").values("id", "codigo", "nombre")
+    )
+    analytics_action = _build_manual_action_status(
+        lock_key=INTEGRATIONS_ANALYTICS_REFRESH_LOCK_KEY,
+        action_prefix="INTEGRATIONS_ANALYTICS_REFRESH",
+    )
+    operations_action = _build_manual_action_status(
+        lock_key=INTEGRATIONS_OPERATIONAL_REFRESH_LOCK_KEY,
+        action_prefix="INTEGRATIONS_OPERATIONAL_REFRESH",
+    )
+    technical_alerts: list[dict[str, object]] = []
+    if pending_windows:
+        technical_alerts.append(
+            {
+                "tone": "warning",
+                "title": "Ventanas analíticas pendientes",
+                "detail": f"{len(pending_windows)} ventana(s) requieren atención en analytics.",
+            }
+        )
+    latest_error_job = next((job for job in recent_point_jobs if job.status == PointSyncJob.STATUS_FAILED), None)
+    if latest_error_job:
+        technical_alerts.append(
+            {
+                "tone": "danger",
+                "title": f"Último fallo Point: {latest_error_job.get_job_type_display()}",
+                "detail": latest_error_job.error_message or "Sin detalle adicional en job.",
+            }
+        )
+    if materialized_snapshot.get("comparison_detail"):
+        technical_alerts.append(
+            {
+                "tone": "neutral",
+                "title": "Comparativo mensual parcial esperado",
+                "detail": materialized_snapshot.get("comparison_detail"),
+            }
+        )
+    if not technical_alerts:
+        technical_alerts.append(
+            {
+                "tone": "success",
+                "title": "Pipeline operativo estable",
+                "detail": "Sin alertas técnicas abiertas en Point, analytics o dashboard materializado.",
+            }
+        )
+    executive_semaphore = _build_executive_semaphore(
+        reference_date=reference_date,
+        sales_cards=sales_cards,
+        pipeline_rows=pipeline_rows,
+        pending_windows=pending_windows,
+        quality_alerts=quality_alerts,
+        recent_point_jobs=recent_point_jobs,
+        analytic_audits=audit_rows,
+        schedule_rows=schedule_rows,
+    )
+    return {
+        "integration_monitor": {
+            "reference_date": reference_date,
+            "executive_semaphore": executive_semaphore,
+            "sales_cards": sales_cards,
+            "pipeline_rows": pipeline_rows,
+            "pending_windows": pending_windows,
+            "analytic_audits": audit_rows,
+            "quality_alerts": quality_alerts,
+            "recent_point_jobs": recent_point_jobs,
+            "schedule_rows": schedule_rows,
+            "latest_corte": latest_corte,
+            "operations_metric": operations_metric,
+            "branch_options": branch_options,
+            "dashboard_snapshot": dashboard_snapshot,
+            "materialized_snapshot": materialized_snapshot,
+            "analytics_action": analytics_action,
+            "operations_action": operations_action,
+            "technical_alerts": technical_alerts,
+            "quick_links": _build_monitor_quick_links(),
+        }
+    }
+
+
+def _parse_reference_date(raw_value: str | None) -> date:
+    try:
+        return date.fromisoformat((raw_value or "").strip())
+    except ValueError:
+        return timezone.localdate()
+
+
+def _parse_positive_int(raw_value: str | None, *, default: int, min_value: int, max_value: int) -> int:
+    try:
+        value = int(raw_value or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(min_value, min(max_value, value))
 
 
 def _integraciones_enterprise_chain(
@@ -778,6 +1483,82 @@ def panel(request):
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
+        if action in {"refresh_analytics_monitor", "refresh_operations_monitor"}:
+            if not can_manage_orquestacion(request.user):
+                raise PermissionDenied("No tienes permisos para ejecutar refrescos operativos.")
+
+            reference_date = _parse_reference_date(request.POST.get("reference_date"))
+            lookback_days = _parse_positive_int(
+                request.POST.get("lookback_days"),
+                default=7,
+                min_value=1,
+                max_value=30,
+            )
+            sucursal_id = request.POST.get("sucursal_id")
+            sucursal_id = int(sucursal_id) if (sucursal_id or "").isdigit() else None
+
+            if action == "refresh_analytics_monitor":
+                lock_key = INTEGRATIONS_ANALYTICS_REFRESH_LOCK_KEY
+                requested_action = "INTEGRATIONS_ANALYTICS_REFRESH_REQUESTED"
+                scope = "analytics_only"
+                task_name = "task_analytics_refresh_cycle"
+                success_message = (
+                    "Se encoló el refresh analítico. "
+                    f"Referencia {reference_date.isoformat()} con lookback de {lookback_days} día(s)."
+                )
+            else:
+                lock_key = INTEGRATIONS_OPERATIONAL_REFRESH_LOCK_KEY
+                requested_action = "INTEGRATIONS_OPERATIONAL_REFRESH_REQUESTED"
+                scope = "operations_cycle"
+                task_name = "task_operations_automation_cycle"
+                success_message = (
+                    "Se encoló el ciclo operativo completo. "
+                    f"Referencia {reference_date.isoformat()} con lookback de {lookback_days} día(s)."
+                )
+
+            if not cache.add(lock_key, reference_date.isoformat(), INTEGRATIONS_REFRESH_LOCK_SECONDS):
+                messages.warning(
+                    request,
+                    "Ya existe una actualización en curso para este frente. Espera unos minutos antes de reintentarlo.",
+                )
+                return redirect("integraciones:panel")
+
+            try:
+                from pos_bridge.tasks.celery_tasks import task_analytics_refresh_cycle, task_operations_automation_cycle
+
+                if task_name == "task_analytics_refresh_cycle":
+                    task_analytics_refresh_cycle.delay(
+                        reference_date_iso=reference_date.isoformat(),
+                        lookback_days=lookback_days,
+                        triggered_by_id=request.user.id,
+                    )
+                else:
+                    task_operations_automation_cycle.delay(
+                        reference_date_iso=reference_date.isoformat(),
+                        lookback_days=lookback_days,
+                        sucursal_id=sucursal_id,
+                        triggered_by_id=request.user.id,
+                    )
+                log_event(
+                    request.user,
+                    requested_action,
+                    "reportes.AnalyticRefreshWindow",
+                    reference_date.isoformat(),
+                    payload={
+                        "reference_date": reference_date.isoformat(),
+                        "lookback_days": lookback_days,
+                        "sucursal_id": sucursal_id,
+                        "scope": scope,
+                        "trigger": "integraciones_panel",
+                    },
+                )
+            except Exception:
+                cache.delete(lock_key)
+                raise
+
+            messages.success(request, success_message)
+            return redirect("integraciones:panel")
+
         if action == "resolve_point_sugerencias_insumos":
             min_score = max(0.0, min(100.0, _to_float(request.POST.get("auto_score_min"), 90.0)))
             limit = max(1, min(2000, _to_int(request.POST.get("auto_limit"), 250)))
@@ -1298,6 +2079,7 @@ def panel(request):
         "api_7d_error_rate": api_7d_error_rate,
         "audit_rows": audit_rows,
     }
+    context.update(_build_monitor_context(reference_date=timezone.localdate()))
     if export_mode == "health_csv":
         return _export_health_csv(
             requests_24h=requests_24h,

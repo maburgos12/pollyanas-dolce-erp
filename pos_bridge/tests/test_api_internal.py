@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
+from django.contrib.auth.models import Group
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.utils import timezone
@@ -15,7 +16,7 @@ from rest_framework.test import APITestCase
 from core.models import Sucursal
 from maestros.models import Insumo, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailySale, PointInventorySnapshot, PointProduct, PointSyncJob
-from recetas.models import LineaReceta, Receta
+from recetas.models import LineaReceta, ProductoMonthClosure, ProductoMonthClosureLine, Receta
 
 
 class PosBridgeInternalApiTests(APITestCase):
@@ -109,6 +110,25 @@ class PosBridgeInternalApiTests(APITestCase):
             tax_amount=Decimal("0"),
             net_amount=Decimal("550"),
         )
+        self.product_closure = ProductoMonthClosure.objects.create(
+            month_start=timezone.localdate().replace(day=1),
+            month_end=timezone.localdate(),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=timezone.localdate() - timedelta(days=1),
+            built_at=timezone.now(),
+            is_locked=False,
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=self.product_closure,
+            receta_padre=self.receta,
+            inventario_inicial_teorico=Decimal("12"),
+            produccion_mes=Decimal("8"),
+            venta_directa_enteros=Decimal("4"),
+            venta_total_equivalente=Decimal("4"),
+            merma_total_equivalente=Decimal("1"),
+            inventario_final_teorico=Decimal("15"),
+        )
 
     def test_inventory_current_uses_latest_snapshot(self):
         response = self.client.get("/api/pos-bridge/inventory/current/")
@@ -176,3 +196,64 @@ class PosBridgeInternalApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["query_type"], "recipe")
         self.assertEqual(response.data["data"]["receta_id"], self.receta.id)
+
+    def test_product_closures_list_returns_month_summary(self):
+        response = self.client.get("/api/pos-bridge/product-closures/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        row = response.data["results"][0]
+        self.assertEqual(row["line_count"], 1)
+        self.assertEqual(row["total_opening_inventory"], "12.000000")
+        self.assertEqual(row["total_ending_inventory"], "15.000000")
+
+    def test_product_closures_detail_returns_lines(self):
+        response = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], self.product_closure.id)
+        self.assertEqual(len(response.data["lines"]), 1)
+        self.assertEqual(response.data["lines"][0]["receta_padre"], self.receta.id)
+
+    def test_product_closures_build_endpoint_creates_month(self):
+        PointInventorySnapshot.objects.create(
+            branch=self.branch,
+            product=self.product,
+            stock=Decimal("9"),
+            sync_job=self.sync_job,
+            captured_at=timezone.make_aware(datetime(2025, 8, 31, 23, 0, 0), timezone.get_current_timezone()),
+        )
+        response = self.client.post(
+            "/api/pos-bridge/product-closures/build/",
+            {"month": "2025-09"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["month"], "2025-09")
+        self.assertIn("validation", response.data)
+
+    def test_product_closures_lock_endpoint_locks_clean_closure(self):
+        response = self.client.post(
+            f"/api/pos-bridge/product-closures/{self.product_closure.id}/lock/",
+            {"approval_note": "Cierre aprobado desde API"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.product_closure.refresh_from_db()
+        self.assertTrue(self.product_closure.is_locked)
+        self.assertEqual(self.product_closure.metadata["lock_event"]["channel"], "api")
+
+    def test_product_closures_build_requires_operator_permission_for_non_staff(self):
+        non_staff = get_user_model().objects.create_user(
+            username="product_closure_viewer",
+            email="product_closure_viewer@example.com",
+            password="test12345",
+        )
+        lectura_group, _ = Group.objects.get_or_create(name="LECTURA")
+        non_staff.groups.add(lectura_group)
+        self.client.force_authenticate(non_staff)
+
+        response = self.client.post(
+            "/api/pos-bridge/product-closures/build/",
+            {"month": "2025-09"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

@@ -26,10 +26,12 @@ from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import CostoInsumo, PointPendingMatch, Proveedor, Insumo, InsumoAlias, UnidadMedida
 from .utils.canonical_catalog import (
+    canonical_catalog_maps,
     canonical_insumo,
     canonical_insumo_by_id,
     canonicalized_active_insumos,
     canonicalized_insumo_selector,
+    clear_canonical_catalog_runtime_caches,
     duplicate_priority,
     latest_costo_canonico,
 )
@@ -1163,7 +1165,7 @@ def _build_duplicate_groups(active_qs):
     for _, items in duplicate_groups_map.items():
         ordered = sorted(items, key=lambda x: (duplicate_priority(x), x.id), reverse=True)
         canonical = ordered[0]
-        latest_costo = latest_costo_canonico(canonical)
+        latest_costo = getattr(canonical, "latest_costo_unitario", None)
         canonical.latest_costo_unitario = latest_costo
         for item in ordered:
             item.latest_costo_unitario = latest_costo
@@ -1696,6 +1698,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
             .order_by("-total", "categoria")[:8]
         )
         duplicate_groups, duplicate_ids, canonical_ids, variant_ids = _build_duplicate_groups(active_qs)
+        _, _, canonical_by_member_id, canonical_rows_by_id = canonical_catalog_maps(limit=5000)
         canonical_by_variant_id = {}
         for group in duplicate_groups:
             canonical = group["canonical"]
@@ -1703,9 +1706,23 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 if item.id != canonical.id:
                     canonical_by_variant_id[item.id] = canonical
         page_items = list(context["insumos"])
+        page_item_ids = [item.id for item in page_items]
         page_duplicate_ids = duplicate_ids.intersection({item.id for item in page_items})
         usage_maps = _insumo_usage_maps([item.id for item in page_items])
         active_usage_maps = _insumo_usage_maps(list(active_qs.values_list("id", flat=True)))
+        final_recipe_examples_map: dict[int, list[str]] = defaultdict(list)
+        if page_item_ids:
+            final_recipe_pairs = (
+                LineaReceta.objects.filter(insumo_id__in=page_item_ids, receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+                .select_related("receta")
+                .order_by("insumo_id", "receta__nombre")
+                .values_list("insumo_id", "receta__nombre")
+                .distinct()
+            )
+            for insumo_id, receta_nombre in final_recipe_pairs:
+                names = final_recipe_examples_map[insumo_id]
+                if len(names) < 3:
+                    names.append(receta_nombre)
         recipe_used_ids = set(active_usage_maps["recipe_counts"].keys())
         final_recipe_used_ids = set(active_usage_maps["final_recipe_counts"].keys())
         base_recipe_used_ids = set(active_usage_maps["base_recipe_counts"].keys())
@@ -1728,9 +1745,10 @@ class InsumoListView(LoginRequiredMixin, ListView):
             "final_products": 0,
         }
         for item in page_items:
-            canonical_display = canonical_insumo(item) if item.activo else None
+            canonical_display = canonical_by_member_id.get(item.id) if item.activo else None
             if canonical_display:
-                item.latest_costo_unitario = latest_costo_canonico(canonical_display)
+                canonical_row = canonical_rows_by_id.get(canonical_display.id) or {}
+                item.latest_costo_unitario = getattr(canonical_row.get("canonical"), "latest_costo_unitario", None)
                 item.canonical_display = canonical_display
             item.has_duplicate_group = item.id in page_duplicate_ids
             item.is_canonical_record = item.id in canonical_ids or item.id not in duplicate_ids
@@ -1756,15 +1774,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 page_usage_summary["inventory"] += 1
             if not (used_in_recipes or used_in_purchases or used_in_inventory):
                 page_usage_summary["without_usage"] += 1
-            final_recipe_examples = []
-            if final_recipe_count:
-                final_recipe_examples = list(
-                    LineaReceta.objects.filter(insumo_id=item.id, receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
-                    .select_related("receta")
-                    .order_by("receta__nombre")
-                    .values_list("receta__nombre", flat=True)
-                    .distinct()[:3]
-                )
+            final_recipe_examples = final_recipe_examples_map.get(item.id, [])
             item.usage_profile = {
                 "recipe_count": recipe_count,
                 "final_recipe_count": final_recipe_count,
@@ -2628,6 +2638,7 @@ class InsumoCreateView(LoginRequiredMixin, CreateView):
         if form.errors:
             return self.form_invalid(form)
         response = super().form_valid(form)
+        clear_canonical_catalog_runtime_caches()
         if self.object.activo and not (self.object.codigo_point or "").strip():
             messages.warning(
                 self.request,
@@ -2891,6 +2902,7 @@ class InsumoUpdateView(LoginRequiredMixin, UpdateView):
         if form.errors:
             return self.form_invalid(form)
         response = super().form_valid(form)
+        clear_canonical_catalog_runtime_caches()
         if self.object.activo and not (self.object.codigo_point or "").strip():
             messages.warning(
                 self.request,
@@ -2953,6 +2965,11 @@ class InsumoDeleteView(LoginRequiredMixin, DeleteView):
             {"label": "Sin huella de inventario", "ok": inventory_count == 0},
         ]
         return context
+
+    def delete(self, request, *args, **kwargs):
+        response = super().delete(request, *args, **kwargs)
+        clear_canonical_catalog_runtime_caches()
+        return response
 
 
 @login_required
@@ -3319,6 +3336,7 @@ def point_pending_review(request):
             if not insumo_target:
                 return False, False, 0
             point_code = (pending.point_codigo or "").strip()
+            point_category = str((pending.payload or {}).get("categoria") or "").strip()
             if point_code and insumo_target.codigo_point and insumo_target.codigo_point != point_code:
                 return False, True, 0
 
@@ -3329,6 +3347,9 @@ def point_pending_review(request):
             if insumo_target.nombre_point != pending.point_nombre:
                 insumo_target.nombre_point = pending.point_nombre
                 changed.append("nombre_point")
+            if point_category and insumo_target.categoria != point_category[:120]:
+                insumo_target.categoria = point_category[:120]
+                changed.append("categoria")
             if changed:
                 insumo_target.save(update_fields=changed)
 

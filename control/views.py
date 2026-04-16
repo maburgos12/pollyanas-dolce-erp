@@ -559,50 +559,6 @@ def discrepancias(request):
     ventas_hoy = VentaPOS.objects.filter(fecha=timezone.localdate()).count()
     mermas_hoy = MermaPOS.objects.filter(fecha=timezone.localdate()).count()
     capturas_recientes = VentaPOS.objects.count() + MermaPOS.objects.count()
-
-    enterprise_chain = _control_enterprise_chain(
-        discrepancias_alerta=report["totals"]["alertas"],
-        discrepancias_observar=report["totals"]["observar"],
-        discrepancias_ok=report["totals"]["ok"],
-        ventas_hoy=ventas_hoy,
-        mermas_hoy=mermas_hoy,
-        capturas_recientes=capturas_recientes,
-    )
-    document_stage_rows = _control_document_stage_rows(
-        discrepancias_alerta=report["totals"]["alertas"],
-        discrepancias_observar=report["totals"]["observar"],
-        discrepancias_ok=report["totals"]["ok"],
-        ventas_hoy=ventas_hoy,
-        mermas_hoy=mermas_hoy,
-        capturas_recientes=capturas_recientes,
-    )
-    operational_health_cards = _control_operational_health_cards(
-        alertas=report["totals"]["alertas"],
-        observar=report["totals"]["observar"],
-        ok=report["totals"]["ok"],
-        ventas_hoy=ventas_hoy,
-        mermas_hoy=mermas_hoy,
-        capturas_recientes=capturas_recientes,
-    )
-    maturity_summary = _control_maturity_summary(
-        chain=enterprise_chain,
-        default_url=reverse("control:discrepancias"),
-    )
-    handoff_map = _control_handoff_map(
-        capturas_recientes=capturas_recientes,
-        ventas_hoy=ventas_hoy,
-        mermas_hoy=mermas_hoy,
-        discrepancias_alerta=report["totals"]["alertas"],
-    )
-    release_gate_rows = _control_release_gate_rows(
-        capturas_recientes=capturas_recientes,
-        ventas_hoy=ventas_hoy,
-        mermas_hoy=mermas_hoy,
-        discrepancias_alerta=report["totals"]["alertas"],
-        discrepancias_observar=report["totals"]["observar"],
-        discrepancias_ok=report["totals"]["ok"],
-        base_url=reverse("control:discrepancias"),
-    )
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
     if enterprise_focus == "ALERTAS":
         report["rows"] = [row for row in report["rows"] if row["semaforo"] == "ROJO"]
@@ -629,7 +585,6 @@ def discrepancias(request):
         selected_focus=enterprise_focus,
         count=len(report["rows"]),
     )
-    governance_rows = _control_governance_rows(document_stage_rows)
 
     context = {
         "module_tabs": _module_tabs("discrepancias"),
@@ -640,42 +595,10 @@ def discrepancias(request):
         "sucursal_id": sucursal_id,
         "sucursales": list(Sucursal.objects.filter(activa=True).order_by("codigo")),
         "report": report,
-        "enterprise_chain": enterprise_chain,
-        "document_stage_rows": document_stage_rows,
-        "erp_governance_rows": governance_rows,
-        "executive_radar_rows": _control_executive_radar_rows(
-            governance_rows,
-            default_owner="Control / Lectura",
-            fallback_url=reverse("control:discrepancias"),
-        ),
-        "erp_command_center": _control_command_center(
-            governance_rows=governance_rows,
-            maturity_summary=maturity_summary,
-            default_url=reverse("control:discrepancias"),
-            default_cta="Abrir control",
-        ),
-        "operational_health_cards": operational_health_cards,
-        "maturity_summary": maturity_summary,
-        "handoff_map": handoff_map,
-        "release_gate_rows": release_gate_rows,
-        "release_gate_completion": (
-            int(
-                round(
-                    (
-                        sum(row["completed"] for row in release_gate_rows)
-                        / sum(row["total"] for row in release_gate_rows)
-                    )
-                    * 100
-                )
-            )
-            if release_gate_rows and sum(row["total"] for row in release_gate_rows)
-            else 0
-        ),
         "enterprise_focus": enterprise_focus,
         "focus_cards": focus_cards,
         "focus_summary": focus_summary,
     }
-    context["critical_path_rows"] = _control_critical_path_rows(context["enterprise_chain"])
     return render(request, "control/discrepancias.html", context)
 
 

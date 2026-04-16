@@ -1,17 +1,52 @@
 #!/bin/bash
 set -e
 
+RUNNING_ON_RAILWAY="${RUNNING_ON_RAILWAY:-0}"
+if [ -n "${RAILWAY_PROJECT_ID:-}" ] || [ -n "${RAILWAY_SERVICE_ID:-}" ] || [ -n "${RAILWAY_PUBLIC_DOMAIN:-}" ]; then
+  RUNNING_ON_RAILWAY=1
+fi
+
+: "${BOOTSTRAP_ROLES_ON_START:=1}"
+: "${COLLECTSTATIC_ON_START:=1}"
+
+if [ "${RUNNING_ON_RAILWAY}" = "1" ]; then
+  # El proceso web de Railway debe quedar sano rápido y no iniciar sincronizadores ni bootstrap externos.
+  : "${BOOTSTRAP_POINT_BRANCHES_ON_START:=0}"
+  : "${ENABLE_AUTO_SYNC_ALMACEN:=0}"
+  : "${ENABLE_AUTO_MAINT_INTEGRACIONES:=0}"
+  : "${ENABLE_AUTO_SYNC_POS_BRIDGE:=0}"
+else
+  : "${BOOTSTRAP_POINT_BRANCHES_ON_START:=1}"
+fi
+
+echo "DEBUG: RUNNING_ON_RAILWAY=${RUNNING_ON_RAILWAY}"
+echo "DEBUG: BOOTSTRAP_ROLES_ON_START=${BOOTSTRAP_ROLES_ON_START}"
+echo "DEBUG: BOOTSTRAP_POINT_BRANCHES_ON_START=${BOOTSTRAP_POINT_BRANCHES_ON_START}"
+echo "DEBUG: COLLECTSTATIC_ON_START=${COLLECTSTATIC_ON_START}"
+
 echo "Running migrations..."
-python manage.py migrate
+python manage.py migrate --noinput
 
-echo "Bootstrapping roles..."
-python manage.py bootstrap_roles
+if [ "${BOOTSTRAP_ROLES_ON_START}" = "1" ]; then
+  echo "Bootstrapping roles..."
+  python manage.py bootstrap_roles
+else
+  echo "Skipping role bootstrap on start"
+fi
 
-echo "Bootstrapping Point branches..."
-python manage.py bootstrap_sucursales_point --only-missing
+if [ "${BOOTSTRAP_POINT_BRANCHES_ON_START}" = "1" ]; then
+  echo "Bootstrapping Point branches..."
+  python manage.py bootstrap_sucursales_point --only-missing
+else
+  echo "Skipping Point branch bootstrap on start"
+fi
 
-echo "Collecting static files..."
-python manage.py collectstatic --noinput
+if [ "${COLLECTSTATIC_ON_START}" = "1" ]; then
+  echo "Collecting static files..."
+  python manage.py collectstatic --noinput
+else
+  echo "Skipping collectstatic on start"
+fi
 
 echo "Creating legacy CSS aliases for cached clients..."
 LATEST_STYLES_CSS="$(ls -1 /app/staticfiles/css/styles.*.css 2>/dev/null | grep -v '\\.map$' | sort | tail -n 1 || true)"
@@ -83,4 +118,9 @@ if [ "${ENABLE_AUTO_SYNC_POS_BRIDGE:-0}" = "1" ]; then
 fi
 
 echo "Starting Gunicorn..."
-exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_CONCURRENCY:-2} --timeout 60
+exec gunicorn config.wsgi:application \
+  --bind 0.0.0.0:${PORT:-8000} \
+  --workers "${WEB_CONCURRENCY:-2}" \
+  --timeout "${GUNICORN_TIMEOUT:-120}" \
+  --access-logfile - \
+  --error-logfile -

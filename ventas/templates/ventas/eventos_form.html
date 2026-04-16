@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block title %}Ventas - Evento{% endblock %}
+{% block page_title %}{% if event %}Editar evento{% else %}Nuevo evento{% endif %}{% endblock %}
+{% block body_class %}page-ventas-evento-form{% endblock %}
+
+{% block content %}
+<div class="module-shell ventas-evento-form">
+  <section class="card">
+    <div class="card-header">Datos generales</div>
+    <form method="post">
+      {% csrf_token %}
+      <div class="form-grid">
+        <label class="field">
+          <span>Nombre</span>
+          <input class="input" type="text" name="name" value="{{ event.name|default:'' }}" required />
+        </label>
+        <label class="field">
+          <span>Tipo de evento</span>
+          <input class="input" type="text" name="event_type" value="{{ event.event_type|default:'' }}" />
+        </label>
+        <label class="field">
+          <span>Fecha principal</span>
+          <input class="input" type="date" name="main_date" value="{{ event.main_date|date:'Y-m-d' }}" required />
+        </label>
+        <label class="field">
+          <span>Inicio análisis</span>
+          <input class="input" type="date" name="analysis_start_date" value="{{ event.analysis_start_date|date:'Y-m-d' }}" required />
+        </label>
+        <label class="field">
+          <span>Fin análisis</span>
+          <input class="input" type="date" name="analysis_end_date" value="{{ event.analysis_end_date|date:'Y-m-d' }}" required />
+        </label>
+        <label class="field">
+          <span>Fecha límite aprobación</span>
+          <input class="input" type="date" name="approval_deadline" value="{{ event.approval_deadline|date:'Y-m-d' }}" />
+        </label>
+        <label class="field">
+          <span>Prioridad</span>
+          <select class="input" name="priority">
+            {% for key, label in priority_choices %}
+            <option value="{{ key }}" {% if event and event.priority == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Escenario foco</span>
+          <select class="input" name="scenario_focus">
+            <option value="CONSERVADOR" {% if event and event.scenario_focus == 'CONSERVADOR' %}selected{% endif %}>Conservador</option>
+            <option value="BASE" {% if not event or event.scenario_focus == 'BASE' %}selected{% endif %}>Base</option>
+            <option value="AGRESIVO" {% if event and event.scenario_focus == 'AGRESIVO' %}selected{% endif %}>Agresivo</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Multiplicador conservador</span>
+          <input class="input" type="number" step="0.01" name="conservative_pct" value="{{ event.conservative_pct|default:'0.90' }}" />
+        </label>
+        <label class="field">
+          <span>Multiplicador agresivo</span>
+          <input class="input" type="number" step="0.01" name="aggressive_pct" value="{{ event.aggressive_pct|default:'1.10' }}" />
+        </label>
+        <label class="field" style="grid-column:1 / -1;">
+          <span>Objetivo comercial</span>
+          <input class="input" type="text" name="objective_type" value="{{ event.objective_type|default:'' }}" />
+        </label>
+        <label class="field" style="grid-column:1 / -1;">
+          <span>Notas</span>
+          <textarea class="input" name="objective_notes" rows="3">{{ event.objective_notes|default:'' }}</textarea>
+        </label>
+      </div>
+
+      <div class="card-header" style="margin-top:16px;">Sucursales participantes</div>
+      <div class="muted" style="margin-bottom:12px;">Selecciona de forma explícita las sucursales que participarán en la proyección.</div>
+      <div class="chips" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
+        {% for branch in branches %}
+        <label class="chip" style="justify-content:flex-start;">
+          <input
+            class="branch-checkbox"
+            type="checkbox"
+            name="branches"
+            value="{{ branch.id }}"
+            data-branch-id="{{ branch.id }}"
+            {% if branch.id in selected_branch_ids %}checked{% endif %}
+          />
+          <span>{{ branch.nombre|default:branch.codigo|title }}</span>
+        </label>
+        {% endfor %}
+      </div>
+
+      {% if branch_comparable_controls %}
+      <div class="card-header" style="margin-top:16px;">Sucursales que requieren comparable</div>
+      <div class="muted" style="margin-bottom:12px;">Solo aparece para sucursales sin historial suficiente. Si no eliges una comparable, el sistema seguirá sin comparable explícita y resolverá internamente su señal sin marcarla en la interfaz como selección previa.</div>
+      <div style="display:grid; gap:12px;">
+        {% for control in branch_comparable_controls %}
+        <label
+          class="field branch-comparable-field"
+          data-branch-comparable="{{ control.branch.id }}"
+          style="{% if not control.is_selected %}display:none;{% endif %}"
+        >
+          <span>{{ control.branch.nombre|default:control.branch.codigo|title }}</span>
+          <select class="input" name="{{ control.field_name }}">
+            <option value="">Sin comparable explícita</option>
+            {% for branch in control.options %}
+            <option value="{{ branch.id }}" {% if control.current_id == branch.id %}selected{% endif %}>{{ branch.nombre|default:branch.codigo|title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="card-header" style="margin-top:16px;">Productos participantes</div>
+      <div class="muted" style="margin-bottom:12px;">Selecciona por bloques visuales. Los productos ya vienen agrupados por familia y categoría para no revisar una lista corrida.</div>
+      <div style="display:flex; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
+        <input
+          id="productSearchInput"
+          class="input"
+          type="search"
+          placeholder="Buscar producto por nombre..."
+          style="max-width:360px;"
+        />
+        <button class="btn btn-secondary btn-sm" id="selectVisibleProducts" type="button">Seleccionar visibles</button>
+        <button class="btn btn-ghost btn-sm" id="clearVisibleProducts" type="button">Limpiar visibles</button>
+        <span class="muted" id="productSearchSummary">Mostrando todos los bloques.</span>
+      </div>
+      <div style="display:grid; gap:16px; max-height:460px; overflow:auto; padding-right:4px;">
+        {% for group in product_groups %}
+        <section class="card product-group-card" data-group-index="{{ forloop.counter }}" style="padding:14px 16px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:700;">{{ group.family }}</div>
+              <div class="muted">{{ group.category }} · {{ group.products|length }} productos</div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm product-group-select" type="button" data-group-index="{{ forloop.counter }}">Seleccionar categoría</button>
+              <button class="btn btn-ghost btn-sm product-group-clear" type="button" data-group-index="{{ forloop.counter }}">Limpiar categoría</button>
+            </div>
+          </div>
+          <div class="chips" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px;">
+            {% for product in group.products %}
+            <label
+              class="chip product-chip"
+              data-group-index="{{ forloop.parentloop.counter }}"
+              data-search-text="{{ group.family|lower }} {{ group.category|lower }} {{ product.nombre|lower }}"
+              style="justify-content:flex-start;"
+            >
+              <input class="product-checkbox" type="checkbox" name="products" value="{{ product.id }}" {% if product.id in selected_product_ids %}checked{% endif %} />
+              <span>{{ product.nombre }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+
+      <div class="toolbar" style="margin-top:16px;">
+        <button class="btn btn-primary" type="submit">Guardar</button>
+        <a class="btn btn-ghost" href="{% url 'ventas:eventos' %}">Cancelar</a>
+      </div>
+    </form>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (() => {
+    const searchInput = document.getElementById("productSearchInput");
+    const searchSummary = document.getElementById("productSearchSummary");
+    const selectVisibleButton = document.getElementById("selectVisibleProducts");
+    const clearVisibleButton = document.getElementById("clearVisibleProducts");
+    const groupCards = Array.from(document.querySelectorAll(".product-group-card"));
+    const productChips = Array.from(document.querySelectorAll(".product-chip"));
+    const branchCheckboxes = Array.from(document.querySelectorAll(".branch-checkbox"));
+    const branchComparableFields = Array.from(document.querySelectorAll(".branch-comparable-field"));
+    const visibleCheckboxes = () =>
+      productChips
+        .filter((chip) => chip.style.display !== "none")
+        .map((chip) => chip.querySelector(".product-checkbox"))
+        .filter(Boolean);
+
+    const syncComparableVisibility = () => {
+      branchComparableFields.forEach((field) => {
+        const branchId = field.dataset.branchComparable;
+        const checkbox = branchCheckboxes.find((item) => item.dataset.branchId === branchId);
+        const shouldShow = !checkbox || checkbox.checked || checkbox.disabled;
+        field.style.display = shouldShow ? "block" : "none";
+      });
+    };
+
+    const updateSearch = () => {
+      const term = (searchInput?.value || "").trim().toLowerCase();
+      let visibleGroups = 0;
+
+      groupCards.forEach((card) => {
+        const groupIndex = card.dataset.groupIndex;
+        const chips = productChips.filter((chip) => chip.dataset.groupIndex === groupIndex);
+        let visibleInGroup = 0;
+
+        chips.forEach((chip) => {
+          const matches = !term || chip.dataset.searchText.includes(term);
+          chip.style.display = matches ? "flex" : "none";
+          if (matches) visibleInGroup += 1;
+        });
+
+        const showGroup = visibleInGroup > 0;
+        card.style.display = showGroup ? "block" : "none";
+        if (showGroup) visibleGroups += 1;
+      });
+
+      if (!searchSummary) return;
+      searchSummary.textContent = term
+        ? `Mostrando ${visibleGroups} bloque(s) con coincidencias para "${term}".`
+        : "Mostrando todos los bloques.";
+    };
+
+    document.querySelectorAll(".product-group-select").forEach((button) => {
+      button.addEventListener("click", () => {
+        const groupIndex = button.dataset.groupIndex;
+        document
+          .querySelectorAll(`.product-chip[data-group-index="${groupIndex}"] .product-checkbox`)
+          .forEach((checkbox) => {
+            if (checkbox.closest(".product-chip")?.style.display !== "none") checkbox.checked = true;
+          });
+      });
+    });
+
+    document.querySelectorAll(".product-group-clear").forEach((button) => {
+      button.addEventListener("click", () => {
+        const groupIndex = button.dataset.groupIndex;
+        document
+          .querySelectorAll(`.product-chip[data-group-index="${groupIndex}"] .product-checkbox`)
+          .forEach((checkbox) => {
+            checkbox.checked = false;
+          });
+      });
+    });
+
+    selectVisibleButton?.addEventListener("click", () => {
+      visibleCheckboxes().forEach((checkbox) => {
+        checkbox.checked = true;
+      });
+    });
+
+    clearVisibleButton?.addEventListener("click", () => {
+      visibleCheckboxes().forEach((checkbox) => {
+        checkbox.checked = false;
+      });
+    });
+
+    searchInput?.addEventListener("input", updateSearch);
+    branchCheckboxes.forEach((checkbox) => {
+      checkbox.addEventListener("change", syncComparableVisibility);
+    });
+    updateSearch();
+    syncComparableVisibility();
+  })();
+</script>
+{% endblock %}

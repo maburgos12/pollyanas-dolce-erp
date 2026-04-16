@@ -1,7 +1,7 @@
 import hashlib
 import csv
 from io import BytesIO
-from math import sqrt
+from math import exp, sqrt
 from datetime import date, datetime, timedelta
 from calendar import monthrange
 from collections import defaultdict
@@ -13,7 +13,7 @@ from uuid import uuid4
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import PermissionDenied
-from django.db import OperationalError, ProgrammingError, transaction
+from django.db import OperationalError, ProgrammingError, connection, transaction
 from django.db.models.deletion import ProtectedError
 from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum, DecimalField, Max
 from django.core.paginator import Paginator
@@ -38,6 +38,8 @@ from pos_bridge.models import (
     PointDailyBranchIndicator,
     PointDailySale,
     PointInventorySnapshot,
+    PointProduct,
+    PointSalesDailyProductFact,
     PointSyncJob,
     PointProductionLine,
     PointTransferLine,
@@ -83,9 +85,28 @@ from .utils.matching import match_insumo
 from .utils.normalizacion import normalizar_nombre
 from .catalogs import familia_categoria_catalogo_json, familias_producto_catalogo
 from reportes.executive_panels import _partial_month_amount_quantity
+from ventas.models import VentaAutoritativaPoint
 
 OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
 RECENT_POINT_SOURCE = "/Report/VentasCategorias"
+NONBLOCKING_PRODUCT_PLACEHOLDER_LABELS = {
+    "armado",
+    "presentacion",
+}
+DIRECT_BASE_REPLACEMENT_MIN_QTY = Decimal("0.25")
+DIRECT_BASE_REPLACEMENT_MAX_QTY = Decimal("4.00")
+FORECAST_HISTORY_START = date(2022, 1, 1)
+FORECAST_RECENCY_HALF_LIFE_DAYS = Decimal("540")
+FORECAST_MIN_RECENCY_WEIGHT = Decimal("0.20")
+FORECAST_MARCH_2026_LEGACY_WEIGHT = Decimal("0.20")
+FORECAST_EXCLUDED_MONTHS = {(2026, 3)}
+MIX_ADJUSTMENT_ENABLED_DEFAULT = False
+MIX_RECENT_WINDOW_DAYS = 84
+MIX_SHORT_WINDOW_DAYS = 28
+MIX_MIN_RECENT_SALES_QTY = Decimal("12")
+MIX_MIN_EFFECTIVE_RECENT_SAMPLES = Decimal("4")
+MIX_MAX_CHANGE_PCT = Decimal("0.20")
+MIX_ALPHA_MAX = Decimal("0.35")
 
 
 def _presentacion_sort_key(nombre: str) -> tuple[int, str]:
@@ -150,6 +171,22 @@ def _insumo_erp_readiness(insumo: Insumo) -> dict[str, object]:
         missing.append("categoría")
     if effective_tipo == Insumo.TIPO_EMPAQUE and not (insumo.categoria or "").strip():
         missing.append("categoría")
+    return {
+        "ready": not missing,
+        "missing": missing,
+        "label": "Listo para operar" if not missing else "Incompleto",
+    }
+
+
+def _insumo_operational_readiness(
+    insumo: Insumo,
+    *,
+    ignore_supplier: bool = False,
+) -> dict[str, object]:
+    profile = _insumo_erp_readiness(insumo)
+    missing = list(profile["missing"])
+    if ignore_supplier:
+        missing = [item for item in missing if item != "proveedor principal"]
     return {
         "ready": not missing,
         "missing": missing,
@@ -246,6 +283,7 @@ def _run_point_recipe_sync_action(
         job.result_summary = result.summary
         job.artifacts = {"raw_export_path": result.raw_export_path}
         job.save(update_fields=["status", "finished_at", "result_summary", "artifacts", "updated_at"])
+        request.session["recetas_last_point_sync_job_id"] = job.id
         log_event(
             request.user,
             "SYNC_POINT_RECIPES",
@@ -276,6 +314,93 @@ def _run_point_recipe_sync_action(
             },
         )
         raise
+
+
+def _format_point_recipe_sync_message(summary: dict[str, Any], *, new_codes_count: int | None = None) -> str:
+    completed = int(summary.get("recipes_completed_successfully") or 0)
+    warnings = int(summary.get("recipes_with_unresolved_inputs") or 0)
+    new_products = int(summary.get("new_products_imported") or 0)
+    new_preparations = int(summary.get("new_preparations_imported") or 0)
+    unresolved = int(summary.get("unresolved_inputs_count") or 0)
+    products_selected = int(summary.get("products_selected") or 0)
+    products_label = new_codes_count if new_codes_count is not None else products_selected
+
+    parts = [
+        f"Point procesó {products_selected} producto(s)",
+        f"{completed} completo(s)",
+        f"{warnings} con advertencias",
+    ]
+    if new_codes_count is not None:
+        parts.insert(0, f"Se detectaron {products_label} código(s) nuevo(s)")
+    if new_products:
+        parts.append(f"{new_products} producto(s) nuevo(s) creado(s)")
+    if new_preparations:
+        parts.append(f"{new_preparations} preparación(es) hija(s) nueva(s)")
+    if unresolved:
+        parts.append(f"{unresolved} insumo(s) pendiente(s)")
+    return ". ".join(parts) + "."
+
+
+def _format_point_recipe_discovery_blocked_message(discovery: dict[str, Any]) -> str:
+    blocked_candidates = discovery.get("blocked_candidates") or []
+    blocked_count = int(discovery.get("blocked_candidates_count") or len(blocked_candidates))
+    if blocked_count <= 0:
+        return "Point no reportó productos nuevos con receta pendientes de incorporar."
+    sample = ", ".join(
+        f"{item.get('codigo_point') or ''} {item.get('nombre') or ''}".strip()
+        for item in blocked_candidates[:3]
+    )
+    suffix = f" Ejemplos: {sample}." if sample else ""
+    return (
+        f"Point no reportó productos nuevos importables con receta, pero detectó {blocked_count} "
+        f"candidato(s) nuevo(s) bloqueado(s) porque Point no entregó receta/BOM.{suffix}"
+    )
+
+
+def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
+    job_qs = PointSyncJob.objects.filter(job_type=PointSyncJob.JOB_TYPE_RECIPES)
+    preferred_job_id = request.session.get("recetas_last_point_sync_job_id")
+    job = None
+    if preferred_job_id:
+        candidate = job_qs.filter(id=preferred_job_id).first()
+        if candidate is not None and (candidate.parameters or {}).get("mode") != "recipe_gap_audit":
+            job = candidate
+    if job is None:
+        for candidate in job_qs:
+            if (candidate.parameters or {}).get("mode") != "recipe_gap_audit":
+                job = candidate
+                break
+    if job is None:
+        return None
+
+    summary = job.result_summary or {}
+    imported_products = list(summary.get("imported_products_status") or [])
+    status_label_map = {
+        "SUCCESS_COMPLETE": ("Completo", "success"),
+        "SUCCESS_WITH_WARNINGS": ("Con advertencias", "warning"),
+        "BLOCKED_UNRESOLVED": ("Bloqueado", "danger"),
+    }
+    decorated_products: list[dict[str, Any]] = []
+    for item in imported_products[:5]:
+        label, tone = status_label_map.get(item.get("status"), ("Sin clasificar", "warning"))
+        decorated_products.append(
+            {
+                **item,
+                "status_label": label,
+                "tone": tone,
+            }
+        )
+
+    return {
+        "job_id": job.id,
+        "job_status": job.status,
+        "job_status_label": job.get_status_display(),
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "summary": summary,
+        "products": decorated_products,
+        "products_more_count": max(0, len(imported_products) - len(decorated_products)),
+    }
 
 
 def _snapshot_costeo_after_sync(*, receta_ids: list[int] | None = None) -> dict[str, Any]:
@@ -648,6 +773,36 @@ def _product_upstream_snapshot(lineas: list[LineaReceta], *, receta: Receta | No
     }
 
 
+def _recipe_requires_fixed_packaging(receta: Receta) -> bool:
+    if receta.tipo != Receta.TIPO_PRODUCTO_FINAL:
+        return False
+    nombre_norm = normalizar_nombre(receta.nombre or "")
+    familia_norm = normalizar_nombre(receta.familia or "")
+    categoria_norm = normalizar_nombre(receta.categoria or "")
+    # Reglas operativas confirmadas por DG:
+    # - Bollos y galletas no se entregan con empaque unitario fijo.
+    # - Su salida depende de empaque por paquete o decisión comercial al momento.
+    # - Empanadas individuales no llevan empaque unitario fijo.
+    # - Bolitas de Nuez KG se maneja sin empaque unitario directo por ahora.
+    if nombre_norm.startswith("bollo ") or nombre_norm.startswith("galleta "):
+        return False
+    if familia_norm == "empanadas" or categoria_norm == "empanadas" or nombre_norm.startswith("empanada "):
+        return False
+    if (receta.codigo_point or "").strip() == "05021" or nombre_norm == "bolitas de nuez kg":
+        return False
+    return True
+
+
+def _recipe_packaging_ready(receta: Receta, upstream_snapshot: dict[str, object]) -> bool:
+    if not _recipe_requires_fixed_packaging(receta):
+        return True
+    return int(upstream_snapshot.get("empaque_count") or 0) > 0
+
+
+def _recipe_packaging_missing(receta: Receta, upstream_snapshot: dict[str, object]) -> bool:
+    return _recipe_requires_fixed_packaging(receta) and int(upstream_snapshot.get("empaque_count") or 0) <= 0
+
+
 def _direct_base_usage_snapshot(lineas: list[LineaReceta]) -> dict[str, object]:
     source_recipe_ids = {
         recipe_id
@@ -674,6 +829,7 @@ def _direct_base_usage_snapshot(lineas: list[LineaReceta]) -> dict[str, object]:
 
     direct_base_names: list[str] = []
     count = 0
+    replacement_cache: dict[int, list[dict[str, object]]] = {}
     for linea in lineas:
         insumo = getattr(linea, "insumo", None)
         if not getattr(linea, "insumo_id", None) or not insumo or insumo.tipo_item != Insumo.TIPO_INTERNO:
@@ -683,10 +839,15 @@ def _direct_base_usage_snapshot(lineas: list[LineaReceta]) -> dict[str, object]:
         source_recipe_id = _recipe_id_from_derived_code(insumo.codigo or "")
         source_recipe = source_recipe_map.get(source_recipe_id) if source_recipe_id else None
         active_presentaciones = int(source_recipe_presentaciones.get(source_recipe_id, 0)) if source_recipe_id else 0
-        if source_recipe and source_recipe.usa_presentaciones and active_presentaciones > 0:
-            count += 1
-            if source_recipe.nombre not in direct_base_names:
-                direct_base_names.append(source_recipe.nombre)
+        if not source_recipe or not source_recipe.usa_presentaciones or active_presentaciones <= 0:
+            continue
+        candidates = _active_presentation_derived_candidates(source_recipe_id, cache=replacement_cache)
+        replacement = _suggest_direct_base_replacement(linea, cache=replacement_cache)
+        if candidates and not replacement:
+            continue
+        count += 1
+        if source_recipe.nombre not in direct_base_names:
+            direct_base_names.append(source_recipe.nombre)
 
     return {
         "count": count,
@@ -760,12 +921,15 @@ def _recipe_direct_base_snapshot(receta: Receta) -> dict[str, object]:
         if not source_recipe or not source_recipe.usa_presentaciones or active_presentaciones <= 0:
             continue
 
+        candidates = _active_presentation_derived_candidates(source_recipe_id, cache=replacement_cache)
+        replacement = _suggest_direct_base_replacement(linea, cache=replacement_cache)
+        if candidates and not replacement:
+            continue
         count += 1
         if source_recipe.nombre not in base_names:
             base_names.append(source_recipe.nombre)
 
         linea.uses_direct_base_in_final = True
-        replacement = _suggest_direct_base_replacement(linea, cache=replacement_cache)
         if not replacement:
             continue
         suggested_count += 1
@@ -858,7 +1022,12 @@ def _suggest_direct_base_replacement(
     linea: LineaReceta,
     cache: dict[int, list[dict[str, object]]] | None = None,
 ) -> dict[str, object] | None:
-    if not getattr(linea, "insumo_id", None) or not getattr(linea, "uses_direct_base_in_final", False):
+    if not getattr(linea, "insumo_id", None):
+        return None
+    insumo = getattr(linea, "insumo", None)
+    if not insumo or insumo.tipo_item != Insumo.TIPO_INTERNO:
+        return None
+    if _derived_code_kind(getattr(insumo, "codigo", "") or "") != "PREPARACION":
         return None
     source_recipe_id = _recipe_id_from_derived_code(getattr(linea.insumo, "codigo", "") or "")
     if not source_recipe_id:
@@ -885,6 +1054,11 @@ def _suggest_direct_base_replacement(
     replacement_quantity = Decimal("0")
     if best["peso"] > 0:
         replacement_quantity = (qty / best["peso"]).quantize(Decimal("0.000001"))
+    if not exact_match and (
+        replacement_quantity < DIRECT_BASE_REPLACEMENT_MIN_QTY
+        or replacement_quantity > DIRECT_BASE_REPLACEMENT_MAX_QTY
+    ):
+        return None
     qty_human = f"{qty.quantize(Decimal('0.01'))}"
     peso_human = f"{best['peso'].quantize(Decimal('0.01'))}"
     if exact_match:
@@ -922,7 +1096,10 @@ def _recipe_incomplete_erp_item_count(receta: Receta) -> int:
     for linea in lineas_qs:
         if not linea.insumo_id:
             continue
-        profile = _insumo_erp_readiness(linea.insumo)
+        profile = _insumo_operational_readiness(
+            linea.insumo,
+            ignore_supplier=receta.tipo == Receta.TIPO_PRODUCTO_FINAL,
+        )
         if not profile["ready"]:
             count += 1
     setattr(receta, "_incomplete_erp_item_count_cache", count)
@@ -956,7 +1133,10 @@ def _recipe_master_gap_summary(receta: Receta) -> dict[str, object]:
     for linea in lineas_qs:
         if not linea.insumo_id:
             continue
-        profile = _insumo_erp_readiness(linea.insumo)
+        profile = _insumo_operational_readiness(
+            linea.insumo,
+            ignore_supplier=receta.tipo == Receta.TIPO_PRODUCTO_FINAL,
+        )
         missing = set(profile["missing"])
         if "unidad base" in missing:
             counters["unidad"] += 1
@@ -991,6 +1171,25 @@ def _recipe_master_gap_summary(receta: Receta) -> dict[str, object]:
     }
     setattr(receta, "_master_gap_summary_cache", summary)
     return summary
+
+
+def _linea_counts_as_operational_pending(linea: LineaReceta) -> bool:
+    if linea.match_status not in {LineaReceta.STATUS_NEEDS_REVIEW, LineaReceta.STATUS_REJECTED}:
+        return False
+    if linea.tipo_linea == LineaReceta.TIPO_SUBSECCION and linea.insumo_id:
+        return False
+    if linea.insumo_id:
+        return True
+    label = normalizar_nombre(linea.insumo_texto or "")
+    return label not in NONBLOCKING_PRODUCT_PLACEHOLDER_LABELS
+
+
+def _recipe_operational_pending_count(receta: Receta) -> int:
+    prefetched = getattr(receta, "_prefetched_objects_cache", {}).get("lineas")
+    if prefetched is not None:
+        return sum(1 for linea in prefetched if _linea_counts_as_operational_pending(linea))
+    lineas_qs = receta.lineas.only("id", "tipo_linea", "match_status", "insumo_id", "insumo_texto")
+    return sum(1 for linea in lineas_qs if _linea_counts_as_operational_pending(linea))
 
 
 def _recipe_master_blockers(
@@ -1098,15 +1297,8 @@ def _recipe_master_gap_totals_from_blockers(blockers: list[dict[str, object]]) -
 
 
 def _recipe_operational_health(receta: Receta) -> dict[str, str]:
-    pendientes_attr = getattr(receta, "pendientes_count", None)
     lineas_attr = getattr(receta, "lineas_count", None)
-    if pendientes_attr is None:
-        pendientes = receta.lineas.filter(
-            Q(match_status=LineaReceta.STATUS_NEEDS_REVIEW)
-            | Q(match_status=LineaReceta.STATUS_REJECTED)
-        ).count()
-    else:
-        pendientes = int(pendientes_attr or 0)
+    pendientes = _recipe_operational_pending_count(receta)
     if lineas_attr is None:
         lineas = receta.lineas.count()
     else:
@@ -1150,7 +1342,7 @@ def _recipe_operational_health(receta: Receta) -> dict[str, str]:
                 "label": "Sin trazabilidad base",
                 "description": "Tiene insumos internos ligados que todavía no apuntan a una receta base canónica.",
             }
-        if upstream_snapshot["empaque_count"] <= 0:
+        if _recipe_packaging_missing(receta, upstream_snapshot):
             return {
                 "code": "warning",
                 "label": "Sin empaque",
@@ -1202,6 +1394,110 @@ def _recipe_operational_health(receta: Receta) -> dict[str, str]:
         "label": "Lista para operar",
         "description": "Base preparada para costeo, derivados y uso operativo.",
     }
+
+
+def _build_recipe_point_validation_snapshot(recetas: list[Receta]) -> dict[int, dict[str, object]]:
+    producto_final_ids = [receta.id for receta in recetas if receta.tipo == Receta.TIPO_PRODUCTO_FINAL]
+    if not producto_final_ids:
+        return {}
+
+    latest_sale = PointDailySale.objects.aggregate(max_date=Max("sale_date")).get("max_date")
+    latest_production = PointProductionLine.objects.aggregate(max_date=Max("production_date")).get("max_date")
+    sale_cutoff = latest_sale - timedelta(days=90) if latest_sale else None
+    production_cutoff = latest_production - timedelta(days=90) if latest_production else None
+
+    active_code_norms = {
+        normalizar_codigo_point(code)
+        for code in PointProduct.objects.filter(active=True).exclude(sku="").values_list("sku", flat=True)
+        if normalizar_codigo_point(code)
+    }
+    active_name_norms = {
+        name
+        for name in PointProduct.objects.filter(active=True).exclude(normalized_name="").values_list("normalized_name", flat=True)
+        if name
+    }
+    sale_code_norms = (
+        {
+            normalizar_codigo_point(code)
+            for code in PointDailySale.objects.filter(sale_date__gte=sale_cutoff)
+            .exclude(product__sku="")
+            .values_list("product__sku", flat=True)
+            .distinct()
+            if normalizar_codigo_point(code)
+        }
+        if sale_cutoff
+        else set()
+    )
+    sale_name_norms = (
+        {
+            name
+            for name in PointDailySale.objects.filter(sale_date__gte=sale_cutoff)
+            .exclude(product__normalized_name="")
+            .values_list("product__normalized_name", flat=True)
+            .distinct()
+            if name
+        }
+        if sale_cutoff
+        else set()
+    )
+    production_code_norms = (
+        {
+            normalizar_codigo_point(code)
+            for code in PointProductionLine.objects.filter(production_date__gte=production_cutoff)
+            .exclude(item_code="")
+            .values_list("item_code", flat=True)
+            .distinct()
+            if normalizar_codigo_point(code)
+        }
+        if production_cutoff
+        else set()
+    )
+    production_name_norms = (
+        {
+            normalizar_nombre(name)
+            for name in PointProductionLine.objects.filter(production_date__gte=production_cutoff)
+            .exclude(item_name="")
+            .values_list("item_name", flat=True)
+            .distinct()
+            if normalizar_nombre(name)
+        }
+        if production_cutoff
+        else set()
+    )
+
+    snapshot: dict[int, dict[str, object]] = {}
+    for receta in recetas:
+        if receta.tipo != Receta.TIPO_PRODUCTO_FINAL:
+            continue
+        code_norm = normalizar_codigo_point(receta.codigo_point or "")
+        name_norm = normalizar_nombre(receta.nombre or "")
+        is_candidate = bool(
+            (code_norm and code_norm in active_code_norms)
+            or (code_norm and code_norm in sale_code_norms)
+            or (code_norm and code_norm in production_code_norms)
+            or (name_norm and name_norm in active_name_norms)
+            or (name_norm and name_norm in sale_name_norms)
+            or (name_norm and name_norm in production_name_norms)
+        )
+        snapshot[receta.id] = {
+            "is_candidate": is_candidate,
+            "label": "Vigente en Point" if is_candidate else "Fuera de Point",
+            "description": (
+                "El producto sigue activo o con movimiento reciente en Point."
+                if is_candidate
+                else "No tiene producto activo, venta reciente ni producción reciente en Point; no entra al conteo operativo."
+            ),
+        }
+    return snapshot
+
+
+def _recipe_counts_in_operational_catalog(receta: Receta) -> bool:
+    if receta.tipo != Receta.TIPO_PRODUCTO_FINAL:
+        return True
+    status = getattr(receta, "point_validation_status", None)
+    if not status:
+        return True
+    return bool(status.get("is_candidate", True))
 
 
 def _module_enablement_handoff_rows(
@@ -1351,7 +1647,7 @@ def _recipe_governance_issues(receta: Receta) -> list[str]:
             receta.direct_base_snapshot = direct_base_snapshot
             if int(direct_base_snapshot["count"]) > 0:
                 issues.append("base_directa")
-            if upstream_snapshot["empaque_count"] <= 0:
+            if _recipe_packaging_missing(receta, upstream_snapshot):
                 issues.append("sin_empaque")
             if upstream_snapshot["internal_without_source_count"] > 0:
                 issues.append("sin_base_origen")
@@ -1518,13 +1814,17 @@ def _recipe_chain_checkpoints(receta: Receta) -> list[dict[str, str]]:
             }
         )
 
-        pack_ok = int(upstream_snapshot["empaque_count"]) > 0
+        pack_ok = _recipe_packaging_ready(receta, upstream_snapshot)
         checkpoints.append(
             {
                 "label": "Empaque",
                 "code": "success" if pack_ok else "warning",
                 "detail": (
-                    f"{upstream_snapshot['empaque_count']} ligado(s)"
+                    (
+                        f"{upstream_snapshot['empaque_count']} ligado(s)"
+                        if int(upstream_snapshot["empaque_count"]) > 0
+                        else "Empaque flexible"
+                    )
                     if pack_ok
                     else "Sin empaque"
                 ),
@@ -1668,7 +1968,7 @@ def _recipe_chain_actions_catalog(receta: Receta) -> list[dict[str, str]]:
             actions.append(
                 {"label": "Resolver referencias", "url": f"{reverse('recetas:matching_pendientes')}?receta={receta.id}"}
             )
-        if upstream_snapshot["empaque_count"] <= 0:
+        if _recipe_packaging_missing(receta, upstream_snapshot):
             actions.append(
                 {
                     "label": "Agregar empaque",
@@ -2169,7 +2469,7 @@ def _recipe_enterprise_stage_playbook(receta: Receta) -> list[dict[str, Any]]:
                 "action_url": None if trazabilidad_ok else reverse("recetas:receta_detail", args=[receta.id]),
             }
         )
-        empaque_ok = int(upstream_snapshot["empaque_count"]) > 0
+        empaque_ok = _recipe_packaging_ready(receta, upstream_snapshot)
         items.append(
             {
                 "label": "Empaque final",
@@ -4346,40 +4646,44 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             recetas = [r for r in recetas if (r.categoria or "") == categoria]
         else:
             recetas = recetas.filter(categoria=categoria)
+    if not isinstance(recetas, list):
+        recetas = list(recetas.order_by("nombre"))
     if estado == "pendientes":
-        if isinstance(recetas, list):
-            recetas = [r for r in recetas if (r.pendientes_count or 0) > 0]
-        else:
-            recetas = recetas.filter(pendientes_count__gt=0)
+        recetas = [r for r in recetas if _recipe_operational_pending_count(r) > 0]
     elif estado == "ok":
-        if isinstance(recetas, list):
-            recetas = [r for r in recetas if (r.pendientes_count or 0) == 0]
-        else:
-            recetas = recetas.filter(pendientes_count=0)
+        recetas = [r for r in recetas if _recipe_operational_pending_count(r) == 0]
+
+    point_validation_snapshot = _build_recipe_point_validation_snapshot(recetas)
+    for receta in recetas:
+        if receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
+            receta.point_validation_status = point_validation_snapshot.get(
+                receta.id,
+                {
+                    "is_candidate": True,
+                    "label": "Vigente en Point",
+                    "description": "El producto sigue activo dentro del catálogo operativo.",
+                },
+            )
+
     if health_status in {"listas", "pendientes", "incompletas"}:
-        if isinstance(recetas, list):
-            recetas = [r for r in recetas if _matches_recipe_health_filter(r, health_status)]
-        else:
-            recetas = [r for r in recetas if _matches_recipe_health_filter(r, health_status)]
+        recetas = [
+            r
+            for r in recetas
+            if (health_status != "pendientes" or _recipe_counts_in_operational_catalog(r))
+            and _matches_recipe_health_filter(r, health_status)
+        ]
     if chain_status in {"listas", "pendientes", "incompletas"}:
-        if isinstance(recetas, list):
-            recetas = [
-                r for r in recetas
-                if (
+        recetas = [
+            r for r in recetas
+            if (
+                (chain_status != "pendientes" or _recipe_counts_in_operational_catalog(r))
+                and (
                     (_recipe_chain_status(r)["code"] == "success" and chain_status == "listas")
                     or (_recipe_chain_status(r)["code"] == "warning" and chain_status == "pendientes")
                     or (_recipe_chain_status(r)["code"] == "danger" and chain_status == "incompletas")
                 )
-            ]
-        else:
-            recetas = [
-                r for r in recetas
-                if (
-                    (_recipe_chain_status(r)["code"] == "success" and chain_status == "listas")
-                    or (_recipe_chain_status(r)["code"] == "warning" and chain_status == "pendientes")
-                    or (_recipe_chain_status(r)["code"] == "danger" and chain_status == "incompletas")
-                )
-            ]
+            )
+        ]
     if chain_checkpoint in {"base_ready", "derived_sync", "final_usage", "upstream_trace", "packaging_ready", "internal_components"}:
         if isinstance(recetas, list):
             recetas = [r for r in recetas if chain_checkpoint in _recipe_failing_chain_checkpoint_codes(r)]
@@ -4402,21 +4706,15 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         "final_ready",
         "final_defined",
     }:
-        if isinstance(recetas, list):
-            recetas = [r for r in recetas if _matches_recipe_enterprise_stage(r, enterprise_stage_filter)]
-        else:
-            recetas = [r for r in recetas if _matches_recipe_enterprise_stage(r, enterprise_stage_filter)]
-    if not isinstance(recetas, list):
-        recetas = recetas.order_by("nombre")
+        recetas = [r for r in recetas if _matches_recipe_enterprise_stage(r, enterprise_stage_filter)]
 
-    if isinstance(recetas, list):
-        total_recetas = len(recetas)
-        total_pendientes = sum(1 for r in recetas if (r.pendientes_count or 0) > 0)
-        total_lineas = sum((r.lineas_count or 0) for r in recetas)
-    else:
-        total_recetas = recetas.count()
-        total_pendientes = recetas.filter(pendientes_count__gt=0).count()
-        total_lineas = sum(r.lineas_count for r in recetas)
+    total_recetas = len(recetas)
+    total_pendientes = sum(
+        1
+        for r in recetas
+        if _recipe_counts_in_operational_catalog(r) and _recipe_operational_health(r)["code"] == "warning"
+    )
+    total_lineas = sum((r.lineas_count or 0) for r in recetas)
 
     qs_filters = {
         "vista": vista,
@@ -4477,7 +4775,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         "packaging_ready": 0,
         "internal_components": 0,
     }
-    source_for_health = recetas if isinstance(recetas, list) else list(recetas)
+    source_for_health = [receta for receta in recetas if _recipe_counts_in_operational_catalog(receta)]
     governance_summary = {
         "familia": 0,
         "categoria": 0,
@@ -4714,6 +5012,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         receta.enterprise_stage_playbook = _recipe_enterprise_stage_playbook(receta)
         receta.enterprise_stage_progress = _recipe_stage_progress(receta.enterprise_stage_playbook)
         receta.document_status = _recipe_document_status(receta)
+    point_recipe_sync_panel = _point_recipe_sync_job_panel(request)
     return render(
         request,
         "recetas/recetas_list.html",
@@ -4783,6 +5082,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             ),
             "direct_base_suggested_total": direct_base_suggested_total,
             "qs_base": qs_base,
+            "point_recipe_sync_panel": point_recipe_sync_panel,
         },
     )
 
@@ -4798,7 +5098,7 @@ def recetas_sync_all(request: HttpRequest) -> HttpResponse:
         messages.success(
             request,
             (
-                f"Point recetas actualizado: {summary.get('products_selected', 0)} productos revisados, "
+                f"{_format_point_recipe_sync_message(summary)} "
                 f"{summary.get('lineas_created', 0)} líneas materializadas. "
                 f"Corte semanal {snapshot['week_start']} recalculado."
             ),
@@ -4836,8 +5136,8 @@ def recetas_sync_group(request: HttpRequest) -> HttpResponse:
         messages.success(
             request,
             (
-                f"Grupo actualizado desde Point: {len(product_codes)} códigos enviados, "
-                f"{summary.get('products_selected', 0)} productos procesados. "
+                f"Grupo actualizado desde Point: {len(product_codes)} códigos enviados. "
+                f"{_format_point_recipe_sync_message(summary)} "
                 f"Snapshot semanal del grupo recalculado."
             ),
         )
@@ -4862,8 +5162,12 @@ def recetas_sync_new(request: HttpRequest) -> HttpResponse:
     try:
         discovery = service.discover_new_product_codes(branch_hint="MATRIZ")
         new_codes = discovery.get("new_codes") or []
+        blocked_candidates_count = int(discovery.get("blocked_candidates_count") or 0)
         if not new_codes:
-            messages.info(request, "Point no reportó productos nuevos con receta pendientes de incorporar.")
+            if blocked_candidates_count:
+                messages.warning(request, _format_point_recipe_discovery_blocked_message(discovery))
+            else:
+                messages.info(request, "Point no reportó productos nuevos con receta pendientes de incorporar.")
             return redirect(next_url)
         job, summary = _run_point_recipe_sync_action(
             request,
@@ -4875,10 +5179,12 @@ def recetas_sync_new(request: HttpRequest) -> HttpResponse:
         messages.success(
             request,
             (
-                f"Se incorporaron {len(new_codes)} códigos nuevos desde Point. "
-                f"{summary.get('products_selected', 0)} productos procesados y snapshot semanal actualizado."
+                f"{_format_point_recipe_sync_message(summary, new_codes_count=len(new_codes))} "
+                f"Snapshot semanal actualizado."
             ),
         )
+        if blocked_candidates_count:
+            messages.warning(request, _format_point_recipe_discovery_blocked_message(discovery))
         log_event(
             request.user,
             "SYNC_ONLY_NEW_PRODUCTS",
@@ -4910,7 +5216,7 @@ def receta_sync_point(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request,
             (
-                f"Receta {receta.codigo_point} actualizada desde Point. "
+                f"{_format_point_recipe_sync_message(summary)} "
                 f"{summary.get('lineas_created', 0)} líneas materializadas y costeo semanal recalculado."
             ),
         )
@@ -5540,7 +5846,14 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
         linea.source_active_presentaciones_count = 0
         linea.uses_direct_base_in_final = False
         linea.direct_base_replacement = None
-        linea.erp_profile = _insumo_erp_readiness(linea.insumo) if linea.insumo_id else None
+        linea.erp_profile = (
+            _insumo_operational_readiness(
+                linea.insumo,
+                ignore_supplier=is_producto_final,
+            )
+            if linea.insumo_id
+            else None
+        )
         if linea.insumo_id:
             linea.source_code_kind = _derived_code_kind(linea.insumo.codigo or "")
             source_recipe_id = _recipe_id_from_derived_code(linea.insumo.codigo or "")
@@ -5549,7 +5862,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 linea.source_active_presentaciones_count = int(
                     source_recipe_presentaciones.get(source_recipe_id, 0)
                 )
-                linea.uses_direct_base_in_final = bool(
+                direct_base_candidate = bool(
                     is_producto_final
                     and linea.insumo.tipo_item == Insumo.TIPO_INTERNO
                     and linea.source_code_kind == "PREPARACION"
@@ -5557,11 +5870,16 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     and linea.source_recipe.usa_presentaciones
                     and linea.source_active_presentaciones_count > 0
                 )
-                if linea.uses_direct_base_in_final:
+                if direct_base_candidate:
+                    direct_base_candidates = _active_presentation_derived_candidates(
+                        source_recipe_id,
+                        cache=direct_base_replacement_cache,
+                    )
                     linea.direct_base_replacement = _suggest_direct_base_replacement(
                         linea,
                         cache=direct_base_replacement_cache,
                     )
+                    linea.uses_direct_base_in_final = bool(linea.direct_base_replacement) or not direct_base_candidates
         grouped_line_map[_line_origin_bucket(linea)].append(linea)
     line_groups = [
         {
@@ -5706,7 +6024,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     "action_url": f"{reverse('recetas:linea_create', args=[receta.id])}?component_kind=INSUMO_INTERNO&component_context=internos",
                 }
             )
-        if total_empaques == 0:
+        if _recipe_requires_fixed_packaging(receta) and total_empaques == 0:
             bom_integrity_alerts.append(
                 {
                     "level": "warning",
@@ -5991,7 +6309,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
     bom_ready = total_revision == 0 and total_sin_match == 0
     cost_ready = total_costo_estimado > 0
     chain_ready = recipe_chain_status["tone"] != "danger"
-    packaging_ready = total_empaques > 0
+    packaging_ready = total_empaques > 0 or (is_producto_final and not _recipe_requires_fixed_packaging(receta))
     internal_ready = total_internos > 0
     if is_producto_final:
         module_enablement_cards = [
@@ -7549,7 +7867,7 @@ def linea_apply_direct_base_replacement(request: HttpRequest, pk: int, linea_id:
                 receta_id=source_recipe_id,
                 activo=True,
             ).count()
-            linea.uses_direct_base_in_final = bool(
+            direct_base_candidate = bool(
                 receta.tipo == Receta.TIPO_PRODUCTO_FINAL
                 and linea.insumo.tipo_item == Insumo.TIPO_INTERNO
                 and linea.source_code_kind == "PREPARACION"
@@ -7557,6 +7875,9 @@ def linea_apply_direct_base_replacement(request: HttpRequest, pk: int, linea_id:
                 and linea.source_recipe.usa_presentaciones
                 and linea.source_active_presentaciones_count > 0
             )
+            if direct_base_candidate:
+                direct_base_candidates = _active_presentation_derived_candidates(source_recipe_id)
+                linea.uses_direct_base_in_final = bool(_suggest_direct_base_replacement(linea)) or not direct_base_candidates
 
     replacement = _suggest_direct_base_replacement(linea)
     if not replacement:
@@ -8546,7 +8867,7 @@ def receta_apply_direct_base_replacements(request: HttpRequest, pk: int) -> Http
                     receta_id=source_recipe_id,
                     activo=True,
                 ).count()
-                linea.uses_direct_base_in_final = bool(
+                direct_base_candidate = bool(
                     receta.tipo == Receta.TIPO_PRODUCTO_FINAL
                     and linea.insumo.tipo_item == Insumo.TIPO_INTERNO
                     and linea.source_code_kind == "PREPARACION"
@@ -8554,6 +8875,14 @@ def receta_apply_direct_base_replacements(request: HttpRequest, pk: int) -> Http
                     and linea.source_recipe.usa_presentaciones
                     and linea.source_active_presentaciones_count > 0
                 )
+                if direct_base_candidate:
+                    direct_base_candidates = _active_presentation_derived_candidates(
+                        source_recipe_id,
+                        cache=replacement_cache,
+                    )
+                    linea.uses_direct_base_in_final = bool(
+                        _suggest_direct_base_replacement(linea, cache=replacement_cache)
+                    ) or not direct_base_candidates
         replacement = _suggest_direct_base_replacement(linea, cache=replacement_cache)
         if not replacement:
             continue
@@ -12350,89 +12679,994 @@ def _stddev_decimal(values: list[Decimal]) -> Decimal:
     return Decimal(str(sqrt(float(variance))))
 
 
-def _forecast_month_qty(
-    day_rows: list[tuple[date, Decimal]], target_start: date
-) -> tuple[Decimal, int, Decimal, Decimal, int]:
-    if not day_rows:
-        return Decimal("0"), 0, Decimal("0"), Decimal("0"), 0
-
-    monthly_totals: dict[tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0"))
-    for d, qty in day_rows:
-        monthly_totals[(d.year, d.month)] += qty
-    ordered_keys = sorted(monthly_totals.keys())
-    ordered_values = [monthly_totals[k] for k in ordered_keys]
-
-    recent_values = ordered_values[-3:] if len(ordered_values) >= 3 else ordered_values
-    recent_avg = sum(recent_values, Decimal("0")) / Decimal(str(len(recent_values) or 1))
-
-    seasonal_values = [v for (y, m), v in monthly_totals.items() if m == target_start.month and (y, m) != (target_start.year, target_start.month)]
-    seasonal_avg = (
-        sum(seasonal_values, Decimal("0")) / Decimal(str(len(seasonal_values)))
-        if seasonal_values
-        else recent_avg
-    )
-
-    trend_values = ordered_values[-6:] if len(ordered_values) >= 6 else ordered_values
-    trend_next = recent_avg
-    if len(trend_values) >= 2:
-        slope = (trend_values[-1] - trend_values[0]) / Decimal(str(len(trend_values) - 1))
-        trend_next = max(trend_values[-1] + slope, Decimal("0"))
-
-    weighted = (
-        (recent_avg * Decimal("0.50"))
-        + (seasonal_avg * Decimal("0.30"))
-        + (trend_next * Decimal("0.20"))
-    )
-    variance_samples = ordered_values[-12:] if len(ordered_values) >= 12 else ordered_values
-    dispersion = _stddev_decimal(variance_samples)
-    confidence = min(Decimal("1"), Decimal(str(len(ordered_values))) / Decimal("12"))
-    return weighted, len(day_rows), confidence, dispersion, len(variance_samples)
-
-
-def _forecast_range_qty(
-    day_rows: list[tuple[date, Decimal]], target_start: date, target_end: date
-) -> tuple[Decimal, int, Decimal, Decimal, int]:
-    if not day_rows:
-        return Decimal("0"), 0, Decimal("0"), Decimal("0"), 0
-
-    by_dow: dict[int, list[Decimal]] = defaultdict(list)
-    lower_window = target_start - timedelta(days=84)
-    for d, qty in day_rows:
-        if d < target_start and d >= lower_window:
-            by_dow[d.weekday()].append(qty)
-
-    all_daily = [qty for _, qty in day_rows[-120:]]
-    global_avg = sum(all_daily, Decimal("0")) / Decimal(str(len(all_daily) or 1))
-
-    horizon_days: list[date] = []
+def _forecast_target_days(alcance: str, *, periodo: str, fecha_base: date | None) -> tuple[date, date, list[date]]:
+    if alcance == "mes":
+        target_start, target_end = _month_start_end(periodo)
+    else:
+        base = fecha_base or timezone.localdate()
+        if alcance == "fin_semana":
+            target_start, target_end = _weekend_start_end(base)
+        elif alcance == "dia":
+            target_start = base
+            target_end = base
+        else:
+            target_start, target_end = _week_start_end(base)
+    target_days: list[date] = []
     pointer = target_start
     while pointer <= target_end:
-        horizon_days.append(pointer)
+        target_days.append(pointer)
         pointer += timedelta(days=1)
+    return target_start, target_end, target_days
 
-    used_samples = 0
-    pred_total = Decimal("0")
-    variance_samples: list[Decimal] = []
-    for d in horizon_days:
-        samples = by_dow.get(d.weekday(), [])
-        if samples:
-            recent = samples[-8:]
-            day_pred = _weighted_avg_decimal(recent)
-            used_samples += len(recent)
-            variance_samples.extend(recent)
-        else:
-            day_pred = global_avg
-            variance_samples.append(global_avg)
-        pred_total += day_pred
 
-    confidence = Decimal("0")
-    if horizon_days:
-        confidence = min(
-            Decimal("1"),
-            Decimal(str(used_samples)) / Decimal(str(len(horizon_days) * 8)),
+def _is_excluded_forecast_month(value: date) -> bool:
+    return (value.year, value.month) in FORECAST_EXCLUDED_MONTHS
+
+
+def _week_of_month(value: date) -> int:
+    return ((value.day - 1) // 7) + 1
+
+
+def _seasonality_weight(sample_date: date, target_date: date) -> Decimal:
+    month_distance = abs(sample_date.month - target_date.month)
+    month_distance = min(month_distance, 12 - month_distance)
+    if month_distance == 0:
+        return Decimal("1.35")
+    if month_distance == 1:
+        return Decimal("1.15")
+    if month_distance == 2:
+        return Decimal("1.00")
+    if month_distance == 3:
+        return Decimal("0.90")
+    return Decimal("0.80")
+
+
+def _recency_weight(sample_date: date, target_date: date) -> Decimal:
+    age_days = max(0, (target_date - sample_date).days)
+    decay = Decimal(str(exp(-float(Decimal(age_days) / FORECAST_RECENCY_HALF_LIFE_DAYS))))
+    return FORECAST_MIN_RECENCY_WEIGHT + ((Decimal("1") - FORECAST_MIN_RECENCY_WEIGHT) * decay)
+
+
+def _sample_quality_weight(sample_date: date) -> Decimal:
+    if _is_excluded_forecast_month(sample_date):
+        return FORECAST_MARCH_2026_LEGACY_WEIGHT
+    return Decimal("1")
+
+
+def _canonical_history_dates(
+    *,
+    target_start: date,
+    sucursal: Sucursal | None,
+    incluir_preparaciones: bool,
+) -> list[date]:
+    fact_qs = PointSalesDailyProductFact.objects.filter(
+        sale_date__gte=FORECAST_HISTORY_START,
+        sale_date__lt=target_start,
+        receta_id__isnull=False,
+        branch__erp_branch_id__isnull=False,
+    ).exclude(
+        sale_date__year=2026,
+        sale_date__month=3,
+    )
+    auth_qs = VentaAutoritativaPoint.objects.filter(
+        sale_date__gte=FORECAST_HISTORY_START,
+        sale_date__lt=target_start,
+        product_id__isnull=False,
+    ).exclude(
+        sale_date__year=2026,
+        sale_date__month=3,
+    )
+    if sucursal:
+        fact_qs = fact_qs.filter(branch__erp_branch=sucursal)
+        auth_qs = auth_qs.filter(branch=sucursal)
+    if not incluir_preparaciones:
+        fact_qs = fact_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+        auth_qs = auth_qs.filter(product__tipo=Receta.TIPO_PRODUCTO_FINAL)
+    fact_dates = set(fact_qs.values_list("sale_date", flat=True).distinct())
+    auth_dates = set(auth_qs.values_list("sale_date", flat=True).distinct())
+    return sorted(fact_dates | auth_dates)
+
+
+def _forecast_history_meta_from_dates(
+    history_dates: list[date],
+    *,
+    alcance: str,
+    target_start: date,
+    target_end: date,
+) -> dict[str, Any]:
+    if not history_dates:
+        return {
+            "available": False,
+            "first_date": None,
+            "last_date": None,
+            "days_observed": 0,
+            "years_observed": 0,
+            "comparable_years": 0,
+            "months_observed": 0,
+            "scope_label": "Sin histórico",
+        }
+
+    first_date = min(history_dates)
+    last_date = max(history_dates)
+    years_observed = len({d.year for d in history_dates})
+    months_observed = len({(d.year, d.month) for d in history_dates})
+    if alcance == "mes":
+        comparable_years = len({d.year for d in history_dates if d.month == target_start.month})
+    else:
+        target_weekdays = {((target_start.weekday() + offset) % 7) for offset in range((target_end - target_start).days + 1)}
+        comparable_years = len({d.year for d in history_dates if d.weekday() in target_weekdays})
+    return {
+        "available": True,
+        "first_date": first_date,
+        "last_date": last_date,
+        "days_observed": len(history_dates),
+        "years_observed": years_observed,
+        "comparable_years": comparable_years,
+        "months_observed": months_observed,
+        "scope_label": f"{first_date.isoformat()} a {last_date.isoformat()}",
+    }
+
+
+def _canonical_sales_history_grouped(
+    *,
+    target_start: date,
+    sucursal: Sucursal | None,
+    incluir_preparaciones: bool,
+) -> dict[tuple[int, int | None], dict[str, Any]]:
+    grouped: dict[tuple[int, int | None], dict[str, Any]] = {}
+
+    fact_qs = PointSalesDailyProductFact.objects.filter(
+        sale_date__gte=FORECAST_HISTORY_START,
+        sale_date__lt=target_start,
+        receta_id__isnull=False,
+        branch__erp_branch_id__isnull=False,
+    ).exclude(
+        sale_date__year=2026,
+        sale_date__month=3,
+    )
+    if sucursal:
+        fact_qs = fact_qs.filter(branch__erp_branch=sucursal)
+    if not incluir_preparaciones:
+        fact_qs = fact_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+
+    seen_keys: set[tuple[int, int, date]] = set()
+    for row in fact_qs.values(
+        "receta_id",
+        "receta__nombre",
+        "branch__erp_branch_id",
+        "branch__erp_branch__codigo",
+        "branch__erp_branch__nombre",
+        "sale_date",
+    ).annotate(total=Sum("total_cantidad")).order_by("receta_id", "branch__erp_branch_id", "sale_date"):
+        rid = int(row["receta_id"])
+        bid = int(row["branch__erp_branch_id"])
+        sale_date = row["sale_date"]
+        seen_keys.add((rid, bid, sale_date))
+        item = grouped.setdefault(
+            (rid, bid),
+            {
+                "receta_id": rid,
+                "receta": row["receta__nombre"],
+                "sucursal_id": bid,
+                "sucursal_codigo": row.get("branch__erp_branch__codigo") or "",
+                "sucursal": row.get("branch__erp_branch__nombre") or "",
+                "days": [],
+                "source_mode": "POINT_FACT_V2",
+            },
         )
-    dispersion = _stddev_decimal(variance_samples)
-    return pred_total, len(day_rows), confidence, dispersion, len(variance_samples)
+        item["days"].append((sale_date, Decimal(str(row["total"] or 0))))
+
+    auth_qs = VentaAutoritativaPoint.objects.filter(
+        sale_date__gte=FORECAST_HISTORY_START,
+        sale_date__lt=target_start,
+        product_id__isnull=False,
+    ).exclude(
+        sale_date__year=2026,
+        sale_date__month=3,
+    )
+    if sucursal:
+        auth_qs = auth_qs.filter(branch=sucursal)
+    if not incluir_preparaciones:
+        auth_qs = auth_qs.filter(product__tipo=Receta.TIPO_PRODUCTO_FINAL)
+
+    for row in auth_qs.values(
+        "product_id",
+        "product__nombre",
+        "branch_id",
+        "branch__codigo",
+        "branch__nombre",
+        "sale_date",
+    ).annotate(total=Sum("quantity")).order_by("product_id", "branch_id", "sale_date"):
+        rid = int(row["product_id"])
+        bid = int(row["branch_id"])
+        sale_date = row["sale_date"]
+        if (rid, bid, sale_date) in seen_keys:
+            continue
+        item = grouped.setdefault(
+            (rid, bid),
+            {
+                "receta_id": rid,
+                "receta": row["product__nombre"],
+                "sucursal_id": bid,
+                "sucursal_codigo": row.get("branch__codigo") or "",
+                "sucursal": row.get("branch__nombre") or "",
+                "days": [],
+                "source_mode": "VENTA_AUTORITATIVA_POINT",
+            },
+        )
+        item["days"].append((sale_date, Decimal(str(row["total"] or 0))))
+
+    return grouped
+
+
+def _canonical_actual_map(
+    *,
+    window_start: date,
+    window_end: date,
+    sucursal: Sucursal | None,
+    incluir_preparaciones: bool,
+) -> dict[int, Decimal]:
+    fact_qs = PointSalesDailyProductFact.objects.filter(
+        sale_date__gte=window_start,
+        sale_date__lte=window_end,
+        receta_id__isnull=False,
+        branch__erp_branch_id__isnull=False,
+    ).exclude(
+        sale_date__year=2026,
+        sale_date__month=3,
+    )
+    if sucursal:
+        fact_qs = fact_qs.filter(branch__erp_branch=sucursal)
+    if not incluir_preparaciones:
+        fact_qs = fact_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+    actual_map = {
+        int(row["receta_id"]): Decimal(str(row["total"] or 0))
+        for row in fact_qs.values("receta_id").annotate(total=Sum("total_cantidad"))
+    }
+
+    auth_qs = VentaAutoritativaPoint.objects.filter(
+        sale_date__gte=window_start,
+        sale_date__lte=window_end,
+        product_id__isnull=False,
+    ).exclude(
+        sale_date__year=2026,
+        sale_date__month=3,
+    )
+    if sucursal:
+        auth_qs = auth_qs.filter(branch=sucursal)
+    if not incluir_preparaciones:
+        auth_qs = auth_qs.filter(product__tipo=Receta.TIPO_PRODUCTO_FINAL)
+    for row in auth_qs.values("product_id").annotate(total=Sum("quantity")):
+        rid = int(row["product_id"])
+        if rid in actual_map:
+            continue
+        actual_map[rid] = Decimal(str(row["total"] or 0))
+    return actual_map
+
+
+def _weighted_std(values: list[Decimal], weights: list[Decimal], mean: Decimal) -> Decimal:
+    if not values or not weights:
+        return Decimal("0")
+    total_weight = sum(weights, Decimal("0"))
+    if total_weight <= 0:
+        return Decimal("0")
+    variance = sum(
+        ((value - mean) ** 2) * weight
+        for value, weight in zip(values, weights)
+    ) / total_weight
+    return Decimal(str(sqrt(float(variance))))
+
+
+def _clamp_decimal(value: Decimal, low: Decimal, high: Decimal) -> Decimal:
+    return max(low, min(high, value))
+
+
+def _predict_daily_qty(
+    day_rows: list[tuple[date, Decimal]],
+    *,
+    target_date: date,
+) -> dict[str, Decimal | int]:
+    if not day_rows:
+        return {
+            "forecast_qty": Decimal("0"),
+            "forecast_low": Decimal("0"),
+            "forecast_high": Decimal("0"),
+            "desviacion": Decimal("0"),
+            "confianza": Decimal("0"),
+            "muestras": 0,
+            "observaciones": 0,
+            "effective_samples": Decimal("0"),
+            "recent_share_pct": Decimal("0"),
+            "weekday_match_pct": Decimal("0"),
+            "week_of_month_match_pct": Decimal("0"),
+            "legacy_low_weight_samples": 0,
+        }
+
+    weighted_values: list[Decimal] = []
+    weighted_weights: list[Decimal] = []
+    recent_weight = Decimal("0")
+    weekday_weight = Decimal("0")
+    wom_weight = Decimal("0")
+    legacy_low_weight_samples = 0
+
+    for sample_date, sample_qty in day_rows:
+        if sample_date < FORECAST_HISTORY_START or sample_date >= target_date:
+            continue
+        recency_weight = _recency_weight(sample_date, target_date)
+        quality_weight = _sample_quality_weight(sample_date)
+        seasonality_weight = _seasonality_weight(sample_date, target_date)
+        weekday_match_weight = Decimal("1.60") if sample_date.weekday() == target_date.weekday() else Decimal("0.65")
+        wom_match_weight = Decimal("1.20") if _week_of_month(sample_date) == _week_of_month(target_date) else Decimal("0.90")
+        total_weight = recency_weight * quality_weight * seasonality_weight * weekday_match_weight * wom_match_weight
+        if total_weight <= 0:
+            continue
+        weighted_values.append(Decimal(str(sample_qty)))
+        weighted_weights.append(total_weight)
+        if (target_date - sample_date).days <= 730:
+            recent_weight += total_weight
+        if sample_date.weekday() == target_date.weekday():
+            weekday_weight += total_weight
+        if _week_of_month(sample_date) == _week_of_month(target_date):
+            wom_weight += total_weight
+        if quality_weight < Decimal("1"):
+            legacy_low_weight_samples += 1
+
+    if not weighted_values:
+        return {
+            "forecast_qty": Decimal("0"),
+            "forecast_low": Decimal("0"),
+            "forecast_high": Decimal("0"),
+            "desviacion": Decimal("0"),
+            "confianza": Decimal("0"),
+            "muestras": 0,
+            "observaciones": 0,
+            "effective_samples": Decimal("0"),
+            "recent_share_pct": Decimal("0"),
+            "weekday_match_pct": Decimal("0"),
+            "week_of_month_match_pct": Decimal("0"),
+            "legacy_low_weight_samples": legacy_low_weight_samples,
+        }
+
+    total_weight = sum(weighted_weights, Decimal("0"))
+    weighted_sum = sum(
+        value * weight
+        for value, weight in zip(weighted_values, weighted_weights)
+    )
+    forecast_qty = weighted_sum / total_weight if total_weight > 0 else Decimal("0")
+    desviacion = _weighted_std(weighted_values, weighted_weights, forecast_qty)
+    sum_weight_sq = sum((weight * weight for weight in weighted_weights), Decimal("0"))
+    effective_samples = (
+        (total_weight * total_weight) / sum_weight_sq
+        if sum_weight_sq > 0
+        else Decimal("0")
+    )
+    coefficient_variation = (
+        desviacion / forecast_qty
+        if forecast_qty > 0
+        else Decimal("1")
+    )
+    effective_score = _clamp_decimal(effective_samples / Decimal("18"), Decimal("0"), Decimal("1"))
+    recent_share = recent_weight / total_weight if total_weight > 0 else Decimal("0")
+    weekday_share = weekday_weight / total_weight if total_weight > 0 else Decimal("0")
+    wom_share = wom_weight / total_weight if total_weight > 0 else Decimal("0")
+    stability_score = Decimal("1") - _clamp_decimal(coefficient_variation / Decimal("1.5"), Decimal("0"), Decimal("1"))
+    confidence = (
+        (effective_score * Decimal("0.30"))
+        + (recent_share * Decimal("0.25"))
+        + (weekday_share * Decimal("0.20"))
+        + (wom_share * Decimal("0.10"))
+        + (stability_score * Decimal("0.15"))
+    )
+    confidence = _clamp_decimal(confidence, Decimal("0"), Decimal("1"))
+    forecast_qty = forecast_qty.quantize(Decimal("0.001"))
+    desviacion = desviacion.quantize(Decimal("0.001"))
+    forecast_low = max(forecast_qty - desviacion, Decimal("0")).quantize(Decimal("0.001"))
+    forecast_high = max(forecast_qty + desviacion, Decimal("0")).quantize(Decimal("0.001"))
+    return {
+        "forecast_qty": forecast_qty,
+        "forecast_low": forecast_low,
+        "forecast_high": forecast_high,
+        "desviacion": desviacion,
+        "confianza": (confidence * Decimal("100")).quantize(Decimal("0.1")),
+        "muestras": int(effective_samples.quantize(Decimal("1"))),
+        "observaciones": len(weighted_values),
+        "effective_samples": effective_samples.quantize(Decimal("0.001")),
+        "recent_share_pct": (recent_share * Decimal("100")).quantize(Decimal("0.1")),
+        "weekday_match_pct": (weekday_share * Decimal("100")).quantize(Decimal("0.1")),
+        "week_of_month_match_pct": (wom_share * Decimal("100")).quantize(Decimal("0.1")),
+        "legacy_low_weight_samples": legacy_low_weight_samples,
+    }
+
+
+def _recent_mix_signal(
+    day_rows: list[tuple[date, Decimal]],
+    *,
+    target_date: date,
+    window_days: int,
+) -> dict[str, Decimal | int]:
+    weighted_qty = Decimal("0")
+    weights: list[Decimal] = []
+    observations = 0
+    for sample_date, sample_qty in day_rows:
+        age_days = (target_date - sample_date).days
+        if age_days <= 0 or age_days > window_days:
+            continue
+        total_weight = _recency_weight(sample_date, target_date) * _sample_quality_weight(sample_date)
+        if total_weight <= 0:
+            continue
+        weighted_qty += Decimal(str(sample_qty)) * total_weight
+        weights.append(total_weight)
+        observations += 1
+    if not weights:
+        return {
+            "weighted_qty": Decimal("0"),
+            "effective_samples": Decimal("0"),
+            "observations": 0,
+        }
+    total_weight = sum(weights, Decimal("0"))
+    sum_weight_sq = sum((weight * weight for weight in weights), Decimal("0"))
+    effective_samples = (
+        (total_weight * total_weight) / sum_weight_sq
+        if sum_weight_sq > 0
+        else Decimal("0")
+    )
+    return {
+        "weighted_qty": weighted_qty.quantize(Decimal("0.001")),
+        "effective_samples": effective_samples.quantize(Decimal("0.001")),
+        "observations": observations,
+    }
+
+
+def _mix_portfolio_stability(signals: dict[int, dict[str, Decimal | int]]) -> Decimal:
+    long_total = sum((Decimal(str(signal.get("long_qty") or 0)) for signal in signals.values()), Decimal("0"))
+    short_total = sum((Decimal(str(signal.get("short_qty") or 0)) for signal in signals.values()), Decimal("0"))
+    if long_total <= 0 or short_total <= 0:
+        return Decimal("0")
+    l1_distance = Decimal("0")
+    for signal in signals.values():
+        short_share = Decimal(str(signal.get("short_qty") or 0)) / short_total
+        long_share = Decimal(str(signal.get("long_qty") or 0)) / long_total
+        l1_distance += abs(short_share - long_share)
+    return _clamp_decimal(Decimal("1") - (l1_distance / Decimal("2")), Decimal("0"), Decimal("1"))
+
+
+def _rebalance_mix_quantities(candidates: list[dict[str, Decimal]], total_qty: Decimal) -> Decimal:
+    target_total = Decimal(str(total_qty)).quantize(Decimal("0.001"))
+    current_total = sum((Decimal(str(item["current_qty"])) for item in candidates), Decimal("0")).quantize(Decimal("0.001"))
+    residual = (target_total - current_total).quantize(Decimal("0.001"))
+    tolerance = Decimal("0.001")
+    if abs(residual) <= tolerance:
+        return Decimal("0")
+
+    for _ in range(max(1, len(candidates)) * 4):
+        if abs(residual) <= tolerance:
+            break
+        if residual > 0:
+            available = [
+                item
+                for item in candidates
+                if Decimal(str(item["high_qty"])) - Decimal(str(item["current_qty"])) > tolerance
+            ]
+            total_room = sum(
+                (
+                    Decimal(str(item["high_qty"])) - Decimal(str(item["current_qty"]))
+                    for item in available
+                ),
+                Decimal("0"),
+            )
+        else:
+            available = [
+                item
+                for item in candidates
+                if Decimal(str(item["current_qty"])) - Decimal(str(item["low_qty"])) > tolerance
+            ]
+            total_room = sum(
+                (
+                    Decimal(str(item["current_qty"])) - Decimal(str(item["low_qty"]))
+                    for item in available
+                ),
+                Decimal("0"),
+            )
+        if not available or total_room <= tolerance:
+            break
+
+        remaining = residual
+        for item in available:
+            if abs(remaining) <= tolerance:
+                break
+            if residual > 0:
+                room = Decimal(str(item["high_qty"])) - Decimal(str(item["current_qty"]))
+                delta = min(room, (residual * room / total_room).quantize(Decimal("0.001")))
+                if delta <= 0:
+                    delta = min(room, remaining)
+                item["current_qty"] = (Decimal(str(item["current_qty"])) + delta).quantize(Decimal("0.001"))
+                remaining = (remaining - delta).quantize(Decimal("0.001"))
+            else:
+                room = Decimal(str(item["current_qty"])) - Decimal(str(item["low_qty"]))
+                delta = min(room, ((abs(residual) * room / total_room).quantize(Decimal("0.001"))))
+                if delta <= 0:
+                    delta = min(room, abs(remaining))
+                item["current_qty"] = (Decimal(str(item["current_qty"])) - delta).quantize(Decimal("0.001"))
+                remaining = (remaining + delta).quantize(Decimal("0.001"))
+        residual = remaining
+
+    if abs(residual) > tolerance:
+        ordered = sorted(
+            candidates,
+            key=lambda item: Decimal(str(item["base_qty"])),
+            reverse=True,
+        )
+        for item in ordered:
+            if abs(residual) <= tolerance:
+                break
+            if residual > 0:
+                room = Decimal(str(item["high_qty"])) - Decimal(str(item["current_qty"]))
+                if room <= tolerance:
+                    continue
+                delta = min(room, residual)
+                item["current_qty"] = (Decimal(str(item["current_qty"])) + delta).quantize(Decimal("0.001"))
+                residual = (residual - delta).quantize(Decimal("0.001"))
+            else:
+                room = Decimal(str(item["current_qty"])) - Decimal(str(item["low_qty"]))
+                if room <= tolerance:
+                    continue
+                delta = min(room, abs(residual))
+                item["current_qty"] = (Decimal(str(item["current_qty"])) - delta).quantize(Decimal("0.001"))
+                residual = (residual + delta).quantize(Decimal("0.001"))
+
+    return residual.quantize(Decimal("0.001"))
+
+
+def _apply_mix_adjuster(
+    detail_rows: list[dict[str, Any]],
+    grouped_history: dict[tuple[int, int | None], dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not detail_rows:
+        return detail_rows, {
+            "enabled": True,
+            "status": "no_detail_rows",
+            "applied_rows": 0,
+            "adjusted_portfolios": 0,
+            "fallback_rows": 0,
+        }
+
+    try:
+        history_map = {
+            key: list(value.get("days") or [])
+            for key, value in grouped_history.items()
+        }
+        grouped_portfolios: dict[tuple[str, int | None], list[dict[str, Any]]] = defaultdict(list)
+        for row in detail_rows:
+            grouped_portfolios[(str(row.get("fecha") or ""), row.get("sucursal_id"))].append(row)
+
+        adjusted_rows: list[dict[str, Any]] = []
+        adjusted_portfolios = 0
+        applied_rows = 0
+        skipped_low_volume = 0
+        skipped_low_samples = 0
+        skipped_instability = 0
+        fallback_rows = 0
+
+        for (target_date_txt, sucursal_id), portfolio_rows in grouped_portfolios.items():
+            if len(portfolio_rows) < 2:
+                for row in portfolio_rows:
+                    row_copy = dict(row)
+                    row_copy.update(
+                        {
+                            "mix_base_pct": Decimal("100.0"),
+                            "mix_recent_pct": Decimal("100.0"),
+                            "mix_adjusted_pct": Decimal("100.0"),
+                            "mix_alpha_pct": Decimal("0.0"),
+                            "mix_adjustment_pct": Decimal("0.0"),
+                            "recent_sales_qty": Decimal("0.000"),
+                            "effective_recent_samples": Decimal("0.000"),
+                            "portfolio_stability_pct": Decimal("0.0"),
+                            "mix_adjusted": False,
+                            "mix_adjustment_status": "single_sku_portfolio",
+                        }
+                    )
+                    adjusted_rows.append(row_copy)
+                continue
+
+            target_date = date.fromisoformat(target_date_txt)
+            total_qty = sum((Decimal(str(row.get("forecast_qty") or 0)) for row in portfolio_rows), Decimal("0"))
+            if total_qty <= 0:
+                for row in portfolio_rows:
+                    row_copy = dict(row)
+                    row_copy.update(
+                        {
+                            "mix_base_pct": Decimal("0.0"),
+                            "mix_recent_pct": Decimal("0.0"),
+                            "mix_adjusted_pct": Decimal("0.0"),
+                            "mix_alpha_pct": Decimal("0.0"),
+                            "mix_adjustment_pct": Decimal("0.0"),
+                            "recent_sales_qty": Decimal("0.000"),
+                            "effective_recent_samples": Decimal("0.000"),
+                            "portfolio_stability_pct": Decimal("0.0"),
+                            "mix_adjusted": False,
+                            "mix_adjustment_status": "empty_portfolio",
+                        }
+                    )
+                    adjusted_rows.append(row_copy)
+                continue
+
+            signals: dict[int, dict[str, Decimal | int]] = {}
+            for row in portfolio_rows:
+                history_key = (int(row["receta_id"]), row.get("sucursal_id"))
+                day_rows = history_map.get(history_key, [])
+                long_signal = _recent_mix_signal(
+                    day_rows,
+                    target_date=target_date,
+                    window_days=MIX_RECENT_WINDOW_DAYS,
+                )
+                short_signal = _recent_mix_signal(
+                    day_rows,
+                    target_date=target_date,
+                    window_days=MIX_SHORT_WINDOW_DAYS,
+                )
+                signals[int(row["receta_id"])] = {
+                    "long_qty": Decimal(str(long_signal.get("weighted_qty") or 0)),
+                    "short_qty": Decimal(str(short_signal.get("weighted_qty") or 0)),
+                    "effective_samples": Decimal(str(long_signal.get("effective_samples") or 0)),
+                }
+
+            long_total = sum((Decimal(str(signal["long_qty"])) for signal in signals.values()), Decimal("0"))
+            stability = _mix_portfolio_stability(signals)
+            eligible_total = Decimal("0")
+            for signal in signals.values():
+                if Decimal(str(signal["long_qty"])) >= MIX_MIN_RECENT_SALES_QTY:
+                    eligible_total += Decimal(str(signal["long_qty"]))
+
+            base_alpha = Decimal("0")
+            if long_total > 0:
+                volume_score = _clamp_decimal(
+                    eligible_total / (MIX_MIN_RECENT_SALES_QTY * Decimal(str(max(1, len(portfolio_rows))))),
+                    Decimal("0"),
+                    Decimal("1"),
+                )
+                base_alpha = (MIX_ALPHA_MAX * volume_score * stability).quantize(Decimal("0.0001"))
+
+            candidates: list[dict[str, Decimal | int | str]] = []
+            for row in portfolio_rows:
+                receta_id = int(row["receta_id"])
+                signal = signals[receta_id]
+                base_qty = Decimal(str(row.get("forecast_qty") or 0))
+                base_mix = (base_qty / total_qty) if total_qty > 0 else Decimal("0")
+                recent_qty = Decimal(str(signal["long_qty"]))
+                effective_samples = Decimal(str(signal["effective_samples"]))
+                recent_mix = (recent_qty / long_total) if long_total > 0 else base_mix
+                row_status = "mix_base"
+                row_alpha = Decimal("0")
+
+                if long_total <= 0:
+                    row_status = "no_recent_portfolio_signal"
+                elif recent_qty < MIX_MIN_RECENT_SALES_QTY:
+                    row_status = "below_recent_volume_threshold"
+                    skipped_low_volume += 1
+                elif effective_samples < MIX_MIN_EFFECTIVE_RECENT_SAMPLES:
+                    row_status = "below_effective_samples_threshold"
+                    skipped_low_samples += 1
+                elif stability <= 0:
+                    row_status = "low_portfolio_stability"
+                    skipped_instability += 1
+                else:
+                    volume_score = _clamp_decimal(recent_qty / MIX_MIN_RECENT_SALES_QTY, Decimal("0"), Decimal("1"))
+                    sample_score = _clamp_decimal(
+                        effective_samples / MIX_MIN_EFFECTIVE_RECENT_SAMPLES,
+                        Decimal("0"),
+                        Decimal("1"),
+                    )
+                    row_alpha = (base_alpha * min(volume_score, sample_score)).quantize(Decimal("0.0001"))
+                    if row_alpha > 0:
+                        row_status = "adjusted_candidate"
+                    else:
+                        row_status = "mix_base"
+
+                target_mix = base_mix + (row_alpha * (recent_mix - base_mix))
+                raw_target_qty = (total_qty * target_mix).quantize(Decimal("0.001"))
+                low_qty = (base_qty * (Decimal("1") - MIX_MAX_CHANGE_PCT)).quantize(Decimal("0.001"))
+                high_qty = (base_qty * (Decimal("1") + MIX_MAX_CHANGE_PCT)).quantize(Decimal("0.001"))
+                current_qty = _clamp_decimal(raw_target_qty, low_qty, high_qty).quantize(Decimal("0.001"))
+                candidates.append(
+                    {
+                        "row": row,
+                        "receta_id": receta_id,
+                        "base_qty": base_qty,
+                        "base_mix": base_mix,
+                        "recent_qty": recent_qty,
+                        "recent_mix": recent_mix,
+                        "effective_samples": effective_samples,
+                        "row_alpha": row_alpha,
+                        "low_qty": low_qty,
+                        "high_qty": high_qty,
+                        "current_qty": current_qty,
+                        "row_status": row_status,
+                        "portfolio_stability": stability,
+                    }
+                )
+
+            if base_alpha > 0:
+                residual = _rebalance_mix_quantities(candidates, total_qty)
+            else:
+                residual = Decimal("0.000")
+            if abs(residual) > Decimal("0.001"):
+                fallback_rows += len(portfolio_rows)
+                for row in portfolio_rows:
+                    row_copy = dict(row)
+                    base_mix = (
+                        (Decimal(str(row.get("forecast_qty") or 0)) / total_qty) * Decimal("100")
+                        if total_qty > 0
+                        else Decimal("0")
+                    )
+                    row_copy.update(
+                        {
+                            "mix_base_pct": base_mix.quantize(Decimal("0.1")),
+                            "mix_recent_pct": base_mix.quantize(Decimal("0.1")),
+                            "mix_adjusted_pct": base_mix.quantize(Decimal("0.1")),
+                            "mix_alpha_pct": Decimal("0.0"),
+                            "mix_adjustment_pct": Decimal("0.0"),
+                            "recent_sales_qty": Decimal("0.000"),
+                            "effective_recent_samples": Decimal("0.000"),
+                            "portfolio_stability_pct": (stability * Decimal("100")).quantize(Decimal("0.1")),
+                            "mix_adjusted": False,
+                            "mix_adjustment_status": "fallback_mix_base",
+                        }
+                    )
+                    adjusted_rows.append(row_copy)
+                continue
+
+            if base_alpha > 0:
+                adjusted_portfolios += 1
+
+            for candidate in candidates:
+                row = candidate["row"]
+                base_qty = Decimal(str(candidate["base_qty"]))
+                final_qty = Decimal(str(candidate["current_qty"])).quantize(Decimal("0.001"))
+                ratio = (final_qty / base_qty) if base_qty > 0 else Decimal("1")
+                row_copy = dict(row)
+                row_copy["forecast_qty"] = final_qty
+                row_copy["forecast_low"] = (
+                    Decimal(str(row.get("forecast_low") or 0)) * ratio
+                ).quantize(Decimal("0.001"))
+                row_copy["forecast_high"] = (
+                    Decimal(str(row.get("forecast_high") or 0)) * ratio
+                ).quantize(Decimal("0.001"))
+                row_copy["desviacion"] = (
+                    Decimal(str(row.get("desviacion") or 0)) * ratio
+                ).quantize(Decimal("0.001"))
+                if final_qty > 0 and row_copy["forecast_low"] > final_qty:
+                    row_copy["forecast_low"] = final_qty
+                if row_copy["forecast_high"] < final_qty:
+                    row_copy["forecast_high"] = final_qty
+                base_mix_pct = (Decimal(str(candidate["base_mix"])) * Decimal("100")).quantize(Decimal("0.1"))
+                recent_mix_pct = (Decimal(str(candidate["recent_mix"])) * Decimal("100")).quantize(Decimal("0.1"))
+                adjusted_mix_pct = (
+                    (final_qty / total_qty) * Decimal("100")
+                    if total_qty > 0
+                    else Decimal("0")
+                ).quantize(Decimal("0.1"))
+                mix_adjustment_pct = (
+                    ((final_qty / base_qty) - Decimal("1")) * Decimal("100")
+                    if base_qty > 0
+                    else Decimal("0")
+                ).quantize(Decimal("0.1"))
+                mix_adjusted = abs(final_qty - base_qty) > Decimal("0.001")
+                if mix_adjusted:
+                    applied_rows += 1
+                row_copy.update(
+                    {
+                        "mix_base_pct": base_mix_pct,
+                        "mix_recent_pct": recent_mix_pct,
+                        "mix_adjusted_pct": adjusted_mix_pct,
+                        "mix_alpha_pct": (Decimal(str(candidate["row_alpha"])) * Decimal("100")).quantize(Decimal("0.1")),
+                        "mix_adjustment_pct": mix_adjustment_pct,
+                        "recent_sales_qty": Decimal(str(candidate["recent_qty"])).quantize(Decimal("0.001")),
+                        "effective_recent_samples": Decimal(str(candidate["effective_samples"])).quantize(Decimal("0.001")),
+                        "portfolio_stability_pct": (
+                            Decimal(str(candidate["portfolio_stability"])) * Decimal("100")
+                        ).quantize(Decimal("0.1")),
+                        "mix_adjusted": mix_adjusted,
+                        "mix_adjustment_status": "adjusted" if mix_adjusted else str(candidate["row_status"]),
+                    }
+                )
+                adjusted_rows.append(row_copy)
+
+        adjusted_rows.sort(
+            key=lambda row: (
+                row["fecha"],
+                row.get("sucursal_codigo") or "",
+                -(Decimal(str(row.get("forecast_qty") or 0))),
+                row.get("receta") or "",
+            )
+        )
+        return adjusted_rows, {
+            "enabled": True,
+            "status": "applied" if applied_rows > 0 else "mix_base_only",
+            "applied_rows": applied_rows,
+            "adjusted_portfolios": adjusted_portfolios,
+            "skipped_low_volume": skipped_low_volume,
+            "skipped_low_samples": skipped_low_samples,
+            "skipped_instability": skipped_instability,
+            "fallback_rows": fallback_rows,
+        }
+    except Exception as exc:
+        fallback_rows = len(detail_rows)
+        fallback_rows_payload: list[dict[str, Any]] = []
+        for row in detail_rows:
+            row_copy = dict(row)
+            row_copy.update(
+                {
+                    "mix_base_pct": Decimal("0.0"),
+                    "mix_recent_pct": Decimal("0.0"),
+                    "mix_adjusted_pct": Decimal("0.0"),
+                    "mix_alpha_pct": Decimal("0.0"),
+                    "mix_adjustment_pct": Decimal("0.0"),
+                    "recent_sales_qty": Decimal("0.000"),
+                    "effective_recent_samples": Decimal("0.000"),
+                    "portfolio_stability_pct": Decimal("0.0"),
+                    "mix_adjusted": False,
+                    "mix_adjustment_status": "fallback_mix_base",
+                }
+            )
+            fallback_rows_payload.append(row_copy)
+        return fallback_rows_payload, {
+            "enabled": True,
+            "status": "fallback_mix_base",
+            "reason": str(exc)[:180],
+            "applied_rows": 0,
+            "adjusted_portfolios": 0,
+            "fallback_rows": fallback_rows,
+        }
+
+
+def _forecast_result_model_meta(
+    *,
+    target_start: date,
+    target_end: date,
+    scope_days: int,
+    mix_adjustment_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "history_selection": {
+            "history_start": FORECAST_HISTORY_START.isoformat(),
+            "history_end_exclusive": target_start.isoformat(),
+            "scope_start": target_start.isoformat(),
+            "scope_end": target_end.isoformat(),
+            "scope_days": scope_days,
+            "rules": [
+                "Usa todo el histórico canónico disponible desde 2022-01-01.",
+                "Nunca usa ventas del periodo objetivo ni del futuro.",
+                "Si no se filtra sucursal, modela cada sucursal por separado y luego agrega el total.",
+                "Excluye completo 2026-03 del baseline por snapshot legacy documentado.",
+            ],
+            "baseline_sources": [
+                "pos_bridge.PointSalesDailyProductFact",
+                "ventas.VentaAutoritativaPoint",
+            ],
+        },
+        "weighting": {
+            "recent_history_priority": "decaimiento exponencial con half-life de 540 días; últimos 12-24 meses pesan más",
+            "automatic_patterns": [
+                "día de la semana",
+                "semana del mes",
+                "estacionalidad mensual",
+            ],
+        },
+        "data_quality_adjustments": [
+            {
+                "period": "2026-03",
+                "action": "excluded_from_baseline",
+                "reason": "historical_snapshot_legacy_documented",
+            }
+        ],
+        "confidence": {
+            "drivers": [
+                "muestra efectiva",
+                "cobertura reciente",
+                "match de día de semana",
+                "match de semana del mes",
+                "estabilidad de la serie",
+            ],
+            "scale": "0-100",
+        },
+        "mix_adjuster": {
+            "enabled": bool((mix_adjustment_meta or {}).get("enabled", MIX_ADJUSTMENT_ENABLED_DEFAULT)),
+            "default_enabled": MIX_ADJUSTMENT_ENABLED_DEFAULT,
+            "status": str((mix_adjustment_meta or {}).get("status") or "disabled"),
+            "max_change_pct": float((MIX_MAX_CHANGE_PCT * Decimal("100")).quantize(Decimal("0.1"))),
+            "min_recent_sales_qty": float(MIX_MIN_RECENT_SALES_QTY),
+            "min_effective_recent_samples": float(MIX_MIN_EFFECTIVE_RECENT_SAMPLES),
+            "alpha_max_pct": float((MIX_ALPHA_MAX * Decimal("100")).quantize(Decimal("0.1"))),
+            "applied_rows": int((mix_adjustment_meta or {}).get("applied_rows") or 0),
+            "adjusted_portfolios": int((mix_adjustment_meta or {}).get("adjusted_portfolios") or 0),
+            "fallback_rows": int((mix_adjustment_meta or {}).get("fallback_rows") or 0),
+            "rules": [
+                "Cambio máximo por SKU de +/-20% sobre mix_base.",
+                "No ajusta si ventas recientes o effective_recent_samples quedan bajo umbral mínimo.",
+                "Si portfolio_stability es baja, reduce alpha automáticamente.",
+                "Si algo falla, usa mix_base como fallback.",
+            ],
+        },
+        "fallback_policy": "Sin fallback a VentaHistorica ni PointDailySale legacy; si falta base canónica suficiente devuelve baja confianza o sin base.",
+    }
+
+
+def _aggregate_forecast_rows(
+    detail_rows: list[dict[str, Any]],
+    pron_map: dict[int, Decimal],
+) -> list[dict[str, Any]]:
+    grouped: dict[int, dict[str, Any]] = {}
+    for row in detail_rows:
+        rid = int(row["receta_id"])
+        item = grouped.setdefault(
+            rid,
+            {
+                "receta_id": rid,
+                "receta": row["receta"],
+                "forecast_qty": Decimal("0"),
+                "forecast_low": Decimal("0"),
+                "forecast_high": Decimal("0"),
+                "desviacion": Decimal("0"),
+                "muestras": 0,
+                "observaciones": 0,
+                "confidence_weighted_sum": Decimal("0"),
+                "confidence_weight_total": Decimal("0"),
+                "sucursales": set(),
+                "fechas": set(),
+            },
+        )
+        qty = Decimal(str(row.get("forecast_qty") or 0))
+        item["forecast_qty"] += qty
+        item["forecast_low"] += Decimal(str(row.get("forecast_low") or 0))
+        item["forecast_high"] += Decimal(str(row.get("forecast_high") or 0))
+        item["desviacion"] += Decimal(str(row.get("desviacion") or 0))
+        item["muestras"] += int(row.get("muestras") or 0)
+        item["observaciones"] += int(row.get("observaciones") or 0)
+        item["confidence_weighted_sum"] += Decimal(str(row.get("confianza") or 0)) * qty
+        item["confidence_weight_total"] += qty
+        if row.get("sucursal_id") is not None:
+            item["sucursales"].add(int(row["sucursal_id"]))
+        item["fechas"].add(str(row.get("fecha") or ""))
+
+    rows: list[dict[str, Any]] = []
+    for rid, item in grouped.items():
+        current = pron_map.get(rid, Decimal("0")).quantize(Decimal("0.001"))
+        forecast_qty = Decimal(item["forecast_qty"]).quantize(Decimal("0.001"))
+        if forecast_qty <= 0:
+            continue
+        delta = (forecast_qty - current).quantize(Decimal("0.001"))
+        threshold = max(Decimal("1.000"), current * Decimal("0.05"))
+        if delta > threshold:
+            recomendacion = "SUBIR"
+        elif delta < (threshold * Decimal("-1")):
+            recomendacion = "BAJAR"
+        else:
+            recomendacion = "MANTENER"
+        confidence_weight_total = Decimal(item["confidence_weight_total"])
+        if confidence_weight_total > 0:
+            confianza = (Decimal(item["confidence_weighted_sum"]) / confidence_weight_total).quantize(Decimal("0.1"))
+        else:
+            confianza = Decimal("0")
+        rows.append(
+            {
+                "receta_id": rid,
+                "receta": item["receta"],
+                "forecast_qty": forecast_qty,
+                "forecast_low": Decimal(item["forecast_low"]).quantize(Decimal("0.001")),
+                "forecast_high": Decimal(item["forecast_high"]).quantize(Decimal("0.001")),
+                "desviacion": Decimal(item["desviacion"]).quantize(Decimal("0.001")),
+                "muestras": int(item["muestras"]),
+                "pronostico_actual": current,
+                "delta": delta,
+                "recomendacion": recomendacion,
+                "observaciones": int(item["observaciones"]),
+                "confianza": confianza,
+                "sucursales_count": len(item["sucursales"]),
+                "dias_count": len(item["fechas"]),
+            }
+        )
+    rows.sort(key=lambda x: x["forecast_qty"], reverse=True)
+    return rows
 
 
 def _forecast_totals_from_rows(rows: list[dict[str, Any]]) -> dict[str, Decimal | int]:
@@ -12496,6 +13730,12 @@ def _filter_forecast_result_by_confianza(
 
     updated = dict(result)
     updated["rows"] = kept_rows
+    kept_ids = {int(row["receta_id"]) for row in kept_rows}
+    updated["detail_rows"] = [
+        row
+        for row in (result.get("detail_rows") or [])
+        if int(row.get("receta_id") or 0) in kept_ids
+    ]
     updated["totals"] = _forecast_totals_from_rows(kept_rows)
     return updated, filtered
 
@@ -12508,40 +13748,30 @@ def _build_forecast_from_history(
     sucursal: Sucursal | None,
     incluir_preparaciones: bool,
     safety_pct: Decimal,
+    mix_adjustment_enabled: bool = MIX_ADJUSTMENT_ENABLED_DEFAULT,
 ) -> dict[str, Any]:
-    if alcance == "mes":
-        target_start, target_end = _month_start_end(periodo)
-    else:
-        base = fecha_base or timezone.localdate()
-        if alcance == "fin_semana":
-            target_start, target_end = _weekend_start_end(base)
-        else:
-            target_start, target_end = _week_start_end(base)
+    target_start, target_end, target_days = _forecast_target_days(
+        alcance,
+        periodo=periodo,
+        fecha_base=fecha_base,
+    )
 
-    qs = VentaHistorica.objects.filter(fecha__lt=target_start).select_related("receta", "sucursal")
-    if sucursal:
-        qs = qs.filter(sucursal=sucursal)
-    if not incluir_preparaciones:
-        qs = qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
-    history_meta = _forecast_history_meta(
-        qs,
+    history_dates = _canonical_history_dates(
+        target_start=target_start,
+        sucursal=sucursal,
+        incluir_preparaciones=incluir_preparaciones,
+    )
+    history_meta = _forecast_history_meta_from_dates(
+        history_dates,
         alcance=alcance,
         target_start=target_start,
         target_end=target_end,
     )
-
-    grouped: dict[int, dict[str, Any]] = {}
-    for row in qs.values("receta_id", "receta__nombre", "fecha").annotate(total=Sum("cantidad")).order_by("receta_id", "fecha"):
-        rid = int(row["receta_id"])
-        item = grouped.setdefault(
-            rid,
-            {
-                "receta_id": rid,
-                "receta": row["receta__nombre"],
-                "days": [],
-            },
-        )
-        item["days"].append((row["fecha"], Decimal(str(row["total"] or 0))))
+    grouped = _canonical_sales_history_grouped(
+        target_start=target_start,
+        sucursal=sucursal,
+        incluir_preparaciones=incluir_preparaciones,
+    )
 
     periodo_target = f"{target_start.year:04d}-{target_start.month:02d}"
     pron_map = {
@@ -12549,50 +13779,56 @@ def _build_forecast_from_history(
         for p in PronosticoVenta.objects.filter(periodo=periodo_target)
     }
 
-    rows = []
+    detail_rows: list[dict[str, Any]] = []
     safety_factor = Decimal("1") + (safety_pct / Decimal("100"))
-    for rid, item in grouped.items():
-        days = item["days"]
-        if alcance == "mes":
-            predicted, obs, confidence, dispersion, samples_count = _forecast_month_qty(days, target_start)
-        else:
-            predicted, obs, confidence, dispersion, samples_count = _forecast_range_qty(days, target_start, target_end)
-        predicted = max(predicted * safety_factor, Decimal("0"))
-        predicted = predicted.quantize(Decimal("0.001"))
-        dispersion = max(dispersion * safety_factor, Decimal("0")).quantize(Decimal("0.001"))
-        forecast_low = max(predicted - dispersion, Decimal("0")).quantize(Decimal("0.001"))
-        forecast_high = max(predicted + dispersion, Decimal("0")).quantize(Decimal("0.001"))
-        if predicted <= 0:
-            continue
+    for item in grouped.values():
+        day_rows = item["days"]
+        for target_day in target_days:
+            day_prediction = _predict_daily_qty(day_rows, target_date=target_day)
+            forecast_qty = (Decimal(str(day_prediction["forecast_qty"])) * safety_factor).quantize(Decimal("0.001"))
+            if forecast_qty <= 0:
+                continue
+            desviacion = (Decimal(str(day_prediction["desviacion"])) * safety_factor).quantize(Decimal("0.001"))
+            detail_rows.append(
+                {
+                    "fecha": target_day.isoformat(),
+                    "receta_id": item["receta_id"],
+                    "receta": item["receta"],
+                    "sucursal_id": item["sucursal_id"],
+                    "sucursal_codigo": item["sucursal_codigo"],
+                    "sucursal": item["sucursal"],
+                    "forecast_qty": forecast_qty,
+                    "forecast_low": max(forecast_qty - desviacion, Decimal("0")).quantize(Decimal("0.001")),
+                    "forecast_high": max(forecast_qty + desviacion, Decimal("0")).quantize(Decimal("0.001")),
+                    "desviacion": desviacion,
+                    "muestras": int(day_prediction["muestras"]),
+                    "observaciones": int(day_prediction["observaciones"]),
+                    "confianza": Decimal(str(day_prediction["confianza"])).quantize(Decimal("0.1")),
+                    "recent_share_pct": Decimal(str(day_prediction["recent_share_pct"])).quantize(Decimal("0.1")),
+                    "weekday_match_pct": Decimal(str(day_prediction["weekday_match_pct"])).quantize(Decimal("0.1")),
+                    "week_of_month_match_pct": Decimal(str(day_prediction["week_of_month_match_pct"])).quantize(Decimal("0.1")),
+                    "legacy_low_weight_samples": int(day_prediction["legacy_low_weight_samples"]),
+                }
+            )
 
-        current = pron_map.get(rid, Decimal("0"))
-        delta = predicted - current
-        threshold = max(Decimal("1.000"), current * Decimal("0.05"))
-        if delta > threshold:
-            recomendacion = "SUBIR"
-        elif delta < (threshold * Decimal("-1")):
-            recomendacion = "BAJAR"
-        else:
-            recomendacion = "MANTENER"
-
-        rows.append(
-            {
-                "receta_id": rid,
-                "receta": item["receta"],
-                "forecast_qty": predicted,
-                "forecast_low": forecast_low,
-                "forecast_high": forecast_high,
-                "desviacion": dispersion,
-                "muestras": int(samples_count),
-                "pronostico_actual": current.quantize(Decimal("0.001")),
-                "delta": delta.quantize(Decimal("0.001")),
-                "recomendacion": recomendacion,
-                "observaciones": obs,
-                "confianza": (confidence * Decimal("100")).quantize(Decimal("0.1")),
-            }
+    detail_rows.sort(
+        key=lambda row: (
+            row["fecha"],
+            row.get("sucursal_codigo") or "",
+            -(Decimal(str(row.get("forecast_qty") or 0))),
+            row.get("receta") or "",
         )
-
-    rows.sort(key=lambda x: x["forecast_qty"], reverse=True)
+    )
+    mix_adjustment_meta = {
+        "enabled": mix_adjustment_enabled,
+        "status": "disabled" if not mix_adjustment_enabled else "mix_base_only",
+        "applied_rows": 0,
+        "adjusted_portfolios": 0,
+        "fallback_rows": 0,
+    }
+    if mix_adjustment_enabled:
+        detail_rows, mix_adjustment_meta = _apply_mix_adjuster(detail_rows, grouped)
+    rows = _aggregate_forecast_rows(detail_rows, pron_map)
     return {
         "alcance": alcance,
         "periodo": periodo_target,
@@ -12601,8 +13837,15 @@ def _build_forecast_from_history(
         "sucursal_id": sucursal.id if sucursal else None,
         "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
         "rows": rows,
+        "detail_rows": detail_rows,
         "totals": _forecast_totals_from_rows(rows),
         "history_meta": history_meta,
+        "model_meta": _forecast_result_model_meta(
+            target_start=target_start,
+            target_end=target_end,
+            scope_days=len(target_days),
+            mix_adjustment_meta=mix_adjustment_meta,
+        ),
     }
 
 
@@ -12623,6 +13866,41 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
                 "recomendacion": row["recomendacion"],
                 "observaciones": int(row["observaciones"]),
                 "confianza": float(row["confianza"]),
+                "sucursales_count": int(row.get("sucursales_count") or 0),
+                "dias_count": int(row.get("dias_count") or 0),
+            }
+        )
+    detail_rows = []
+    for row in (result.get("detail_rows") or [])[: max(top_rows * 4, 120)]:
+        detail_rows.append(
+            {
+                "fecha": str(row.get("fecha") or ""),
+                "receta_id": int(row.get("receta_id") or 0),
+                "receta": str(row.get("receta") or ""),
+                "sucursal_id": int(row["sucursal_id"]) if row.get("sucursal_id") is not None else None,
+                "sucursal_codigo": str(row.get("sucursal_codigo") or ""),
+                "sucursal": str(row.get("sucursal") or ""),
+                "forecast_qty": float(row.get("forecast_qty") or 0),
+                "forecast_low": float(row.get("forecast_low") or 0),
+                "forecast_high": float(row.get("forecast_high") or 0),
+                "desviacion": float(row.get("desviacion") or 0),
+                "muestras": int(row.get("muestras") or 0),
+                "observaciones": int(row.get("observaciones") or 0),
+                "confianza": float(row.get("confianza") or 0),
+                "recent_share_pct": float(row.get("recent_share_pct") or 0),
+                "weekday_match_pct": float(row.get("weekday_match_pct") or 0),
+                "week_of_month_match_pct": float(row.get("week_of_month_match_pct") or 0),
+                "legacy_low_weight_samples": int(row.get("legacy_low_weight_samples") or 0),
+                "mix_base_pct": float(row.get("mix_base_pct") or 0),
+                "mix_recent_pct": float(row.get("mix_recent_pct") or 0),
+                "mix_adjusted_pct": float(row.get("mix_adjusted_pct") or 0),
+                "mix_alpha_pct": float(row.get("mix_alpha_pct") or 0),
+                "mix_adjustment_pct": float(row.get("mix_adjustment_pct") or 0),
+                "recent_sales_qty": float(row.get("recent_sales_qty") or 0),
+                "effective_recent_samples": float(row.get("effective_recent_samples") or 0),
+                "portfolio_stability_pct": float(row.get("portfolio_stability_pct") or 0),
+                "mix_adjusted": bool(row.get("mix_adjusted")),
+                "mix_adjustment_status": str(row.get("mix_adjustment_status") or ""),
             }
         )
     payload = {
@@ -12633,6 +13911,8 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
         "sucursal_id": int(result["sucursal_id"]) if result["sucursal_id"] else None,
         "sucursal_nombre": result["sucursal_nombre"],
         "rows": rows,
+        "detail_rows": detail_rows,
+        "detail_rows_total": len(result.get("detail_rows") or []),
         "totals": {
             "recetas_count": int(result["totals"]["recetas_count"]),
             "forecast_total": float(result["totals"]["forecast_total"]),
@@ -12651,6 +13931,7 @@ def _forecast_session_payload(result: dict[str, Any], top_rows: int = 80) -> dic
             "months_observed": int((result.get("history_meta") or {}).get("months_observed") or 0),
             "scope_label": str((result.get("history_meta") or {}).get("scope_label") or "Sin histórico"),
         },
+        "model_meta": result.get("model_meta") or {},
     }
     if result.get("min_confianza_pct") is not None:
         payload["min_confianza_pct"] = float(result.get("min_confianza_pct") or 0)
@@ -12920,6 +14201,8 @@ def _plan_master_demand_gate(plan: PlanProduccion | None, *, lookback_days: int 
 
 def _forecast_vs_solicitud_preview(payload: dict[str, Any] | None, escenario: str = "base") -> dict[str, Any] | None:
     if not payload:
+        return None
+    if str(payload.get("alcance") or "").strip().lower() == "dia":
         return None
     rows_payload = payload.get("rows") or []
     if not rows_payload:
@@ -13298,6 +14581,12 @@ def _forecast_backtest_windows(alcance: str, fecha_base: date, periods: int) -> 
     if periods <= 0:
         return windows
 
+    if alcance == "dia":
+        for i in range(periods):
+            target_day = fecha_base - timedelta(days=i)
+            windows.append((target_day, target_day))
+        return windows
+
     if alcance == "mes":
         anchor = date(fecha_base.year, fecha_base.month, 1)
         for i in range(periods):
@@ -13322,7 +14611,7 @@ def _forecast_backtest_windows(alcance: str, fecha_base: date, periods: int) -> 
     return windows
 
 
-def _build_forecast_backtest_preview(
+def _build_forecast_backtest_metrics(
     *,
     alcance: str,
     fecha_base: date,
@@ -13333,17 +14622,18 @@ def _build_forecast_backtest_preview(
     min_confianza_pct: Decimal,
     escenario: str,
     top: int,
+    mix_adjustment_enabled: bool = MIX_ADJUSTMENT_ENABLED_DEFAULT,
 ) -> dict[str, Any] | None:
     windows = _forecast_backtest_windows(alcance, fecha_base, periods)
     if not windows:
         return None
-    history_qs = VentaHistorica.objects.filter(fecha__lt=fecha_base)
-    if sucursal:
-        history_qs = history_qs.filter(sucursal=sucursal)
-    if not incluir_preparaciones:
-        history_qs = history_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
-    history_meta = _forecast_history_meta(
-        history_qs,
+    history_dates = _canonical_history_dates(
+        target_start=fecha_base,
+        sucursal=sucursal,
+        incluir_preparaciones=incluir_preparaciones,
+    )
+    history_meta = _forecast_history_meta_from_dates(
+        history_dates,
         alcance=alcance,
         target_start=fecha_base,
         target_end=fecha_base,
@@ -13355,6 +14645,11 @@ def _build_forecast_backtest_preview(
     sum_abs_error = Decimal("0")
     ape_sum = Decimal("0")
     ape_count = 0
+    fallback_rows_total = 0
+    stability_sum = Decimal("0")
+    stability_count = 0
+    recent_samples_sum = Decimal("0")
+    recent_samples_count = 0
 
     for window_start, window_end in windows:
         periodo_window = f"{window_start.year:04d}-{window_start.month:02d}"
@@ -13365,8 +14660,36 @@ def _build_forecast_backtest_preview(
             sucursal=sucursal,
             incluir_preparaciones=incluir_preparaciones,
             safety_pct=safety_pct,
+            mix_adjustment_enabled=mix_adjustment_enabled,
         )
         forecast_result, _ = _filter_forecast_result_by_confianza(forecast_result, min_confianza_pct)
+        mix_meta = ((forecast_result.get("model_meta") or {}).get("mix_adjuster") or {})
+        fallback_rows_window = int(mix_meta.get("fallback_rows") or 0)
+        detail_rows = list(forecast_result.get("detail_rows") or [])
+        stability_values = [
+            Decimal(str(row.get("portfolio_stability_pct") or 0))
+            for row in detail_rows
+            if Decimal(str(row.get("portfolio_stability_pct") or 0)) > 0
+        ]
+        effective_recent_sample_values = [
+            Decimal(str(row.get("effective_recent_samples") or 0))
+            for row in detail_rows
+            if Decimal(str(row.get("effective_recent_samples") or 0)) > 0
+        ]
+        avg_stability = None
+        if stability_values:
+            avg_stability = (
+                sum(stability_values, Decimal("0")) / Decimal(str(len(stability_values)))
+            ).quantize(Decimal("0.1"))
+            stability_sum += sum(stability_values, Decimal("0"))
+            stability_count += len(stability_values)
+        avg_effective_recent_samples = None
+        if effective_recent_sample_values:
+            avg_effective_recent_samples = (
+                sum(effective_recent_sample_values, Decimal("0")) / Decimal(str(len(effective_recent_sample_values)))
+            ).quantize(Decimal("0.001"))
+            recent_samples_sum += sum(effective_recent_sample_values, Decimal("0"))
+            recent_samples_count += len(effective_recent_sample_values)
         qty_key = "forecast_qty"
         if escenario == "bajo":
             qty_key = "forecast_low"
@@ -13377,15 +14700,12 @@ def _build_forecast_backtest_preview(
             for row in (forecast_result.get("rows") or [])
         }
 
-        actual_qs = VentaHistorica.objects.filter(fecha__gte=window_start, fecha__lte=window_end)
-        if sucursal:
-            actual_qs = actual_qs.filter(sucursal=sucursal)
-        if not incluir_preparaciones:
-            actual_qs = actual_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
-        actual_map = {
-            int(row["receta_id"]): Decimal(str(row["total"] or 0))
-            for row in actual_qs.values("receta_id").annotate(total=Sum("cantidad"))
-        }
+        actual_map = _canonical_actual_map(
+            window_start=window_start,
+            window_end=window_end,
+            sucursal=sucursal,
+            incluir_preparaciones=incluir_preparaciones,
+        )
 
         if min_confianza_pct > 0:
             union_ids = sorted(set(forecast_map.keys()))
@@ -13448,6 +14768,7 @@ def _build_forecast_backtest_preview(
         sum_forecast_total += forecast_total
         sum_actual_total += actual_total
         sum_abs_error += abs_error_total
+        fallback_rows_total += fallback_rows_window
 
         windows_payload.append(
             {
@@ -13460,6 +14781,9 @@ def _build_forecast_backtest_preview(
                 "bias_total": float((forecast_total - actual_total).quantize(Decimal("0.001"))),
                 "mae": float(mae),
                 "mape": float(mape) if mape is not None else None,
+                "fallback_rows": fallback_rows_window,
+                "portfolio_stability_pct": float(avg_stability) if avg_stability is not None else None,
+                "effective_recent_samples": float(avg_effective_recent_samples) if avg_effective_recent_samples is not None else None,
                 "top_errors": rows[:top],
             }
         )
@@ -13471,6 +14795,14 @@ def _build_forecast_backtest_preview(
     if ape_count > 0:
         overall_mape = (ape_sum / Decimal(str(ape_count))).quantize(Decimal("0.1"))
     overall_mae = (sum_abs_error / Decimal(str(max(1, len(windows_payload))))).quantize(Decimal("0.001"))
+    overall_stability = None
+    if stability_count > 0:
+        overall_stability = (stability_sum / Decimal(str(stability_count))).quantize(Decimal("0.1"))
+    overall_effective_recent_samples = None
+    if recent_samples_count > 0:
+        overall_effective_recent_samples = (
+            recent_samples_sum / Decimal(str(recent_samples_count))
+        ).quantize(Decimal("0.001"))
     return {
         "scope": {
             "alcance": alcance,
@@ -13478,6 +14810,7 @@ def _build_forecast_backtest_preview(
             "periods": periods,
             "min_confianza_pct": float(min_confianza_pct),
             "escenario": escenario,
+            "mix_adjustment_enabled": bool(mix_adjustment_enabled),
             "sucursal_id": sucursal.id if sucursal else None,
             "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
         },
@@ -13488,6 +14821,13 @@ def _build_forecast_backtest_preview(
             "bias_total": float((sum_forecast_total - sum_actual_total).quantize(Decimal("0.001"))),
             "mae_promedio": float(overall_mae),
             "mape_promedio": float(overall_mape) if overall_mape is not None else None,
+            "fallback_rows": fallback_rows_total,
+            "portfolio_stability_pct": float(overall_stability) if overall_stability is not None else None,
+            "effective_recent_samples": (
+                float(overall_effective_recent_samples)
+                if overall_effective_recent_samples is not None
+                else None
+            ),
         },
         "windows": windows_payload,
         "history_meta": {
@@ -13501,6 +14841,200 @@ def _build_forecast_backtest_preview(
             "scope_label": str(history_meta.get("scope_label") or "Sin histórico"),
         },
     }
+
+
+def _summarize_mix_adjuster_backtest_compare(
+    base_payload: dict[str, Any] | None,
+    adjusted_payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not base_payload or not adjusted_payload:
+        return None
+    base_windows = {
+        (str(window.get("window_start") or ""), str(window.get("window_end") or "")): window
+        for window in (base_payload.get("windows") or [])
+    }
+    adjusted_windows = {
+        (str(window.get("window_start") or ""), str(window.get("window_end") or "")): window
+        for window in (adjusted_payload.get("windows") or [])
+    }
+    shared_keys = [key for key in base_windows.keys() if key in adjusted_windows]
+    if not shared_keys:
+        return None
+
+    improved_cases = 0
+    worsened_cases = 0
+    tie_cases = 0
+    case_rows: list[dict[str, Any]] = []
+    window_rows: list[dict[str, Any]] = []
+    for key in shared_keys:
+        base_window = base_windows[key]
+        adjusted_window = adjusted_windows[key]
+        base_metric = base_window.get("mape")
+        adjusted_metric = adjusted_window.get("mape")
+        metric_name = "MAPE"
+        if base_metric is None or adjusted_metric is None:
+            base_metric = base_window.get("mae")
+            adjusted_metric = adjusted_window.get("mae")
+            metric_name = "MAE"
+        if base_metric is None or adjusted_metric is None:
+            continue
+        delta_metric = Decimal(str(adjusted_metric)) - Decimal(str(base_metric))
+        if delta_metric < Decimal("-0.1"):
+            improved_cases += 1
+            outcome = "improve"
+        elif delta_metric > Decimal("0.1"):
+            worsened_cases += 1
+            outcome = "worsen"
+        else:
+            tie_cases += 1
+            outcome = "tie"
+        case_rows.append(
+            {
+                "window_start": key[0],
+                "window_end": key[1],
+                "metric": metric_name,
+                "base_value": float(base_metric),
+                "adjusted_value": float(adjusted_metric),
+                "delta": float(delta_metric.quantize(Decimal("0.1"))),
+                "outcome": outcome,
+            }
+        )
+        window_rows.append(
+            {
+                "window_start": key[0],
+                "window_end": key[1],
+                "base_mape": base_window.get("mape"),
+                "adjusted_mape": adjusted_window.get("mape"),
+                "base_mae": base_window.get("mae"),
+                "adjusted_mae": adjusted_window.get("mae"),
+                "base_bias_total": base_window.get("bias_total"),
+                "adjusted_bias_total": adjusted_window.get("bias_total"),
+                "base_fallback_rows": base_window.get("fallback_rows"),
+                "adjusted_fallback_rows": adjusted_window.get("fallback_rows"),
+                "base_portfolio_stability_pct": base_window.get("portfolio_stability_pct"),
+                "adjusted_portfolio_stability_pct": adjusted_window.get("portfolio_stability_pct"),
+                "base_effective_recent_samples": base_window.get("effective_recent_samples"),
+                "adjusted_effective_recent_samples": adjusted_window.get("effective_recent_samples"),
+                "outcome": outcome,
+            }
+        )
+
+    base_mape = base_payload.get("totals", {}).get("mape_promedio")
+    adjusted_mape = adjusted_payload.get("totals", {}).get("mape_promedio")
+    recommendation = "mantener_desactivado"
+    activation_candidate = False
+    if base_mape is not None and adjusted_mape is not None:
+        if (
+            Decimal(str(adjusted_mape)) < Decimal(str(base_mape))
+            and improved_cases > worsened_cases
+        ):
+            recommendation = "activar_opcionalmente"
+            activation_candidate = True
+
+    case_rows.sort(
+        key=lambda row: (0 if row["outcome"] == "improve" else 1, abs(row["delta"])),
+        reverse=True,
+    )
+    return {
+        "base": {
+            "mape_promedio": base_mape,
+            "mae_promedio": base_payload.get("totals", {}).get("mae_promedio"),
+            "bias_total": base_payload.get("totals", {}).get("bias_total"),
+            "fallback_rows": base_payload.get("totals", {}).get("fallback_rows"),
+            "portfolio_stability_pct": base_payload.get("totals", {}).get("portfolio_stability_pct"),
+            "effective_recent_samples": base_payload.get("totals", {}).get("effective_recent_samples"),
+        },
+        "adjusted": {
+            "mape_promedio": adjusted_mape,
+            "mae_promedio": adjusted_payload.get("totals", {}).get("mae_promedio"),
+            "bias_total": adjusted_payload.get("totals", {}).get("bias_total"),
+            "fallback_rows": adjusted_payload.get("totals", {}).get("fallback_rows"),
+            "portfolio_stability_pct": adjusted_payload.get("totals", {}).get("portfolio_stability_pct"),
+            "effective_recent_samples": adjusted_payload.get("totals", {}).get("effective_recent_samples"),
+        },
+        "improved_cases": improved_cases,
+        "worsened_cases": worsened_cases,
+        "tie_cases": tie_cases,
+        "improvement_rate_pct": round((improved_cases / max(1, len(shared_keys))) * 100, 1),
+        "mape_improvement_pct": (
+            float(
+                (
+                    ((Decimal(str(base_mape)) - Decimal(str(adjusted_mape))) / Decimal(str(base_mape)))
+                    * Decimal("100")
+                ).quantize(Decimal("0.1"))
+            )
+            if base_mape not in (None, 0) and adjusted_mape is not None
+            else None
+        ),
+        "windows": window_rows,
+        "cases": case_rows[: min(len(case_rows), 12)],
+        "recommendation": recommendation,
+        "activation_candidate": activation_candidate,
+    }
+
+
+def _build_forecast_backtest_preview(
+    *,
+    alcance: str,
+    fecha_base: date,
+    periods: int,
+    sucursal: Sucursal | None,
+    incluir_preparaciones: bool,
+    safety_pct: Decimal,
+    min_confianza_pct: Decimal,
+    escenario: str,
+    top: int,
+    mix_adjustment_enabled: bool = MIX_ADJUSTMENT_ENABLED_DEFAULT,
+    include_mix_compare: bool = True,
+) -> dict[str, Any] | None:
+    primary_payload = _build_forecast_backtest_metrics(
+        alcance=alcance,
+        fecha_base=fecha_base,
+        periods=periods,
+        sucursal=sucursal,
+        incluir_preparaciones=incluir_preparaciones,
+        safety_pct=safety_pct,
+        min_confianza_pct=min_confianza_pct,
+        escenario=escenario,
+        top=top,
+        mix_adjustment_enabled=mix_adjustment_enabled,
+    )
+    if not primary_payload:
+        return None
+    if include_mix_compare:
+        base_payload = primary_payload
+        adjusted_payload = primary_payload
+        if mix_adjustment_enabled:
+            base_payload = _build_forecast_backtest_metrics(
+                alcance=alcance,
+                fecha_base=fecha_base,
+                periods=periods,
+                sucursal=sucursal,
+                incluir_preparaciones=incluir_preparaciones,
+                safety_pct=safety_pct,
+                min_confianza_pct=min_confianza_pct,
+                escenario=escenario,
+                top=top,
+                mix_adjustment_enabled=False,
+            )
+        else:
+            adjusted_payload = _build_forecast_backtest_metrics(
+                alcance=alcance,
+                fecha_base=fecha_base,
+                periods=periods,
+                sucursal=sucursal,
+                incluir_preparaciones=incluir_preparaciones,
+                safety_pct=safety_pct,
+                min_confianza_pct=min_confianza_pct,
+                escenario=escenario,
+                top=top,
+                mix_adjustment_enabled=True,
+            )
+        primary_payload["mix_adjuster_compare"] = _summarize_mix_adjuster_backtest_compare(
+            base_payload,
+            adjusted_payload,
+        )
+    return primary_payload
 
 
 def _redirect_plan_produccion_with_request_params(request: HttpRequest) -> HttpResponse:
@@ -14532,7 +16066,7 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
         next_params["plan_id"] = plan_id
 
     alcance = (request.POST.get("alcance") or "mes").strip().lower()
-    if alcance not in {"mes", "semana", "fin_semana"}:
+    if alcance not in {"dia", "mes", "semana", "fin_semana"}:
         alcance = "mes"
     periodo = _normalize_periodo_mes(request.POST.get("periodo"))
     fecha_base = _parse_date_safe(request.POST.get("fecha_base")) or timezone.localdate()
@@ -14571,6 +16105,7 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
         min_confianza_pct = Decimal("0")
     if min_confianza_pct > Decimal("100"):
         min_confianza_pct = Decimal("100")
+    mix_adjustment_enabled = request.POST.get("mix_adjustment_enabled") == "1"
 
     sucursal = Sucursal.objects.filter(pk=request.POST.get("sucursal_id")).first()
 
@@ -14581,6 +16116,7 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
         sucursal=sucursal,
         incluir_preparaciones=incluir_preparaciones,
         safety_pct=safety_pct,
+        mix_adjustment_enabled=mix_adjustment_enabled,
     )
     resultado, filtered_conf = _filter_forecast_result_by_confianza(resultado, min_confianza_pct)
     resultado["min_confianza_pct"] = min_confianza_pct
@@ -14602,6 +16138,8 @@ def pronostico_estadistico_desde_historial(request: HttpRequest) -> HttpResponse
             min_confianza_pct=min_confianza_pct,
             escenario=escenario,
             top=backtest_top,
+            mix_adjustment_enabled=mix_adjustment_enabled,
+            include_mix_compare=True,
         )
         if backtest_payload is None:
             messages.warning(request, "No hay historial suficiente para backtest con esos filtros.")
@@ -15200,7 +16738,7 @@ def plan_produccion(request: HttpRequest) -> HttpResponse:
     mrp_periodo = _normalize_periodo_mes(request.GET.get("mrp_periodo"))
     mrp_periodo_tipo = (request.GET.get("mrp_periodo_tipo") or "mes").strip().lower()
     alcance_estadistico = (request.GET.get("alcance_estadistico") or "mes").strip().lower()
-    if alcance_estadistico not in {"mes", "semana", "fin_semana"}:
+    if alcance_estadistico not in {"dia", "mes", "semana", "fin_semana"}:
         alcance_estadistico = "mes"
     fecha_base_estadistica = request.GET.get("fecha_base_estadistica") or timezone.localdate().isoformat()
     backtest_periods = request.GET.get("backtest_periods") or "3"
@@ -15616,6 +17154,22 @@ def _latest_point_operational_cutoff_date() -> date:
     return min(candidates) if candidates else (timezone.localdate() - timedelta(days=1))
 
 
+def _expected_dg_operacion_cut_date() -> date:
+    fallback_date = _latest_point_operational_cutoff_date()
+    try:
+        from django_celery_beat.models import PeriodicTask
+        from reportes.views import _expected_sales_cut_date
+
+        task = PeriodicTask.objects.filter(name="reportes: refresh analytics operativo").select_related(
+            "crontab",
+            "interval",
+        ).first()
+        expected_cut_date = _expected_sales_cut_date(task).get("expected_cut_date")
+        return expected_cut_date or fallback_date
+    except Exception:
+        return fallback_date
+
+
 def _build_dg_operacion_dashboard_payload(
     *,
     start_date: date | None = None,
@@ -15625,7 +17179,7 @@ def _build_dg_operacion_dashboard_payload(
 ) -> dict[str, Any]:
     if group_by not in {"day", "week", "month"}:
         group_by = "day"
-    fecha_operacion = fecha_operacion or (_latest_point_operational_cutoff_date() + timedelta(days=1))
+    fecha_operacion = fecha_operacion or _expected_dg_operacion_cut_date()
     planes_qs = PlanProduccion.objects.select_related("creado_por").prefetch_related("items").order_by("-fecha_produccion", "-id")
     plan_dashboard = _plan_status_dashboard(
         planes_qs,
@@ -15721,7 +17275,7 @@ def _point_waste_branch_label(row: PointWasteLine) -> tuple[str, str]:
 
 
 def _build_point_exec_summary(fecha_operacion: date) -> dict[str, Any]:
-    cierre_fecha = fecha_operacion - timedelta(days=1)
+    cierre_fecha = fecha_operacion
     try:
         sales_qs = _point_operational_sales_rows_for_date(cierre_fecha).filter(
             branch__erp_branch_id__isnull=False,
@@ -15775,7 +17329,7 @@ def _build_point_exec_summary(fecha_operacion: date) -> dict[str, Any]:
         active_branch_count = sucursales_operativas().count()
         ticket_branch_count = indicator_qs.values("branch__erp_branch_id").distinct().count()
         top_branches = list(
-            indicator_qs.values("branch__erp_branch__codigo", "branch__erp_branch__nombre")
+            indicator_qs.values("branch__erp_branch_id", "branch__erp_branch__codigo", "branch__erp_branch__nombre")
             .annotate(total_amount=Sum("total_amount"), total_tickets=Sum("total_tickets"))
             .order_by("-total_amount", "branch__erp_branch__codigo")[:5]
         )
@@ -15822,7 +17376,7 @@ def _build_point_exec_summary(fecha_operacion: date) -> dict[str, Any]:
 
 
 def _build_point_waste_summary(fecha_operacion: date) -> dict[str, Any]:
-    cierre_fecha = fecha_operacion - timedelta(days=1)
+    cierre_fecha = fecha_operacion
     try:
         window_start = timezone.make_aware(datetime.combine(cierre_fecha, datetime.min.time()), timezone.get_current_timezone())
         window_end = window_start + timedelta(days=2)
@@ -15846,6 +17400,7 @@ def _build_point_waste_summary(fecha_operacion: date) -> dict[str, Any]:
             branch_bucket = branch_buckets.setdefault(
                 (branch_code, branch_name),
                 {
+                    "branch_id": row.erp_branch_id,
                     "branch_code": branch_code,
                     "branch_name": branch_name,
                     "total_qty": Decimal("0"),
@@ -15932,7 +17487,7 @@ def _build_point_waste_summary(fecha_operacion: date) -> dict[str, Any]:
 
 
 def _build_point_central_flow_summary(fecha_operacion: date) -> dict[str, Any]:
-    cierre_fecha = fecha_operacion - timedelta(days=1)
+    cierre_fecha = fecha_operacion
     settings = load_point_bridge_settings()
     allowed_production = {normalizar_nombre(value) for value in settings.production_storage_branches if value}
     allowed_transfer = {normalizar_nombre(value) for value in settings.transfer_storage_branches if value}
@@ -16007,9 +17562,58 @@ def _build_point_central_flow_summary(fecha_operacion: date) -> dict[str, Any]:
         }
 
 
+def _latest_point_inventory_branch_totals(
+    *,
+    before_dt: datetime,
+    recent_cutoff: datetime | None = None,
+) -> tuple[dict[int, Decimal], set[int]]:
+    branch_totals: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+    recent_branch_ids: set[int] = set()
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            WITH ranked_snapshots AS (
+                SELECT
+                    branch.erp_branch_id AS erp_branch_id,
+                    snapshot.stock AS stock,
+                    snapshot.captured_at AS captured_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY snapshot.branch_id, snapshot.product_id
+                        ORDER BY snapshot.captured_at DESC, snapshot.id DESC
+                    ) AS rn
+                FROM pos_bridge_inventory_snapshots AS snapshot
+                INNER JOIN pos_bridge_branches AS branch
+                    ON snapshot.branch_id = branch.id
+                INNER JOIN core_sucursal AS sucursal
+                    ON branch.erp_branch_id = sucursal.id
+                WHERE snapshot.captured_at < %s
+                  AND branch.erp_branch_id IS NOT NULL
+                  AND sucursal.activa
+            )
+            SELECT
+                erp_branch_id,
+                COALESCE(SUM(stock), 0) AS total_stock,
+                MAX(captured_at) AS latest_snapshot_at
+            FROM ranked_snapshots
+            WHERE rn = 1
+            GROUP BY erp_branch_id
+            """,
+            [before_dt],
+        )
+        rows = cursor.fetchall()
+    for branch_id, total_stock, latest_snapshot_at in rows:
+        if not branch_id:
+            continue
+        branch_key = int(branch_id)
+        branch_totals[branch_key] += Decimal(str(total_stock or 0))
+        if recent_cutoff is not None and latest_snapshot_at and latest_snapshot_at >= recent_cutoff:
+            recent_branch_ids.add(branch_key)
+    return dict(branch_totals), recent_branch_ids
+
+
 def _build_point_closure_summary(fecha_operacion: date) -> dict[str, Any]:
     try:
-        cierre_fecha = fecha_operacion - timedelta(days=1)
+        cierre_fecha = fecha_operacion
         tz = timezone.get_current_timezone()
         apertura_dt = timezone.make_aware(datetime.combine(cierre_fecha, datetime.min.time()), tz)
         siguiente_dt = apertura_dt + timedelta(days=1)
@@ -16100,47 +17704,11 @@ def _build_point_closure_summary(fecha_operacion: date) -> dict[str, Any]:
         ):
             waste_map[int(row["sucursal_id"])] += Decimal(str(row.get("total") or 0))
 
-        opening_rows = (
-            PointInventorySnapshot.objects.filter(
-                captured_at__lt=apertura_dt,
-                branch__erp_branch_id__isnull=False,
-                branch__erp_branch__activa=True,
-            )
-            .select_related("branch__erp_branch")
-            .order_by("branch_id", "product_id", "-captured_at")
+        opening_map, _ = _latest_point_inventory_branch_totals(before_dt=apertura_dt)
+        closing_map, closing_snapshot_recent = _latest_point_inventory_branch_totals(
+            before_dt=corte_cierre_dt,
+            recent_cutoff=siguiente_dt,
         )
-        opening_map: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
-        seen_opening: set[tuple[int, int]] = set()
-        for snapshot in opening_rows:
-            key = (snapshot.branch_id, snapshot.product_id)
-            if key in seen_opening:
-                continue
-            seen_opening.add(key)
-            if snapshot.branch.erp_branch_id:
-                opening_map[int(snapshot.branch.erp_branch_id)] += Decimal(str(snapshot.stock or 0))
-
-        closing_rows = (
-            PointInventorySnapshot.objects.filter(
-                captured_at__lt=corte_cierre_dt,
-                branch__erp_branch_id__isnull=False,
-                branch__erp_branch__activa=True,
-            )
-            .select_related("branch__erp_branch")
-            .order_by("branch_id", "product_id", "-captured_at")
-        )
-        closing_map: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
-        closing_snapshot_recent: set[int] = set()
-        seen_closing: set[tuple[int, int]] = set()
-        for snapshot in closing_rows:
-            key = (snapshot.branch_id, snapshot.product_id)
-            if key in seen_closing:
-                continue
-            seen_closing.add(key)
-            if snapshot.branch.erp_branch_id:
-                branch_id = int(snapshot.branch.erp_branch_id)
-                closing_map[branch_id] += Decimal(str(snapshot.stock or 0))
-                if snapshot.captured_at >= siguiente_dt:
-                    closing_snapshot_recent.add(branch_id)
 
         rows: list[dict[str, Any]] = []
         total_cuadra = 0
@@ -16238,7 +17806,7 @@ def _build_point_closure_summary(fecha_operacion: date) -> dict[str, Any]:
     except (OperationalError, ProgrammingError):
         return {
             "available": False,
-            "closure_date": fecha_operacion - timedelta(days=1),
+            "closure_date": fecha_operacion,
             "status": "Sin cuadre Point",
             "tone": "warning",
             "detail": "La base Point no está disponible en este entorno.",
@@ -16344,7 +17912,7 @@ def _build_point_chart_bundle(
     fecha_operacion: date,
     point_closure_summary: dict[str, Any],
 ) -> dict[str, Any]:
-    cierre_fecha = fecha_operacion - timedelta(days=1)
+    cierre_fecha = fecha_operacion
     current_week_start = _point_week_start(cierre_fecha)
     week_starts = [current_week_start - timedelta(weeks=offset) for offset in range(5, -1, -1)]
     weekly_labels = [f"{week_start:%d %b}" for week_start in week_starts]
@@ -16809,6 +18377,7 @@ def _build_produccion_cedis_weekly_dashboard(base_date: date | None = None) -> d
             branch_label = getattr(row.erp_branch, "codigo", "") or getattr(row.erp_branch, "nombre", "") or "Sin sucursal"
             waste_by_branch[branch_label]["cost"] += amount
             waste_by_branch[branch_label]["qty"] += qty
+            waste_by_branch[branch_label]["branch_id"] = getattr(row, "erp_branch_id", None)
 
     for bucket in weekly.values():
         sales_units = bucket["sales_units"]
@@ -16832,6 +18401,7 @@ def _build_produccion_cedis_weekly_dashboard(base_date: date | None = None) -> d
     total_top_sales_amount = sum((row["amount"] for row in top_sales_rows), Decimal("0"))
     for row in top_sales_rows:
         row["share_pct"] = ((row["amount"] / total_top_sales_amount) * Decimal("100")).quantize(Decimal("0.1")) if total_top_sales_amount > 0 else Decimal("0")
+        row["action_url"] = reverse("reportes:financiero") + f"?{urlencode({'q': row['product']})}"
 
     top_waste_rows = sorted(
         [
@@ -16843,6 +18413,7 @@ def _build_produccion_cedis_weekly_dashboard(base_date: date | None = None) -> d
     total_top_waste_amount = sum((row["amount"] for row in top_waste_rows), Decimal("0"))
     for row in top_waste_rows:
         row["share_pct"] = ((row["amount"] / total_top_waste_amount) * Decimal("100")).quantize(Decimal("0.1")) if total_top_waste_amount > 0 else Decimal("0")
+        row["action_url"] = reverse("reportes:financiero") + f"?{urlencode({'q': row['product']})}"
 
     category_rows = sorted(
         set(sales_by_category.keys()) | set(production_by_category.keys()),
@@ -17007,7 +18578,18 @@ def _build_produccion_cedis_weekly_dashboard(base_date: date | None = None) -> d
         "top_waste_rows": top_waste_rows,
         "category_balance_rows": category_balance_rows,
         "waste_branch_rows": [
-            {"label": label, "cost": values["cost"], "qty": values["qty"]}
+            {
+                "label": label,
+                "cost": values["cost"],
+                "qty": values["qty"],
+                "action_url": (
+                    reverse("control:discrepancias")
+                    + f"?{urlencode({'from': current_week_start.isoformat(), 'to': current_week_end.isoformat(), 'sucursal_id': values['branch_id']})}"
+                )
+                if values.get("branch_id")
+                else reverse("control:discrepancias")
+                + f"?{urlencode({'from': current_week_start.isoformat(), 'to': current_week_end.isoformat()})}",
+            }
             for label, values in sorted(waste_by_branch.items(), key=lambda item: (-item[1]["cost"], item[0]))
         ],
         "forecast_rows": forecast_rows,
@@ -19222,7 +20804,7 @@ def mrp_form(request: HttpRequest) -> HttpResponse:
                         receta_id=source_recipe_id,
                         activo=True,
                     ).count()
-                    l.uses_direct_base_in_final = bool(
+                    direct_base_candidate = bool(
                         receta.tipo == Receta.TIPO_PRODUCTO_FINAL
                         and l.insumo.tipo_item == Insumo.TIPO_INTERNO
                         and l.source_code_kind == "PREPARACION"
@@ -19230,11 +20812,16 @@ def mrp_form(request: HttpRequest) -> HttpResponse:
                         and l.source_recipe.usa_presentaciones
                         and l.source_active_presentaciones_count > 0
                     )
-                    if l.uses_direct_base_in_final:
+                    if direct_base_candidate:
+                        direct_base_candidates = _active_presentation_derived_candidates(
+                            source_recipe_id,
+                            cache=direct_base_replacement_cache,
+                        )
                         l.direct_base_replacement = _suggest_direct_base_replacement(
                             l,
                             cache=direct_base_replacement_cache,
                         )
+                        l.uses_direct_base_in_final = bool(l.direct_base_replacement) or not direct_base_candidates
             if not l.insumo_id:
                 lineas_sin_match += 1
                 key = f"(NO MATCH) {l.insumo_texto}"
@@ -19264,7 +20851,10 @@ def mrp_form(request: HttpRequest) -> HttpResponse:
             key = l.insumo.nombre
             if key not in agregados:
                 article_class = _insumo_article_class(l.insumo)
-                readiness = _insumo_erp_readiness(l.insumo)
+                readiness = _insumo_operational_readiness(
+                    l.insumo,
+                    ignore_supplier=receta.tipo == Receta.TIPO_PRODUCTO_FINAL,
+                )
                 master_missing = list(readiness["missing"])
                 if l.insumo.activo and not (l.insumo.codigo_point or "").strip():
                     master_missing.append("código comercial")

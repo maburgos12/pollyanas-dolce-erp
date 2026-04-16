@@ -9,7 +9,7 @@ SUCURSALES_POINT = [
     {"codigo": "COLOSIO", "nombre": "Colosio", "activa": True},
     {"codigo": "CRUCERO", "nombre": "Crucero", "activa": True},
     {"codigo": "EL_TUNEL", "nombre": "EL TUNEL", "activa": True},
-    {"codigo": "GUAMUCHIL", "nombre": "Guamuchil", "activa": False, "fecha_apertura": None},
+    {"codigo": "GUAMUCHIL", "nombre": "Guamuchil", "activa": True, "fecha_apertura": None},
     {"codigo": "LAS_GLORIAS", "nombre": "Las Glorias", "activa": True},
     {"codigo": "LEYVA", "nombre": "Leyva", "activa": True},
     {"codigo": "MATRIZ", "nombre": "Matriz", "activa": True},

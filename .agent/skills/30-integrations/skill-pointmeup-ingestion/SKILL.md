@@ -38,3 +38,4 @@ Standardize PointMeUp ingestion pipelines (xls/xlsx/csv/pdf) into canonical ERP 
 
 ## Related playbooks
 - `playbooks/point_recetas_multinivel_y_addons.md`
+- `playbooks/point_inventory_unit_cost_loop.md`

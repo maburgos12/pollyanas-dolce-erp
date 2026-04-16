@@ -1,10 +1,11 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from openpyxl import load_workbook
 from io import BytesIO
@@ -12,6 +13,7 @@ from io import BytesIO
 from core.models import AuditLog
 from compras.models import SolicitudCompra
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
+from inventario.stock_trace import TRACE_RECONSTRUCTED_MOVEMENT, TRACE_RECONSTRUCTED_SYNC
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 from recetas.models import LineaReceta, Receta, VentaHistorica
 
@@ -346,7 +348,7 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(selected["enterprise_status"], "Lista para operar")
         self.assertEqual(selected["enterprise_missing"], [])
         self.assertFalse(selected["is_operational_blocker"])
-        self.assertContains(response, "estado ERP")
+        self.assertContains(response, "estado operativo")
 
     def test_movimientos_shows_master_focus_for_operational_blockers(self):
         unidad = UnidadMedida.objects.create(
@@ -406,20 +408,19 @@ class InventarioAliasesPendingTests(TestCase):
 
         response = self.client.get(reverse("inventario:movimientos"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Uso ERP")
-        self.assertContains(response, "Maestro ERP")
+        self.assertContains(response, "Uso operativo")
+        self.assertContains(response, "Maestro")
         self.assertContains(response, "Empaque final")
         self.assertContains(response, "Incompleto")
         self.assertContains(response, "Falta: código Point")
         self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, f"insumo_id={insumo.id}")
-        self.assertContains(response, "Ruta troncal ERP")
-        self.assertContains(response, "Dependencias upstream ERP")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Tramo ERP")
-        self.assertContains(response, "Con bloqueo")
-        self.assertContains(response, "Dependencia")
+        self.assertContains(response, "Ruta operativa")
+        self.assertContains(response, "Dependencias previas")
+        self.assertContains(response, "Prioridades de cierre")
         self.assertContains(response, "Salud operativa")
+        self.assertNotContains(response, "Centro de mando ERP")
+        self.assertNotContains(response, "Ruta troncal ERP")
         self.assertIn("enterprise_chain", response.context)
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("upstream_dependency_rows", response.context)
@@ -590,6 +591,34 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn(canonical.id, ids)
         self.assertNotIn(variant.id, ids)
 
+    def test_existencias_view_prefers_point_name_for_display(self):
+        proveedor = Proveedor.objects.create(nombre="Proveedor Display Point", activo=True)
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-disp-point",
+            nombre="Kilogramo Display Point",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Nombre ERP Interno",
+            nombre_point="Nombre Point Operativo",
+            categoria="Harinas",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            stock_actual=Decimal("5"),
+            stock_minimo=Decimal("2"),
+            punto_reorden=Decimal("3"),
+        )
+
+        response = self.client.get(reverse("inventario:existencias"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Nombre Point Operativo")
+
     def test_existencias_aggregates_duplicate_variants_into_one_canonical_row(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Existencias Canon", activo=True)
         unidad = UnidadMedida.objects.create(
@@ -707,24 +736,22 @@ class InventarioAliasesPendingTests(TestCase):
 
         response = self.client.get(reverse("inventario:existencias"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Uso ERP")
-        self.assertContains(response, "Maestro ERP")
+        self.assertContains(response, "Uso operativo")
+        self.assertContains(response, "Maestro")
         self.assertContains(response, "Empaque final")
         self.assertContains(response, "Incompleto")
         self.assertContains(response, "Editar artículo")
         self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, f"insumo_id={insumo.id}")
-        self.assertContains(response, "Cadena documental ERP")
-        self.assertContains(response, "Ruta troncal ERP")
-        self.assertContains(response, "Dependencias upstream ERP")
-        self.assertContains(response, "Dependencia")
+        self.assertContains(response, "Cadena de control")
+        self.assertContains(response, "Ruta operativa")
+        self.assertContains(response, "Dependencias previas")
         self.assertContains(response, "Resumen de seguimiento")
         self.assertContains(response, "Cierre por etapa documental")
-        self.assertContains(response, "Control por frente")
-        self.assertContains(response, "Entrega de inventario a downstream")
-        self.assertContains(response, "Tramo ERP")
-        self.assertContains(response, "Con bloqueo")
+        self.assertContains(response, "Seguimiento por frente")
+        self.assertContains(response, "Entrega a otros frentes")
         self.assertContains(response, "Salud operativa")
+        self.assertNotContains(response, "Cadena documental ERP")
         self.assertIn("enterprise_chain", response.context)
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("executive_radar_rows", response.context)
@@ -966,24 +993,22 @@ class InventarioAliasesPendingTests(TestCase):
 
         response = self.client.get(reverse("inventario:alertas"), {"nivel": "all"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Uso ERP")
-        self.assertContains(response, "Maestro ERP")
+        self.assertContains(response, "Uso operativo")
+        self.assertContains(response, "Maestro")
         self.assertContains(response, "Empaque final")
         self.assertContains(response, "Incompleto")
         self.assertContains(response, "Editar artículo")
         self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, f"insumo_id={insumo.id}")
-        self.assertContains(response, "Cadena documental ERP")
-        self.assertContains(response, "Ruta troncal ERP")
-        self.assertContains(response, "Dependencias upstream ERP")
+        self.assertContains(response, "Cadena de control")
+        self.assertContains(response, "Ruta operativa")
+        self.assertContains(response, "Dependencias previas")
         self.assertContains(response, "Prioridades de atención")
         self.assertContains(response, "Resumen de seguimiento")
-        self.assertContains(response, "Dependencia")
         self.assertContains(response, "Cierre por etapa documental")
-        self.assertContains(response, "Entrega de inventario a downstream")
-        self.assertContains(response, "Tramo ERP")
-        self.assertContains(response, "Con bloqueo")
-        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Entrega a otros frentes")
+        self.assertContains(response, "Salud operativa")
+        self.assertNotContains(response, "Cadena documental ERP")
         self.assertIn("enterprise_chain", response.context)
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("executive_radar_rows", response.context)
@@ -1080,24 +1105,22 @@ class InventarioAliasesPendingTests(TestCase):
 
         response = self.client.get(reverse("inventario:ajustes"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Uso ERP")
-        self.assertContains(response, "Maestro ERP")
+        self.assertContains(response, "Uso operativo")
+        self.assertContains(response, "Maestro")
         self.assertContains(response, "Empaque final")
         self.assertContains(response, "Incompleto")
         self.assertContains(response, "Falta: código Point")
         self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, f"insumo_id={ajuste.insumo_id}")
-        self.assertContains(response, "Cadena documental ERP")
-        self.assertContains(response, "Ruta troncal ERP")
-        self.assertContains(response, "Dependencias upstream ERP")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Dependencia")
+        self.assertContains(response, "Cadena de control")
+        self.assertContains(response, "Ruta operativa")
+        self.assertContains(response, "Dependencias previas")
+        self.assertContains(response, "Prioridades de cierre")
+        self.assertContains(response, "Resumen de seguimiento")
         self.assertContains(response, "Cierre por etapa documental")
-        self.assertContains(response, "Entrega de inventario a downstream")
-        self.assertContains(response, "Tramo ERP")
-        self.assertContains(response, "Con bloqueo")
-        self.assertContains(response, "Salud operativa ERP")
+        self.assertContains(response, "Entrega a otros frentes")
+        self.assertContains(response, "Salud operativa")
+        self.assertNotContains(response, "Radar ejecutivo ERP")
         self.assertIn("enterprise_chain", response.context)
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("executive_radar_rows", response.context)
@@ -1884,11 +1907,12 @@ class InventarioAliasesPendingTests(TestCase):
         Insumo.objects.create(nombre="Azucar Normal", unidad_base=unidad)
         response = self.client.get(reverse("inventario:aliases_catalog"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Centro de mando ERP")
-        self.assertContains(response, "Workflow ERP de referencias")
-        self.assertContains(response, "Mesa de gobierno ERP")
-        self.assertContains(response, "Gobierno operativo de referencias")
-        self.assertContains(response, "Siguiente paso ERP")
+        self.assertContains(response, "Resumen del módulo")
+        self.assertContains(response, "Flujo de referencias")
+        self.assertContains(response, "Seguimiento por frente")
+        self.assertContains(response, "Control de referencias")
+        self.assertContains(response, "Siguiente paso")
+        self.assertNotContains(response, "Centro de mando ERP")
         self.assertIn("erp_command_center", response.context)
         self.assertIn("erp_governance_rows", response.context)
         self.assertIn("master_normalize", response.context)
@@ -2147,12 +2171,112 @@ class InventarioAliasesPendingTests(TestCase):
             self.assertIn("executive_radar_rows", response.context)
             self.assertIn("erp_command_center", response.context)
 
+    def test_inventory_dashboard_view_renders_executive_inventory_context(self):
+        response = self.client.get(reverse("inventario:home"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Control de cobertura")
+        self.assertContains(response, "Salud del inventario")
+        self.assertIn("health_rows", response.context)
+        self.assertIn("sync_quality_rows", response.context)
+        self.assertIn("movement_mix_rows", response.context)
+        if response.context["pending_rows"]:
+            self.assertIn("action_url", response.context["pending_rows"][0])
+
+    def test_inventory_dashboard_filters_by_focus_categoria_and_clase(self):
+        unidad = UnidadMedida.objects.create(codigo="kg-dash-filter", nombre="Kg Dash Filter", tipo=UnidadMedida.TIPO_MASA)
+        empaque = Insumo.objects.create(
+            nombre="Caja Filtro",
+            categoria="Empaque",
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            unidad_base=unidad,
+            activo=True,
+        )
+        masa = Insumo.objects.create(
+            nombre="Harina Filtro",
+            categoria="Masa",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=unidad,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(insumo=empaque, stock_actual=Decimal("0"), punto_reorden=Decimal("5"))
+        ExistenciaInsumo.objects.create(insumo=masa, stock_actual=Decimal("10"), punto_reorden=Decimal("5"))
+
+        response = self.client.get(
+            reverse("inventario:home"),
+            {"focus": "critical", "categoria": "Empaque", "clase": "empaque"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_focus"], "critical")
+        self.assertEqual(response.context["selected_categoria"], "Empaque")
+        self.assertEqual(response.context["selected_clase"], "empaque")
+        self.assertEqual(response.context["total_items"], 1)
+        self.assertContains(response, 'option value="Empaque" selected')
+        self.assertContains(response, 'option value="empaque" selected')
+
+    def test_inventory_detail_views_filter_by_query(self):
+        unidad = UnidadMedida.objects.create(codigo="kg-dash-search", nombre="Kg Dash Search", tipo=UnidadMedida.TIPO_MASA)
+        azucar = Insumo.objects.create(
+            nombre="Azucar Morena Search",
+            categoria="Dulces",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=unidad,
+            activo=True,
+        )
+        harina = Insumo.objects.create(
+            nombre="Harina Blanca Search",
+            categoria="Harinas",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=unidad,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(insumo=azucar, stock_actual=Decimal("0"), punto_reorden=Decimal("4"))
+        ExistenciaInsumo.objects.create(insumo=harina, stock_actual=Decimal("9"), punto_reorden=Decimal("3"))
+        MovimientoInventario.objects.create(
+            insumo=azucar,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            cantidad=Decimal("2"),
+            referencia="AJUSTE-AZUCAR",
+            fecha=timezone.now(),
+        )
+        MovimientoInventario.objects.create(
+            insumo=harina,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            cantidad=Decimal("2"),
+            referencia="AJUSTE-HARINA",
+            fecha=timezone.now(),
+        )
+
+        response_existencias = self.client.get(reverse("inventario:existencias"), {"q": "Azucar"})
+        self.assertEqual(response_existencias.status_code, 200)
+        self.assertEqual(response_existencias.context["selected_q"], "Azucar")
+        self.assertEqual(len(response_existencias.context["existencias"]), 1)
+        self.assertEqual(response_existencias.context["existencias"][0].insumo.nombre, "Azucar Morena Search")
+
+        response_movimientos = self.client.get(reverse("inventario:movimientos"), {"q": "AZUCAR"})
+        self.assertEqual(response_movimientos.status_code, 200)
+        self.assertEqual(response_movimientos.context["selected_q"], "AZUCAR")
+        self.assertEqual(len(response_movimientos.context["movimientos"]), 1)
+        self.assertEqual(response_movimientos.context["movimientos"][0].insumo.nombre, "Azucar Morena Search")
+
+        response_alertas = self.client.get(reverse("inventario:alertas"), {"nivel": "all", "q": "Azucar"})
+        self.assertEqual(response_alertas.status_code, 200)
+        self.assertEqual(response_alertas.context["selected_q"], "Azucar")
+        self.assertEqual(len(response_alertas.context["rows"]), 1)
+        self.assertEqual(response_alertas.context["rows"][0].insumo.nombre, "Azucar Morena Search")
+
+        response_dashboard = self.client.get(reverse("inventario:home"), {"q": "Azucar"})
+        self.assertEqual(response_dashboard.status_code, 200)
+        self.assertEqual(response_dashboard.context["selected_q"], "Azucar")
+        self.assertContains(response_dashboard, 'value="Azucar"')
+
     def test_importar_archivos_view_renders_governance_table(self):
         response = self.client.get(reverse("inventario:importar_archivos"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Workflow ERP de carga de almacén")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Mesa de gobierno ERP")
+        self.assertContains(response, "Flujo de carga de almacén")
+        self.assertContains(response, "Resumen de seguimiento")
+        self.assertContains(response, "Seguimiento por frente")
+        self.assertNotContains(response, "Workflow ERP de carga de almacén")
         self.assertIn("executive_radar_rows", response.context)
         self.assertIn("erp_governance_rows", response.context)
 
@@ -2186,6 +2310,41 @@ class InventarioAjustesApprovalTests(TestCase):
         self.unidad = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo", tipo=UnidadMedida.TIPO_MASA)
         self.insumo = Insumo.objects.create(nombre="Azucar Ajuste", unidad_base=self.unidad, activo=True)
         self.existencia = ExistenciaInsumo.objects.create(insumo=self.insumo, stock_actual=Decimal("10"))
+
+    def test_ajustes_view_filters_by_ajuste_id_and_status(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("9"),
+            motivo="Conteo dirigido",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("7"),
+            motivo="Otro ajuste",
+            estatus=AjusteInventario.STATUS_RECHAZADO,
+            solicitado_por=self.almacen,
+            aprobado_por=self.admin,
+            aprobado_en=timezone.now(),
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get(
+            reverse("inventario:ajustes"),
+            {
+                "ajuste_id": str(ajuste.id),
+                "estatus": AjusteInventario.STATUS_PENDIENTE,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_ajuste_id"], str(ajuste.id))
+        self.assertEqual(response.context["selected_status"], AjusteInventario.STATUS_PENDIENTE)
+        self.assertEqual(len(response.context["ajustes"]), 1)
+        self.assertEqual(response.context["ajustes"][0].id, ajuste.id)
 
     def test_almacen_registra_ajuste_queda_pendiente(self):
         self.client.force_login(self.almacen)
@@ -2338,3 +2497,68 @@ class InventarioAjustesApprovalTests(TestCase):
             {"action": "approve", "ajuste_id": ajuste.id},
         )
         self.assertEqual(response.status_code, 403)
+
+
+class InventoryTraceabilityCommandTests(TestCase):
+    def setUp(self):
+        self.kg = UnidadMedida.objects.create(
+            codigo="kg-trace",
+            nombre="Kilogramo trace",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(
+            nombre="Harina Trace",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.kg,
+        )
+        self.existencia = ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            stock_actual=Decimal("12.000"),
+            actualizado_en=timezone.make_aware(datetime(2026, 4, 8, 10, 0)),
+        )
+
+    def test_reconcile_inventory_traceability_marks_reconstructed_movement(self):
+        MovimientoInventario.objects.create(
+            fecha=timezone.make_aware(datetime(2026, 4, 7, 9, 0)),
+            tipo=MovimientoInventario.TIPO_CONSUMO,
+            insumo=self.insumo,
+            cantidad=Decimal("2.000"),
+            referencia="TRACE-MOV",
+        )
+
+        call_command(
+            "reconcile_inventory_traceability",
+            "--start-date",
+            "2026-01-01",
+            "--end-date",
+            "2026-04-08",
+            "--execute",
+        )
+
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.trazabilidad_stock.get("source"), TRACE_RECONSTRUCTED_MOVEMENT)
+        self.assertEqual(self.existencia.trazabilidad_stock.get("reference"), "TRACE-MOV")
+
+    def test_reconcile_inventory_traceability_falls_back_to_sync_when_no_movement(self):
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_SCHEDULED,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=timezone.make_aware(datetime(2026, 3, 3, 2, 2)),
+            finished_at=timezone.make_aware(datetime(2026, 3, 3, 2, 10)),
+            rows_stock_read=10,
+            existencias_updated=5,
+        )
+
+        call_command(
+            "reconcile_inventory_traceability",
+            "--start-date",
+            "2026-01-01",
+            "--end-date",
+            "2026-04-08",
+            "--execute",
+        )
+
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.trazabilidad_stock.get("source"), TRACE_RECONSTRUCTED_SYNC)
+        self.assertEqual(self.existencia.trazabilidad_stock.get("run_source"), AlmacenSyncRun.SOURCE_SCHEDULED)

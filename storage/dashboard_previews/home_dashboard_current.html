@@ -1,0 +1,1773 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Pollyanas Dolce ERP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260321-05">
+    
+<style>
+    .executive-shell-dashboard {
+        gap: 16px;
+    }
+
+    .executive-shell-dashboard .executive-hero {
+        padding: 18px 22px;
+        min-height: 0;
+        align-items: flex-start;
+    }
+
+    .executive-shell-dashboard .dashboard-hero-copy {
+        max-width: 680px;
+    }
+
+    .executive-shell-dashboard .dashboard-hero-title {
+        font-size: clamp(1.9rem, 2.4vw, 2.8rem);
+        line-height: 1.02;
+        margin-bottom: 6px;
+    }
+
+    .executive-shell-dashboard .dashboard-hero-subtitle {
+        max-width: 56ch;
+        margin-bottom: 0;
+    }
+
+    .executive-shell-dashboard .dashboard-hero-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-left: auto;
+    }
+
+    .executive-shell-dashboard .executive-section-highlight {
+        padding-top: 16px;
+    }
+
+    .executive-shell-dashboard .executive-section-head {
+        gap: 10px;
+        margin-bottom: 12px;
+    }
+
+    .dashboard-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .dashboard-summary-grid .executive-kpi-card {
+        min-height: 0;
+        padding: 16px 18px;
+        border-radius: 18px;
+    }
+
+    .dashboard-summary-grid .kpi-number {
+        font-size: clamp(1.65rem, 2vw, 2.35rem);
+        line-height: 1;
+        margin-bottom: 6px;
+    }
+
+    .dashboard-summary-grid .kpi-label {
+        margin-bottom: 4px;
+    }
+
+    .dashboard-summary-grid .executive-kpi-note {
+        font-size: 0.92rem;
+        line-height: 1.35;
+    }
+
+    .dashboard-summary-grid.dashboard-summary-grid-secondary {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .dashboard-summary-grid .executive-kpi-card.executive-kpi-card-soft {
+        background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,248,250,0.94));
+    }
+
+    @media (max-width: 1180px) {
+        .dashboard-summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .dashboard-summary-grid.dashboard-summary-grid-secondary {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 760px) {
+        .executive-shell-dashboard .executive-hero {
+            padding: 18px;
+        }
+
+        .dashboard-summary-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .executive-shell-dashboard .dashboard-hero-badges {
+            margin-left: 0;
+            justify-content: flex-start;
+        }
+    }
+</style>
+
+</head>
+<body class="page-dashboard">
+    <div class="layout-wrapper">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3.5 10.5 12 5l8.5 5.5L12 16 3.5 10.5Z"/>
+                        <path d="M3.5 14 12 19l8.5-5"/>
+                    </svg>
+                </div>
+                <div class="sidebar-brand">Pollyana's Dolce</div>
+                <div class="sidebar-tagline">Operación y control</div>
+            </div>
+
+            <nav>
+                
+                <div class="sidebar-section-label">Dirección</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    <li>
+                        <a href="/dashboard/" class="active">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>
+                            </span>
+                            <span>Dashboard</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/recetas/dg-operacion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="7" width="3" height="10" rx="1"/><rect x="16" y="4" width="3" height="13" rx="1"/></svg>
+                            </span>
+                            <span>Operación DG</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/reportes/bi/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>BI ejecutivo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Operación diaria</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/maestros/proveedores/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4L11 7h7.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-10Z"/></svg>
+                            </span>
+                            <span>Maestros</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/recetas/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+                            </span>
+                            <span>Recetas</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/plan-produccion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>
+                            </span>
+                            <span>Plan de producción</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/reabasto-cedis/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/><path d="M7 12h6"/><path d="m10 9 3 3-3 3"/></svg>
+                            </span>
+                            <span>Reabasto CEDIS</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/compras/solicitudes/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/></svg>
+                            </span>
+                            <span>Compras</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/inventario/existencias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
+                            </span>
+                            <span>Inventario</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/inventario/importar/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M4 15.5A2.5 2.5 0 0 0 6.5 18h11A2.5 2.5 0 0 0 20 15.5"/></svg>
+                            </span>
+                            <span>Cortes de almacén</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/captura-movil/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10 6.5h4"/><circle cx="12" cy="18" r="1"/></svg>
+                            </span>
+                            <span>Captura de piso</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Análisis y soporte</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/reportes/costo-receta/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>Reportes</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/crm/pedidos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            </span>
+                            <span>CRM</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/logistica/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v8H3z"/><path d="M14 10h3l3 3v2h-6z"/><circle cx="7" cy="17.5" r="1.5"/><circle cx="18" cy="17.5" r="1.5"/></svg>
+                            </span>
+                            <span>Logística</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/rrhh/empleados/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8h3M21.5 6.5v3"/></svg>
+                            </span>
+                            <span>RRHH</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/activos/dashboard/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/><path d="M8 14h3M13 14h3"/></svg>
+                            </span>
+                            <span>Activos</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/discrepancias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20V9"/><path d="M12 20V4"/><path d="M17 20v-7"/><path d="m6 11 5-5 6 3"/></svg>
+                            </span>
+                            <span>Control operativo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Gobierno</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/auditoria/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10l2 2v14H5V6l2-2Z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+                            </span>
+                            <span>Bitácora</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/integraciones/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="7" height="12" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 12h4"/></svg>
+                            </span>
+                            <span>Integraciones</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/usuarios-accesos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-1.5a3.5 3.5 0 0 0-3.5-3.5H6.5A3.5 3.5 0 0 0 3 19.5V21"/><circle cx="9.5" cy="8" r="3.5"/><path d="M18 8v6M15 11h6"/></svg>
+                            </span>
+                            <span>Accesos</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/admin/">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.2 1.2 0 0 1-1.7 1.7l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V19a1.2 1.2 0 0 1-2.4 0v-.2a1 1 0 0 0-.7-1 1 1 0 0 0-1 .2l-.2.1a1.2 1.2 0 1 1-1.7-1.7l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H5a1.2 1.2 0 0 1 0-2.4h.2a1 1 0 0 0 1-.7 1 1 0 0 0-.2-1l-.1-.2a1.2 1.2 0 1 1 1.7-1.7l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V5a1.2 1.2 0 1 1 2.4 0v.2a1 1 0 0 0 .7 1 1 1 0 0 0 1-.2l.2-.1a1.2 1.2 0 0 1 1.7 1.7l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2a1.2 1.2 0 0 1 0 2.4h-.2a1 1 0 0 0-1 .7Z"/></svg>
+                            </span>
+                            <span>Administración</span>
+                        </a>
+                    </li>
+                </ul>
+                
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-user">Sesión activa</div>
+                <div class="sidebar-user-name">erpadmin</div>
+                <a href="/logout/" class="logout-link">Cerrar sesión</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="header">
+                <h1 class="header-title">Dashboard Ejecutivo</h1>
+                <div class="header-meta">
+                    <span class="header-context-pill">Operación diaria</span>
+                    <button id="densityToggle" class="btn btn-secondary btn-sm density-toggle" type="button" aria-pressed="false">
+                        Modo compacto
+                    </button>
+                    <span>Lunes, 23 de Marzo de 2026</span>
+                </div>
+            </header>
+
+            <div class="container">
+                
+                
+<div class="executive-shell executive-shell-dashboard">
+<section class="card dashboard-hero executive-hero">
+    <div class="executive-hero-copy">
+        <div class="executive-eyebrow">Dirección general</div>
+        <div class="dashboard-hero-title">Pulso operativo del día</div>
+        <div class="dashboard-hero-subtitle">Corte comercial confirmado por Point, presión operativa y riesgos que sí requieren decisión hoy.</div>
+    </div>
+    <div class="dashboard-hero-badges">
+        
+        <span class="badge bg-primary">Corte ventas: 2026-03-21</span>
+        
+        
+        <span class="badge bg-warning text-dark">
+            Producción: Sin plan
+        </span>
+        
+        
+        <span class="badge bg-success">
+            Compras abiertas: 0
+        </span>
+        
+        <span class="badge bg-danger">Stock crítico: 295</span>
+    </div>
+</section>
+
+<section class="card executive-section executive-section-highlight">
+    <div class="executive-section-head">
+        <div>
+            <div class="executive-section-kicker">Resumen</div>
+            <div class="card-header">Resumen ejecutivo del corte</div>
+            <p class="executive-section-copy">Primero el frente comercial real de Point. Después solo el contexto mínimo de producción, compras e inventario.</p>
+        </div>
+        
+        <div class="executive-meta-pill">2026-03</div>
+        
+    </div>
+    <div class="dashboard-summary-grid">
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number is-primary">$124,562.01</div>
+            <div class="kpi-label">Venta del último corte</div>
+            <div class="muted executive-kpi-note">
+                
+                    2026-03-21 · Point directo
+                    
+                        · Cobertura ERP 90.4%
+                    
+                
+            </div>
+        </article>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number is-primary">$306.80</div>
+            <div class="kpi-label">Ticket promedio</div>
+            <div class="muted executive-kpi-note">406 tickets confirmados para el último corte</div>
+        </article>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number is-primary">406</div>
+            <div class="kpi-label">Tickets del corte</div>
+            <div class="muted executive-kpi-note">Promedio por sucursal: $15,570.25</div>
+        </article>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number is-primary">$2,270,044.26</div>
+            <div class="kpi-label">Venta acumulada del mes</div>
+            <div class="muted executive-kpi-note">
+                
+                    17162 unidades
+                    
+                        · 7,970 tickets
+                        
+                            · ticket medio $284.82
+                        
+                    
+                    
+                        · $11,995.00 sin mapear al ERP
+                    
+                
+            </div>
+        </article>
+    <div class="dashboard-summary-grid dashboard-summary-grid-secondary mt-3">
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number is-warning">Sin plan</div>
+            <div class="kpi-label">Producción del día</div>
+            <div class="muted executive-kpi-note">Sin plan para hoy</div>
+        </article>
+        <article class="kpi-card executive-kpi-card executive-kpi-card-soft">
+            <div class="kpi-number is-success">0</div>
+            <div class="kpi-label">Órdenes abiertas</div>
+            <div class="muted executive-kpi-note">0 recepciones pendientes por cerrar</div>
+        </article>
+        <article class="kpi-card executive-kpi-card executive-kpi-card-soft">
+            <div class="kpi-number is-danger">295</div>
+            <div class="kpi-label">Insumos en crítico</div>
+            <div class="muted executive-kpi-note">21 bajo reorden · 21 alertas activas en el inventario central</div>
+        </article>
+    </div>
+</section>
+
+
+<section class="card executive-section executive-section-spotlight">
+    <div class="executive-section-head">
+        <div>
+            <div class="executive-section-kicker">Acción</div>
+            <div class="card-header">Top decisiones del día</div>
+            <p class="executive-section-copy">Prioridades concretas para Dirección y operación en una rejilla simétrica, sin carriles laterales ni scroll horizontal.</p>
+        </div>
+    </div>
+    <div class="executive-decision-list">
+        
+        <article class="executive-decision-item tone-danger">
+            <div class="executive-decision-rank">1</div>
+            <div class="executive-decision-copy">
+                <div class="executive-decision-title">Cerrar artículo maestro crítico</div>
+                <div class="executive-decision-detail">La demanda crítica sigue bloqueada por Betún dream whip. Cierra esta cola antes de liberar plan, MRP, compras o reabasto.</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="/maestros/insumos/185/editar/">Cerrar prioridad crítica</a>
+        </article>
+        
+        <article class="executive-decision-item tone-danger">
+            <div class="executive-decision-rank">2</div>
+            <div class="executive-decision-copy">
+                <div class="executive-decision-title">Atender stock crítico</div>
+                <div class="executive-decision-detail">Hay 295 insumos en crítico y 21 bajo reorden. Valida cobertura antes de liberar producción o compras.</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="/inventario/alertas/">Abrir alertas</a>
+        </article>
+        
+        <article class="executive-decision-item tone-success">
+            <div class="executive-decision-rank">3</div>
+            <div class="executive-decision-copy">
+                <div class="executive-decision-title">Revisar merma semanal</div>
+                <div class="executive-decision-detail">Merma sucursal 9.0 u y CEDIS 0.0 u. Aún no hay una ventana previa equivalente para merma.</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="/control/discrepancias/">Abrir merma</a>
+        </article>
+        
+        <article class="executive-decision-item tone-danger">
+            <div class="executive-decision-rank">4</div>
+            <div class="executive-decision-copy">
+                <div class="executive-decision-title">Confirmar plan de producción de hoy</div>
+                <div class="executive-decision-detail">No hay plan operativo cargado para hoy. Define el plan antes de empujar compras o reabasto.</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="/recetas/plan-produccion/">Abrir plan</a>
+        </article>
+        
+        <article class="executive-decision-item tone-danger">
+            <div class="executive-decision-rank">5</div>
+            <div class="executive-decision-copy">
+                <div class="executive-decision-title">Revisar sucursal Plaza Nío</div>
+                <div class="executive-decision-detail">Abajo del comparable. Cae 35.9% contra el último mismo día de semana (2026-03-14).</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="/reportes/bi/">Abrir BI</a>
+        </article>
+        
+    </div>
+</section>
+
+
+
+<section class="card executive-section executive-section-alert executive-section-alert-wide">
+    <div class="executive-section-head">
+        <div>
+            <div class="executive-section-kicker">Bloqueo dominante</div>
+            <div class="card-header">Bloqueos que frenan la operación</div>
+            <p class="executive-section-copy">Resumen corto de artículos del maestro que hoy siguen afectando venta, producción o compras.</p>
+        </div>
+    </div>
+    <div class="kpi-mini executive-kpi-grid">
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number is-danger">
+                4
+            </div>
+            <div class="kpi-label">Artículos bloqueando</div>
+            <div class="muted executive-kpi-note">Cantidad total de artículos maestros que hoy frenan la operación.</div>
+        </article>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number executive-kpi-number-text">
+                Betún dream whip
+            </div>
+            <div class="kpi-label">Artículo principal</div>
+            <div class="muted executive-kpi-note">
+                
+                Bloquea 37 productos finales.
+                
+            </div>
+        </article>
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number executive-kpi-number-text">
+                unidad base, proveedor principal
+            </div>
+            <div class="kpi-label">Qué falta corregir</div>
+            <div class="muted executive-kpi-note">
+                La demanda crítica sigue bloqueada por Betún dream whip. Cierra esta cola antes de liberar plan, MRP, compras o reabasto.
+            </div>
+        </article>
+        <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+            <div class="kpi-label">Acción</div>
+            <div class="muted executive-kpi-note">El detalle completo queda en Maestros para cerrar el artículo correcto.</div>
+            <div class="executive-inline-actions">
+                <a class="btn btn-secondary btn-sm" href="/maestros/insumos/185/editar/">
+                    Cerrar prioridad crítica
+                </a>
+            </div>
+        </article>
+    </div>
+</section>
+
+
+
+
+<div class="executive-grid executive-grid-two">
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Comercial</div>
+                <div class="card-header">Ventas recientes</div>
+                <p class="executive-section-copy">Magnitud del último corte y referencia rápida de desempeño comercial.</p>
+            </div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number">855</div>
+                <div class="kpi-label">Unidades vendidas</div>
+                <div class="muted executive-kpi-note">8 sucursales · 97 productos</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-success">Arriba</div>
+                <div class="kpi-label">Vs corte previo</div>
+                <div class="muted executive-kpi-note">Contra el corte inmediato anterior · 20.2% vs corte previo (2026-03-20)</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number ">406</div>
+                <div class="kpi-label">Tickets</div>
+                <div class="muted executive-kpi-note">Último corte disponible</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-primary">$15,570.25</div>
+                <div class="kpi-label">Venta promedio por sucursal</div>
+                <div class="muted executive-kpi-note">Promedio del último corte disponible.</div>
+            </article>
+        </div>
+    </section>
+    
+
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Ranking</div>
+                <div class="card-header">Ranking comercial del corte</div>
+                <p class="executive-section-copy">Quién lidera el día y qué productos están empujando el resultado.</p>
+            </div>
+        </div>
+        <div class="executive-chart-grid">
+            <section class="executive-chart-card">
+                <div class="executive-chart-title">Sucursales líderes</div>
+                
+                <div class="executive-bar-list">
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">1</div>
+                            <div class="executive-bar-meta">Matriz</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill" style="width: 100%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$42,682.01</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">6</div>
+                            <div class="executive-bar-meta">Leyva</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill" style="width: 50%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$21,408.00</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">3</div>
+                            <div class="executive-bar-meta">Las Glorias</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill" style="width: 39%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$16,436.00</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">5</div>
+                            <div class="executive-bar-meta">Colosio</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill" style="width: 37%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$15,842.00</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">4</div>
+                            <div class="executive-bar-meta">Payán</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill" style="width: 23%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$9,679.00</div>
+                    </div>
+                    
+                </div>
+                
+            </section>
+            <section class="executive-chart-card">
+                <div class="executive-chart-title">Productos líderes</div>
+                
+                <div class="executive-bar-list">
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">Pastel de 3 Pecados Mediano</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-accent" style="width: 100%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$24,010.00</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">Pastel de Fresas Con Crema Mediano</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-accent" style="width: 57%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$13,720.00</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">Pay de Queso Grande</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-accent" style="width: 35%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$8,355.01</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">Pay de Queso Mediano</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-accent" style="width: 33%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$7,900.00</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">Pastel de 3 Pecados Chico</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-accent" style="width: 25%;"></div>
+                        </div>
+                        <div class="executive-bar-value">$6,120.00</div>
+                    </div>
+                    
+                </div>
+                
+            </section>
+        </div>
+    </section>
+    
+</div>
+
+<div class="executive-grid executive-grid-two">
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Excepciones</div>
+                <div class="card-header">Excepciones por sucursal</div>
+                <p class="executive-section-copy">Sucursales que se salen del comportamiento esperado del corte inmediato.</p>
+            </div>
+        </div>
+        <div class="executive-chart-card">
+            <div class="executive-bar-list">
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">4</div>
+                        <div class="executive-bar-meta">Payán</div>
+                        <div class="executive-bar-detail">Cae 29.5% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 34%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-29.5%</span>
+                        <div class="executive-bar-value">$9,679.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">1</div>
+                        <div class="executive-bar-meta">Matriz</div>
+                        <div class="executive-bar-detail">Variación de 13.7% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-warning" style="width: 16%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-warning text-dark">13.7%</span>
+                        <div class="executive-bar-value">$42,682.01</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">3</div>
+                        <div class="executive-bar-meta">Las Glorias</div>
+                        <div class="executive-bar-detail">Variación de 6.7% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-warning" style="width: 8%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-warning text-dark">6.7%</span>
+                        <div class="executive-bar-value">$16,436.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">7</div>
+                        <div class="executive-bar-meta">Plaza Nío</div>
+                        <div class="executive-bar-detail">Variación de -3.8% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-warning" style="width: 8%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-warning text-dark">-3.8%</span>
+                        <div class="executive-bar-value">$6,705.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">6</div>
+                        <div class="executive-bar-meta">Leyva</div>
+                        <div class="executive-bar-detail">Sube 87.7% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-success" style="width: 100%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-success">87.7%</span>
+                        <div class="executive-bar-value">$21,408.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">11</div>
+                        <div class="executive-bar-meta">EL TUNEL</div>
+                        <div class="executive-bar-detail">Sube 77.9% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-success" style="width: 89%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-success">77.9%</span>
+                        <div class="executive-bar-value">$3,735.00</div>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+    </section>
+    
+
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Productos</div>
+                <div class="card-header">Productos con variación fuerte</div>
+                <p class="executive-section-copy">Productos que subieron o cayeron con fuerza frente al corte inmediato.</p>
+            </div>
+        </div>
+        <div class="executive-chart-card">
+            <div class="executive-bar-list">
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Bolitas de Nuez 10 PZ</div>
+                        <div class="executive-bar-detail">Cae 66.7% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 100%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-66.7%</span>
+                        <div class="executive-bar-value">$40.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Pastel Lotus Mini</div>
+                        <div class="executive-bar-detail">Cae 66.7% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 100%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-66.7%</span>
+                        <div class="executive-bar-value">$230.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">TE DEL JARDIN</div>
+                        <div class="executive-bar-detail">Cae 55.6% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 83%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-55.6%</span>
+                        <div class="executive-bar-value">$80.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Pastel de Zanahoria R</div>
+                        <div class="executive-bar-detail">Cae 54.5% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 82%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-54.5%</span>
+                        <div class="executive-bar-value">$350.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Galleta Chispas Chocolate</div>
+                        <div class="executive-bar-detail">Cae 50.0% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 75%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-50.0%</span>
+                        <div class="executive-bar-value">$256.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Letrero Chispas HB 1</div>
+                        <div class="executive-bar-detail">Cae 50.0% contra el corte previo.</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 75%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-50.0%</span>
+                        <div class="executive-bar-value">$80.00</div>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+    </section>
+    
+</div>
+
+<div class="executive-grid executive-grid-two">
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Comparable</div>
+                <div class="card-header">Sucursales vs mismo día de semana</div>
+                <p class="executive-section-copy">Lectura más limpia para separar una caída real de una variación normal del patrón semanal.</p>
+            </div>
+        </div>
+        <div class="executive-chart-card">
+            <div class="executive-bar-list">
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">7</div>
+                        <div class="executive-bar-meta">Plaza Nío</div>
+                        <div class="executive-bar-detail">Cae 35.9% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 100%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-35.9%</span>
+                        <div class="executive-bar-value">$6,705.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">2</div>
+                        <div class="executive-bar-meta">Crucero</div>
+                        <div class="executive-bar-detail">Cae 26.9% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 75%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-26.9%</span>
+                        <div class="executive-bar-value">$8,075.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">4</div>
+                        <div class="executive-bar-meta">Payán</div>
+                        <div class="executive-bar-detail">Cae 26.8% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 75%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-26.8%</span>
+                        <div class="executive-bar-value">$9,679.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">1</div>
+                        <div class="executive-bar-meta">Matriz</div>
+                        <div class="executive-bar-detail">Cae 25.6% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 71%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-25.6%</span>
+                        <div class="executive-bar-value">$42,682.01</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">3</div>
+                        <div class="executive-bar-meta">Las Glorias</div>
+                        <div class="executive-bar-detail">Cae 14.1% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 39%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-14.1%</span>
+                        <div class="executive-bar-value">$16,436.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">11</div>
+                        <div class="executive-bar-meta">EL TUNEL</div>
+                        <div class="executive-bar-detail">Variación de 10.7% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-warning" style="width: 30%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-warning text-dark">10.7%</span>
+                        <div class="executive-bar-value">$3,735.00</div>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+    </section>
+    
+
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Comparable</div>
+                <div class="card-header">Productos vs mismo día de semana</div>
+                <p class="executive-section-copy">Validación semanal para detectar si el movimiento del producto es normal o exige ajuste hoy.</p>
+            </div>
+        </div>
+        <div class="executive-chart-card">
+            <div class="executive-bar-list">
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">ESPAGUETI DORADA</div>
+                        <div class="executive-bar-detail">Cae 85.7% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 100%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-85.7%</span>
+                        <div class="executive-bar-value">$68.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Pastel de Snickers Rebanada</div>
+                        <div class="executive-bar-detail">Cae 77.8% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 91%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-77.8%</span>
+                        <div class="executive-bar-value">$280.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Galleta Nutella</div>
+                        <div class="executive-bar-detail">Cae 73.3% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 86%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-73.3%</span>
+                        <div class="executive-bar-value">$120.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Bolitas de Nuez 10 PZ</div>
+                        <div class="executive-bar-detail">Cae 71.4% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 83%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-71.4%</span>
+                        <div class="executive-bar-value">$40.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Empanada de Manzana</div>
+                        <div class="executive-bar-detail">Cae 66.7% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 78%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-66.7%</span>
+                        <div class="executive-bar-value">$80.00</div>
+                    </div>
+                </div>
+                
+                <div class="executive-bar-row executive-bar-row-detailed">
+                    <div class="executive-bar-copy">
+                        <div class="executive-bar-label">Pastel de Arándano Chico</div>
+                        <div class="executive-bar-detail">Cae 66.7% contra el último mismo día de semana (2026-03-14).</div>
+                    </div>
+                    <div class="executive-bar-track">
+                        <div class="executive-bar-fill is-danger" style="width: 78%;"></div>
+                    </div>
+                    <div class="executive-bar-side">
+                        <span class="badge bg-danger">-66.7%</span>
+                        <div class="executive-bar-value">$385.00</div>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+    </section>
+    
+</div>
+
+<div class="executive-grid executive-grid-two">
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Operación</div>
+                <div class="card-header">Abasto e inventario</div>
+                <p class="executive-section-copy">Cobertura disponible y presión de reabasto para sostener la venta y la producción.</p>
+            </div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-danger">295</div>
+                <div class="kpi-label">Sin stock o crítico</div>
+                <div class="muted executive-kpi-note">Artículos que requieren atención inmediata.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-warning">21</div>
+                <div class="kpi-label">Bajo reorden</div>
+                <div class="muted executive-kpi-note">Materiales que ya piden reabasto.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number">22869.9</div>
+                <div class="kpi-label">Cobertura promedio</div>
+                <div class="muted executive-kpi-note">Lectura agregada del inventario activo.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Acción inmediata</div>
+                <div class="muted executive-kpi-note">Atender críticos, después bajo reorden y luego validar máximos y mínimos.</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="/inventario/alertas/">Abrir alertas</a>
+                    <a class="btn btn-secondary btn-sm" href="/inventario/existencias/">Ver existencias</a>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Flujo</div>
+                <div class="card-header">Compras y producción</div>
+                <p class="executive-section-copy">Plan, solicitudes y recepciones activas para sostener el servicio de la jornada.</p>
+            </div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-warning">0</div>
+                <div class="kpi-label">Planes abiertos</div>
+                <div class="muted executive-kpi-note">0 solicitudes de venta activas</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-success">0</div>
+                <div class="kpi-label">Solicitudes vencidas</div>
+                <div class="muted executive-kpi-note">Lo que ya debería estar resuelto o liberado.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-success">0</div>
+                <div class="kpi-label">Órdenes por recibir</div>
+                <div class="muted executive-kpi-note">Entrega estimada dentro de 3 días.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Acción inmediata</div>
+                <div class="muted executive-kpi-note">Ir al cuello de botella del día: plan o compras.</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="/recetas/plan-produccion/">Abrir plan</a>
+                    <a class="btn btn-secondary btn-sm" href="/compras/solicitudes/">Abrir compras</a>
+                </div>
+            </article>
+        </div>
+    </section>
+</div>
+
+<div class="executive-grid executive-grid-two">
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Producción</div>
+                <div class="card-header">Producción CEDIS y cobertura</div>
+                <p class="executive-section-copy">Volumen producido, costo estimado y cobertura contra venta final comparable de la semana.</p>
+            </div>
+            <div class="executive-meta-pill">Semana 2026-03-23 a 2026-03-29</div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-warning">0</div>
+                <div class="kpi-label">Unidades producidas</div>
+                <div class="muted executive-kpi-note">0 planes · 0 abiertos</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-primary">$0.00</div>
+                <div class="kpi-label">Costo estimado</div>
+                <div class="muted executive-kpi-note">Costo total estimado de la producción registrada.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-warning">Sin producción</div>
+                <div class="kpi-label">Cobertura vs venta</div>
+                <div class="muted executive-kpi-note">
+                    
+                    No hay renglones de producción capturados para la semana en curso.
+                    
+                </div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Conversión</div>
+                <div class="muted executive-kpi-note">Conversión a enteros equivalentes pendiente de catálogo específico por presentación.</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="/recetas/plan-produccion/">Abrir producción</a>
+                </div>
+            </article>
+        </div>
+        
+    </section>
+    
+
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Forecast</div>
+                <div class="card-header">Forecast de venta y producción</div>
+                <p class="executive-section-copy">Alineación entre forecast mensual cargado y producción planificada del periodo.</p>
+            </div>
+            <div class="executive-meta-pill">2026-03</div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-primary">0</div>
+                <div class="kpi-label">Forecast de venta</div>
+                <div class="muted executive-kpi-note">0 recetas con forecast/plan</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-primary">0</div>
+                <div class="kpi-label">Producción planificada</div>
+                <div class="muted executive-kpi-note">0 recetas con desviación</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-warning">Sin datos</div>
+                <div class="kpi-label">Semáforo forecast</div>
+                <div class="muted executive-kpi-note">
+                    
+                    El plan mensual está alineado con el forecast cargado.
+                    
+                </div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Dato faltante</div>
+                <div class="muted executive-kpi-note">Forecast mensual cargado en ERP. La exclusión automática de semanas atípicas aún no está parametrizada.</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="/recetas/plan-produccion/">Abrir forecast</a>
+                </div>
+            </article>
+        </div>
+        
+    </section>
+    
+</div>
+
+<div class="executive-grid executive-grid-two">
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Control</div>
+                <div class="card-header">Merma sucursal y CEDIS</div>
+                <p class="executive-section-copy">Merma consolidada de sucursales y producción CEDIS en la última ventana operativa disponible.</p>
+            </div>
+            <div class="executive-meta-pill">Últimos 7 días</div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-warning">9</div>
+                <div class="kpi-label">Merma sucursal</div>
+                <div class="muted executive-kpi-note">$11.23 estimados · 4 sucursales · captura ERP</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-success">0</div>
+                <div class="kpi-label">Merma CEDIS</div>
+                <div class="muted executive-kpi-note">$0.00 estimados · 0 movimientos de inventario</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-warning">Base inicial</div>
+                <div class="kpi-label">Vs ventana previa</div>
+                <div class="muted executive-kpi-note">Aún no hay una ventana previa equivalente para merma.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Costo estimado</div>
+                <div class="muted executive-kpi-note">Costo estimado en sucursal sobre 6 capturas con receta mapeada. Merma CEDIS sin costo estimable: faltan costos canónicos para esos insumos.</div>
+                <div class="executive-inline-actions">
+                    <a class="btn btn-secondary btn-sm" href="/control/discrepancias/">Abrir merma</a>
+                </div>
+            </article>
+        </div>
+        <div class="executive-chart-grid" style="margin-top: 16px;">
+            <section class="executive-chart-card">
+                <div class="executive-chart-title">Sucursales con más merma</div>
+                
+                <div class="executive-bar-list">
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">SIN SUCURSAL</div>
+                            <div class="executive-bar-meta">Sin sucursal</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-warning" style="width: 100%;"></div>
+                        </div>
+                        <div class="executive-bar-value">4.0</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">MATRIZ</div>
+                            <div class="executive-bar-meta">Matriz</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-warning" style="width: 50%;"></div>
+                        </div>
+                        <div class="executive-bar-value">2.0</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">EL_TUNEL</div>
+                            <div class="executive-bar-meta">EL TUNEL</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-warning" style="width: 50%;"></div>
+                        </div>
+                        <div class="executive-bar-value">2.0</div>
+                    </div>
+                    
+                    <div class="executive-bar-row">
+                        <div class="executive-bar-copy">
+                            <div class="executive-bar-label">COLOSIO</div>
+                            <div class="executive-bar-meta">Colosio</div>
+                        </div>
+                        <div class="executive-bar-track">
+                            <div class="executive-bar-fill is-warning" style="width: 25%;"></div>
+                        </div>
+                        <div class="executive-bar-value">1.0</div>
+                    </div>
+                    
+                </div>
+                
+            </section>
+            <section class="executive-chart-card">
+                <div class="executive-chart-title">Insumos con más merma CEDIS</div>
+                
+                <div class="muted">Sin merma CEDIS en la ventana.</div>
+                
+            </section>
+        </div>
+    </section>
+    
+
+    
+    <section class="card executive-section">
+        <div class="executive-section-head">
+            <div>
+                <div class="executive-section-kicker">Base</div>
+                <div class="card-header">Base histórica de ventas</div>
+                <p class="executive-section-copy">Profundidad de serie para leer comparables, construir pronóstico y validar decisiones.</p>
+            </div>
+        </div>
+        <div class="kpi-mini executive-kpi-grid executive-kpi-grid-compact">
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number is-warning">Cobertura parcial</div>
+                <div class="kpi-label">Cobertura histórica</div>
+                <div class="muted executive-kpi-note">Fuente canónica Point bridge. Hay 1 día(s) faltantes dentro del rango cargado.</div>
+            </article>
+            <article class="kpi-card executive-kpi-card">
+                <div class="kpi-number">470077</div>
+                <div class="kpi-label">Registros cargados</div>
+                <div class="muted executive-kpi-note">01/01/2022 → 21/03/2026</div>
+            </article>
+            
+            <article class="kpi-card executive-kpi-card executive-kpi-card-action">
+                <div class="kpi-label">Serie oficial</div>
+                <div class="muted executive-kpi-note">No se muestran acumulados ni tendencia mensual porque el histórico todavía no está conciliado completo contra Point.</div>
+            </article>
+            
+        </div>
+        
+        <div class="executive-chart-card executive-chart-card-muted">
+            <div class="executive-chart-title">Tendencia mensual de ventas Point</div>
+            <div class="muted">No se muestra la tendencia mensual porque la serie oficial de Point sigue incompleta o sin conciliación continua.</div>
+        </div>
+        
+    </section>
+    
+</div>
+
+
+<section class="card executive-section">
+    <div class="executive-section-head">
+        <div>
+            <div class="executive-section-kicker">Maestro</div>
+            <div class="card-header">Bloqueos del maestro con impacto comercial</div>
+            <p class="executive-section-copy">Detalle de artículos incompletos que hoy sí pegan a venta, plan o compra.</p>
+        </div>
+    </div>
+    <div class="executive-master-block-grid">
+        
+        <article class="executive-master-block-card">
+            <div class="executive-master-block-head">
+                <div>
+                    <div class="executive-master-block-title">Betún dream whip</div>
+                    <div class="executive-master-block-meta">37 productos finales impactados</div>
+                </div>
+                <span class="module-chip blocked">Demanda crítica bloqueada</span>
+            </div>
+            <div class="executive-master-block-metrics">
+                <div class="executive-critical-stat">
+                    <span class="executive-critical-stat-label">Demanda</span>
+                    <strong>19427.0</strong>
+                </div>
+                <div class="executive-master-block-gap">
+                    <span class="executive-critical-stat-label">Faltante maestro</span>
+                    <div>unidad base, proveedor principal</div>
+                </div>
+            </div>
+            <div class="executive-master-block-products">
+                <span class="executive-critical-stat-label">Productos afectados</span>
+                <div>Pastel Fresas Con Crema - Mini, Pastel de Fresas Con Crema Chico, Pastel de Fresas Con Crema Mediano</div>
+            </div>
+            <div class="executive-master-block-actions">
+                <a class="btn btn-secondary btn-sm" href="/maestros/insumos/185/editar/">Cerrar artículo</a>
+            </div>
+        </article>
+        
+        <article class="executive-master-block-card">
+            <div class="executive-master-block-head">
+                <div>
+                    <div class="executive-master-block-title">Mezcla 3 Leches</div>
+                    <div class="executive-master-block-meta">14 productos finales impactados</div>
+                </div>
+                <span class="module-chip blocked">Demanda crítica bloqueada</span>
+            </div>
+            <div class="executive-master-block-metrics">
+                <div class="executive-critical-stat">
+                    <span class="executive-critical-stat-label">Demanda</span>
+                    <strong>11632.0</strong>
+                </div>
+                <div class="executive-master-block-gap">
+                    <span class="executive-critical-stat-label">Faltante maestro</span>
+                    <div>categoría</div>
+                </div>
+            </div>
+            <div class="executive-master-block-products">
+                <span class="executive-critical-stat-label">Productos afectados</span>
+                <div>Pastel de Fresas Con Crema Chico, Pastel de Fresas Con Crema Mediano, Pastel de Fresas Con Crema Grande</div>
+            </div>
+            <div class="executive-master-block-actions">
+                <a class="btn btn-secondary btn-sm" href="/maestros/insumos/201/editar/">Cerrar artículo</a>
+            </div>
+        </article>
+        
+        <article class="executive-master-block-card">
+            <div class="executive-master-block-head">
+                <div>
+                    <div class="executive-master-block-title">Domo Mediano C105</div>
+                    <div class="executive-master-block-meta">6 productos finales impactados</div>
+                </div>
+                <span class="module-chip blocked">Demanda crítica bloqueada</span>
+            </div>
+            <div class="executive-master-block-metrics">
+                <div class="executive-critical-stat">
+                    <span class="executive-critical-stat-label">Demanda</span>
+                    <strong>6424.0</strong>
+                </div>
+                <div class="executive-master-block-gap">
+                    <span class="executive-critical-stat-label">Faltante maestro</span>
+                    <div>categoría</div>
+                </div>
+            </div>
+            <div class="executive-master-block-products">
+                <span class="executive-critical-stat-label">Productos afectados</span>
+                <div>Pastel de Fresas Con Crema Mediano, Pastel de 3 Pecados Mediano, Pastel de Zanahoria Mediano</div>
+            </div>
+            <div class="executive-master-block-actions">
+                <a class="btn btn-secondary btn-sm" href="/maestros/insumos/111/editar/">Cerrar artículo</a>
+            </div>
+        </article>
+        
+        <article class="executive-master-block-card">
+            <div class="executive-master-block-head">
+                <div>
+                    <div class="executive-master-block-title">Domo Chico C85</div>
+                    <div class="executive-master-block-meta">6 productos finales impactados</div>
+                </div>
+                <span class="module-chip blocked">Demanda crítica bloqueada</span>
+            </div>
+            <div class="executive-master-block-metrics">
+                <div class="executive-critical-stat">
+                    <span class="executive-critical-stat-label">Demanda</span>
+                    <strong>4999.0</strong>
+                </div>
+                <div class="executive-master-block-gap">
+                    <span class="executive-critical-stat-label">Faltante maestro</span>
+                    <div>categoría</div>
+                </div>
+            </div>
+            <div class="executive-master-block-products">
+                <span class="executive-critical-stat-label">Productos afectados</span>
+                <div>Pastel de Fresas Con Crema Chico, Pastel de 3 Pecados Chico, Pastel de Zanahoria Chico</div>
+            </div>
+            <div class="executive-master-block-actions">
+                <a class="btn btn-secondary btn-sm" href="/maestros/insumos/114/editar/">Cerrar artículo</a>
+            </div>
+        </article>
+        
+        <article class="executive-master-block-card">
+            <div class="executive-master-block-head">
+                <div>
+                    <div class="executive-master-block-title">Pan Vainilla Dawn - Mediano</div>
+                    <div class="executive-master-block-meta">4 productos finales impactados</div>
+                </div>
+                <span class="module-chip blocked">Demanda crítica bloqueada</span>
+            </div>
+            <div class="executive-master-block-metrics">
+                <div class="executive-critical-stat">
+                    <span class="executive-critical-stat-label">Demanda</span>
+                    <strong>4524.0</strong>
+                </div>
+                <div class="executive-master-block-gap">
+                    <span class="executive-critical-stat-label">Faltante maestro</span>
+                    <div>categoría</div>
+                </div>
+            </div>
+            <div class="executive-master-block-products">
+                <span class="executive-critical-stat-label">Productos afectados</span>
+                <div>Pastel de Fresas Con Crema Mediano, Pastel de 3 Pecados Mediano, Pastel de Vainilla Mediano</div>
+            </div>
+            <div class="executive-master-block-actions">
+                <a class="btn btn-secondary btn-sm" href="/maestros/insumos/194/editar/">Cerrar artículo</a>
+            </div>
+        </article>
+        
+    </div>
+</section>
+
+
+<details class="erp-advanced-panel executive-advanced-panel">
+    <summary class="erp-advanced-summary">Control interno y navegación</summary>
+    <div class="erp-advanced-body executive-advanced-body">
+        <div class="executive-grid executive-grid-two">
+            
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Finanzas</div>
+                        <div class="card-header">Presupuesto de compras</div>
+                    </div>
+                </div>
+                <div class="kpi-mini executive-kpi-grid">
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-label">Mensual 2026-03</div>
+                        <div class="executive-inline-actions"><span class="badge bg-warning">Sin objetivo</span></div>
+                        <div class="muted executive-kpi-note">Objetivo $0.00 · Estimado $0.00</div>
+                    </article>
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-label">2da quincena 2026-03</div>
+                        <div class="executive-inline-actions"><span class="badge bg-warning">Sin objetivo</span></div>
+                        <div class="muted executive-kpi-note">Objetivo $0.00 · Estimado $0.00</div>
+                    </article>
+                </div>
+                
+            </section>
+            
+
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Maestro</div>
+                        <div class="card-header">Integridad del maestro</div>
+                    </div>
+                </div>
+                <div class="kpi-mini executive-kpi-grid">
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-number is-danger">80</div>
+                        <div class="kpi-label">Bloqueos del maestro</div>
+                    </article>
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-number is-warning">1</div>
+                        <div class="kpi-label">Integración comercial pendiente</div>
+                        <div class="muted executive-kpi-note">Insumos 0 · Productos 1 · Proveedores 0</div>
+                    </article>
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-number is-warning">79</div>
+                        <div class="kpi-label">Partidas BOM por validar</div>
+                    </article>
+                    <article class="kpi-card executive-kpi-card">
+                        <div class="kpi-number is-success">0</div>
+                        <div class="kpi-label">Brechas de almacén</div>
+                    </article>
+                </div>
+                <div class="executive-inline-actions">
+                    <a href="/maestros/point-pendientes/" class="btn btn-secondary btn-sm">Integración comercial</a>
+                    <a href="/recetas/matching/pendientes/" class="btn btn-secondary btn-sm">Validación BOM</a>
+                    <a href="/inventario/aliases/" class="btn btn-secondary btn-sm">Gobierno maestro</a>
+                </div>
+            </section>
+
+            
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Datos</div>
+                        <div class="card-header">Cortes de almacén</div>
+                    </div>
+                </div>
+                <div class="executive-fact-list">
+                    <div><strong>Estatus:</strong> Error</div>
+                    <div><strong>Fecha:</strong> 2026-03-02 23:56</div>
+                    <div><strong>Origen:</strong> Programado</div>
+                    <div><strong>Resultado:</strong> Existencias 0 · Movimientos 0 · Pendientes 0</div>
+                </div>
+                <div class="executive-inline-actions">
+                    <a href="/inventario/importar/" class="btn btn-secondary btn-sm">Ver cortes operativos</a>
+                </div>
+            </section>
+            
+
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Inventario</div>
+                        <div class="card-header">Salud detallada de inventario</div>
+                    </div>
+                </div>
+                <div class="executive-fact-list">
+                    <div><strong>Insumos con existencia:</strong> 497</div>
+                    <div><strong>Abajo de stock mínimo:</strong> 5</div>
+                    <div><strong>Arriba de stock máximo:</strong> 43</div>
+                    <div><strong>Riesgo por lead time:</strong> 0</div>
+                    <div><strong>Días promedio de llegada:</strong> 0.6</div>
+                    <div><strong>Consumo diario total:</strong> 611.25</div>
+                </div>
+            </section>
+
+            <section class="card executive-section executive-subsection">
+                <div class="executive-section-head">
+                    <div>
+                        <div class="executive-section-kicker">Acceso</div>
+                        <div class="card-header">Navegación operativa</div>
+                    </div>
+                </div>
+                <div class="executive-inline-actions executive-inline-actions-wrap">
+                    
+                    <a href="/maestros/insumos/" class="btn btn-secondary btn-sm">Insumos</a>
+                    <a href="/maestros/proveedores/" class="btn btn-secondary btn-sm">Proveedores</a>
+                    
+                    
+                    <a href="/compras/solicitudes/" class="btn btn-secondary btn-sm">Compras</a>
+                    
+                    
+                    <a href="/inventario/existencias/" class="btn btn-secondary btn-sm">Inventario</a>
+                    <a href="/activos/dashboard/" class="btn btn-secondary btn-sm">Activos</a>
+                    
+                    
+                    <a href="/reportes/bi/" class="btn btn-secondary btn-sm">BI</a>
+                    <a href="/control/discrepancias/" class="btn btn-secondary btn-sm">Control</a>
+                    
+                    
+                    <a href="/recetas/" class="btn btn-secondary btn-sm">Recetas</a>
+                    
+                </div>
+            </section>
+        </div>
+    </div>
+</details>
+</div>
+
+            </div>
+        </main>
+    </div>
+    <script>
+      (() => {
+        const key = "ui_density_mode";
+        const body = document.body;
+        const toggle = document.getElementById("densityToggle");
+        if (!toggle) return;
+
+        const applyMode = (mode) => {
+          const compact = mode === "compact";
+          body.classList.toggle("ui-compact", compact);
+          toggle.setAttribute("aria-pressed", compact ? "true" : "false");
+          toggle.textContent = compact ? "Modo normal" : "Modo compacto";
+        };
+
+        const saved = localStorage.getItem(key);
+        applyMode(saved || "normal");
+
+        toggle.addEventListener("click", () => {
+          const compact = !body.classList.contains("ui-compact");
+          const mode = compact ? "compact" : "normal";
+          localStorage.setItem(key, mode);
+          applyMode(mode);
+        });
+      })();
+    </script>
+    
+</body>
+</html>

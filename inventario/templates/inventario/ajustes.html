@@ -5,6 +5,7 @@
 
 {% block content %}
 <nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:home' %}">Dashboard</a>
   <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
   <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
   <a class="module-tab active" href="{% url 'inventario:ajustes' %}">Ajustes</a>
@@ -14,7 +15,46 @@
 </nav>
 
 <section class="card">
-  <div class="card-header">Centro de mando ERP</div>
+  <div class="card-header">Filtro rápido</div>
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-md-3">
+      <label for="ajuste_id" class="form-label">ID ajuste</label>
+      <input id="ajuste_id" name="ajuste_id" type="text" class="form-control" value="{{ selected_ajuste_id }}" placeholder="Ej. 154">
+    </div>
+    <div class="col-md-3">
+      <label for="estatus" class="form-label">Estatus</label>
+      <select id="estatus" name="estatus" class="form-control">
+        <option value="all" {% if selected_status == 'ALL' %}selected{% endif %}>Todos</option>
+        {% for value, label in status_choices %}
+        <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label for="q" class="form-label">Folio, artículo o motivo</label>
+      <input id="q" name="q" type="text" class="form-control" value="{{ selected_q }}" placeholder="Buscar folio, artículo, motivo o usuario">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-secondary">Aplicar</button>
+    </div>
+    {% if selected_q or selected_status != "ALL" or selected_ajuste_id %}
+    <div class="col-auto">
+      <a class="btn btn-link" href="{% url 'inventario:ajustes' %}">Limpiar</a>
+    </div>
+    <div class="col-12">
+      <div class="muted">
+        Filtro activo:
+        {% if selected_ajuste_id %} ID {{ selected_ajuste_id }}{% endif %}
+        {% if selected_status != "ALL" %} · {{ selected_status }}{% endif %}
+        {% if selected_q %} · {{ selected_q }}{% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Resumen del módulo</div>
   <div class="kpi-grid">
     <article class="kpi-card">
       <div class="kpi-label">Responsable principal</div>
@@ -37,7 +77,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Expediente ERP del módulo</div>
+  <div class="card-header">Ficha del módulo</div>
   <div class="table-responsive">
     <table class="table">
       <tbody>
@@ -71,7 +111,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Workflow ERP del módulo</div>
+  <div class="card-header">Flujo del módulo</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -112,7 +152,7 @@
 
 {% if upstream_dependency_rows %}
 <section class="card">
-  <div class="card-header">Dependencias upstream ERP</div>
+  <div class="card-header">Dependencias previas</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -149,7 +189,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Cadena documental ERP</div>
+  <div class="card-header">Cadena de control</div>
   <div class="erp-chain-grid">
     {% for step in enterprise_chain %}
     <article class="erp-chain-card tone-{{ step.tone|default:'neutral' }}">
@@ -165,7 +205,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Ruta troncal ERP</div>
+  <div class="card-header">Ruta operativa</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -202,7 +242,7 @@
 
 {% if critical_path_rows %}
 <section class="card">
-  <div class="card-header">Ruta crítica ERP</div>
+  <div class="card-header">Prioridades de cierre</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -246,7 +286,7 @@
 
 {% if executive_radar_rows %}
 <section class="card">
-  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="card-header">Resumen de seguimiento</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -279,7 +319,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Madurez ERP de inventario</div>
+  <div class="card-header">Cobertura del módulo</div>
   <div class="kpi-grid">
     <article class="kpi-card">
       <div class="kpi-number is-success">{{ maturity_summary.completed_steps }}</div>
@@ -354,7 +394,7 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Mesa de gobierno ERP</div>
+  <div class="card-header">Seguimiento por frente</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -387,7 +427,7 @@
 
 {% if downstream_handoff_rows %}
 <section class="card">
-  <div class="card-header">Entrega de inventario a downstream</div>
+  <div class="card-header">Entrega a otros frentes</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -420,7 +460,7 @@
 {% endif %}
 
 <section class="card">
-  <div class="card-header">Salud operativa ERP</div>
+  <div class="card-header">Salud operativa</div>
   <div class="kpi-mini">
     {% for card in operational_health_cards %}
     <div class="kpi-card">
@@ -535,12 +575,12 @@
         <tr>
           <th>Folio</th>
           <th>Insumo</th>
-          <th>Uso ERP</th>
+          <th>Uso operativo</th>
           <th>Solicitó</th>
           <th class="text-end">Sistema</th>
           <th class="text-end">Físico</th>
           <th>Motivo</th>
-          <th>Maestro ERP</th>
+          <th>Maestro</th>
           <th>Estatus</th>
           <th>Revisión</th>
           {% if can_approve_ajustes %}<th>Acciones</th>{% endif %}
@@ -551,7 +591,7 @@
         <tr>
           <td>{{ a.folio }}</td>
           <td>
-            {{ a.insumo.nombre }}
+            {{ a.insumo.display_name }}
             {% if a.enterprise_missing %}
             <div class="muted" style="margin-top: 6px;">Maestro: {{ a.enterprise_missing|join:", " }}</div>
             {% endif %}

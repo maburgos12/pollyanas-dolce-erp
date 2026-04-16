@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Ventas - Eventos{% endblock %}
+{% block page_title %}Ventas · Fechas Importantes{% endblock %}
+{% block body_class %}page-ventas-eventos{% endblock %}
+
+{% block content %}
+<div class="module-shell ventas-eventos">
+  <section class="card">
+    <div class="card-header">Filtros</div>
+    <form class="toolbar" method="get">
+      <input class="input" type="text" name="q" placeholder="Buscar por nombre" value="{{ query }}" style="min-width:220px;" />
+      <select class="input" name="status">
+        <option value="">Estatus</option>
+        {% for key, label in status_choices %}
+        <option value="{{ key }}" {% if status_filter == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <input class="input" type="text" name="event_type" placeholder="Tipo de evento" value="{{ event_type_filter }}" />
+      <button class="btn btn-secondary" type="submit">Aplicar</button>
+      <a class="btn btn-ghost" href="{% url 'ventas:eventos' %}">Limpiar</a>
+      {% if can_manage %}
+      <a class="btn btn-primary" href="{% url 'ventas:evento_create' %}">Nuevo evento</a>
+      {% endif %}
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Eventos registrados</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Nombre</th>
+            <th>Tipo</th>
+            <th>Fecha principal</th>
+            <th>Estatus</th>
+            <th>Prioridad</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in events %}
+          <tr>
+            <td><strong>{{ event.code }}</strong></td>
+            <td>{{ event.name }}</td>
+            <td>{{ event.event_type|default:"-" }}</td>
+            <td>{{ event.main_date }}</td>
+            <td><span class="badge">{{ event.get_status_display }}</span></td>
+            <td>{{ event.get_priority_display }}</td>
+            <td class="text-end">
+              <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+                <a class="btn btn-sm btn-secondary" href="{% url 'ventas:evento_detail' event.id %}">Abrir</a>
+                {% if can_manage %}
+                  {% if event.status == "BORRADOR" or event.status == "RECHAZADO" %}
+                  <form method="post" action="{% url 'ventas:evento_delete' event.id %}" onsubmit="return confirm('¿Eliminar este evento? Esta acción no se puede deshacer.');">
+                    {% csrf_token %}
+                    <button class="btn btn-sm btn-ghost" type="submit">Eliminar</button>
+                  </form>
+                  {% else %}
+                  <button class="btn btn-sm btn-ghost" type="button" disabled title="Solo se pueden eliminar eventos en borrador o rechazados.">Eliminar</button>
+                  {% endif %}
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" class="muted">No hay eventos con esos filtros.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

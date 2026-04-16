@@ -1,0 +1,754 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - Ventas{% endblock %}
+{% block page_title %}Reportes · Ventas{% endblock %}
+{% block body_class %}page-reportes-ventas{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell">
+  <nav class="module-tabs">
+    <a class="module-tab active" href="{% url 'reportes:ventas' %}">Ventas</a>
+    <a class="module-tab" href="{% url 'reportes:cierre_operativo' %}">Cierre diario</a>
+    <a class="module-tab" href="{% url 'reportes:cierre_producto' %}">Cierre producto</a>
+    <a class="module-tab" href="{% url 'reportes:bi' %}">BI</a>
+    <a class="module-tab" href="{% url 'reportes:financiero' %}">Financiero</a>
+    <a class="module-tab" href="{% url 'reportes:consumo' %}">Consumo</a>
+    <a class="module-tab" href="{% url 'reportes:faltantes' %}">Faltantes</a>
+    <a class="module-tab" href="{% url 'reportes:proyectos_inversion' %}">Proyectos inversión</a>
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Ventas</div>
+      <h1 class="bi-hero-title">Panel comercial</h1>
+      <p class="bi-copy">Corte, ticket, pronóstico y comparativo anual en una sola vista.</p>
+      <div class="bi-hero-highlights">
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Corte visible</div>
+          <div class="bi-hero-highlight-value">${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }} piezas</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Mes visible</div>
+          <div class="bi-hero-highlight-value">${{ yoy_panel.hero_row.amount|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ yoy_panel.hero_note }}</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Forecast</div>
+          <div class="bi-hero-highlight-value">${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas</div>
+        </article>
+      </div>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card">
+          <span class="bi-status-label">Fecha corte</span>
+          <strong>{{ daily_sales_snapshot.date_label }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Tickets</span>
+          <strong>{{ daily_sales_snapshot.total_tickets|intcomma }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Sucursales</span>
+          <strong>{{ daily_sales_snapshot.present_required_branch_count|intcomma }}/{{ daily_sales_snapshot.required_branch_count|intcomma }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Comparable</span>
+          <strong>{{ daily_sales_snapshot.comparison_label }}</strong>
+        </article>
+      </div>
+      <div class="bi-note bi-note-compact {% if sales_refresh_status.last_status == 'ERROR' %}bi-note-danger{% elif sales_refresh_status.last_status == 'INCONSISTENCIA' or sales_refresh_status.last_status == 'REZAGO' or sales_refresh_status.last_status == 'PENDIENTE_REZAGO' %}pending{% elif sales_refresh_status.configured and sales_refresh_status.enabled %}bi-note-success{% else %}bi-note-warning{% endif %}">
+        <strong>Actualización de ventas.</strong>
+        {% if sales_refresh_status.configured %}
+          Scheduler: {{ sales_refresh_status.schedule_label }}.
+          {% if sales_refresh_status.enabled %}
+            Automatización habilitada.
+          {% else %}
+            Scheduler detectado pero deshabilitado.
+          {% endif %}
+        {% else %}
+          No hay scheduler configurado para ventas.
+        {% endif %}
+        {% if sales_refresh_status.last_event %}
+          Último evento: {{ sales_refresh_status.last_event.timestamp|date:"Y-m-d H:i" }} · {{ sales_refresh_status.status_label }}.
+        {% else %}
+          Aún no hay ejecuciones auditadas.
+        {% endif %}
+      </div>
+      <div class="bi-note bi-note-compact bi-refresh-status {% if sales_refresh_status.last_status == 'ERROR' %}bi-note-danger{% elif sales_refresh_status.last_status == 'OK' %}bi-note-success{% elif sales_refresh_status.last_status == 'PENDIENTE' or sales_refresh_status.last_status == 'PENDIENTE_REZAGO' or sales_refresh_status.last_status == 'REZAGO' or sales_refresh_status.last_status == 'INCONSISTENCIA' %}pending{% else %}bi-note-warning{% endif %}" id="sales-refresh-status-card">
+        <span class="bi-refresh-pill {% if sales_refresh_status.last_status == 'ERROR' %}is-danger{% elif sales_refresh_status.last_status == 'OK' %}is-success{% elif sales_refresh_status.last_status == 'PENDIENTE' or sales_refresh_status.last_status == 'PENDIENTE_REZAGO' or sales_refresh_status.last_status == 'REZAGO' or sales_refresh_status.last_status == 'INCONSISTENCIA' %}is-pending{% endif %}" id="sales-refresh-status-pill">
+          {{ sales_refresh_status.status_label }}
+        </span>
+        <div class="bi-inline-health">
+          <span class="bi-pill {% if sales_refresh_status.is_cut_delayed %}warning{% else %}success{% endif %}">
+            Visible {{ sales_refresh_status.visible_cut_date_iso|default:"Sin fecha" }}
+          </span>
+          <span class="bi-pill {% if sales_refresh_status.is_cut_delayed %}warning{% else %}is-muted{% endif %}">
+            Esperada {{ sales_refresh_status.expected_cut_date_iso|default:"Sin regla" }}
+          </span>
+          {% if sales_refresh_status.is_cut_delayed %}
+          <span class="bi-pill warning">
+            Rezago {{ sales_refresh_status.cut_lag_days }} día{{ sales_refresh_status.cut_lag_days|pluralize }}
+          </span>
+          {% else %}
+          <span class="bi-pill success">Al día</span>
+          {% endif %}
+        </div>
+        <div>
+          <strong id="sales-refresh-status-title">{{ sales_refresh_status.status_title }}.</strong>
+          <span id="sales-refresh-status-message">{{ sales_refresh_status.status_message }}</span>
+        </div>
+        {% if sales_refresh_status.is_refresh_pending %}
+        <div class="bi-refresh-progress" aria-hidden="true" id="sales-refresh-progress">
+          <span></span>
+        </div>
+        {% endif %}
+        <div class="bi-subtle" id="sales-refresh-status-meta">
+          {% if sales_refresh_status.last_refresh_timestamp %}
+            Última referencia: {{ sales_refresh_status.last_refresh_timestamp|date:"Y-m-d H:i" }}.
+          {% endif %}
+          Objetivo manual: {{ sales_refresh_status.target_refresh_date_iso|default:"Sin objetivo" }}.
+          {% if sales_refresh_status.is_cut_delayed %}
+            El sistema ya debería mostrar al menos {{ sales_refresh_status.expected_cut_date_iso }} según la corrida {{ sales_refresh_status.schedule_time_label }} ({{ sales_refresh_status.schedule_timezone_label }}).
+          {% endif %}
+          {% if sales_refresh_status.last_status == 'SIN_EJECUCION' %}
+            El botón sólo encola la actualización; la ejecución real depende del worker operativo.
+          {% elif sales_refresh_status.is_refresh_pending %}
+            {% if sales_refresh_status.is_cut_delayed %}
+              Se está intentando cerrar el rezago hasta la fecha esperada.
+            {% else %}
+              Puedes esperar en esta pantalla; no hace falta volver a hacer clic.
+            {% endif %}
+          {% elif sales_refresh_status.last_status == 'INCONSISTENCIA' %}
+            La automatización ya no debería seguir pendiente; conviene reintentar o revisar la bitácora del worker.
+          {% endif %}
+        </div>
+      </div>
+      {% if can_manage_sales_refresh %}
+      <form method="post" action="{% url 'reportes:bi_force_refresh' %}" id="sales-refresh-form" data-pending="{% if sales_refresh_status.is_refresh_pending %}true{% else %}false{% endif %}">
+        {% csrf_token %}
+        <input type="hidden" name="reference_date" value="{{ sales_refresh_reference_date }}">
+        <input type="hidden" name="lookback_days" value="{{ sales_refresh_lookback_days }}">
+        <input type="hidden" name="next" value="{% url 'reportes:ventas' %}?months={{ months_window }}">
+        <div class="bi-control">
+          <button
+            type="submit"
+            id="sales-refresh-button"
+            class="bi-refresh-button{% if sales_refresh_status.button_disabled %} is-loading{% endif %}"
+            data-default-label="{{ sales_refresh_status.button_label }}"
+            data-loading-label="Encolando actualización..."
+            data-pending-label="Actualización en curso"
+            {% if sales_refresh_status.button_disabled %}disabled aria-disabled="true"{% endif %}
+          >
+            <span class="bi-refresh-spinner" aria-hidden="true"></span>
+            <span id="sales-refresh-button-label">
+              {% if sales_refresh_status.button_disabled %}
+                {{ sales_refresh_status.button_label }}
+              {% else %}
+                {{ sales_refresh_status.button_label }}
+              {% endif %}
+            </span>
+          </button>
+        </div>
+      </form>
+      {% else %}
+      <div class="bi-subtle">La actualización manual queda visible para Dirección General y Administración.</div>
+      {% endif %}
+      <form class="bi-filterbar" method="get">
+        <div class="bi-control">
+          <label for="months">Fecha visible</label>
+          <select id="months" name="months">
+            <option value="6" {% if request.GET.months == "6" or not request.GET.months %}selected{% endif %}>6 meses</option>
+            <option value="9" {% if request.GET.months == "9" %}selected{% endif %}>9 meses</option>
+            <option value="12" {% if request.GET.months == "12" %}selected{% endif %}>12 meses</option>
+          </select>
+        </div>
+        <div class="bi-control">
+          <button type="submit">Aplicar filtros</button>
+        </div>
+      </form>
+      <div class="bi-summary-band">
+        <div class="bi-summary-chip">
+          <span>Cobertura</span>
+          <strong>Red comercial</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Portafolio</span>
+          <strong>Total visible</strong>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bi-kpi-grid">
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value">${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Venta último corte</div>
+      <div class="bi-kpi-note">{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }} piezas · {{ daily_sales_snapshot.present_required_branch_count|intcomma }}/{{ daily_sales_snapshot.required_branch_count|intcomma }} sucursales obligatorias · {{ daily_sales_snapshot.source_label }}</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if not daily_sales_snapshot.tickets_available %}warning{% endif %}">
+        {% if daily_sales_snapshot.tickets_available %}${{ daily_sales_snapshot.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
+      </div>
+      <div class="bi-kpi-label">Ticket promedio</div>
+      <div class="bi-kpi-note">{{ daily_sales_snapshot.total_tickets|intcomma }} tickets · {{ daily_sales_snapshot.present_required_branch_count|intcomma }}/{{ daily_sales_snapshot.required_branch_count|intcomma }} sucursales obligatorias</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value success">${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Pronóstico próxima semana</div>
+      <div class="bi-kpi-note">{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas · {{ forecast_panel.target_week_label }}</div>
+    </article>
+    <article class="bi-kpi-card">
+      {% with hero=yoy_panel.hero_row %}
+      <div class="bi-kpi-value {% if hero and hero.amount_delta_pct is not None and hero.amount_delta_pct < 0 %}danger{% elif hero and hero.amount_delta_pct is not None %}success{% else %}warning{% endif %}">
+        {% if hero and hero.amount_delta_pct is not None %}{{ hero.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+      </div>
+      <div class="bi-kpi-label">Mes vs año anterior</div>
+      <div class="bi-kpi-note">{{ yoy_panel.hero_note }}</div>
+      {% endwith %}
+    </article>
+  </section>
+  {% if daily_sales_snapshot.official_cut_applied %}
+  <section class="bi-section-full">
+    <div class="bi-note bi-note-compact bi-note-success">
+      <strong>Corte oficial aplicado.</strong>
+      El total visible usa el corte oficial conciliado del día.
+      {% if daily_sales_snapshot.raw_total_amount and daily_sales_snapshot.raw_total_amount != daily_sales_snapshot.total_amount %}
+        Point crudo trae ${{ daily_sales_snapshot.raw_total_amount|floatformat:2|intcomma }} y el corte oficial valida ${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}.
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+  {% if daily_sales_snapshot.missing_required_branch_count %}
+  <section class="bi-section-full">
+    <div class="bi-note bi-note-compact bi-note-danger">
+      <strong>{{ daily_sales_snapshot.status }}.</strong>
+      {{ daily_sales_snapshot.detail }}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="bi-grid-feature">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Pronóstico</div>
+          <h2 class="bi-panel-title">Tendencia semanal</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill {% if forecast_panel.has_atypical_history %}warning{% else %}success{% endif %}">
+            {{ forecast_panel.baseline_label }}
+          </span>
+          <a class="btn btn-secondary btn-sm" href="{% url 'reportes:bi' %}?months={{ request.GET.months|default:'6' }}">Abrir BI</a>
+        </div>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-chart-stage">
+          <canvas id="salesForecastTrendChart" aria-label="Tendencia semanal de venta" role="img"></canvas>
+        </div>
+        <div class="bi-metric-strip">
+          <div class="bi-metric">
+            <div class="bi-metric-label">Escenario base</div>
+            <div class="bi-metric-value">${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Escenario alto</div>
+            <div class="bi-metric-value">${{ forecast_panel.high_scenario_amount|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">{{ forecast_panel.high_scenario_quantity|floatformat:0|intcomma }} piezas</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Ticket esperado</div>
+            <div class="bi-metric-value">${{ forecast_panel.forecast_avg_ticket|floatformat:2|intcomma }}</div>
+            <div class="bi-subtle">{{ forecast_panel.forecast_tickets|intcomma }} tickets</div>
+          </div>
+        </div>
+        <div class="bi-subtle">{{ forecast_panel.high_scenario_note }}</div>
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Comparativo</div>
+          <h2 class="bi-panel-title">Mes contra año anterior</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill">{% if yoy_panel.hero_row and yoy_panel.hero_row.is_partial %}Mismo corte anual{% else %}Mes cerrado comparable{% endif %}</span>
+          <a class="btn btn-secondary btn-sm" href="{% url 'reportes:bi' %}?months={{ request.GET.months|default:'6' }}">Ver comparativo</a>
+        </div>
+      </div>
+      <div class="bi-panel-stack">
+        <div class="bi-chart-stage">
+          <canvas id="salesYoyChart" aria-label="Comparativo mensual" role="img"></canvas>
+        </div>
+        {% with hero=yoy_panel.hero_row %}
+        <div class="bi-metric-strip">
+          <div class="bi-metric">
+            <div class="bi-metric-label">Mes visible</div>
+            <div class="bi-metric-value">{{ hero.month_label|default:"Sin mes" }}</div>
+            <div class="bi-subtle">{{ yoy_panel.hero_note }}</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Venta actual</div>
+            <div class="bi-metric-value">{% if hero %}${{ hero.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
+            <div class="bi-subtle">{% if hero %}{{ hero.quantity|floatformat:0|intcomma }} piezas{% else %}Sin fila{% endif %}</div>
+          </div>
+          <div class="bi-metric">
+            <div class="bi-metric-label">Año previo</div>
+            <div class="bi-metric-value">{% if hero and hero.prev_amount is not None %}${{ hero.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
+            <div class="bi-subtle">{% if hero and hero.amount_delta_pct is not None %}{{ hero.amount_delta_pct|floatformat:1 }}%{% else %}Comparativo pendiente{% endif %}</div>
+          </div>
+        </div>
+        {% endwith %}
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Corte</div>
+          <h2 class="bi-panel-title">Top sucursales</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{% url 'reportes:bi' %}?period_days=28">Ver sucursales</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="salesBranchChart" aria-label="Top sucursales por venta" role="img"></canvas>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in daily_sales_snapshot.top_branches|slice:":3" %}
+        <article class="bi-list-item is-tight">
+          <strong>{{ row.secondary|default:row.label }}</strong>
+          {% if row.secondary %}<div class="bi-subtle">{{ row.label }}</div>{% endif %}
+          <div>${{ row.amount|floatformat:2|intcomma }} · {{ row.total|floatformat:0|intcomma }} piezas</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Abrir sucursal</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin sucursales visibles</strong><div class="bi-subtle">No hay corte suficiente para ranking.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Corte</div>
+          <h2 class="bi-panel-title">Top productos</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{% url 'reportes:financiero' %}">Cruzar con margen</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="salesProductChart" aria-label="Top productos por venta" role="img"></canvas>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in daily_sales_snapshot.top_products|slice:":3" %}
+        <article class="bi-list-item is-tight">
+          <strong>{{ row.label }}</strong>
+          <div>${{ row.amount|floatformat:2|intcomma }} · {{ row.total|floatformat:0|intcomma }} piezas</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">
+              Cruzar con margen
+            </a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin productos visibles</strong><div class="bi-subtle">No hay corte suficiente para ranking.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Comparable</div>
+          <h2 class="bi-panel-title">Sucursales en alerta</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{% url 'reportes:bi' %}?period_days=60">Abrir alertas</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="salesBranchAlertChart" aria-label="Sucursales en alerta" role="img"></canvas>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in branch_weekday_rows|slice:":3" %}
+        <article class="bi-list-item is-tight is-signal-{{ row.tone|default:'neutral' }}">
+          <strong>{{ row.branch_name|default:row.branch_code }}</strong>
+          {% if row.branch_name %}<div class="bi-subtle">{{ row.branch_code }}</div>{% endif %}
+          <div>${{ row.amount|floatformat:2|intcomma }} · {{ row.units|floatformat:0|intcomma }} piezas · {{ row.tickets|intcomma }} tickets</div>
+          <div class="bi-subtle">{{ row.detail }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Abrir sucursal</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin alertas de sucursal</strong><div class="bi-subtle">No hay suficiente referencia comparable.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Comparable</div>
+          <h2 class="bi-panel-title">Productos en alerta</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{% url 'reportes:financiero' %}">Ver productos</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="salesProductAlertChart" aria-label="Productos en alerta" role="img"></canvas>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in product_weekday_rows|slice:":3" %}
+        <article class="bi-list-item is-tight is-signal-{{ row.tone|default:'neutral' }}">
+          <strong>{{ row.recipe_name }}</strong>
+          <div>{{ row.units|floatformat:0|intcomma }} piezas · ${{ row.amount|floatformat:2|intcomma }} · {{ row.branch_count|intcomma }} sucursales</div>
+          <div class="bi-subtle">{{ row.detail }}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">
+              Abrir en financiero
+            </a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin alertas de producto</strong><div class="bi-subtle">No hay suficiente referencia comparable.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Cobertura</div>
+        <h2 class="bi-panel-title">Histórico comercial disponible</h2>
+      </div>
+      <span class="bi-pill {% if ventas_historicas_summary.official_ready %}success{% else %}warning{% endif %}">
+        {{ ventas_historicas_summary.status }}
+      </span>
+    </div>
+    <div class="bi-metric-strip">
+      <div class="bi-metric">
+        <div class="bi-metric-label">Serie visible</div>
+        <div class="bi-metric-value">{{ ventas_historicas_summary.date_label }}</div>
+        <div class="bi-subtle">{{ ventas_historicas_summary.source_label }}</div>
+      </div>
+      <div class="bi-metric">
+        <div class="bi-metric-label">Días activos</div>
+        <div class="bi-metric-value">{{ ventas_historicas_summary.active_days|intcomma }}</div>
+        <div class="bi-subtle">{{ ventas_historicas_summary.expected_days|intcomma }} esperados</div>
+      </div>
+      <div class="bi-metric">
+        <div class="bi-metric-label">Faltantes</div>
+        <div class="bi-metric-value {% if ventas_historicas_summary.missing_days %}warning{% else %}success{% endif %}">{{ ventas_historicas_summary.missing_days|intcomma }}</div>
+        <div class="bi-subtle">días sin serie</div>
+      </div>
+    </div>
+    <details class="bi-details">
+      <summary>Ver detalle auditable de ventas</summary>
+      <div class="bi-details-body table-responsive">
+        <table class="bi-table">
+          <thead>
+            <tr>
+              <th>Mes</th>
+              <th class="text-end">Venta $</th>
+              <th class="text-end">Año anterior $</th>
+              <th class="text-end">Dif. %</th>
+              <th class="text-end">Piezas</th>
+              <th class="text-end">Ticket prom.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in yoy_panel.rows %}
+            <tr>
+              <td>{{ row.month_label }}{% if row.is_partial %}<div class="bi-subtle">Mes parcial</div>{% endif %}</td>
+              <td class="text-end">${{ row.amount|floatformat:2|intcomma }}</td>
+              <td class="text-end">{% if row.prev_amount is not None %}${{ row.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+              <td class="text-end">{% if row.amount_delta_pct is not None %}{{ row.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
+              <td class="text-end">{{ row.quantity|floatformat:0|intcomma }}</td>
+              <td class="text-end">${{ row.avg_ticket|floatformat:2|intcomma }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ forecast_panel.weekly_rows|json_script:"ventas-forecast-weekly-data" }}
+{{ yoy_panel.rows|json_script:"ventas-yoy-monthly-data" }}
+{{ sales_branch_bar_rows|json_script:"ventas-branch-bars" }}
+{{ sales_product_bar_rows|json_script:"ventas-product-bars" }}
+{{ branch_weekday_bar_rows|json_script:"ventas-branch-alert-bars" }}
+{{ product_weekday_bar_rows|json_script:"ventas-product-alert-bars" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  (() => {
+    const refreshForm = document.getElementById("sales-refresh-form");
+    const refreshButton = document.getElementById("sales-refresh-button");
+    const refreshButtonLabel = document.getElementById("sales-refresh-button-label");
+    const refreshReferenceInput = refreshForm ? refreshForm.querySelector('input[name="reference_date"]') : null;
+    const refreshStatusCard = document.getElementById("sales-refresh-status-card");
+    const refreshStatusPill = document.getElementById("sales-refresh-status-pill");
+    const refreshStatusTitle = document.getElementById("sales-refresh-status-title");
+    const refreshStatusMessage = document.getElementById("sales-refresh-status-message");
+    const refreshStatusMeta = document.getElementById("sales-refresh-status-meta");
+
+    if (refreshForm && refreshButton && refreshButtonLabel) {
+      refreshForm.addEventListener("submit", function () {
+        if (refreshButton.disabled) {
+          return;
+        }
+        refreshButton.disabled = true;
+        refreshButton.setAttribute("aria-disabled", "true");
+        refreshButton.classList.add("is-loading");
+        refreshButtonLabel.textContent = refreshButton.dataset.loadingLabel || "Encolando actualización...";
+
+        if (
+          refreshStatusCard &&
+          refreshStatusPill &&
+          refreshStatusTitle &&
+          refreshStatusMessage &&
+          refreshStatusMeta
+        ) {
+          refreshStatusCard.classList.remove("bi-note-danger", "bi-note-success", "bi-note-warning");
+          refreshStatusCard.classList.add("pending");
+          refreshStatusPill.classList.remove("is-danger", "is-success");
+          refreshStatusPill.classList.add("is-pending");
+          refreshStatusPill.textContent = "Pendiente";
+          const targetDate = refreshReferenceInput && refreshReferenceInput.value ? refreshReferenceInput.value : "";
+          refreshStatusTitle.textContent = targetDate ? "Refresh solicitado para cerrar rezago." : "Actualización solicitada.";
+          refreshStatusMessage.textContent = targetDate
+            ? ` Intentando alcanzar la fecha operativa ${targetDate}.`
+            : " Esperando procesamiento del ciclo operativo y refresh analítico.";
+          refreshStatusMeta.textContent = targetDate
+            ? `La solicitud ya quedó en cola para alcanzar ${targetDate}; no hace falta volver a hacer clic.`
+            : "Puedes esperar en esta pantalla; no hace falta volver a hacer clic.";
+
+          if (!document.getElementById("sales-refresh-progress")) {
+            const progress = document.createElement("div");
+            progress.id = "sales-refresh-progress";
+            progress.className = "bi-refresh-progress";
+            progress.setAttribute("aria-hidden", "true");
+            progress.innerHTML = "<span></span>";
+            refreshStatusCard.insertBefore(progress, refreshStatusMeta);
+          }
+        }
+      });
+    }
+
+    const parse = (id) => {
+      const node = document.getElementById(id);
+      return node ? JSON.parse(node.textContent) : [];
+    };
+    const asNumber = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const moneyTick = (value) => {
+      if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+      if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(0)}k`;
+      return `$${value.toFixed(0)}`;
+    };
+    const intTick = (value) => {
+      if (Math.abs(value) >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+      if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(0)}k`;
+      return `${value.toFixed(0)}`;
+    };
+    const theme = {
+      wine: "#922456",
+      forest: "#236d53",
+      amber: "#b38a25",
+      slate: "#6f6170",
+      border: "rgba(145, 36, 86, 0.10)"
+    };
+    const baseOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          labels: { usePointStyle: true, boxWidth: 10, color: "#6f6170", font: { size: 12, weight: "600" } }
+        },
+        tooltip: {
+          backgroundColor: "rgba(49, 28, 38, 0.96)",
+          titleColor: "#fff5f8",
+          bodyColor: "#fff5f8",
+          padding: 12,
+          cornerRadius: 12
+        }
+      },
+      scales: {
+        x: { grid: { color: "rgba(145, 36, 86, 0.06)" }, ticks: { color: "#7c6971" } },
+        y: { grid: { color: "rgba(145, 36, 86, 0.06)" }, ticks: { color: "#7c6971" } }
+      }
+    };
+    const renderFallbackBarList = (canvas, rows) => {
+      if (!canvas || !rows.length) return;
+      const host = canvas.parentElement;
+      canvas.style.display = "none";
+      const max = Math.max(...rows.map((row) => Math.abs(asNumber(row.value))), 1);
+      host.innerHTML = `
+        <div class="bi-chart-fallback">
+          <div class="bi-bar-list">
+            ${rows.map((row) => `
+              <div class="bi-bar-row">
+                <span>${row.label}</span>
+                <div class="bi-bar-track">
+                  <div class="bi-bar-fill ${row.tone || "is-wine"}" style="width:${Math.max(4, Math.abs(asNumber(row.value)) / max * 100)}%"></div>
+                </div>
+                <strong>${row.display || row.delta_label || ""}</strong>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    };
+    const hasChartJs = typeof window.Chart === "function";
+
+    const forecastRows = parse("ventas-forecast-weekly-data");
+    const yoyRows = parse("ventas-yoy-monthly-data");
+    const branchBars = parse("ventas-branch-bars");
+    const productBars = parse("ventas-product-bars");
+    const branchAlertBars = parse("ventas-branch-alert-bars");
+    const productAlertBars = parse("ventas-product-alert-bars");
+
+    const forecastCtx = document.getElementById("salesForecastTrendChart");
+    if (forecastCtx && forecastRows.length && hasChartJs) {
+      new Chart(forecastCtx, {
+        type: "line",
+        data: {
+          labels: forecastRows.map((row) => row.week_label),
+          datasets: [
+            {
+              label: "Venta $",
+              data: forecastRows.map((row) => asNumber(row.amount)),
+              borderColor: theme.wine,
+              backgroundColor: "rgba(146,36,86,0.12)",
+              tension: 0.3,
+              fill: true,
+              yAxisID: "yMoney",
+            },
+            {
+              label: "Piezas",
+              data: forecastRows.map((row) => asNumber(row.quantity)),
+              borderColor: theme.forest,
+              backgroundColor: "rgba(35,109,83,0.12)",
+              tension: 0.28,
+              fill: false,
+              yAxisID: "yUnits",
+            }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          scales: {
+            x: baseOptions.scales.x,
+            yMoney: {
+              position: "left",
+              grid: { color: "rgba(145, 36, 86, 0.06)" },
+              ticks: { color: "#7c6971", callback: (value) => moneyTick(Number(value)) }
+            },
+            yUnits: {
+              position: "right",
+              grid: { display: false },
+              ticks: { color: "#7c6971", callback: (value) => intTick(Number(value)) }
+            }
+          }
+        }
+      });
+    }
+
+    const yoyCtx = document.getElementById("salesYoyChart");
+    if (yoyCtx && yoyRows.length && hasChartJs) {
+      new Chart(yoyCtx, {
+        type: "bar",
+        data: {
+          labels: yoyRows.map((row) => row.month_label),
+          datasets: [
+            {
+              label: "Actual",
+              data: yoyRows.map((row) => asNumber(row.amount)),
+              backgroundColor: "rgba(146,36,86,0.82)",
+              borderRadius: 10,
+            },
+            {
+              label: "Año anterior",
+              data: yoyRows.map((row) => asNumber(row.prev_amount)),
+              backgroundColor: "rgba(35,109,83,0.72)",
+              borderRadius: 10,
+            }
+          ]
+        },
+        options: {
+          ...baseOptions,
+          scales: {
+            ...baseOptions.scales,
+            y: {
+              ...baseOptions.scales.y,
+              ticks: { color: "#7c6971", callback: (value) => moneyTick(Number(value)) }
+            }
+          }
+        }
+      });
+    }
+
+    const renderHorizontalBars = (canvasId, rows, color, label, formatter = moneyTick) => {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      if (!rows.length || !hasChartJs) {
+        renderFallbackBarList(canvas, rows.map((row) => ({ ...row, tone: color, display: row.display || formatter(asNumber(row.value)) })));
+        return;
+      }
+      new Chart(canvas, {
+        type: "bar",
+        data: {
+          labels: rows.map((row) => row.label),
+          datasets: [{
+            label,
+            data: rows.map((row) => asNumber(row.value)),
+            backgroundColor: color === "is-green" ? "rgba(35,109,83,0.78)" : color === "is-amber" ? "rgba(179,138,37,0.78)" : color === "is-red" ? "rgba(188,59,59,0.78)" : "rgba(146,36,86,0.82)",
+            borderRadius: 10,
+          }]
+        },
+        options: {
+          ...baseOptions,
+          indexAxis: "y",
+          plugins: { ...baseOptions.plugins, legend: { display: false } },
+          scales: {
+            x: { ...baseOptions.scales.x, ticks: { color: "#7c6971", callback: (value) => formatter(Number(value)) } },
+            y: { ...baseOptions.scales.y, grid: { display: false }, ticks: { color: "#7c6971" } }
+          }
+        }
+      });
+    };
+
+    renderHorizontalBars("salesBranchChart", branchBars, "is-wine", "Venta $");
+    renderHorizontalBars("salesProductChart", productBars, "is-green", "Venta $");
+    renderHorizontalBars("salesBranchAlertChart", branchAlertBars.map((row) => ({ ...row, value: Math.abs(asNumber(row.value)), display: row.delta_label })), "is-amber", "Desviación", intTick);
+    renderHorizontalBars("salesProductAlertChart", productAlertBars.map((row) => ({ ...row, value: Math.abs(asNumber(row.value)), display: row.delta_label })), "is-red", "Desviación", intTick);
+  })();
+</script>
+{% endblock %}

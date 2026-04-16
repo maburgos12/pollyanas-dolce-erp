@@ -278,11 +278,75 @@
     border-radius: 999px;
     display: inline-block;
   }
+  .cedis-comparison-grid,
+  .cedis-signal-list,
+  .cedis-week-strip {
+    display: grid;
+    gap: 12px;
+  }
+  .cedis-comparison-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cedis-week-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .cedis-compare-card,
+  .cedis-week-card,
+  .cedis-signal-item {
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: rgba(255,255,255,.9);
+    border: 1px solid rgba(165, 126, 104, .12);
+  }
+  .cedis-compare-label,
+  .cedis-week-label {
+    color: #906f60;
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .cedis-compare-value,
+  .cedis-week-value {
+    font-family: "Playfair Display", serif;
+    font-size: 1.5rem;
+    line-height: 1;
+    color: #312019;
+    margin-bottom: 6px;
+  }
+  .cedis-compare-delta,
+  .cedis-week-meta {
+    color: #745f55;
+    font-size: .9rem;
+  }
+  .cedis-signal-list {
+    grid-template-columns: 1fr;
+  }
+  .cedis-signal-item {
+    display: grid;
+    gap: 6px;
+  }
+  .cedis-signal-item strong {
+    color: #32211b;
+  }
+  .cedis-signal-meta {
+    color: #7b665c;
+    font-size: .9rem;
+  }
+  .cedis-audit details {
+    margin-top: 8px;
+  }
+  .cedis-audit summary {
+    cursor: pointer;
+    color: #6f574c;
+    font-weight: 700;
+  }
   @media (max-width: 1200px) {
     .cedis-grid-4, .cedis-grid-3, .cedis-chart-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-    .cedis-grid-2, .cedis-hero-grid, .cedis-command-grid {
+    .cedis-grid-2, .cedis-hero-grid, .cedis-command-grid, .cedis-comparison-grid, .cedis-week-strip {
       grid-template-columns: 1fr;
     }
     .cedis-hero-badges { justify-content: flex-start; }
@@ -303,7 +367,7 @@
       <div>
         <div class="cedis-eyebrow">Dashboard semanal CEDIS</div>
         <h1 class="cedis-title">Producción CEDIS vs ventas, merma y pronóstico</h1>
-        <p class="cedis-subtitle">Tablero semanal orientado a Dirección General y operación central. Usa producción Point, ventas reales reconciliadas, merma capturada por personal y un pronóstico simple de próxima semana para detectar exceso, faltante o presión comercial.</p>
+        <p class="cedis-subtitle">Producción Point, ventas reales, merma capturada y pronóstico semanal para detectar exceso, faltante o presión comercial.</p>
         <div class="cedis-actions">
           <a class="btn btn-secondary" href="{% url 'recetas:dg_operacion_dashboard' %}">Volver al cockpit DG</a>
           <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion' %}">Abrir plan operativo</a>
@@ -327,8 +391,26 @@
     </div>
     <form method="get" class="cedis-filter">
       <input type="date" name="week_of" value="{{ week_start|date:'Y-m-d' }}" aria-label="Semana base">
-      <button class="btn btn-primary" type="submit">Actualizar semana</button>
+      <button class="btn btn-primary" type="submit">Aplicar filtros</button>
     </form>
+    <div class="bi-summary-band">
+      <div class="bi-summary-chip">
+        <span>Fecha visible</span>
+        <strong>{{ week_label }}</strong>
+      </div>
+      <div class="bi-summary-chip">
+        <span>Centro</span>
+        <strong>CEDIS</strong>
+      </div>
+      <div class="bi-summary-chip">
+        <span>Portafolio</span>
+        <strong>Central</strong>
+      </div>
+      <div class="bi-summary-chip">
+        <span>Comparativo</span>
+        <strong>{{ previous_week_label }}</strong>
+      </div>
+    </div>
   </section>
 
   <section class="cedis-command-grid">
@@ -451,35 +533,21 @@
         </div>
         <span class="cedis-pill {% if alert_tone == 'success' %}is-success{% elif alert_tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ alert_status }}</span>
       </div>
-      <div class="cedis-table-wrap">
-        <table class="cedis-table">
-          <thead>
-            <tr>
-              <th>Indicador</th>
-              <th class="cedis-num">Actual</th>
-              <th class="cedis-num">Anterior</th>
-              <th class="cedis-num">Δ%</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in week_comparison_rows %}
-            <tr>
-              <td>{{ row.label }}</td>
-              <td class="cedis-num">{{ row.current|floatformat:1 }}</td>
-              <td class="cedis-num">{{ row.previous|floatformat:1 }}</td>
-              <td class="cedis-num">
-                {% if row.delta_pct is None %}
-                  -
-                {% else %}
-                  <span class="{% if row.delta_pct > 0 %}cedis-tone-success{% elif row.delta_pct < 0 %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">
-                    {{ row.delta_pct|floatformat:1 }}%
-                  </span>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="cedis-comparison-grid">
+        {% for row in week_comparison_rows|slice:":6" %}
+        <article class="cedis-compare-card">
+          <div class="cedis-compare-label">{{ row.label }}</div>
+          <div class="cedis-compare-value">{{ row.current|floatformat:1 }}</div>
+          <div class="cedis-compare-delta">
+            Semana previa {{ row.previous|floatformat:1 }} ·
+            {% if row.delta_pct is None %}
+              sin comparable
+            {% else %}
+              <span class="{% if row.delta_pct > 0 %}cedis-tone-success{% elif row.delta_pct < 0 %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">{{ row.delta_pct|floatformat:1 }}%</span>
+            {% endif %}
+          </div>
+        </article>
+        {% endfor %}
       </div>
     </article>
 
@@ -491,33 +559,14 @@
         </div>
         <span class="cedis-pill">W actual + 2 previas</span>
       </div>
-      <div class="cedis-table-wrap">
-        <table class="cedis-table">
-          <thead>
-            <tr>
-              <th>Semana</th>
-              <th class="cedis-num">Ventas ($)</th>
-              <th class="cedis-num">Unidades</th>
-              <th class="cedis-num">Producción</th>
-              <th class="cedis-num">Transfer.</th>
-              <th class="cedis-num">Merma ($)</th>
-              <th class="cedis-num">Cobertura</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in weekly_rows %}
-            <tr>
-              <td>{{ row.week_label }}</td>
-              <td class="cedis-num">${{ row.sales_amount|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.sales_units|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.production_units|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.transfer_units|floatformat:0 }}</td>
-              <td class="cedis-num">${{ row.waste_cost|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.coverage_ratio|floatformat:2 }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="cedis-week-strip">
+        {% for row in weekly_rows %}
+        <article class="cedis-week-card">
+          <div class="cedis-week-label">{{ row.week_label }}</div>
+          <div class="cedis-week-value">${{ row.sales_amount|floatformat:0 }}</div>
+          <div class="cedis-week-meta">{{ row.sales_units|floatformat:0 }} vendidas · {{ row.production_units|floatformat:0 }} prod. · cobertura {{ row.coverage_ratio|floatformat:2 }}</div>
+        </article>
+        {% endfor %}
       </div>
     </article>
   </section>
@@ -530,27 +579,18 @@
           <p class="cedis-panel-subtitle">Semana actual.</p>
         </div>
       </div>
-      <div class="cedis-table-wrap">
-        <table class="cedis-table">
-          <thead>
-            <tr>
-              <th>Producto</th>
-              <th class="cedis-num">Venta total</th>
-              <th class="cedis-num">% participación</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in top_sales_rows %}
-            <tr>
-              <td>{{ row.product }}</td>
-              <td class="cedis-num">${{ row.amount|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.share_pct|floatformat:1 }}%</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="3">Sin ventas para mostrar.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="cedis-signal-list">
+        {% for row in top_sales_rows|slice:":5" %}
+        <article class="cedis-signal-item">
+          <strong>{{ row.product }}</strong>
+          <div class="cedis-signal-meta">${{ row.amount|floatformat:0 }} · {{ row.qty|floatformat:0 }} piezas · {{ row.share_pct|floatformat:1 }}%</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Cruzar producto</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="cedis-signal-item"><strong>Sin ventas para mostrar</strong></article>
+        {% endfor %}
       </div>
     </article>
 
@@ -561,27 +601,18 @@
           <p class="cedis-panel-subtitle">Semana actual.</p>
         </div>
       </div>
-      <div class="cedis-table-wrap">
-        <table class="cedis-table">
-          <thead>
-            <tr>
-              <th>Producto</th>
-              <th class="cedis-num">Merma total</th>
-              <th class="cedis-num">% participación</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in top_waste_rows %}
-            <tr>
-              <td>{{ row.product }}</td>
-              <td class="cedis-num">${{ row.amount|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.share_pct|floatformat:1 }}%</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="3">Sin merma monetizada para mostrar.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="cedis-signal-list">
+        {% for row in top_waste_rows|slice:":5" %}
+        <article class="cedis-signal-item">
+          <strong>{{ row.product }}</strong>
+          <div class="cedis-signal-meta">${{ row.amount|floatformat:0 }} · {{ row.qty|floatformat:0 }} pzas · {{ row.share_pct|floatformat:1 }}%</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Cruzar producto</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="cedis-signal-item"><strong>Sin merma monetizada visible</strong></article>
+        {% endfor %}
       </div>
     </article>
 
@@ -592,27 +623,18 @@
           <p class="cedis-panel-subtitle">Participación semanal por costo y piezas.</p>
         </div>
       </div>
-      <div class="cedis-table-wrap">
-        <table class="cedis-table">
-          <thead>
-            <tr>
-              <th>Sucursal</th>
-              <th class="cedis-num">Merma ($)</th>
-              <th class="cedis-num">Merma (pzas)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in waste_branch_rows %}
-            <tr>
-              <td>{{ row.label }}</td>
-              <td class="cedis-num">${{ row.cost|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.qty|floatformat:0 }}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="3">Sin mermas por sucursal.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="cedis-signal-list">
+        {% for row in waste_branch_rows|slice:":5" %}
+        <article class="cedis-signal-item">
+          <strong>{{ row.label }}</strong>
+          <div class="cedis-signal-meta">${{ row.cost|floatformat:0 }} · {{ row.qty|floatformat:0 }} pzas</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Abrir control semanal</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="cedis-signal-item"><strong>Sin mermas por sucursal</strong></article>
+        {% endfor %}
       </div>
     </article>
   </section>
@@ -630,31 +652,16 @@
           </p>
         </div>
       </div>
-      <div class="cedis-table-wrap">
-        <table class="cedis-table">
-          <thead>
-            <tr>
-              <th>Categoría</th>
-              <th class="cedis-num">Entradas</th>
-              <th class="cedis-num">Ventas</th>
-              <th class="cedis-num">Diferencia</th>
-              <th>Estatus</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in category_balance_rows %}
-            <tr>
-              <td>{{ row.label }}</td>
-              <td class="cedis-num">{{ row.production_qty|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.sales_qty|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.delta|floatformat:0 }}</td>
-              <td><span class="{% if row.tone == 'success' %}cedis-tone-success{% elif row.tone == 'danger' %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">{{ row.status }}</span></td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="5">Sin categorías para comparar.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="cedis-signal-list">
+        {% for row in category_balance_rows|slice:":6" %}
+        <article class="cedis-signal-item">
+          <strong>{{ row.label }}</strong>
+          <div class="cedis-signal-meta">Entradas {{ row.production_qty|floatformat:0 }} · ventas {{ row.sales_qty|floatformat:0 }} · delta {{ row.delta|floatformat:0 }}</div>
+          <div class="cedis-signal-meta {% if row.tone == 'success' %}cedis-tone-success{% elif row.tone == 'danger' %}cedis-tone-danger{% else %}cedis-tone-warning{% endif %}">{{ row.status }}</div>
+        </article>
+        {% empty %}
+        <article class="cedis-signal-item"><strong>Sin categorías para comparar</strong></article>
+        {% endfor %}
       </div>
     </article>
 
@@ -665,31 +672,16 @@
           <p class="cedis-panel-subtitle">Promedio simple de las últimas 3 semanas. Sirve como señal, no sustituye planeación fina.</p>
         </div>
       </div>
-      <div class="cedis-table-wrap">
-        <table class="cedis-table">
-          <thead>
-            <tr>
-              <th>Categoría</th>
-              <th class="cedis-num">Pron. prod.</th>
-              <th class="cedis-num">Pron. ventas ($)</th>
-              <th class="cedis-num">Pron. ventas (pzas)</th>
-              <th class="cedis-num">Tendencia</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in forecast_rows %}
-            <tr>
-              <td>{{ row.label }}</td>
-              <td class="cedis-num">{{ row.forecast_production_qty|floatformat:0 }}</td>
-              <td class="cedis-num">${{ row.forecast_sales_amount|floatformat:0 }}</td>
-              <td class="cedis-num">{{ row.forecast_sales_qty|floatformat:0 }}</td>
-              <td class="cedis-num">{% if row.trend == "up" %}↑{% else %}↓{% endif %}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="5">Sin categorías suficientes para pronóstico.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="cedis-signal-list">
+        {% for row in forecast_rows|slice:":6" %}
+        <article class="cedis-signal-item">
+          <strong>{{ row.label }}</strong>
+          <div class="cedis-signal-meta">Pron. prod. {{ row.forecast_production_qty|floatformat:0 }} · ventas ${{ row.forecast_sales_amount|floatformat:0 }} · {{ row.forecast_sales_qty|floatformat:0 }} pzas</div>
+          <div class="cedis-signal-meta">{% if row.trend == "up" %}Tendencia ↑{% else %}Tendencia ↓{% endif %}</div>
+        </article>
+        {% empty %}
+        <article class="cedis-signal-item"><strong>Sin categorías suficientes para pronóstico</strong></article>
+        {% endfor %}
       </div>
     </article>
   </section>
@@ -717,6 +709,105 @@
         <span><i class="cedis-dot" style="background:#2eb495;"></i>Pronóstico próximo</span>
       </div>
     </article>
+  </section>
+
+  <section class="cedis-panel cedis-audit">
+    <div class="cedis-panel-head">
+      <div>
+        <h2 class="cedis-panel-title">Detalle auditable semanal</h2>
+        <p class="cedis-panel-subtitle">Tablas completas disponibles solo como respaldo del análisis principal.</p>
+      </div>
+    </div>
+    <details>
+      <summary>Ver tablas completas de comparación y categorías</summary>
+      <div class="cedis-grid-2" style="margin-top:14px;">
+        <article class="cedis-panel">
+          <div class="cedis-panel-head"><h3 class="cedis-panel-title">Comparativo semana actual vs anterior</h3></div>
+          <div class="cedis-table-wrap">
+            <table class="cedis-table">
+              <thead>
+                <tr><th>Indicador</th><th class="cedis-num">Actual</th><th class="cedis-num">Anterior</th><th class="cedis-num">Δ%</th></tr>
+              </thead>
+              <tbody>
+                {% for row in week_comparison_rows %}
+                <tr>
+                  <td>{{ row.label }}</td>
+                  <td class="cedis-num">{{ row.current|floatformat:1 }}</td>
+                  <td class="cedis-num">{{ row.previous|floatformat:1 }}</td>
+                  <td class="cedis-num">{% if row.delta_pct is None %}-{% else %}{{ row.delta_pct|floatformat:1 }}%{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="cedis-panel">
+          <div class="cedis-panel-head"><h3 class="cedis-panel-title">Comparativa 3 semanas</h3></div>
+          <div class="cedis-table-wrap">
+            <table class="cedis-table">
+              <thead>
+                <tr><th>Semana</th><th class="cedis-num">Ventas ($)</th><th class="cedis-num">Unidades</th><th class="cedis-num">Producción</th><th class="cedis-num">Transfer.</th><th class="cedis-num">Merma ($)</th><th class="cedis-num">Cobertura</th></tr>
+              </thead>
+              <tbody>
+                {% for row in weekly_rows %}
+                <tr>
+                  <td>{{ row.week_label }}</td>
+                  <td class="cedis-num">${{ row.sales_amount|floatformat:0 }}</td>
+                  <td class="cedis-num">{{ row.sales_units|floatformat:0 }}</td>
+                  <td class="cedis-num">{{ row.production_units|floatformat:0 }}</td>
+                  <td class="cedis-num">{{ row.transfer_units|floatformat:0 }}</td>
+                  <td class="cedis-num">${{ row.waste_cost|floatformat:0 }}</td>
+                  <td class="cedis-num">{{ row.coverage_ratio|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="cedis-panel">
+          <div class="cedis-panel-head"><h3 class="cedis-panel-title">Producción vs ventas por categoría</h3></div>
+          <div class="cedis-table-wrap">
+            <table class="cedis-table">
+              <thead>
+                <tr><th>Categoría</th><th class="cedis-num">Entradas</th><th class="cedis-num">Ventas</th><th class="cedis-num">Diferencia</th><th>Estatus</th></tr>
+              </thead>
+              <tbody>
+                {% for row in category_balance_rows %}
+                <tr>
+                  <td>{{ row.label }}</td>
+                  <td class="cedis-num">{{ row.production_qty|floatformat:0 }}</td>
+                  <td class="cedis-num">{{ row.sales_qty|floatformat:0 }}</td>
+                  <td class="cedis-num">{{ row.delta|floatformat:0 }}</td>
+                  <td>{{ row.status }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="cedis-panel">
+          <div class="cedis-panel-head"><h3 class="cedis-panel-title">Pronóstico por categoría</h3></div>
+          <div class="cedis-table-wrap">
+            <table class="cedis-table">
+              <thead>
+                <tr><th>Categoría</th><th class="cedis-num">Pron. prod.</th><th class="cedis-num">Pron. ventas ($)</th><th class="cedis-num">Pron. ventas (pzas)</th><th class="cedis-num">Tendencia</th></tr>
+              </thead>
+              <tbody>
+                {% for row in forecast_rows %}
+                <tr>
+                  <td>{{ row.label }}</td>
+                  <td class="cedis-num">{{ row.forecast_production_qty|floatformat:0 }}</td>
+                  <td class="cedis-num">${{ row.forecast_sales_amount|floatformat:0 }}</td>
+                  <td class="cedis-num">{{ row.forecast_sales_qty|floatformat:0 }}</td>
+                  <td class="cedis-num">{% if row.trend == "up" %}↑{% else %}↓{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </details>
   </section>
 </div>
 {% endblock %}

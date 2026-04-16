@@ -3,6 +3,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from crm.models import Cliente, PedidoCliente
+from logistica.models import EntregaRuta, RutaEntrega
 
 
 class LogisticaViewsTests(TestCase):
@@ -12,47 +13,105 @@ class LogisticaViewsTests(TestCase):
         self.user.groups.add(group)
         self.client.login(username="logistica", password="pass123")
 
+    def test_dashboard_view_renders_executive_surface(self):
+        cliente = Cliente.objects.create(nombre="Cliente Logística")
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            descripcion="Pedido de reparto",
+            estatus=PedidoCliente.ESTATUS_CONFIRMADO,
+            monto_estimado=950,
+        )
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Centro",
+            fecha_ruta="2026-03-25",
+            chofer="Mario",
+            unidad="Van 1",
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+        )
+        EntregaRuta.objects.create(
+            ruta=ruta,
+            pedido=pedido,
+            secuencia=1,
+            direccion="Sucursal Centro",
+            estatus=EntregaRuta.ESTATUS_EN_CAMINO,
+            monto_estimado=950,
+        )
+        ruta.recompute_totals()
+        ruta.save(update_fields=["total_entregas", "entregas_completadas", "entregas_incidencia", "monto_estimado_total"])
+
+        resp = self.client.get(reverse("logistica:home"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Logística en control")
+        self.assertContains(resp, "Distribución de estatus de ruta")
+        self.assertContains(resp, "Distribución de estatus de entrega")
+        self.assertContains(resp, "Últimos 7 días")
+
+    def test_dashboard_view_supports_real_focus_filter(self):
+        cliente = Cliente.objects.create(nombre="Cliente Incidencia")
+        pedido = PedidoCliente.objects.create(cliente=cliente, descripcion="Pedido con incidencia", monto_estimado=500)
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Incidencia",
+            fecha_ruta="2026-03-25",
+            chofer="Mario",
+            unidad="Van 1",
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+        )
+        EntregaRuta.objects.create(
+            ruta=ruta,
+            pedido=pedido,
+            secuencia=1,
+            direccion="Sucursal Centro",
+            estatus=EntregaRuta.ESTATUS_INCIDENCIA,
+            monto_estimado=500,
+        )
+        ruta.recompute_totals()
+        ruta.save(update_fields=["total_entregas", "entregas_completadas", "entregas_incidencia", "monto_estimado_total"])
+
+        resp = self.client.get(reverse("logistica:home"), {"enterprise_focus": "INCIDENCIAS"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["enterprise_focus"], "INCIDENCIAS")
+        self.assertIsNotNone(resp.context["focus_summary"])
+        self.assertContains(resp, "Foco")
+
+    def test_dashboard_view_supports_real_search_filter(self):
+        cliente = Cliente.objects.create(nombre="Cliente Busqueda Logística")
+        pedido = PedidoCliente.objects.create(cliente=cliente, descripcion="Pedido filtro", monto_estimado=500)
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta Busqueda",
+            fecha_ruta="2026-03-25",
+            chofer="Mario",
+            unidad="Van 99",
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+        )
+        EntregaRuta.objects.create(
+            ruta=ruta,
+            pedido=pedido,
+            secuencia=1,
+            direccion="Sucursal Centro",
+            estatus=EntregaRuta.ESTATUS_PENDIENTE,
+            monto_estimado=500,
+        )
+        ruta.recompute_totals()
+        ruta.save(update_fields=["total_entregas", "entregas_completadas", "entregas_incidencia", "monto_estimado_total"])
+
+        resp = self.client.get(reverse("logistica:home"), {"q": "Van 99"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["selected_q"], "Van 99")
+        self.assertContains(resp, "Ruta o pedido")
+
     def test_rutas_view_and_create(self):
         resp = self.client.get(reverse("logistica:rutas"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Logística · Rutas")
-        self.assertContains(resp, "Centro de mando ERP")
-        self.assertContains(resp, "Cockpit operativo de logística")
-        self.assertContains(resp, "Cadena documental ERP")
-        self.assertContains(resp, "Cadena troncal de logística")
-        self.assertContains(resp, "Ruta crítica ERP")
-        self.assertContains(resp, "Radar ejecutivo ERP")
-        self.assertContains(resp, "Depende de")
-        self.assertContains(resp, "Dependencia")
-        self.assertContains(resp, "Madurez ERP de logística")
-        self.assertContains(resp, "Criterios de cierre ERP")
-        self.assertContains(resp, "Cierre global")
-        self.assertContains(resp, "Cadena de control logístico")
-        self.assertContains(resp, "Entrega logística a downstream")
-        self.assertContains(resp, "Cierre por etapa documental")
-        self.assertContains(resp, "Mesa de gobierno ERP")
-        self.assertContains(resp, "Responsable")
-        self.assertContains(resp, "Cierre")
-        self.assertContains(resp, "Salud operativa ERP")
+        self.assertContains(resp, "Nueva ruta de entrega")
+        self.assertContains(resp, "Filtro operativo")
+        self.assertContains(resp, "Rutas de entrega")
+        self.assertNotContains(resp, "Centro de mando ERP")
+        self.assertNotContains(resp, "Cadena documental ERP")
+        self.assertNotContains(resp, "Ruta crítica ERP")
+        self.assertNotContains(resp, "Mesa de gobierno ERP")
         self.assertTrue(resp.context["focus_cards"])
         self.assertTrue(resp.context["enterprise_chain"])
-        self.assertIn("erp_command_center", resp.context)
-        self.assertIn("critical_path_rows", resp.context)
-        self.assertIn("dependency_status", resp.context["enterprise_chain"][0])
-        self.assertIn("maturity_summary", resp.context)
-        self.assertIn("release_gate_rows", resp.context)
-        self.assertIn("release_gate_completion", resp.context)
-        self.assertIn("handoff_map", resp.context)
-        self.assertIn("owner", resp.context["handoff_map"][0])
-        self.assertIn("depends_on", resp.context["handoff_map"][0])
-        self.assertIn("exit_criteria", resp.context["handoff_map"][0])
-        self.assertIn("next_step", resp.context["handoff_map"][0])
-        self.assertIn("completion", resp.context["handoff_map"][0])
-        self.assertTrue(resp.context["document_stage_rows"])
-        self.assertIn("erp_governance_rows", resp.context)
-        self.assertIn("executive_radar_rows", resp.context)
-        self.assertIn("owner", resp.context["document_stage_rows"][0])
-        self.assertIn("completion", resp.context["document_stage_rows"][0])
         self.assertTrue(resp.context["operational_health_cards"])
 
         resp_post = self.client.post(
@@ -68,23 +127,11 @@ class LogisticaViewsTests(TestCase):
         )
         self.assertEqual(resp_post.status_code, 200)
         self.assertContains(resp_post, "Detalle de ruta")
-        self.assertContains(resp_post, "Centro de mando ERP")
-        self.assertContains(resp_post, "Cadena documental ERP")
-        self.assertContains(resp_post, "Cadena troncal de logística")
-        self.assertContains(resp_post, "Ruta crítica ERP")
-        self.assertContains(resp_post, "Radar ejecutivo ERP")
-        self.assertContains(resp_post, "Depende de")
-        self.assertContains(resp_post, "Dependencia")
-        self.assertContains(resp_post, "Madurez ERP de logística")
-        self.assertContains(resp_post, "Criterios de cierre ERP")
-        self.assertContains(resp_post, "Cierre global")
-        self.assertContains(resp_post, "Cadena de control logístico")
-        self.assertContains(resp_post, "Entrega logística a downstream")
-        self.assertContains(resp_post, "Cierre por etapa documental")
-        self.assertContains(resp_post, "Mesa de gobierno ERP")
-        self.assertContains(resp_post, "Responsable")
-        self.assertContains(resp_post, "Cierre")
-        self.assertContains(resp_post, "Salud operativa ERP")
+        self.assertContains(resp_post, "Agregar entrega")
+        self.assertContains(resp_post, "Entregas de ruta")
+        self.assertNotContains(resp_post, "Centro de mando ERP")
+        self.assertNotContains(resp_post, "Cadena documental ERP")
+        self.assertNotContains(resp_post, "Mesa de gobierno ERP")
 
     def test_ruta_detail_add_entrega(self):
         cliente = Cliente.objects.create(nombre="Cliente Logística")
@@ -114,34 +161,13 @@ class LogisticaViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         ruta.refresh_from_db()
         self.assertEqual(ruta.total_entregas, 1)
-        self.assertContains(resp, "Cadena documental ERP")
-        self.assertContains(resp, "Centro de mando ERP")
-        self.assertContains(resp, "Cadena troncal de logística")
-        self.assertContains(resp, "Depende de")
-        self.assertContains(resp, "Dependencia")
-        self.assertContains(resp, "Madurez ERP de logística")
-        self.assertContains(resp, "Criterios de cierre ERP")
-        self.assertContains(resp, "Cierre global")
-        self.assertContains(resp, "Cadena de control logístico")
-        self.assertContains(resp, "Cierre por etapa documental")
-        self.assertContains(resp, "Salud operativa ERP")
+        self.assertContains(resp, "Agregar entrega")
+        self.assertContains(resp, "Entregas de ruta")
+        self.assertNotContains(resp, "Cadena documental ERP")
+        self.assertNotContains(resp, "Centro de mando ERP")
+        self.assertNotContains(resp, "Madurez ERP de logística")
         self.assertTrue(resp.context["enterprise_chain"])
-        self.assertIn("erp_command_center", resp.context)
-        self.assertIn("critical_path_rows", resp.context)
         self.assertIn("dependency_status", resp.context["enterprise_chain"][0])
-        self.assertIn("maturity_summary", resp.context)
-        self.assertIn("release_gate_rows", resp.context)
-        self.assertIn("release_gate_completion", resp.context)
-        self.assertIn("handoff_map", resp.context)
-        self.assertIn("owner", resp.context["handoff_map"][0])
-        self.assertIn("depends_on", resp.context["handoff_map"][0])
-        self.assertIn("exit_criteria", resp.context["handoff_map"][0])
-        self.assertIn("next_step", resp.context["handoff_map"][0])
-        self.assertIn("completion", resp.context["handoff_map"][0])
-        self.assertTrue(resp.context["document_stage_rows"])
-        self.assertIn("erp_governance_rows", resp.context)
-        self.assertIn("owner", resp.context["document_stage_rows"][0])
-        self.assertIn("completion", resp.context["document_stage_rows"][0])
         self.assertTrue(resp.context["operational_health_cards"])
 
     def test_rutas_view_can_focus_enterprise_subset(self):
@@ -170,7 +196,7 @@ class LogisticaViewsTests(TestCase):
 
         resp = self.client.get(reverse("logistica:rutas"), {"enterprise_focus": "INCIDENCIAS"})
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Entrega logística a downstream")
+        self.assertContains(resp, "Focos operativos")
         self.assertContains(resp, "Quitar foco")
         self.assertEqual(resp.context["enterprise_focus"], "INCIDENCIAS")
         self.assertIsNotNone(resp.context["focus_summary"])

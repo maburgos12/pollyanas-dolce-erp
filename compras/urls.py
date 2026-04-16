@@ -5,7 +5,8 @@ from . import views
 app_name = "compras"
 
 urlpatterns = [
-    path("", views.solicitudes, name="home"),
+    path("", views.dashboard, name="home"),
+    path("dashboard/", views.dashboard, name="dashboard"),
     path("solicitudes/", views.solicitudes, name="solicitudes"),
     path("solicitudes/resumen.json", views.solicitudes_resumen_api, name="solicitudes_resumen_api"),
     path("solicitudes/consumo-vs-plan.json", views.solicitudes_consumo_vs_plan_api, name="solicitudes_consumo_vs_plan_api"),

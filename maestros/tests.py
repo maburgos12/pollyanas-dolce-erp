@@ -167,6 +167,7 @@ class PointPendingReviewTests(TestCase):
             tipo=PointPendingMatch.TIPO_INSUMO,
             point_codigo="PT-INS-010",
             point_nombre="Harina Point Oficial",
+            payload={"categoria": "Harinas Point"},
             fuzzy_sugerencia="Harina Pastelera",
             fuzzy_score=97.0,
             method="FUZZY",
@@ -188,6 +189,7 @@ class PointPendingReviewTests(TestCase):
         self.insumo_harina.refresh_from_db()
         self.assertEqual(self.insumo_harina.codigo_point, "PT-INS-010")
         self.assertEqual(self.insumo_harina.nombre_point, "Harina Point Oficial")
+        self.assertEqual(self.insumo_harina.categoria, "Harinas Point")
 
         alias_norm = "harina point oficial"
         self.assertTrue(
@@ -1640,6 +1642,36 @@ class InsumoCanonicalResolveTests(TestCase):
         self.assertEqual(canonical.nombre_point, "Etiqueta Canonica Point")
         self.assertEqual(canonical.codigo_point, "PT-ETQ-011")
         self.assertTrue(variant.activo)
+
+    def test_insumo_display_name_prefers_point_name(self):
+        self.insumo_harina.nombre_point = "Harina Point Visible"
+        self.insumo_harina.save(update_fields=["nombre_point"])
+
+        self.assertEqual(self.insumo_harina.display_name, "Harina Point Visible")
+
+    def test_sync_point_catalogs_updates_categoria_for_existing_insumo(self):
+        from maestros.management.commands.sync_point_catalogs import Command
+
+        command = Command()
+        report, stats = command._sync_insumos(
+            rows=[
+                {
+                    "codigo": "PT-INS-300",
+                    "nombre": "Harina Pastelera",
+                    "unidad": "kg",
+                    "categoria": "Harinas Point Sync",
+                }
+            ],
+            threshold=90,
+            apply=True,
+            create_aliases=False,
+            create_missing_insumos=False,
+        )
+
+        self.assertEqual(stats["matched"], 1)
+        self.assertEqual(report[0]["point_categoria"], "Harinas Point Sync")
+        self.insumo_harina.refresh_from_db()
+        self.assertEqual(self.insumo_harina.categoria, "Harinas Point Sync")
 
 
 class MaestroEnterpriseCockpitTests(TestCase):

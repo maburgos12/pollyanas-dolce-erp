@@ -14,6 +14,7 @@ from rapidfuzz import fuzz
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from core.branch_catalog import eligible_operational_branch_qs
 from core.models import Sucursal
 from recetas.models import Receta, RecetaCodigoPointAlias, VentaHistorica, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
@@ -40,6 +41,9 @@ NON_RECIPE_CATEGORIES = {
     "industrias lec",
     "te",
     "hielo y agua mar de cortez",
+    "viva party",
+    "clarita",
+    "glow",
 }
 
 NON_RECIPE_TOKENS = (
@@ -557,13 +561,14 @@ class Command(BaseCommand):
     def _resolve_default_sucursal(self, raw: str) -> Sucursal | None:
         if not raw:
             return None
+        eligible_branches = eligible_operational_branch_qs()
         sucursal = None
         if raw.isdigit():
-            sucursal = Sucursal.objects.filter(pk=int(raw), activa=True).first()
+            sucursal = eligible_branches.filter(pk=int(raw)).first()
         if sucursal is None:
-            sucursal = Sucursal.objects.filter(codigo__iexact=raw, activa=True).order_by("id").first()
+            sucursal = eligible_branches.filter(codigo__iexact=raw).order_by("id").first()
         if sucursal is None:
-            sucursal = Sucursal.objects.filter(nombre__iexact=raw, activa=True).order_by("id").first()
+            sucursal = eligible_branches.filter(nombre__iexact=raw).order_by("id").first()
         if sucursal is None:
             raise CommandError(f"Sucursal default no encontrada: {raw}")
         return sucursal
@@ -813,14 +818,15 @@ class Command(BaseCommand):
         key = (normalizar_nombre(sucursal_name), normalizar_nombre(sucursal_code))
         if key in cache:
             return cache[key]
+        eligible_branches = eligible_operational_branch_qs()
         sucursal = None
         if sucursal_code:
-            sucursal = Sucursal.objects.filter(codigo__iexact=sucursal_code, activa=True).order_by("id").first()
+            sucursal = eligible_branches.filter(codigo__iexact=sucursal_code).order_by("id").first()
         if sucursal is None and sucursal_name:
-            sucursal = Sucursal.objects.filter(nombre__iexact=sucursal_name, activa=True).order_by("id").first()
+            sucursal = eligible_branches.filter(nombre__iexact=sucursal_name).order_by("id").first()
         if sucursal is None and sucursal_name:
             objetivo = normalizar_nombre(sucursal_name)
-            for row in Sucursal.objects.filter(activa=True).only("id", "codigo", "nombre").order_by("id"):
+            for row in eligible_branches.only("id", "codigo", "nombre").order_by("id"):
                 if normalizar_nombre(row.nombre) == objetivo or normalizar_nombre(row.codigo) == objetivo:
                     sucursal = row
                     break

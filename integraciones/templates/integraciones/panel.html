@@ -46,6 +46,356 @@
             </article>
         </div>
     </section>
+    <section class="card mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="card-header mb-0">Monitor de integraciones Point → ERP → Dashboard</div>
+            <div class="recipe-actions">
+                {% for link in integration_monitor.quick_links %}
+                <a class="btn btn-secondary btn-sm" href="{{ link.url }}">{{ link.label }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="enterprise-focus-alert tone-{% if integration_monitor.executive_semaphore.tone == 'danger' %}danger{% elif integration_monitor.executive_semaphore.tone == 'warning' %}warning{% else %}success{% endif %}" style="margin-bottom:16px;">
+            <div>
+                <div class="enterprise-focus-title">Semáforo ejecutivo del corte · {{ integration_monitor.executive_semaphore.status_code }}</div>
+                <div class="enterprise-focus-text">{{ integration_monitor.executive_semaphore.title }} · {{ integration_monitor.executive_semaphore.summary }}</div>
+                <div class="muted" style="margin-top:8px;">
+                    Fecha objetivo {{ integration_monitor.executive_semaphore.target_cut_date|date:"Y-m-d" }}
+                    · Dashboard {{ integration_monitor.executive_semaphore.dashboard_date|date:"Y-m-d"|default:"Sin fecha" }}
+                    · Capa más atrasada {{ integration_monitor.executive_semaphore.blocking_layer }}
+                </div>
+                <div class="muted">{{ integration_monitor.executive_semaphore.detail_line }}</div>
+            </div>
+            <div class="enterprise-focus-actions" style="align-items:flex-end;">
+                <span class="module-chip {% if integration_monitor.executive_semaphore.tone == 'danger' %}blocked{% elif integration_monitor.executive_semaphore.tone == 'warning' %}pending{% else %}manage{% endif %}">
+                    {% if integration_monitor.executive_semaphore.cutover_reached %}Fuera de ventana{% else %}Ventana normal hasta {{ integration_monitor.executive_semaphore.cutoff_label }}{% endif %}
+                </span>
+                <div class="muted" style="text-align:right; max-width:260px;">
+                    <strong>Acción sugerida:</strong> {{ integration_monitor.executive_semaphore.recommended_action.label }}<br>
+                    {{ integration_monitor.executive_semaphore.recommended_action.detail }}
+                </div>
+            </div>
+        </div>
+        <div class="kpi-grid kpi-mini mb-3">
+            {% for card in integration_monitor.sales_cards %}
+            <article class="kpi-card">
+                <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% elif card.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">
+                    {{ card.latest_date_label }}
+                </div>
+                <div class="kpi-label">{{ card.label }}</div>
+                <div class="muted">{{ card.status }} · {{ card.detail }}</div>
+                <div class="muted">{{ card.extra }}</div>
+                <div class="muted">Última corrida: {{ card.latest_generated_label }}</div>
+                {% if card.note %}
+                <div class="muted">{{ card.note }}</div>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        <div class="enterprise-pill-grid enterprise-pill-grid-compact mb-3">
+            {% for alert in integration_monitor.technical_alerts %}
+            <article class="enterprise-pill-card {% if alert.tone == 'danger' %}is-danger{% elif alert.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
+                <div class="enterprise-pill-title">{{ alert.title }}</div>
+                <div class="enterprise-pill-text">{{ alert.detail }}</div>
+            </article>
+            {% endfor %}
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Capa</th>
+                        <th>Última fecha de datos</th>
+                        <th>Última ejecución</th>
+                        <th>Último éxito</th>
+                        <th>Último error</th>
+                        <th>Salud</th>
+                        <th>Detalle</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in integration_monitor.pipeline_rows %}
+                    <tr>
+                        <td><strong>{{ row.label }}</strong></td>
+                        <td>{{ row.latest_data_label }}</td>
+                        <td>{{ row.last_run_label }}</td>
+                        <td>{{ row.last_success_label }}</td>
+                        <td>
+                            {{ row.last_error_label }}
+                            {% if row.last_error_message %}
+                            <div class="muted">{{ row.last_error_message|truncatechars:140 }}</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">
+                                {{ row.health_status }}
+                            </span>
+                        </td>
+                        <td>{{ row.detail }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <section class="card mb-3">
+        <div class="card-header">Acciones manuales seguras</div>
+        <div class="kpi-grid kpi-mini mb-3">
+            <article class="kpi-card">
+                <div class="kpi-number {% if integration_monitor.analytics_action.tone == 'danger' %}is-danger{% elif integration_monitor.analytics_action.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">
+                    {{ integration_monitor.analytics_action.status }}
+                </div>
+                <div class="kpi-label">Refresh analytics/dashboard</div>
+                <div class="muted">
+                    {% if integration_monitor.analytics_action.latest_event %}
+                    Último evento {{ integration_monitor.analytics_action.latest_event.timestamp|date:"Y-m-d H:i" }}
+                    {% else %}
+                    Sin ejecuciones manuales
+                    {% endif %}
+                </div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-number {% if integration_monitor.operations_action.tone == 'danger' %}is-danger{% elif integration_monitor.operations_action.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">
+                    {{ integration_monitor.operations_action.status }}
+                </div>
+                <div class="kpi-label">Ciclo operativo completo</div>
+                <div class="muted">
+                    {% if integration_monitor.operations_action.latest_event %}
+                    Último evento {{ integration_monitor.operations_action.latest_event.timestamp|date:"Y-m-d H:i" }}
+                    {% else %}
+                    Sin ejecuciones manuales
+                    {% endif %}
+                </div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-label">Último corte visible en BI</div>
+                <div style="font-weight:700; margin-top:8px;">{{ integration_monitor.materialized_snapshot.date|default:"Sin fecha" }}</div>
+                <div class="muted">{{ integration_monitor.materialized_snapshot.source_label|default:"Sin snapshot" }}</div>
+            </article>
+            <article class="kpi-card">
+                <div class="kpi-label">Corte oficial diario</div>
+                <div style="font-weight:700; margin-top:8px;">{{ integration_monitor.latest_corte.corte_date|date:"Y-m-d"|default:"Sin corte" }}</div>
+                <div class="muted">
+                    {% if integration_monitor.latest_corte %}
+                    ${{ integration_monitor.latest_corte.total_amount|floatformat:2 }}
+                    {% else %}
+                    Sin fila en CorteOficialDiario
+                    {% endif %}
+                </div>
+            </article>
+        </div>
+        {% if can_manage_orquestacion %}
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Acción</th>
+                        <th>Alcance</th>
+                        <th>Parámetros</th>
+                        <th>Ejecutar</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Refresh analytics/dashboard</strong><div class="muted">Seguro. No re-extrae Point.</div></td>
+                        <td>Global por fecha</td>
+                        <td>
+                            <form method="post" class="form-grid-auto">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="refresh_analytics_monitor">
+                                <div class="form-group">
+                                    <label class="form-label" for="id_reference_date_analytics">Fecha referencia</label>
+                                    <input id="id_reference_date_analytics" class="input-field" type="date" name="reference_date" value="{{ integration_monitor.reference_date|date:'Y-m-d' }}">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="id_lookback_days_analytics">Lookback días</label>
+                                    <input id="id_lookback_days_analytics" class="input-field" type="number" min="1" max="30" name="lookback_days" value="7">
+                                </div>
+                                <div class="form-group" style="display:flex;align-items:flex-end;">
+                                    <button type="submit" class="btn btn-primary w-100">Encolar refresh analytics</button>
+                                </div>
+                            </form>
+                        </td>
+                        <td><span class="module-chip manage">RBAC + audit + lock</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Ciclo operativo completo</strong><div class="muted">Refresh + producción + compras + alertas + métricas.</div></td>
+                        <td>Global o por sucursal</td>
+                        <td>
+                            <form method="post" class="form-grid-auto">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="refresh_operations_monitor">
+                                <div class="form-group">
+                                    <label class="form-label" for="id_reference_date_ops">Fecha referencia</label>
+                                    <input id="id_reference_date_ops" class="input-field" type="date" name="reference_date" value="{{ integration_monitor.reference_date|date:'Y-m-d' }}">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="id_lookback_days_ops">Lookback días</label>
+                                    <input id="id_lookback_days_ops" class="input-field" type="number" min="1" max="30" name="lookback_days" value="7">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="id_sucursal_id_ops">Sucursal</label>
+                                    <select id="id_sucursal_id_ops" class="input-field" name="sucursal_id">
+                                        <option value="">Toda la red</option>
+                                        {% for branch in integration_monitor.branch_options %}
+                                        <option value="{{ branch.id }}">{{ branch.codigo }} · {{ branch.nombre }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="form-group" style="display:flex;align-items:flex-end;">
+                                    <button type="submit" class="btn btn-primary w-100">Encolar ciclo operativo</button>
+                                </div>
+                            </form>
+                        </td>
+                        <td><span class="module-chip pending">Acción más amplia</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="module-note">Solo DG/Admin puede disparar acciones manuales de refresh desde este monitor.</div>
+        {% endif %}
+    </section>
+    <section class="card mb-3">
+        <div class="card-header">Schedules, ventanas y auditoría</div>
+        <div class="table-responsive mb-3">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Automatización</th>
+                        <th>Hora</th>
+                        <th>Habilitado</th>
+                        <th>Última corrida</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in integration_monitor.schedule_rows %}
+                    <tr>
+                        <td>{{ row.label }}</td>
+                        <td>{{ row.schedule_label }}</td>
+                        <td>
+                            <span class="module-chip {% if row.enabled %}manage{% else %}blocked{% endif %}">
+                                {% if row.enabled %}Activa{% else %}Inactiva{% endif %}
+                            </span>
+                        </td>
+                        <td>{{ row.last_run_label }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4">No hay schedules configurados visibles.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="table-responsive mb-3">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Ventana pendiente</th>
+                        <th>Rango</th>
+                        <th>Estatus</th>
+                        <th>Error</th>
+                        <th>Actualizada</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in integration_monitor.pending_windows %}
+                    <tr>
+                        <td>{{ row.get_dataset_display }}</td>
+                        <td>{{ row.date_from|date:"Y-m-d" }} → {{ row.date_to|date:"Y-m-d" }}</td>
+                        <td>{{ row.get_status_display }}</td>
+                        <td>{{ row.last_error|default:"-" }}</td>
+                        <td>{{ row.updated_at|date:"Y-m-d H:i" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="5">Sin ventanas analíticas pendientes.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="table-responsive mb-3">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Auditoría analítica</th>
+                        <th>Estatus</th>
+                        <th>Rango</th>
+                        <th>Discrepancias</th>
+                        <th>Creada</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in integration_monitor.analytic_audits %}
+                    <tr>
+                        <td>{{ row.audit_type }}</td>
+                        <td>{{ row.status }}</td>
+                        <td>{{ row.date_from|date:"Y-m-d"|default:"-" }} → {{ row.date_to|date:"Y-m-d"|default:"-" }}</td>
+                        <td>{{ row.discrepancy_count }}</td>
+                        <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="5">Sin auditorías analíticas registradas.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Alerta</th>
+                        <th>Severidad</th>
+                        <th>Sucursal</th>
+                        <th>Fecha</th>
+                        <th>Detalle</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in integration_monitor.quality_alerts %}
+                    <tr>
+                        <td>{{ row.alert_type }}</td>
+                        <td>{{ row.severity }}</td>
+                        <td>{{ row.sucursal|default:"GLOBAL" }}</td>
+                        <td>{{ row.fecha|date:"Y-m-d"|default:"-" }}</td>
+                        <td>{{ row.detalle|truncatechars:140 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="5">Sin alertas de calidad recientes.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <section class="card mb-3" id="jobs-recentes">
+        <div class="card-header">Jobs recientes Point</div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Tipo</th>
+                        <th>Estatus</th>
+                        <th>Inicio</th>
+                        <th>Fin</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in integration_monitor.recent_point_jobs %}
+                    <tr>
+                        <td>{{ row.id }}</td>
+                        <td>{{ row.get_job_type_display }}</td>
+                        <td>{{ row.status }}</td>
+                        <td>{{ row.started_at|date:"Y-m-d H:i" }}</td>
+                        <td>{{ row.finished_at|date:"Y-m-d H:i"|default:"-" }}</td>
+                        <td>{{ row.error_message|truncatechars:120|default:"-" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6">Sin jobs Point recientes.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
     <section class="kpi-mini">
         <article class="kpi-card">
             <div class="kpi-number">{{ clients|length }}</div>

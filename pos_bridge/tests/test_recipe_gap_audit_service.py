@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from maestros.models import Insumo, UnidadMedida
-from pos_bridge.models import PointSyncJob
+from pos_bridge.models import PointExtractionLog, PointSyncJob
 from pos_bridge.services.recipe_gap_audit_service import PointRecipeGapAuditResult, PointRecipeGapAuditService
 from pos_bridge.services.sync_service import PointSyncService
 from recetas.models import Receta
@@ -239,6 +239,24 @@ class FakeRecipeGapAuditService:
         )
 
 
+class FakeRecipeGapAuditServiceWithWarnings(FakeRecipeGapAuditService):
+    def audit(self, *, sync_job=None, **kwargs):
+        result = super().audit(**kwargs)
+        PointExtractionLog.objects.create(
+            sync_job=sync_job,
+            level=PointExtractionLog.LEVEL_WARNING,
+            message="retry",
+            context={"event": "point_http_retry", "attempt": 1},
+        )
+        PointExtractionLog.objects.create(
+            sync_job=sync_job,
+            level=PointExtractionLog.LEVEL_WARNING,
+            message="relogin",
+            context={"event": "point_relogin", "attempt": 1},
+        )
+        return result
+
+
 class PointSyncServiceRecipeGapAuditTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_superuser(
@@ -261,3 +279,18 @@ class PointSyncServiceRecipeGapAuditTests(TestCase):
         self.assertEqual(sync_job.result_summary["products_audited"], 2)
         self.assertEqual(sync_job.result_summary["products_derived_presentations"], 1)
         self.assertEqual(sync_job.result_summary["report_path"], "/tmp/point_recipe_gap_audit.csv")
+        self.assertEqual(sync_job.result_summary["point_retry_events"], 0)
+        self.assertEqual(sync_job.result_summary["point_relogin_events"], 0)
+
+    def test_run_recipe_gap_audit_counts_point_health_warning_events(self):
+        service = PointSyncService(recipe_gap_audit_service=FakeRecipeGapAuditServiceWithWarnings())
+
+        sync_job = service.run_recipe_gap_audit(
+            triggered_by=self.user,
+            branch_hint="MATRIZ",
+            product_codes=["00445", "00446"],
+        )
+
+        self.assertEqual(sync_job.status, PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(sync_job.result_summary["point_retry_events"], 1)
+        self.assertEqual(sync_job.result_summary["point_relogin_events"], 1)

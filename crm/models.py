@@ -142,8 +142,34 @@ class PedidoCliente(models.Model):
     def save(self, *args, **kwargs):
         if not self.folio:
             self.folio = self._generate_folio()
-        if self.sucursal_ref_id and not (self.sucursal or "").strip():
-            self.sucursal = self.sucursal_ref.nombre
+
+        sync_sucursal = False
+        if self.sucursal_ref_id:
+            canonical_name = self.sucursal_ref.nombre
+            current_sucursal = self.sucursal or ""
+
+            if self._state.adding:
+                if not current_sucursal.strip():
+                    self.sucursal = canonical_name
+                    sync_sucursal = True
+            else:
+                previous = (
+                    PedidoCliente.objects.filter(pk=self.pk)
+                    .values("sucursal", "sucursal_ref__nombre")
+                    .first()
+                )
+                previous_canonical = ""
+                if previous:
+                    previous_canonical = previous.get("sucursal_ref__nombre") or ""
+
+                if not current_sucursal.strip() or current_sucursal == previous_canonical:
+                    self.sucursal = canonical_name
+                    sync_sucursal = True
+
+        update_fields = kwargs.get("update_fields")
+        if sync_sucursal and update_fields is not None:
+            kwargs["update_fields"] = set(update_fields) | {"sucursal"}
+
         super().save(*args, **kwargs)
 
 

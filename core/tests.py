@@ -2,8 +2,9 @@ import os
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from django.core.management import call_command
 from django.db import OperationalError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.test.client import RequestFactory
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -14,13 +15,16 @@ from unittest.mock import MagicMock, patch
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra
 from control.models import MermaPOS
 from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_compras
+from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
 from core.models import Departamento, Sucursal, UserProfile
-from core.views import _compute_budget_semaforo, _compute_plan_forecast_semaforo
+from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from core.management.commands.ejecutar_rutina_diaria_erp import _prefer_public_database_url_if_needed
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, PointPendingMatch, UnidadMedida
-from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, Receta, VentaHistorica
+from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointSalesDailyCategoryFact, PointSalesDailyProductFact
+from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PoliticaStockSucursalProducto, Receta, VentaHistorica
+from reportes.models import CentroCosto
 
 
 class DashboardForecastRobustnessTests(TestCase):
@@ -34,15 +38,63 @@ class DashboardForecastRobustnessTests(TestCase):
         self.assertTrue(result["data_unavailable"])
 
 
+class BranchCatalogTests(TestCase):
+    def test_eligible_operational_branch_qs_excludes_future_openings(self):
+        today = timezone.localdate()
+        matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        Sucursal.objects.create(
+            codigo="FUTURA",
+            nombre="Sucursal Futura",
+            activa=True,
+            fecha_apertura=today + timedelta(days=5),
+        )
+
+        branches = list(eligible_operational_branch_qs(reference_date=today))
+
+        self.assertEqual([branch.codigo for branch in branches], [matriz.codigo])
+
+
+class PurgeGhostBranchCommandTests(TestCase):
+    def test_purge_ghost_branch_col_migrates_live_dependencies(self):
+        canonical = Sucursal.objects.create(codigo="COLOSIO", nombre="Colosio", activa=True)
+        ghost = Sucursal.objects.create(codigo="COL", nombre="Colosio", activa=True)
+        user = get_user_model().objects.create_user(username="ghost_user", password="secret")
+        profile = UserProfile.objects.create(user=user, sucursal=ghost)
+        receta = Receta.objects.create(nombre="Pastel Col", hash_contenido="ghost-hash-001")
+        policy = PoliticaStockSucursalProducto.objects.create(
+            sucursal=ghost,
+            receta=receta,
+            stock_minimo=Decimal("5"),
+            stock_objetivo=Decimal("8"),
+            stock_maximo=Decimal("10"),
+        )
+        center = CentroCosto.objects.create(
+            codigo="SUC_COL",
+            nombre="Sucursal Colosio",
+            tipo=CentroCosto.TIPO_SUCURSAL,
+            sucursal=ghost,
+        )
+
+        call_command("purge_ghost_branch_col", "--execute")
+
+        profile.refresh_from_db()
+        policy.refresh_from_db()
+        self.assertEqual(profile.sucursal, canonical)
+        self.assertEqual(policy.sucursal, canonical)
+        self.assertFalse(Sucursal.objects.filter(codigo="COL").exists())
+        self.assertFalse(CentroCosto.objects.filter(pk=center.pk).exists())
+
+
 class CanonicalLocalHostMiddlewareTests(TestCase):
+    @override_settings(CANONICAL_LOCAL_HOST="localhost:8011")
     def test_localhost_redirects_to_canonical_local_host(self):
         factory = RequestFactory()
-        request = factory.get("/login/?next=/dashboard/", HTTP_HOST="localhost:8002")
+        request = factory.get("/login/?next=/dashboard/", HTTP_HOST="127.0.0.1:8011")
         middleware = CanonicalLocalHostMiddleware(lambda req: MagicMock(status_code=200))
         response = middleware(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "http://127.0.0.1:8002/login/?next=/dashboard/")
+        self.assertEqual(response["Location"], "http://localhost:8011/login/?next=/dashboard/")
 
 
 class DashboardHomologacionContextTests(TestCase):
@@ -118,6 +170,79 @@ class DashboardHomologacionContextTests(TestCase):
         self.assertEqual(response.context["recetas_pending_matching_count"], 2)
         self.assertEqual(response.context["inventario_last_unmatched_count"], 5)
         self.assertEqual(response.context["homologacion_total_pending"], 10)
+    def _create_sucursal(self, codigo: str, nombre: str) -> Sucursal:
+        return Sucursal.objects.create(nombre=nombre, codigo=codigo, activa=True)
+
+    def test_sales_source_context_detects_canonical_point_date_without_stage(self):
+        sucursal = self._create_sucursal("CORECTXV2", "Sucursal Contexto Core V2")
+        point_branch = PointBranch.objects.create(external_id="CORECTXV2", name=sucursal.nombre, erp_branch=sucursal)
+        latest_day = timezone.localdate() - timedelta(days=1)
+        previous_day = latest_day - timedelta(days=7)
+
+        PointSalesDailyCategoryFact.objects.create(
+            branch=point_branch,
+            sale_date=previous_day,
+            sucursal_nombre=sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("5"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("500"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("500"),
+        )
+        PointSalesDailyCategoryFact.objects.create(
+            branch=point_branch,
+            sale_date=latest_day,
+            sucursal_nombre=sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("7"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("700"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("700"),
+        )
+
+        source = _sales_source_context()
+        previous_dates = _sales_previous_dates(source, latest_day)
+
+        self.assertEqual(source["mode"], "point_stage")
+        self.assertEqual(source["latest_date"], latest_day)
+        self.assertEqual(source["canonical_latest_date"], latest_day)
+        self.assertIsNone(source["stage_latest_date"])
+        self.assertEqual(previous_dates, [previous_day])
+
+    def test_sales_source_context_keeps_stage_latest_date_when_stage_lags_canonical(self):
+        sucursal = self._create_sucursal("CORECTXST", "Sucursal Contexto Core Stage")
+        point_branch = PointBranch.objects.create(external_id="CORECTXST", name=sucursal.nombre, erp_branch=sucursal)
+        stage_day = timezone.localdate() - timedelta(days=2)
+        canonical_day = timezone.localdate() - timedelta(days=1)
+
+        PointDailySale.objects.create(
+            branch=point_branch,
+            product=PointProduct.objects.create(external_id="CORECTXST-P", sku="CORECTXSTP", name="Producto Stage", active=True),
+            sale_date=stage_day,
+            quantity=Decimal("4"),
+            total_amount=Decimal("400"),
+            source_endpoint="/Report/PrintReportes?idreporte=3",
+        )
+        PointSalesDailyCategoryFact.objects.create(
+            branch=point_branch,
+            sale_date=canonical_day,
+            sucursal_nombre=sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("8"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("800"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("800"),
+        )
+
+        source = _sales_source_context()
+
+        self.assertEqual(source["mode"], "point_stage")
+        self.assertEqual(source["latest_date"], stage_day)
+        self.assertEqual(source["stage_latest_date"], stage_day)
+        self.assertEqual(source["canonical_latest_date"], canonical_day)
 
     def test_dashboard_excludes_hidden_point_pending_from_totals(self):
         PointPendingMatch.objects.create(
@@ -435,6 +560,93 @@ class DashboardHomologacionContextTests(TestCase):
         self.assertNotContains(response, "Módulos complementarios ERP")
         self.assertNotContains(response, "Gobierno de módulos complementarios ERP")
 
+    def test_dashboard_sales_history_summary_uses_canonical_source_when_stage_is_missing(self):
+        sucursal = self._create_sucursal("DASHHISTV2", "Sucursal Dashboard Historico V2")
+        point_branch = PointBranch.objects.create(external_id="DASHHISTV2", name=sucursal.nombre, erp_branch=sucursal)
+        receta = Receta.objects.create(nombre="Pastel Historico Dashboard", hash_contenido="hash-dash-hist-v2")
+        first_day = timezone.localdate() - timedelta(days=8)
+        last_day = timezone.localdate() - timedelta(days=1)
+
+        for offset, qty in enumerate([Decimal("4"), Decimal("6")]):
+            sale_day = first_day + timedelta(days=offset * 7)
+            PointSalesDailyCategoryFact.objects.create(
+                branch=point_branch,
+                sale_date=sale_day,
+                sucursal_nombre=sucursal.nombre,
+                categoria="Pasteles",
+                total_cantidad=qty,
+                total_descuento=Decimal("0"),
+                total_venta=qty * Decimal("100"),
+                total_impuestos=Decimal("0"),
+                total_venta_neta=qty * Decimal("100"),
+            )
+        PointSalesDailyProductFact.objects.create(
+            branch=point_branch,
+            sale_date=first_day,
+            point_product=PointProduct.objects.create(external_id="DASHHISTV2-P", sku="DASHHISTV2P", name="Pastel Historico Dashboard", active=True),
+            producto_nombre_historico=receta.nombre,
+            receta=receta,
+            total_cantidad=Decimal("4"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("400"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("400"),
+        )
+        PointSalesDailyProductFact.objects.create(
+            branch=point_branch,
+            sale_date=last_day,
+            point_product=PointProduct.objects.get(external_id="DASHHISTV2-P"),
+            producto_nombre_historico=receta.nombre,
+            receta=receta,
+            total_cantidad=Decimal("6"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("600"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("600"),
+        )
+
+        summary = _build_dashboard_sales_history_summary()
+
+        self.assertTrue(summary["available"])
+        self.assertEqual(summary["source_label"], "Point directo")
+        self.assertEqual(summary["total_units"], Decimal("10"))
+        self.assertEqual(summary["total_amount"], Decimal("1000"))
+        self.assertEqual(summary["branch_count"], 1)
+        self.assertEqual(summary["recipe_count"], 1)
+        self.assertEqual(summary["latest_source"], "CANONICAL_V2_FACT")
+
+    def test_dashboard_sales_history_summary_mentions_canonical_date_when_stage_lags(self):
+        sucursal = self._create_sucursal("DASHLAG", "Sucursal Dashboard Lag")
+        point_branch = PointBranch.objects.create(external_id="DASHLAG", name=sucursal.nombre, erp_branch=sucursal)
+        stage_day = timezone.localdate() - timedelta(days=2)
+        canonical_day = timezone.localdate() - timedelta(days=1)
+
+        PointDailySale.objects.create(
+            branch=point_branch,
+            product=PointProduct.objects.create(external_id="DASHLAG-P", sku="DASHLAGP", name="Producto Lag", active=True),
+            sale_date=stage_day,
+            quantity=Decimal("5"),
+            total_amount=Decimal("500"),
+            source_endpoint="/Report/PrintReportes?idreporte=3",
+        )
+        PointSalesDailyCategoryFact.objects.create(
+            branch=point_branch,
+            sale_date=canonical_day,
+            sucursal_nombre=sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("9"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("900"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("900"),
+        )
+
+        summary = _build_dashboard_sales_history_summary()
+
+        self.assertTrue(summary["available"])
+        self.assertIn(canonical_day.strftime("%d/%m/%Y"), summary["detail"])
+        self.assertIn(stage_day.strftime("%d/%m/%Y"), summary["detail"])
+
     def test_dashboard_prioritizes_operational_daily_sections(self):
         sucursal = Sucursal.objects.create(codigo="SUC-DASH-DAY", nombre="Sucursal Diario")
         receta = Receta.objects.create(nombre="Pastel Diario Dashboard", hash_contenido="hash-dashboard-diario")
@@ -476,6 +688,95 @@ class DashboardHomologacionContextTests(TestCase):
         self.assertIn("production_snapshot", response.context)
         self.assertIn("production_summary", response.context)
         self.assertIn("forecast_summary", response.context)
+
+    def test_dashboard_daily_sales_snapshot_uses_canonical_daily_totals_and_tops_without_stage(self):
+        sucursal = self._create_sucursal("DASHSNAP", "Sucursal Snapshot Dashboard")
+        point_branch = PointBranch.objects.create(external_id="DASHSNAP", name=sucursal.nombre, erp_branch=sucursal)
+        receta = Receta.objects.create(nombre="Pastel Snapshot Dashboard", hash_contenido="hash-dashboard-snapshot")
+        point_product = PointProduct.objects.create(
+            external_id="DASHSNAP-P",
+            sku="DASHSNAPP",
+            name=receta.nombre,
+            active=True,
+        )
+        latest_day = timezone.localdate() - timedelta(days=1)
+
+        PointSalesDailyCategoryFact.objects.create(
+            branch=point_branch,
+            sale_date=latest_day,
+            sucursal_nombre=sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("6"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("600"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("600"),
+        )
+        PointSalesDailyProductFact.objects.create(
+            branch=point_branch,
+            sale_date=latest_day,
+            point_product=point_product,
+            producto_nombre_historico=receta.nombre,
+            receta=receta,
+            total_cantidad=Decimal("6"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("600"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("600"),
+        )
+        PointDailyBranchIndicator.objects.create(
+            branch=point_branch,
+            indicator_date=latest_day,
+            total_amount=Decimal("610"),
+            total_tickets=3,
+        )
+
+        snapshot = _build_dashboard_daily_sales_snapshot()
+
+        self.assertEqual(snapshot["source_label"], "Point directo")
+        self.assertEqual(snapshot["date_label"], latest_day.isoformat())
+        self.assertEqual(snapshot["total_units"], Decimal("6"))
+        self.assertEqual(snapshot["total_amount"], Decimal("600"))
+        self.assertEqual(snapshot["total_tickets"], 3)
+        self.assertEqual(snapshot["branch_count"], 1)
+        self.assertEqual(snapshot["recipe_count"], 1)
+        self.assertEqual(snapshot["top_branches"][0]["label"], sucursal.codigo)
+        self.assertEqual(snapshot["top_products"][0]["label"], receta.nombre)
+
+    def test_dashboard_daily_sales_snapshot_uses_canonical_previous_day_comparison_when_stage_missing(self):
+        sucursal = self._create_sucursal("DASHCMP", "Sucursal Comparable Dashboard")
+        point_branch = PointBranch.objects.create(external_id="DASHCMP", name=sucursal.nombre, erp_branch=sucursal)
+        latest_day = timezone.localdate() - timedelta(days=1)
+        comparable_day = latest_day - timedelta(days=7)
+
+        PointSalesDailyCategoryFact.objects.create(
+            branch=point_branch,
+            sale_date=comparable_day,
+            sucursal_nombre=sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("4"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("400"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("400"),
+        )
+        PointSalesDailyCategoryFact.objects.create(
+            branch=point_branch,
+            sale_date=latest_day,
+            sucursal_nombre=sucursal.nombre,
+            categoria="Pasteles",
+            total_cantidad=Decimal("8"),
+            total_descuento=Decimal("0"),
+            total_venta=Decimal("800"),
+            total_impuestos=Decimal("0"),
+            total_venta_neta=Decimal("800"),
+        )
+
+        snapshot = _build_dashboard_daily_sales_snapshot()
+
+        self.assertEqual(snapshot["comparison_label"], "Arriba")
+        self.assertEqual(snapshot["comparison_tone"], "success")
+        self.assertIn(comparable_day.isoformat(), snapshot["comparison_detail"])
 
     def test_dashboard_shows_recent_waste_snapshot(self):
         sucursal = Sucursal.objects.create(codigo="SUC-WASTE", nombre="Sucursal Merma")

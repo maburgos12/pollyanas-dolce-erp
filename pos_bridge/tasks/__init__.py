@@ -2,6 +2,7 @@
 from pos_bridge.tasks.celery_tasks import (
     task_daily_sales_sync,
     task_inventory_sync,
+    task_monthly_product_closure,
     task_production_sync,
     task_product_recipe_sync,
     task_realtime_inventory_sync,
@@ -15,6 +16,7 @@ from pos_bridge.tasks.celery_tasks import (
 __all__ = (
     "task_daily_sales_sync",
     "task_inventory_sync",
+    "task_monthly_product_closure",
     "task_production_sync",
     "task_product_recipe_sync",
     "task_realtime_inventory_sync",

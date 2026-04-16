@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 from typing import Any
 
 import requests
@@ -12,10 +14,22 @@ from pos_bridge.utils.helpers import normalize_text
 class PointHttpSessionClient:
     """Cliente HTTP determinístico para Point sin automatización visual."""
 
-    def __init__(self, settings):
+    DEFAULT_ACCOUNT_ID = "83852AED-D4FB-E611-814F-06B55B5505BA"
+
+    def __init__(self, settings, *, audit_callback=None):
         self.settings = settings
-        self.session = requests.Session()
+        self.audit_callback = audit_callback
+        self.session = self._build_session()
         self._workspace = None
+
+    def _build_session(self) -> requests.Session:
+        session = requests.Session()
+        session.headers.update({"X-Requested-With": "XMLHttpRequest"})
+        return session
+
+    def _reset_session(self) -> None:
+        self.session.close()
+        self.session = self._build_session()
 
     def __enter__(self):
         return self
@@ -26,6 +40,11 @@ class PointHttpSessionClient:
 
     def close(self) -> None:
         self.session.close()
+
+    def _audit(self, event: str, *, message: str, context: dict | None = None) -> None:
+        if self.audit_callback is None:
+            return
+        self.audit_callback(event=event, message=message, context=context or {})
 
     def _url(self, path: str) -> str:
         base = (self.settings.base_url or "").rstrip("/")
@@ -42,9 +61,36 @@ class PointHttpSessionClient:
 
     def _request(self, method: str, path: str, **kwargs) -> requests.Response:
         timeout = kwargs.pop("timeout", max(self.settings.timeout_ms // 1000, 5))
-        response = self.session.request(method, self._url(path), timeout=timeout, **kwargs)
-        response.raise_for_status()
-        return response
+        attempts = max(1, int(getattr(self.settings, "retry_attempts", 1) or 1))
+        last_error: Exception | None = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                response = self.session.request(method, self._url(path), timeout=timeout, **kwargs)
+                if response.status_code >= 500 and attempt < attempts:
+                    self._audit(
+                        "point_http_retry",
+                        message="Point devolvió 5xx transitorio; se reintentará la solicitud.",
+                        context={"path": path, "method": method, "attempt": attempt, "status_code": response.status_code},
+                    )
+                    time.sleep(min(attempt, 3))
+                    continue
+                response.raise_for_status()
+                return response
+            except requests.RequestException as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    raise
+                self._audit(
+                    "point_http_retry",
+                    message="Solicitud HTTP a Point falló de forma transitoria; se reintentará.",
+                    context={"path": path, "method": method, "attempt": attempt, "error": str(exc)},
+                )
+                time.sleep(min(attempt, 3))
+
+        if last_error is not None:
+            raise last_error
+        raise ExtractionError(f"Point no respondió correctamente en {path}.")
 
     def login(self, *, branch_hint: str | None = None) -> dict:
         if not self.settings.base_url:
@@ -52,13 +98,43 @@ class PointHttpSessionClient:
         if not self.settings.username or not self.settings.password:
             raise ConfigurationError("Faltan POINT_USERNAME y/o POINT_PASSWORD para autenticar Point.")
 
+        attempts = max(1, int(getattr(self.settings, "retry_attempts", 1) or 1))
+        last_error: Exception | None = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                return self._login_once(branch_hint=branch_hint)
+            except (AuthenticationError, ExtractionError) as exc:
+                last_error = exc
+                preview = str(getattr(exc, "context", {}).get("body_preview") or "")
+                session_expired = "Sesión Expirada" in preview or "Sesion Expirada" in preview or "Session Expired" in preview
+                if attempt >= attempts or not session_expired:
+                    raise
+                self._audit(
+                    "point_relogin",
+                    message="Point devolvió sesión expirada durante login; se reiniciará la sesión y se reintentará.",
+                    context={"attempt": attempt, "branch_hint": branch_hint or ""},
+                )
+                self._reset_session()
+                time.sleep(min(attempt, 3))
+
+        if last_error is not None:
+            raise last_error
+        raise AuthenticationError("Point no permitió iniciar sesión.")
+
+    def _login_once(self, *, branch_hint: str | None = None) -> dict:
+        # Igualamos el flujo real del navegador: abrir Point antes del POST AJAX
+        # de login para que se inicialicen cookies/contexto de sesión.
+        self._request("GET", "/")
+
         response = self._request(
             "POST",
             "/Account/SignIn_click",
             data={
                 "user": self.settings.username,
                 "pass": self.settings.password,
-                "timeZone": -7,
+                # La UI real de Point envía timeZone=0 en SignIn_click.
+                "timeZone": 0,
             },
         )
         payload = self._parse_json(response, label="login Point")
@@ -66,15 +142,31 @@ class PointHttpSessionClient:
         if not redirect:
             raise AuthenticationError("Point no devolvió redirectToUrl al autenticarse.", context={"payload": payload})
 
-        workspaces_payload = self._fetch_workspaces_payload()
-        workspace = self._select_workspace(workspaces_payload, branch_hint=branch_hint)
+        accounts = self._fetch_workspaces_payload()
+        current_account_id = self._extract_current_account_id()
+        workspace = self._select_workspace(accounts, branch_hint=branch_hint)
+        if not workspace.get("account_id"):
+            workspace["account_id"] = current_account_id or self.DEFAULT_ACCOUNT_ID
+        elif current_account_id and not branch_hint:
+            workspace["account_id"] = current_account_id
+        set_current = self._request(
+            "POST",
+            "/Account/SetCurrentAccount",
+            data={
+                "accId": workspace["account_id"],
+            },
+        )
+        set_current_payload = self._parse_json(set_current, label="selección de cuenta activa Point")
+        if not set_current_payload.get("success"):
+            raise AuthenticationError("Point no confirmó la selección de la cuenta activa.", context={"payload": set_current_payload})
+        self._request("GET", "/Home/Index")
         acctok_response = self._request(
             "POST",
             "/Account/get_acctok",
             data={
                 "acid": workspace["account_id"],
-                "sucid": workspace["branch_id"],
-                "sucname": workspace["branch_name"],
+                "sucid": workspace.get("branch_id"),
+                "sucname": workspace.get("branch_name"),
             },
         )
         acctok_payload = self._parse_json(acctok_response, label="selección de workspace Point")
@@ -96,6 +188,16 @@ class PointHttpSessionClient:
         if not isinstance(accounts, list):
             raise AuthenticationError("El catálogo de workspaces Point tiene formato inesperado.")
         return accounts
+
+    def _extract_current_account_id(self) -> str | None:
+        response = self._request("GET", "/Account/workSpaces")
+        match = re.search(r"accIdActual\\s*=\\s*'([^']+)'", response.text)
+        if match:
+            return match.group(1).strip() or None
+        match = re.search(r"accIdActual\\s*=\\s*\"([^\"]+)\"", response.text)
+        if match:
+            return match.group(1).strip() or None
+        return None
 
     def _select_workspace(self, accounts: list[dict], *, branch_hint: str | None = None) -> dict:
         candidates: list[dict] = []

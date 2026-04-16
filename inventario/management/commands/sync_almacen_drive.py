@@ -3,7 +3,8 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from inventario.models import AlmacenSyncRun
+from inventario.models import AlmacenSyncRun, ExistenciaInsumo
+from inventario.stock_trace import attach_sync_trace
 from inventario.utils.google_drive_sync import sync_almacen_from_drive
 from inventario.utils.sync_logging import log_sync_run
 
@@ -79,6 +80,10 @@ class Command(BaseCommand):
                 alias_threshold=int(options["alias_threshold"]),
                 create_missing_insumos=bool(options["create_missing_insumos"]),
                 dry_run=bool(options["dry_run"]),
+                trace_context={
+                    "process": "inventario.sync_almacen_drive",
+                    "batch_token": run_started_at.isoformat(),
+                },
             )
         except Exception as exc:
             log_sync_run(
@@ -92,7 +97,7 @@ class Command(BaseCommand):
         summary = result.summary
         mode = "DRY-RUN" if options["dry_run"] else "APLICADO"
 
-        log_sync_run(
+        run = log_sync_run(
             source=AlmacenSyncRun.SOURCE_SCHEDULED,
             status=AlmacenSyncRun.STATUS_OK,
             summary=summary,
@@ -103,6 +108,9 @@ class Command(BaseCommand):
             message=" | ".join(result.skipped_files[:12]),
             started_at=run_started_at,
         )
+        if summary.updated_existencia_ids:
+            existencias = list(ExistenciaInsumo.objects.filter(id__in=summary.updated_existencia_ids))
+            attach_sync_trace(existencias, run=run)
 
         self.stdout.write(self.style.SUCCESS(f"Sync de Google Drive completado ({mode})"))
         self.stdout.write(f"  - carpeta usada: {result.folder_name} ({result.folder_id})")

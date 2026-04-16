@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-BASE_URL="${BASE_URL:-${ERP_BASE_URL:-http://127.0.0.1:8000}}"
+BASE_URL="${BASE_URL:-${ERP_BASE_URL:-http://localhost:8011}}"
 API_KEY="${API_KEY:-${ERP_PUBLIC_API_KEY:-}}"
 TIMEOUT="${TIMEOUT:-15}"
 

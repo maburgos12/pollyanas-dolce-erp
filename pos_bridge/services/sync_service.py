@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from datetime import date
 from decimal import Decimal
@@ -7,6 +8,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 
+from core.cache_versions import bump_cache_scopes
 from core.audit import log_event
 from core.models import Sucursal
 from pos_bridge.config import load_point_bridge_settings
@@ -21,6 +23,7 @@ from pos_bridge.models import (
 )
 from pos_bridge.services.alert_service import PointAlertService
 from pos_bridge.services.inventory_extractor import PointInventoryExtractor
+from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
 from pos_bridge.services.recipe_gap_audit_service import PointRecipeGapAuditService
 from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
@@ -29,6 +32,7 @@ from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from pos_bridge.utils.exceptions import PersistenceError, PosBridgeError
 from pos_bridge.utils.helpers import normalize_text, sanitize_sensitive_data
 from pos_bridge.utils.logger import get_job_logger, get_pos_bridge_logger
+from reportes.analytics_service import mark_analytics_dirty_for_range
 from recetas.models import VentaHistorica
 
 
@@ -46,6 +50,7 @@ class PointSyncService:
     def __init__(
         self,
         extractor: PointInventoryExtractor | None = None,
+        inventory_cost_capture_service: PointInventoryCostCaptureService | None = None,
         sales_extractor: PointSalesExtractor | None = None,
         sales_matcher: PointSalesMatchingService | None = None,
         recipe_sync_service: PointProductRecipeSyncService | None = None,
@@ -53,6 +58,7 @@ class PointSyncService:
     ):
         self.settings = load_point_bridge_settings()
         self.extractor = extractor or PointInventoryExtractor(self.settings)
+        self.inventory_cost_capture_service = inventory_cost_capture_service or PointInventoryCostCaptureService(self.settings)
         self.sales_extractor = sales_extractor or PointSalesExtractor(self.settings)
         self.sales_matcher = sales_matcher or PointSalesMatchingService()
         self.recipe_sync_service = recipe_sync_service or PointProductRecipeSyncService(self.settings)
@@ -114,6 +120,16 @@ class PointSyncService:
         )
         return branch
 
+    def _point_health_counters(self, sync_job: PointSyncJob) -> dict[str, int]:
+        warning_logs = PointExtractionLog.objects.filter(
+            sync_job=sync_job,
+            level=PointExtractionLog.LEVEL_WARNING,
+        )
+        return {
+            "point_retry_events": warning_logs.filter(context__event="point_http_retry").count(),
+            "point_relogin_events": warning_logs.filter(context__event="point_relogin").count(),
+        }
+
     def _upsert_product(self, payload: dict) -> PointProduct:
         defaults = {
             "sku": payload["sku"],
@@ -151,6 +167,15 @@ class PointSyncService:
             )
 
         PointInventorySnapshot.objects.bulk_create(snapshots_to_create, batch_size=500)
+        if snapshots_to_create:
+            bump_cache_scopes("dashboard")
+            captured_days = [timezone.localtime(row.captured_at).date() if timezone.is_aware(row.captured_at) else row.captured_at.date() for row in snapshots_to_create]
+            mark_analytics_dirty_for_range(
+                start_date=min(captured_days),
+                end_date=max(captured_days),
+                include_production=True,
+                reason="point_inventory_sync_service",
+            )
         return {
             "branch_id": branch.id,
             "branch_external_id": branch.external_id,
@@ -354,6 +379,18 @@ class PointSyncService:
         log_event(sync_job.triggered_by, "POS_BRIDGE_SYNC_SUCCESS", "pos_bridge.PointSyncJob", str(sync_job.id), payload=summary)
         return sync_job
 
+    def mark_partial(self, sync_job: PointSyncJob, summary: dict, *, warning_message: str = "") -> PointSyncJob:
+        summary = sanitize_sensitive_data(summary)
+        sync_job.status = PointSyncJob.STATUS_PARTIAL
+        sync_job.finished_at = timezone.now()
+        sync_job.result_summary = summary
+        sync_job.error_message = warning_message
+        sync_job.save(update_fields=["status", "finished_at", "result_summary", "error_message", "updated_at"])
+        if warning_message:
+            self.record_log(sync_job, PointExtractionLog.LEVEL_WARNING, warning_message, context=summary)
+        log_event(sync_job.triggered_by, "POS_BRIDGE_SYNC_PARTIAL", "pos_bridge.PointSyncJob", str(sync_job.id), payload=summary)
+        return sync_job
+
     def mark_failure(self, sync_job: PointSyncJob, exc: Exception) -> PointSyncJob:
         context = sanitize_sensitive_data(getattr(exc, "context", {}) or {})
         sync_job.status = PointSyncJob.STATUS_FAILED
@@ -378,11 +415,19 @@ class PointSyncService:
         triggered_by=None,
         branch_filter: str | None = None,
         limit_branches: int | None = None,
+        capture_costs: bool | None = None,
         attempt_count: int = 1,
     ) -> PointSyncJob:
+        should_capture_costs = bool(
+            self.settings.inventory_cost_capture_enabled
+            if capture_costs is None
+            else capture_costs
+        ) and branch_filter is None and limit_branches is None
         parameters = {
             "branch_filter": branch_filter or "",
             "limit_branches": limit_branches,
+            "capture_costs": should_capture_costs,
+            "inventory_cost_capture_branch": self.settings.inventory_cost_capture_branch,
             "settings": self.settings.safe_dict(),
         }
         sync_job = self.create_job(triggered_by=triggered_by, parameters=parameters, attempt_count=attempt_count)
@@ -401,6 +446,16 @@ class PointSyncService:
                 "products_seen": 0,
                 "snapshots_created": 0,
                 "raw_exports": [],
+                "inventory_cost_capture_enabled": should_capture_costs,
+                "inventory_cost_capture_branch": self.settings.inventory_cost_capture_branch,
+                "inventory_cost_rows_seen": 0,
+                "inventory_cost_costs_created": 0,
+                "inventory_cost_costs_existing": 0,
+                "inventory_cost_unresolved_matches": 0,
+                "inventory_cost_zero_cost_matches": 0,
+                "inventory_cost_status": "SKIPPED" if not should_capture_costs else "PENDING",
+                "inventory_cost_unresolved_samples": [],
+                "inventory_cost_zero_cost_samples": [],
             }
             for branch_result in branch_results:
                 branch_summary = self.persist_branch_inventory(sync_job, branch_result)
@@ -414,6 +469,61 @@ class PointSyncService:
                     f"Sucursal procesada {branch_result.branch['external_id']}.",
                     context=branch_summary,
                 )
+            if should_capture_costs:
+                try:
+                    cost_result = self.inventory_cost_capture_service.capture_and_persist_all(
+                        branch_hint=self.settings.inventory_cost_capture_branch,
+                    )
+                except PosBridgeError as exc:
+                    summary.update(
+                        {
+                            "inventory_cost_status": "FAILED",
+                            "inventory_cost_error": str(exc),
+                        }
+                    )
+                    return self.mark_partial(
+                        sync_job,
+                        summary,
+                        warning_message="Inventario Point sincronizado, pero la captura de costos unitarios falló.",
+                    )
+
+                summary.update(
+                    {
+                        "inventory_cost_rows_seen": cost_result.rows_seen,
+                        "inventory_cost_costs_created": cost_result.costs_created,
+                        "inventory_cost_costs_existing": cost_result.costs_existing,
+                        "inventory_cost_unresolved_matches": cost_result.unresolved_matches,
+                        "inventory_cost_zero_cost_matches": cost_result.zero_cost_matches,
+                        "inventory_cost_status": "SUCCESS",
+                        "inventory_cost_unresolved_samples": cost_result.unresolved_samples,
+                        "inventory_cost_zero_cost_samples": cost_result.zero_cost_samples,
+                    }
+                )
+                self.record_log(
+                    sync_job,
+                    PointExtractionLog.LEVEL_INFO,
+                    "Captura de costos unitarios desde Point/Existencias completada.",
+                    context={
+                        "branch_name": cost_result.branch_name,
+                        "rows_seen": cost_result.rows_seen,
+                        "costs_created": cost_result.costs_created,
+                        "costs_existing": cost_result.costs_existing,
+                        "unresolved_matches": cost_result.unresolved_matches,
+                        "zero_cost_matches": cost_result.zero_cost_matches,
+                    },
+                )
+                if cost_result.unresolved_matches or cost_result.zero_cost_matches:
+                    self.record_log(
+                        sync_job,
+                        PointExtractionLog.LEVEL_WARNING,
+                        "La captura de costos Point dejó filas sin costo persistido.",
+                        context={
+                            "unresolved_matches": cost_result.unresolved_matches,
+                            "zero_cost_matches": cost_result.zero_cost_matches,
+                            "unresolved_samples": cost_result.unresolved_samples,
+                            "zero_cost_samples": cost_result.zero_cost_samples,
+                        },
+                    )
             return self.mark_success(sync_job, summary)
         except PosBridgeError as exc:
             return self.mark_failure(sync_job, exc)
@@ -567,6 +677,7 @@ class PointSyncService:
             summary = {
                 **result.summary,
                 "raw_exports": [result.raw_export_path],
+                **self._point_health_counters(sync_job),
             }
             self.record_log(
                 sync_job,
@@ -606,15 +717,19 @@ class PointSyncService:
         self.record_log(sync_job, PointExtractionLog.LEVEL_INFO, "Inicio de auditoría Point de recetas faltantes.", context=parameters)
 
         try:
-            result = self.recipe_gap_audit_service.audit(
-                branch_hint=branch_hint,
-                product_codes=product_codes,
-                limit=limit,
-            )
+            audit_kwargs = {
+                "branch_hint": branch_hint,
+                "product_codes": product_codes,
+                "limit": limit,
+            }
+            if "sync_job" in inspect.signature(self.recipe_gap_audit_service.audit).parameters:
+                audit_kwargs["sync_job"] = sync_job
+            result = self.recipe_gap_audit_service.audit(**audit_kwargs)
             summary = {
                 **result.summary,
                 "report_path": result.report_path,
                 "raw_exports": [result.raw_export_path],
+                **self._point_health_counters(sync_job),
             }
             self.record_log(
                 sync_job,

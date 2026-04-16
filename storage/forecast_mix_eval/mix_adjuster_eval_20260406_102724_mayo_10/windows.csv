@@ -1,0 +1,9 @@
+scope_key,sucursal_id,sucursal_nombre,window_start,window_end,base_mape,adjusted_mape,base_mae,adjusted_mae,base_bias_total,adjusted_bias_total,base_fallback_rows,adjusted_fallback_rows,base_portfolio_stability_pct,adjusted_portfolio_stability_pct,base_effective_recent_samples,adjusted_effective_recent_samples,outcome
+EL_TUNEL,3,EL_TUNEL - EL TUNEL,2026-05-10,2026-05-10,,,2.968,2.968,97.929,97.929,0,0,,,,,tie
+EL_TUNEL,3,EL_TUNEL - EL TUNEL,2026-05-09,2026-05-09,,,3.238,3.238,106.86,106.86,0,0,,,,,tie
+EL_TUNEL,3,EL_TUNEL - EL TUNEL,2026-05-08,2026-05-08,,,2.968,2.968,97.929,97.929,0,0,,,,,tie
+EL_TUNEL,3,EL_TUNEL - EL TUNEL,2026-05-07,2026-05-07,,,2.761,2.761,91.099,91.099,0,0,,,,,tie
+EL_TUNEL,3,EL_TUNEL - EL TUNEL,2026-05-06,2026-05-06,,,2.465,2.465,81.355,81.355,0,0,,,,,tie
+EL_TUNEL,3,EL_TUNEL - EL TUNEL,2026-05-05,2026-05-05,,,2.761,2.761,91.099,91.099,0,0,,,,,tie
+EL_TUNEL,3,EL_TUNEL - EL TUNEL,2026-05-04,2026-05-04,,,2.761,2.761,91.099,91.099,0,0,,,,,tie
+EL_TUNEL,3,EL_TUNEL - EL TUNEL,2026-05-03,2026-05-03,,,2.761,2.761,91.099,91.099,0,0,,,,,tie

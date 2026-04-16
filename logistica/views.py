@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -40,6 +41,7 @@ def _parse_datetime_local(raw: str | None):
 
 def _module_tabs(active: str) -> list[dict]:
     return [
+        {"label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
         {"label": "Rutas", "url_name": "logistica:rutas", "active": active == "rutas"},
     ]
 
@@ -546,6 +548,144 @@ def _logistica_focus_summary(*, selected_focus: str, rutas_count: int) -> dict[s
 
 
 @login_required
+def dashboard(request):
+    if not can_view_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para ver Logística")
+
+    today = timezone.localdate()
+    date_from_raw = (request.GET.get("date_from") or "").strip()
+    date_to_raw = (request.GET.get("date_to") or "").strip()
+    enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
+    q = (request.GET.get("q") or "").strip()
+    try:
+        date_from = datetime.strptime(date_from_raw, "%Y-%m-%d").date() if date_from_raw else (today - timedelta(days=6))
+    except ValueError:
+        date_from = today - timedelta(days=6)
+    try:
+        date_to = datetime.strptime(date_to_raw, "%Y-%m-%d").date() if date_to_raw else today
+    except ValueError:
+        date_to = today
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
+
+    rutas_qs = RutaEntrega.objects.all()
+    entregas_qs = EntregaRuta.objects.select_related("ruta", "pedido", "pedido__cliente")
+    rutas_qs = rutas_qs.filter(fecha_ruta__gte=date_from, fecha_ruta__lte=date_to)
+    entregas_qs = entregas_qs.filter(ruta__fecha_ruta__gte=date_from, ruta__fecha_ruta__lte=date_to)
+    if q:
+        rutas_qs = rutas_qs.filter(
+            Q(folio__icontains=q) | Q(nombre__icontains=q) | Q(chofer__icontains=q) | Q(unidad__icontains=q)
+        )
+        entregas_qs = entregas_qs.filter(
+            Q(cliente_nombre__icontains=q)
+            | Q(pedido__folio__icontains=q)
+            | Q(ruta__folio__icontains=q)
+            | Q(ruta__nombre__icontains=q)
+            | Q(ruta__chofer__icontains=q)
+            | Q(ruta__unidad__icontains=q)
+        )
+    if enterprise_focus == "HOY":
+        rutas_qs = rutas_qs.filter(fecha_ruta=today)
+        entregas_qs = entregas_qs.filter(ruta__fecha_ruta=today)
+    elif enterprise_focus == "EN_RUTA":
+        rutas_qs = rutas_qs.filter(estatus=RutaEntrega.ESTATUS_EN_RUTA)
+        entregas_qs = entregas_qs.filter(ruta__estatus=RutaEntrega.ESTATUS_EN_RUTA)
+    elif enterprise_focus == "PENDIENTES":
+        rutas_qs = rutas_qs.filter(entregas__estatus=EntregaRuta.ESTATUS_PENDIENTE).distinct()
+        entregas_qs = entregas_qs.filter(estatus=EntregaRuta.ESTATUS_PENDIENTE)
+    elif enterprise_focus == "INCIDENCIAS":
+        rutas_qs = rutas_qs.filter(entregas__estatus=EntregaRuta.ESTATUS_INCIDENCIA).distinct()
+        entregas_qs = entregas_qs.filter(estatus=EntregaRuta.ESTATUS_INCIDENCIA)
+
+    rutas_total = rutas_qs.count()
+    rutas_hoy = rutas_qs.filter(fecha_ruta=today).count()
+    rutas_en_ruta = rutas_qs.filter(estatus=RutaEntrega.ESTATUS_EN_RUTA).count()
+    rutas_completadas = rutas_qs.filter(estatus=RutaEntrega.ESTATUS_COMPLETADA).count()
+    rutas_canceladas = rutas_qs.filter(estatus=RutaEntrega.ESTATUS_CANCELADA).count()
+
+    entregas_total = entregas_qs.count()
+    entregas_pendientes = entregas_qs.filter(estatus=EntregaRuta.ESTATUS_PENDIENTE).count()
+    entregas_en_camino = entregas_qs.filter(estatus=EntregaRuta.ESTATUS_EN_CAMINO).count()
+    entregas_entregadas = entregas_qs.filter(estatus=EntregaRuta.ESTATUS_ENTREGADA).count()
+    incidencias = entregas_qs.filter(estatus=EntregaRuta.ESTATUS_INCIDENCIA).count()
+    monto_visible = sum((row.monto_estimado for row in entregas_qs[:500]), Decimal("0"))
+
+    last_days = []
+    for delta in range(6, -1, -1):
+        day = today - timedelta(days=delta)
+        last_days.append(
+            {
+                "label": day.strftime("%d %b"),
+                "rutas": rutas_qs.filter(fecha_ruta=day).count(),
+                "entregas": entregas_qs.filter(ruta__fecha_ruta=day).count(),
+            }
+        )
+
+    route_status_rows = [
+        {"label": "Planeadas", "value": rutas_qs.filter(estatus=RutaEntrega.ESTATUS_PLANEADA).count()},
+        {"label": "En ruta", "value": rutas_en_ruta},
+        {"label": "Completadas", "value": rutas_completadas},
+        {"label": "Canceladas", "value": rutas_canceladas},
+    ]
+    delivery_status_rows = [
+        {"label": "Pendientes", "value": entregas_pendientes},
+        {"label": "En camino", "value": entregas_en_camino},
+        {"label": "Entregadas", "value": entregas_entregadas},
+        {"label": "Incidencia", "value": incidencias},
+    ]
+
+    latest_routes = list(rutas_qs.order_by("-fecha_ruta", "-id")[:4])
+    incident_routes = [
+        row for row in rutas_qs.order_by("-entregas_incidencia", "-total_entregas", "-fecha_ruta")[:4] if row.entregas_incidencia
+    ]
+    pending_deliveries = list(
+        entregas_qs.filter(estatus__in=[EntregaRuta.ESTATUS_PENDIENTE, EntregaRuta.ESTATUS_INCIDENCIA])
+        .order_by("-updated_at", "-id")[:4]
+    )
+    dashboard_query = {
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+    }
+    if enterprise_focus:
+        dashboard_query["enterprise_focus"] = enterprise_focus
+    if q:
+        dashboard_query["q"] = q
+
+    context = {
+        "module_tabs": _module_tabs("dashboard"),
+        "rutas_total": rutas_total,
+        "rutas_hoy": rutas_hoy,
+        "rutas_en_ruta": rutas_en_ruta,
+        "rutas_completadas": rutas_completadas,
+        "rutas_canceladas": rutas_canceladas,
+        "entregas_total": entregas_total,
+        "entregas_pendientes": entregas_pendientes,
+        "entregas_en_camino": entregas_en_camino,
+        "entregas_entregadas": entregas_entregadas,
+        "incidencias": incidencias,
+        "monto_visible": monto_visible,
+        "last_days": last_days,
+        "route_status_rows": route_status_rows,
+        "delivery_status_rows": delivery_status_rows,
+        "latest_routes": latest_routes,
+        "incident_routes": incident_routes,
+        "pending_deliveries": pending_deliveries,
+        "has_visible_data": any([rutas_total, entregas_total]),
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "enterprise_focus": enterprise_focus,
+        "selected_q": q,
+        "focus_cards": _logistica_focus_cards(selected_focus=enterprise_focus),
+        "focus_summary": _logistica_focus_summary(selected_focus=enterprise_focus, rutas_count=rutas_total),
+        "rutas_url": reverse("logistica:rutas") + f"?{urlencode(dashboard_query)}",
+        "rutas_hoy_url": reverse("logistica:rutas") + f"?{urlencode({**dashboard_query, 'enterprise_focus': 'HOY'})}",
+        "rutas_en_ruta_url": reverse("logistica:rutas") + f"?{urlencode({**dashboard_query, 'enterprise_focus': 'EN_RUTA'})}",
+        "rutas_incidencias_url": reverse("logistica:rutas") + f"?{urlencode({**dashboard_query, 'enterprise_focus': 'INCIDENCIAS'})}",
+    }
+    return render(request, "logistica/dashboard.html", context)
+
+
+@login_required
 def rutas(request):
     if not can_view_logistica(request.user):
         raise PermissionDenied("No tienes permisos para ver Logística")
@@ -586,8 +726,26 @@ def rutas(request):
     q = (request.GET.get("q") or "").strip()
     estatus = (request.GET.get("estatus") or "").strip().upper()
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
+    date_from_raw = (request.GET.get("date_from") or "").strip()
+    date_to_raw = (request.GET.get("date_to") or "").strip()
+
+    today = timezone.localdate()
+    try:
+        date_from = datetime.strptime(date_from_raw, "%Y-%m-%d").date() if date_from_raw else None
+    except ValueError:
+        date_from = None
+    try:
+        date_to = datetime.strptime(date_to_raw, "%Y-%m-%d").date() if date_to_raw else None
+    except ValueError:
+        date_to = None
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
 
     rutas_qs = RutaEntrega.objects.all()
+    if date_from:
+        rutas_qs = rutas_qs.filter(fecha_ruta__gte=date_from)
+    if date_to:
+        rutas_qs = rutas_qs.filter(fecha_ruta__lte=date_to)
     if q:
         rutas_qs = rutas_qs.filter(
             Q(folio__icontains=q)
@@ -607,7 +765,7 @@ def rutas(request):
         rutas_qs = rutas_qs.filter(entregas__estatus=EntregaRuta.ESTATUS_INCIDENCIA).distinct()
 
     rutas_total = RutaEntrega.objects.count()
-    rutas_hoy = RutaEntrega.objects.filter(fecha_ruta=timezone.localdate()).count()
+    rutas_hoy = RutaEntrega.objects.filter(fecha_ruta=today).count()
     rutas_en_ruta = RutaEntrega.objects.filter(estatus=RutaEntrega.ESTATUS_EN_RUTA).count()
     entregas_pendientes = EntregaRuta.objects.filter(estatus=EntregaRuta.ESTATUS_PENDIENTE).count()
     incidencias = EntregaRuta.objects.filter(estatus=EntregaRuta.ESTATUS_INCIDENCIA).count()
@@ -663,6 +821,8 @@ def rutas(request):
         "q": q,
         "estatus": estatus,
         "enterprise_focus": enterprise_focus,
+        "date_from": date_from.isoformat() if date_from else "",
+        "date_to": date_to.isoformat() if date_to else "",
         "estatus_choices": RutaEntrega.ESTATUS_CHOICES,
         "totales": {
             "rutas": rutas_total,

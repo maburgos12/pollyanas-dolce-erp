@@ -1,0 +1,825 @@
+{
+  "generated_at": "2026-03-23T23:46:34.113443+00:00",
+  "candidates": [
+    {
+      "sku": "SFRESAPC",
+      "name": "TOPPING FRESA C",
+      "category": "Pastel Chico",
+      "total_qty": "5113.000",
+      "rows": 1467
+    },
+    {
+      "sku": "1412",
+      "name": "TOPPING SNICKER CH",
+      "category": "Pastel Chico",
+      "total_qty": "376.000",
+      "rows": 241
+    },
+    {
+      "sku": "1254",
+      "name": "TOPPING ZANAHORIA C",
+      "category": "Pastel Chico",
+      "total_qty": "367.000",
+      "rows": 228
+    },
+    {
+      "sku": "214541",
+      "name": "TOPPING CRUNCH C",
+      "category": "Pastel Chico",
+      "total_qty": "366.000",
+      "rows": 234
+    },
+    {
+      "sku": "SFRESAPG",
+      "name": "TOPPING FRESA G",
+      "category": "Pastel Grande",
+      "total_qty": "1519.000",
+      "rows": 518
+    },
+    {
+      "sku": "21254",
+      "name": "TOPPING SNICKER G",
+      "category": "Pastel Grande",
+      "total_qty": "34.000",
+      "rows": 27
+    },
+    {
+      "sku": "21455",
+      "name": "TOPPING CRUNCH G",
+      "category": "Pastel Grande",
+      "total_qty": "29.000",
+      "rows": 29
+    },
+    {
+      "sku": "1125",
+      "name": "TOPPING ZANAHORIA G",
+      "category": "Pastel Grande",
+      "total_qty": "29.000",
+      "rows": 26
+    },
+    {
+      "sku": "SFRESAPM",
+      "name": "TOPPING FRESA M",
+      "category": "Pastel Mediano",
+      "total_qty": "10820.000",
+      "rows": 1595
+    },
+    {
+      "sku": "22145",
+      "name": "TOPPING SNICKER M",
+      "category": "Pastel Mediano",
+      "total_qty": "558.000",
+      "rows": 286
+    },
+    {
+      "sku": "21125",
+      "name": "TOPPING CRUNCH M",
+      "category": "Pastel Mediano",
+      "total_qty": "499.000",
+      "rows": 275
+    },
+    {
+      "sku": "21445",
+      "name": "TOPPING ZANAHORIA M",
+      "category": "Pastel Mediano",
+      "total_qty": "477.000",
+      "rows": 262
+    },
+    {
+      "sku": "21245",
+      "name": "TOPPING 3 LECHES",
+      "category": "Pastel Mediano",
+      "total_qty": "471.000",
+      "rows": 271
+    },
+    {
+      "sku": "SFRESAPMINI",
+      "name": "TOPPING FRESA MINI",
+      "category": "Pastel Mini",
+      "total_qty": "1300.000",
+      "rows": 811
+    },
+    {
+      "sku": "1254",
+      "name": "TOPPING CRUNCH MINI",
+      "category": "Pastel Mini",
+      "total_qty": "176.000",
+      "rows": 141
+    },
+    {
+      "sku": "SOREOG",
+      "name": "Sabor Oreo Grande",
+      "category": "Pay Grande",
+      "total_qty": "304.000",
+      "rows": 266
+    },
+    {
+      "sku": "SBROWNIEG",
+      "name": "Sabor Brownie Grande",
+      "category": "Pay Grande",
+      "total_qty": "8.000",
+      "rows": 8
+    },
+    {
+      "sku": "SOREOM",
+      "name": "Sabor Oreo Mediano",
+      "category": "Pay Mediano",
+      "total_qty": "340.000",
+      "rows": 273
+    },
+    {
+      "sku": "SBROWNIEM",
+      "name": "Sabor Brownie Mediano",
+      "category": "Pay Mediano",
+      "total_qty": "8.000",
+      "rows": 8
+    },
+    {
+      "sku": "SANFRESAR",
+      "name": "TOPPING FRESA REBANADA",
+      "category": "Rebanada",
+      "total_qty": "2411.000",
+      "rows": 609
+    },
+    {
+      "sku": "03SPOREB",
+      "name": "Sabor Oreo Rebanada",
+      "category": "Rebanada",
+      "total_qty": "664.000",
+      "rows": 476
+    },
+    {
+      "sku": "SMANZANAREB",
+      "name": "Sabor Mazana Rebanada",
+      "category": "Rebanada",
+      "total_qty": "2.000",
+      "rows": 2
+    }
+  ],
+  "synced_codes": [
+    "SFRESAPC",
+    "1412",
+    "1254",
+    "214541",
+    "SFRESAPG",
+    "21254",
+    "21455",
+    "1125",
+    "SFRESAPM",
+    "22145",
+    "21125",
+    "21445",
+    "21245",
+    "SFRESAPMINI",
+    "1254",
+    "SOREOG",
+    "SBROWNIEG",
+    "SOREOM",
+    "SBROWNIEM",
+    "SANFRESAR",
+    "03SPOREB",
+    "SMANZANAREB"
+  ],
+  "detected_rules": [
+    {
+      "base_codigo_point": "0101",
+      "base_nombre": "Pastel de Fresas Con Crema Chico",
+      "addon_codigo_point": "SFRESAPC",
+      "addon_nombre": "TOPPING FRESA C",
+      "coverage": "100.0000",
+      "qty": "24996.000",
+      "rule_id": 3,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0109",
+      "base_nombre": "Pastel de 3 Pecados Chico",
+      "addon_codigo_point": "SFRESAPC",
+      "addon_nombre": "TOPPING FRESA C",
+      "coverage": "92.3654",
+      "qty": "22240.000",
+      "rule_id": 4,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0056",
+      "base_nombre": "Pastel de Snickers Chico",
+      "addon_codigo_point": "SFRESAPC",
+      "addon_nombre": "TOPPING FRESA C",
+      "coverage": "70.1431",
+      "qty": "14181.000",
+      "rule_id": 5,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0056",
+      "base_nombre": "Pastel de Snickers Chico",
+      "addon_codigo_point": "1412",
+      "addon_nombre": "TOPPING SNICKER CH",
+      "coverage": "99.5851",
+      "qty": "14181.000",
+      "rule_id": 6,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0109",
+      "base_nombre": "Pastel de 3 Pecados Chico",
+      "addon_codigo_point": "1412",
+      "addon_nombre": "TOPPING SNICKER CH",
+      "coverage": "85.0622",
+      "qty": "22240.000",
+      "rule_id": 7,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0101",
+      "base_nombre": "Pastel de Fresas Con Crema Chico",
+      "addon_codigo_point": "1412",
+      "addon_nombre": "TOPPING SNICKER CH",
+      "coverage": "80.0830",
+      "qty": "24996.000",
+      "rule_id": 8,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0109",
+      "base_nombre": "Pastel de 3 Pecados Chico",
+      "addon_codigo_point": "1254",
+      "addon_nombre": "TOPPING ZANAHORIA C",
+      "coverage": "85.6655",
+      "qty": "22240.000",
+      "rule_id": 9,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0101",
+      "base_nombre": "Pastel de Fresas Con Crema Chico",
+      "addon_codigo_point": "1254",
+      "addon_nombre": "TOPPING ZANAHORIA C",
+      "coverage": "82.2526",
+      "qty": "24996.000",
+      "rule_id": 10,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0066",
+      "base_nombre": "Pastel de Zanahoria Chico",
+      "addon_codigo_point": "1254",
+      "addon_nombre": "TOPPING ZANAHORIA C",
+      "coverage": "78.4983",
+      "qty": "11721.000",
+      "rule_id": 11,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0061",
+      "base_nombre": "Pastel de Crunch Chico",
+      "addon_codigo_point": "214541",
+      "addon_nombre": "TOPPING CRUNCH C",
+      "coverage": "100.0000",
+      "qty": "16999.000",
+      "rule_id": 12,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0109",
+      "base_nombre": "Pastel de 3 Pecados Chico",
+      "addon_codigo_point": "214541",
+      "addon_nombre": "TOPPING CRUNCH C",
+      "coverage": "86.7521",
+      "qty": "22240.000",
+      "rule_id": 13,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0101",
+      "base_nombre": "Pastel de Fresas Con Crema Chico",
+      "addon_codigo_point": "214541",
+      "addon_nombre": "TOPPING CRUNCH C",
+      "coverage": "83.7607",
+      "qty": "24996.000",
+      "rule_id": 14,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0099",
+      "base_nombre": "Pastel de Fresas Con Crema Grande",
+      "addon_codigo_point": "SFRESAPG",
+      "addon_nombre": "TOPPING FRESA G",
+      "coverage": "78.3784",
+      "qty": "11971.000",
+      "rule_id": 15,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0107",
+      "base_nombre": "Pastel de 3 Pecados Grande",
+      "addon_codigo_point": "SFRESAPG",
+      "addon_nombre": "TOPPING FRESA G",
+      "coverage": "63.1274",
+      "qty": "9627.000",
+      "rule_id": 16,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0054",
+      "base_nombre": "Pastel de Snickers Grande",
+      "addon_codigo_point": "SFRESAPG",
+      "addon_nombre": "TOPPING FRESA G",
+      "coverage": "27.7992",
+      "qty": "4860.000",
+      "rule_id": 17,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0054",
+      "base_nombre": "Pastel de Snickers Grande",
+      "addon_codigo_point": "21254",
+      "addon_nombre": "TOPPING SNICKER G",
+      "coverage": "100.0000",
+      "qty": "4860.000",
+      "rule_id": 18,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0099",
+      "base_nombre": "Pastel de Fresas Con Crema Grande",
+      "addon_codigo_point": "21254",
+      "addon_nombre": "TOPPING SNICKER G",
+      "coverage": "66.6667",
+      "qty": "11971.000",
+      "rule_id": 19,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0107",
+      "base_nombre": "Pastel de 3 Pecados Grande",
+      "addon_codigo_point": "21254",
+      "addon_nombre": "TOPPING SNICKER G",
+      "coverage": "66.6667",
+      "qty": "9627.000",
+      "rule_id": 20,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0059",
+      "base_nombre": "Pastel de Crunch Grande",
+      "addon_codigo_point": "21455",
+      "addon_nombre": "TOPPING CRUNCH G",
+      "coverage": "100.0000",
+      "qty": "4447.000",
+      "rule_id": 21,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0099",
+      "base_nombre": "Pastel de Fresas Con Crema Grande",
+      "addon_codigo_point": "21455",
+      "addon_nombre": "TOPPING CRUNCH G",
+      "coverage": "82.7586",
+      "qty": "11971.000",
+      "rule_id": 22,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0107",
+      "base_nombre": "Pastel de 3 Pecados Grande",
+      "addon_codigo_point": "21455",
+      "addon_nombre": "TOPPING CRUNCH G",
+      "coverage": "82.7586",
+      "qty": "9627.000",
+      "rule_id": 23,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0064",
+      "base_nombre": "Pastel de Zanahoria Grande",
+      "addon_codigo_point": "1125",
+      "addon_nombre": "TOPPING ZANAHORIA G",
+      "coverage": "100.0000",
+      "qty": "4019.000",
+      "rule_id": 24,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0099",
+      "base_nombre": "Pastel de Fresas Con Crema Grande",
+      "addon_codigo_point": "1125",
+      "addon_nombre": "TOPPING ZANAHORIA G",
+      "coverage": "69.2308",
+      "qty": "11971.000",
+      "rule_id": 25,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0107",
+      "base_nombre": "Pastel de 3 Pecados Grande",
+      "addon_codigo_point": "1125",
+      "addon_nombre": "TOPPING ZANAHORIA G",
+      "coverage": "69.2308",
+      "qty": "9627.000",
+      "rule_id": 26,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0100",
+      "base_nombre": "Pastel de Fresas Con Crema Mediano",
+      "addon_codigo_point": "SFRESAPM",
+      "addon_nombre": "TOPPING FRESA M",
+      "coverage": "98.8088",
+      "qty": "105244.000",
+      "rule_id": 2,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0108",
+      "base_nombre": "Pastel de 3 Pecados Mediano",
+      "addon_codigo_point": "SFRESAPM",
+      "addon_nombre": "TOPPING FRESA M",
+      "coverage": "94.7335",
+      "qty": "93977.000",
+      "rule_id": 27,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0055",
+      "base_nombre": "Pastel de Snickers Mediano",
+      "addon_codigo_point": "SFRESAPM",
+      "addon_nombre": "TOPPING FRESA M",
+      "coverage": "76.4890",
+      "qty": "31977.000",
+      "rule_id": 28,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0055",
+      "base_nombre": "Pastel de Snickers Mediano",
+      "addon_codigo_point": "22145",
+      "addon_nombre": "TOPPING SNICKER M",
+      "coverage": "100.0000",
+      "qty": "31977.000",
+      "rule_id": 29,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0100",
+      "base_nombre": "Pastel de Fresas Con Crema Mediano",
+      "addon_codigo_point": "22145",
+      "addon_nombre": "TOPPING SNICKER M",
+      "coverage": "93.0070",
+      "qty": "105244.000",
+      "rule_id": 30,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0108",
+      "base_nombre": "Pastel de 3 Pecados Mediano",
+      "addon_codigo_point": "22145",
+      "addon_nombre": "TOPPING SNICKER M",
+      "coverage": "92.6573",
+      "qty": "93977.000",
+      "rule_id": 31,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0060",
+      "base_nombre": "Pastel de Crunch Mediano",
+      "addon_codigo_point": "21125",
+      "addon_nombre": "TOPPING CRUNCH M",
+      "coverage": "99.6364",
+      "qty": "29798.000",
+      "rule_id": 32,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0108",
+      "base_nombre": "Pastel de 3 Pecados Mediano",
+      "addon_codigo_point": "21125",
+      "addon_nombre": "TOPPING CRUNCH M",
+      "coverage": "96.0000",
+      "qty": "93977.000",
+      "rule_id": 33,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0100",
+      "base_nombre": "Pastel de Fresas Con Crema Mediano",
+      "addon_codigo_point": "21125",
+      "addon_nombre": "TOPPING CRUNCH M",
+      "coverage": "93.8182",
+      "qty": "105244.000",
+      "rule_id": 34,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0065",
+      "base_nombre": "Pastel de Zanahoria Mediano",
+      "addon_codigo_point": "21445",
+      "addon_nombre": "TOPPING ZANAHORIA M",
+      "coverage": "100.0000",
+      "qty": "28360.000",
+      "rule_id": 35,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0108",
+      "base_nombre": "Pastel de 3 Pecados Mediano",
+      "addon_codigo_point": "21445",
+      "addon_nombre": "TOPPING ZANAHORIA M",
+      "coverage": "94.6565",
+      "qty": "93977.000",
+      "rule_id": 36,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0100",
+      "base_nombre": "Pastel de Fresas Con Crema Mediano",
+      "addon_codigo_point": "21445",
+      "addon_nombre": "TOPPING ZANAHORIA M",
+      "coverage": "94.2748",
+      "qty": "105244.000",
+      "rule_id": 37,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0105",
+      "base_nombre": "Pastel de 3 Leches Mediano",
+      "addon_codigo_point": "21245",
+      "addon_nombre": "TOPPING 3 LECHES",
+      "coverage": "99.6310",
+      "qty": "33433.000",
+      "rule_id": 38,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0100",
+      "base_nombre": "Pastel de Fresas Con Crema Mediano",
+      "addon_codigo_point": "21245",
+      "addon_nombre": "TOPPING 3 LECHES",
+      "coverage": "94.0959",
+      "qty": "105244.000",
+      "rule_id": 39,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0108",
+      "base_nombre": "Pastel de 3 Pecados Mediano",
+      "addon_codigo_point": "21245",
+      "addon_nombre": "TOPPING 3 LECHES",
+      "coverage": "93.7269",
+      "qty": "93977.000",
+      "rule_id": 40,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "PFCMINI",
+      "base_nombre": "Pastel Fresas Con Crema - Mini",
+      "addon_codigo_point": "SFRESAPMINI",
+      "addon_nombre": "TOPPING FRESA MINI",
+      "coverage": "99.2602",
+      "qty": "3071.000",
+      "rule_id": 41,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "P3PMINI",
+      "base_nombre": "Pastel 3 Pecados - Mini",
+      "addon_codigo_point": "SFRESAPMINI",
+      "addon_nombre": "TOPPING FRESA MINI",
+      "coverage": "74.1060",
+      "qty": "4615.000",
+      "rule_id": 42,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "PCRUNCHMINI",
+      "base_nombre": "Pastel Crunch - Mini",
+      "addon_codigo_point": "SFRESAPMINI",
+      "addon_nombre": "TOPPING FRESA MINI",
+      "coverage": "58.1998",
+      "qty": "3132.000",
+      "rule_id": 43,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "P3PMINI",
+      "base_nombre": "Pastel 3 Pecados - Mini",
+      "addon_codigo_point": "1254",
+      "addon_nombre": "TOPPING CRUNCH MINI",
+      "coverage": "54.6075",
+      "qty": "4615.000",
+      "rule_id": 44,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "PCRUNCHMINI",
+      "base_nombre": "Pastel Crunch - Mini",
+      "addon_codigo_point": "1254",
+      "addon_nombre": "TOPPING CRUNCH MINI",
+      "coverage": "49.8294",
+      "qty": "3132.000",
+      "rule_id": 45,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "PFCMINI",
+      "base_nombre": "Pastel Fresas Con Crema - Mini",
+      "addon_codigo_point": "1254",
+      "addon_nombre": "TOPPING CRUNCH MINI",
+      "coverage": "46.7577",
+      "qty": "3071.000",
+      "rule_id": 46,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0001",
+      "base_nombre": "Pay de Queso Grande",
+      "addon_codigo_point": "SOREOG",
+      "addon_nombre": "Sabor Oreo Grande",
+      "coverage": "100.0000",
+      "qty": "77401.000",
+      "rule_id": 47,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0005",
+      "base_nombre": "Pay de Plátano Grande",
+      "addon_codigo_point": "SOREOG",
+      "addon_nombre": "Sabor Oreo Grande",
+      "coverage": "17.2932",
+      "qty": "1529.000",
+      "rule_id": 48,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0306",
+      "base_nombre": "Sabor Pay Manzana Grande",
+      "addon_codigo_point": "SOREOG",
+      "addon_nombre": "Sabor Oreo Grande",
+      "coverage": "3.7594",
+      "qty": "72.000",
+      "rule_id": 49,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0001",
+      "base_nombre": "Pay de Queso Grande",
+      "addon_codigo_point": "SBROWNIEG",
+      "addon_nombre": "Sabor Brownie Grande",
+      "coverage": "100.0000",
+      "qty": "77401.000",
+      "rule_id": 50,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0002",
+      "base_nombre": "Pay de Queso Mediano",
+      "addon_codigo_point": "SOREOM",
+      "addon_nombre": "Sabor Oreo Mediano",
+      "coverage": "100.0000",
+      "qty": "74519.000",
+      "rule_id": 51,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0006",
+      "base_nombre": "Pay de Plátano Mediano",
+      "addon_codigo_point": "SOREOM",
+      "addon_nombre": "Sabor Oreo Mediano",
+      "coverage": "14.6520",
+      "qty": "1965.000",
+      "rule_id": 52,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0034",
+      "base_nombre": "Pay de Suspiro con Fresa Mediano",
+      "addon_codigo_point": "SOREOM",
+      "addon_nombre": "Sabor Oreo Mediano",
+      "coverage": "0.7326",
+      "qty": "136.000",
+      "rule_id": 53,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0002",
+      "base_nombre": "Pay de Queso Mediano",
+      "addon_codigo_point": "SBROWNIEM",
+      "addon_nombre": "Sabor Brownie Mediano",
+      "coverage": "100.0000",
+      "qty": "74519.000",
+      "rule_id": 54,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0006",
+      "base_nombre": "Pay de Plátano Mediano",
+      "addon_codigo_point": "SBROWNIEM",
+      "addon_nombre": "Sabor Brownie Mediano",
+      "coverage": "25.0000",
+      "qty": "1965.000",
+      "rule_id": 55,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0307",
+      "base_nombre": "Sabor Pay Manzana Mediano",
+      "addon_codigo_point": "SBROWNIEM",
+      "addon_nombre": "Sabor Brownie Mediano",
+      "coverage": "25.0000",
+      "qty": "84.000",
+      "rule_id": 56,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0110",
+      "base_nombre": "Pastel 3 Pecados - Rebanada",
+      "addon_codigo_point": "SANFRESAR",
+      "addon_nombre": "TOPPING FRESA REBANADA",
+      "coverage": "87.8489",
+      "qty": "43560.000",
+      "rule_id": 57,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0058",
+      "base_nombre": "Pastel Snicker's - Rebanada",
+      "addon_codigo_point": "SANFRESAR",
+      "addon_nombre": "TOPPING FRESA REBANADA",
+      "coverage": "79.8030",
+      "qty": "41096.000",
+      "rule_id": 58,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0068",
+      "base_nombre": "Pastel Zanahoria - Rebanada",
+      "addon_codigo_point": "SANFRESAR",
+      "addon_nombre": "TOPPING FRESA REBANADA",
+      "coverage": "77.6683",
+      "qty": "32447.000",
+      "rule_id": 59,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0003",
+      "base_nombre": "Pay de Queso Rebanada",
+      "addon_codigo_point": "03SPOREB",
+      "addon_nombre": "Sabor Oreo Rebanada",
+      "coverage": "100.0000",
+      "qty": "149542.000",
+      "rule_id": 60,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0110",
+      "base_nombre": "Pastel 3 Pecados - Rebanada",
+      "addon_codigo_point": "03SPOREB",
+      "addon_nombre": "Sabor Oreo Rebanada",
+      "coverage": "92.2269",
+      "qty": "43560.000",
+      "rule_id": 61,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0068",
+      "base_nombre": "Pastel Zanahoria - Rebanada",
+      "addon_codigo_point": "03SPOREB",
+      "addon_nombre": "Sabor Oreo Rebanada",
+      "coverage": "84.8739",
+      "qty": "32447.000",
+      "rule_id": 62,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0003",
+      "base_nombre": "Pay de Queso Rebanada",
+      "addon_codigo_point": "SMANZANAREB",
+      "addon_nombre": "Sabor Mazana Rebanada",
+      "coverage": "100.0000",
+      "qty": "149542.000",
+      "rule_id": 63,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0110",
+      "base_nombre": "Pastel 3 Pecados - Rebanada",
+      "addon_codigo_point": "SMANZANAREB",
+      "addon_nombre": "Sabor Mazana Rebanada",
+      "coverage": "98.6301",
+      "qty": "43560.000",
+      "rule_id": 64,
+      "status": "DETECTED"
+    },
+    {
+      "base_codigo_point": "0058",
+      "base_nombre": "Pastel Snicker's - Rebanada",
+      "addon_codigo_point": "SMANZANAREB",
+      "addon_nombre": "Sabor Mazana Rebanada",
+      "coverage": "97.2603",
+      "qty": "41096.000",
+      "rule_id": 65,
+      "status": "DETECTED"
+    }
+  ]
+}

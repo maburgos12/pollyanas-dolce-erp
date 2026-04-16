@@ -9,6 +9,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import OperationalError
 from django.test import TestCase
@@ -21,6 +22,7 @@ from core.models import UserProfile
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from core.models import Sucursal
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
+from recetas.management.commands.importar_ventas_point_archivos import Command as ImportarVentasPointArchivosCommand
 from recetas.models import (
     CostoDriver,
     LineaReceta,
@@ -36,10 +38,12 @@ from recetas.models import (
     SolicitudVenta,
     VentaHistorica,
 )
+from pos_bridge.models import PointBranch, PointSalesDailyProductFact, PointSyncJob
 from recetas.utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta
 from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost
-from recetas.utils.derived_insumos import sync_presentacion_insumo
+from recetas.utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 from recetas.utils.importador import ImportadorCosteo
+from pos_bridge.models import PointProduct
 
 
 class MatchingPendientesAutocompleteTests(TestCase):
@@ -433,12 +437,89 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertIn(self.receta_producto.nombre, nombres)
         self.assertNotIn(self.receta_preparacion.nombre, nombres)
 
+    def test_recetas_list_shows_latest_point_recipe_import_panel(self):
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={"action": "SYNC_ONLY_NEW_PRODUCTS", "product_codes": ["PT-NUEVO-001"]},
+            result_summary={
+                "products_selected": 1,
+                "recipes_completed_successfully": 1,
+                "recipes_with_unresolved_inputs": 0,
+                "new_products_imported": 1,
+                "new_preparations_imported": 1,
+                "recursive_nodes_created": 1,
+                "unresolved_inputs_count": 0,
+                "point_retry_events": 0,
+                "point_relogin_events": 0,
+                "imported_products_status": [
+                    {
+                        "codigo_point": "PT-NUEVO-001",
+                        "nombre": "Pastel Nuevo Point",
+                        "status": "SUCCESS_COMPLETE",
+                        "is_new_product": True,
+                        "unresolved_inputs": [],
+                        "created_preparations": [
+                            {"codigo_point": "PREP-001", "nombre": "Betún Base Point"},
+                        ],
+                        "message": "Se importó Pastel Nuevo Point correctamente con toda su receta y 1 preparación(es) hija(s) automática(s).",
+                    }
+                ],
+            },
+            triggered_by=self.user,
+        )
+        session = self.client.session
+        session["recetas_last_point_sync_job_id"] = job.id
+        session.save()
+
+        response = self.client.get(reverse("recetas:recetas_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("point_recipe_sync_panel", response.context)
+        self.assertEqual(response.context["point_recipe_sync_panel"]["job_id"], job.id)
+        self.assertContains(response, "Última importación Point")
+        self.assertContains(response, "Pastel Nuevo Point")
+        self.assertContains(response, "Producto nuevo importado")
+        self.assertContains(response, "Preparaciones creadas automáticamente")
+
     def test_recetas_list_filters_by_tipo(self):
         response = self.client.get(reverse("recetas:recetas_list"), {"tipo": Receta.TIPO_PRODUCTO_FINAL})
         self.assertEqual(response.status_code, 200)
         nombres = [r.nombre for r in response.context["page"].object_list]
         self.assertIn(self.receta_producto.nombre, nombres)
         self.assertNotIn(self.receta_preparacion.nombre, nombres)
+
+    @patch("recetas.views.PointProductRecipeSyncService")
+    def test_recetas_sync_new_warns_when_point_detects_blocked_candidates_without_bom(self, service_cls):
+        service = service_cls.return_value
+        service.discover_new_product_codes.return_value = {
+            "workspace": "Matriz",
+            "products_seen": 150,
+            "new_candidates": [],
+            "new_codes": [],
+            "blocked_candidates": [
+                {
+                    "codigo_point": "EXTRA-FRESA-C",
+                    "nombre": "Extra Fresa Chico",
+                    "familia": "Otros postres",
+                    "categoria": "Pastel Chico",
+                    "detection_reason": "POINT_NO_BOM",
+                    "message": "Point no reportó receta/BOM para este código y no puede incorporarse automáticamente.",
+                    "bom_lines": 0,
+                }
+            ],
+            "blocked_codes": ["EXTRA-FRESA-C"],
+            "importable_candidates_count": 0,
+            "blocked_candidates_count": 1,
+            "ignored_candidates_count": 90,
+        }
+
+        response = self.client.post(reverse("recetas:recetas_sync_new"), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        messages = [str(message) for message in response.context["messages"]]
+        self.assertTrue(any("bloqueado" in message.lower() for message in messages))
+        self.assertTrue(any("EXTRA-FRESA-C" in message for message in messages))
 
     def test_recetas_list_quick_view_subinsumos(self):
         response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos", "_debug_chain_focus": "1"})
@@ -620,8 +701,224 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertIn(self.receta_preparacion.nombre, nombres)
         self.assertNotIn(self.receta_producto.nombre, nombres)
         self.assertContains(response, "Listas para operar")
-        self.assertContains(response, "Por validar")
+        self.assertContains(response, "Pendientes operativos")
         self.assertContains(response, "Incompletas")
+
+    def test_recetas_list_ignores_products_without_point_signal_in_pending_summary(self):
+        interno = Insumo.objects.create(
+            nombre="Relleno activo catálogo",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad_kg,
+            activo=True,
+        )
+        producto_fuera_point = Receta.objects.create(
+            nombre="Producto Fuera Point",
+            hash_contenido="hash-catalogo-out-point-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pasteles",
+            categoria="Temporal",
+        )
+        producto_vigente_point = Receta.objects.create(
+            nombre="Producto Vigente Point",
+            hash_contenido="hash-catalogo-live-point-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pasteles",
+            categoria="Temporal",
+            codigo_point="LIVE-001",
+        )
+        PointProduct.objects.create(
+            external_id="ext-live-001",
+            sku="LIVE-001",
+            name=producto_vigente_point.nombre,
+            active=True,
+        )
+        for receta in (producto_fuera_point, producto_vigente_point):
+            LineaReceta.objects.create(
+                receta=receta,
+                posicion=1,
+                insumo=interno,
+                insumo_texto=interno.nombre,
+                cantidad=Decimal("1.000000"),
+                unidad=self.unidad_kg,
+                unidad_texto="kg",
+                costo_unitario_snapshot=Decimal("5.000000"),
+                match_status=LineaReceta.STATUS_AUTO,
+                match_score=100,
+                match_method=LineaReceta.MATCH_EXACT,
+            )
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["health_summary"]["pendientes"], 1)
+        self.assertContains(response, "Fuera de Point")
+
+    def test_recetas_list_pending_filter_excludes_products_without_point_signal(self):
+        interno = Insumo.objects.create(
+            nombre="Relleno activo filtro",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad_kg,
+            activo=True,
+        )
+        producto_fuera_point = Receta.objects.create(
+            nombre="Producto Filtro Fuera Point",
+            hash_contenido="hash-catalogo-out-point-002",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pasteles",
+            categoria="Temporal",
+        )
+        producto_vigente_point = Receta.objects.create(
+            nombre="Producto Filtro Vigente Point",
+            hash_contenido="hash-catalogo-live-point-002",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pasteles",
+            categoria="Temporal",
+            codigo_point="LIVE-002",
+        )
+        PointProduct.objects.create(
+            external_id="ext-live-002",
+            sku="LIVE-002",
+            name=producto_vigente_point.nombre,
+            active=True,
+        )
+        for receta in (producto_fuera_point, producto_vigente_point):
+            LineaReceta.objects.create(
+                receta=receta,
+                posicion=1,
+                insumo=interno,
+                insumo_texto=interno.nombre,
+                cantidad=Decimal("1.000000"),
+                unidad=self.unidad_kg,
+                unidad_texto="kg",
+                costo_unitario_snapshot=Decimal("5.000000"),
+                match_status=LineaReceta.STATUS_AUTO,
+                match_score=100,
+                match_method=LineaReceta.MATCH_EXACT,
+            )
+
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "health_status": "pendientes"},
+        )
+        self.assertEqual(response.status_code, 200)
+        nombres = [r.nombre for r in response.context["page"].object_list]
+        self.assertIn(producto_vigente_point.nombre, nombres)
+        self.assertNotIn(producto_fuera_point.nombre, nombres)
+
+    def test_recetas_list_ignores_legacy_placeholders_in_operational_pending(self):
+        materia = Insumo.objects.create(
+            nombre="Materia lista placeholder",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unidad_kg,
+            proveedor_principal=Proveedor.objects.create(nombre="Proveedor Placeholder"),
+            activo=True,
+        )
+        empaque = Insumo.objects.create(
+            nombre="Caja lista placeholder",
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            categoria="Empaque",
+            unidad_base=self.unidad_kg,
+            activo=True,
+        )
+        decorado = Insumo.objects.create(
+            nombre="Decorado listo placeholder",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unidad_kg,
+            proveedor_principal=Proveedor.objects.create(nombre="Proveedor Decorado"),
+            activo=True,
+        )
+        producto = Receta.objects.create(
+            nombre="Producto Legacy Placeholder",
+            hash_contenido="hash-legacy-placeholder-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pasteles",
+            categoria="Especial",
+            codigo_point="LEGACY-001",
+        )
+        PointProduct.objects.create(
+            external_id="ext-legacy-001",
+            sku="LEGACY-001",
+            name=producto.nombre,
+            active=True,
+        )
+        LineaReceta.objects.create(
+            receta=producto,
+            posicion=1,
+            insumo=materia,
+            insumo_texto=materia.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad_kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5.000000"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        LineaReceta.objects.create(
+            receta=producto,
+            posicion=2,
+            insumo=empaque,
+            insumo_texto=empaque.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad_kg,
+            unidad_texto="pza",
+            costo_unitario_snapshot=Decimal("1.000000"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        LineaReceta.objects.create(
+            receta=producto,
+            posicion=3,
+            insumo=None,
+            insumo_texto="Presentación",
+            cantidad=None,
+            unidad=None,
+            unidad_texto="",
+            costo_unitario_snapshot=Decimal("0"),
+            match_status=LineaReceta.STATUS_REJECTED,
+            match_score=63.63,
+            match_method=LineaReceta.MATCH_NONE,
+        )
+        LineaReceta.objects.create(
+            receta=producto,
+            posicion=4,
+            insumo=None,
+            insumo_texto="Armado",
+            cantidad=None,
+            unidad=None,
+            unidad_texto="",
+            costo_unitario_snapshot=Decimal("0"),
+            match_status=LineaReceta.STATUS_REJECTED,
+            match_score=71.42,
+            match_method=LineaReceta.MATCH_NONE,
+        )
+        LineaReceta.objects.create(
+            receta=producto,
+            posicion=5,
+            tipo_linea=LineaReceta.TIPO_SUBSECCION,
+            insumo=decorado,
+            insumo_texto="Decorado",
+            cantidad=Decimal("0.050000"),
+            unidad=self.unidad_kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("2.000000"),
+            match_status=LineaReceta.STATUS_NEEDS_REVIEW,
+            match_score=80,
+            match_method=LineaReceta.MATCH_FUZZY,
+        )
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos"})
+        self.assertEqual(response.status_code, 200)
+        health = {r.nombre: r.operational_health["label"] for r in response.context["page"].object_list}
+        self.assertEqual(health[producto.nombre], "Lista para operar")
+
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "estado": "pendientes"},
+        )
+        self.assertEqual(response.status_code, 200)
+        nombres = [r.nombre for r in response.context["page"].object_list]
+        self.assertNotIn(producto.nombre, nombres)
 
     def test_recetas_list_filters_by_governance_issue(self):
         self.receta_preparacion.rendimiento_cantidad = None
@@ -1292,6 +1589,55 @@ class RecetaDerivedInsumoAutolinkTests(TestCase):
         )
         pres_code = f"DERIVADO:RECETA:{receta.id}:PRESENTACION:{presentacion.id}"
         self.assertTrue(Insumo.objects.filter(codigo=pres_code, activo=True).exists())
+
+    def test_sync_receta_derivados_keeps_preparacion_active_when_downstream_usage_exists(self):
+        base_final = Receta.objects.create(
+            nombre="Galleta Lotus QA",
+            hash_contenido="hash-signal-derived-downstream-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            usa_presentaciones=True,
+            rendimiento_cantidad=Decimal("1.000000"),
+            rendimiento_unidad=self.unidad_kg,
+        )
+        prep_code = f"DERIVADO:RECETA:{base_final.id}:PREPARACION"
+        prep = Insumo.objects.create(
+            codigo=prep_code,
+            nombre=base_final.nombre,
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad_kg,
+            activo=True,
+        )
+        presentacion = RecetaPresentacion.objects.create(
+            receta=base_final,
+            nombre="Individual",
+            peso_por_unidad_kg=Decimal("0.090000"),
+            activo=True,
+        )
+        producto_final = Receta.objects.create(
+            nombre="Pastel QA usa base producto final",
+            hash_contenido="hash-signal-derived-downstream-002",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Chocolate",
+        )
+        LineaReceta.objects.create(
+            receta=producto_final,
+            posicion=1,
+            insumo=prep,
+            insumo_texto=prep.nombre,
+            cantidad=Decimal("0.250000"),
+            unidad=self.unidad_kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        sync_receta_derivados(base_final)
+
+        prep.refresh_from_db()
+        self.assertTrue(prep.activo)
 
     def test_producto_final_requires_linked_insumo_in_main_lines(self):
         receta = Receta.objects.create(
@@ -3051,6 +3397,36 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             hash_contenido="hash-forecast-hist-001",
         )
+        self.point_branch = PointBranch.objects.create(
+            external_id="PB-MATRIZ-TEST",
+            name="Matriz",
+            erp_branch=self.sucursal,
+        )
+
+    def _create_canonical_sale(self, *, fecha: date, cantidad: str | Decimal, sucursal: Sucursal | None = None, receta: Receta | None = None):
+        suc = sucursal or self.sucursal
+        rec = receta or self.receta
+        branch = self.point_branch
+        if suc.id != self.sucursal.id:
+            branch, _ = PointBranch.objects.get_or_create(
+                external_id=f"PB-{suc.codigo}",
+                defaults={
+                    "name": suc.nombre,
+                    "erp_branch": suc,
+                },
+            )
+        PointSalesDailyProductFact.objects.create(
+            branch=branch,
+            sale_date=fecha,
+            sucursal_nombre=suc.nombre,
+            categoria="Pasteles",
+            producto_nombre_historico=rec.nombre,
+            receta=rec,
+            match_catalogo_status="EXACT_CODE",
+            total_cantidad=Decimal(str(cantidad)),
+            total_venta=Decimal("100.00"),
+            total_venta_neta=Decimal("100.00"),
+        )
 
     def test_import_ventas_historicas_crea_registros(self):
         csv_data = (
@@ -3076,13 +3452,7 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
         for w in range(1, 9):
             week_start = base - timedelta(days=base.weekday()) - timedelta(days=(7 * w))
             for d in range(7):
-                VentaHistorica.objects.create(
-                    receta=self.receta,
-                    sucursal=self.sucursal,
-                    fecha=week_start + timedelta(days=d),
-                    cantidad=Decimal("5"),
-                    fuente="TEST_SEMANA",
-                )
+                self._create_canonical_sale(fecha=week_start + timedelta(days=d), cantidad="5")
 
         response = self.client.post(
             reverse("recetas:pronostico_estadistico_desde_historial"),
@@ -3112,13 +3482,7 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
     def test_pronostico_estadistico_aplica_pronostico_mensual(self):
         for month_idx, qty in [(10, "40"), (11, "50"), (12, "60"), (1, "65"), (2, "70")]:
             year = 2025 if month_idx >= 10 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_MENSUAL",
-            )
+            self._create_canonical_sale(fecha=date(year, month_idx, 15), cantidad=qty)
 
         response = self.client.post(
             reverse("recetas:pronostico_estadistico_desde_historial"),
@@ -3138,13 +3502,7 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
     def test_pronostico_estadistico_backtest_genera_contexto(self):
         for month_idx, qty in [(9, "30"), (10, "35"), (11, "40"), (12, "46"), (1, "50"), (2, "55"), (3, "60")]:
             year = 2025 if month_idx >= 9 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_BACKTEST",
-            )
+            self._create_canonical_sale(fecha=date(year, month_idx, 15), cantidad=qty)
 
         response = self.client.post(
             reverse("recetas:pronostico_estadistico_desde_historial"),
@@ -3180,13 +3538,7 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
     def test_pronostico_estadistico_backtest_export_csv_y_xlsx(self):
         for month_idx, qty in [(9, "30"), (10, "35"), (11, "40"), (12, "46"), (1, "50"), (2, "55"), (3, "60")]:
             year = 2025 if month_idx >= 9 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_BACKTEST_EXPORT",
-            )
+            self._create_canonical_sale(fecha=date(year, month_idx, 15), cantidad=qty)
 
         response = self.client.post(
             reverse("recetas:pronostico_estadistico_desde_historial"),
@@ -3226,13 +3578,7 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
     def test_pronostico_estadistico_min_confianza_filtra_resultados(self):
         for month_idx, qty in [(10, "40"), (11, "50"), (12, "60"), (1, "65"), (2, "70")]:
             year = 2025 if month_idx >= 10 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_CONF",
-            )
+            self._create_canonical_sale(fecha=date(year, month_idx, 15), cantidad=qty)
 
         response = self.client.post(
             reverse("recetas:pronostico_estadistico_desde_historial"),
@@ -3254,13 +3600,7 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
     def test_pronostico_estadistico_preview_export_csv_y_xlsx(self):
         for month_idx, qty in [(10, "40"), (11, "50"), (12, "60"), (1, "65"), (2, "70")]:
             year = 2025 if month_idx >= 10 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_PREVIEW_EXPORT",
-            )
+            self._create_canonical_sale(fecha=date(year, month_idx, 15), cantidad=qty)
 
         response = self.client.post(
             reverse("recetas:pronostico_estadistico_desde_historial"),
@@ -3290,6 +3630,239 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
         wb = load_workbook(BytesIO(response_xlsx.content), data_only=True)
         self.assertIn("Resumen", wb.sheetnames)
         self.assertIn("Detalle", wb.sheetnames)
+
+    def test_pronostico_estadistico_dia_generates_branch_detail_rows(self):
+        sucursal_b = Sucursal.objects.create(codigo="NORTE", nombre="Norte", activa=True)
+        target_day = date(2026, 4, 6)  # lunes
+        for lag in range(1, 9):
+            sample_day = target_day - timedelta(days=7 * lag)
+            self._create_canonical_sale(fecha=sample_day, cantidad="12")
+            self._create_canonical_sale(fecha=sample_day, cantidad="5", sucursal=sucursal_b)
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "dia",
+                "fecha_base": "2026-04-06",
+                "run_mode": "preview",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        preview = self.client.session.get("pronostico_estadistico_preview")
+        self.assertIsNotNone(preview)
+        self.assertEqual(preview["alcance"], "dia")
+        self.assertGreaterEqual(preview["detail_rows_total"], 2)
+        detail_rows = preview["detail_rows"]
+        self.assertTrue(any(row["sucursal_codigo"] == "MATRIZ" for row in detail_rows))
+        self.assertTrue(any(row["sucursal_codigo"] == "NORTE" for row in detail_rows))
+        self.assertTrue(all(row["fecha"] == "2026-04-06" for row in detail_rows))
+        self.assertIn("model_meta", preview)
+        self.assertEqual(preview["model_meta"]["history_selection"]["history_start"], "2022-01-01")
+        self.assertFalse(preview["model_meta"]["mix_adjuster"]["enabled"])
+
+    def test_pronostico_estadistico_mix_adjuster_caps_changes(self):
+        receta_b = Receta.objects.create(
+            nombre="Pastel Forecast Mix B",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-forecast-mix-b",
+        )
+        target_day = date(2026, 4, 6)
+        for lag in range(1, 10):
+            sample_day = target_day - timedelta(days=7 * lag)
+            self._create_canonical_sale(fecha=sample_day, cantidad="10", receta=self.receta)
+            self._create_canonical_sale(fecha=sample_day, cantidad="10", receta=receta_b)
+        for offset in (5, 12, 19):
+            recent_day = target_day - timedelta(days=offset)
+            self._create_canonical_sale(fecha=recent_day, cantidad="18", receta=self.receta)
+            self._create_canonical_sale(fecha=recent_day, cantidad="2", receta=receta_b)
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "dia",
+                "fecha_base": target_day.isoformat(),
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "preview",
+                "mix_adjustment_enabled": "1",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        preview = self.client.session.get("pronostico_estadistico_preview")
+        self.assertIsNotNone(preview)
+        self.assertTrue(preview["model_meta"]["mix_adjuster"]["enabled"])
+        detail_rows = {row["receta_id"]: row for row in preview["detail_rows"]}
+        qty_a = Decimal(str(detail_rows[self.receta.id]["forecast_qty"]))
+        qty_b = Decimal(str(detail_rows[receta_b.id]["forecast_qty"]))
+        self.assertGreater(qty_a, Decimal("0"))
+        self.assertGreater(qty_b, Decimal("0"))
+        self.assertTrue(detail_rows[self.receta.id]["mix_adjusted"])
+        self.assertLessEqual(
+            Decimal(str(detail_rows[self.receta.id]["mix_adjustment_pct"])),
+            Decimal("20.0"),
+        )
+        self.assertGreaterEqual(
+            Decimal(str(detail_rows[receta_b.id]["mix_adjustment_pct"])),
+            Decimal("-20.0"),
+        )
+
+    def test_pronostico_estadistico_downweights_march_2026_legacy_snapshot(self):
+        target_day = date(2027, 3, 10)
+        comparable_days = [
+            (date(2024, 3, 13), "20"),
+            (date(2025, 3, 12), "22"),
+            (date(2026, 3, 11), "250"),
+        ]
+        for sample_day, qty in comparable_days:
+            self._create_canonical_sale(fecha=sample_day, cantidad=qty)
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "dia",
+                "fecha_base": target_day.isoformat(),
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "preview",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        preview = self.client.session.get("pronostico_estadistico_preview")
+        self.assertIsNotNone(preview)
+        self.assertGreaterEqual(len(preview["rows"]), 1)
+        row = preview["rows"][0]
+        self.assertLess(row["forecast_qty"], 80.0)
+        self.assertIn("model_meta", preview)
+        adjustment = preview["model_meta"]["data_quality_adjustments"][0]
+        self.assertEqual(adjustment["period"], "2026-03")
+        self.assertEqual(adjustment["action"], "excluded_from_baseline")
+
+    def test_pronostico_estadistico_does_not_fallback_to_venta_historica_raw(self):
+        target_day = date(2026, 4, 6)
+        for lag in range(1, 9):
+            sample_day = target_day - timedelta(days=7 * lag)
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=self.sucursal,
+                fecha=sample_day,
+                cantidad=Decimal("25"),
+                fuente="RAW_ONLY",
+            )
+
+        response = self.client.post(
+            reverse("recetas:pronostico_estadistico_desde_historial"),
+            {
+                "alcance": "dia",
+                "fecha_base": target_day.isoformat(),
+                "sucursal_id": str(self.sucursal.id),
+                "run_mode": "preview",
+                "safety_pct": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        preview = self.client.session.get("pronostico_estadistico_preview")
+        self.assertIsNotNone(preview)
+        self.assertEqual(preview["totals"]["recetas_count"], 0)
+
+    def test_evaluar_mix_adjuster_command_generates_comparison_artifacts(self):
+        receta_b = Receta.objects.create(
+            nombre="Pastel Forecast Eval Mix B",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-forecast-eval-mix-b",
+        )
+        target_day = date(2026, 4, 6)
+        for lag in range(1, 10):
+            sample_day = target_day - timedelta(days=7 * lag)
+            self._create_canonical_sale(fecha=sample_day, cantidad="10", receta=self.receta)
+            self._create_canonical_sale(fecha=sample_day, cantidad="10", receta=receta_b)
+        for offset in (5, 12, 19):
+            recent_day = target_day - timedelta(days=offset)
+            self._create_canonical_sale(fecha=recent_day, cantidad="18", receta=self.receta)
+            self._create_canonical_sale(fecha=recent_day, cantidad="2", receta=receta_b)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            call_command(
+                "evaluar_mix_adjuster",
+                "--fecha-base",
+                target_day.isoformat(),
+                "--alcance",
+                "dia",
+                "--periods",
+                "4",
+                "--sucursal-id",
+                str(self.sucursal.id),
+                "--output-dir",
+                tmpdir,
+                "--label",
+                "test",
+            )
+            run_dirs = [name for name in os.listdir(tmpdir) if name.startswith("mix_adjuster_eval_")]
+            self.assertEqual(len(run_dirs), 1)
+            run_dir = os.path.join(tmpdir, run_dirs[0])
+            summary_path = os.path.join(run_dir, "summary.csv")
+            windows_path = os.path.join(run_dir, "windows.csv")
+            cases_path = os.path.join(run_dir, "cases.csv")
+            json_path = os.path.join(run_dir, "summary.json")
+            self.assertTrue(os.path.exists(summary_path))
+            self.assertTrue(os.path.exists(windows_path))
+            self.assertTrue(os.path.exists(cases_path))
+            self.assertTrue(os.path.exists(json_path))
+            with open(summary_path, "r", encoding="utf-8") as fh:
+                summary_csv = fh.read()
+            self.assertIn("base_mape", summary_csv)
+            self.assertIn("adjusted_mape", summary_csv)
+            self.assertIn("recommendation", summary_csv)
+
+    def test_evaluar_mix_adjuster_all_sucursales_excludes_col_duplicate(self):
+        Sucursal.objects.create(codigo="COL", nombre="Colosio", activa=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            call_command(
+                "evaluar_mix_adjuster",
+                "--fecha-base",
+                date(2026, 4, 6).isoformat(),
+                "--alcance",
+                "dia",
+                "--periods",
+                "2",
+                "--all-sucursales",
+                "--output-dir",
+                tmpdir,
+                "--label",
+                "exclude_col",
+            )
+            run_dirs = [name for name in os.listdir(tmpdir) if name.startswith("mix_adjuster_eval_")]
+            self.assertEqual(len(run_dirs), 1)
+            summary_path = os.path.join(tmpdir, run_dirs[0], "summary.csv")
+            with open(summary_path, "r", encoding="utf-8") as fh:
+                summary_csv = fh.read()
+            self.assertNotIn("COL - Colosio", summary_csv)
+
+
+class ImportarVentasPointBranchResolutionTests(TestCase):
+    def setUp(self):
+        self.command = ImportarVentasPointArchivosCommand()
+
+    def test_resolve_default_sucursal_rejects_excluded_duplicate_code(self):
+        Sucursal.objects.create(codigo="COLOSIO", nombre="Colosio", activa=True)
+        Sucursal.objects.create(codigo="COL", nombre="Colosio", activa=True)
+
+        with self.assertRaises(CommandError):
+            self.command._resolve_default_sucursal("COL")
+
+    def test_resolve_sucursal_uses_canonical_branch_for_duplicate_name(self):
+        canonical = Sucursal.objects.create(codigo="COLOSIO", nombre="Colosio", activa=True)
+        Sucursal.objects.create(codigo="COL", nombre="Colosio", activa=True)
+
+        resolved = self.command._resolve_sucursal(
+            sucursal_name="Colosio",
+            sucursal_code="",
+            default_sucursal=None,
+            cache={},
+        )
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.id, canonical.id)
 
 
 class SolicitudVentasForecastTests(TestCase):
@@ -3936,6 +4509,83 @@ class RecetaPhase2ViewsTests(TestCase):
         self.assertContains(resp, "Base QA Directa - Chico")
         self.assertContains(resp, "Coincide con la cantidad capturada")
 
+    def test_producto_final_detail_ignores_implausible_direct_base_replacement(self):
+        base = Receta.objects.create(
+            nombre="Base QA Directa Implausible",
+            hash_contenido="hash-phase2-direct-base-implausible-001",
+            tipo=Receta.TIPO_PREPARACION,
+            usa_presentaciones=True,
+            rendimiento_cantidad=Decimal("6"),
+            rendimiento_unidad=self.unidad,
+        )
+        presentacion = RecetaPresentacion.objects.create(
+            receta=base,
+            nombre="Individual",
+            peso_por_unidad_kg=Decimal("0.090000"),
+            activo=True,
+        )
+        Insumo.objects.create(
+            nombre="Base QA Directa Implausible - Individual",
+            codigo=f"DERIVADO:RECETA:{base.id}:PRESENTACION:{presentacion.id}",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+            activo=True,
+        )
+        base_directa = Insumo.objects.create(
+            nombre="Base QA Directa Implausible",
+            codigo=f"DERIVADO:RECETA:{base.id}:PREPARACION",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+            activo=True,
+        )
+        empaque = Insumo.objects.create(
+            nombre="Empaque QA Implausible",
+            codigo="EMP-QA-IMPLAUSIBLE",
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            unidad_base=self.unidad,
+            activo=True,
+            categoria="Empaques",
+        )
+        producto_final = Receta.objects.create(
+            nombre="Pastel QA Base Directa Implausible",
+            hash_contenido="hash-phase2-direct-base-implausible-002",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Chocolate",
+        )
+        LineaReceta.objects.create(
+            receta=producto_final,
+            posicion=1,
+            insumo=base_directa,
+            insumo_texto=base_directa.nombre,
+            cantidad=Decimal("8.000000"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("11"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        LineaReceta.objects.create(
+            receta=producto_final,
+            posicion=2,
+            insumo=empaque,
+            insumo_texto=empaque.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad,
+            unidad_texto="pza",
+            costo_unitario_snapshot=Decimal("1"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        resp = self.client.get(reverse("recetas:receta_detail", args=[producto_final.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Producto final usando base sin presentación")
+        self.assertNotContains(resp, "Usa base sin presentación")
+
     def test_producto_final_can_apply_suggested_direct_base_replacement(self):
         base = Receta.objects.create(
             nombre="Base QA Reemplazo",
@@ -4245,8 +4895,8 @@ class RecetaPhase2ViewsTests(TestCase):
         self.assertEqual(CostoDriver.objects.count(), 1)
         get_resp = self.client.get(reverse("recetas:drivers_costeo"))
         self.assertEqual(get_resp.status_code, 200)
-        self.assertContains(get_resp, "Centro de mando ERP")
-        self.assertContains(get_resp, "Workflow ERP del costeo")
+        self.assertContains(get_resp, "Resumen de drivers")
+        self.assertContains(get_resp, "Flujo del costeo")
         self.assertContains(get_resp, "Driver test producto")
 
     def test_drivers_costeo_plantilla_csv(self):
@@ -5035,6 +5685,69 @@ class RematchLineasRecetaCommandTests(TestCase):
         self.assertEqual(self.linea_sub.match_method, LineaReceta.MATCH_SUBSECTION)
 
 
+class RecetaCosteoSubseccionTests(TestCase):
+    def setUp(self):
+        self.unidad_kg = UnidadMedida.objects.create(
+            codigo="kg",
+            nombre="Kilogramo",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(
+            nombre="Harina Costeo Sub",
+            unidad_base=self.unidad_kg,
+            activo=True,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Pastel QA Sin Duplicar",
+            hash_contenido="hash-costeo-sub-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unidad_kg,
+        )
+        self.linea_normal = LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            etapa="Base",
+            insumo=self.insumo,
+            insumo_texto="Harina Costeo Sub",
+            cantidad=Decimal("2.000000"),
+            unidad_texto="kg",
+            unidad=self.unidad_kg,
+            costo_linea_excel=None,
+            costo_unitario_snapshot=Decimal("10.000000"),
+            match_score=100,
+            match_method="MANUAL",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        self.linea_sub = LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=2,
+            tipo_linea=LineaReceta.TIPO_SUBSECCION,
+            etapa="Decorado",
+            insumo=None,
+            insumo_texto="Decorado QA",
+            cantidad=Decimal("0.100000"),
+            unidad_texto="kg",
+            unidad=self.unidad_kg,
+            costo_linea_excel=Decimal("99.000000"),
+            costo_unitario_snapshot=None,
+            match_score=100,
+            match_method=LineaReceta.MATCH_SUBSECTION,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+
+    def test_subsection_does_not_duplicate_recipe_rollup(self):
+        self.receta.refresh_from_db()
+        self.linea_normal.refresh_from_db()
+        self.linea_sub.refresh_from_db()
+
+        self.assertEqual(self.linea_normal.costo_total_estimado, 20.0)
+        self.assertIsNone(self.linea_sub.costo_total_estimado)
+        self.assertEqual(self.receta.costo_total_estimado_decimal, Decimal("20.000000"))
+
+
 class RecetaCopyLineasTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -5702,6 +6415,191 @@ class RecetasListEnterpriseChainTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sin empaque")
         self.assertContains(response, "Producto final todavía sin empaque ligado en su BOM.")
+
+    def test_recetas_list_does_not_flag_galleta_without_fixed_packaging(self):
+        materia_prima = Insumo.objects.create(
+            nombre="Chocolate Galleta Flexible",
+            codigo="MP-GALLETA-FLEXIBLE",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unidad,
+            activo=True,
+            categoria="Chocolate",
+        )
+        final = Receta.objects.create(
+            nombre="Galleta Flexible Operativa",
+            hash_contenido="hash-recetas-list-chain-004-flex-galleta",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Galletas",
+            categoria="Galletas",
+        )
+        LineaReceta.objects.create(
+            receta=final,
+            posicion=1,
+            insumo=materia_prima,
+            insumo_texto=materia_prima.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "governance_issue": "sin_empaque"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Galleta Flexible Operativa")
+
+    def test_recetas_list_marks_galleta_without_fixed_packaging_as_ready(self):
+        materia_prima = Insumo.objects.create(
+            nombre="Chocolate Galleta Health",
+            codigo="MP-GALLETA-HEALTH",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=self.unidad,
+            activo=True,
+            categoria="Chocolate",
+        )
+        final = Receta.objects.create(
+            nombre="Galleta Health Operativa",
+            hash_contenido="hash-recetas-list-chain-004-flex-health",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Galletas",
+            categoria="Galletas",
+        )
+        LineaReceta.objects.create(
+            receta=final,
+            posicion=1,
+            insumo=materia_prima,
+            insumo_texto=materia_prima.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Health Operativa"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Empaque flexible")
+        self.assertNotContains(response, "Producto final todavía sin empaque ligado en su BOM.")
+
+    def test_recetas_list_does_not_flag_empanada_without_fixed_packaging(self):
+        interno = Insumo.objects.create(
+            nombre="Relleno Empanada Flexible",
+            codigo="INT-EMPANADA-FLEXIBLE",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+            activo=True,
+            categoria="Rellenos",
+        )
+        final = Receta.objects.create(
+            nombre="Empanada Flexible Operativa",
+            hash_contenido="hash-recetas-list-chain-004-flex-empanada",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Empanadas",
+            categoria="Empanadas",
+        )
+        LineaReceta.objects.create(
+            receta=final,
+            posicion=1,
+            insumo=interno,
+            insumo_texto=interno.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "governance_issue": "sin_empaque"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Empanada Flexible Operativa")
+
+    def test_recetas_list_marks_empanada_without_fixed_packaging_as_ready(self):
+        interno = Insumo.objects.create(
+            nombre="Relleno Empanada Health",
+            codigo="INT-EMPANADA-HEALTH",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+            activo=True,
+            categoria="Rellenos",
+        )
+        final = Receta.objects.create(
+            nombre="Empanada Health Operativa",
+            hash_contenido="hash-recetas-list-chain-004-flex-empanada-health",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Empanadas",
+            categoria="Empanadas",
+        )
+        LineaReceta.objects.create(
+            receta=final,
+            posicion=1,
+            insumo=interno,
+            insumo_texto=interno.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Empanada Health Operativa"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Empaque flexible")
+        self.assertNotContains(response, "Producto final todavía sin empaque ligado en su BOM.")
+
+    def test_recetas_list_marks_bolitas_kg_without_fixed_packaging_as_ready(self):
+        interno = Insumo.objects.create(
+            nombre="Masa Bolitas Health",
+            codigo="INT-BOLITAS-HEALTH",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+            activo=True,
+            categoria="Masas",
+        )
+        final = Receta.objects.create(
+            nombre="Bolitas de Nuez KG",
+            codigo_point="05021",
+            hash_contenido="hash-recetas-list-chain-004-flex-bolitas-health",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Galletas",
+            categoria="Galletas",
+        )
+        LineaReceta.objects.create(
+            receta=final,
+            posicion=1,
+            insumo=interno,
+            insumo_texto=interno.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Bolitas de Nuez KG"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Empaque flexible")
+        self.assertNotContains(response, "Producto final todavía sin empaque ligado en su BOM.")
 
     def test_recetas_list_shows_internal_components_checkpoint_card(self):
         empaque = Insumo.objects.create(
@@ -6570,6 +7468,87 @@ class RecetasListEnterpriseChainTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Ajustar componente")
+        self.assertNotContains(response, "Aplicar derivados sugeridos")
+
+    def test_recetas_list_ignores_implausible_direct_base_replacement(self):
+        base = Receta.objects.create(
+            nombre="Base Lista Directa Implausible",
+            hash_contenido="hash-recetas-list-directa-implausible-001",
+            tipo=Receta.TIPO_PREPARACION,
+            familia="Bases",
+            categoria="Chocolate",
+            usa_presentaciones=True,
+            rendimiento_cantidad=Decimal("10.000000"),
+            rendimiento_unidad=self.unidad,
+        )
+        base_directa = Insumo.objects.create(
+            nombre="Base Lista Directa Implausible",
+            codigo=f"DERIVADO:RECETA:{base.id}:PREPARACION",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+            activo=True,
+            categoria="Bases",
+        )
+        presentacion = RecetaPresentacion.objects.create(
+            receta=base,
+            nombre="Individual",
+            peso_por_unidad_kg=Decimal("0.090000"),
+            activo=True,
+        )
+        Insumo.objects.create(
+            nombre="Base Lista Directa Implausible - Individual",
+            codigo=f"DERIVADO:RECETA:{base.id}:PRESENTACION:{presentacion.id}",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+            activo=True,
+            categoria="Bases",
+        )
+        empaque = Insumo.objects.create(
+            nombre="Caja Lista Directa Implausible",
+            codigo="EMP-LISTA-DIRECTA-IMPLAUSIBLE",
+            tipo_item=Insumo.TIPO_EMPAQUE,
+            unidad_base=self.unidad,
+            activo=True,
+            categoria="Empaques",
+        )
+        final = Receta.objects.create(
+            nombre="Pastel Lista Directa Implausible",
+            hash_contenido="hash-recetas-list-directa-implausible-002",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Chocolate",
+        )
+        LineaReceta.objects.create(
+            receta=final,
+            posicion=1,
+            insumo=base_directa,
+            insumo_texto=base_directa.nombre,
+            cantidad=Decimal("8.000000"),
+            unidad=self.unidad,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("5"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        LineaReceta.objects.create(
+            receta=final,
+            posicion=2,
+            insumo=empaque,
+            insumo_texto=empaque.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad,
+            unidad_texto="pza",
+            costo_unitario_snapshot=Decimal("1"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": final.nombre})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Usa base sin presentación")
         self.assertNotContains(response, "Aplicar derivados sugeridos")
 
 

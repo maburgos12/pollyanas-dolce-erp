@@ -1,7 +1,9 @@
 from decimal import Decimal
+from functools import lru_cache
 
 from django.db.models import Count, DecimalField, OuterRef, Subquery
 
+from core.cache_versions import bump_cache_scopes, get_cache_scope_version, get_or_set_versioned_cache
 from maestros.models import CostoInsumo, Insumo
 from recetas.utils.normalizacion import normalizar_nombre
 
@@ -101,8 +103,7 @@ def duplicate_priority(insumo: Insumo) -> int:
     return score
 
 
-def canonicalized_active_insumos(limit: int = 1500) -> list[dict]:
-    limit_safe = max(100, min(int(limit or 1500), 5000))
+def _build_canonicalized_active_insumos(limit_safe: int) -> list[dict]:
     active_insumos = list(
         Insumo.objects.filter(activo=True)
         .select_related("unidad_base", "proveedor_principal")
@@ -162,6 +163,55 @@ def canonicalized_active_insumos(limit: int = 1500) -> list[dict]:
     return canonical_rows[:limit_safe]
 
 
+def canonicalized_active_insumos(limit: int = 1500) -> list[dict]:
+    limit_safe = max(100, min(int(limit or 1500), 5000))
+    return get_or_set_versioned_cache(
+        key_parts=("erp", "catalog", "canonicalized-insumos", f"limit{limit_safe}"),
+        scopes=("insumos",),
+        builder=lambda: _build_canonicalized_active_insumos(limit_safe),
+    )
+
+
+def canonical_catalog_maps(limit: int = 1500) -> tuple[list[dict], dict[int, dict], dict[int, Insumo], dict[int, dict]]:
+    canonical_rows = canonicalized_active_insumos(limit=limit)
+    member_to_row: dict[int, dict] = {}
+    canonical_by_member_id: dict[int, Insumo] = {}
+    canonical_by_id: dict[int, dict] = {}
+    for row in canonical_rows:
+        canonical = row["canonical"]
+        canonical_by_id[canonical.id] = row
+        for member_id in row["member_ids"]:
+            member_to_row[member_id] = row
+            canonical_by_member_id[member_id] = canonical
+    return canonical_rows, member_to_row, canonical_by_member_id, canonical_by_id
+
+
+@lru_cache(maxsize=8)
+def _canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
+    member_to_canonical_id: dict[int, int] = {}
+    canonical_to_member_ids: dict[int, tuple[int, ...]] = {}
+    for row in canonicalized_active_insumos(limit=5000):
+        canonical_id = row["canonical"].id
+        member_ids = tuple(int(member_id) for member_id in row["member_ids"])
+        canonical_to_member_ids[canonical_id] = member_ids
+        for member_id in member_ids:
+            member_to_canonical_id[member_id] = canonical_id
+    return member_to_canonical_id, canonical_to_member_ids
+
+
+@lru_cache(maxsize=8192)
+def _active_canonical_insumo(canonical_id: int, version: int) -> Insumo | None:
+    return (
+        Insumo.objects.filter(pk=canonical_id, activo=True)
+        .select_related("unidad_base", "proveedor_principal")
+        .first()
+    )
+
+
+def clear_canonical_catalog_runtime_caches() -> None:
+    bump_cache_scopes("insumos", "inventario", "dashboard")
+
+
 def canonicalized_insumo_selector(limit: int = 1500) -> list[Insumo]:
     selected = []
     for row in canonicalized_active_insumos(limit=limit):
@@ -185,29 +235,26 @@ def canonical_member_ids(insumo: Insumo | None = None, *, insumo_id: int | str |
         insumo = Insumo.objects.filter(pk=parsed_id, activo=True).first()
         if not insumo:
             return []
-    normalized_name = insumo.nombre_normalizado or normalizar_nombre(insumo.nombre or "")
-    if not normalized_name:
+    version = get_cache_scope_version("insumos")
+    member_to_canonical_id, canonical_to_member_ids = _canonical_membership_maps(version)
+    canonical_id = member_to_canonical_id.get(insumo.id)
+    if canonical_id is None:
         return [insumo.id]
-    for row in canonicalized_active_insumos(limit=5000):
-        if row["normalized_name"] == normalized_name:
-            return list(row["member_ids"])
-    return [insumo.id]
+    return list(canonical_to_member_ids.get(canonical_id, (insumo.id,)))
 
 
 def canonical_insumo(insumo: Insumo | None) -> Insumo | None:
     if not insumo:
         return None
-    normalized_name = insumo.nombre_normalizado or normalizar_nombre(insumo.nombre or "")
-    if not normalized_name:
+    version = get_cache_scope_version("insumos")
+    member_to_canonical_id, canonical_to_member_ids = _canonical_membership_maps(version)
+    canonical_id = member_to_canonical_id.get(insumo.id)
+    if canonical_id is None:
         return insumo
-    for row in canonicalized_active_insumos(limit=5000):
-        if row["normalized_name"] != normalized_name:
-            continue
-        canonical = row["canonical"]
-        canonical.canonical_variant_count = row["variant_count"]
-        canonical.member_ids = row["member_ids"]
-        return canonical
-    return insumo
+    canonical = _active_canonical_insumo(canonical_id, version) or insumo
+    canonical.member_ids = list(canonical_to_member_ids.get(canonical_id, (canonical.id,)))
+    canonical.canonical_variant_count = len(canonical.member_ids)
+    return canonical
 
 
 def latest_costo_canonico(insumo: Insumo | None = None, *, insumo_id: int | str | None = None) -> Decimal | None:
@@ -230,7 +277,15 @@ def canonical_insumo_by_id(insumo_id: int | str | None) -> Insumo | None:
         return None
     if parsed_id <= 0:
         return None
-    insumo = Insumo.objects.filter(pk=parsed_id, activo=True).first()
-    if not insumo:
+    version = get_cache_scope_version("insumos")
+    member_to_canonical_id, canonical_to_member_ids = _canonical_membership_maps(version)
+    canonical_id = member_to_canonical_id.get(parsed_id)
+    if canonical_id is None:
+        insumo = Insumo.objects.filter(pk=parsed_id, activo=True).first()
+        return insumo
+    canonical = _active_canonical_insumo(canonical_id, version)
+    if not canonical:
         return None
-    return canonical_insumo(insumo)
+    canonical.member_ids = list(canonical_to_member_ids.get(canonical_id, (canonical.id,)))
+    canonical.canonical_variant_count = len(canonical.member_ids)
+    return canonical

@@ -1,0 +1,93 @@
+{
+  "target_date": "2026-03-20",
+  "verified_at": "2026-03-22T11:16:13.232320-07:00",
+  "sales_stage": {
+    "amount": "103606",
+    "quantity": "773",
+    "rows": 302
+  },
+  "tickets_direct": {
+    "amount": "103606.0",
+    "tickets": 354,
+    "rows": 8
+  },
+  "tickets_stage": {
+    "amount": "103606.00",
+    "tickets": 354,
+    "rows": 8
+  },
+  "waste_direct": {
+    "rows": 7,
+    "qty": "9.0",
+    "cost": "138.95"
+  },
+  "waste_stage_rawdate": {
+    "rows": 5,
+    "qty": "7",
+    "cost": "120.440000000000"
+  },
+  "waste_canonical_operational": {
+    "rows": 2,
+    "qty": "3"
+  },
+  "production_direct": {
+    "rows_cedis": 44,
+    "qty_cedis": "1094.45"
+  },
+  "production_stage": {
+    "rows_cedis": 44,
+    "qty_cedis": "1094.450"
+  },
+  "transfer_direct": {
+    "rows_cedis": 23,
+    "qty_cedis": "1853.080001831054684"
+  },
+  "transfer_stage": {
+    "rows_cedis": 23,
+    "qty_cedis": "1853.080"
+  },
+  "dg_summary": {
+    "central_flow": {
+      "available": true,
+      "closure_date": "2026-03-20",
+      "status": "Flujo central registrado",
+      "tone": "success",
+      "detail": "Producción directa 44 línea(s) y transferencias recibidas 23 línea(s) hacia inventario central.",
+      "production_rows": 44,
+      "production_total_qty": "1094.450",
+      "production_item_count": 43,
+      "transfer_rows": 23,
+      "transfer_total_qty": "1853.080",
+      "transfer_item_count": 20,
+      "top_transfer_origins": [
+        {
+          "origin": "9 · Almacen",
+          "total_qty": "1846.080",
+          "total_rows": 19
+        },
+        {
+          "origin": "12 · Devoluciones",
+          "total_qty": "7.000",
+          "total_rows": 3
+        },
+        {
+          "origin": "3 · Las Glorias",
+          "total_qty": "0",
+          "total_rows": 1
+        }
+      ]
+    },
+    "closure_summary": {
+      "available": true,
+      "closure_date": "2026-03-20",
+      "status": "Pendiente de cuadre",
+      "tone": "warning",
+      "detail": "Sin cierre 8 · Desviacion menor 0.",
+      "branch_count": 8,
+      "cuadra": 0,
+      "minor": 0,
+      "critical": 0,
+      "without_closure": 8
+    }
+  }
+}

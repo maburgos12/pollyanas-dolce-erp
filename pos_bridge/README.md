@@ -20,7 +20,8 @@ Módulo Django para integrar POS Point mediante browser automation determinísti
 - Determinismo: la navegación usa Page Object Model + selectores centralizados. No hay IA dentro del flujo browser.
 - Auditabilidad: cada corrida crea `PointSyncJob`, `PointExtractionLog`, snapshots y entrada en `core.AuditLog`.
 - Alcance de sucursales: el robot abre un workspace válido y luego controla la sucursal real desde el dropdown de inventario, para soportar cuentas donde una sola sesión ve múltiples sucursales.
-- Ventas históricas: se usa el reporte autenticado `Report/VentasCategorias` dentro de la sesión web de Point. No es API pública, pero sí una fuente determinística del portal ya autenticado.
+- Ventas históricas diarias: el flujo operativo estándar usa el reporte autenticado oficial `Report/PrintReportes?idreporte=3` por sucursal y día.
+- `Report/VentasCategorias` queda como ruta legado de contingencia y no debe ser la fuente diaria por default.
 - Seguridad de materialización: `VentaHistorica` sólo se actualiza con fuente `POINT_BRIDGE_SALES` y no pisa otros importadores.
 
 ## Estructura
@@ -53,6 +54,8 @@ Variables operativas:
 - `POINT_SALES_EXCLUDED_BRANCHES`
 - `POINT_PRODUCTION_STORAGE_BRANCHES`
 - `POINT_TRANSFER_STORAGE_BRANCHES`
+- `POINT_SALES_SYNC_SOURCE_MODE` (`OFFICIAL` recomendado)
+- `POINT_SALES_SYNC_CREDITO_SCOPES` (`null` recomendado)
 - `POINT_BRIDGE_STORAGE_ROOT`
 - `POINT_SELECTOR_OVERRIDES_JSON`
 - `POS_BRIDGE_REALTIME_INTERVAL_MINUTES` (`10` recomendado cuando recorre todas las sucursales)
@@ -129,10 +132,12 @@ Comportamiento:
 Para Pollyana's Dolce, `POINT_SALES_EXCLUDED_BRANCHES` debe incluir sucursales operativas sin venta al público, por ejemplo:
 
 ```bash
-POINT_SALES_EXCLUDED_BRANCHES=CEDIS,ALMACEN,PRODUCCION CRUCERO,DEVOLUCIONES
+POINT_SALES_EXCLUDED_BRANCHES=CEDIS,ALMACEN,PRODUCCION CRUCERO,DEVOLUCIONES,Matriz DBG
 POINT_PRODUCTION_STORAGE_BRANCHES=CEDIS
 POINT_TRANSFER_STORAGE_BRANCHES=CEDIS
 ```
+
+Y el backfill oficial de ventas no debe ejecutarse con `POINT_BASE_URL` vacío: si falta, debe tratarse como defecto de configuración y no como hueco de datos.
 
 ## Instalación
 
@@ -164,6 +169,70 @@ python manage.py reconcile_unresolved_sales_matches --start-date 2022-01-01 --en
 python manage.py export_unresolved_sales_matches --start-date 2022-01-01 --end-date 2025-12-31
 python manage.py retry_failed_jobs --limit 3
 python manage.py run_pos_bridge_scheduler --once --run-inventory --run-sales
+python manage.py download_point_file --path /Report/PrintReportes/ --param idreporte=3 --param ext=Excel
+```
+
+## Descarga autenticada de archivos Point
+
+Cuando Point expone un XLS/CSV/PDF descargable, el flujo preferido ya no debe ser screenshot.
+Usa:
+
+```bash
+python manage.py download_point_file \
+  --path /Report/PrintReportes/ \
+  --param idreporte=3 \
+  --param ext=Excel
+```
+
+Características:
+
+- reutiliza autenticación HTTP determinística
+- guarda el archivo en `storage/pos_bridge/raw_exports/point_files/`
+- mantiene auditabilidad con URL y ruta final
+
+## Importación de historial por producto
+
+Para llevar un historial XLS/XLSX de Point a staging y reconciliación ERP:
+
+```bash
+python manage.py import_point_product_history \
+  --report-path "/ruta/al/archivo.xls"
+```
+
+El flujo crea:
+
+- encabezado del archivo importado
+- filas de movimientos del historial
+- costo unitario Point más reciente del archivo
+- reconciliación básica contra la receta ERP resuelta
+
+## Navegador Point para búsqueda/click/descarga
+
+Cuando haga falta operar la UI real de Point:
+
+```bash
+./scripts/point_browser_pull.sh --path /Catalogos/Index --headed
+```
+
+Soporta:
+
+- abrir Point ya autenticado
+- esperar texto/selector
+- llenar campos
+- escribir texto
+- hacer click
+- descargar archivos desde la UI
+
+Ejemplo:
+
+```bash
+./scripts/point_browser_pull.sh \
+  --path "/Reportes/VentasCategorias" \
+  --fill "#datepicker=2026-03-01" \
+  --fill "#datepicker2=2026-03-29" \
+  --click "#btnBuscar" \
+  --download-selector "#btnExcel" \
+  --download-name "ventas_categorias_marzo.xls"
 ```
 
 ## Sync de inventario en alta frecuencia
@@ -245,7 +314,8 @@ celery -A config beat -l info
 
 Notas:
 
-- `django_celery_beat` registra el calendario en base de datos; el comando `setup_celery_schedules` es idempotente.
+- `django_celery_beat` registra el calendario en base de datos; el comando `setup_celery_schedules` es idempotente y ahora también incluye los runners programados de `orquestacion`.
+- Las ventanas del orquestador se pueden ajustar por entorno con `ORQUESTACION_DAILY_PLAN_HOUR`, `ORQUESTACION_DAILY_PLAN_MINUTE`, `ORQUESTACION_PLAN_CHAIN_HOUR`, `ORQUESTACION_PLAN_CHAIN_MINUTE`, `ORQUESTACION_PURCHASE_EXCEPTION_INTERVAL_HOURS` y `ORQUESTACION_INVENTORY_GUARD_INTERVAL_HOURS`.
 - La recomendación es usar una sola estrategia por entorno:
   - local actual de este repo: Celery + Beat + Redis
   - Linux/servidor: Celery + Beat + Redis

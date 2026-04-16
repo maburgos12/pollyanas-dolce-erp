@@ -13,6 +13,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--start-date", required=True, help="Fecha inicial YYYY-MM-DD.")
         parser.add_argument("--end-date", required=True, help="Fecha final YYYY-MM-DD.")
+        parser.add_argument("--branch", default="", help="Branch Point a limitar por external_id o nombre exacto.")
 
     def handle(self, *args, **options):
         try:
@@ -25,7 +26,8 @@ class Command(BaseCommand):
             raise CommandError("end-date no puede ser menor que start-date.")
 
         service = BridgeSalesMaterializationRepairService()
-        result = service.repair(start_date=start_date, end_date=end_date)
+        branch_filter = (options.get("branch") or "").strip() or None
+        result = service.repair(start_date=start_date, end_date=end_date, branch_filter=branch_filter)
 
         self.stdout.write("Reparación de materialización Point bridge")
         self.stdout.write(f"Rango: {start_date.isoformat()} -> {end_date.isoformat()}")

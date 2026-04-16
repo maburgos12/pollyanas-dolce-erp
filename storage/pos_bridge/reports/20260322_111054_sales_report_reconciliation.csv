@@ -1,0 +1,86 @@
+codigo,producto_excel,categoria_excel,excel_qty,excel_venta,canon_qty,canon_venta,canon_qty_diff,canon_venta_diff,point_qty,point_venta,point_qty_diff,point_venta_diff,canon_producto,point_producto
+0145,Vaso Fresas con Crema Chico,Vasos Preparados Grande,42,3780,0,0,-42,-3780,42,3780,0,0,,Vaso Fresas con Crema Chico
+0147,Vaso Fresas con Crema Mediano,Vasos Preparados Grande,21,2205,0,0,-21,-2205,21,2205,0,0,,Vaso Fresas con Crema Mediano
+0148,Vaso Fresas con Crema Grande,Vasos Preparados Grande,15,1725,0,0,-15,-1725,15,1725,0,0,,Vaso Fresas con Crema Grande
+0170,Pirotecnia Alegría Ch,Alegría,41,1025,0,0,-41,-1025,41,1025,0,0,,Pirotecnia Alegría Ch
+0169,Pirotecnia Alegría G,Alegría,23,805,0,0,-23,-805,23,805,0,0,,Pirotecnia Alegría G
+01CHLI01,,,0,0,3,405,3,405,0,0,0,0,Cheesecakes Lotus Individual,
+CHCAKEINDLOTUS,Cheesecake Lotus Individual,Individual,3,405,0,0,-3,-405,3,405,0,0,,Cheesecake Lotus Individual
+0313,TE DEL JARDIN,TE,9,180,0,0,-9,-180,9,180,0,0,,TE DEL JARDIN
+COCA450,COCA-COLA 450 ML,Coca-cola,5,110,0,0,-5,-110,5,110,0,0,,COCA-COLA 450 ML
+7186/1,VELA METALICA No. 1 DORADO,Granmark,2,70,0,0,-2,-70,2,70,0,0,,VELA METALICA No. 1 DORADO
+7186/8,VELA METALICA No. 8 DORADO,Granmark,2,70,0,0,-2,-70,2,70,0,0,,VELA METALICA No. 8 DORADO
+7186/9,VELA METALICA No. 9 DORADO,Granmark,2,70,0,0,-2,-70,2,70,0,0,,VELA METALICA No. 9 DORADO
+1250,ESPAGUETI DORADA,Granmark,1,68,0,0,-1,-68,1,68,0,0,,ESPAGUETI DORADA
+1251,ESPAGUETI ROSA PERLADO,Granmark,1,68,0,0,-1,-68,1,68,0,0,,ESPAGUETI ROSA PERLADO
+CND000951,VELA SPAGUETI ROSA PERLADO,Alegría,1,60,0,0,-1,-60,1,60,0,0,,VELA SPAGUETI ROSA PERLADO
+7186/0,VELA METALICA No. 0 DORADO,Granmark,1,35,0,0,-1,-35,1,35,0,0,,VELA METALICA No. 0 DORADO
+7186/1R,VELA METALICA No. 1 ROSA,Granmark,1,35,0,0,-1,-35,1,35,0,0,,VELA METALICA No. 1 ROSA
+7186/3,VELA METALICA No. 3 DORADO,Granmark,1,35,0,0,-1,-35,1,35,0,0,,VELA METALICA No. 3 DORADO
+7186/6R,VELA METALICA No. 6 ROSA,Granmark,1,35,0,0,-1,-35,1,35,0,0,,VELA METALICA No. 6 ROSA
+0303,Servicio Domicilio 1,Otros postres,1,25,0,0,-1,-25,1,25,0,0,,Servicio Domicilio 1
+0308,TARJETA DE REGALO,Otros postres,1,5,0,0,-1,-5,1,5,0,0,,TARJETA DE REGALO
+0001,Pay de Queso Grande,Pay Grande,18,8860,18,8860,0,0,18,8860,0,0,Pay de Queso Grande,Pay de Queso Grande
+0002,Pay de Queso Mediano,Pay Mediano,15,5925,15,5925,0,0,15,5925,0,0,Pay de Queso Mediano,Pay de Queso Mediano
+0003,Pay de Queso Rebanada,Rebanada,51,3570,51,3570,0,0,51,3570,0,0,Pay de Queso Rebanada,Pay de Queso Rebanada
+0055,Pastel de Snickers Mediano,Pastel Mediano,11,5500,11,5500,0,0,11,5500,0,0,Pastel Snicker's - Mediano,Pastel de Snickers Mediano
+0056,Pastel de Snickers Chico,Pastel Chico,3,1200,3,1200,0,0,3,1200,0,0,Pastel Snicker's - Chico,Pastel de Snickers Chico
+0058,Pastel de Snickers Rebanada,Rebanada,7,490,7,490,0,0,7,490,0,0,Pastel Snicker's - Rebanada,Pastel de Snickers Rebanada
+0059,Pastel de Crunch Grande,Pastel Grande,1,720,1,720,0,0,1,720,0,0,Pastel Crunch - Grande,Pastel de Crunch Grande
+0060,Pastel de Crunch Mediano,Pastel Mediano,8,3920,8,3920,0,0,8,3920,0,0,Pastel Crunch - Mediano,Pastel de Crunch Mediano
+0061,Pastel de Crunch Chico,Pastel Chico,4,1440,4,1440,0,0,4,1440,0,0,Pastel Crunch - Chico,Pastel de Crunch Chico
+0063,Pastel de Crunch R,Rebanada,5,350,5,350,0,0,5,350,0,0,Pastel de Crunch R,Pastel de Crunch R
+0065,Pastel de Zanahoria Mediano,Pastel Mediano,7,3058,7,3058,0,0,7,3058,0,0,Pastel Zanahoria - Mediano,Pastel de Zanahoria Mediano
+0066,Pastel de Zanahoria Chico,Pastel Chico,3,990,3,990,0,0,3,990,0,0,Pastel Zanahoria - Chico,Pastel de Zanahoria Chico
+0068,Pastel de Zanahoria R,Rebanada,11,770,11,770,0,0,11,770,0,0,Pastel Zanahoria - Rebanada,Pastel de Zanahoria R
+0099,Pastel de Fresas Con Crema Grande,Pastel Grande,4,2800,4,2800,0,0,4,2800,0,0,Pastel Fresas Con Crema - Grande,Pastel de Fresas Con Crema Grande
+0100,Pastel de Fresas Con Crema Mediano,Pastel Mediano,23,11270,23,11270,0,0,23,11270,0,0,Pastel Fresas Con Crema - Mediano,Pastel de Fresas Con Crema Mediano
+0101,Pastel de Fresas Con Crema Chico,Pastel Chico,15,5025,15,5025,0,0,15,5025,0,0,Pastel Fresas Con Crema - Chico,Pastel de Fresas Con Crema Chico
+0103,Pastel de Fresas Con Crema R,Rebanada,4,280,4,280,0,0,4,280,0,0,Pastel Fresas Con Crema - Rebanada,Pastel de Fresas Con Crema R
+0105,Pastel de 3 Leches Mediano,Pastel Mediano,5,2175,5,2175,0,0,5,2175,0,0,Pastel 3 Leches - Mediano,Pastel de 3 Leches Mediano
+0107,Pastel de 3 Pecados Grande,Pastel Grande,5,3500,5,3500,0,0,5,3500,0,0,Pastel 3 Pecados - Grande,Pastel de 3 Pecados Grande
+0108,Pastel de 3 Pecados Mediano,Pastel Mediano,27,13230,27,13230,0,0,27,13230,0,0,Pastel 3 Pecados - Mediano,Pastel de 3 Pecados Mediano
+0109,Pastel de 3 Pecados Chico,Pastel Chico,12,4080,12,4080,0,0,12,4080,0,0,Pastel 3 Pecados - Chico,Pastel de 3 Pecados Chico
+0110,Pastel de 3 Pecados R,Rebanada,17,1190,17,1190,0,0,17,1190,0,0,Pastel 3 Pecados - Rebanada,Pastel de 3 Pecados R
+0116,Bollo Chocolate,Bollo,34,1224,34,1224,0,0,34,1224,0,0,Bollo Chocolate,Bollo Chocolate
+0117,Bollo Vainilla,Bollo,7,238,7,238,0,0,7,238,0,0,Pastel Vainilla - Bollo,Bollo Vainilla
+0118,Bollo Zanahoria,Bollo,10,270,10,270,0,0,10,270,0,0,Bollo Zanahoria,Bollo Zanahoria
+0119,Bollo Red Velvet,Bollo,6,180,6,180,0,0,6,180,0,0,Bollo Red Velvet,Bollo Red Velvet
+0126,Galleta Red Velvet,Galletas,5,150,5,150,0,0,5,150,0,0,Galleta Red Velvet Mejorada 2025,Galleta Red Velvet
+0135,Empanada de Manzana,Empanadas,13,130,13,130,0,0,13,130,0,0,Empanada de Manzana,Empanada de Manzana
+0160,Bollo Lotus,Bollo,6,234,6,234,0,0,6,234,0,0,Bollo Lotus,Bollo Lotus
+0177,Letrero Chispas HB 1,Pillines,2,160,2,160,0,0,2,160,0,0,Letrero Chispas HB 1,Letrero Chispas HB 1
+01BLN01,Bolitas de Nuez 10 PZ,Galletas,6,120,6,120,0,0,6,120,0,0,Bolitas de Nuez 10 PZ,Bolitas de Nuez 10 PZ
+01GCC01,Galleta Chispas Chocolate,Galletas,16,512,16,512,0,0,16,512,0,0,Galleta de Chispas de Chocolate,Galleta Chispas Chocolate
+01GN01,Galleta Nutella,Galletas,5,150,5,150,0,0,5,150,0,0,Galleta Nutella,Galleta Nutella
+03SPFREB,Sabor Fresa Rebanada Pay,Rebanada,36,0,36,0,0,0,36,0,0,0,Sabor Fresa Rebanada Pay,Sabor Fresa Rebanada Pay
+03SPGCCREB,Sabor Galleta con Cajeta Rebanada,Rebanada,2,0,2,0,0,0,2,0,0,0,Sabor Galleta con Cajeta Rebanada,Sabor Galleta con Cajeta Rebanada
+03SPGREB,Sabor Guayaba Rebanada,Rebanada,9,0,9,0,0,0,9,0,0,0,Sabor Guayaba Rebanada,Sabor Guayaba Rebanada
+1254,TOPPING CRUNCH MINI,Pastel Mini,8,0,0,0,-8,0,8,0,0,0,,TOPPING ZANAHORIA C
+1412,TOPPING SNICKER CH,Pastel Chico,3,0,0,0,-3,0,3,0,0,0,,TOPPING SNICKER CH
+21125,TOPPING CRUNCH M,Pastel Mediano,8,0,0,0,-8,0,8,0,0,0,,TOPPING CRUNCH M
+21245,TOPPING 3 LECHES,Pastel Mediano,3,0,0,0,-3,0,3,0,0,0,,TOPPING 3 LECHES
+21445,TOPPING ZANAHORIA M,Pastel Mediano,6,0,0,0,-6,0,6,0,0,0,,TOPPING ZANAHORIA M
+214541,TOPPING CRUNCH C,Pastel Chico,4,0,0,0,-4,0,4,0,0,0,,TOPPING CRUNCH C
+21455,TOPPING CRUNCH G,Pastel Grande,1,0,0,0,-1,0,1,0,0,0,,TOPPING CRUNCH G
+22145,TOPPING SNICKER M,Pastel Mediano,11,0,0,0,-11,0,11,0,0,0,,TOPPING SNICKER M
+3345,Pastel de 3 Leches Individual,Individual,26,1950,26,1950,0,0,26,1950,0,0,Pastel 3 Leches - Individual,Pastel de 3 Leches Individual
+3462,Piñatero Mini,Pastel Mini,1,190,1,190,0,0,1,190,0,0,Pastel Piñatero - Mini,Piñatero Mini
+3489,Pastel Lotus Mediano,Pastel Mediano,1,680,1,680,0,0,1,680,0,0,Pastel Lotus - Mediano,Pastel Lotus Mediano
+5346,Pastel Arándano Mediano,Pastel Mediano,1,480,1,480,0,0,1,480,0,0,Pastel de Arándano - Mediano,Pastel Arándano Mediano
+5638,Galleta Lotus,Galletas,3,144,3,144,0,0,3,144,0,0,Galleta Lotus,Galleta Lotus
+6423,Pastel Lotus Chico,Pastel Chico,1,445,1,445,0,0,1,445,0,0,Pastel Lotus - Chico,Pastel Lotus Chico
+8941,Pastel Lotus Mini,Pastel Mini,3,690,3,690,0,0,3,690,0,0,Pastel Lotus - Mini,Pastel Lotus Mini
+CHCAKEINDROLLCANELA,Cheesecake Roll Canela Individual,Individual,4,520,4,520,0,0,4,520,0,0,Cheesecake Roll Canela Individual,Cheesecake Roll Canela Individual
+CHEESELOTUSMED,Cheesecakes Lotus M,Cheesecake,1,650,1,650,0,0,1,650,0,0,Cheesecakes Lotus M,Cheesecakes Lotus M
+CHEESETORTIND,Cheesecakes Tortuga Individual,Individual,3,375,3,375,0,0,3,375,0,0,Cheesecakes Tortuga Individual,Cheesecakes Tortuga Individual
+P3PMINI,Pastel 3 Pecados Mini,Pastel Mini,7,1295,7,1295,0,0,7,1295,0,0,Pastel 3 Pecados - Mini,Pastel 3 Pecados Mini
+PCRUNCHMINI,Pastel Crunch Mini,Pastel Mini,5,925,5,925,0,0,5,925,0,0,Pastel Crunch - Mini,Pastel Crunch Mini
+PFCMINI,Pastel Fresas con Crema Mini,Pastel Mini,4,740,4,740,0,0,4,740,0,0,Pastel Fresas Con Crema - Mini,Pastel Fresas con Crema Mini
+SANFRESAR,TOPPING FRESA REBANADA,Rebanada,4,0,0,0,-4,0,4,0,0,0,,TOPPING FRESA REBANADA
+SFRESAG,Sabor Fresa Grande Pay,Pay Grande,18,0,18,0,0,0,18,0,0,0,Sabor Fresa Grande Pay,Sabor Fresa Grande Pay
+SFRESAM,Sabor Fresa Mediano Pay,Pay Mediano,15,0,15,0,0,0,15,0,0,0,Sabor Fresa Mediano Pay,Sabor Fresa Mediano Pay
+SFRESAPC,TOPPING FRESA C,Pastel Chico,14,0,0,0,-14,0,14,0,0,0,,TOPPING FRESA C
+SFRESAPG,TOPPING FRESA G,Pastel Grande,4,0,0,0,-4,0,4,0,0,0,,TOPPING FRESA G
+SFRESAPM,TOPPING FRESA M,Pastel Mediano,23,0,0,0,-23,0,23,0,0,0,,TOPPING FRESA M
+SFRESAPMINI,TOPPING FRESA MINI,Pastel Mini,4,0,0,0,-4,0,4,0,0,0,,TOPPING FRESA MINI

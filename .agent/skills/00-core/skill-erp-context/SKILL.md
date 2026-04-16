@@ -11,7 +11,7 @@ Single source of context for ERP operating rules, glossary, and non-negotiable b
 
 ## Business alignment
 - Maximize business value, operational control, reliability, and auditability (enterprise/SAP-style).
-- Align with Pollyana’s Dolce reality: 8 sucursales, shelf life of 2 days, Sunday has no production/distribution but still has sales.
+- Align with Pollyana’s Dolce reality: 9 active operating branches, shelf life of 2 days, Sunday has no production/distribution but still has sales. `MATRIZDBG` is not a real branch and `GUAMUCHIL` must be treated as a recent opening.
 - Protect cross-area consistency for inventory, costing, production, purchasing, and reporting.
 
 ## Inputs expected

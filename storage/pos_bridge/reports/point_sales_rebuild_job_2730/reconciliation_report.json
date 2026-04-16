@@ -1,0 +1,101 @@
+{
+  "job_id": 2730,
+  "parameters": {
+    "pipeline_code": "POINT_SALES_REBUILD_V2",
+    "start_date": "2026-03-24",
+    "end_date": "2026-04-05",
+    "branch_filter": "13",
+    "credito_scope": "null",
+    "source_mode": "OFFICIAL_CATEGORY_REPORT"
+  },
+  "summary": {
+    "pipeline_code": "POINT_SALES_REBUILD_V2",
+    "total_tasks": 13,
+    "tasks_pending": 0,
+    "tasks_running": 0,
+    "tasks_success": 13,
+    "tasks_failed": 0,
+    "tasks_skipped": 0,
+    "category_fact_rows": 113,
+    "product_fact_rows": 327,
+    "unmatched_rows": 9,
+    "duplicate_raw_rows": 0,
+    "quality_alerts": 0
+  },
+  "counts_by_branch_year": [
+    {
+      "sucursal": "Guamuchil",
+      "year": 2026,
+      "record_count": 113
+    }
+  ],
+  "net_sales_by_branch_month": [
+    {
+      "sucursal": "Guamuchil",
+      "year": 2026,
+      "month": 3,
+      "total_venta_neta": "39943.43"
+    },
+    {
+      "sucursal": "Guamuchil",
+      "year": 2026,
+      "month": 4,
+      "total_venta_neta": "43742.29"
+    }
+  ],
+  "legacy_vs_rebuilt": [],
+  "exact_duplicates": [],
+  "partial_duplicates": [],
+  "missing_days": {
+    "plausible": [
+      {
+        "sucursal": "Guamuchil",
+        "fecha": "2026-04-03",
+        "motivo": "reporte_exitoso_sin_renglones"
+      }
+    ],
+    "suspicious": [],
+    "coverage": [
+      {
+        "sucursal": "Guamuchil",
+        "first_operational_date": "2026-03-24",
+        "last_operational_date": "2026-04-05",
+        "successful_tasks": 13,
+        "days_with_sales": 12,
+        "days_without_sales_but_successful": 1,
+        "suspicious_missing_days_inside_coverage": 0
+      }
+    ]
+  },
+  "run_deltas": [],
+  "unmatched_catalog": {
+    "total_normalized_rows": 327,
+    "unmatched_rows": 9,
+    "percentage_unmatched": 2.75
+  },
+  "coverage_by_branch": [
+    {
+      "sucursal": "Guamuchil",
+      "first_operational_date": "2026-03-24",
+      "last_operational_date": "2026-04-05",
+      "successful_tasks": 13,
+      "days_with_sales": 12,
+      "days_without_sales_but_successful": 1,
+      "suspicious_missing_days_inside_coverage": 0
+    }
+  ],
+  "extraction_errors": [],
+  "reconciliation_summary": {
+    "records_recovered": 327,
+    "records_new_or_corrected_vs_legacy": 0,
+    "records_duplicated_exact": 0,
+    "records_duplicated_partial": 0,
+    "days_with_plausible_missing": 1,
+    "days_with_suspicious_missing": 0,
+    "branches_with_detected_opening": [
+      "Guamuchil"
+    ],
+    "differences_monetary_against_legacy_rows": 0,
+    "quality_alerts": 0
+  }
+}

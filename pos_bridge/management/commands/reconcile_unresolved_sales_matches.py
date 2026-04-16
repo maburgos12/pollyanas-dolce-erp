@@ -4,6 +4,7 @@ import json
 from datetime import date, datetime, timedelta
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db.models import Q
 
 from pos_bridge.models import PointDailySale
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
@@ -23,6 +24,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--start-date", default="2022-01-01", help="Fecha inicial YYYY-MM-DD.")
         parser.add_argument("--end-date", default="", help="Fecha final YYYY-MM-DD. Si se omite, usa 2025-12-31.")
+        parser.add_argument("--branch", default="", help="Branch Point a limitar por external_id o nombre exacto.")
         parser.add_argument(
             "--create-missing-recipes",
             action="store_true",
@@ -37,6 +39,7 @@ class Command(BaseCommand):
         if end_date < start_date:
             raise CommandError("end-date no puede ser menor a start-date.")
 
+        branch_filter = (options.get("branch") or "").strip()
         create_missing = bool(options.get("create_missing_recipes"))
         dry_run = bool(options.get("dry_run"))
         matcher = PointSalesMatchingService()
@@ -56,6 +59,7 @@ class Command(BaseCommand):
             "historical_sales_created": 0,
             "historical_sales_updated": 0,
             "branch_unresolved_rows": 0,
+            "branch_filter": branch_filter or None,
         }
 
         ambiguous_samples: list[dict] = []
@@ -66,6 +70,8 @@ class Command(BaseCommand):
             .select_related("branch", "product", "branch__erp_branch")
             .order_by("product_id", "sale_date", "id")
         )
+        if branch_filter:
+            sales_qs = sales_qs.filter(Q(branch__external_id=branch_filter) | Q(branch__name__iexact=branch_filter))
 
         for sale in sales_qs.iterator(chunk_size=1000):
             if sale.product_id in unresolved_products:
@@ -80,7 +86,7 @@ class Command(BaseCommand):
                 "name": product.name,
                 "sku": product.sku,
             }
-            if matcher.is_non_recipe_sale_row(row):
+            if matcher.infer_cost_mode(row) == "SERVICIO_ACCESORIO":
                 summary["products_non_recipe_skipped"] += 1
                 continue
 
@@ -103,7 +109,11 @@ class Command(BaseCommand):
                     )
                 continue
 
-            if not matcher.is_descriptive_product_name(point_name=product.name, family=product.metadata.get("family", "")):
+            if not matcher.is_descriptive_product_name(
+                point_name=product.name,
+                family=product.metadata.get("family", ""),
+                category=product.category,
+            ):
                 summary["products_ambiguous_skipped"] += 1
                 if len(ambiguous_samples) < 20:
                     ambiguous_samples.append(
@@ -139,7 +149,7 @@ class Command(BaseCommand):
                 "name": sale.product.name,
                 "sku": sale.product.sku,
             }
-            if matcher.is_non_recipe_sale_row(row):
+            if matcher.infer_cost_mode(row) == "SERVICIO_ACCESORIO":
                 continue
 
             receta = matcher.resolve_receta(codigo_point=sale.product.sku, point_name=sale.product.name)
@@ -163,7 +173,7 @@ class Command(BaseCommand):
                 sale_date=sale.sale_date,
                 quantity=sale.quantity,
                 tickets=sale.tickets,
-                total_amount=sale.net_amount or sale.total_amount,
+                total_amount=sale.total_amount or sale.gross_amount or sale.net_amount,
             )
             summary["historical_sales_created"] += created_history
             summary["historical_sales_updated"] += updated_history

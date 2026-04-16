@@ -15,6 +15,11 @@ class Command(BaseCommand):
         parser.add_argument("--branch", default="", help="Filtra por sucursal (external_id o label parcial).")
         parser.add_argument("--limit-branches", type=int, default=None, help="Límite de sucursales a recorrer.")
         parser.add_argument("--actor-username", default="", help="Usuario ERP para registrar la ejecución.")
+        parser.add_argument(
+            "--without-cost-capture",
+            action="store_true",
+            help="Omite la captura de costos unitarios Point/ALMACEN aunque el loop esté habilitado.",
+        )
 
     def handle(self, *args, **options):
         actor = None
@@ -28,6 +33,7 @@ class Command(BaseCommand):
             triggered_by=actor,
             branch_filter=(options.get("branch") or "").strip() or None,
             limit_branches=options.get("limit_branches"),
+            capture_costs=False if options.get("without_cost_capture") else None,
         )
         payload = {
             "job_id": sync_job.id,

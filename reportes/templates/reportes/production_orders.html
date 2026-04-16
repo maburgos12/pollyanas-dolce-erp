@@ -1,0 +1,597 @@
+{% extends "base.html" %}
+
+{% block title %}Órdenes de producción{% endblock %}
+
+{% block content %}
+<div class="container" style="padding:24px 16px;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:20px;">
+    <div>
+      <h1 style="margin:0 0 6px 0;">Órdenes de producción automáticas</h1>
+      <p style="margin:0;color:#6b7280;">Propuesta controlada e idempotente por sucursal y fecha. No ejecuta automáticamente sin aprobación.</p>
+    </div>
+    <form method="get" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
+      <label>
+        <span style="display:block;font-size:12px;color:#6b7280;">Fecha operativa</span>
+        <input type="date" name="fecha" value="{{ selected_date|date:'Y-m-d' }}" class="form-control">
+      </label>
+      <button type="submit" class="btn btn-secondary">Ver fecha</button>
+    </form>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
+    <div class="card"><div class="card-body"><strong>{{ summary.orders }}</strong><br><span style="color:#6b7280;">Órdenes</span></div></div>
+    <div class="card"><div class="card-body"><strong>{{ summary.lines }}</strong><br><span style="color:#6b7280;">Líneas</span></div></div>
+    <div class="card"><div class="card-body"><strong>{{ summary.proposed }}</strong><br><span style="color:#6b7280;">Propuestas</span></div></div>
+    <div class="card"><div class="card-body"><strong>{{ summary.approved }}</strong><br><span style="color:#6b7280;">Aprobadas</span></div></div>
+    <div class="card"><div class="card-body"><strong>{{ summary.released }}</strong><br><span style="color:#6b7280;">Liberadas</span></div></div>
+    <div class="card"><div class="card-body"><strong>{{ summary.executed }}</strong><br><span style="color:#6b7280;">Ejecutadas</span></div></div>
+  </div>
+
+  {% if can_manage_orders %}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="fecha" value="{{ selected_date|date:'Y-m-d' }}">
+        <input type="hidden" name="action" value="generate">
+        <button type="submit" class="btn btn-primary">Generar propuestas del día</button>
+      </form>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="fecha" value="{{ selected_date|date:'Y-m-d' }}">
+        <input type="hidden" name="action" value="generate_purchases">
+        <button type="submit" class="btn btn-secondary">Generar compras desde aprobadas</button>
+      </form>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="fecha" value="{{ selected_date|date:'Y-m-d' }}">
+        <input type="hidden" name="action" value="generate_alerts">
+        <button type="submit" class="btn btn-secondary">Actualizar alertas</button>
+      </form>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="fecha" value="{{ selected_date|date:'Y-m-d' }}">
+        <input type="hidden" name="action" value="refresh_metrics">
+        <button type="submit" class="btn btn-secondary">Actualizar métricas DG</button>
+      </form>
+    </div>
+  {% endif %}
+
+  <section class="card" style="margin-bottom:20px;">
+    <div class="card-body">
+      <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+        <div>
+          <h2 style="margin:0 0 6px 0;">Planeación por proyección / evento</h2>
+          <p style="margin:0;color:#6b7280;max-width:900px;">
+            Este modo calcula el <strong>requerimiento bruto proyectado</strong> de insumos con base en forecast y receta.
+            <strong>No descuenta stock actual</strong> y no debe leerse como faltante operativo.
+          </p>
+        </div>
+        <div style="color:#6b7280;">
+          <div>Modo: <strong>{{ projection_supply_context.mode }}</strong></div>
+          <div>Usa stock: <strong>{% if projection_supply_context.uses_stock %}Sí{% else %}No{% endif %}</strong></div>
+          <div>Fecha proyectada: <strong>{{ projection_supply_context.target_label }}</strong></div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px;margin-bottom:16px;">
+        <div class="card"><div class="card-body"><strong>{{ projection_supply_context.summary.projected_products }}</strong><br><span style="color:#6b7280;">Productos proyectados</span></div></div>
+        <div class="card"><div class="card-body"><strong>{{ projection_supply_context.summary.projected_insumos }}</strong><br><span style="color:#6b7280;">Insumos en bruto</span></div></div>
+        <div class="card"><div class="card-body"><strong>{{ projection_supply_context.summary.forecast_units }}</strong><br><span style="color:#6b7280;">Unidades proyectadas</span></div></div>
+      </div>
+
+      <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;color:#475569;margin-bottom:16px;">
+        {{ projection_supply_context.formula_note }}
+      </div>
+
+      {% if projection_supply_context.insumos %}
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Insumo</th>
+                <th>Requerimiento bruto</th>
+                <th>Productos</th>
+                <th>Sucursales</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in projection_supply_context.insumos %}
+                <tr>
+                  <td><strong>{{ row.insumo_nombre }}</strong><div style="font-size:12px;color:#6b7280;">{{ row.unidad_codigo|default:"-" }}</div></td>
+                  <td>{{ row.required_gross_qty }} {{ row.unidad_codigo }}</td>
+                  <td style="color:#6b7280;min-width:220px;">{{ row.recipes_text }}</td>
+                  <td style="color:#6b7280;">{{ row.branches_text }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p style="margin:0;color:#6b7280;">No hay forecast suficiente para calcular requerimiento bruto de insumos en la fecha seleccionada.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom:20px;">
+    <div class="card-body">
+      <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+        <div>
+          <h2 style="margin:0 0 6px 0;">Conciliación de insumos para Producción</h2>
+          <p style="margin:0;color:#6b7280;max-width:900px;">
+            La fuente de verdad del inventario físico para Producción es el ledger del ERP:
+            <strong>{{ supply_context.source_of_truth }}</strong>.
+            Point aporta ventas/producción/merma, pero no es el inventario físico de insumos. Este modo
+            <strong>sí compara</strong> lo que se va a producir hoy contra el stock disponible real.
+          </p>
+        </div>
+        <div style="color:#6b7280;">
+          <div>Fecha auditada: <strong>{{ selected_date|date:"Y-m-d" }}</strong></div>
+          <div>Alcance inventario: <strong>{{ supply_context.inventory_scope }}</strong></div>
+          <div>Última actualización visible: <strong>{{ supply_context.latest_visible_update|date:"Y-m-d H:i"|default:"-" }}</strong></div>
+          <div>Último sync OK: <strong>{% if supply_context.latest_sync_ok %}{{ supply_context.latest_sync_ok.started_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</strong></div>
+          <div>Último sync visto: <strong>{% if supply_context.latest_sync_any %}{{ supply_context.latest_sync_any.started_at|date:"Y-m-d H:i" }} · {{ supply_context.latest_sync_any.status }}{% else %}-{% endif %}</strong></div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px;margin-bottom:16px;">
+        <div class="card"><div class="card-body"><strong>{{ supply_context.summary.active_orders }}</strong><br><span style="color:#6b7280;">Órdenes activas</span></div></div>
+        <div class="card"><div class="card-body"><strong>{{ supply_context.summary.unique_insumos }}</strong><br><span style="color:#6b7280;">Insumos requeridos</span></div></div>
+        <div class="card"><div class="card-body"><strong>{{ supply_context.summary.shortage_insumos }}</strong><br><span style="color:#6b7280;">Insumos con faltante</span></div></div>
+        <div class="card"><div class="card-body"><strong>{{ supply_context.summary.coverage_rows_pct }}%</strong><br><span style="color:#6b7280;">Insumos cubiertos</span></div></div>
+        <div class="card"><div class="card-body"><strong>{{ supply_context.summary.covered_insumos }}</strong><br><span style="color:#6b7280;">Insumos sin bloqueo</span></div></div>
+        <div class="card"><div class="card-body"><strong>{{ supply_context.summary.purchase_generated_rows }}</strong><br><span style="color:#6b7280;">Con compra sugerida</span></div></div>
+      </div>
+
+      {% if supply_context.notes %}
+        <div style="display:grid;gap:8px;margin-bottom:16px;">
+          {% for note in supply_context.notes %}
+            <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;color:#475569;">
+              {{ note }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if supply_context.rows %}
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Insumo</th>
+                <th>Disponible real</th>
+                <th>Comprometido</th>
+                <th>Requerido</th>
+                <th>Faltante</th>
+                <th>Estatus stock</th>
+                <th>Cobertura</th>
+                <th>Queda libre</th>
+                <th>Origen stock</th>
+                <th>Solicitud sugerida</th>
+                <th>Órdenes / recetas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in supply_context.rows %}
+                <tr {% if row.is_blocker %}style="background:#fff7ed;"{% endif %}>
+                  <td>
+                    <strong>{{ row.insumo_nombre }}</strong>
+                    <div style="font-size:12px;color:#6b7280;">{{ row.unidad_codigo|default:"-" }}</div>
+                  </td>
+                  <td>{{ row.available_qty }} {{ row.unidad_codigo }}</td>
+                  <td>{{ row.committed_qty }} {{ row.unidad_codigo }}</td>
+                  <td>{{ row.required_qty }} {{ row.unidad_codigo }}</td>
+                  <td><strong>{{ row.shortage_qty }} {{ row.unidad_codigo }}</strong></td>
+                  <td>{{ row.status_label }}</td>
+                  <td>{{ row.coverage_pct }}%</td>
+                  <td>{{ row.remaining_after_commit }} {{ row.unidad_codigo }}</td>
+                  <td style="min-width:180px;">
+                    <div>{{ row.trace_label }}</div>
+                    <div style="font-size:12px;color:#6b7280;">Efectiva {{ row.trace_effective_at|default:"-" }}</div>
+                    <div style="font-size:12px;color:#6b7280;">Visible {{ row.visible_updated_at|date:"Y-m-d H:i"|default:"-" }}</div>
+                  </td>
+                  <td style="min-width:180px;">
+                    {% if row.purchase_folios_text %}
+                      <div><strong>{{ row.purchase_generated_qty }} {{ row.unidad_codigo }}</strong></div>
+                      <div style="font-size:12px;color:#6b7280;">{{ row.purchase_folios_text }}</div>
+                      <div style="font-size:12px;color:#6b7280;">{{ row.purchase_status_text }}</div>
+                    {% elif row.shortage_qty > 0 %}
+                      <div><strong>{{ row.shortage_qty }} {{ row.unidad_codigo }}</strong></div>
+                      <div style="font-size:12px;color:#6b7280;">Sugerir solicitud para cubrir faltante.</div>
+                    {% else %}
+                      <span style="color:#6b7280;">Sin solicitud</span>
+                    {% endif %}
+                  </td>
+                  <td style="min-width:220px;color:#6b7280;">
+                    <div>{{ row.branches_text }}</div>
+                    <div style="font-size:12px;margin-top:4px;">{{ row.recipes_text }}</div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p style="margin:0;color:#6b7280;">No hay insumos requeridos por órdenes activas para la fecha seleccionada.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if orders %}
+    {% for order in orders %}
+      <section class="card" style="margin-bottom:18px;">
+        <div class="card-body">
+          <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:14px;">
+            <div>
+              <h2 style="margin:0 0 6px 0;">{{ order.sucursal.codigo }} · {{ order.sucursal.nombre }}</h2>
+              <div style="color:#6b7280;">
+                Estado <strong>{{ order.get_status_display }}</strong> · Fuente {{ order.get_source_display }} · Versión {{ order.recommendation_version }}
+              </div>
+            </div>
+            <div style="color:#6b7280;">
+              {% if order.approved_by %}<div>Aprobó: {{ order.approved_by.username }}</div>{% endif %}
+              {% if order.approved_at %}<div>Aprobada: {{ order.approved_at }}</div>{% endif %}
+              {% if order.released_at %}<div>Liberada: {{ order.released_at }}</div>{% endif %}
+              {% if order.executed_at %}<div>Ejecutada: {{ order.executed_at }}</div>{% endif %}
+            </div>
+          </div>
+
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="fecha" value="{{ selected_date|date:'Y-m-d' }}">
+            <input type="hidden" name="order_id" value="{{ order.id }}">
+            <div class="table-responsive">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Recomendada</th>
+                    <th>Aprobada</th>
+                    <th>Ejecutada</th>
+                    <th>Score</th>
+                    <th>Riesgo</th>
+                    <th>Motivo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for line in order.lines.all %}
+                    <tr>
+                      <td>{{ line.receta.nombre }}</td>
+                      <td>{{ line.cantidad_recomendada }}</td>
+                      <td>
+                        <input type="number" step="0.001" min="0" name="approved_{{ line.id }}" value="{{ line.cantidad_aprobada|default_if_none:'' }}" class="form-control form-control-sm">
+                      </td>
+                      <td>
+                        <input type="number" step="0.001" min="0" name="executed_{{ line.id }}" value="{{ line.cantidad_ejecutada|default_if_none:'' }}" class="form-control form-control-sm">
+                      </td>
+                      <td>{{ line.decision_score }}</td>
+                      <td>{{ line.riesgo_merma }}</td>
+                      <td style="min-width:260px;color:#6b7280;">{{ line.motivo }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div style="margin-top:14px;">
+              <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;">
+                <div>
+                  <h3 style="margin:0 0 6px 0;font-size:16px;">Insumos requeridos para esta orden</h3>
+                  <p style="margin:0;color:#6b7280;">
+                    Se calcula contra inventario global visible del ERP. “Comprometido” es reserva operativa calculada con las órdenes activas del día.
+                  </p>
+                </div>
+                <div style="color:#6b7280;">
+                  <div>Insumos: <strong>{{ order.supply_reconciliation.item_count }}</strong></div>
+                  <div>Con faltante: <strong>{{ order.supply_reconciliation.shortage_items }}</strong></div>
+                  <div>Cubiertos: <strong>{{ order.supply_reconciliation.covered_items }}</strong></div>
+                  <div>Cobertura: <strong>{{ order.supply_reconciliation.coverage_rows_pct }}%</strong></div>
+                </div>
+              </div>
+              {% if order.supply_reconciliation.items %}
+                {% if order.supply_reconciliation.recipe_rows %}
+                  <div style="margin-top:12px;">
+                    <h4 style="margin:0 0 8px 0;font-size:15px;">Disponibilidad por receta</h4>
+                    <div style="display:grid;gap:12px;">
+                      {% for recipe_row in order.supply_reconciliation.recipe_rows %}
+                        <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#fafafa;">
+                          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px;">
+                            <div>
+                              <strong>{{ recipe_row.recipe_name }}</strong>
+                              <div style="font-size:12px;color:#6b7280;">Producción requerida: {{ recipe_row.units }}</div>
+                            </div>
+                            <div style="text-align:right;">
+                              <div><strong>{{ recipe_row.status_label }}</strong></div>
+                              <div style="font-size:12px;color:#6b7280;">{{ recipe_row.shortage_items }} de {{ recipe_row.item_count }} insumos con faltante</div>
+                            </div>
+                          </div>
+                          <div class="table-responsive">
+                            <table class="table table-sm" style="margin-bottom:0;">
+                              <thead>
+                                <tr>
+                                  <th>Insumo</th>
+                                  <th>Requerido</th>
+                                  <th>Disponible antes</th>
+                                  <th>Faltante</th>
+                                  <th>Estatus stock</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {% for recipe_item in recipe_row.items %}
+                                  <tr {% if recipe_item.shortage_qty > 0 %}style="background:#fff7ed;"{% endif %}>
+                                    <td><strong>{{ recipe_item.insumo_nombre }}</strong><div style="font-size:12px;color:#6b7280;">{{ recipe_item.unidad_codigo|default:"-" }}</div></td>
+                                    <td>{{ recipe_item.required_qty }} {{ recipe_item.unidad_codigo }}</td>
+                                    <td>{{ recipe_item.available_before_qty }} {{ recipe_item.unidad_codigo }}</td>
+                                    <td><strong>{{ recipe_item.shortage_qty }} {{ recipe_item.unidad_codigo }}</strong></td>
+                                    <td>{{ recipe_item.status_label }}</td>
+                                  </tr>
+                                {% endfor %}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                {% endif %}
+                <div class="table-responsive" style="margin-top:10px;">
+                  <table class="table table-sm">
+                    <thead>
+                      <tr>
+                        <th>Insumo</th>
+                        <th>Disponible antes</th>
+                        <th>Requerido</th>
+                        <th>Comprometido</th>
+                        <th>Faltante</th>
+                        <th>Estatus stock</th>
+                        <th>Queda</th>
+                        <th>Solicitud / compra</th>
+                        <th>Origen stock</th>
+                        <th>Recetas</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for item in order.supply_reconciliation.items %}
+                        <tr {% if item.shortage_qty > 0 %}style="background:#fff7ed;"{% endif %}>
+                          <td><strong>{{ item.insumo_nombre }}</strong><div style="font-size:12px;color:#6b7280;">{{ item.unidad_codigo|default:"-" }}</div></td>
+                          <td>{{ item.available_before_qty }} {{ item.unidad_codigo }}</td>
+                          <td>{{ item.required_qty }} {{ item.unidad_codigo }}</td>
+                          <td>{{ item.committed_qty }} {{ item.unidad_codigo }}</td>
+                          <td><strong>{{ item.shortage_qty }} {{ item.unidad_codigo }}</strong></td>
+                          <td>{{ item.status_label }}</td>
+                          <td>{{ item.available_after_qty }} {{ item.unidad_codigo }}</td>
+                          <td style="min-width:170px;">
+                            {% if item.purchase_folios_text %}
+                              <div><strong>{{ item.purchase_generated_qty }} {{ item.unidad_codigo }}</strong></div>
+                              <div style="font-size:12px;color:#6b7280;">{{ item.purchase_folios_text }}</div>
+                              <div style="font-size:12px;color:#6b7280;">{{ item.purchase_status_text }}</div>
+                            {% elif item.shortage_qty > 0 %}
+                              <div><strong>{{ item.purchase_gap_qty }} {{ item.unidad_codigo }}</strong></div>
+                              <div style="font-size:12px;color:#6b7280;">Pendiente de solicitar</div>
+                            {% else %}
+                              <span style="color:#6b7280;">Sin faltante</span>
+                            {% endif %}
+                          </td>
+                          <td style="min-width:180px;">
+                            <div>{{ item.trace_label }}</div>
+                            <div style="font-size:12px;color:#6b7280;">Efectiva {{ item.trace_effective_at|default:"-" }}</div>
+                            <div style="font-size:12px;color:#6b7280;">Visible {{ item.visible_updated_at|date:"Y-m-d H:i"|default:"-" }}</div>
+                          </td>
+                          <td style="min-width:180px;color:#6b7280;">{{ item.recipes_text }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% else %}
+                <p style="margin:10px 0 0 0;color:#6b7280;">La orden no requiere explosión de insumos o no tiene cantidades activas.</p>
+              {% endif %}
+            </div>
+            {% if can_manage_orders %}
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                {% if order.status == "PROPOSED" or order.status == "DRAFT" %}
+                  <button type="submit" name="action" value="approve" class="btn btn-primary">Aprobar</button>
+                {% endif %}
+                {% if order.status == "APPROVED" %}
+                  <button type="submit" name="action" value="release" class="btn btn-secondary">Liberar</button>
+                  <button type="submit" name="action" value="generate_purchases" class="btn btn-secondary">Generar compras</button>
+                {% endif %}
+                {% if order.status == "APPROVED" or order.status == "RELEASED" %}
+                  <button type="submit" name="action" value="execute" class="btn btn-secondary">Registrar ejecución</button>
+                {% endif %}
+                <button type="submit" name="action" value="sync" class="btn btn-secondary">Sincronizar bitácora</button>
+              </div>
+            {% endif %}
+          </form>
+        </div>
+      </section>
+    {% endfor %}
+  {% else %}
+    <div class="card">
+      <div class="card-body">
+        <p style="margin:0;color:#6b7280;">No hay órdenes para la fecha seleccionada.</p>
+      </div>
+    </div>
+  {% endif %}
+
+  <section class="card" style="margin-top:22px;margin-bottom:18px;">
+    <div class="card-body">
+      <h2 style="margin-top:0;">Solicitudes de compra generadas</h2>
+      {% if purchase_requests %}
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Prioridad</th>
+                <th>Folio</th>
+                <th>Sucursal</th>
+                <th>Insumo</th>
+                <th>Proveedor</th>
+                <th>Compra sugerida</th>
+                <th>Actual / objetivo</th>
+                <th>Cantidad</th>
+                <th>Estatus</th>
+                <th>Explicación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for snapshot in purchase_requests %}
+                <tr>
+                  <td><strong>{{ snapshot.purchase_priority_score }}</strong></td>
+                  <td>{{ snapshot.solicitud.folio }}</td>
+                  <td>{{ snapshot.sucursal.codigo|default:"-" }}</td>
+                  <td>{{ snapshot.insumo.nombre }}</td>
+                  <td>{{ snapshot.proveedor.nombre|default:"Sin proveedor" }}</td>
+                  <td>{{ snapshot.fecha_sugerida_compra|date:"Y-m-d"|default:"-" }}</td>
+                  <td>{{ snapshot.stock_actual }} / {{ snapshot.stock_objetivo }}</td>
+                  <td>{{ snapshot.cantidad_sugerida }} {{ snapshot.insumo.unidad_base.codigo|default:"" }}</td>
+                  <td>{{ snapshot.solicitud.get_estatus_display }}</td>
+                  <td style="color:#6b7280;">
+                    {{ snapshot.metadata.reason|default:snapshot.solicitud.justificacion_excepcion }}
+                    <div style="font-size:12px;margin-top:4px;">
+                      LT {{ snapshot.lead_time_dias }}d · Freq {{ snapshot.frecuencia_pedido_dias }}d · Lote mín {{ snapshot.lote_minimo }}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p style="margin:0;color:#6b7280;">No hay solicitudes automáticas para la fecha seleccionada.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom:18px;">
+    <div class="card-body">
+      <h2 style="margin-top:0;">Alertas críticas</h2>
+      {% if active_alerts %}
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Severidad</th>
+                <th>Entidad</th>
+                <th>Impacto</th>
+                <th>Mensaje</th>
+                {% if can_manage_orders %}<th>Resolver</th>{% endif %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for alert in active_alerts %}
+                <tr>
+                  <td>{{ alert.get_tipo_display }}</td>
+                  <td>{{ alert.severidad }}</td>
+                  <td>{{ alert.entidad }}</td>
+                  <td>${{ alert.impacto_estimado }}</td>
+                  <td style="color:#6b7280;">{{ alert.mensaje }}</td>
+                  {% if can_manage_orders %}
+                    <td style="min-width:220px;">
+                      <form method="post" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                        {% csrf_token %}
+                        <input type="hidden" name="fecha" value="{{ selected_date|date:'Y-m-d' }}">
+                        <input type="hidden" name="action" value="resolve_alert">
+                        <input type="hidden" name="alert_id" value="{{ alert.id }}">
+                        <input type="text" name="resolution_note" class="form-control form-control-sm" placeholder="Motivo / seguimiento">
+                        <input type="number" step="0.01" name="impacto_real" class="form-control form-control-sm" placeholder="Impacto real">
+                        <button type="submit" class="btn btn-secondary btn-sm">Resolver</button>
+                      </form>
+                    </td>
+                  {% endif %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p style="margin:0;color:#6b7280;">No hay alertas activas para la fecha seleccionada.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom:18px;">
+    <div class="card-body">
+      <h2 style="margin-top:0;">Alertas resueltas</h2>
+      {% if resolved_alerts %}
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Entidad</th>
+                <th>Resuelta por</th>
+                <th>Fecha</th>
+                <th>Nota</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for alert in resolved_alerts %}
+                <tr>
+                  <td>{{ alert.get_tipo_display }}</td>
+                  <td>{{ alert.entidad }}</td>
+                  <td>{{ alert.resolved_by.username|default:"-" }}</td>
+                  <td>{{ alert.resolved_at|date:"Y-m-d H:i" }}</td>
+                  <td style="color:#6b7280;">{{ alert.resolution_note|default:"-" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p style="margin:0;color:#6b7280;">No hay alertas resueltas para la fecha seleccionada.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom:18px;">
+    <div class="card-body">
+      <h2 style="margin-top:0;">Adopción del sistema</h2>
+      {% if operations_metrics %}
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+          <div><strong>{{ operations_metrics.adoption_pct }}%</strong><br><span style="color:#6b7280;">Adopción recomendada</span></div>
+          <div><strong>{{ operations_metrics.adopcion_real }}%</strong><br><span style="color:#6b7280;">Adopción real ejecutada</span></div>
+          <div><strong>{{ operations_metrics.approval_deviation_avg }}</strong><br><span style="color:#6b7280;">Desviación aprobación</span></div>
+          <div><strong>{{ operations_metrics.execution_deviation_avg }}</strong><br><span style="color:#6b7280;">Desviación ejecución</span></div>
+          <div><strong>{{ operations_metrics.merma_total }}</strong><br><span style="color:#6b7280;">Merma total</span></div>
+          <div><strong>${{ operations_metrics.impacto_economico_estimado }}</strong><br><span style="color:#6b7280;">Costo evitable estimado</span></div>
+          <div><strong>${{ operations_metrics.impacto_real }}</strong><br><span style="color:#6b7280;">Impacto real</span></div>
+          <div><strong>${{ operations_metrics.desviacion_impacto }}</strong><br><span style="color:#6b7280;">Desviación impacto</span></div>
+          <div><strong>{{ operations_metrics.efectividad_recomendaciones }}%</strong><br><span style="color:#6b7280;">Efectividad recomendaciones</span></div>
+        </div>
+        {% if branch_metrics %}
+          <div class="table-responsive" style="margin-top:16px;">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>Sucursal</th>
+                  <th>Adopción</th>
+                  <th>Modificadas</th>
+                  <th>Ignoradas</th>
+                  <th>Nivel</th>
+                  <th>Impacto real</th>
+                  <th>Impacto estimado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in branch_metrics %}
+                  <tr>
+                    <td>{{ row.branch_code }}</td>
+                    <td>{{ row.adopcion_real_pct }}%</td>
+                    <td>{{ row.modified_pct }}%</td>
+                    <td>{{ row.ignored_pct }}%</td>
+                    <td>{{ row.adoption_band }}</td>
+                    <td>${{ row.impacto_real }}</td>
+                    <td>${{ row.impacto_estimado }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      {% else %}
+        <p style="margin:0;color:#6b7280;">Aún no hay snapshot de métricas para la fecha seleccionada.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

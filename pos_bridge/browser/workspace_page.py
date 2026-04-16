@@ -38,9 +38,28 @@ class PointWorkspacePage:
         )
 
     def select_workspace(self, branch_hint: str | None = None) -> dict:
-        self.wait_until_loaded()
+        try:
+            self.wait_until_loaded()
+        except NavigationError:
+            current_url = self.page.url
+            if current_url and "/Account/workSpaces" not in current_url:
+                return {
+                    "workspace_onclick": "",
+                    "workspace_label": "",
+                    "workspace_url": current_url,
+                    "already_inside_workspace": True,
+                }
+            raise
         workspaces = self.list_workspaces()
         if not workspaces:
+            current_url = self.page.url
+            if current_url and "/Account/workSpaces" not in current_url:
+                return {
+                    "workspace_onclick": "",
+                    "workspace_label": "",
+                    "workspace_url": current_url,
+                    "already_inside_workspace": True,
+                }
             raise NavigationError("No se detectaron tarjetas de sucursal en Point.")
 
         selected = None
@@ -87,4 +106,6 @@ class PointWorkspacePage:
         return {
             "workspace_onclick": onclick,
             "workspace_label": selected.get("containerText") or selected.get("text") or "",
+            "workspace_url": self.page.url,
+            "already_inside_workspace": False,
         }

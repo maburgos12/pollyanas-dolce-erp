@@ -34,6 +34,7 @@ class PointSalesCategoryParsedReport:
 
 class PointSalesCategoryReportService:
     PRINT_REPORT_PATH = "/Report/PrintReportes/"
+    BRANCHES_PATH = "/Report/Get_Sucursales"
     REPORTE_CATEGORIA_ID = 3
     REPORT_TYPE_CATEGORY = "category"
     EXT_XLS = "Excel"
@@ -102,6 +103,31 @@ class PointSalesCategoryReportService:
             branch_external_id=branch_external_id,
             branch_display_name=branch_display_name,
         )
+        try:
+            return self.fetch_report_with_session(
+                auth_session=auth_session,
+                start_date=start_date,
+                end_date=end_date,
+                branch_external_id=branch_external_id,
+                branch_display_name=branch_display_name,
+                credito=credito,
+            )
+        finally:
+            try:
+                auth_session.session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def fetch_report_with_session(
+        self,
+        *,
+        auth_session,
+        start_date: date,
+        end_date: date,
+        branch_external_id: str | None = None,
+        branch_display_name: str | None = None,
+        credito: str | None = None,
+    ) -> PointSalesCategoryReportResult:
         params = self._build_params(
             start_date=start_date,
             end_date=end_date,
@@ -131,6 +157,37 @@ class PointSalesCategoryReportService:
             start_date=start_date,
             end_date=end_date,
         )
+
+    def list_available_branches(self) -> list[dict]:
+        auth_session = self.http_session_service.create()
+        try:
+            return self.list_available_branches_with_session(auth_session=auth_session)
+        finally:
+            try:
+                auth_session.session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def list_available_branches_with_session(self, *, auth_session) -> list[dict]:
+        request_url = urljoin(self.settings.base_url.rstrip("/") + "/", self.BRANCHES_PATH.lstrip("/"))
+        response = auth_session.session.get(request_url, timeout=self.settings.timeout_ms / 1000)
+        response.raise_for_status()
+        payload = response.json() or []
+        if not isinstance(payload, list):
+            return []
+        branches: list[dict] = []
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            branches.append(
+                {
+                    "external_id": str(row.get("PK_Sucursal") or "").strip(),
+                    "name": str(row.get("Sucursal") or "").strip(),
+                    "short_name": str(row.get("Sucursal_Corto") or "").strip(),
+                    "plaza_id": row.get("FK_Plaza"),
+                }
+            )
+        return branches
 
     def parse_report(self, *, report_path: str) -> PointSalesCategoryParsedReport:
         path = Path(report_path)

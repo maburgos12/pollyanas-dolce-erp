@@ -1,0 +1,609 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Inventario - Dashboard{% endblock %}
+{% block page_title %}Inventario · Dashboard{% endblock %}
+{% block body_class %}page-inventario-dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell">
+  <nav class="module-tabs">
+    <a class="module-tab active" href="{% url 'inventario:home' %}">Dashboard</a>
+    <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
+    <a class="module-tab" href="{% url 'inventario:alertas' %}">Alertas</a>
+    <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
+    <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
+    <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Referencias</a>
+    <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Inventario</div>
+      <h1 class="bi-hero-title">Control de cobertura</h1>
+      <p class="bi-copy">Existencia, alerta comercial, carga de almacén y presión de reabasto en una sola lectura útil.</p>
+      <div class="bi-hero-highlights">
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Artículos visibles</div>
+          <div class="bi-hero-highlight-value">{{ total_items|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ healthy_count|intcomma }} sin presión inmediata{% if total_unfiltered_count != total_items %} · {{ total_unfiltered_count|intcomma }} en red{% endif %}</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Alertas abiertas</div>
+          <div class="bi-hero-highlight-value">{{ below_reorder_count|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ critical_out_count|intcomma }} sin stock</div>
+        </article>
+        <article class="bi-hero-highlight">
+          <div class="bi-hero-highlight-label">Demanda visible</div>
+          <div class="bi-hero-highlight-value">{{ sales_demand_signal.units_total|default:0|floatformat:0|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">{{ sales_demand_signal.recipes_count|default:0|intcomma }} productos ligados</div>
+        </article>
+      </div>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card">
+          <span class="bi-status-label">Último corte aplicado</span>
+          <strong>{{ sync_freshness_label }}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Origen</span>
+          <strong>{% if latest_sync %}{{ latest_sync.get_source_display }}{% else %}Pendiente{% endif %}</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Referencias</span>
+          <strong>{{ pending_visible_count|intcomma }} visibles</strong>
+        </article>
+        <article class="bi-status-card">
+          <span class="bi-status-label">Calidad de match</span>
+          <strong>{{ match_rate|floatformat:1 }}%</strong>
+        </article>
+      </div>
+      <form class="bi-filterbar" method="get">
+        <div class="bi-control">
+          <label for="focus">Foco</label>
+          <select id="focus" name="focus">
+            {% for option in focus_options %}
+            <option value="{{ option.value }}" {% if selected_focus == option.value %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="categoria">Categoría</label>
+          <select id="categoria" name="categoria">
+            <option value="">Todas</option>
+            {% for option in categoria_options %}
+            <option value="{{ option }}" {% if selected_categoria == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="clase">Clase</label>
+          <select id="clase" name="clase">
+            {% for option in clase_options %}
+            <option value="{{ option.value }}" {% if selected_clase == option.value %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bi-control">
+          <label for="inventory-q">Artículo</label>
+          <input id="inventory-q" name="q" type="text" value="{{ selected_q }}" placeholder="Nombre, categoría o código">
+        </div>
+        <div class="bi-control">
+          <button class="btn btn-secondary btn-sm" type="submit">Aplicar filtros</button>
+        </div>
+      </form>
+      <div class="bi-summary-band">
+        <div class="bi-summary-chip">
+          <span>Corte</span>
+          <strong>{% if latest_sync %}{{ sync_freshness_label }}{% else %}Sin corte válido{% endif %}</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Origen</span>
+          <strong>{% if latest_sync %}{{ latest_sync.get_source_display }}{% else %}Pendiente{% endif %}</strong>
+        </div>
+        <div class="bi-summary-chip">
+          <span>Match</span>
+          <strong>{{ match_rate|floatformat:1 }}%</strong>
+        </div>
+        {% if selected_q %}
+        <div class="bi-summary-chip">
+          <span>Búsqueda</span>
+          <strong>{{ selected_q }}</strong>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="bi-kpi-grid">
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if critical_out_count %}danger{% else %}success{% endif %}">{{ critical_out_count|intcomma }}</div>
+      <div class="bi-kpi-label">Sin stock</div>
+      <div class="bi-kpi-note">Artículos ya rotos y sin cobertura operativa.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if below_reorder_count %}warning{% else %}success{% endif %}">{{ below_reorder_count|intcomma }}</div>
+      <div class="bi-kpi-label">Bajo reorden</div>
+      <div class="bi-kpi-note">Artículos con señal activa de reabasto o compra.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if pending_visible_count %}warning{% else %}success{% endif %}">{{ pending_visible_count|intcomma }}</div>
+      <div class="bi-kpi-label">Referencias pendientes</div>
+      <div class="bi-kpi-note">Nombres visibles que todavía requieren homologación o cierre.</div>
+    </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if movement_total %}success{% else %}warning{% endif %}">{{ movement_total|intcomma }}</div>
+      <div class="bi-kpi-label">Eventos 30 días</div>
+      <div class="bi-kpi-note">Entradas, salidas, consumos y ajustes con evidencia reciente.</div>
+    </article>
+  </section>
+
+  <section class="bi-grid-feature">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Cobertura</div>
+          <h2 class="bi-panel-title">Salud del inventario</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill {% if critical_out_count or below_reorder_count %}warning{% else %}success{% endif %}">Lectura visible</span>
+          <a class="btn btn-secondary btn-sm" href="{{ existencias_url }}">Abrir existencias</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage">
+        <canvas id="inventoryHealthChart" aria-label="Distribución de salud del inventario" role="img"></canvas>
+      </div>
+      <div class="bi-insight-grid">
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Sin stock</div>
+          <div class="bi-insight-value">{{ critical_out_count|intcomma }}</div>
+          <div class="bi-insight-meta">Requieren acción inmediata</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Bajo reorden</div>
+          <div class="bi-insight-value">{{ below_reorder_count|intcomma }}</div>
+          <div class="bi-insight-meta">Protege surtido y producción</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Saludable</div>
+          <div class="bi-insight-value">{{ healthy_count|intcomma }}</div>
+          <div class="bi-insight-meta">Operan sin presión inmediata</div>
+        </article>
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Prioridad</div>
+          <h2 class="bi-panel-title">Cobertura más presionada</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <span class="bi-pill warning">Top críticos</span>
+          <a class="btn btn-secondary btn-sm" href="{{ alertas_url }}">Abrir alertas</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage">
+        <canvas id="inventoryCoverageChart" aria-label="Cobertura vs reorden" role="img"></canvas>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in top_shortage_rows %}
+        <article class="bi-list-item is-tight is-signal-{% if row.coverage_pct == 0 %}danger{% elif row.coverage_pct < 60 %}warning{% else %}neutral{% endif %}">
+          <strong>{{ row.name }}</strong>
+          <div>{{ row.coverage_pct|floatformat:0 }}% cobertura · stock {{ row.stock|floatformat:2 }} / reorden {{ row.reorder|floatformat:2 }}</div>
+          {% if row.missing and row.missing.0 != "Sin faltante" %}
+          <div class="bi-subtle">Faltante maestro: {{ row.missing|join:", " }}</div>
+          {% endif %}
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.detail_url }}">Ver existencia</a>
+            <a class="bi-inline-link" href="{{ row.alert_url }}">Ver alerta</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin críticos visibles</strong><div class="bi-subtle">No hay artículos por debajo del reorden.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Demanda</div>
+          <h2 class="bi-panel-title">Artículos con mayor presión comercial</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ compras_url }}">Ir a compras</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="inventoryDemandChart" aria-label="Artículos con mayor presión comercial" role="img"></canvas>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in commercial_priority_rows %}
+        <article class="bi-list-item is-tight is-signal-{{ row.priority_tone|default:'neutral' }}">
+          <strong>{{ row.insumo_nombre }}</strong>
+          <div>{{ row.historico_units|floatformat:0|intcomma }} unidades ligadas · brecha {{ row.gap|floatformat:2 }}</div>
+          <div class="bi-subtle">{% if row.recipe_names %}{{ row.recipe_names|join:", " }}{% else %}Sin producto dominante{% endif %}</div>
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">{{ row.action_label|default:"Asegurar artículo" }}</a>
+            <a class="bi-inline-link" href="{{ compras_url }}">Cruzar con compras</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin presión comercial visible</strong><div class="bi-subtle">No hay artículos ligados a demanda reciente.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Movimiento</div>
+          <h2 class="bi-panel-title">Ledger últimos 30 días</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ movimientos_url }}">Abrir movimientos</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="inventoryMovementChart" aria-label="Movimientos de inventario recientes" role="img"></canvas>
+      </div>
+      <div class="bi-insight-grid">
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Eventos</div>
+          <div class="bi-insight-value">{{ movement_total|intcomma }}</div>
+          <div class="bi-insight-meta">Entradas, salidas, consumos y ajustes</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Entradas</div>
+          <div class="bi-insight-value">{{ movement_mix_rows.0.value|intcomma }}</div>
+          <div class="bi-insight-meta">Refuerzan disponibilidad</div>
+        </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Consumos</div>
+          <div class="bi-insight-value">{{ movement_mix_rows.2.value|intcomma }}</div>
+          <div class="bi-insight-meta">Descarga productiva visible</div>
+        </article>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-grid-2">
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Calidad</div>
+          <h2 class="bi-panel-title">Cortes de almacén recientes</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{% url 'inventario:importar_archivos' %}">Abrir cortes</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="inventorySyncChart" aria-label="Calidad de cortes de almacén" role="img"></canvas>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in pending_rows %}
+        <article class="bi-list-item is-tight is-signal-warning">
+          <strong>{{ row.name }}</strong>
+          <div>{{ row.count|intcomma }} filas · {{ row.sources }}</div>
+          {% if row.suggestion %}<div class="bi-subtle">Sugerencia: {{ row.suggestion }}</div>{% endif %}
+          <div class="bi-inline-actions">
+            <a class="bi-inline-link" href="{{ row.action_url }}">Abrir referencia</a>
+          </div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item is-tight is-signal-success">
+          <strong>Sin referencias pendientes</strong>
+          <div class="bi-subtle">La carga visible no tiene nombres abiertos.</div>
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="bi-panel">
+      <div class="bi-panel-head">
+        <div>
+          <div class="bi-kicker">Señal</div>
+          <h2 class="bi-panel-title">Productos que empujan consumo</h2>
+        </div>
+        <div class="bi-panel-actions">
+          <a class="btn btn-secondary btn-sm" href="{{ compras_url }}">Cruzar con compras</a>
+        </div>
+      </div>
+      <div class="bi-chart-stage compact">
+        <canvas id="inventoryProductSignalChart" aria-label="Productos que empujan el consumo" role="img"></canvas>
+      </div>
+      <div class="bi-list bi-list-dense">
+        {% for row in sales_demand_signal.top_products|slice:":4" %}
+        <article class="bi-list-item is-tight">
+          <strong>{{ row.receta__nombre }}</strong>
+          <div>{{ row.total|floatformat:0|intcomma }} unidades recientes</div>
+        </article>
+        {% empty %}
+        <article class="bi-list-item"><strong>Sin señal comercial suficiente</strong><div class="bi-subtle">Falta histórico útil para ligar productos e inventario.</div></article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <details class="bi-audit-details">
+    <summary>Detalle auditable del inventario</summary>
+    <div class="bi-grid-2 bi-grid-tight">
+      <article class="bi-panel">
+        <div class="bi-panel-head">
+          <div>
+            <div class="bi-kicker">Detalle</div>
+            <h2 class="bi-panel-title">Artículos críticos</h2>
+          </div>
+          <div class="bi-panel-actions">
+            <a class="btn btn-secondary btn-sm" href="{{ alertas_url }}">Ver alertas</a>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Artículo</th>
+                <th>Stock</th>
+                <th>Reorden</th>
+                <th>Cobertura</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in top_shortage_rows %}
+              <tr>
+                <td>{{ row.name }}</td>
+                <td>{{ row.stock|floatformat:2 }}</td>
+                <td>{{ row.reorder|floatformat:2 }}</td>
+                <td>{{ row.coverage_pct|floatformat:1 }}%</td>
+                <td>
+                  <div class="bi-inline-actions">
+                    <a class="bi-inline-link" href="{{ row.detail_url }}">Existencia</a>
+                    <a class="bi-inline-link" href="{{ row.alert_url }}">Alerta</a>
+                  </div>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="muted">No hay artículos críticos visibles.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="bi-panel">
+        <div class="bi-panel-head">
+          <div>
+            <div class="bi-kicker">Detalle</div>
+            <h2 class="bi-panel-title">Foco de abastecimiento</h2>
+          </div>
+          <div class="bi-panel-actions">
+            <a class="btn btn-secondary btn-sm" href="{{ compras_url }}">Ir a solicitudes</a>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Artículo</th>
+                <th>Producto dominante</th>
+                <th>Demanda</th>
+                <th>Brecha</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in supply_focus_rows %}
+              <tr>
+                <td>{{ row.insumo_nombre }}</td>
+                <td>{{ row.dominant_recipe_name }}</td>
+                <td>{{ row.historico_units|floatformat:0 }}</td>
+                <td>
+                  {{ row.gap|floatformat:2 }}
+                  <div class="bi-inline-actions">
+                    <a class="bi-inline-link" href="{{ row.action_url }}">{{ row.action_label|default:"Asegurar" }}</a>
+                  </div>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="4" class="muted">No hay foco de abastecimiento visible.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  </details>
+</div>
+
+{{ health_rows|json_script:"inventory-health-data" }}
+{{ shortage_chart_rows|json_script:"inventory-shortage-data" }}
+{{ demand_rows|json_script:"inventory-demand-data" }}
+{{ movement_mix_rows|json_script:"inventory-movement-data" }}
+{{ sync_quality_rows|json_script:"inventory-sync-data" }}
+{{ product_signal_rows|json_script:"inventory-product-data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  (() => {
+    const parse = (id) => {
+      const el = document.getElementById(id);
+      if (!el) return [];
+      try { return JSON.parse(el.textContent || "[]"); } catch (_) { return []; }
+    };
+
+    const makeChart = (id, config) => {
+      const el = document.getElementById(id);
+      if (!el || typeof Chart === "undefined") return;
+      new Chart(el, config);
+    };
+
+    const palette = {
+      vino: "#8b2252",
+      vinoSoft: "rgba(139, 34, 82, 0.15)",
+      success: "#236d53",
+      successSoft: "rgba(35, 109, 83, 0.18)",
+      warning: "#b38a25",
+      warningSoft: "rgba(179, 138, 37, 0.18)",
+      danger: "#bc3b3b",
+      dangerSoft: "rgba(188, 59, 59, 0.18)",
+      neutral: "#7c6f76",
+      neutralSoft: "rgba(124, 111, 118, 0.18)",
+    };
+
+    const healthRows = parse("inventory-health-data");
+    makeChart("inventoryHealthChart", {
+      type: "doughnut",
+      data: {
+        labels: healthRows.map((row) => row.label),
+        datasets: [{
+          data: healthRows.map((row) => row.value),
+          backgroundColor: [palette.successSoft, palette.warningSoft, palette.dangerSoft, palette.vinoSoft],
+          borderColor: [palette.success, palette.warning, palette.danger, palette.vino],
+          borderWidth: 1.5,
+        }],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.raw}` } },
+        },
+      },
+    });
+
+    const shortageRows = parse("inventory-shortage-data");
+    makeChart("inventoryCoverageChart", {
+      type: "bar",
+      data: {
+        labels: shortageRows.map((row) => row.label),
+        datasets: [{
+          label: "Cobertura %",
+          data: shortageRows.map((row) => row.value),
+          backgroundColor: palette.warningSoft,
+          borderColor: palette.warning,
+          borderWidth: 1.5,
+          borderRadius: 10,
+        }],
+      },
+      options: {
+        indexAxis: "y",
+        maintainAspectRatio: false,
+        scales: {
+          x: { beginAtZero: true, max: 100, ticks: { callback: (value) => `${value}%` } },
+          y: { ticks: { autoSkip: false } },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => `Cobertura: ${ctx.raw.toFixed(1)}%` } },
+        },
+      },
+    });
+
+    const demandRows = parse("inventory-demand-data");
+    makeChart("inventoryDemandChart", {
+      type: "bar",
+      data: {
+        labels: demandRows.map((row) => row.label),
+        datasets: [{
+          label: "Unidades ligadas",
+          data: demandRows.map((row) => row.value),
+          backgroundColor: palette.vinoSoft,
+          borderColor: palette.vino,
+          borderWidth: 1.5,
+          borderRadius: 10,
+        }],
+      },
+      options: {
+        indexAxis: "y",
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+      },
+    });
+
+    const movementRows = parse("inventory-movement-data");
+    makeChart("inventoryMovementChart", {
+      type: "bar",
+      data: {
+        labels: movementRows.map((row) => row.label),
+        datasets: [{
+          label: "Eventos",
+          data: movementRows.map((row) => row.value),
+          backgroundColor: [palette.successSoft, palette.dangerSoft, palette.vinoSoft, palette.warningSoft],
+          borderColor: [palette.success, palette.danger, palette.vino, palette.warning],
+          borderWidth: 1.5,
+          borderRadius: 10,
+        }],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.raw} eventos` } },
+        },
+      },
+    });
+
+    const syncRows = parse("inventory-sync-data");
+    makeChart("inventorySyncChart", {
+      type: "bar",
+      data: {
+        labels: syncRows.map((row) => row.label),
+        datasets: [
+          {
+            label: "Match",
+            data: syncRows.map((row) => row.matched),
+            backgroundColor: palette.successSoft,
+            borderColor: palette.success,
+            borderWidth: 1.5,
+            borderRadius: 10,
+          },
+          {
+            label: "Pendientes",
+            data: syncRows.map((row) => row.unmatched),
+            backgroundColor: palette.warningSoft,
+            borderColor: palette.warning,
+            borderWidth: 1.5,
+            borderRadius: 10,
+          },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { position: "bottom" } },
+      },
+    });
+
+    const productRows = parse("inventory-product-data");
+    makeChart("inventoryProductSignalChart", {
+      type: "bar",
+      data: {
+        labels: productRows.map((row) => row.label),
+        datasets: [{
+          label: "Unidades recientes",
+          data: productRows.map((row) => row.value),
+          backgroundColor: palette.vinoSoft,
+          borderColor: palette.vino,
+          borderWidth: 1.5,
+          borderRadius: 10,
+        }],
+      },
+      options: {
+        indexAxis: "y",
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+      },
+    });
+  })();
+</script>
+{% endblock %}

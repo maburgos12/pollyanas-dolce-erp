@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Reportes - Presupuestos por área{% endblock %}
+{% block page_title %}Reportes · Carga de presupuesto por área{% endblock %}
+{% block body_class %}page-reportes-presupuesto-areas{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260406b">
+<style>
+  .budget-shell { display:grid; gap:1.4rem; }
+  .budget-grid { display:grid; gap:1rem; grid-template-columns:repeat(3, minmax(0, 1fr)); }
+  .budget-summary-grid { display:grid; gap:1rem; grid-template-columns:repeat(4, minmax(0, 1fr)); }
+  .budget-summary-card, .budget-area-card {
+    background:#fff;
+    border:1px solid var(--inv-line);
+    border-radius:22px;
+    box-shadow:0 14px 28px rgba(21,37,56,.05);
+  }
+  .budget-summary-card { padding:1rem 1.1rem; }
+  .budget-summary-card strong { display:block; font-size:1.55rem; color:var(--inv-ink); margin-top:.35rem; }
+  .budget-area-card { padding:1.15rem; display:grid; gap:.9rem; }
+  .budget-area-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
+  .budget-area-card h2 { margin:0; font-size:1.1rem; color:var(--inv-ink); }
+  .budget-meta-list, .budget-rule-list { display:grid; gap:.55rem; margin:0; padding:0; list-style:none; }
+  .budget-meta-item, .budget-rule-item {
+    padding:.75rem .85rem;
+    border-radius:16px;
+    background:rgba(23,50,77,.06);
+    color:var(--inv-muted);
+  }
+  .budget-file-input { display:grid; gap:.55rem; }
+  .budget-file-input input[type="file"] {
+    padding:.8rem;
+    border:1px dashed rgba(23,50,77,.22);
+    border-radius:16px;
+    background:rgba(246,248,251,.75);
+  }
+  .budget-history-meta { display:grid; gap:.15rem; }
+  .budget-chip-stack { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .budget-empty { padding:1rem; border:1px dashed var(--inv-line); border-radius:18px; color:var(--inv-muted); }
+  @media (max-width: 1180px) {
+    .budget-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+    .budget-summary-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 780px) {
+    .budget-grid, .budget-summary-grid { grid-template-columns:1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="investment-shell budget-shell">
+  <nav class="module-tabs">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="investment-header">
+    <article class="investment-hero">
+      <div class="investment-kicker">Consolidación operativa</div>
+      <h1 class="investment-title">Carga de presupuesto por área</h1>
+      <p class="investment-copy">Cada responsable sube su archivo en el bloque que le corresponde. El ERP valida formato, ejecuta el importador existente, actualiza resumen mensual y deja bitácora con usuario, archivo, periodos y resultado.</p>
+      <div class="investment-meta">
+        <span class="investment-pill">Sin modelos nuevos</span>
+        <span class="investment-pill">Importadores reutilizados</span>
+        <span class="investment-pill">Bitácora por área</span>
+      </div>
+    </article>
+    <aside class="investment-side">
+      <div class="investment-actions">
+        <a class="investment-action-link is-ghost" href="{% url 'reportes:financiero' %}">Volver a Financiero</a>
+      </div>
+      <div class="budget-rule-list">
+        {% for item in upload_help %}
+        <div class="budget-rule-item">{{ item }}</div>
+        {% endfor %}
+      </div>
+    </aside>
+  </section>
+
+  <section class="budget-summary-grid">
+    <article class="budget-summary-card">
+      <div class="investment-kicker">Áreas disponibles</div>
+      <strong>{{ area_cards|length|intcomma }}</strong>
+      <div class="investment-muted">Bloques operativos listos para captura.</div>
+    </article>
+    <article class="budget-summary-card">
+      <div class="investment-kicker">Exitosas</div>
+      <strong>{{ status_counts.success|intcomma }}</strong>
+      <div class="investment-muted">Importaciones con consolidación completada.</div>
+    </article>
+    <article class="budget-summary-card">
+      <div class="investment-kicker">Con error</div>
+      <strong>{{ status_counts.error|intcomma }}</strong>
+      <div class="investment-muted">Intentos rechazados por formato o validación.</div>
+    </article>
+    <article class="budget-summary-card">
+      <div class="investment-kicker">Última ejecución</div>
+      <strong>{% if latest_upload %}{{ latest_upload.area_label }}{% else %}Sin historial{% endif %}</strong>
+      <div class="investment-muted">{% if latest_upload %}{{ latest_upload.timestamp|date:"Y-m-d H:i" }} · {{ latest_upload.status }}{% else %}Aún no hay cargas{% endif %}</div>
+    </article>
+  </section>
+
+  <section class="budget-grid">
+    {% for card in area_cards %}
+    <article class="budget-area-card">
+      <div class="budget-area-head">
+        <div>
+          <div class="investment-kicker">Área responsable</div>
+          <h2>{{ card.definition.label }}</h2>
+        </div>
+        {% if card.latest %}
+        <span class="investment-status-pill {% if card.latest.status == 'SUCCESS' %}is-active{% elif card.latest.status == 'DUPLICATE' %}is-warning{% else %}is-danger{% endif %}">
+          {{ card.latest.status }}
+        </span>
+        {% else %}
+        <span class="investment-pill">Sin cargas</span>
+        {% endif %}
+      </div>
+
+      <p class="investment-copy" style="margin:0;">{{ card.definition.description }}</p>
+
+      <ul class="budget-meta-list">
+        <li class="budget-meta-item"><strong>Archivo esperado:</strong> {{ card.definition.expected_filename }}</li>
+        <li class="budget-meta-item"><strong>Hojas esperadas:</strong> {{ card.definition.expected_sheets|join:", " }}</li>
+        <li class="budget-meta-item"><strong>Año detectado:</strong> {% if card.latest and card.latest.target_year %}{{ card.latest.target_year }}{% else %}Se resuelve desde el archivo{% endif %}</li>
+        <li class="budget-meta-item"><strong>Cargas visibles:</strong> {{ card.import_count|intcomma }}</li>
+      </ul>
+
+      {% if card.latest %}
+      <div class="budget-history-meta">
+        <span><strong>Último archivo:</strong> {{ card.latest.original_filename|default:card.latest.canonical_filename }}</span>
+        <span class="investment-muted">{{ card.latest.user_label }} · {{ card.latest.timestamp|date:"Y-m-d H:i" }}</span>
+      </div>
+      <div class="budget-chip-stack">
+        {% for period in card.latest.periods %}
+        <span class="investment-pill">{{ period }}</span>
+        {% empty %}
+        <span class="investment-muted">Sin periodos visibles</span>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="investment-muted">Todavía no hay historial registrado para esta área.</div>
+      {% endif %}
+
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="hidden" name="area_key" value="{{ card.definition.key }}">
+        <div class="budget-file-input">
+          <input type="file" name="budget_file" accept=".xlsx" required>
+          <button class="investment-button" type="submit">Subir archivo de {{ card.definition.label }}</button>
+        </div>
+      </form>
+    </article>
+    {% endfor %}
+  </section>
+
+  <article class="investment-panel">
+    <div class="investment-panel-head">
+      <div>
+        <div class="investment-kicker">Historial</div>
+        <h2 class="investment-panel-title">Bitácora reciente por área</h2>
+      </div>
+    </div>
+    {% if history_rows %}
+    <div class="investment-table-wrap">
+      <table class="investment-table">
+        <thead>
+          <tr>
+            <th>Área</th>
+            <th>Archivo</th>
+            <th>Estatus</th>
+            <th>Usuario</th>
+            <th>Fecha</th>
+            <th>Periodos / hojas</th>
+            <th>Resultado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in history_rows %}
+          <tr>
+            <td>{{ row.area_label }}</td>
+            <td>
+              <div class="budget-history-meta">
+                <strong>{{ row.original_filename|default:row.canonical_filename }}</strong>
+                <span class="investment-muted">{{ row.expected_filename }}{% if row.target_year %} · {{ row.target_year }}{% endif %}</span>
+              </div>
+            </td>
+            <td>
+              <span class="investment-status-pill {% if row.status == 'SUCCESS' %}is-active{% elif row.status == 'DUPLICATE' %}is-warning{% else %}is-danger{% endif %}">
+                {{ row.status }}
+              </span>
+            </td>
+            <td>{{ row.user_label }}</td>
+            <td>{{ row.timestamp|date:"Y-m-d H:i" }}</td>
+            <td>
+              <div class="budget-chip-stack">
+                {% for period in row.periods %}
+                <span class="investment-pill">{{ period }}</span>
+                {% empty %}
+                <span class="investment-muted">Sin periodos</span>
+                {% endfor %}
+              </div>
+              <div class="budget-chip-stack" style="margin-top:.35rem;">
+                {% for sheet in row.sheets_imported %}
+                <span class="investment-pill">{{ sheet }}</span>
+                {% empty %}
+                <span class="investment-muted">Sin hojas importadas</span>
+                {% endfor %}
+              </div>
+            </td>
+            <td>
+              <div class="budget-history-meta">
+                <span>{{ row.lines_created|intcomma }} nuevas · {{ row.lines_updated|intcomma }} actualizadas</span>
+                <span class="investment-muted">{{ row.snapshot_rows_created|intcomma }} resumen(es) nuevos · {{ row.snapshot_rows_updated|intcomma }} actualizados</span>
+                {% if row.detail %}<span class="investment-muted">{{ row.detail }}</span>{% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="budget-empty">Todavía no hay bitácora de cargas de presupuesto.</div>
+    {% endif %}
+  </article>
+</div>
+{% endblock %}

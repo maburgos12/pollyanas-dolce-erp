@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
+import re
 
 from django.db.models import Q
 
@@ -64,15 +65,27 @@ def resolve_preparation_recipe_for_insumo(insumo: Insumo | None) -> Receta | Non
         return None
 
     qs = Receta.objects.filter(tipo=Receta.TIPO_PREPARACION)
+    derived_code = (insumo.codigo or "").strip()
+    derived_match = re.match(r"^DERIVADO:RECETA:(\d+):PREPARACION$", derived_code)
+    if derived_match:
+        receta_id = int(derived_match.group(1))
+        receta = qs.filter(id=receta_id).order_by("id").first()
+        if receta:
+            return receta
+
     if (insumo.codigo_point or "").strip():
         receta = qs.filter(codigo_point__iexact=(insumo.codigo_point or "").strip()).order_by("id").first()
         if receta:
             return receta
 
-    normalized_name = normalizar_nombre(insumo.nombre_point or insumo.nombre or "")
-    if not normalized_name:
-        return None
-    return qs.filter(nombre_normalizado=normalized_name).order_by("id").first()
+    for raw_name in [insumo.nombre, insumo.nombre_point]:
+        normalized_name = normalizar_nombre(raw_name or "")
+        if not normalized_name:
+            continue
+        receta = qs.filter(nombre_normalizado=normalized_name).order_by("id").first()
+        if receta:
+            return receta
+    return None
 
 
 def resolve_insumo_unit_cost(insumo: Insumo | None) -> tuple[Decimal | None, UnidadMedida | None, str]:
@@ -98,7 +111,13 @@ def resolve_line_snapshot_cost(linea: LineaReceta) -> tuple[Decimal | None, str]
     if unit_cost is None or unit_cost <= 0:
         return None, source_label
 
-    target_unit = linea.unidad or linea.insumo.unidad_base or source_unit
+    target_unit = linea.unidad
+    if target_unit is None and source_label == "RECETA_PREPARACION":
+        # En líneas históricas sin unidad explícita de preparaciones internas,
+        # la cantidad suele venir en la unidad de rendimiento de la receta base.
+        target_unit = source_unit
+    if target_unit is None:
+        target_unit = linea.insumo.unidad_base or source_unit
     if target_unit is None or source_unit is None:
         return None, f"{source_label}_SIN_UNIDAD"
 

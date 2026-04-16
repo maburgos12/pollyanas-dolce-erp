@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-03-31T00:16:59.645072+00:00",
+  "summary": {
+    "workspace": "Matriz",
+    "products_seen": 150,
+    "products_skipped_non_recipe": 0,
+    "products_with_product_bom": 0,
+    "products_missing_recipe_in_point": 0,
+    "products_audited": 0,
+    "products_derived_presentations": 0,
+    "corroborated_from_insumos": 0,
+    "possible_matches_requiring_review": 0,
+    "internal_candidates_without_bom": 0,
+    "missing_without_candidates": 0
+  },
+  "items": []
+}

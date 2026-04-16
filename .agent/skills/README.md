@@ -31,6 +31,7 @@ Director General mode always applies in this repository.
 5. `40-domain-finance/skill-costing-pricing/playbooks/costeo_por_rendimiento_y_presentacion.md`
 6. `30-integrations/skill-pointmeup-ingestion/playbooks/point_recetas_multinivel_y_addons.md`
 7. `40-domain-finance/skill-costing-pricing/playbooks/costeo_mp_con_addons_point.md`
-8. `30-integrations/skill-google-sheets-bridge/playbooks/google_drive_inventory_sync_playbook.md`
-9. `70-security-compliance/skill-rbac-permissions/playbooks/rbac_matrix_operativa.md`
-10. `50-reporting-bi/skill-kpi-definitions/playbooks/kpi_dictionary_governance.md`
+8. `30-integrations/skill-pointmeup-ingestion/playbooks/point_inventory_unit_cost_loop.md`
+9. `30-integrations/skill-google-sheets-bridge/playbooks/google_drive_inventory_sync_playbook.md`
+10. `70-security-compliance/skill-rbac-permissions/playbooks/rbac_matrix_operativa.md`
+11. `50-reporting-bi/skill-kpi-definitions/playbooks/kpi_dictionary_governance.md`

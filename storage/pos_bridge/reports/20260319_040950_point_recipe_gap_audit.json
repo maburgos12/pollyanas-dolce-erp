@@ -1,0 +1,2056 @@
+{
+  "generated_at": "2026-03-19T04:09:50.793831+00:00",
+  "summary": {
+    "workspace": "Matriz",
+    "products_seen": 150,
+    "products_with_product_bom": 39,
+    "products_missing_recipe_in_point": 111,
+    "products_audited": 111,
+    "corroborated_from_insumos": 0,
+    "possible_matches_requiring_review": 4,
+    "internal_candidates_without_bom": 0,
+    "missing_without_candidates": 107
+  },
+  "items": [
+    {
+      "product": {
+        "pk_producto": 507,
+        "codigo": "700818123170",
+        "nombre": "SET CUCHARA MEDIDORA",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 616,
+        "codigo": "404-0-0017",
+        "nombre": "3 MANGAS PASTELERAS REUTILIZABLES",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 617,
+        "codigo": "404-0-0018",
+        "nombre": "3 MANGAS PASTELERAS REUTILIZABLES",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 291,
+        "codigo": "10063",
+        "nombre": "ADEREZO AGRIDULCE",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 627,
+        "codigo": "03-3120",
+        "nombre": "BASE GIRATORA PARA DECORAR 30.4CM DIAMETRO",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 577,
+        "codigo": "P10X15",
+        "nombre": "Bolsa celofán 10x15",
+        "familia": "Plásticos",
+        "categoria": "PLÁSTICOS",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 611,
+        "codigo": "418-612",
+        "nombre": "Boquilla para petalo",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 504,
+        "codigo": "700818121519",
+        "nombre": "BROCHA SILICON",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 361,
+        "codigo": "803",
+        "nombre": "CAJA BOLLO 1 PZ P7VENTA",
+        "familia": "Accesorios",
+        "categoria": "Bollo",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": {
+        "pk_articulo": 442,
+        "codigo": "47131803",
+        "nombre": "TOALLAS DESINFECTANTES MEMBERS MARK",
+        "categoria": "HIGIENE Y LIMPIEZA",
+        "has_recipe_flag": false,
+        "score": 39.02,
+        "search_terms": [
+          "803"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 442,
+          "codigo": "47131803",
+          "nombre": "TOALLAS DESINFECTANTES MEMBERS MARK",
+          "categoria": "HIGIENE Y LIMPIEZA",
+          "has_recipe_flag": false,
+          "score": 39.02,
+          "search_terms": [
+            "803"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 173,
+          "codigo": "788034",
+          "nombre": "DETERGENTE EN POLVO MULTIUSOS 9 KG",
+          "categoria": "HIGIENE Y LIMPIEZA",
+          "has_recipe_flag": false,
+          "score": 31.82,
+          "search_terms": [
+            "803"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 360,
+        "codigo": "802",
+        "nombre": "CAJA BOLLO 2 PZ P/VENTA",
+        "familia": "Accesorios",
+        "categoria": "Bollo",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 359,
+        "codigo": "801",
+        "nombre": "CAJA BOLLO 4 PZ P/VENTA",
+        "familia": "Accesorios",
+        "categoria": "Bollo",
+        "has_receta_flag": false
+      },
+      "status": "POSSIBLE_MATCH_REQUIRES_REVIEW",
+      "best_candidate": {
+        "pk_articulo": 187,
+        "codigo": "00801",
+        "nombre": "ESCOBA MIXTA DE 6 HILOS",
+        "categoria": "HIGIENE Y LIMPIEZA",
+        "has_recipe_flag": false,
+        "score": 36.36,
+        "search_terms": [
+          "801"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 187,
+          "codigo": "00801",
+          "nombre": "ESCOBA MIXTA DE 6 HILOS",
+          "categoria": "HIGIENE Y LIMPIEZA",
+          "has_recipe_flag": false,
+          "score": 36.36,
+          "search_terms": [
+            "801"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 436,
+          "codigo": "01801",
+          "nombre": "Pay de Queso Horneado Mediano",
+          "categoria": "PAN",
+          "has_recipe_flag": true,
+          "score": 17.78,
+          "search_terms": [
+            "801"
+          ],
+          "bom_count": 2,
+          "bom_preview": [
+            {
+              "codigo": "01BPQ19",
+              "nombre": "Batida pay de queso",
+              "cantidad": 800.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "01BTPM20",
+              "nombre": "Base Tarta Pay Mediano",
+              "cantidad": 1.0,
+              "unidad": "U"
+            }
+          ],
+          "erp_insumo_id": 456,
+          "erp_insumo_nombre": "Pay de Queso Horneado Mediano",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 358,
+        "codigo": "800",
+        "nombre": "CAJA BOLLO 6 PZ P/VENTA",
+        "familia": "Accesorios",
+        "categoria": "Bollo",
+        "has_receta_flag": false
+      },
+      "status": "POSSIBLE_MATCH_REQUIRES_REVIEW",
+      "best_candidate": {
+        "pk_articulo": 267,
+        "codigo": "FPF03800",
+        "nombre": "TOALLA INTERDOBLADA SANITAS",
+        "categoria": "HIGIENE Y LIMPIEZA",
+        "has_recipe_flag": false,
+        "score": 36.36,
+        "search_terms": [
+          "800"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 267,
+          "codigo": "FPF03800",
+          "nombre": "TOALLA INTERDOBLADA SANITAS",
+          "categoria": "HIGIENE Y LIMPIEZA",
+          "has_recipe_flag": false,
+          "score": 36.36,
+          "search_terms": [
+            "800"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 323,
+          "codigo": "51326",
+          "nombre": "Kinder Bueno Mini",
+          "categoria": "CHOCOLATES",
+          "has_recipe_flag": false,
+          "score": 21.43,
+          "search_terms": [
+            "800"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 346,
+          "codigo": "01800",
+          "nombre": "Pay de Queso Horneado Grande",
+          "categoria": "PAN",
+          "has_recipe_flag": true,
+          "score": 17.78,
+          "search_terms": [
+            "800"
+          ],
+          "bom_count": 2,
+          "bom_preview": [
+            {
+              "codigo": "01BPQ19",
+              "nombre": "Batida pay de queso",
+              "cantidad": 1400.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "01BTPG20",
+              "nombre": "Base Tarta Pay Grande",
+              "cantidad": 1.0,
+              "unidad": "U"
+            }
+          ],
+          "erp_insumo_id": 432,
+          "erp_insumo_nombre": "Pay de Queso Horneado Grande",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 240,
+        "codigo": "0240",
+        "nombre": "CAJA CH PARA VENTA",
+        "familia": "Accesorios",
+        "categoria": "Industrias lec",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 239,
+        "codigo": "0239",
+        "nombre": "CAJA G PARA VENTA",
+        "familia": "Accesorios",
+        "categoria": "Industrias lec",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 482,
+        "codigo": "070896042354",
+        "nombre": "CEPILLO DE LAVADO DUYA",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 444,
+        "codigo": "0085",
+        "nombre": "CONTENEDOR INDIVIDUAL CUPCAKE",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 491,
+        "codigo": "070896519924",
+        "nombre": "COPLE PARA DUYA GDE",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 518,
+        "codigo": "070896700322",
+        "nombre": "CORAZON JUMBO 92 GR",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 517,
+        "codigo": "070896172808",
+        "nombre": "CORAZON ROJO JUMBO",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 618,
+        "codigo": "417-1112",
+        "nombre": "CUCHARA PARA GALLETA",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 434,
+        "codigo": "0330",
+        "nombre": "DECORACION",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 485,
+        "codigo": "070896253545",
+        "nombre": "DESCORAZONADOR",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 496,
+        "codigo": "40210",
+        "nombre": "DUYA #10",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 494,
+        "codigo": "24012",
+        "nombre": "DUYA #12 OZ",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 497,
+        "codigo": "4021A",
+        "nombre": "DUYA #1A",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 498,
+        "codigo": "40220",
+        "nombre": "DUYA #20",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 499,
+        "codigo": "40221",
+        "nombre": "DUYA #21A",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 500,
+        "codigo": "52151600",
+        "nombre": "DUYA #234",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 495,
+        "codigo": "2402A",
+        "nombre": "DUYA #2A OZ",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 487,
+        "codigo": "070896355645",
+        "nombre": "DUYA #2A WILTON",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 574,
+        "codigo": "418-6600",
+        "nombre": "Duya #6B",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 501,
+        "codigo": "4028",
+        "nombre": "DUYA #8 WILTON",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 573,
+        "codigo": "402-8800",
+        "nombre": "Duya #8B",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 481,
+        "codigo": "070896042064",
+        "nombre": "DUYA WILTON #12",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 587,
+        "codigo": "EBOLLO1PZ",
+        "nombre": "Empaque 1 Bollo Domo",
+        "familia": "Plásticos",
+        "categoria": "PLÁSTICOS",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 585,
+        "codigo": "EBOLLO2PZ",
+        "nombre": "Empaque Bollo 2 con Domo",
+        "familia": "Plásticos",
+        "categoria": "PLÁSTICOS",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 625,
+        "codigo": "409-3203",
+        "nombre": "ESPATULA ANGULAR  9\" AZUL",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 505,
+        "codigo": "0700818122003",
+        "nombre": "ESPATULA SILICON 42 CM",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 626,
+        "codigo": "2109-8811",
+        "nombre": "ESPATULAS PARA GLASEADO",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 267,
+        "codigo": "0227",
+        "nombre": "Extra 10",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": {
+        "pk_articulo": 456,
+        "codigo": "7502271913",
+        "nombre": "SNICKERS MINI",
+        "categoria": "CHOCOLATES",
+        "has_recipe_flag": false,
+        "score": 25.0,
+        "search_terms": [
+          "0227"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 456,
+          "codigo": "7502271913",
+          "nombre": "SNICKERS MINI",
+          "categoria": "CHOCOLATES",
+          "has_recipe_flag": false,
+          "score": 25.0,
+          "search_terms": [
+            "0227"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 404,
+        "codigo": "0320",
+        "nombre": "EXTRA 100",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 268,
+        "codigo": "0228",
+        "nombre": "Extra 15",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 269,
+        "codigo": "0229",
+        "nombre": "Extra 20",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 270,
+        "codigo": "0230",
+        "nombre": "Extra 25",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 271,
+        "codigo": "0231",
+        "nombre": "Extra 30",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 403,
+        "codigo": "1315",
+        "nombre": "EXTRA 50",
+        "familia": "Otros postres",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 266,
+        "codigo": "0227",
+        "nombre": "Extra Fresa Chico",
+        "familia": "Otros postres",
+        "categoria": "Pastel Chico",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": {
+        "pk_articulo": 456,
+        "codigo": "7502271913",
+        "nombre": "SNICKERS MINI",
+        "categoria": "CHOCOLATES",
+        "has_recipe_flag": false,
+        "score": 21.05,
+        "search_terms": [
+          "0227"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 456,
+          "codigo": "7502271913",
+          "nombre": "SNICKERS MINI",
+          "categoria": "CHOCOLATES",
+          "has_recipe_flag": false,
+          "score": 21.05,
+          "search_terms": [
+            "0227"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 508,
+        "codigo": "TFG24",
+        "nombre": "GUANTE ANTI INFLAMABLE",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 614,
+        "codigo": "418-2112",
+        "nombre": "JGO DUYAS #12 Y #21",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 615,
+        "codigo": "418-163",
+        "nombre": "JGO DUYAS #3 Y #16",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 612,
+        "codigo": "070896046130",
+        "nombre": "JUEGO DE FLORES DE GOTA",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 613,
+        "codigo": "070896817204",
+        "nombre": "JUEGO DUYAS CON COPLE",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 572,
+        "codigo": "417-7551",
+        "nombre": "Juego Peines para texturas",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 571,
+        "codigo": "417-1154",
+        "nombre": "Juego Penies Para Glaseado Wilton",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 628,
+        "codigo": "2105-9961",
+        "nombre": "KIT PASTEL AJEDREZ 3 NMOLDES",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 511,
+        "codigo": "070896112705",
+        "nombre": "LENTEJUELAS DORADAS",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 512,
+        "codigo": "070896158635",
+        "nombre": "LENTEJUELAS PLATEADA",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 179,
+        "codigo": "0179",
+        "nombre": "Letrero Chispas Felicidades",
+        "familia": "Velas",
+        "categoria": "Pillines",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 180,
+        "codigo": "0180",
+        "nombre": "Letrero Chispas Feliz Cumpleaños",
+        "familia": "Velas",
+        "categoria": "Pillines",
+        "has_receta_flag": false
+      },
+      "status": "POSSIBLE_MATCH_REQUIRES_REVIEW",
+      "best_candidate": {
+        "pk_articulo": 346,
+        "codigo": "01800",
+        "nombre": "Pay de Queso Horneado Grande",
+        "categoria": "PAN",
+        "has_recipe_flag": true,
+        "score": 34.04,
+        "search_terms": [
+          "0180"
+        ],
+        "bom_count": 2,
+        "bom_preview": [
+          {
+            "codigo": "01BPQ19",
+            "nombre": "Batida pay de queso",
+            "cantidad": 1400.0,
+            "unidad": "ML"
+          },
+          {
+            "codigo": "01BTPG20",
+            "nombre": "Base Tarta Pay Grande",
+            "cantidad": 1.0,
+            "unidad": "U"
+          }
+        ],
+        "erp_insumo_id": 432,
+        "erp_insumo_nombre": "Pay de Queso Horneado Grande",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 346,
+          "codigo": "01800",
+          "nombre": "Pay de Queso Horneado Grande",
+          "categoria": "PAN",
+          "has_recipe_flag": true,
+          "score": 34.04,
+          "search_terms": [
+            "0180"
+          ],
+          "bom_count": 2,
+          "bom_preview": [
+            {
+              "codigo": "01BPQ19",
+              "nombre": "Batida pay de queso",
+              "cantidad": 1400.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "01BTPG20",
+              "nombre": "Base Tarta Pay Grande",
+              "cantidad": 1.0,
+              "unidad": "U"
+            }
+          ],
+          "erp_insumo_id": 432,
+          "erp_insumo_nombre": "Pay de Queso Horneado Grande",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 436,
+          "codigo": "01801",
+          "nombre": "Pay de Queso Horneado Mediano",
+          "categoria": "PAN",
+          "has_recipe_flag": true,
+          "score": 33.33,
+          "search_terms": [
+            "0180"
+          ],
+          "bom_count": 2,
+          "bom_preview": [
+            {
+              "codigo": "01BPQ19",
+              "nombre": "Batida pay de queso",
+              "cantidad": 800.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "01BTPM20",
+              "nombre": "Base Tarta Pay Mediano",
+              "cantidad": 1.0,
+              "unidad": "U"
+            }
+          ],
+          "erp_insumo_id": 456,
+          "erp_insumo_nombre": "Pay de Queso Horneado Mediano",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 177,
+        "codigo": "0177",
+        "nombre": "Letrero Chispas HB 1",
+        "familia": "Velas",
+        "categoria": "Pillines",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 261,
+        "codigo": "0505",
+        "nombre": "Letrero Graduado Congrats",
+        "familia": "Velas",
+        "categoria": "Letreros",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 484,
+        "codigo": "070896080233",
+        "nombre": "LEVANTADOR DE PASTELES",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 623,
+        "codigo": "415-0165",
+        "nombre": "NIVELADOR DE PASTEL 10 BLANCO/MORADO",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 106,
+        "codigo": "0106",
+        "nombre": "Pastel de 3 Leches Rebanada",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 110,
+        "codigo": "0110",
+        "nombre": "Pastel de 3 Pecados R",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 63,
+        "codigo": "0063",
+        "nombre": "Pastel de Crunch R",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 103,
+        "codigo": "0103",
+        "nombre": "Pastel de Fresas Con Crema R",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": {
+        "pk_articulo": 342,
+        "codigo": "0103",
+        "nombre": "GOMA XANTANA 1 KG",
+        "categoria": "AZUCARES",
+        "has_recipe_flag": false,
+        "score": 40.69,
+        "search_terms": [
+          "0103"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 342,
+          "codigo": "0103",
+          "nombre": "GOMA XANTANA 1 KG",
+          "categoria": "AZUCARES",
+          "has_recipe_flag": false,
+          "score": 40.69,
+          "search_terms": [
+            "0103"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 58,
+        "codigo": "0058",
+        "nombre": "Pastel de Snickers Rebanada",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 68,
+        "codigo": "0068",
+        "nombre": "Pastel de Zanahoria R",
+        "familia": "Pastel",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": {
+        "pk_articulo": 333,
+        "codigo": "50327008",
+        "nombre": "COCO RALLADO P/PASTEL ZANAHORIA",
+        "categoria": "FRUTAS",
+        "has_recipe_flag": false,
+        "score": 21.62,
+        "search_terms": [
+          "pastel zanahoria"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 333,
+          "codigo": "50327008",
+          "nombre": "COCO RALLADO P/PASTEL ZANAHORIA",
+          "categoria": "FRUTAS",
+          "has_recipe_flag": false,
+          "score": 21.62,
+          "search_terms": [
+            "pastel zanahoria"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 7,
+        "codigo": "0007",
+        "nombre": "Pay de Plátano Rebanada",
+        "familia": "Pay",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": {
+        "pk_articulo": 380,
+        "codigo": "31201512",
+        "nombre": "CINTA TRANSPARENTE",
+        "categoria": "DESECHABLES",
+        "has_recipe_flag": false,
+        "score": 17.65,
+        "search_terms": [
+          "0007"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 380,
+          "codigo": "31201512",
+          "nombre": "CINTA TRANSPARENTE",
+          "categoria": "DESECHABLES",
+          "has_recipe_flag": false,
+          "score": 17.65,
+          "search_terms": [
+            "0007"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 313,
+          "codigo": "0007501024",
+          "nombre": "KISSES LECHE",
+          "categoria": "CHOCOLATES",
+          "has_recipe_flag": false,
+          "score": 12.5,
+          "search_terms": [
+            "0007"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 3,
+        "codigo": "0003",
+        "nombre": "Pay de Queso Rebanada",
+        "familia": "Pay",
+        "categoria": "Rebanada",
+        "has_receta_flag": false
+      },
+      "status": "POSSIBLE_MATCH_REQUIRES_REVIEW",
+      "best_candidate": {
+        "pk_articulo": 436,
+        "codigo": "01801",
+        "nombre": "Pay de Queso Horneado Mediano",
+        "categoria": "PAN",
+        "has_recipe_flag": true,
+        "score": 78.05,
+        "search_terms": [
+          "pay queso"
+        ],
+        "bom_count": 2,
+        "bom_preview": [
+          {
+            "codigo": "01BPQ19",
+            "nombre": "Batida pay de queso",
+            "cantidad": 800.0,
+            "unidad": "ML"
+          },
+          {
+            "codigo": "01BTPM20",
+            "nombre": "Base Tarta Pay Mediano",
+            "cantidad": 1.0,
+            "unidad": "U"
+          }
+        ],
+        "erp_insumo_id": 456,
+        "erp_insumo_nombre": "Pay de Queso Horneado Mediano",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 436,
+          "codigo": "01801",
+          "nombre": "Pay de Queso Horneado Mediano",
+          "categoria": "PAN",
+          "has_recipe_flag": true,
+          "score": 78.05,
+          "search_terms": [
+            "pay queso"
+          ],
+          "bom_count": 2,
+          "bom_preview": [
+            {
+              "codigo": "01BPQ19",
+              "nombre": "Batida pay de queso",
+              "cantidad": 800.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "01BTPM20",
+              "nombre": "Base Tarta Pay Mediano",
+              "cantidad": 1.0,
+              "unidad": "U"
+            }
+          ],
+          "erp_insumo_id": 456,
+          "erp_insumo_nombre": "Pay de Queso Horneado Mediano",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 346,
+          "codigo": "01800",
+          "nombre": "Pay de Queso Horneado Grande",
+          "categoria": "PAN",
+          "has_recipe_flag": true,
+          "score": 78.05,
+          "search_terms": [
+            "pay queso"
+          ],
+          "bom_count": 2,
+          "bom_preview": [
+            {
+              "codigo": "01BPQ19",
+              "nombre": "Batida pay de queso",
+              "cantidad": 1400.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "01BTPG20",
+              "nombre": "Base Tarta Pay Grande",
+              "cantidad": 1.0,
+              "unidad": "U"
+            }
+          ],
+          "erp_insumo_id": 432,
+          "erp_insumo_nombre": "Pay de Queso Horneado Grande",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 377,
+          "codigo": "01BPQ19",
+          "nombre": "Batida pay de queso",
+          "categoria": "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)",
+          "has_recipe_flag": true,
+          "score": 64.52,
+          "search_terms": [
+            "pay queso"
+          ],
+          "bom_count": 5,
+          "bom_preview": [
+            {
+              "codigo": "004",
+              "nombre": "LECHERA",
+              "cantidad": 211.0,
+              "unidad": "Gr"
+            },
+            {
+              "codigo": "006",
+              "nombre": "MEDIA CREMA",
+              "cantidad": 163.0,
+              "unidad": "ML"
+            },
+            {
+              "codigo": "005",
+              "nombre": "QUESO CREMA",
+              "cantidad": 139.0,
+              "unidad": "Gr"
+            }
+          ],
+          "erp_insumo_id": 222,
+          "erp_insumo_nombre": "Batida Queso Pay",
+          "erp_preparation_recipe_exists": false
+        },
+        {
+          "pk_articulo": 318,
+          "codigo": "OTS000313",
+          "nombre": "DECO MEZCLA CORAZON PERLA ROSA GRANILLO 1KG",
+          "categoria": "AZUCARES",
+          "has_recipe_flag": false,
+          "score": 19.05,
+          "search_terms": [
+            "0003"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 515,
+        "codigo": "070896411730",
+        "nombre": "PERLA DECORATIVA DORADA 135 GR",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 516,
+        "codigo": "070896411747",
+        "nombre": "PERLA DECORATIVA PLATEADA 135 GR",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 170,
+        "codigo": "0170",
+        "nombre": "Pirotecnia Alegría Ch",
+        "familia": "Velas",
+        "categoria": "Alegría",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 169,
+        "codigo": "0169",
+        "nombre": "Pirotecnia Alegría G",
+        "familia": "Velas",
+        "categoria": "Alegría",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 552,
+        "codigo": "8446PO",
+        "nombre": "Platos Solidos Oro",
+        "familia": "Accesorios",
+        "categoria": "Granmark",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 551,
+        "codigo": "8446PR",
+        "nombre": "Platos Solidos Rosa",
+        "familia": "Accesorios",
+        "categoria": "Granmark",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 624,
+        "codigo": "2103-434",
+        "nombre": "PROBADOR DE PASTELES MORADO",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 488,
+        "codigo": "070896400710",
+        "nombre": "REJILLA PARA ENFRIAR",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 256,
+        "codigo": "0303",
+        "nombre": "Servicio Domicilio 1",
+        "familia": "Accesorios",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 257,
+        "codigo": "0304",
+        "nombre": "Servicio Domicilio 2",
+        "familia": "Accesorios",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 258,
+        "codigo": "0305",
+        "nombre": "Servicio Domicilio 3",
+        "familia": "Accesorios",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 548,
+        "codigo": "7102SO",
+        "nombre": "Servilletas Coctel Oro",
+        "familia": "Accesorios",
+        "categoria": "Granmark",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 547,
+        "codigo": "7102SR",
+        "nombre": "Servilletas Coctel Rosa",
+        "familia": "Accesorios",
+        "categoria": "Granmark",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 610,
+        "codigo": "2104-7857",
+        "nombre": "SET DE 19 PZAS DECORACION FLORES",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 489,
+        "codigo": "070896449160",
+        "nombre": "SET DE 6 TAPAS DE SILICON PARA DUYAS",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 630,
+        "codigo": "070896096142",
+        "nombre": "SET DE DUYAS DE ESPECIALIDAD C/4",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 483,
+        "codigo": "070896051073",
+        "nombre": "SET DE UTENCILIOS",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 619,
+        "codigo": "04-0-0051",
+        "nombre": "SISTEMA EFICAZ DE COLORANTES",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 519,
+        "codigo": "070896172792",
+        "nombre": "SPRINKLER CORAZON ROSA 30G",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 509,
+        "codigo": "070896099822",
+        "nombre": "SPRINKLER METALICOS",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 520,
+        "codigo": "070896035240",
+        "nombre": "SPRINKLER SURTIDO COLORES",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 622,
+        "codigo": "710-0-0493",
+        "nombre": "SPRINKLES CACTUS MEZCLA GDE 10OZ",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 621,
+        "codigo": "710-9978",
+        "nombre": "SPRINKLES CONFETTI  ARCOIRIS 41GR",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 629,
+        "codigo": "710-9975",
+        "nombre": "SPRINKLES NONPAREILS JUMBO ROSA",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 310,
+        "codigo": "0308",
+        "nombre": "TARJETA DE REGALO",
+        "familia": "Accesorios",
+        "categoria": "Otros postres",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 502,
+        "codigo": "700818121504",
+        "nombre": "TAZA MEDIDORA 250ML  VIDRIO",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 493,
+        "codigo": "190318121203",
+        "nombre": "TAZA MEDIDORA CON BASCULA",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 492,
+        "codigo": "17701116",
+        "nombre": "TAZA MEDIDORA DE 1 LTS",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 503,
+        "codigo": "700818121506",
+        "nombre": "TAZA MEDIDORA VIDRIO 1 LTS",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 402,
+        "codigo": "0313",
+        "nombre": "TE DEL JARDIN",
+        "familia": "Bebidas",
+        "categoria": "TE",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": {
+        "pk_articulo": 318,
+        "codigo": "OTS000313",
+        "nombre": "DECO MEZCLA CORAZON PERLA ROSA GRANILLO 1KG",
+        "categoria": "AZUCARES",
+        "has_recipe_flag": false,
+        "score": 41.67,
+        "search_terms": [
+          "0313"
+        ],
+        "bom_count": 0,
+        "erp_insumo_id": null,
+        "erp_insumo_nombre": "",
+        "erp_preparation_recipe_exists": false
+      },
+      "candidates": [
+        {
+          "pk_articulo": 318,
+          "codigo": "OTS000313",
+          "nombre": "DECO MEZCLA CORAZON PERLA ROSA GRANILLO 1KG",
+          "categoria": "AZUCARES",
+          "has_recipe_flag": false,
+          "score": 41.67,
+          "search_terms": [
+            "0313"
+          ],
+          "bom_count": 0,
+          "erp_insumo_id": null,
+          "erp_insumo_nombre": "",
+          "erp_preparation_recipe_exists": false
+        }
+      ]
+    },
+    {
+      "product": {
+        "pk_producto": 506,
+        "codigo": "700818122104",
+        "nombre": "TEMPORIZADOR",
+        "familia": "WILTON",
+        "categoria": "Accesorios de repostería",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 550,
+        "codigo": "7112TO",
+        "nombre": "Tenedores Oro",
+        "familia": "Accesorios",
+        "categoria": "Granmark",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 549,
+        "codigo": "7112TR",
+        "nombre": "Tenedores Rosa",
+        "familia": "Accesorios",
+        "categoria": "Granmark",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 441,
+        "codigo": "00445",
+        "nombre": "Vaso Galleta Chispas Chocolate Mini",
+        "familia": "Vasos Preparados",
+        "categoria": "Vaso Preparado Mini",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 442,
+        "codigo": "00446",
+        "nombre": "Vaso Galleta Chispas de Chocolate Gde",
+        "familia": "Vasos Preparados",
+        "categoria": "Vasos Preparados Grande",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 554,
+        "codigo": "8448VO",
+        "nombre": "Vaso Solido Oro",
+        "familia": "Accesorios",
+        "categoria": "Granmark",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 553,
+        "codigo": "8448VR",
+        "nombre": "Vaso Solido Rosa",
+        "familia": "Accesorios",
+        "categoria": "Granmark",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 463,
+        "codigo": "VHROSA",
+        "nombre": "VELA HUMO ROSA",
+        "familia": "Velas",
+        "categoria": "Velas Sparklers",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 347,
+        "codigo": "0314",
+        "nombre": "VELA REPUESTO",
+        "familia": "Velas",
+        "categoria": "Pillines",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    },
+    {
+      "product": {
+        "pk_producto": 522,
+        "codigo": "CND000951",
+        "nombre": "VELA SPAGUETI ROSA PERLADO",
+        "familia": "Velas",
+        "categoria": "Alegría",
+        "has_receta_flag": false
+      },
+      "status": "MISSING_IN_POINT",
+      "best_candidate": null,
+      "candidates": []
+    }
+  ]
+}

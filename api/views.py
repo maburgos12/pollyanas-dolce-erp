@@ -82,6 +82,7 @@ from recetas.models import (
     normalizar_codigo_point,
 )
 from recetas.views import (
+    _build_forecast_backtest_preview,
     _build_forecast_from_history,
     _filter_forecast_result_by_confianza,
     _forecast_session_payload,
@@ -7366,6 +7367,8 @@ class ForecastBacktestView(APIView):
         alcance = data.get("alcance") or "mes"
         fecha_base = data.get("fecha_base") or timezone.localdate()
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
+        mix_adjustment_enabled = bool(data.get("mix_adjustment_enabled"))
+        include_mix_compare = bool(data.get("include_mix_compare", True))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
         min_confianza_pct = _to_decimal(data.get("min_confianza_pct"), default=Decimal("0"))
         escenario = str(data.get("escenario") or "base").lower()
@@ -7382,161 +7385,24 @@ class ForecastBacktestView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        windows = _forecast_backtest_windows(alcance, fecha_base, periods)
-        if not windows:
-            return Response(
-                {"detail": "No se pudo construir ventanas de backtest."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        windows_payload: list[dict] = []
-        sum_forecast_total = Decimal("0")
-        sum_actual_total = Decimal("0")
-        sum_abs_error = Decimal("0")
-        ape_sum = Decimal("0")
-        ape_count = 0
-
-        for window_start, window_end in windows:
-            periodo_window = f"{window_start.year:04d}-{window_start.month:02d}"
-            forecast_result = _build_forecast_from_history(
-                alcance=alcance,
-                periodo=periodo_window,
-                fecha_base=window_start,
-                sucursal=sucursal,
-                incluir_preparaciones=incluir_preparaciones,
-                safety_pct=safety_pct,
-            )
-            forecast_result, _ = _filter_forecast_result_by_confianza(forecast_result, min_confianza_pct)
-            qty_key = "forecast_qty"
-            if escenario == "bajo":
-                qty_key = "forecast_low"
-            elif escenario == "alto":
-                qty_key = "forecast_high"
-            forecast_map = {
-                int(row["receta_id"]): _to_decimal(row.get(qty_key))
-                for row in (forecast_result.get("rows") or [])
-            }
-
-            actual_qs = VentaHistorica.objects.filter(fecha__gte=window_start, fecha__lte=window_end)
-            if sucursal:
-                actual_qs = actual_qs.filter(sucursal=sucursal)
-            if not incluir_preparaciones:
-                actual_qs = actual_qs.filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
-            actual_map = {
-                int(row["receta_id"]): _to_decimal(row["total"])
-                for row in actual_qs.values("receta_id").annotate(total=Sum("cantidad"))
-            }
-
-            if min_confianza_pct > 0:
-                union_ids = sorted(set(forecast_map.keys()))
-            else:
-                union_ids = sorted(set(forecast_map.keys()) | set(actual_map.keys()))
-            if not union_ids:
-                continue
-
-            receta_names = {
-                r.id: r.nombre for r in Receta.objects.filter(id__in=union_ids).only("id", "nombre")
-            }
-            rows = []
-            forecast_total = Decimal("0")
-            actual_total = Decimal("0")
-            abs_error_total = Decimal("0")
-            local_ape_sum = Decimal("0")
-            local_ape_count = 0
-            for receta_id in union_ids:
-                forecast_qty = forecast_map.get(receta_id, Decimal("0"))
-                actual_qty = actual_map.get(receta_id, Decimal("0"))
-                delta_qty = forecast_qty - actual_qty
-                abs_error = abs(delta_qty)
-
-                forecast_total += forecast_qty
-                actual_total += actual_qty
-                abs_error_total += abs_error
-
-                variacion_pct = None
-                status_tag = "SIN_BASE"
-                if actual_qty > 0:
-                    variacion_pct = ((delta_qty / actual_qty) * Decimal("100")).quantize(Decimal("0.1"))
-                    local_ape_sum += abs(variacion_pct)
-                    local_ape_count += 1
-                    if variacion_pct > Decimal("10"):
-                        status_tag = "SOBRE"
-                    elif variacion_pct < Decimal("-10"):
-                        status_tag = "BAJO"
-                    else:
-                        status_tag = "OK"
-
-                rows.append(
-                    {
-                        "receta_id": receta_id,
-                        "receta": receta_names.get(receta_id) or f"Receta {receta_id}",
-                        "forecast_qty": float(forecast_qty),
-                        "actual_qty": float(actual_qty),
-                        "delta_qty": float(delta_qty),
-                        "abs_error": float(abs_error),
-                        "variacion_pct": float(variacion_pct) if variacion_pct is not None else None,
-                        "status": status_tag,
-                    }
-                )
-
-            rows.sort(key=lambda r: abs(r["abs_error"]), reverse=True)
-            mae = (abs_error_total / Decimal(str(len(union_ids)))).quantize(Decimal("0.001"))
-            mape = None
-            if local_ape_count > 0:
-                mape = (local_ape_sum / Decimal(str(local_ape_count))).quantize(Decimal("0.1"))
-                ape_sum += local_ape_sum
-                ape_count += local_ape_count
-
-            sum_forecast_total += forecast_total
-            sum_actual_total += actual_total
-            sum_abs_error += abs_error_total
-
-            windows_payload.append(
-                {
-                    "window_start": str(window_start),
-                    "window_end": str(window_end),
-                    "periodo": periodo_window,
-                    "recetas_count": len(union_ids),
-                    "forecast_total": float(forecast_total),
-                    "actual_total": float(actual_total),
-                    "bias_total": float((forecast_total - actual_total).quantize(Decimal("0.001"))),
-                    "mae": float(mae),
-                    "mape": float(mape) if mape is not None else None,
-                    "top_errors": rows[:top],
-                }
-            )
-
-        if not windows_payload:
+        payload = _build_forecast_backtest_preview(
+            alcance=alcance,
+            fecha_base=fecha_base,
+            periods=periods,
+            sucursal=sucursal,
+            incluir_preparaciones=incluir_preparaciones,
+            safety_pct=safety_pct,
+            min_confianza_pct=min_confianza_pct,
+            escenario=escenario,
+            top=top,
+            mix_adjustment_enabled=mix_adjustment_enabled,
+            include_mix_compare=include_mix_compare,
+        )
+        if payload is None:
             return Response(
                 {"detail": "No hay historial suficiente para evaluar backtest en el alcance seleccionado."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        overall_mape = None
-        if ape_count > 0:
-            overall_mape = (ape_sum / Decimal(str(ape_count))).quantize(Decimal("0.1"))
-        overall_mae = (sum_abs_error / Decimal(str(max(1, len(windows_payload))))).quantize(Decimal("0.001"))
-
-        payload = {
-            "scope": {
-                "alcance": alcance,
-                "fecha_base": str(fecha_base),
-                "periods": periods,
-                "escenario": escenario,
-                "min_confianza_pct": _to_float(min_confianza_pct),
-                "sucursal_id": sucursal.id if sucursal else None,
-                "sucursal_nombre": f"{sucursal.codigo} - {sucursal.nombre}" if sucursal else "Todas",
-            },
-            "totals": {
-                "windows_evaluated": len(windows_payload),
-                "forecast_total": float(sum_forecast_total),
-                "actual_total": float(sum_actual_total),
-                "bias_total": float((sum_forecast_total - sum_actual_total).quantize(Decimal("0.001"))),
-                "mae_promedio": float(overall_mae),
-                "mape_promedio": float(overall_mape) if overall_mape is not None else None,
-            },
-            "windows": windows_payload,
-        }
         if export_format:
             return _forecast_backtest_export_response(payload, export_format)
         return Response(payload, status=status.HTTP_200_OK)
@@ -7871,7 +7737,8 @@ class VentaHistoricaListView(APIView):
         tickets_total = int(agg.get("tickets_total") or 0)
         monto_total = _to_decimal(agg.get("monto_total"))
         by_sucursal: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-        for row in qs.values("sucursal__codigo").annotate(total=Sum("cantidad")):
+        branch_totals_qs = qs.order_by().values("sucursal__codigo").annotate(total=Sum("cantidad")).order_by("-total")
+        for row in branch_totals_qs:
             sucursal_key = str(row.get("sucursal__codigo") or "GLOBAL")
             by_sucursal[sucursal_key] += _to_decimal(row.get("total"))
 
@@ -9395,6 +9262,7 @@ class ForecastEstadisticoView(APIView):
         fecha_base = data.get("fecha_base") or timezone.localdate()
         alcance = data.get("alcance") or "mes"
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
+        mix_adjustment_enabled = bool(data.get("mix_adjustment_enabled"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
         min_confianza_pct = _to_decimal(data.get("min_confianza_pct"), default=Decimal("0"))
         escenario_compare = str(data.get("escenario_compare") or "base").lower()
@@ -9417,6 +9285,7 @@ class ForecastEstadisticoView(APIView):
             sucursal=sucursal,
             incluir_preparaciones=incluir_preparaciones,
             safety_pct=safety_pct,
+            mix_adjustment_enabled=mix_adjustment_enabled,
         )
         result, filtered_conf = _filter_forecast_result_by_confianza(result, min_confianza_pct)
         result["min_confianza_pct"] = min_confianza_pct
@@ -9444,11 +9313,15 @@ class ForecastEstadisticoView(APIView):
                 "sucursal_nombre": payload["sucursal_nombre"],
                 "sucursal_id": payload.get("sucursal_id"),
                 "escenario_compare": escenario_compare,
+                "mix_adjustment_enabled": mix_adjustment_enabled,
                 "min_confianza_pct": _to_float(min_confianza_pct),
                 "filtered_conf": filtered_conf,
             },
             "totals": payload["totals"],
             "rows": payload["rows"],
+            "detail_rows": payload.get("detail_rows") or [],
+            "detail_rows_total": int(payload.get("detail_rows_total") or 0),
+            "model_meta": payload.get("model_meta") or {},
             "compare_solicitud": compare_payload,
         }
         if export_format:
@@ -9486,6 +9359,7 @@ class ForecastEstadisticoGuardarView(APIView):
         fecha_base = data.get("fecha_base") or timezone.localdate()
         alcance = data.get("alcance") or "mes"
         incluir_preparaciones = bool(data.get("incluir_preparaciones"))
+        mix_adjustment_enabled = bool(data.get("mix_adjustment_enabled"))
         safety_pct = _to_decimal(data.get("safety_pct"), default=Decimal("0"))
         min_confianza_pct = _to_decimal(data.get("min_confianza_pct"), default=Decimal("0"))
         top = int(data.get("top") or 120)
@@ -9511,6 +9385,7 @@ class ForecastEstadisticoGuardarView(APIView):
             sucursal=sucursal,
             incluir_preparaciones=incluir_preparaciones,
             safety_pct=safety_pct,
+            mix_adjustment_enabled=mix_adjustment_enabled,
         )
         result, filtered_conf = _filter_forecast_result_by_confianza(result, min_confianza_pct)
         result["min_confianza_pct"] = min_confianza_pct
@@ -9586,6 +9461,7 @@ class ForecastEstadisticoGuardarView(APIView):
                 "sucursal_id": payload.get("sucursal_id"),
                 "escenario": escenario,
                 "qty_key": qty_key,
+                "mix_adjustment_enabled": mix_adjustment_enabled,
                 "min_confianza_pct": _to_float(min_confianza_pct),
                 "filtered_conf": filtered_conf,
             },
@@ -9598,6 +9474,9 @@ class ForecastEstadisticoGuardarView(APIView):
                 "applied": created + updated,
             },
             "rows": payload["rows"],
+            "detail_rows": payload.get("detail_rows") or [],
+            "detail_rows_total": int(payload.get("detail_rows_total") or 0),
+            "model_meta": payload.get("model_meta") or {},
             "applied_rows": applied_rows,
         }
         if export_format:

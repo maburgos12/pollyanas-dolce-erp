@@ -1,0 +1,233 @@
+{
+  "fecha_operacion": "2026-03-20",
+  "plan_status_dashboard": {
+    "total": 0,
+    "borrador": 0,
+    "consumo_aplicado": 0,
+    "cerrados": 0,
+    "abiertos": 0,
+    "oldest_open_name": "",
+    "oldest_open_date": null,
+    "oldest_open_days": 0,
+    "status": "Operacion al dia",
+    "tone": "success",
+    "detail": "No hay planes abiertos; todos los planes registrados ya quedaron cerrados.",
+    "start_date": null,
+    "end_date": null,
+    "group_by": "day",
+    "group_by_label": "Fecha producción",
+    "rows": []
+  },
+  "ventas_historicas_summary": {
+    "available": true,
+    "status": "Cobertura parcial",
+    "tone": "warning",
+    "detail": "Hay 1 día(s) faltantes dentro del rango histórico cargado.",
+    "date_label": "01/01/2022 → 17/03/2026",
+    "active_days": 1536,
+    "expected_days": 1537,
+    "missing_days": 1,
+    "branch_count": 8,
+    "recipe_count": 317,
+    "total_rows": 348995,
+    "total_units": "1952175",
+    "top_branches": [
+      {
+        "sucursal__codigo": "MATRIZ",
+        "sucursal__nombre": "Matriz",
+        "total": "881653"
+      },
+      {
+        "sucursal__codigo": "LEYVA",
+        "sucursal__nombre": "Leyva",
+        "total": "224258"
+      },
+      {
+        "sucursal__codigo": "PAYAN",
+        "sucursal__nombre": "Payán",
+        "total": "212043"
+      },
+      {
+        "sucursal__codigo": "LAS_GLORIAS",
+        "sucursal__nombre": "Las Glorias",
+        "total": "209868"
+      }
+    ],
+    "top_recipes": [
+      {
+        "receta__nombre": "Pastel Fresas Con Crema - Chico",
+        "total": "156980"
+      },
+      {
+        "receta__nombre": "Pay de Queso Rebanada",
+        "total": "154535"
+      },
+      {
+        "receta__nombre": "Pastel Fresas Con Crema - Mediano",
+        "total": "103606"
+      },
+      {
+        "receta__nombre": "Pastel 3 Pecados - Mediano",
+        "total": "95860"
+      },
+      {
+        "receta__nombre": "Bollo Chocolate",
+        "total": "81019"
+      }
+    ]
+  },
+  "reabasto_stage": "Con rezago",
+  "reabasto_tone": "warning",
+  "reabasto_detail": "Pendientes 9 · Tardías 0 · Borrador 0.",
+  "demand_history_summary": {
+    "available": true,
+    "status": "Base comparable multianual",
+    "tone": "success",
+    "detail": "Usa temporadas comparables de varios años como referencia para cierres de sucursal y faltante CEDIS.",
+    "scope_label": "07/11/2025 → 13/03/2026",
+    "sample_days": 19,
+    "branch_count": 8,
+    "recipe_count": 74,
+    "total_units": "16605",
+    "top_branches": [
+      {
+        "sucursal__codigo": "MATRIZ",
+        "sucursal__nombre": "Matriz",
+        "total": "7071"
+      },
+      {
+        "sucursal__codigo": "LAS_GLORIAS",
+        "sucursal__nombre": "Las Glorias",
+        "total": "1904"
+      },
+      {
+        "sucursal__codigo": "LEYVA",
+        "sucursal__nombre": "Leyva",
+        "total": "1668"
+      },
+      {
+        "sucursal__codigo": "COLOSIO",
+        "sucursal__nombre": "Colosio",
+        "total": "1476"
+      }
+    ],
+    "top_recipes": [
+      {
+        "receta__nombre": "Pay de Queso Rebanada",
+        "total": "1213"
+      },
+      {
+        "receta__nombre": "Pastel Fresas Con Crema - Chico",
+        "total": "1117"
+      },
+      {
+        "receta__nombre": "Pastel 3 Pecados - Mediano",
+        "total": "924"
+      },
+      {
+        "receta__nombre": "Empanada de Manzana",
+        "total": "825"
+      },
+      {
+        "receta__nombre": "Bollo Chocolate",
+        "total": "779"
+      }
+    ],
+    "years_observed": 5,
+    "comparable_years": 5
+  },
+  "resumen_cierre": {
+    "fecha_corte": "2026-03-19",
+    "total": 9,
+    "en_tiempo": 0,
+    "tardias": 0,
+    "borrador": 0,
+    "pendientes": 9,
+    "listo_8am": false,
+    "pendientes_codigos": [
+      "COL",
+      "COLOSIO",
+      "CRUCERO",
+      "EL_TUNEL",
+      "LAS_GLORIAS",
+      "LEYVA",
+      "MATRIZ",
+      "PAYAN",
+      "PLAZA_NIO"
+    ],
+    "detalle": [
+      {
+        "sucursal_codigo": "COL",
+        "sucursal_nombre": "Colosio",
+        "estado": "PENDIENTE",
+        "estado_label": "Por validar (sin captura)",
+        "actualizado_en": null,
+        "semaforo": "rojo"
+      },
+      {
+        "sucursal_codigo": "COLOSIO",
+        "sucursal_nombre": "Colosio",
+        "estado": "PENDIENTE",
+        "estado_label": "Por validar (sin captura)",
+        "actualizado_en": null,
+        "semaforo": "rojo"
+      },
+      {
+        "sucursal_codigo": "CRUCERO",
+        "sucursal_nombre": "Crucero",
+        "estado": "PENDIENTE",
+        "estado_label": "Por validar (sin captura)",
+        "actualizado_en": null,
+        "semaforo": "rojo"
+      },
+      {
+        "sucursal_codigo": "EL_TUNEL",
+        "sucursal_nombre": "EL TUNEL",
+        "estado": "PENDIENTE",
+        "estado_label": "Por validar (sin captura)",
+        "actualizado_en": null,
+        "semaforo": "rojo"
+      },
+      {
+        "sucursal_codigo": "LAS_GLORIAS",
+        "sucursal_nombre": "Las Glorias",
+        "estado": "PENDIENTE",
+        "estado_label": "Por validar (sin captura)",
+        "actualizado_en": null,
+        "semaforo": "rojo"
+      },
+      {
+        "sucursal_codigo": "LEYVA",
+        "sucursal_nombre": "Leyva",
+        "estado": "PENDIENTE",
+        "estado_label": "Por validar (sin captura)",
+        "actualizado_en": null,
+        "semaforo": "rojo"
+      },
+      {
+        "sucursal_codigo": "MATRIZ",
+        "sucursal_nombre": "Matriz",
+        "estado": "PENDIENTE",
+        "estado_label": "Por validar (sin captura)",
+        "actualizado_en": null,
+        "semaforo": "rojo"
+      },
+      {
+        "sucursal_codigo": "PAYAN",
+        "sucursal_nombre": "Payán",
+        "estado": "PENDIENTE",
+        "estado_label": "Por validar (sin captura)",
+        "actualizado_en": null,
+        "semaforo": "rojo"
+      },
+      {
+        "sucursal_codigo": "PLAZA_NIO",
+        "sucursal_nombre": "Plaza Nío",
+        "estado": "PENDIENTE",
+        "estado_label": "Por validar (sin captura)",
+        "actualizado_en": null,
+        "semaforo": "rojo"
+      }
+    ]
+  }
+}

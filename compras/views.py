@@ -49,11 +49,28 @@ from .models import (
 IMPORT_PREVIEW_SESSION_KEY = "compras_solicitudes_import_preview"
 
 
+def _insumo_display_name(insumo: Insumo | None) -> str:
+    if not insumo:
+        return ""
+    return getattr(insumo, "display_name", "") or getattr(insumo, "nombre", "")
+
+
 def _to_decimal(value: str, default: str = "0") -> Decimal:
     try:
         return Decimal(value or default)
     except (InvalidOperation, TypeError):
         return Decimal(default)
+
+
+def _to_non_negative_int(value, default: int = 0) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return max(int(default), 0)
+
+
+def _to_bool_flag(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "t", "si", "sí", "yes", "y", "on", "x"}
 
 
 def _extract_plan_id_from_scope(value: str | None) -> str:
@@ -1598,7 +1615,7 @@ def _build_plan_branch_supply_rows(
                 best_score = score
                 best_candidate = {
                     "insumo_id": canonical.id,
-                    "insumo_nombre": canonical.nombre,
+                    "insumo_nombre": _insumo_display_name(canonical),
                     "required_qty": required_qty,
                     "stock_actual": stock_actual,
                     "shortage": shortage,
@@ -2541,9 +2558,9 @@ def _enterprise_blocker_details_for_solicitud(solicitud) -> list[dict[str, objec
         blockers.append(
             {
                 "key": "no_canonico",
-                "message": f"Ligado a variante no canónica: usar {canonical.nombre}",
+                "message": f"Ligado a variante no canónica: usar {_insumo_display_name(canonical)}",
                 "insumo_id": canonical.id,
-                "insumo_nombre": canonical.nombre,
+                "insumo_nombre": _insumo_display_name(canonical),
                 "missing_field": "catálogo canónico",
                 "action_label": action_meta["label"],
                 "action_url": action_meta["url"],
@@ -2558,7 +2575,7 @@ def _enterprise_blocker_details_for_solicitud(solicitud) -> list[dict[str, objec
                 "key": "articulo_inactivo",
                 "message": "Artículo inactivo en maestro",
                 "insumo_id": insumo.id,
-                "insumo_nombre": insumo.nombre,
+                "insumo_nombre": _insumo_display_name(insumo),
                 "missing_field": "inactivo",
                 "action_label": action_meta["label"],
                 "action_url": action_meta["url"],
@@ -2572,7 +2589,7 @@ def _enterprise_blocker_details_for_solicitud(solicitud) -> list[dict[str, objec
                 "key": "maestro_incompleto",
                 "message": "Artículo incompleto: " + ", ".join(profile["missing"]),
                 "insumo_id": insumo.id,
-                "insumo_nombre": insumo.nombre,
+                "insumo_nombre": _insumo_display_name(insumo),
                 "missing_field": ", ".join(profile["missing"]),
                 "action_label": "Corregir artículo",
                 "action_url": reverse("maestros:insumo_update", args=[insumo.id]),
@@ -2587,7 +2604,7 @@ def _enterprise_blocker_details_for_solicitud(solicitud) -> list[dict[str, objec
                     "key": f"missing_{normalizar_nombre(missing).replace(' ', '_')}",
                     "message": f"Falta {missing}",
                     "insumo_id": insumo.id,
-                    "insumo_nombre": insumo.nombre,
+                    "insumo_nombre": _insumo_display_name(insumo),
                     "missing_field": missing,
                     "action_label": action_meta["label"],
                     "action_url": action_meta["url"],
@@ -2603,7 +2620,7 @@ def _enterprise_blocker_details_for_solicitud(solicitud) -> list[dict[str, objec
                 "key": "sin_costo",
                 "message": "Sin costo vigente",
                 "insumo_id": insumo.id,
-                "insumo_nombre": insumo.nombre,
+                "insumo_nombre": _insumo_display_name(insumo),
                 "missing_field": "costo vigente",
                 "action_label": "Cargar costo vigente",
                 "action_url": reverse("maestros:insumo_update", args=[insumo.id]),
@@ -2620,7 +2637,7 @@ def _enterprise_blocker_details_for_solicitud(solicitud) -> list[dict[str, objec
                 "key": "sin_proveedor",
                 "message": "Sin proveedor sugerido",
                 "insumo_id": insumo.id,
-                "insumo_nombre": insumo.nombre,
+                "insumo_nombre": _insumo_display_name(insumo),
                 "missing_field": "proveedor principal",
                 "action_label": action_meta["label"],
                 "action_url": action_meta["url"],
@@ -3907,7 +3924,7 @@ def _build_insumo_options(limit: int = 1200):
         options.append(
             {
                 "id": insumo.id,
-                "nombre": insumo.nombre,
+                "nombre": _insumo_display_name(insumo),
                 "canonical_variant_count": row["variant_count"],
                 "proveedor_sugerido": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
                 "stock_actual": stock_actual,
@@ -4206,6 +4223,29 @@ def _filter_movimientos_by_categoria(movimientos_qs, categoria_filter: str):
             )
         )
     return movimientos_qs.filter(insumo__categoria__iexact=categoria)
+
+
+def _filter_recepciones_by_categoria(recepciones_qs, categoria_filter: str):
+    categoria = _sanitize_categoria_filter(categoria_filter)
+    if not categoria:
+        return recepciones_qs
+
+    categoria_norm = _normalize_categoria_text(categoria)
+    categoria_unit_map = {
+        "masa": "MASS",
+        "volumen": "VOLUME",
+        "pieza": "UNIT",
+    }
+    unidad_tipo = categoria_unit_map.get(categoria_norm)
+    if unidad_tipo:
+        return recepciones_qs.filter(
+            Q(orden__solicitud__insumo__categoria__iexact=categoria)
+            | (
+                (Q(orden__solicitud__insumo__categoria="") | Q(orden__solicitud__insumo__categoria__isnull=True))
+                & Q(orden__solicitud__insumo__unidad_base__tipo=unidad_tipo)
+            )
+        )
+    return recepciones_qs.filter(orden__solicitud__insumo__categoria__iexact=categoria)
 
 
 def _shift_month(periodo_mes: str, delta_months: int) -> str:
@@ -5992,6 +6032,7 @@ def _filtered_solicitudes(
     blocker_key_raw: str,
     periodo_tipo_raw: str,
     periodo_mes_raw: str,
+    q_filter_raw: str = "",
 ):
     source_filter = (source_filter_raw or "all").lower()
     if source_filter not in {"all", "manual", "plan"}:
@@ -5999,6 +6040,7 @@ def _filtered_solicitudes(
     plan_filter = (plan_filter_raw or "").strip()
     categoria_filter = _sanitize_categoria_filter(categoria_filter_raw)
     estatus_filter = (estatus_filter_raw or "all").strip().upper() or "ALL"
+    q_filter = (q_filter_raw or "").strip()
     periodo_tipo, periodo_mes, periodo_label = _parse_period_filters(periodo_tipo_raw, periodo_mes_raw)
 
     solicitudes_qs = SolicitudCompra.objects.select_related("insumo", "insumo__unidad_base", "proveedor_sugerido").all()
@@ -6020,6 +6062,16 @@ def _filtered_solicitudes(
             solicitudes_qs = solicitudes_qs.filter(fecha_requerida__day__lte=15)
         elif periodo_tipo == "q2":
             solicitudes_qs = solicitudes_qs.filter(fecha_requerida__day__gte=16)
+    if q_filter:
+        solicitudes_qs = solicitudes_qs.filter(
+            Q(folio__icontains=q_filter)
+            | Q(area__icontains=q_filter)
+            | Q(solicitante__icontains=q_filter)
+            | Q(insumo__nombre__icontains=q_filter)
+            | Q(insumo__nombre_point__icontains=q_filter)
+            | Q(insumo__codigo_point__icontains=q_filter)
+            | Q(proveedor_sugerido__nombre__icontains=q_filter)
+        )
 
     solicitudes = list(solicitudes_qs[:300])
     member_to_row, canonical_by_id = _canonical_catalog_maps()
@@ -6333,6 +6385,410 @@ def _document_command_center(
     }
 
 
+def _dashboard_filtered_solicitudes(
+    source_filter: str,
+    plan_filter: str,
+    categoria_filter: str,
+    periodo_tipo: str,
+    periodo_mes: str,
+) -> list[SolicitudCompra]:
+    solicitudes_qs = SolicitudCompra.objects.select_related(
+        "insumo",
+        "insumo__unidad_base",
+        "proveedor_sugerido",
+    ).all()
+    solicitudes_qs = _filter_solicitudes_by_scope(solicitudes_qs, source_filter, plan_filter)
+    solicitudes_qs = _filter_solicitudes_by_categoria(solicitudes_qs, categoria_filter)
+
+    start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
+    if start_date and end_date:
+        solicitudes_qs = solicitudes_qs.filter(fecha_requerida__range=(start_date, end_date))
+
+    solicitudes = list(solicitudes_qs.order_by("-fecha_requerida", "-creado_en"))
+    if not solicitudes:
+        return []
+
+    member_to_row, canonical_by_id = _canonical_catalog_maps()
+    canonical_ids = {
+        canonical_insumo_by_id(s.insumo_id).id
+        for s in solicitudes
+        if canonical_insumo_by_id(s.insumo_id)
+    }
+    canonical_member_ids = sorted(
+        {
+            member.id
+            for canonical_id in canonical_ids
+            for member in (canonical_by_id.get(canonical_id, {}) or {}).get("items", [])
+        }
+    )
+    existencias_raw = {
+        e.insumo_id: e
+        for e in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_member_ids)
+    }
+    latest_cost_by_insumo = _latest_cost_by_canonical_ids(canonical_ids, canonical_by_id)
+
+    plan_ids = set()
+    for solicitud in solicitudes:
+        if (solicitud.area or "").startswith("PLAN_PRODUCCION:"):
+            _, _, maybe_id = solicitud.area.partition(":")
+            if maybe_id.isdigit():
+                plan_ids.add(int(maybe_id))
+    planes_map = {p.id: p for p in PlanProduccion.objects.filter(id__in=plan_ids)}
+
+    open_orders_by_solicitud = {}
+    solicitud_ids = [s.id for s in solicitudes]
+    if solicitud_ids:
+        for orden in (
+            OrdenCompra.objects.filter(solicitud_id__in=solicitud_ids)
+            .exclude(estatus=OrdenCompra.STATUS_CERRADA)
+            .order_by("-creado_en")
+        ):
+            open_orders_by_solicitud.setdefault(orden.solicitud_id, orden)
+
+    for solicitud in solicitudes:
+        canonical = canonical_insumo_by_id(solicitud.insumo_id)
+        row = member_to_row.get(solicitud.insumo_id)
+        member_ids = row["member_ids"] if row else []
+        member_existencias = [existencias_raw[mid] for mid in member_ids if mid in existencias_raw]
+        existencia = existencias_raw.get(canonical.id) if canonical else None
+        existencia = existencia or next((item for item in member_existencias if item), None)
+        stock_actual = sum((item.stock_actual for item in member_existencias), Decimal("0"))
+        punto_reorden = existencia.punto_reorden if existencia else Decimal("0")
+        if stock_actual <= Decimal("0"):
+            solicitud.reabasto_nivel = "critico"
+            solicitud.reabasto_texto = "Sin stock"
+        elif stock_actual < punto_reorden:
+            solicitud.reabasto_nivel = "bajo"
+            solicitud.reabasto_texto = "Bajo reorden"
+        else:
+            solicitud.reabasto_nivel = "ok"
+            solicitud.reabasto_texto = "Stock suficiente"
+        solicitud.reabasto_detalle = f"Stock {stock_actual} / Reorden {punto_reorden}"
+        solicitud.__dict__.update(_source_context_from_scope(area=solicitud.area, planes_map=planes_map))
+        solicitud.costo_unitario = latest_cost_by_insumo.get(canonical.id, Decimal("0")) if canonical else Decimal("0")
+        solicitud.presupuesto_estimado = (solicitud.cantidad or Decimal("0")) * (solicitud.costo_unitario or Decimal("0"))
+        open_order = open_orders_by_solicitud.get(solicitud.id)
+        solicitud.has_open_order = bool(open_order)
+        solicitud.open_order_id = open_order.id if open_order else None
+        solicitud.open_order_folio = open_order.folio if open_order else ""
+        _enrich_solicitud_workflow(solicitud)
+
+    return solicitudes
+
+
+@login_required
+def dashboard(request: HttpRequest) -> HttpResponse:
+    if not can_view_compras(request.user):
+        raise PermissionDenied("No tienes permisos para ver Compras.")
+
+    source_filter = (request.GET.get("source") or "all").lower()
+    if source_filter not in {"all", "manual", "plan"}:
+        source_filter = "all"
+    plan_filter = (request.GET.get("plan_id") or "").strip()
+    categoria_filter = _sanitize_categoria_filter(request.GET.get("categoria"))
+    periodo_tipo, periodo_mes, periodo_label = _parse_period_filters(
+        request.GET.get("periodo_tipo"),
+        request.GET.get("periodo_mes"),
+    )
+    consumo_ref_filter = _sanitize_consumo_ref_filter(request.GET.get("consumo_ref"))
+
+    solicitudes = _dashboard_filtered_solicitudes(
+        source_filter=source_filter,
+        plan_filter=plan_filter,
+        categoria_filter=categoria_filter,
+        periodo_tipo=periodo_tipo,
+        periodo_mes=periodo_mes,
+    )
+    budget_ctx = _build_budget_context(
+        solicitudes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        periodo_tipo,
+        periodo_mes,
+    )
+    provider_dashboard = _build_provider_dashboard(
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        budget_ctx["presupuesto_rows_proveedor"],
+    )
+    category_dashboard = _build_category_dashboard(
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        budget_ctx["presupuesto_rows_categoria"],
+    )
+    consumo_dashboard = _build_consumo_vs_plan_dashboard(
+        periodo_tipo,
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        consumo_ref_filter,
+        limit=12,
+    )
+    budget_history = _build_budget_history(periodo_mes, source_filter, plan_filter, categoria_filter)
+
+    start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
+    ordenes_qs = OrdenCompra.objects.select_related(
+        "proveedor",
+        "solicitud",
+        "solicitud__insumo",
+        "solicitud__insumo__unidad_base",
+    ).all()
+    recepciones_qs = RecepcionCompra.objects.select_related(
+        "orden",
+        "orden__proveedor",
+        "orden__solicitud",
+        "orden__solicitud__insumo",
+        "orden__solicitud__insumo__unidad_base",
+    ).all()
+    if start_date and end_date:
+        ordenes_qs = ordenes_qs.filter(fecha_emision__range=(start_date, end_date))
+        recepciones_qs = recepciones_qs.filter(fecha_recepcion__range=(start_date, end_date))
+    ordenes_qs = _filter_ordenes_by_scope(ordenes_qs, source_filter, plan_filter)
+    ordenes_qs = _filter_ordenes_by_categoria(ordenes_qs, categoria_filter)
+    recepciones_qs = _filter_recepciones_by_scope(recepciones_qs, source_filter, plan_filter)
+    recepciones_qs = _filter_recepciones_by_categoria(recepciones_qs, categoria_filter)
+
+    ordenes = list(ordenes_qs.order_by("-fecha_emision", "-creado_en")[:12])
+    recepciones = list(recepciones_qs.order_by("-fecha_recepcion", "-creado_en")[:12])
+
+    solicitudes_count = len(solicitudes)
+    open_solicitudes = sum(
+        1
+        for row in solicitudes
+        if row.estatus in {SolicitudCompra.STATUS_BORRADOR, SolicitudCompra.STATUS_EN_REVISION}
+    )
+    blocked_solicitudes = sum(1 for row in solicitudes if getattr(row, "has_workflow_blockers", False))
+    ready_for_order = sum(
+        1
+        for row in solicitudes
+        if row.estatus == SolicitudCompra.STATUS_APROBADA
+        and not getattr(row, "has_open_order", False)
+        and not getattr(row, "has_workflow_blockers", False)
+    )
+    ordenes_abiertas = ordenes_qs.exclude(estatus=OrdenCompra.STATUS_CERRADA).count()
+    ordenes_confirmadas = ordenes_qs.filter(estatus=OrdenCompra.STATUS_CONFIRMADA).count()
+    recepciones_pendientes = recepciones_qs.exclude(estatus=RecepcionCompra.STATUS_CERRADA).count()
+    recepciones_con_diferencias = recepciones_qs.filter(estatus=RecepcionCompra.STATUS_DIFERENCIAS).count()
+
+    latest_request = solicitudes[0].fecha_requerida if solicitudes else None
+    total_estimado = budget_ctx["presupuesto_estimado_total"]
+    total_ejecutado = budget_ctx["presupuesto_ejecutado_total"]
+    objetivo = budget_ctx["presupuesto_objetivo"] or Decimal("0")
+    objetivo_pct = budget_ctx["presupuesto_avance_objetivo_pct"]
+    execution_gap = budget_ctx["presupuesto_variacion_ejecutado_estimado"]
+    provider_rows = budget_ctx["presupuesto_rows_proveedor"]
+    category_rows = budget_ctx["presupuesto_rows_categoria"]
+    top_provider_rows = provider_dashboard["top_desviaciones"][:4]
+    top_category_rows = category_dashboard["top_desviaciones"][:4]
+    top_consumo_rows = [
+        row
+        for row in consumo_dashboard["rows"]
+        if row["semaforo"] != "VERDE" or row["sin_costo"] or (row["variacion_cost"] or Decimal("0")) != Decimal("0")
+    ][:4]
+    alert_rows = budget_ctx["presupuesto_alertas"][:4]
+
+    overdue_orders = [
+        orden
+        for orden in ordenes_qs.exclude(estatus=OrdenCompra.STATUS_CERRADA)
+        if orden.fecha_entrega_estimada and orden.fecha_entrega_estimada < timezone.localdate()
+    ][:4]
+
+    history_rows = []
+    for row in budget_history[-6:]:
+        history_rows.append(
+            {
+                "label": row["periodo_mes"],
+                "objetivo": float(row["objetivo"] or 0),
+                "estimado": float(row["estimado"] or 0),
+                "ejecutado": float(row["ejecutado"] or 0),
+            }
+        )
+
+    provider_chart_rows = [
+        {
+            "label": row["proveedor"],
+            "estimado": float(row["estimado"] or 0),
+            "ejecutado": float(row["ejecutado"] or 0),
+        }
+        for row in provider_rows[:6]
+    ]
+    category_chart_rows = [
+        {
+            "label": row["categoria"],
+            "estimado": float(row["estimado"] or 0),
+            "ejecutado": float(row["ejecutado"] or 0),
+        }
+        for row in category_rows[:6]
+    ]
+    pipeline_rows = [
+        {"label": "Solicitudes abiertas", "value": open_solicitudes},
+        {"label": "Listas para OC", "value": ready_for_order},
+        {"label": "Órdenes abiertas", "value": ordenes_abiertas},
+        {"label": "Recepciones pendientes", "value": recepciones_pendientes},
+    ]
+    consumo_chart_rows = [
+        {
+            "label": row["insumo"],
+            "plan": float(row["cantidad_plan"] or 0),
+            "real": float(row["cantidad_real"] or 0),
+        }
+        for row in consumo_dashboard["rows"][:6]
+    ]
+
+    latest_rows = [
+        {
+            "folio": row.folio,
+            "insumo": _insumo_display_name(row.insumo),
+            "estatus": row.get_estatus_display(),
+            "proveedor": row.proveedor_sugerido.nombre if row.proveedor_sugerido_id else "Sin proveedor",
+            "monto": row.presupuesto_estimado or Decimal("0"),
+        }
+        for row in solicitudes[:4]
+    ]
+    latest_orders = [
+        {
+            "folio": row.folio,
+            "proveedor": row.proveedor.nombre,
+            "estatus": row.get_estatus_display(),
+            "monto": row.monto_estimado or Decimal("0"),
+        }
+        for row in ordenes[:4]
+    ]
+    latest_receptions = [
+        {
+            "folio": row.folio,
+            "orden": row.orden.folio,
+            "estatus": row.get_estatus_display(),
+            "fecha": row.fecha_recepcion,
+        }
+        for row in recepciones[:4]
+    ]
+
+    plan_ids_all = set()
+    for area_val in SolicitudCompra.objects.filter(area__startswith="PLAN_PRODUCCION:").values_list("area", flat=True).distinct():
+        _, _, maybe_id = (area_val or "").partition(":")
+        if maybe_id.isdigit():
+            plan_ids_all.add(int(maybe_id))
+    plan_options = list(PlanProduccion.objects.filter(id__in=plan_ids_all).order_by("-fecha_produccion", "-id")[:100])
+
+    current_query = request.GET.copy()
+    current_query.pop("export", None)
+    scoped_params = {
+        "source": source_filter,
+        "periodo_tipo": periodo_tipo,
+        "periodo_mes": periodo_mes,
+    }
+    if plan_filter:
+        scoped_params["plan_id"] = plan_filter
+    if categoria_filter:
+        scoped_params["categoria"] = categoria_filter
+
+    for row in top_provider_rows:
+        provider_name = str(row.get("proveedor") or "").strip()
+        provider_query = dict(scoped_params)
+        if provider_name:
+            provider_query["q"] = provider_name
+        row["action_url"] = reverse("compras:ordenes") + f"?{urlencode(provider_query)}"
+    for row in top_category_rows:
+        category_name = str(row.get("categoria") or "").strip()
+        category_query = dict(scoped_params)
+        if category_name:
+            category_query["categoria"] = category_name
+        row["action_url"] = reverse("compras:solicitudes") + f"?{urlencode(category_query)}"
+    for row in top_consumo_rows:
+        insumo_name = str(row.get("insumo") or "").strip()
+        consumption_query = dict(scoped_params)
+        if insumo_name:
+            consumption_query["q"] = insumo_name
+        row["action_url"] = reverse("compras:solicitudes") + f"?{urlencode(consumption_query)}"
+    for row in alert_rows:
+        row["action_url"] = reverse("compras:solicitudes") + f"?{urlencode(scoped_params)}"
+
+    context = {
+        "source_filter": source_filter,
+        "plan_filter": plan_filter,
+        "categoria_filter": categoria_filter,
+        "periodo_tipo": periodo_tipo,
+        "periodo_mes": periodo_mes,
+        "periodo_label": periodo_label,
+        "consumo_ref_filter": consumo_ref_filter,
+        "plan_options": plan_options,
+        "categoria_options": [
+            c
+            for c in sorted(
+                {
+                    *[
+                        " ".join((x or "").strip().split())
+                        for x in Insumo.objects.filter(activo=True)
+                        .exclude(categoria="")
+                        .values_list("categoria", flat=True)
+                    ],
+                    "Masa",
+                    "Volumen",
+                    "Pieza",
+                }
+            )
+            if c
+        ],
+        "current_query": current_query.urlencode(),
+        "solicitudes_count": solicitudes_count,
+        "open_solicitudes": open_solicitudes,
+        "blocked_solicitudes": blocked_solicitudes,
+        "ready_for_order": ready_for_order,
+        "ordenes_abiertas": ordenes_abiertas,
+        "ordenes_confirmadas": ordenes_confirmadas,
+        "recepciones_pendientes": recepciones_pendientes,
+        "recepciones_con_diferencias": recepciones_con_diferencias,
+        "latest_request": latest_request,
+        "total_estimado": total_estimado,
+        "total_ejecutado": total_ejecutado,
+        "objetivo": objetivo,
+        "objetivo_pct": objetivo_pct,
+        "execution_gap": execution_gap,
+        "provider_chart_rows": provider_chart_rows,
+        "category_chart_rows": category_chart_rows,
+        "pipeline_rows": pipeline_rows,
+        "history_rows": history_rows,
+        "consumo_chart_rows": consumo_chart_rows,
+        "top_provider_rows": top_provider_rows,
+        "top_category_rows": top_category_rows,
+        "top_consumo_rows": top_consumo_rows,
+        "alert_rows": alert_rows,
+        "overdue_orders": overdue_orders,
+        "latest_rows": latest_rows,
+        "latest_orders": latest_orders,
+        "latest_receptions": latest_receptions,
+        "has_visible_data": any(
+            [
+                solicitudes_count,
+                ordenes_abiertas,
+                recepciones_pendientes,
+                total_estimado,
+                total_ejecutado,
+            ]
+        ),
+        "solicitudes_url": reverse("compras:solicitudes") + f"?{urlencode(scoped_params)}",
+        "ordenes_url": reverse("compras:ordenes") + f"?{urlencode(scoped_params)}",
+        "recepciones_url": reverse("compras:recepciones") + f"?{urlencode(scoped_params)}",
+        "solicitudes_abiertas_url": reverse("compras:solicitudes")
+        + f"?{urlencode({**scoped_params, 'estatus': SolicitudCompra.STATUS_EN_REVISION})}",
+        "ordenes_abiertas_url": reverse("compras:ordenes") + f"?{urlencode({**scoped_params, 'estatus': 'ALL'})}",
+        "recepciones_pendientes_url": reverse("compras:recepciones")
+        + f"?{urlencode({**scoped_params, 'estatus': RecepcionCompra.STATUS_PENDIENTE})}",
+        "budget_ctx": budget_ctx,
+        "provider_dashboard": provider_dashboard,
+        "category_dashboard": category_dashboard,
+        "consumo_dashboard": consumo_dashboard,
+    }
+    return render(request, "compras/dashboard.html", context)
+
+
 def _ordenes_release_gate_rows(ordenes: list[OrdenCompra]) -> list[dict[str, object]]:
     total = max(len(ordenes), 1)
     article_open = sum(1 for orden in ordenes if getattr(orden, "enterprise_master_blocker_details", []))
@@ -6449,6 +6905,12 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             if not insumo:
                 messages.error(request, "El insumo seleccionado no es válido.")
                 return _redirect_scoped_list("compras:solicitudes", request)
+            fuera_de_catalogo = _to_bool_flag(request.POST.get("fuera_de_catalogo"))
+            cotizaciones_requeridas = _to_non_negative_int(
+                request.POST.get("cotizaciones_requeridas"),
+                default=3 if fuera_de_catalogo else 0,
+            )
+            cotizaciones_recibidas = _to_non_negative_int(request.POST.get("cotizaciones_recibidas"), default=0)
             solicitud = SolicitudCompra.objects.create(
                 area=(
                     locked_plan_scope["plan_scope"]
@@ -6461,16 +6923,27 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
                 cantidad=_to_decimal(request.POST.get("cantidad"), "1"),
                 fecha_requerida=request.POST.get("fecha_requerida") or date.today(),
                 estatus=request.POST.get("estatus") or SolicitudCompra.STATUS_BORRADOR,
+                fuera_de_catalogo=fuera_de_catalogo,
+                cotizaciones_requeridas=cotizaciones_requeridas,
+                cotizaciones_recibidas=cotizaciones_recibidas,
+                justificacion_excepcion=(request.POST.get("justificacion_excepcion") or "").strip()[:255],
             )
             log_event(
                 request.user,
                 "CREATE",
                 "compras.SolicitudCompra",
                 solicitud.id,
-                {"folio": solicitud.folio, "estatus": solicitud.estatus},
+                {
+                    "folio": solicitud.folio,
+                    "estatus": solicitud.estatus,
+                    "fuera_de_catalogo": solicitud.fuera_de_catalogo,
+                    "cotizaciones_requeridas": solicitud.cotizaciones_requeridas,
+                    "cotizaciones_recibidas": solicitud.cotizaciones_recibidas,
+                },
             )
         return _redirect_scoped_list("compras:solicitudes", request)
 
+    q_filter = (request.GET.get("q") or "").strip()
     (
         solicitudes,
         source_filter,
@@ -6494,6 +6967,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         request.GET.get("blocker_key"),
         request.GET.get("periodo_tipo"),
         request.GET.get("periodo_mes"),
+        q_filter,
     )
     closure_key_raw = (request.GET.get("closure_key") or "all").strip().lower()
     handoff_key_raw = (request.GET.get("handoff_key") or "all").strip().lower()
@@ -6684,6 +7158,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
     plan_scope_context = _build_plan_scope_context(
         source_filter=source_filter,
         plan_filter=plan_filter,
+        q_filter=q_filter,
         current_view="solicitudes",
         closure_key_filter=closure_key_raw,
         handoff_key_filter=handoff_key_raw,
@@ -6789,6 +7264,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "consumo_ref_filter": consumo_ref_filter,
         "master_class_filter": master_class_filter,
         "master_missing_filter": master_missing_filter,
+        "q_filter": q_filter,
         "master_class_choices": [
             ("all", "Todas las clases"),
             (Insumo.TIPO_MATERIA_PRIMA, "Materia prima"),
@@ -7368,6 +7844,13 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
                 "fecha_requerida": fecha_requerida,
                 "estatus": estatus,
                 "proveedor_id": int(proveedor.id) if proveedor else 0,
+                "fuera_de_catalogo": _to_bool_flag(row.get("fuera_de_catalogo")),
+                "cotizaciones_requeridas": _to_non_negative_int(
+                    row.get("cotizaciones_requeridas"),
+                    default=3 if _to_bool_flag(row.get("fuera_de_catalogo")) else 0,
+                ),
+                "cotizaciones_recibidas": _to_non_negative_int(row.get("cotizaciones_recibidas"), default=0),
+                "justificacion_excepcion": str(row.get("justificacion_excepcion") or "").strip()[:255],
                 "score": float(score or 0),
                 "metodo": method,
                 "has_insumo_match": bool(insumo_match),
@@ -7411,6 +7894,9 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
         solicitante = parsed["solicitante"]
         fecha_requerida = parsed["fecha_requerida"]
         estatus = parsed["estatus"]
+        fuera_de_catalogo = bool(parsed["fuera_de_catalogo"])
+        cotizaciones_requeridas = int(parsed["cotizaciones_requeridas"])
+        cotizaciones_recibidas = int(parsed["cotizaciones_recibidas"])
         duplicate = bool(insumo_id and (area, insumo_id, fecha_requerida) in duplicates_found)
 
         notes: list[str] = []
@@ -7429,6 +7915,12 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
             hard_error = True
         if duplicate:
             notes.append("Posible duplicado con solicitud activa.")
+        if fuera_de_catalogo and not parsed["justificacion_excepcion"]:
+            notes.append("Fuera de catálogo sin justificación documentada.")
+        if cotizaciones_requeridas > cotizaciones_recibidas:
+            notes.append(
+                f"Cotizaciones incompletas ({cotizaciones_recibidas}/{cotizaciones_requeridas})."
+            )
 
         preview_rows.append(
             {
@@ -7444,6 +7936,10 @@ def importar_solicitudes(request: HttpRequest) -> HttpResponse:
                 "fecha_requerida": fecha_requerida.isoformat(),
                 "estatus": estatus,
                 "proveedor_id": str(parsed["proveedor_id"]) if parsed["proveedor_id"] else "",
+                "fuera_de_catalogo": fuera_de_catalogo,
+                "cotizaciones_requeridas": str(cotizaciones_requeridas),
+                "cotizaciones_recibidas": str(cotizaciones_recibidas),
+                "justificacion_excepcion": parsed["justificacion_excepcion"],
                 "score": f"{parsed['score']:.1f}",
                 "metodo": parsed["metodo"],
                 "costo_unitario": str(costo_unitario),
@@ -7581,6 +8077,18 @@ def confirmar_importacion_solicitudes(request: HttpRequest) -> HttpResponse:
             continue
 
         fecha_requerida = _parse_date_value(request.POST.get(f"row_{row_id}_fecha_requerida"), default_fecha)
+        fuera_de_catalogo = _to_bool_flag(request.POST.get(f"row_{row_id}_fuera_de_catalogo"))
+        cotizaciones_requeridas = _to_non_negative_int(
+            request.POST.get(f"row_{row_id}_cotizaciones_requeridas"),
+            default=3 if fuera_de_catalogo else 0,
+        )
+        cotizaciones_recibidas = _to_non_negative_int(
+            request.POST.get(f"row_{row_id}_cotizaciones_recibidas"),
+            default=0,
+        )
+        justificacion_excepcion = (
+            request.POST.get(f"row_{row_id}_justificacion_excepcion") or ""
+        ).strip()[:255]
 
         proveedor = None
         try:
@@ -7605,6 +8113,10 @@ def confirmar_importacion_solicitudes(request: HttpRequest) -> HttpResponse:
             cantidad=cantidad,
             fecha_requerida=fecha_requerida,
             estatus=estatus,
+            fuera_de_catalogo=fuera_de_catalogo,
+            cotizaciones_requeridas=cotizaciones_requeridas,
+            cotizaciones_recibidas=cotizaciones_recibidas,
+            justificacion_excepcion=justificacion_excepcion,
         )
         log_event(
             request.user,
@@ -7614,6 +8126,9 @@ def confirmar_importacion_solicitudes(request: HttpRequest) -> HttpResponse:
             {
                 "folio": solicitud.folio,
                 "source": "import_preview_confirm",
+                "fuera_de_catalogo": solicitud.fuera_de_catalogo,
+                "cotizaciones_requeridas": solicitud.cotizaciones_requeridas,
+                "cotizaciones_recibidas": solicitud.cotizaciones_recibidas,
             },
         )
         if evitar_duplicados:

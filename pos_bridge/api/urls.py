@@ -1,13 +1,21 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from pos_bridge.api.views import AgentQueryView, InventoryViewSet, ProductsViewSet, SalesViewSet, SyncJobsViewSet
+from pos_bridge.api.views import (
+    AgentQueryView,
+    InventoryViewSet,
+    ProductMonthClosureViewSet,
+    ProductsViewSet,
+    SalesViewSet,
+    SyncJobsViewSet,
+)
 
 app_name = "pos_bridge_api"
 
 router = DefaultRouter()
 router.register("sales", SalesViewSet, basename="pos_bridge_sales")
 router.register("inventory", InventoryViewSet, basename="pos_bridge_inventory")
+router.register("product-closures", ProductMonthClosureViewSet, basename="pos_bridge_product_closures")
 router.register("products", ProductsViewSet, basename="pos_bridge_products")
 router.register("sync-jobs", SyncJobsViewSet, basename="pos_bridge_sync_jobs")
 

@@ -1,4 +1,15 @@
 from django.urls import path
+from .ai_gateway_views import (
+    AIGatewayApprovalDecisionView,
+    AIGatewayApprovalExecuteView,
+    AIGatewayApprovalListView,
+    AIGatewayApprovalRequestView,
+    AIGatewayManifestView,
+    AIGatewayOpenAPIView,
+    AIGatewayToolDetailView,
+    AIGatewayToolInvokeView,
+    AIGatewayToolsView,
+)
 from .views import (
     ApiTokenAuthView,
     ApiAuthMeView,
@@ -92,6 +103,10 @@ from .logistica_views import (
     LogisticaRutaStatusView,
 )
 from .reportes_bi_views import ReportesBIDashboardView
+from .reportes_investment_views import (
+    InvestmentProjectDashboardView,
+    InvestmentProjectScenarioSimulationView,
+)
 from .public_views import (
     PublicHealthView,
     PublicInsumosView,
@@ -103,8 +118,51 @@ from .public_views import (
     PublicResumenView,
     PublicPedidosCreateView,
 )
+from .ventas_eventos_views import (
+    SalesEventListCreateView,
+    SalesEventDetailView,
+    SalesEventGenerateForecastView,
+    SalesEventForecastListView,
+    SalesEventSubmitApprovalView,
+    SalesEventApproveView,
+    SalesEventRejectView,
+    SalesEventSendToProductionView,
+    SalesEventProductionPlanView,
+    SalesEventConfirmProductionView,
+    SalesEventCapacityRulesView,
+    SalesEventCapacityRuleDetailView,
+    SalesEventAdjustmentsView,
+    SalesEventInputRequirementsView,
+    SalesEventSendToPurchasesView,
+    SalesEventPurchaseRequirementsView,
+    SalesEventFinancialSummaryView,
+    SalesEventExecutionDashboardView,
+    SalesEventCloseView,
+    SalesEventPostmortemView,
+)
 
 urlpatterns = [
+    path("ai-gateway/manifest/", AIGatewayManifestView.as_view(), name="api_ai_gateway_manifest"),
+    path("ai-gateway/openapi/", AIGatewayOpenAPIView.as_view(), name="api_ai_gateway_openapi"),
+    path("ai-gateway/tools/", AIGatewayToolsView.as_view(), name="api_ai_gateway_tools"),
+    path("ai-gateway/tools/<path:tool_key>/invoke/", AIGatewayToolInvokeView.as_view(), name="api_ai_gateway_tool_invoke"),
+    path(
+        "ai-gateway/tools/<path:tool_key>/request-approval/",
+        AIGatewayApprovalRequestView.as_view(),
+        name="api_ai_gateway_tool_request_approval",
+    ),
+    path("ai-gateway/tools/<path:tool_key>/", AIGatewayToolDetailView.as_view(), name="api_ai_gateway_tool_detail"),
+    path("ai-gateway/approvals/", AIGatewayApprovalListView.as_view(), name="api_ai_gateway_approvals"),
+    path(
+        "ai-gateway/approvals/<int:suggestion_id>/execute/",
+        AIGatewayApprovalExecuteView.as_view(),
+        name="api_ai_gateway_approval_execute",
+    ),
+    path(
+        "ai-gateway/approvals/<int:suggestion_id>/<str:decision>/",
+        AIGatewayApprovalDecisionView.as_view(),
+        name="api_ai_gateway_approval_decision",
+    ),
     path("auth/token/", ApiTokenAuthView.as_view(), name="api_auth_token"),
     path("auth/token/rotate/", ApiTokenRotateView.as_view(), name="api_auth_token_rotate"),
     path("auth/token/revoke/", ApiTokenRevokeView.as_view(), name="api_auth_token_revoke"),
@@ -138,6 +196,26 @@ urlpatterns = [
     path("ventas/solicitud/import-preview/", SolicitudVentaImportPreviewView.as_view(), name="api_ventas_solicitud_import_preview"),
     path("ventas/solicitud/import-confirm/", SolicitudVentaImportConfirmView.as_view(), name="api_ventas_solicitud_import_confirm"),
     path("ventas/solicitud/aplicar-forecast/", SolicitudVentaAplicarForecastView.as_view(), name="api_ventas_solicitud_aplicar_forecast"),
+    path("ventas/sales-events/", SalesEventListCreateView.as_view(), name="api_ventas_sales_events"),
+    path("ventas/sales-events/<int:event_id>/", SalesEventDetailView.as_view(), name="api_ventas_sales_event_detail"),
+    path("ventas/sales-events/<int:event_id>/generate-forecast/", SalesEventGenerateForecastView.as_view(), name="api_ventas_sales_event_generate_forecast"),
+    path("ventas/sales-events/<int:event_id>/forecast/", SalesEventForecastListView.as_view(), name="api_ventas_sales_event_forecast"),
+    path("ventas/sales-events/<int:event_id>/submit-for-approval/", SalesEventSubmitApprovalView.as_view(), name="api_ventas_sales_event_submit_for_approval"),
+    path("ventas/sales-events/<int:event_id>/approve/", SalesEventApproveView.as_view(), name="api_ventas_sales_event_approve"),
+    path("ventas/sales-events/<int:event_id>/reject/", SalesEventRejectView.as_view(), name="api_ventas_sales_event_reject"),
+    path("ventas/sales-events/<int:event_id>/adjustments/", SalesEventAdjustmentsView.as_view(), name="api_ventas_sales_event_adjustments"),
+    path("ventas/sales-events/<int:event_id>/send-to-production/", SalesEventSendToProductionView.as_view(), name="api_ventas_sales_event_send_to_production"),
+    path("ventas/sales-events/<int:event_id>/production-plan/", SalesEventProductionPlanView.as_view(), name="api_ventas_sales_event_production_plan"),
+    path("ventas/sales-events/<int:event_id>/confirm-production/", SalesEventConfirmProductionView.as_view(), name="api_ventas_sales_event_confirm_production"),
+    path("ventas/sales-events/<int:event_id>/capacity-rules/", SalesEventCapacityRulesView.as_view(), name="api_ventas_sales_event_capacity_rules"),
+    path("ventas/sales-events/<int:event_id>/capacity-rules/<int:rule_id>/", SalesEventCapacityRuleDetailView.as_view(), name="api_ventas_sales_event_capacity_rule_detail"),
+    path("ventas/sales-events/<int:event_id>/input-requirements/", SalesEventInputRequirementsView.as_view(), name="api_ventas_sales_event_input_requirements"),
+    path("ventas/sales-events/<int:event_id>/send-to-purchases/", SalesEventSendToPurchasesView.as_view(), name="api_ventas_sales_event_send_to_purchases"),
+    path("ventas/sales-events/<int:event_id>/purchase-requirements/", SalesEventPurchaseRequirementsView.as_view(), name="api_ventas_sales_event_purchase_requirements"),
+    path("ventas/sales-events/<int:event_id>/financial-summary/", SalesEventFinancialSummaryView.as_view(), name="api_ventas_sales_event_financial_summary"),
+    path("ventas/sales-events/<int:event_id>/execution-dashboard/", SalesEventExecutionDashboardView.as_view(), name="api_ventas_sales_event_execution_dashboard"),
+    path("ventas/sales-events/<int:event_id>/close/", SalesEventCloseView.as_view(), name="api_ventas_sales_event_close"),
+    path("ventas/sales-events/<int:event_id>/postmortem/", SalesEventPostmortemView.as_view(), name="api_ventas_sales_event_postmortem"),
     path("inventario/ajustes/", InventarioAjustesView.as_view(), name="api_inventario_ajustes"),
     path("inventario/ajustes/<int:ajuste_id>/decision/", InventarioAjusteDecisionView.as_view(), name="api_inventario_ajuste_decision"),
     path("inventario/aliases/", InventarioAliasesListCreateView.as_view(), name="api_inventario_aliases"),
@@ -192,6 +270,16 @@ urlpatterns = [
     path("logistica/rutas/<int:ruta_id>/estatus/", LogisticaRutaStatusView.as_view(), name="api_logistica_ruta_estatus"),
     path("logistica/rutas/<int:ruta_id>/entregas/", LogisticaRutaEntregasView.as_view(), name="api_logistica_ruta_entregas"),
     path("reportes/bi/dashboard/", ReportesBIDashboardView.as_view(), name="api_reportes_bi_dashboard"),
+    path(
+        "reportes/investment-projects/<int:project_id>/dashboard/",
+        InvestmentProjectDashboardView.as_view(),
+        name="api_reportes_investment_project_dashboard",
+    ),
+    path(
+        "reportes/investment-projects/<int:project_id>/scenarios/<int:scenario_id>/simulate/",
+        InvestmentProjectScenarioSimulationView.as_view(),
+        name="api_reportes_investment_project_scenario_simulate",
+    ),
     path("public/v1/health/", PublicHealthView.as_view(), name="api_public_health"),
     path("public/v1/insumos/", PublicInsumosView.as_view(), name="api_public_insumos"),
     path("public/v1/recetas/", PublicRecetasView.as_view(), name="api_public_recetas"),

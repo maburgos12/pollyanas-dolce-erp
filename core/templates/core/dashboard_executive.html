@@ -6,16 +6,16 @@
 {% block body_class %}page-dashboard-executive{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}">
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
 <style>
   .home-exec-shell {
     display: grid;
-    gap: 14px;
+    gap: 12px;
   }
 
   .home-exec-hero,
   .home-exec-card {
-    padding: 16px 18px;
+    padding: 14px 16px;
     border-radius: 22px;
     border: 1px solid rgba(145, 36, 86, 0.10);
     background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,248,251,0.96));
@@ -23,10 +23,17 @@
   }
 
   .home-exec-hero {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
     gap: 14px;
     align-items: flex-start;
+  }
+
+  .home-exec-hero-side {
+    display: grid;
+    gap: 10px;
+    justify-items: end;
+    min-width: 0;
   }
 
   .home-exec-kicker {
@@ -52,8 +59,9 @@
   .home-exec-copy {
     margin: 0;
     color: #6f6170;
-    max-width: 62ch;
-    line-height: 1.35;
+    max-width: 54ch;
+    line-height: 1.28;
+    font-size: 0.96rem;
   }
 
   .home-exec-pills,
@@ -61,6 +69,11 @@
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
+  }
+
+  .home-exec-actions {
+    gap: 8px;
+    justify-content: flex-end;
   }
 
   .home-exec-pills {
@@ -74,19 +87,20 @@
     color: #7a2853;
     font-weight: 700;
     font-size: 0.86rem;
-    white-space: nowrap;
+    white-space: normal;
+    text-align: center;
   }
 
   .home-exec-grid-top {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
+    gap: 8px;
   }
 
   .home-exec-grid-secondary {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 8px;
   }
 
   .home-exec-kpi {
@@ -131,8 +145,8 @@
 
   .home-exec-grid-half {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+    gap: 12px;
   }
 
   .home-exec-grid-stack {
@@ -145,12 +159,30 @@
     justify-content: space-between;
     align-items: flex-start;
     gap: 14px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
+  }
+
+  .home-exec-panel-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .home-exec-panel-actions .btn {
+    min-height: 34px;
+    padding-inline: 12px;
+    border-radius: 999px;
+    font-size: 0.82rem;
   }
 
   .home-exec-title {
     font-size: clamp(1.08rem, 1.3vw, 1.35rem);
     line-height: 1.08;
+  }
+
+  .home-exec-section-head .home-exec-copy {
+    max-width: 46ch;
   }
 
   .home-exec-mini-grid {
@@ -222,6 +254,7 @@
     border-radius: 16px;
     background: rgba(255,255,255,0.74);
     border: 1px solid rgba(145, 36, 86, 0.08);
+    border-left: 4px solid rgba(145, 36, 86, 0.14);
   }
 
   .home-exec-list-item--tight {
@@ -237,14 +270,99 @@
     color: #42292e;
   }
 
+  .home-exec-list-item.is-success {
+    border-left-color: rgba(35, 109, 83, 0.7);
+  }
+
+  .home-exec-list-item.is-warning {
+    border-left-color: rgba(185, 140, 36, 0.7);
+  }
+
+  .home-exec-list-item.is-danger {
+    border-left-color: rgba(188, 59, 59, 0.72);
+  }
+
   .home-exec-subtle {
     color: #8a757e;
     font-size: 0.88rem;
   }
 
+  .home-exec-inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .home-exec-inline-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #7a2853;
+    font-size: 0.82rem;
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .home-exec-inline-link:hover,
+  .home-exec-inline-link:focus-visible {
+    color: #5f1f43;
+    text-decoration: underline;
+  }
+
   .home-exec-card .table-responsive {
     max-height: 320px;
     overflow: auto;
+  }
+
+  .home-exec-visual-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    gap: 14px;
+  }
+
+  .home-exec-chart-card {
+    min-height: 0;
+  }
+
+  .home-exec-chart-stage {
+    position: relative;
+    min-height: 204px;
+    padding: 8px 4px 0;
+  }
+
+  .home-exec-chart-stage.is-short {
+    min-height: 174px;
+  }
+
+  .home-exec-chart-stage canvas {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .home-exec-insight-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .home-exec-insight {
+    padding: 10px 12px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.76);
+    border: 1px solid rgba(145, 36, 86, 0.08);
+  }
+
+  .home-exec-insight strong {
+    display: block;
+    font-size: 1.02rem;
+    color: #42292e;
+  }
+
+  .home-exec-insight span {
+    color: #7d6a72;
+    font-size: 0.86rem;
   }
 
   .home-exec-metric-pill {
@@ -273,10 +391,22 @@
 
   .home-exec-actions .btn,
   .home-exec-pills .home-exec-pill {
-    white-space: nowrap;
+    white-space: normal;
+  }
+
+  .home-exec-actions .btn {
+    padding: 8px 12px;
+    min-height: 0;
+    border-radius: 999px;
+    font-size: 0.84rem;
+    line-height: 1.1;
   }
 
   @media (max-width: 1380px) {
+    .home-exec-hero {
+      grid-template-columns: 1fr;
+    }
+
     .home-exec-grid-top {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -284,6 +414,8 @@
 
   @media (max-width: 1120px) {
     .home-exec-grid-half,
+    .home-exec-visual-grid,
+    .home-exec-insight-grid,
     .home-exec-mini-grid,
     .home-exec-grid-secondary {
       grid-template-columns: 1fr;
@@ -291,11 +423,9 @@
   }
 
   @media (max-width: 760px) {
-    .home-exec-hero {
-      flex-direction: column;
-    }
-
+    .home-exec-hero-side,
     .home-exec-pills {
+      justify-items: start;
       justify-content: flex-start;
     }
 
@@ -311,22 +441,77 @@
   <section class="home-exec-hero">
     <div>
       <div class="home-exec-kicker">Dirección general</div>
-      <h1>Home ejecutiva del ERP</h1>
-      <p class="home-exec-copy">Portada compacta con la misma lógica del BI ejecutivo: ventas confirmadas, pronóstico, rentabilidad, sobreproducción y cuadre mensual. Sin duplicar fórmulas viejas.</p>
+      <h1>Tablero ejecutivo</h1>
+      <p class="home-exec-copy">Venta, forecast, margen y cierre mensual en una sola lectura.</p>
     </div>
-    <div class="home-exec-pills">
-      <span class="home-exec-pill">Corte ventas: {{ daily_sales_snapshot.date_label|default:"Sin corte" }}</span>
-      <span class="home-exec-pill">Costeo semanal: {{ profitability_panel.latest_week|default:"Sin corte" }}</span>
-      <span class="home-exec-pill">Flujo producción/merma: {{ production_sales_panel.cutoff_date|default:"Sin corte" }}</span>
+    <div class="home-exec-hero-side">
+      <div class="home-exec-pills">
+        <span class="home-exec-pill">Corte {{ daily_sales_snapshot.date_label|default:"Sin corte" }}</span>
+        <span class="home-exec-pill">Ticket {% if daily_sales_snapshot.tickets_available %}${{ daily_sales_snapshot.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}</span>
+        <span class="home-exec-pill">{{ forecast_panel.target_week_label }}</span>
+      </div>
+      <div class="home-exec-actions">
+        <a class="btn btn-primary" href="{% url 'reportes:bi' %}">BI</a>
+        <a class="btn btn-primary" href="{% url 'reportes:ventas' %}">Ventas</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Costeo</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:dg_operacion_dashboard' %}">DG</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:produccion_cedis_weekly_dashboard' %}">CEDIS</a>
+      </div>
     </div>
   </section>
 
-  <section class="home-exec-actions">
-    <a class="btn btn-primary" href="{% url 'reportes:bi' %}">Abrir BI completo</a>
-    <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Abrir costeo semanal</a>
-    <a class="btn btn-secondary" href="{% url 'recetas:dg_operacion_dashboard' %}">Abrir DG operación</a>
-    <a class="btn btn-secondary" href="{% url 'recetas:produccion_cedis_weekly_dashboard' %}">Abrir producción CEDIS</a>
+  {% if sales_refresh_status %}
+  <section class="home-exec-card {% if sales_refresh_status.last_status == 'ERROR' %}is-danger{% elif sales_refresh_status.is_cut_delayed or sales_refresh_status.last_status == 'INCONSISTENCIA' or sales_refresh_status.last_status == 'REZAGO' or sales_refresh_status.last_status == 'PENDIENTE_REZAGO' %}is-warning{% else %}is-success{% endif %}">
+    <div class="home-exec-section-head">
+      <div>
+        <div class="home-exec-kicker">Frescura de ventas</div>
+        <h2 class="home-exec-title">{{ sales_refresh_status.status_title }}</h2>
+        <p class="home-exec-copy">{{ sales_refresh_status.status_message }}</p>
+      </div>
+      <div class="home-exec-pills">
+        <span class="home-exec-pill">Visible {{ sales_refresh_status.visible_cut_date_iso|default:"Sin fecha" }}</span>
+        <span class="home-exec-pill">Esperada {{ sales_refresh_status.expected_cut_date_iso|default:"Sin regla" }}</span>
+        {% if sales_refresh_status.is_cut_delayed %}
+          <span class="home-exec-pill">Rezago {{ sales_refresh_status.cut_lag_days }} día{{ sales_refresh_status.cut_lag_days|pluralize }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="home-exec-inline-actions">
+      <a class="home-exec-inline-link" href="{% url 'reportes:ventas' %}">{{ sales_refresh_status.button_label }}</a>
+      {% if sales_refresh_status.schedule_label %}
+        <span class="home-exec-subtle">Scheduler {{ sales_refresh_status.schedule_label }}</span>
+      {% endif %}
+    </div>
   </section>
+  {% endif %}
+
+  <form class="bi-filterbar" method="get">
+    <div class="bi-control">
+      <label for="dashboard_months">Fecha visible</label>
+      <select id="dashboard_months" name="months">
+        <option value="6" {% if months_window|stringformat:"s" == "6" or not months_window %}selected{% endif %}>Últimos 6 meses</option>
+        <option value="9" {% if months_window|stringformat:"s" == "9" %}selected{% endif %}>Últimos 9 meses</option>
+        <option value="12" {% if months_window|stringformat:"s" == "12" %}selected{% endif %}>Últimos 12 meses</option>
+      </select>
+    </div>
+    <div class="bi-control">
+      <button type="submit">Aplicar filtros</button>
+    </div>
+  </form>
+  <div class="bi-summary-band">
+    <div class="bi-summary-chip">
+      <span>Cobertura</span>
+      <strong>Red completa</strong>
+    </div>
+    <div class="bi-summary-chip">
+      <span>Portafolio</span>
+      <strong>Total visible</strong>
+    </div>
+    <div class="bi-summary-chip">
+      <span>Ventana</span>
+      <strong>{{ months_window }} meses</strong>
+    </div>
+  </div>
 
   <section class="home-exec-grid-top">
     <article class="home-exec-card home-exec-kpi is-hero">
@@ -361,6 +546,68 @@
     </article>
   </section>
 
+  <section class="home-exec-visual-grid">
+    <article class="home-exec-card home-exec-chart-card">
+      <div class="home-exec-section-head">
+        <div>
+          <h2 class="home-exec-title">Ventas semanales</h2>
+        </div>
+        <div class="home-exec-panel-actions">
+          <span class="home-exec-pill">{{ forecast_panel.target_week_label }}</span>
+          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months={{ months_window }}">Abrir ventas</a>
+        </div>
+      </div>
+      <div class="home-exec-chart-stage">
+        <canvas id="homeForecastTrendChart" aria-label="Tendencia semanal de venta" role="img"></canvas>
+      </div>
+      <div class="home-exec-insight-grid">
+        <article class="home-exec-insight">
+          <strong>${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</strong>
+          <span>escenario base próxima semana</span>
+        </article>
+        <article class="home-exec-insight">
+          <strong>{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }}</strong>
+          <span>piezas estimadas</span>
+        </article>
+        <article class="home-exec-insight">
+          <strong>{% if forecast_panel.has_atypical_history %}Atípicas{% else %}Estable{% endif %}</strong>
+          <span>{{ forecast_panel.baseline_label }}</span>
+        </article>
+      </div>
+    </article>
+
+    <article class="home-exec-card home-exec-chart-card">
+      <div class="home-exec-section-head">
+        <div>
+          <h2 class="home-exec-title">Mes contra año anterior</h2>
+        </div>
+        <div class="home-exec-panel-actions">
+          <span class="home-exec-pill">{{ yoy_panel.hero_note|default:"Sin mes" }}</span>
+          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months={{ months_window }}">Comparativo ventas</a>
+        </div>
+      </div>
+      <div class="home-exec-chart-stage is-short">
+        <canvas id="homeYoyChart" aria-label="Comparativo mensual contra año anterior" role="img"></canvas>
+      </div>
+      {% with hero=yoy_panel.hero_row %}
+      <div class="home-exec-insight-grid">
+        <article class="home-exec-insight">
+          <strong>{% if hero %}${{ hero.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong>
+          <span>mes visible actual</span>
+        </article>
+        <article class="home-exec-insight">
+          <strong>{% if hero and hero.prev_amount is not None %}${{ hero.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong>
+          <span>mismo corte año previo</span>
+        </article>
+        <article class="home-exec-insight">
+          <strong>{% if hero and hero.amount_delta_pct is not None %}{{ hero.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}</strong>
+          <span>variación visible</span>
+        </article>
+      </div>
+      {% endwith %}
+    </article>
+  </section>
+
   <section class="home-exec-grid-secondary">
     <article class="home-exec-card home-exec-kpi is-context">
       <div class="home-exec-kpi-value {% if criticos_count > 0 %}is-danger{% else %}is-success{% endif %}">{{ criticos_count|intcomma }}</div>
@@ -382,9 +629,7 @@
     <article class="home-exec-card">
       <div class="home-exec-section-head">
         <div>
-          <div class="home-exec-kicker">Pronóstico</div>
-          <h2 class="home-exec-title">Tendencia y fechas atípicas</h2>
-          <p class="home-exec-copy">Base sobre 2-3 semanas normales. Los picos se marcan por anomalía histórica hasta que exista calendario oficial.</p>
+          <h2 class="home-exec-title">Base semanal</h2>
         </div>
         <span class="home-exec-pill">{{ forecast_panel.baseline_label }}</span>
       </div>
@@ -405,9 +650,10 @@
           <div>{{ forecast_panel.forecast_tickets|intcomma }} tickets esperados</div>
         </div>
       </div>
+      <div class="home-exec-subtle mt-2">{{ forecast_panel.high_scenario_note }}</div>
       <div class="home-exec-grid-stack mt-3">
-        {% for row in forecast_panel.weekly_rows|slice:":4" %}
-        <article class="home-exec-list-item home-exec-list-item--tight">
+        {% for row in forecast_panel.weekly_rows|slice:":2" %}
+        <article class="home-exec-list-item home-exec-list-item--tight {% if row.atypical %}is-warning{% else %}is-success{% endif %}">
           <div>
             <strong>{{ row.week_label }}</strong>
             <div class="home-exec-subtle">${{ row.amount|floatformat:2|intcomma }} · {{ row.quantity|floatformat:0|intcomma }} piezas</div>
@@ -416,7 +662,7 @@
             {% if row.atypical %}
             <span class="home-exec-tone warning">Atípica</span>
             {% else %}
-            <span class="home-exec-tone success">Base normal</span>
+            <span class="home-exec-tone success">Normal</span>
             {% endif %}
           </div>
         </article>
@@ -427,14 +673,12 @@
     <article class="home-exec-card">
       <div class="home-exec-section-head">
         <div>
-          <div class="home-exec-kicker">Comparativo</div>
-          <h2 class="home-exec-title">Mes contra mismo mes del año anterior</h2>
-          <p class="home-exec-copy">El mes actual compara solo hasta el mismo día disponible para no mezclar meses parciales con meses cerrados.</p>
+          <h2 class="home-exec-title">Trayectoria mensual</h2>
         </div>
       </div>
       <div class="home-exec-grid-stack">
-        {% for row in yoy_panel.rows %}
-        <article class="home-exec-list-item home-exec-list-item--tight">
+        {% for row in yoy_panel.rows|slice:":4" %}
+        <article class="home-exec-list-item home-exec-list-item--tight {% if row.amount_delta_pct is not None and row.amount_delta_pct >= 0 %}is-success{% else %}is-warning{% endif %}">
           <div>
             <strong>{{ row.month_label }}</strong>
             <div class="home-exec-subtle">
@@ -455,18 +699,24 @@
     <article class="home-exec-card">
       <div class="home-exec-section-head">
         <div>
-          <div class="home-exec-kicker">Rentabilidad</div>
-          <h2 class="home-exec-title">Productos que funcionan y productos a mover</h2>
-          <p class="home-exec-copy">Margen sobre materia prima costada. Mano de obra e indirectos siguen pendientes y no se esconden.</p>
+          <h2 class="home-exec-title">Top margen</h2>
         </div>
-        <span class="home-exec-pill">{{ profitability_panel.lookback_days }} días</span>
+        <div class="home-exec-panel-actions">
+          <span class="home-exec-pill">{{ profitability_panel.lookback_days }} días</span>
+          <a class="btn btn-secondary" href="{% url 'reportes:financiero' %}">Abrir financiero</a>
+        </div>
       </div>
       <div class="home-exec-grid-stack">
-        {% for row in profitability_panel.rows|slice:":5" %}
-        <article class="home-exec-list-item home-exec-list-item--tight">
+        {% for row in profitability_panel.rows|slice:":2" %}
+        <article class="home-exec-list-item home-exec-list-item--tight {% if row.bucket == 'Defender' %}is-success{% elif row.bucket == 'Promocionar' %}is-warning{% else %}is-danger{% endif %}">
           <div>
             <strong>{{ row.label }}</strong>
             <div class="home-exec-subtle">{{ row.categoria|default:row.familia }} · ${{ row.revenue|floatformat:2|intcomma }}</div>
+            <div class="home-exec-inline-actions">
+              <a class="home-exec-inline-link" href="{% url 'reportes:financiero' %}?familia={{ row.familia|urlencode }}&categoria={{ row.categoria|default:''|urlencode }}&bucket={{ row.bucket|urlencode }}&q={{ row.label|urlencode }}">
+                Ver financiero
+              </a>
+            </div>
           </div>
           <div style="display:grid; gap:6px; justify-items:end;">
             <span class="home-exec-metric-pill">{% if row.margin_pct is not None %}{{ row.margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}</span>
@@ -475,23 +725,28 @@
         </article>
         {% endfor %}
       </div>
-      <div class="home-exec-note">{{ profitability_panel.basis_note }}</div>
     </article>
 
     <article class="home-exec-card">
       <div class="home-exec-section-head">
         <div>
-          <div class="home-exec-kicker">Promoción</div>
-          <h2 class="home-exec-title">Candidatos a promoción</h2>
-          <p class="home-exec-copy">Productos con margen suficiente y presión comercial adecuada para mover volumen.</p>
+          <h2 class="home-exec-title">Oportunidad comercial</h2>
+        </div>
+        <div class="home-exec-panel-actions">
+          <a class="btn btn-secondary" href="{% url 'reportes:financiero' %}?bucket=Promocionar">Promociones y margen</a>
         </div>
       </div>
       <div class="home-exec-list">
-        {% for row in profitability_panel.promo_candidates|slice:":4" %}
-        <article class="home-exec-list-item">
+        {% for row in profitability_panel.promo_candidates|slice:":2" %}
+        <article class="home-exec-list-item is-warning">
           <strong>{{ row.label }}</strong>
           <div class="home-exec-subtle">{{ row.categoria|default:row.familia }}</div>
           <div>Margen {{ row.margin_pct|floatformat:1 }}% · {{ row.quantity|floatformat:0|intcomma }} piezas · ${{ row.revenue|floatformat:2|intcomma }}</div>
+          <div class="home-exec-inline-actions">
+            <a class="home-exec-inline-link" href="{% url 'reportes:financiero' %}?familia={{ row.familia|urlencode }}&categoria={{ row.categoria|default:''|urlencode }}&bucket=Promocionar&q={{ row.label|urlencode }}">
+              Abrir promoción
+            </a>
+          </div>
         </article>
         {% empty %}
         <article class="home-exec-list-item">
@@ -507,15 +762,16 @@
     <article class="home-exec-card">
       <div class="home-exec-section-head">
         <div>
-          <div class="home-exec-kicker">Producción</div>
-          <h2 class="home-exec-title">Producido contra vendido</h2>
-          <p class="home-exec-copy">Lectura semanal sin mezclar transferencias internas, para detectar sobreproducción o déficit real.</p>
+          <h2 class="home-exec-title">Gap producción / venta</h2>
         </div>
-        <span class="home-exec-pill">{{ production_sales_panel.week_label }} · corte {{ production_sales_panel.cutoff_date }}</span>
+        <div class="home-exec-panel-actions">
+          <span class="home-exec-pill">{{ production_sales_panel.week_label }}</span>
+          <a class="btn btn-secondary" href="{% url 'recetas:produccion_cedis_weekly_dashboard' %}">Abrir CEDIS</a>
+        </div>
       </div>
       <div class="home-exec-grid-stack">
-        {% for row in production_sales_panel.weekly_rows|slice:":4" %}
-        <article class="home-exec-list-item home-exec-list-item--tight">
+        {% for row in production_sales_panel.weekly_rows|slice:":2" %}
+        <article class="home-exec-list-item home-exec-list-item--tight {% if row.delta_units >= 0 %}is-success{% else %}is-warning{% endif %}">
           <div>
             <strong>{{ row.week_label }}</strong>
             <div class="home-exec-subtle">Prod. {{ row.produced_units|floatformat:0|intcomma }} · Venta {{ row.sold_units|floatformat:0|intcomma }}</div>
@@ -525,11 +781,11 @@
         {% endfor %}
       </div>
       <div class="home-exec-grid-stack mt-3">
-        {% for row in production_sales_panel.category_rows|slice:":5" %}
-        <article class="home-exec-list-item home-exec-list-item--tight">
+        {% for row in production_sales_panel.category_rows|slice:":2" %}
+        <article class="home-exec-list-item home-exec-list-item--tight {% if row.tone == 'success' %}is-success{% elif row.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">
           <div>
             <strong>{{ row.label }}</strong>
-            <div class="home-exec-subtle">{{ row.status }}</div>
+            <div class="home-exec-subtle">Prod. {{ row.produced_units|floatformat:0|intcomma }} · Venta {{ row.sold_units|floatformat:0|intcomma }}</div>
           </div>
           <div class="home-exec-metric-pill {% if row.tone == 'success' %}success{% else %}warning{% endif %}">{{ row.delta_units|floatformat:0|intcomma }}</div>
         </article>
@@ -540,15 +796,23 @@
     <article class="home-exec-card">
       <div class="home-exec-section-head">
         <div>
-          <div class="home-exec-kicker">Cuadre mensual</div>
-          <h2 class="home-exec-title">Inventario inicial + producción - venta - merma</h2>
-          <p class="home-exec-copy">Puente mensual de inventario. Si no cuadra, se muestra la variación; no se maquilla.</p>
+          <h2 class="home-exec-title">Cierre mensual</h2>
         </div>
-        <span class="home-exec-pill">Corte común {{ inventory_ledger_panel.cutoff_date }}</span>
+        <div class="home-exec-panel-actions">
+          <span class="home-exec-pill">{{ inventory_ledger_panel.cutoff_date }}</span>
+          <a class="btn btn-secondary" href="{% url 'reportes:bi' %}?months={{ months_window }}">Ver flujo</a>
+        </div>
+      </div>
+      <div class="home-exec-subtle" style="margin-bottom:10px;">
+        {% if inventory_ledger_panel.snapshot_coverage_start %}
+          Snapshot real desde {{ inventory_ledger_panel.snapshot_coverage_start|date:"Y-m" }} · flujo diario desde {{ inventory_ledger_panel.flow_coverage_start|date:"Y-m"|default:"N/D" }}
+        {% else %}
+          Sin snapshot mensual real todavía · flujo diario desde {{ inventory_ledger_panel.flow_coverage_start|date:"Y-m"|default:"N/D" }}
+        {% endif %}
       </div>
       <div class="home-exec-grid-stack">
-        {% for row in inventory_ledger_panel.rows|slice:":4" %}
-        <article class="home-exec-list-item home-exec-list-item--tight">
+        {% for row in inventory_ledger_panel.rows|slice:":2" %}
+        <article class="home-exec-list-item home-exec-list-item--tight {% if row.variance_units == 0 %}is-success{% else %}is-warning{% endif %}">
           <div>
             <strong>{{ row.month_label }}</strong>
             <div class="home-exec-subtle">
@@ -560,8 +824,249 @@
         </article>
         {% endfor %}
       </div>
-      <div class="home-exec-note">{{ inventory_ledger_panel.basis_note }}</div>
+    </article>
+  </section>
+
+  <section class="home-exec-grid-half">
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <h2 class="home-exec-title">Producción sugerida hoy</h2>
+          <p class="home-exec-copy">Recomendación explicable por producto y sucursal usando forecast, stock visible y merma reciente.</p>
+        </div>
+        <div class="home-exec-panel-actions">
+          <span class="home-exec-pill">{{ decision_support.production.target_label }}</span>
+          <span class="home-exec-pill">Vida anaquel {{ decision_support.production.shelf_life_days }} días</span>
+        </div>
+      </div>
+      <div class="home-exec-subtle" style="margin-bottom:10px;">{{ decision_support.production.note }}</div>
+      <div class="home-exec-list">
+        {% for row in decision_support.production.rows|slice:":3" %}
+        <article class="home-exec-list-item {% if row.risk_level == 'ALTO' %}is-danger{% elif row.risk_level == 'MEDIO' %}is-warning{% else %}is-success{% endif %}">
+          <strong>{{ row.recipe_name }} · {{ row.branch_code }}</strong>
+          <div>Sugerido {{ row.suggested_units|floatformat:0|intcomma }} pzs · stock {{ row.stock_units|floatformat:0|intcomma }} · cobertura {{ row.stock_cover_days|floatformat:1 }} días</div>
+          <div class="home-exec-subtle">{{ row.why }}</div>
+          <div class="home-exec-inline-actions">
+            <span class="home-exec-tone {% if row.risk_level == 'ALTO' %}danger{% elif row.risk_level == 'MEDIO' %}warning{% else %}success{% endif %}">{{ row.risk_level }}</span>
+          </div>
+        </article>
+        {% empty %}
+        <article class="home-exec-list-item">
+          <strong>Sin producción sugerida</strong>
+          <div class="home-exec-subtle">{{ decision_support.production.note }}</div>
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <h2 class="home-exec-title">Productos en riesgo</h2>
+          <p class="home-exec-copy">Sobreproducción, baja rotación y merma histórica convertidas a impacto económico visible.</p>
+        </div>
+        <div class="home-exec-panel-actions">
+          <span class="home-exec-pill">{{ decision_support.waste.summary.high_risk_rows|default:0 }} alto riesgo</span>
+        </div>
+      </div>
+      <div class="home-exec-list">
+        {% for row in decision_support.waste.rows|slice:":3" %}
+        <article class="home-exec-list-item {% if row.risk_level == 'ALTO' %}is-danger{% elif row.risk_level == 'MEDIO' %}is-warning{% else %}is-success{% endif %}">
+          <strong>{{ row.recipe_name }} · {{ row.branch_code }}</strong>
+          <div>Merma {{ row.waste_units|floatformat:0|intcomma }} pzs · impacto real ${{ row.realized_impact|floatformat:2|intcomma }} · expuesto ${{ row.exposed_impact|floatformat:2|intcomma }}</div>
+          <div class="home-exec-subtle">{{ row.why }}</div>
+        </article>
+        {% empty %}
+        <article class="home-exec-list-item">
+          <strong>Sin focos de merma</strong>
+          <div class="home-exec-subtle">No hubo suficiente producción con merma relevante en la ventana visible.</div>
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="home-exec-grid-half">
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <h2 class="home-exec-title">Oportunidades de venta</h2>
+          <p class="home-exec-copy">Acciones sugeridas para producir más, promocionar o reactivar con justificación operativa.</p>
+        </div>
+        <div class="home-exec-panel-actions">
+          <span class="home-exec-pill">{{ decision_support.opportunities.summary.rows|default:0 }} hallazgos</span>
+        </div>
+      </div>
+      <div class="home-exec-list">
+        {% for row in decision_support.opportunities.rows|slice:":3" %}
+        <article class="home-exec-list-item {% if row.priority == 'ALTA' %}is-success{% else %}is-warning{% endif %}">
+          <strong>{{ row.recipe_name }} · {{ row.branch_code }}</strong>
+          <div>{{ row.action|cut:"_" }} · forecast {{ row.forecast_qty|floatformat:0|intcomma }} pzs · margen {{ row.margin_pct|floatformat:1 }}%</div>
+          <div class="home-exec-subtle">{{ row.why }}</div>
+        </article>
+        {% empty %}
+        <article class="home-exec-list-item">
+          <strong>Sin oportunidades activas</strong>
+          <div class="home-exec-subtle">La mezcla actual no supera los umbrales de tendencia, stock o merma definidos.</div>
+        </article>
+        {% endfor %}
+      </div>
+      <div class="home-exec-subtle" style="margin-top:10px;">
+        {% if not decision_support.opportunities.limitations.cross_sell_available %}
+          Cross-sell pendiente: {{ decision_support.opportunities.limitations.reason }}
+        {% endif %}
+      </div>
+    </article>
+
+    <article class="home-exec-card">
+      <div class="home-exec-section-head">
+        <div>
+          <h2 class="home-exec-title">Top decisiones recomendadas</h2>
+          <p class="home-exec-copy">Ranking combinando demanda, rentabilidad, rotación y penalización por merma.</p>
+        </div>
+        <div class="home-exec-panel-actions">
+          <span class="home-exec-pill">WAPE {{ decision_support.forecast.validation.wape_pct|floatformat:1 }}%</span>
+          <span class="home-exec-pill">Hit intervalos {{ decision_support.forecast.validation.interval_hit_rate_pct|floatformat:1 }}%</span>
+        </div>
+      </div>
+      <div class="home-exec-list">
+        {% for row in decision_support.score.rows|slice:":3" %}
+        <article class="home-exec-list-item {% if row.priority == 'ALTA' %}is-success{% elif row.priority == 'MEDIA' %}is-warning{% else %}is-danger{% endif %}">
+          <strong>{{ row.recipe_name }} · {{ row.branch_code }}</strong>
+          <div>Score {{ row.score|floatformat:1 }} · {{ row.recommended_action|cut:"_" }} · forecast {{ row.forecast_qty|floatformat:0|intcomma }} pzs</div>
+          <div class="home-exec-subtle">{{ row.why }}</div>
+        </article>
+        {% empty %}
+        <article class="home-exec-list-item">
+          <strong>Sin ranking disponible</strong>
+          <div class="home-exec-subtle">No hubo productos con suficiente historia reciente para construir prioridad explicable.</div>
+        </article>
+        {% endfor %}
+      </div>
     </article>
   </section>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ forecast_panel.weekly_rows|json_script:"home-forecast-weekly-data" }}
+{{ yoy_panel.rows|json_script:"home-yoy-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  (() => {
+    const parse = (id) => {
+      const node = document.getElementById(id);
+      return node ? JSON.parse(node.textContent) : [];
+    };
+    const moneyTick = (value) => {
+      if (Math.abs(value) >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+      if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(0)}k`;
+      return `$${value.toFixed(0)}`;
+    };
+    const forecastRows = parse("home-forecast-weekly-data");
+    const yoyRows = parse("home-yoy-data");
+    const theme = {
+      wine: "#922456",
+      forest: "#236d53",
+      amber: "#b38a25",
+      border: "rgba(145, 36, 86, 0.10)",
+      blush: "rgba(146, 36, 86, 0.14)",
+      greenSoft: "rgba(35, 109, 83, 0.14)"
+    };
+
+    const makeChart = (canvasId, config) => {
+      const el = document.getElementById(canvasId);
+      if (!el || !window.Chart) return;
+      new Chart(el, config);
+    };
+
+    makeChart("homeForecastTrendChart", {
+      type: "bar",
+      data: {
+        labels: forecastRows.map((row) => row.week_label),
+        datasets: [
+          {
+            type: "bar",
+            label: "Venta $",
+            data: forecastRows.map((row) => Number(row.amount || 0)),
+            backgroundColor: theme.blush,
+            borderColor: theme.wine,
+            borderWidth: 1,
+            borderRadius: 8,
+            yAxisID: "yAmount"
+          },
+          {
+            type: "line",
+            label: "Piezas",
+            data: forecastRows.map((row) => Number(row.quantity || 0)),
+            borderColor: theme.forest,
+            backgroundColor: theme.greenSoft,
+            borderWidth: 2,
+            tension: 0.35,
+            pointRadius: 3,
+            yAxisID: "yQty"
+          }
+        ]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: { mode: "index", intersect: false }
+        },
+        scales: {
+          x: { grid: { display: false } },
+          yAmount: {
+            position: "left",
+            ticks: { callback: moneyTick },
+            grid: { color: theme.border }
+          },
+          yQty: {
+            position: "right",
+            grid: { display: false }
+          }
+        }
+      }
+    });
+
+    makeChart("homeYoyChart", {
+      type: "bar",
+      data: {
+        labels: yoyRows.map((row) => row.month_label),
+        datasets: [
+          {
+            label: "Actual",
+            data: yoyRows.map((row) => Number(row.amount || 0)),
+            backgroundColor: theme.blush,
+            borderColor: theme.wine,
+            borderWidth: 1,
+            borderRadius: 8
+          },
+          {
+            label: "Año anterior",
+            data: yoyRows.map((row) => Number(row.prev_amount || 0)),
+            backgroundColor: "rgba(35, 109, 83, 0.18)",
+            borderColor: theme.forest,
+            borderWidth: 1,
+            borderRadius: 8
+          }
+        ]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: { mode: "index", intersect: false }
+        },
+        scales: {
+          x: { grid: { display: false } },
+          y: {
+            ticks: { callback: moneyTick },
+            grid: { color: theme.border }
+          }
+        }
+      }
+    });
+  })();
+</script>
 {% endblock %}

@@ -1,0 +1,1772 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reportes - BI Ejecutivo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260321-05">
+    
+<style>
+  .bi-v2-shell {
+    display: grid;
+    gap: 18px;
+  }
+
+  .bi-v2-hero {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
+    padding: 20px 22px;
+  }
+
+  .bi-v2-hero h1 {
+    margin: 0 0 6px;
+    font-size: clamp(1.9rem, 2.4vw, 2.8rem);
+    line-height: 1.02;
+  }
+
+  .bi-v2-hero p {
+    margin: 0;
+    max-width: 68ch;
+    color: var(--muted-color, #6f6170);
+  }
+
+  .bi-v2-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .bi-v2-grid-topline {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .bi-v2-grid-main,
+  .bi-v2-grid-half {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .bi-v2-card {
+    padding: 18px 20px;
+    border-radius: 22px;
+    border: 1px solid rgba(145, 36, 86, 0.10);
+    background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,248,251,0.96));
+    box-shadow: 0 10px 30px rgba(93, 22, 59, 0.04);
+  }
+
+  .bi-v2-section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+
+  .bi-v2-kicker {
+    font-size: 0.82rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #8b6e78;
+    margin-bottom: 4px;
+  }
+
+  .bi-v2-title {
+    margin: 0;
+    font-size: clamp(1.35rem, 1.7vw, 1.95rem);
+    line-height: 1.05;
+    color: #42292e;
+  }
+
+  .bi-v2-copy {
+    margin: 4px 0 0;
+    color: #74656d;
+    max-width: 64ch;
+  }
+
+  .bi-v2-pill {
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.86rem;
+    background: rgba(122, 40, 83, 0.08);
+    color: #7a2853;
+    white-space: nowrap;
+  }
+
+  .bi-v2-kpi {
+    min-height: 0;
+  }
+
+  .bi-v2-kpi-value {
+    font-size: clamp(1.9rem, 2.3vw, 3rem);
+    line-height: 1;
+    margin-bottom: 6px;
+    color: #922456;
+    font-weight: 700;
+  }
+
+  .bi-v2-kpi-value.is-warning { color: #b38a25; }
+  .bi-v2-kpi-value.is-success { color: #236d53; }
+  .bi-v2-kpi-value.is-danger { color: #bc3b3b; }
+
+  .bi-v2-kpi-label {
+    font-size: 0.95rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #7c6971;
+    margin-bottom: 6px;
+  }
+
+  .bi-v2-kpi-note {
+    color: #6b5e65;
+    line-height: 1.4;
+  }
+
+  .bi-v2-mini-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .bi-v2-mini-card {
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.74);
+    border: 1px solid rgba(145, 36, 86, 0.08);
+  }
+
+  .bi-v2-mini-card strong {
+    display: block;
+    font-size: 1.25rem;
+    color: #42292e;
+  }
+
+  .bi-v2-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+  }
+
+  .bi-v2-table th,
+  .bi-v2-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(145, 36, 86, 0.08);
+    vertical-align: top;
+  }
+
+  .bi-v2-table th {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #8a757e;
+    background: rgba(122, 40, 83, 0.03);
+  }
+
+  .bi-v2-table td.text-end,
+  .bi-v2-table th.text-end {
+    text-align: right;
+  }
+
+  .bi-v2-tone {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+
+  .bi-v2-tone.success { background: rgba(35, 109, 83, 0.10); color: #236d53; }
+  .bi-v2-tone.warning { background: rgba(185, 140, 36, 0.12); color: #9b6b00; }
+  .bi-v2-tone.danger { background: rgba(188, 59, 59, 0.10); color: #a53434; }
+  .bi-v2-tone.neutral { background: rgba(122, 40, 83, 0.08); color: #7a2853; }
+
+  .bi-v2-note {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: rgba(122, 40, 83, 0.05);
+    color: #6b5e65;
+    line-height: 1.45;
+  }
+
+  .bi-v2-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .bi-v2-list-item {
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.74);
+    border: 1px solid rgba(145, 36, 86, 0.08);
+  }
+
+  .bi-v2-list-item strong {
+    color: #42292e;
+  }
+
+  .bi-v2-subtle {
+    color: #8a757e;
+    font-size: 0.88rem;
+  }
+
+  @media (max-width: 1220px) {
+    .bi-v2-grid-topline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .bi-v2-grid-main,
+    .bi-v2-grid-half { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 760px) {
+    .bi-v2-hero { flex-direction: column; }
+    .bi-v2-badges { justify-content: flex-start; }
+    .bi-v2-grid-topline,
+    .bi-v2-mini-grid { grid-template-columns: 1fr; }
+    .bi-v2-table { font-size: 0.88rem; }
+  }
+</style>
+
+</head>
+<body class="page-reportes-bi">
+    <div class="layout-wrapper">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3.5 10.5 12 5l8.5 5.5L12 16 3.5 10.5Z"/>
+                        <path d="M3.5 14 12 19l8.5-5"/>
+                    </svg>
+                </div>
+                <div class="sidebar-brand">Pollyana's Dolce</div>
+                <div class="sidebar-tagline">Operación y control</div>
+            </div>
+
+            <nav>
+                
+                <div class="sidebar-section-label">Dirección</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    <li>
+                        <a href="/dashboard/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>
+                            </span>
+                            <span>Dashboard</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/recetas/dg-operacion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="7" width="3" height="10" rx="1"/><rect x="16" y="4" width="3" height="13" rx="1"/></svg>
+                            </span>
+                            <span>Operación DG</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/reportes/bi/" class="active">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>BI ejecutivo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Operación diaria</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/maestros/proveedores/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4L11 7h7.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-10Z"/></svg>
+                            </span>
+                            <span>Maestros</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/recetas/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+                            </span>
+                            <span>Recetas</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/plan-produccion/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>
+                            </span>
+                            <span>Plan de producción</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/recetas/reabasto-cedis/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/><path d="M7 12h6"/><path d="m10 9 3 3-3 3"/></svg>
+                            </span>
+                            <span>Reabasto CEDIS</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/compras/solicitudes/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/></svg>
+                            </span>
+                            <span>Compras</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/inventario/existencias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
+                            </span>
+                            <span>Inventario</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/inventario/importar/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M4 15.5A2.5 2.5 0 0 0 6.5 18h11A2.5 2.5 0 0 0 20 15.5"/></svg>
+                            </span>
+                            <span>Cortes de almacén</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/captura-movil/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10 6.5h4"/><circle cx="12" cy="18" r="1"/></svg>
+                            </span>
+                            <span>Captura de piso</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Análisis y soporte</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/reportes/costo-receta/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                            </span>
+                            <span>Reportes</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/crm/pedidos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            </span>
+                            <span>CRM</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/logistica/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v8H3z"/><path d="M14 10h3l3 3v2h-6z"/><circle cx="7" cy="17.5" r="1.5"/><circle cx="18" cy="17.5" r="1.5"/></svg>
+                            </span>
+                            <span>Logística</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/rrhh/empleados/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8h3M21.5 6.5v3"/></svg>
+                            </span>
+                            <span>RRHH</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/activos/dashboard/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/><path d="M8 14h3M13 14h3"/></svg>
+                            </span>
+                            <span>Activos</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/control/discrepancias/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20V9"/><path d="M12 20V4"/><path d="M17 20v-7"/><path d="m6 11 5-5 6 3"/></svg>
+                            </span>
+                            <span>Control operativo</span>
+                        </a>
+                    </li>
+                    
+                </ul>
+
+                <div class="sidebar-section-label">Gobierno</div>
+                <ul class="sidebar-nav sidebar-nav-group">
+                    
+                    <li>
+                        <a href="/auditoria/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10l2 2v14H5V6l2-2Z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+                            </span>
+                            <span>Bitácora</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/integraciones/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="7" height="12" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 12h4"/></svg>
+                            </span>
+                            <span>Integraciones</span>
+                        </a>
+                    </li>
+                    
+                    
+                    <li>
+                        <a href="/usuarios-accesos/" class="">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-1.5a3.5 3.5 0 0 0-3.5-3.5H6.5A3.5 3.5 0 0 0 3 19.5V21"/><circle cx="9.5" cy="8" r="3.5"/><path d="M18 8v6M15 11h6"/></svg>
+                            </span>
+                            <span>Accesos</span>
+                        </a>
+                    </li>
+                    
+                    <li>
+                        <a href="/admin/">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.2 1.2 0 0 1-1.7 1.7l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V19a1.2 1.2 0 0 1-2.4 0v-.2a1 1 0 0 0-.7-1 1 1 0 0 0-1 .2l-.2.1a1.2 1.2 0 1 1-1.7-1.7l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H5a1.2 1.2 0 0 1 0-2.4h.2a1 1 0 0 0 1-.7 1 1 0 0 0-.2-1l-.1-.2a1.2 1.2 0 1 1 1.7-1.7l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V5a1.2 1.2 0 1 1 2.4 0v.2a1 1 0 0 0 .7 1 1 1 0 0 0 1-.2l.2-.1a1.2 1.2 0 0 1 1.7 1.7l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2a1.2 1.2 0 0 1 0 2.4h-.2a1 1 0 0 0-1 .7Z"/></svg>
+                            </span>
+                            <span>Administración</span>
+                        </a>
+                    </li>
+                </ul>
+                
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-user">Sesión activa</div>
+                <div class="sidebar-user-name">maburgos</div>
+                <a href="/logout/" class="logout-link">Cerrar sesión</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="header">
+                <h1 class="header-title">Reportes · BI Ejecutivo</h1>
+                <div class="header-meta">
+                    <span class="header-context-pill">Operación diaria</span>
+                    <button id="densityToggle" class="btn btn-secondary btn-sm density-toggle" type="button" aria-pressed="false">
+                        Modo compacto
+                    </button>
+                    <span>Martes, 24 de Marzo de 2026</span>
+                </div>
+            </header>
+
+            <div class="container">
+                
+                
+<div class="module-shell bi-v2-shell">
+  <nav class="module-tabs">
+    <a class="module-tab" href="/reportes/costo-receta/">Costo receta</a>
+    <a class="module-tab" href="/reportes/consumo/">Consumo</a>
+    <a class="module-tab" href="/reportes/faltantes/">Faltantes</a>
+    <a class="module-tab active" href="/reportes/bi/">BI</a>
+  </nav>
+
+  <section class="card bi-v2-hero">
+    <div>
+      <div class="bi-v2-kicker">Dirección general</div>
+      <h1>Tablero ejecutivo del negocio</h1>
+      <p>Ventas, pronóstico, rentabilidad, sobreproducción y cuadre mensual con fuente Point/ERP real. El pronóstico atípico se marca por anomalía histórica mientras no exista calendario oficial parametrizado.</p>
+    </div>
+    <div class="bi-v2-badges">
+      <span class="bi-v2-pill">Corte ventas: 2026-03-23</span>
+      <span class="bi-v2-pill">Costeo semanal: 23 de Marzo de 2026</span>
+      <span class="bi-v2-pill">Mes visible: 2026-03</span>
+    </div>
+  </section>
+
+  <section class="bi-v2-grid-topline">
+    <article class="bi-v2-card bi-v2-kpi">
+      <div class="bi-v2-kpi-value">$89,967.01</div>
+      <div class="bi-v2-kpi-label">Venta último corte</div>
+      <div class="bi-v2-kpi-note">2026-03-23 · Point directo</div>
+    </article>
+    <article class="bi-v2-card bi-v2-kpi">
+      <div class="bi-v2-kpi-value ">
+        $269.36
+      </div>
+      <div class="bi-v2-kpi-label">Ticket promedio</div>
+      <div class="bi-v2-kpi-note">
+        
+          334 tickets en el corte
+        
+      </div>
+    </article>
+    <article class="bi-v2-card bi-v2-kpi">
+      <div class="bi-v2-kpi-value is-success">4,513</div>
+      <div class="bi-v2-kpi-label">Pronóstico próxima semana (pzas)</div>
+      <div class="bi-v2-kpi-note">30 Mar → 05 Apr · $594,912.98</div>
+    </article>
+    <article class="bi-v2-card bi-v2-kpi">
+      <div class="bi-v2-kpi-value is-warning">8</div>
+      <div class="bi-v2-kpi-label">Promociones sugeridas</div>
+      <div class="bi-v2-kpi-note">Productos con margen suficiente y volumen flojo para empuje comercial.</div>
+    </article>
+  </section>
+
+  <section class="bi-v2-grid-main">
+    <article class="bi-v2-card">
+      <div class="bi-v2-section-head">
+        <div>
+          <div class="bi-v2-kicker">Pronóstico</div>
+          <h2 class="bi-v2-title">Venta esperada según 2-3 semanas previas</h2>
+          <p class="bi-v2-copy">La base excluye semanas anómalas detectadas automáticamente cuando el comportamiento se sale del patrón reciente.</p>
+        </div>
+        <span class="bi-v2-pill">3 semana(s) base</span>
+      </div>
+      <div class="bi-v2-mini-grid">
+        <div class="bi-v2-mini-card">
+          <span class="bi-v2-subtle">Escenario base</span>
+          <strong>$594,912.98</strong>
+          <div>4,513 piezas · 1,865 tickets</div>
+        </div>
+        <div class="bi-v2-mini-card">
+          <span class="bi-v2-subtle">Escenario alto</span>
+          <strong>$1,017,679.89</strong>
+          <div>8,650 piezas si se repite un pico</div>
+        </div>
+        <div class="bi-v2-mini-card">
+          <span class="bi-v2-subtle">Ticket esperado</span>
+          <strong>$318.99</strong>
+          <div>Referenciado sobre el promedio reciente confirmado</div>
+        </div>
+      </div>
+      <div class="table-responsive mt-3">
+        <table class="bi-v2-table">
+          <thead>
+            <tr>
+              <th>Semana</th>
+              <th class="text-end">Venta $</th>
+              <th class="text-end">Piezas</th>
+              <th class="text-end">Tickets</th>
+              <th class="text-end">Ticket prom.</th>
+              <th>Lectura</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>23 Mar → 29 Mar</td>
+              <td class="text-end">$89,967.01</td>
+              <td class="text-end">671</td>
+              <td class="text-end">334</td>
+              <td class="text-end">$269.36</td>
+              <td>
+                
+                  <span class="bi-v2-tone success">Base normal</span>
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>16 Mar → 22 Mar</td>
+              <td class="text-end">$912,193.00</td>
+              <td class="text-end">6,839</td>
+              <td class="text-end">2,485</td>
+              <td class="text-end">$367.08</td>
+              <td>
+                
+                  <span class="bi-v2-tone success">Base normal</span>
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>09 Mar → 15 Mar</td>
+              <td class="text-end">$782,578.92</td>
+              <td class="text-end">6,029</td>
+              <td class="text-end">2,777</td>
+              <td class="text-end">$281.81</td>
+              <td>
+                
+                  <span class="bi-v2-tone success">Base normal</span>
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>02 Mar → 08 Mar</td>
+              <td class="text-end">$747,991.38</td>
+              <td class="text-end">5,640</td>
+              <td class="text-end">2,648</td>
+              <td class="text-end">$282.47</td>
+              <td>
+                
+                  <span class="bi-v2-tone success">Base normal</span>
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>23 Feb → 01 Mar</td>
+              <td class="text-end">$788,828.87</td>
+              <td class="text-end">5,860</td>
+              <td class="text-end">2,675</td>
+              <td class="text-end">$294.89</td>
+              <td>
+                
+                  <span class="bi-v2-tone success">Base normal</span>
+                
+              </td>
+            </tr>
+            
+            <tr>
+              <td>16 Feb → 22 Feb</td>
+              <td class="text-end">$713,319.46</td>
+              <td class="text-end">5,713</td>
+              <td class="text-end">2,497</td>
+              <td class="text-end">$285.67</td>
+              <td>
+                
+                  <span class="bi-v2-tone success">Base normal</span>
+                
+              </td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+      <div class="bi-v2-note">Pronóstico inferido con las últimas 2-3 semanas normales. No existe calendario oficial de fechas atípicas parametrizado; los picos se detectan por anomalía histórica.</div>
+    </article>
+
+    <article class="bi-v2-card">
+      <div class="bi-v2-section-head">
+        <div>
+          <div class="bi-v2-kicker">Comparativo</div>
+          <h2 class="bi-v2-title">Mes contra mismo mes del año anterior</h2>
+          <p class="bi-v2-copy">Sirve para separar crecimiento real de estacionalidad. El mes actual se compara solo hasta el mismo día disponible.</p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="bi-v2-table">
+          <thead>
+            <tr>
+              <th>Mes</th>
+              <th class="text-end">Venta $</th>
+              <th class="text-end">Año anterior $</th>
+              <th class="text-end">Δ%</th>
+              <th class="text-end">Piezas</th>
+              <th class="text-end">Año anterior pzas</th>
+              <th class="text-end">Δ%</th>
+              <th class="text-end">Ticket prom.</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>
+                2025-10
+                
+              </td>
+              <td class="text-end">$3,445,250.00</td>
+              <td class="text-end">
+                
+                  $3,287,710.95
+                
+              </td>
+              <td class="text-end">
+                
+                  4.8%
+                
+              </td>
+              <td class="text-end">26,971</td>
+              <td class="text-end">
+                
+                  26,688
+                
+              </td>
+              <td class="text-end">
+                
+                  1.1%
+                
+              </td>
+              <td class="text-end">$0.00</td>
+            </tr>
+            
+            <tr>
+              <td>
+                2025-11
+                
+              </td>
+              <td class="text-end">$3,246,992.48</td>
+              <td class="text-end">
+                
+                  $3,315,093.40
+                
+              </td>
+              <td class="text-end">
+                
+                  -2.1%
+                
+              </td>
+              <td class="text-end">23,292</td>
+              <td class="text-end">
+                
+                  25,330
+                
+              </td>
+              <td class="text-end">
+                
+                  -8.0%
+                
+              </td>
+              <td class="text-end">$0.00</td>
+            </tr>
+            
+            <tr>
+              <td>
+                2025-12
+                
+              </td>
+              <td class="text-end">$4,824,468.91</td>
+              <td class="text-end">
+                
+                  $4,937,038.00
+                
+              </td>
+              <td class="text-end">
+                
+                  -2.3%
+                
+              </td>
+              <td class="text-end">30,202</td>
+              <td class="text-end">
+                
+                  33,234
+                
+              </td>
+              <td class="text-end">
+                
+                  -9.1%
+                
+              </td>
+              <td class="text-end">$0.00</td>
+            </tr>
+            
+            <tr>
+              <td>
+                2026-01
+                
+              </td>
+              <td class="text-end">$3,519,376.01</td>
+              <td class="text-end">
+                
+                  $3,776,663.00
+                
+              </td>
+              <td class="text-end">
+                
+                  -6.8%
+                
+              </td>
+              <td class="text-end">25,644</td>
+              <td class="text-end">
+                
+                  27,245
+                
+              </td>
+              <td class="text-end">
+                
+                  -5.9%
+                
+              </td>
+              <td class="text-end">$305.42</td>
+            </tr>
+            
+            <tr>
+              <td>
+                2026-02
+                
+              </td>
+              <td class="text-end">$3,288,678.19</td>
+              <td class="text-end">
+                
+                  $3,714,458.22
+                
+              </td>
+              <td class="text-end">
+                
+                  -11.5%
+                
+              </td>
+              <td class="text-end">25,786</td>
+              <td class="text-end">
+                
+                  29,070
+                
+              </td>
+              <td class="text-end">
+                
+                  -11.3%
+                
+              </td>
+              <td class="text-end">$295.98</td>
+            </tr>
+            
+            <tr>
+              <td>
+                2026-03
+                
+                  <div class="bi-v2-subtle">Mes parcial</div>
+                
+              </td>
+              <td class="text-end">$2,663,416.31</td>
+              <td class="text-end">
+                
+                  N/D
+                
+              </td>
+              <td class="text-end">
+                
+                  N/D
+                
+              </td>
+              <td class="text-end">20,124</td>
+              <td class="text-end">
+                
+                  N/D
+                
+              </td>
+              <td class="text-end">
+                
+                  N/D
+                
+              </td>
+              <td class="text-end">$307.34</td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+      <div class="bi-v2-note">Mes contra mismo mes del año anterior. Los meses cerrados usan cache oficial mensual Point. El mes parcial actual no compara contra un previo no oficial.</div>
+    </article>
+  </section>
+
+  <section class="bi-v2-grid-half">
+    <article class="bi-v2-card">
+      <div class="bi-v2-section-head">
+        <div>
+          <div class="bi-v2-kicker">Rentabilidad</div>
+          <h2 class="bi-v2-title">Margen y volumen por producto</h2>
+          <p class="bi-v2-copy">Margen sobre materia prima costada. Aquí se separa qué producto defender, cuál empujar y cuál revisar.</p>
+        </div>
+        <span class="bi-v2-pill">28 días</span>
+      </div>
+      <div class="table-responsive">
+        <table class="bi-v2-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th class="text-end">Venta $</th>
+              <th class="text-end">Piezas</th>
+              <th class="text-end">Costo MP</th>
+              <th class="text-end">Margen $</th>
+              <th class="text-end">Margen %</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>
+                <strong>Pastel de Fresas Con Crema Mediano</strong>
+                <div class="bi-v2-subtle">Pastel Mediano</div>
+              </td>
+              <td class="text-end">$388,962.00</td>
+              <td class="text-end">794</td>
+              <td class="text-end">$147,563.77</td>
+              <td class="text-end">$241,398.23</td>
+              <td class="text-end">
+                62.1%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de 3 Pecados Mediano</strong>
+                <div class="bi-v2-subtle">Pastel Mediano</div>
+              </td>
+              <td class="text-end">$407,582.00</td>
+              <td class="text-end">832</td>
+              <td class="text-end">$173,116.76</td>
+              <td class="text-end">$234,465.24</td>
+              <td class="text-end">
+                57.5%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pay de Queso Grande</strong>
+                <div class="bi-v2-subtle">Pay Grande</div>
+              </td>
+              <td class="text-end">$268,780.03</td>
+              <td class="text-end">546</td>
+              <td class="text-end">$87,666.02</td>
+              <td class="text-end">$181,114.01</td>
+              <td class="text-end">
+                67.4%
+              </td>
+              <td>
+                <span class="bi-v2-tone warning">
+                  Promocionar
+                </span>
+                <div class="bi-v2-subtle">Promoción táctica inmediata</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pay de Queso Mediano</strong>
+                <div class="bi-v2-subtle">Pay Mediano</div>
+              </td>
+              <td class="text-end">$210,229.66</td>
+              <td class="text-end">534</td>
+              <td class="text-end">$46,713.64</td>
+              <td class="text-end">$163,516.02</td>
+              <td class="text-end">
+                77.8%
+              </td>
+              <td>
+                <span class="bi-v2-tone warning">
+                  Promocionar
+                </span>
+                <div class="bi-v2-subtle">Promoción táctica inmediata</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de Fresas Con Crema Chico</strong>
+                <div class="bi-v2-subtle">Pastel Chico</div>
+              </td>
+              <td class="text-end">$136,345.00</td>
+              <td class="text-end">407</td>
+              <td class="text-end">$53,691.98</td>
+              <td class="text-end">$82,653.02</td>
+              <td class="text-end">
+                60.6%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de 3 Pecados Chico</strong>
+                <div class="bi-v2-subtle">Pastel Chico</div>
+              </td>
+              <td class="text-end">$143,080.50</td>
+              <td class="text-end">421</td>
+              <td class="text-end">$60,481.37</td>
+              <td class="text-end">$82,599.13</td>
+              <td class="text-end">
+                57.7%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de Snickers Mediano</strong>
+                <div class="bi-v2-subtle">Pastel Mediano</div>
+              </td>
+              <td class="text-end">$133,875.00</td>
+              <td class="text-end">268</td>
+              <td class="text-end">$57,519.21</td>
+              <td class="text-end">$76,355.79</td>
+              <td class="text-end">
+                57.0%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de 3 Leches Mediano</strong>
+                <div class="bi-v2-subtle">Pastel Mediano</div>
+              </td>
+              <td class="text-end">$103,530.00</td>
+              <td class="text-end">238</td>
+              <td class="text-end">$31,412.25</td>
+              <td class="text-end">$72,117.75</td>
+              <td class="text-end">
+                69.7%
+              </td>
+              <td>
+                <span class="bi-v2-tone success">
+                  Defender
+                </span>
+                <div class="bi-v2-subtle">Defender precio y disponibilidad</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de Crunch Mediano</strong>
+                <div class="bi-v2-subtle">Pastel Mediano</div>
+              </td>
+              <td class="text-end">$106,330.00</td>
+              <td class="text-end">217</td>
+              <td class="text-end">$40,928.32</td>
+              <td class="text-end">$65,401.68</td>
+              <td class="text-end">
+                61.5%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pay de Queso Rebanada</strong>
+                <div class="bi-v2-subtle"></div>
+              </td>
+              <td class="text-end">$90,790.00</td>
+              <td class="text-end">1,298</td>
+              <td class="text-end">$26,050.94</td>
+              <td class="text-end">$64,739.06</td>
+              <td class="text-end">
+                71.3%
+              </td>
+              <td>
+                <span class="bi-v2-tone success">
+                  Defender
+                </span>
+                <div class="bi-v2-subtle">Defender precio y disponibilidad</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de Zanahoria Mediano</strong>
+                <div class="bi-v2-subtle">Pastel Mediano</div>
+              </td>
+              <td class="text-end">$92,752.00</td>
+              <td class="text-end">211</td>
+              <td class="text-end">$39,566.81</td>
+              <td class="text-end">$53,185.19</td>
+              <td class="text-end">
+                57.3%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de Snickers Chico</strong>
+                <div class="bi-v2-subtle">Pastel Chico</div>
+              </td>
+              <td class="text-end">$65,600.00</td>
+              <td class="text-end">164</td>
+              <td class="text-end">$25,145.40</td>
+              <td class="text-end">$40,454.60</td>
+              <td class="text-end">
+                61.7%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de Crunch Chico</strong>
+                <div class="bi-v2-subtle">Pastel Chico</div>
+              </td>
+              <td class="text-end">$61,200.00</td>
+              <td class="text-end">170</td>
+              <td class="text-end">$22,403.22</td>
+              <td class="text-end">$38,796.78</td>
+              <td class="text-end">
+                63.4%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de Fresas Con Crema Grande</strong>
+                <div class="bi-v2-subtle">Pastel Grande</div>
+              </td>
+              <td class="text-end">$63,000.00</td>
+              <td class="text-end">90</td>
+              <td class="text-end">$24,554.95</td>
+              <td class="text-end">$38,445.05</td>
+              <td class="text-end">
+                61.0%
+              </td>
+              <td>
+                <span class="bi-v2-tone neutral">
+                  Revisar portafolio
+                </span>
+                <div class="bi-v2-subtle">Depurar, reformular o sacar de foco</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de 3 Pecados Grande</strong>
+                <div class="bi-v2-subtle">Pastel Grande</div>
+              </td>
+              <td class="text-end">$59,500.00</td>
+              <td class="text-end">85</td>
+              <td class="text-end">$25,307.80</td>
+              <td class="text-end">$34,192.20</td>
+              <td class="text-end">
+                57.5%
+              </td>
+              <td>
+                <span class="bi-v2-tone neutral">
+                  Revisar portafolio
+                </span>
+                <div class="bi-v2-subtle">Depurar, reformular o sacar de foco</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de Zanahoria Chico</strong>
+                <div class="bi-v2-subtle">Pastel Chico</div>
+              </td>
+              <td class="text-end">$50,490.00</td>
+              <td class="text-end">153</td>
+              <td class="text-end">$20,799.96</td>
+              <td class="text-end">$29,690.04</td>
+              <td class="text-end">
+                58.8%
+              </td>
+              <td>
+                <span class="bi-v2-tone danger">
+                  Ajustar margen
+                </span>
+                <div class="bi-v2-subtle">Revisar costo o subir precio</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Pastel de 3 Leches Individual</strong>
+                <div class="bi-v2-subtle">Individual</div>
+              </td>
+              <td class="text-end">$39,225.00</td>
+              <td class="text-end">523</td>
+              <td class="text-end">$9,596.16</td>
+              <td class="text-end">$29,628.84</td>
+              <td class="text-end">
+                75.5%
+              </td>
+              <td>
+                <span class="bi-v2-tone success">
+                  Defender
+                </span>
+                <div class="bi-v2-subtle">Defender precio y disponibilidad</div>
+              </td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Cheesecakes Lotus Individual</strong>
+                <div class="bi-v2-subtle">Individual</div>
+              </td>
+              <td class="text-end">$21,195.00</td>
+              <td class="text-end">157</td>
+              <td class="text-end">$0.00</td>
+              <td class="text-end">$21,195.00</td>
+              <td class="text-end">
+                100.0%
+              </td>
+              <td>
+                <span class="bi-v2-tone success">
+                  Defender
+                </span>
+                <div class="bi-v2-subtle">Defender precio y disponibilidad</div>
+              </td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+      <div class="bi-v2-note">Margen calculado solo con materia prima costada en la última semana disponible. Mano de obra e indirectos siguen fuera del modelo.</div>
+    </article>
+
+    <article class="bi-v2-card">
+      <div class="bi-v2-section-head">
+        <div>
+          <div class="bi-v2-kicker">Promoción</div>
+          <h2 class="bi-v2-title">Productos que sí aguantan promoción</h2>
+          <p class="bi-v2-copy">Selección táctica: bajo empuje comercial reciente pero con margen suficiente para mover volumen sin destruir rentabilidad.</p>
+        </div>
+      </div>
+      <div class="bi-v2-list">
+        
+        <article class="bi-v2-list-item">
+          <strong>Bollo Chocolate</strong>
+          <div class="bi-v2-subtle">Bollo</div>
+          <div class="mt-1">Margen 73.1% · 482 piezas · Venta $17,352.00</div>
+          <div class="bi-v2-subtle">
+            
+              Tendencia previa -49.4%
+            
+            · Promoción táctica inmediata
+          </div>
+        </article>
+        
+        <article class="bi-v2-list-item">
+          <strong>Bollo Vainilla</strong>
+          <div class="bi-v2-subtle">Bollo</div>
+          <div class="mt-1">Margen 76.5% · 398 piezas · Venta $13,498.00</div>
+          <div class="bi-v2-subtle">
+            
+              Tendencia previa -40.7%
+            
+            · Promoción táctica inmediata
+          </div>
+        </article>
+        
+        <article class="bi-v2-list-item">
+          <strong>Bollo Zanahoria</strong>
+          <div class="bi-v2-subtle">Bollo</div>
+          <div class="mt-1">Margen 66.8% · 415 piezas · Venta $11,205.00</div>
+          <div class="bi-v2-subtle">
+            
+              Tendencia previa -28.6%
+            
+            · Promoción táctica inmediata
+          </div>
+        </article>
+        
+        <article class="bi-v2-list-item">
+          <strong>Bollo Lotus</strong>
+          <div class="bi-v2-subtle"></div>
+          <div class="mt-1">Margen 100.0% · 330 piezas · Venta $12,831.00</div>
+          <div class="bi-v2-subtle">
+            
+              Tendencia previa -28.0%
+            
+            · Promoción táctica inmediata
+          </div>
+        </article>
+        
+        <article class="bi-v2-list-item">
+          <strong>Letrero Chispas Feliz Cumpleaños</strong>
+          <div class="bi-v2-subtle"></div>
+          <div class="mt-1">Margen 100.0% · 43 piezas · Venta $3,440.00</div>
+          <div class="bi-v2-subtle">
+            
+              Tendencia previa -25.9%
+            
+            · Promoción táctica inmediata
+          </div>
+        </article>
+        
+        <article class="bi-v2-list-item">
+          <strong>Litro crema</strong>
+          <div class="bi-v2-subtle"></div>
+          <div class="mt-1">Margen 100.0% · 8 piezas · Venta $960.00</div>
+          <div class="bi-v2-subtle">
+            
+              Tendencia previa -20.0%
+            
+            · Promoción táctica inmediata
+          </div>
+        </article>
+        
+        <article class="bi-v2-list-item">
+          <strong>Pastel Fresas Con Crema - Rebanada</strong>
+          <div class="bi-v2-subtle"></div>
+          <div class="mt-1">Margen 69.4% · 131 piezas · Venta $9,170.00</div>
+          <div class="bi-v2-subtle">
+            
+              Tendencia previa -19.6%
+            
+            · Promoción táctica inmediata
+          </div>
+        </article>
+        
+        <article class="bi-v2-list-item">
+          <strong>Pay de Queso Grande</strong>
+          <div class="bi-v2-subtle">Pay Grande</div>
+          <div class="mt-1">Margen 67.4% · 546 piezas · Venta $268,780.03</div>
+          <div class="bi-v2-subtle">
+            
+              Tendencia previa -18.9%
+            
+            · Promoción táctica inmediata
+          </div>
+        </article>
+        
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-v2-grid-half">
+    <article class="bi-v2-card">
+      <div class="bi-v2-section-head">
+        <div>
+          <div class="bi-v2-kicker">Producción</div>
+          <h2 class="bi-v2-title">Producido contra vendido</h2>
+          <p class="bi-v2-copy">Lectura semanal para detectar sobreproducción o presión de demanda sin mezclar transferencias internas.</p>
+        </div>
+        <span class="bi-v2-pill">23 Mar → 29 Mar · corte 23 de Marzo de 2026</span>
+      </div>
+      <div class="table-responsive">
+        <table class="bi-v2-table">
+          <thead>
+            <tr>
+              <th>Semana</th>
+              <th class="text-end">Producción</th>
+              <th class="text-end">Venta</th>
+              <th class="text-end">Delta</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>02 Mar → 08 Mar</td>
+              <td class="text-end">0</td>
+              <td class="text-end">3,081</td>
+              <td class="text-end">-3,081</td>
+            </tr>
+            
+            <tr>
+              <td>09 Mar → 15 Mar</td>
+              <td class="text-end">0</td>
+              <td class="text-end">3,356</td>
+              <td class="text-end">-3,356</td>
+            </tr>
+            
+            <tr>
+              <td>16 Mar → 22 Mar</td>
+              <td class="text-end">262</td>
+              <td class="text-end">3,899</td>
+              <td class="text-end">-3,637</td>
+            </tr>
+            
+            <tr>
+              <td>23 Mar → 29 Mar</td>
+              <td class="text-end">469</td>
+              <td class="text-end">391</td>
+              <td class="text-end">78</td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+      <div class="bi-v2-note">Compara producción directa Point contra venta Point de la semana. Transferencias internas se analizan aparte.</div>
+    </article>
+
+    <article class="bi-v2-card">
+      <div class="bi-v2-section-head">
+        <div>
+          <div class="bi-v2-kicker">Categorías</div>
+          <h2 class="bi-v2-title">Dónde hay sobreproducción o déficit</h2>
+          <p class="bi-v2-copy">Enfocado en la semana actual y en categorías operativas, no en adornos visuales.</p>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="bi-v2-table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th class="text-end">Producción</th>
+              <th class="text-end">Venta</th>
+              <th class="text-end">Delta</th>
+              <th>Estatus</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td>Pastel Mediano</td>
+              <td class="text-end">157</td>
+              <td class="text-end">67</td>
+              <td class="text-end">90</td>
+              <td><span class="bi-v2-tone warning">Sobreproducción</span></td>
+            </tr>
+            
+            <tr>
+              <td>Bollo</td>
+              <td class="text-end">125</td>
+              <td class="text-end">44</td>
+              <td class="text-end">81</td>
+              <td><span class="bi-v2-tone warning">Sobreproducción</span></td>
+            </tr>
+            
+            <tr>
+              <td>Individual</td>
+              <td class="text-end">75</td>
+              <td class="text-end">28</td>
+              <td class="text-end">47</td>
+              <td><span class="bi-v2-tone warning">Sobreproducción</span></td>
+            </tr>
+            
+            <tr>
+              <td>Rebanada</td>
+              <td class="text-end">0</td>
+              <td class="text-end">42</td>
+              <td class="text-end">-42</td>
+              <td><span class="bi-v2-tone danger">Déficit</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pastel Chico</td>
+              <td class="text-end">74</td>
+              <td class="text-end">37</td>
+              <td class="text-end">37</td>
+              <td><span class="bi-v2-tone warning">Sobreproducción</span></td>
+            </tr>
+            
+            <tr>
+              <td>Vasos</td>
+              <td class="text-end">0</td>
+              <td class="text-end">37</td>
+              <td class="text-end">-37</td>
+              <td><span class="bi-v2-tone danger">Déficit</span></td>
+            </tr>
+            
+            <tr>
+              <td>Galletas</td>
+              <td class="text-end">10</td>
+              <td class="text-end">37</td>
+              <td class="text-end">-27</td>
+              <td><span class="bi-v2-tone danger">Déficit</span></td>
+            </tr>
+            
+            <tr>
+              <td>Empanadas</td>
+              <td class="text-end">0</td>
+              <td class="text-end">19</td>
+              <td class="text-end">-19</td>
+              <td><span class="bi-v2-tone success">Balanceado</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pastel de 3 Pecados R</td>
+              <td class="text-end">0</td>
+              <td class="text-end">13</td>
+              <td class="text-end">-13</td>
+              <td><span class="bi-v2-tone success">Balanceado</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pay Grande</td>
+              <td class="text-end">0</td>
+              <td class="text-end">12</td>
+              <td class="text-end">-12</td>
+              <td><span class="bi-v2-tone success">Balanceado</span></td>
+            </tr>
+            
+            <tr>
+              <td>Pay Mediano</td>
+              <td class="text-end">0</td>
+              <td class="text-end">11</td>
+              <td class="text-end">-11</td>
+              <td><span class="bi-v2-tone success">Balanceado</span></td>
+            </tr>
+            
+            <tr>
+              <td>Mini</td>
+              <td class="text-end">12</td>
+              <td class="text-end">20</td>
+              <td class="text-end">-8</td>
+              <td><span class="bi-v2-tone success">Balanceado</span></td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="bi-v2-card">
+    <div class="bi-v2-section-head">
+      <div>
+        <div class="bi-v2-kicker">Cuadre mensual</div>
+        <h2 class="bi-v2-title">Inventario inicial + producción - venta - merma</h2>
+        <p class="bi-v2-copy">Puente mensual para verificar si el cierre de un mes realmente se convierte en el arranque del siguiente.</p>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="bi-v2-table">
+        <thead>
+          <tr>
+            <th>Mes</th>
+            <th class="text-end">Inv. inicial</th>
+            <th class="text-end">Producción</th>
+            <th class="text-end">Venta</th>
+            <th class="text-end">Merma</th>
+            <th class="text-end">Cierre teórico</th>
+            <th class="text-end">Cierre real</th>
+            <th class="text-end">Variación</th>
+            <th class="text-end">Apertura sig. mes</th>
+            <th class="text-end">Gap arrastre</th>
+          </tr>
+        </thead>
+        <tbody>
+          
+          <tr>
+            <td>
+              2025-10
+              
+            </td>
+            <td class="text-end">0</td>
+            <td class="text-end">13,907</td>
+            <td class="text-end">53,923</td>
+            <td class="text-end">323</td>
+            <td class="text-end">-40,339</td>
+            <td class="text-end">0</td>
+            <td class="text-end">40,339</td>
+            <td class="text-end">
+              
+                0
+              
+            </td>
+            <td class="text-end">
+              
+                0
+              
+            </td>
+          </tr>
+          
+          <tr>
+            <td>
+              2025-11
+              
+            </td>
+            <td class="text-end">0</td>
+            <td class="text-end">11,524</td>
+            <td class="text-end">46,285</td>
+            <td class="text-end">358</td>
+            <td class="text-end">-35,119</td>
+            <td class="text-end">0</td>
+            <td class="text-end">35,119</td>
+            <td class="text-end">
+              
+                0
+              
+            </td>
+            <td class="text-end">
+              
+                0
+              
+            </td>
+          </tr>
+          
+          <tr>
+            <td>
+              2025-12
+              
+            </td>
+            <td class="text-end">0</td>
+            <td class="text-end">17,310</td>
+            <td class="text-end">59,827</td>
+            <td class="text-end">470</td>
+            <td class="text-end">-42,987</td>
+            <td class="text-end">0</td>
+            <td class="text-end">42,987</td>
+            <td class="text-end">
+              
+                0
+              
+            </td>
+            <td class="text-end">
+              
+                0
+              
+            </td>
+          </tr>
+          
+          <tr>
+            <td>
+              2026-01
+              
+            </td>
+            <td class="text-end">0</td>
+            <td class="text-end">0</td>
+            <td class="text-end">25,644</td>
+            <td class="text-end">0</td>
+            <td class="text-end">-25,644</td>
+            <td class="text-end">0</td>
+            <td class="text-end">25,644</td>
+            <td class="text-end">
+              
+                0
+              
+            </td>
+            <td class="text-end">
+              
+                0
+              
+            </td>
+          </tr>
+          
+          <tr>
+            <td>
+              2026-02
+              
+            </td>
+            <td class="text-end">0</td>
+            <td class="text-end">0</td>
+            <td class="text-end">25,786</td>
+            <td class="text-end">0</td>
+            <td class="text-end">-25,786</td>
+            <td class="text-end">0</td>
+            <td class="text-end">25,786</td>
+            <td class="text-end">
+              
+                14,756
+              
+            </td>
+            <td class="text-end">
+              
+                14,756
+              
+            </td>
+          </tr>
+          
+          <tr>
+            <td>
+              2026-03
+              
+                <div class="bi-v2-subtle">Mes parcial</div>
+              
+            </td>
+            <td class="text-end">14,756</td>
+            <td class="text-end">831</td>
+            <td class="text-end">20,124</td>
+            <td class="text-end">29</td>
+            <td class="text-end">-4,566</td>
+            <td class="text-end">15,166</td>
+            <td class="text-end">19,732</td>
+            <td class="text-end">
+              
+                N/D
+              
+            </td>
+            <td class="text-end">
+              
+                N/D
+              
+            </td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+    <div class="bi-v2-note">Puente mensual de inventario de red: inventario inicial + producción - venta - merma = cierre teórico. Las transferencias internas no se suman porque no cambian el inventario total de la red. Corte común usado: 23 de Marzo de 2026.</div>
+  </section>
+</div>
+
+            </div>
+        </main>
+    </div>
+    <script>
+      (() => {
+        const key = "ui_density_mode";
+        const body = document.body;
+        const toggle = document.getElementById("densityToggle");
+        if (!toggle) return;
+
+        const applyMode = (mode) => {
+          const compact = mode === "compact";
+          body.classList.toggle("ui-compact", compact);
+          toggle.setAttribute("aria-pressed", compact ? "true" : "false");
+          toggle.textContent = compact ? "Modo normal" : "Modo compacto";
+        };
+
+        const saved = localStorage.getItem(key);
+        applyMode(saved || "normal");
+
+        toggle.addEventListener("click", () => {
+          const compact = !body.classList.contains("ui-compact");
+          const mode = compact ? "compact" : "normal";
+          localStorage.setItem(key, mode);
+          applyMode(mode);
+        });
+      })();
+    </script>
+    
+</body>
+</html>

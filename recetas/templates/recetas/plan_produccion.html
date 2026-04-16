@@ -263,7 +263,7 @@
   </section>
   {% endif %}
   <div class="card table-card mb-3">
-    <div class="card-header">Ruta troncal ERP</div>
+    <div class="card-header">Ruta operativa</div>
     <p class="muted mb-2">
       Expone cómo el plan baja al flujo troncal del ERP: plan/BOM, compras documentales e inventario/reabasto.
     </p>
@@ -599,6 +599,7 @@
     <div class="form-group">
       <label class="form-label">Alcance</label>
       <select class="form-select" name="alcance">
+        <option value="dia" {% if alcance_estadistico == "dia" %}selected{% endif %}>Día</option>
         <option value="mes" {% if alcance_estadistico == "mes" %}selected{% endif %}>Mes</option>
         <option value="semana" {% if alcance_estadistico == "semana" %}selected{% endif %}>Semana (lun-dom)</option>
         <option value="fin_semana" {% if alcance_estadistico == "fin_semana" %}selected{% endif %}>Fin de semana</option>
@@ -609,7 +610,7 @@
       <input class="form-control" type="month" name="periodo" value="{{ periodo_pronostico_default }}">
     </div>
     <div class="form-group">
-      <label class="form-label">Fecha base (semana / fin semana)</label>
+      <label class="form-label">Fecha base (día / semana / fin semana)</label>
       <input class="form-control" type="date" name="fecha_base" value="{{ fecha_base_estadistica }}">
     </div>
     <div class="form-group">
@@ -1618,7 +1619,7 @@
       
 {% if executive_radar_rows %}
 <section class="card">
-  <div class="card-header">Radar ejecutivo ERP</div>
+  <div class="card-header">Resumen de seguimiento</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>

@@ -1,0 +1,129 @@
+{
+  "generated_at": "2026-04-09T05:03:50.619379+00:00",
+  "dry_run": false,
+  "approved": [
+    {
+      "addon_codigo_point": "SFRESAG",
+      "addon_nombre": "Sabor Fresa Grande Pay",
+      "base_codigo_point": "0001",
+      "base_nombre": "Pay de Queso Grande",
+      "status": "APPROVED",
+      "confidence_score": "100.0000",
+      "cooccurrence_qty": "5.000",
+      "base_cost": "10.000000",
+      "addon_cost": "2.000000",
+      "grouped_cost": "12.000000",
+      "reason": "Pay de queso grande con sabor fresa."
+    },
+    {
+      "addon_codigo_point": "1254",
+      "addon_nombre": "TOPPING ZANAHORIA C",
+      "base_codigo_point": "0066",
+      "base_nombre": "Pastel de Zanahoria Chico",
+      "status": "APPROVED",
+      "confidence_score": "0",
+      "cooccurrence_qty": "0",
+      "base_cost": "9.000000",
+      "addon_cost": "1.500000",
+      "grouped_cost": "10.500000",
+      "reason": "Pastel de zanahoria chico con topping zanahoria."
+    }
+  ],
+  "skipped": [
+    {
+      "addon_codigo_point": "03SPOREB",
+      "base_codigo_point": "0003",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "SMANZANAREB",
+      "base_codigo_point": "0003",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "SOREOG",
+      "base_codigo_point": "0001",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "SOREOM",
+      "base_codigo_point": "0002",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "SBROWNIEG",
+      "base_codigo_point": "0001",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "SBROWNIEM",
+      "base_codigo_point": "0002",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "SFRESAPC",
+      "base_codigo_point": "0101",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "SFRESAPG",
+      "base_codigo_point": "0099",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "SFRESAPM",
+      "base_codigo_point": "0100",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "SFRESAPMINI",
+      "base_codigo_point": "PFCMINI",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "1412",
+      "base_codigo_point": "0056",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "21254",
+      "base_codigo_point": "0054",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "22145",
+      "base_codigo_point": "0055",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "214541",
+      "base_codigo_point": "0061",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "21455",
+      "base_codigo_point": "0059",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "21125",
+      "base_codigo_point": "0060",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "1125",
+      "base_codigo_point": "0064",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "21445",
+      "base_codigo_point": "0065",
+      "reason": "Receta addon no encontrada en ERP."
+    },
+    {
+      "addon_codigo_point": "21245",
+      "base_codigo_point": "0105",
+      "reason": "Receta addon no encontrada en ERP."
+    }
+  ]
+}
