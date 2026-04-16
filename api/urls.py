@@ -140,6 +140,16 @@ from .ventas_eventos_views import (
     SalesEventCloseView,
     SalesEventPostmortemView,
 )
+from .special_hours_views import (
+    SpecialHoursApproveView,
+    SpecialHoursCancelView,
+    SpecialHoursDetailView,
+    SpecialHoursExecuteView,
+    SpecialHoursListCreateView,
+    SpecialHoursPreviewView,
+    SpecialHoursRetryView,
+    SpecialHoursValidateView,
+)
 
 urlpatterns = [
     path("ai-gateway/manifest/", AIGatewayManifestView.as_view(), name="api_ai_gateway_manifest"),
@@ -243,6 +253,46 @@ urlpatterns = [
         "integraciones/point/operaciones/historial/",
         IntegracionesOperationsHistoryView.as_view(),
         name="api_integraciones_operations_history",
+    ),
+    path(
+        "integraciones/horarios-especiales/preview/",
+        SpecialHoursPreviewView.as_view(),
+        name="api_integraciones_special_hours_preview",
+    ),
+    path(
+        "integraciones/horarios-especiales/",
+        SpecialHoursListCreateView.as_view(),
+        name="api_integraciones_special_hours",
+    ),
+    path(
+        "integraciones/horarios-especiales/<int:request_id>/",
+        SpecialHoursDetailView.as_view(),
+        name="api_integraciones_special_hours_detail",
+    ),
+    path(
+        "integraciones/horarios-especiales/<int:request_id>/validate/",
+        SpecialHoursValidateView.as_view(),
+        name="api_integraciones_special_hours_validate",
+    ),
+    path(
+        "integraciones/horarios-especiales/<int:request_id>/approve/",
+        SpecialHoursApproveView.as_view(),
+        name="api_integraciones_special_hours_approve",
+    ),
+    path(
+        "integraciones/horarios-especiales/<int:request_id>/execute/",
+        SpecialHoursExecuteView.as_view(),
+        name="api_integraciones_special_hours_execute",
+    ),
+    path(
+        "integraciones/horarios-especiales/<int:request_id>/retry/",
+        SpecialHoursRetryView.as_view(),
+        name="api_integraciones_special_hours_retry",
+    ),
+    path(
+        "integraciones/horarios-especiales/<int:request_id>/cancel/",
+        SpecialHoursCancelView.as_view(),
+        name="api_integraciones_special_hours_cancel",
     ),
     path("inventario/point-pendientes/resolver/", InventarioPointPendingResolveView.as_view(), name="api_inventario_point_pendientes_resolver"),
     path("inventario/sugerencias-compra/", InventarioSugerenciasCompraView.as_view(), name="api_inventario_sugerencias_compra"),

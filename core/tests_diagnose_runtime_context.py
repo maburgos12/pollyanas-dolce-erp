@@ -16,7 +16,7 @@ class DiagnoseErpRuntimeContextTests(SimpleTestCase):
             "name": "pollyana_db",
             "table_statuses": [
                 TableStatus(name="pos_bridge_daily_sales", exists=False, count=None),
-                TableStatus(name="ventas_ventaautoritativapoint", exists=True, count=0),
+                TableStatus(name="ventas_autoritativas_point", exists=True, count=0),
             ],
         }
 
@@ -32,7 +32,7 @@ class DiagnoseErpRuntimeContextTests(SimpleTestCase):
             "name": "pastelerias_chat_native_validate",
             "table_statuses": [
                 TableStatus(name="pos_bridge_daily_sales", exists=True, count=0),
-                TableStatus(name="ventas_ventaautoritativapoint", exists=True, count=0),
+                TableStatus(name="ventas_autoritativas_point", exists=True, count=0),
             ],
         }
 
@@ -52,7 +52,7 @@ class DiagnoseErpRuntimeContextTests(SimpleTestCase):
             "database_public_url_present": False,
             "table_statuses": [
                 TableStatus(name="pos_bridge_daily_sales", exists=True, count=1),
-                TableStatus(name="ventas_ventaautoritativapoint", exists=True, count=1),
+                TableStatus(name="ventas_autoritativas_point", exists=True, count=1),
                 TableStatus(name="orquestacion_orchestrationrun", exists=True, count=1),
                 TableStatus(name="recetas_movimientoproductocedis", exists=True, count=1),
             ],

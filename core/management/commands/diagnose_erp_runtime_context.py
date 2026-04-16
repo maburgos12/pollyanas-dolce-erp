@@ -12,7 +12,7 @@ from core.management.commands.ejecutar_rutina_diaria_erp import _prefer_public_d
 
 CRITICAL_TABLES = (
     "pos_bridge_daily_sales",
-    "ventas_ventaautoritativapoint",
+    "ventas_autoritativas_point",
     "orquestacion_orchestrationrun",
     "recetas_movimientoproductocedis",
 )

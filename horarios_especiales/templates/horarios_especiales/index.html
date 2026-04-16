@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Horarios especiales{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h3 mb-1">Horarios especiales</h1>
+      <p class="text-muted mb-0">Flujo ERP -> validación -> aprobación -> Google Business Profile.</p>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3"><div class="card card-body"><strong>{{ stats.borrador }}</strong><span class="text-muted">Borrador</span></div></div>
+    <div class="col-md-3"><div class="card card-body"><strong>{{ stats.aprobado }}</strong><span class="text-muted">Aprobado</span></div></div>
+    <div class="col-md-3"><div class="card card-body"><strong>{{ stats.ejecutado }}</strong><span class="text-muted">Ejecutado</span></div></div>
+    <div class="col-md-3"><div class="card card-body"><strong>{{ stats.fallido }}</strong><span class="text-muted">Fallido</span></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Solicitud</th>
+              <th>Estatus</th>
+              <th>Sucursales</th>
+              <th>Fecha</th>
+              <th>Solicita</th>
+              <th>Última actualización</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td>
+                <div class="fw-semibold">{{ row.request_code }}</div>
+                <div class="text-muted small">{{ row.raw_command|truncatechars:80 }}</div>
+              </td>
+              <td>{{ row.get_status_display }}</td>
+              <td>
+                {% for detail in row.details.all %}
+                  <span class="badge text-bg-light">{{ detail.sucursal.codigo }}</span>
+                {% empty %}
+                  <span class="text-muted">Sin detalle</span>
+                {% endfor %}
+              </td>
+              <td>
+                {% for detail in row.details.all %}
+                  <div>{{ detail.target_date }}</div>
+                {% empty %}
+                  <span class="text-muted">N/D</span>
+                {% endfor %}
+              </td>
+              <td>{{ row.requested_by|default:"-" }}</td>
+              <td>{{ row.updated_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="text-center text-muted py-4">Aún no hay solicitudes registradas.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
