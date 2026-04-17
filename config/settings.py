@@ -181,7 +181,7 @@ if DATABASE_URL:
         "default": dj_database_url.config(
             default=DATABASE_URL,
             conn_max_age=600,
-            ssl_require=not DEBUG,
+            ssl_require=False,
         )
     }
 elif os.getenv("DB_HOST"):
