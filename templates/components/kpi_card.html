@@ -1,4 +1,4 @@
-{#
+<!--
   Componente: KPI Card
   Parámetros:
     value     — número a mostrar (requerido)
@@ -8,8 +8,8 @@
     delta     — texto de variación, ej. "+5 vs mes pasado" (opcional)
     delta_dir — "up" | "down" | "flat" (opcional, default "flat")
   Uso:
-    {% include "components/kpi_card.html" with value=42 label="Insumos" tone="success" icon="box" %}
-#}
+    include "components/kpi_card.html" with value=42 label="Insumos" tone="success" icon="box"
+-->
 <article class="kpi-card">
     <div class="kpi-card-inner">
         {% if icon %}

@@ -1,13 +1,13 @@
-{#
+<!--
   Componente: Status Badge
   Parámetros:
     status — "OK" | "ERROR" | "PENDIENTE" | "APROBADO" | "RECHAZADO" |
              "ACTIVO" | "INACTIVO" | "ADVERTENCIA" | string libre
     size   — "sm" (opcional, default normal)
   Uso:
-    {% include "components/status_badge.html" with status="OK" %}
-    {% include "components/status_badge.html" with status=objeto.estado %}
-#}
+    include "components/status_badge.html" with status="OK"
+    include "components/status_badge.html" with status=objeto.estado
+-->
 {% if status == "OK" or status == "APROBADO" or status == "ACTIVO" or status == "COMPLETADO" or status == "RECIBIDO" %}
 <span class="badge bg-success{% if size == 'sm' %}" style="font-size:11px;padding:3px 8px;{% endif %}">{{ status }}</span>
 {% elif status == "ERROR" or status == "RECHAZADO" or status == "CRITICO" or status == "CANCELADO" %}

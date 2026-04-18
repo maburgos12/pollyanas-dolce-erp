@@ -1,4 +1,4 @@
-{#
+<!--
   Componente: Empty State
   Parámetros:
     message — texto a mostrar (requerido)
@@ -6,9 +6,9 @@
     action_url   — URL para botón de acción (opcional)
     action_label — texto del botón (opcional, default "Agregar")
   Uso:
-    {% include "components/empty_state.html" with message="No hay alertas activas" icon="check" %}
-    {% include "components/empty_state.html" with message="Sin resultados" icon="search" action_url="/insumos/nuevo/" action_label="Nuevo insumo" %}
-#}
+    include "components/empty_state.html" with message="No hay alertas activas" icon="check"
+    include "components/empty_state.html" with message="Sin resultados" icon="search" action_url="/insumos/nuevo/" action_label="Nuevo insumo"
+-->
 <div class="empty-state">
     <div class="empty-state-icon">
         {% if icon == "check" %}
