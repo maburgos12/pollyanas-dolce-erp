@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 
 from core.models import AuditLog, Sucursal, UserProfile
@@ -94,12 +94,13 @@ class Command(BaseCommand):
                 center.delete()
                 summary.centros_deleted += 1
 
-            remaining = self._dependency_counts(ghost)
+            remaining = self._database_foreign_key_counts(ghost)
             non_zero = [(label, count) for label, count in remaining if count]
             if non_zero:
                 details = ", ".join(f"{label}={count}" for label, count in non_zero)
                 raise CommandError(f"La sucursal {ghost_code} aún tiene dependencias: {details}")
 
+            self._sync_primary_key_sequence(AuditLog)
             AuditLog.objects.create(
                 timestamp=timezone.now(),
                 action="DELETE",
@@ -118,7 +119,8 @@ class Command(BaseCommand):
                     },
                 },
             )
-            ghost.delete()
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM core_sucursal WHERE id = %s", [ghost.pk])
 
         self.stdout.write(self.style.SUCCESS("Purga aplicada"))
         self.stdout.write(f"  - perfiles migrados: {summary.userprofiles_migrated}")
@@ -139,3 +141,41 @@ class Command(BaseCommand):
                     if count:
                         counts.append((f"{model._meta.label}.{field.name}", count))
         return sorted(counts)
+
+    def _database_foreign_key_counts(self, branch: Sucursal) -> list[tuple[str, int]]:
+        counts: list[tuple[str, int]] = []
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT tc.table_name, kcu.column_name
+                FROM information_schema.table_constraints AS tc
+                JOIN information_schema.key_column_usage AS kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                JOIN information_schema.constraint_column_usage AS ccu
+                  ON ccu.constraint_name = tc.constraint_name
+                 AND ccu.table_schema = tc.table_schema
+                WHERE tc.constraint_type = 'FOREIGN KEY'
+                  AND ccu.table_name = 'core_sucursal'
+                ORDER BY tc.table_name, kcu.column_name
+                """
+            )
+            references = cursor.fetchall()
+            for table_name, column_name in references:
+                cursor.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {column_name} = %s", [branch.pk])
+                count = cursor.fetchone()[0]
+                if count:
+                    counts.append((f"{table_name}.{column_name}", count))
+        return counts
+
+    def _sync_primary_key_sequence(self, model) -> None:
+        table_name = model._meta.db_table
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_get_serial_sequence(%s, 'id')", [table_name])
+            row = cursor.fetchone()
+            sequence_name = row[0] if row else None
+            if not sequence_name:
+                return
+            cursor.execute(f"SELECT COALESCE(MAX(id), 1) FROM {table_name}")
+            max_id = cursor.fetchone()[0] or 1
+            cursor.execute("SELECT setval(%s, %s, true)", [sequence_name, max_id])
