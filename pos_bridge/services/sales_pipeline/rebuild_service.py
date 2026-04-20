@@ -469,32 +469,61 @@ class PointSalesRebuildService:
         VentaAutoritativaPoint.objects.filter(branch=erp_branch, sale_date=task.sale_date).delete()
         if not normalized_rows:
             return 0
-        rows = [
-            VentaAutoritativaPoint(
-                branch=erp_branch,
-                product=row.receta,
-                sale_date=row.fecha,
-                product_code=row.raw_row.codigo_raw,
-                point_name=row.producto_nombre_historico,
-                category=row.categoria,
-                quantity=row.total_cantidad,
-                gross_amount=decimal_from_value((row.raw_row.payload_original_json or {}).get("Bruto"), default=str(row.total_venta + row.total_descuento)),
-                discount_amount=row.total_descuento,
-                total_amount=row.total_venta,
-                tax_amount=row.total_impuestos,
-                net_amount=row.total_venta_neta,
-                source_file=row.source_file,
-                source_sheet="category_report",
-                raw_payload={
-                    "source_hash": row.source_hash,
-                    "match_catalogo_status": row.match_catalogo_status,
-                    "task_id": task.id,
-                    "sync_job_id": task.sync_job_id,
-                },
-                imported_at=timezone.now(),
+        grouped_rows: dict[tuple[int | None, object, str], dict] = {}
+        for row in normalized_rows:
+            row_key = (
+                erp_branch.id if erp_branch is not None else None,
+                row.fecha,
+                row.raw_row.codigo_raw,
             )
-            for row in normalized_rows
-        ]
+            authoritative_row = grouped_rows.get(row_key)
+            if authoritative_row is None:
+                grouped_rows[row_key] = {
+                    "branch": erp_branch,
+                    "product": row.receta,
+                    "sale_date": row.fecha,
+                    "product_code": row.raw_row.codigo_raw,
+                    "point_name": row.producto_nombre_historico,
+                    "category": row.categoria,
+                    "quantity": row.total_cantidad,
+                    "gross_amount": decimal_from_value((row.raw_row.payload_original_json or {}).get("Bruto"), default=str(row.total_venta + row.total_descuento)),
+                    "discount_amount": row.total_descuento,
+                    "total_amount": row.total_venta,
+                    "tax_amount": row.total_impuestos,
+                    "net_amount": row.total_venta_neta,
+                    "source_file": row.source_file,
+                    "source_sheet": "category_report",
+                    "raw_payload": {
+                        "source_hash": row.source_hash,
+                        "match_catalogo_status": row.match_catalogo_status,
+                        "task_id": task.id,
+                        "sync_job_id": task.sync_job_id,
+                    },
+                    "imported_at": timezone.now(),
+                }
+                continue
+            authoritative_row["quantity"] += row.total_cantidad
+            authoritative_row["gross_amount"] += decimal_from_value(
+                (row.raw_row.payload_original_json or {}).get("Bruto"),
+                default=str(row.total_venta + row.total_descuento),
+            )
+            authoritative_row["discount_amount"] += row.total_descuento
+            authoritative_row["total_amount"] += row.total_venta
+            authoritative_row["tax_amount"] += row.total_impuestos
+            authoritative_row["net_amount"] += row.total_venta_neta
+            authoritative_row["product"] = row.receta
+            authoritative_row["point_name"] = row.producto_nombre_historico
+            authoritative_row["category"] = row.categoria
+            authoritative_row["source_file"] = row.source_file
+            authoritative_row["raw_payload"] = {
+                "source_hash": row.source_hash,
+                "match_catalogo_status": row.match_catalogo_status,
+                "task_id": task.id,
+                "sync_job_id": task.sync_job_id,
+            }
+            authoritative_row["imported_at"] = timezone.now()
+
+        rows = [VentaAutoritativaPoint(**row_data) for row_data in grouped_rows.values()]
         VentaAutoritativaPoint.objects.bulk_create(rows, batch_size=1000)
         bump_cache_scopes("ventas", "dashboard")
         if rows:
