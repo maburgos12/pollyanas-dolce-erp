@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from decimal import Decimal, ROUND_HALF_UP
 import re
 
@@ -12,6 +13,10 @@ from recetas.utils.normalizacion import normalizar_nombre
 
 
 Q6 = Decimal("0.000001")
+_ACTIVE_PREPARATION_RECIPE_IDS: ContextVar[tuple[int, ...]] = ContextVar(
+    "_ACTIVE_PREPARATION_RECIPE_IDS",
+    default=(),
+)
 
 
 def _q6(value: Decimal | int | float | str | None) -> Decimal:
@@ -88,13 +93,39 @@ def resolve_preparation_recipe_for_insumo(insumo: Insumo | None) -> Receta | Non
     return None
 
 
+def resolve_preparation_recipe_unit_cost(prep_recipe: Receta | None) -> tuple[Decimal | None, UnidadMedida | None, str]:
+    if prep_recipe is None:
+        return None, None, "NO_PREPARACION"
+
+    recipe_id = int(prep_recipe.id or 0)
+    active_recipe_ids = _ACTIVE_PREPARATION_RECIPE_IDS.get()
+    if recipe_id and recipe_id in active_recipe_ids:
+        return None, prep_recipe.rendimiento_unidad, "RECETA_PREPARACION_CYCLE"
+
+    token = _ACTIVE_PREPARATION_RECIPE_IDS.set(
+        (*active_recipe_ids, recipe_id) if recipe_id else active_recipe_ids
+    )
+    try:
+        unit_cost = prep_recipe.costo_por_unidad_rendimiento
+    except RecursionError:
+        return None, prep_recipe.rendimiento_unidad, "RECETA_PREPARACION_CYCLE"
+    finally:
+        _ACTIVE_PREPARATION_RECIPE_IDS.reset(token)
+
+    quantized_cost = _q6(unit_cost)
+    if quantized_cost > 0:
+        return quantized_cost, prep_recipe.rendimiento_unidad, "RECETA_PREPARACION"
+    return None, prep_recipe.rendimiento_unidad, "RECETA_PREPARACION_SIN_COSTO"
+
+
 def resolve_insumo_unit_cost(insumo: Insumo | None) -> tuple[Decimal | None, UnidadMedida | None, str]:
     if not insumo:
         return None, None, "NO_INSUMO"
 
     prep_recipe = resolve_preparation_recipe_for_insumo(insumo)
-    if prep_recipe and prep_recipe.costo_por_unidad_rendimiento and prep_recipe.costo_por_unidad_rendimiento > 0:
-        return _q6(prep_recipe.costo_por_unidad_rendimiento), prep_recipe.rendimiento_unidad, "RECETA_PREPARACION"
+    prep_cost, prep_unit, prep_label = resolve_preparation_recipe_unit_cost(prep_recipe)
+    if prep_cost is not None and prep_cost > 0:
+        return prep_cost, prep_unit, prep_label
 
     latest = latest_costo_canonico(insumo)
     if latest is not None and latest > 0:

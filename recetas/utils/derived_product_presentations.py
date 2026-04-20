@@ -7,7 +7,11 @@ from django.db.models import DecimalField
 
 from maestros.utils.canonical_catalog import latest_costo_canonico
 from recetas.models import LineaReceta, Receta, RecetaPresentacionDerivada
-from recetas.utils.costeo_snapshot import convert_unit_cost, resolve_insumo_unit_cost
+from recetas.utils.costeo_snapshot import (
+    convert_unit_cost,
+    resolve_insumo_unit_cost,
+    resolve_preparation_recipe_unit_cost,
+)
 from recetas.utils.normalizacion import normalizar_nombre
 
 
@@ -177,11 +181,12 @@ def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> di
                         prep_recipe = prep_by_name.get(normalized_name)
                     if prep_recipe is not None:
                         break
-            if prep_recipe and prep_recipe.costo_por_unidad_rendimiento and prep_recipe.costo_por_unidad_rendimiento > 0:
+            prep_cost, prep_unit, prep_label = resolve_preparation_recipe_unit_cost(prep_recipe)
+            if prep_cost is not None and prep_cost > 0:
                 insumo_cost_cache[insumo_id] = (
-                    Decimal(str(prep_recipe.costo_por_unidad_rendimiento)),
-                    prep_recipe.rendimiento_unidad,
-                    "RECETA_PREPARACION",
+                    Decimal(str(prep_cost)),
+                    prep_unit,
+                    prep_label,
                 )
                 continue
             latest_cost = latest_costo_canonico(insumo)
