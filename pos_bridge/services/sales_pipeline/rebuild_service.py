@@ -355,29 +355,52 @@ class PointSalesRebuildService:
         if not normalized_rows:
             return 0, 0
 
-        product_facts = [
-            PointSalesDailyProductFact(
-                branch=row.branch,
-                sync_job=task.sync_job,
-                sale_date=row.fecha,
-                sucursal_nombre=row.sucursal_nombre,
-                categoria=row.categoria,
-                producto_nombre_historico=row.producto_nombre_historico,
-                point_product=row.point_product,
-                receta=row.receta,
-                match_catalogo_status=row.match_catalogo_status,
-                total_cantidad=row.total_cantidad,
-                total_descuento=row.total_descuento,
-                total_venta=row.total_venta,
-                total_impuestos=row.total_impuestos,
-                total_venta_neta=row.total_venta_neta,
-                source_hash=row.source_hash,
-                source_file=row.source_file,
-                extracted_at=row.extracted_at,
-                normalized_at=row.normalized_at,
+        grouped_product_facts: dict[tuple[int | None, object, str, str, str], dict] = {}
+        for row in normalized_rows:
+            fact_key = (
+                row.branch_id,
+                row.fecha,
+                row.categoria,
+                row.producto_nombre_historico,
+                PointSalesDailyProductFact.GRANULARITY_PRODUCT,
             )
-            for row in normalized_rows
-        ]
+            fact = grouped_product_facts.get(fact_key)
+            if fact is None:
+                grouped_product_facts[fact_key] = {
+                    "branch": row.branch,
+                    "sync_job": task.sync_job,
+                    "sale_date": row.fecha,
+                    "sucursal_nombre": row.sucursal_nombre,
+                    "categoria": row.categoria,
+                    "producto_nombre_historico": row.producto_nombre_historico,
+                    "point_product": row.point_product,
+                    "receta": row.receta,
+                    "match_catalogo_status": row.match_catalogo_status,
+                    "total_cantidad": row.total_cantidad,
+                    "total_descuento": row.total_descuento,
+                    "total_venta": row.total_venta,
+                    "total_impuestos": row.total_impuestos,
+                    "total_venta_neta": row.total_venta_neta,
+                    "source_hash": row.source_hash,
+                    "source_file": row.source_file,
+                    "extracted_at": row.extracted_at,
+                    "normalized_at": row.normalized_at,
+                }
+                continue
+            fact["total_cantidad"] += row.total_cantidad
+            fact["total_descuento"] += row.total_descuento
+            fact["total_venta"] += row.total_venta
+            fact["total_impuestos"] += row.total_impuestos
+            fact["total_venta_neta"] += row.total_venta_neta
+            fact["point_product"] = row.point_product
+            fact["receta"] = row.receta
+            fact["match_catalogo_status"] = row.match_catalogo_status
+            fact["source_hash"] = row.source_hash
+            fact["source_file"] = row.source_file
+            fact["extracted_at"] = row.extracted_at
+            fact["normalized_at"] = row.normalized_at
+
+        product_facts = [PointSalesDailyProductFact(**fact) for fact in grouped_product_facts.values()]
         PointSalesDailyProductFact.objects.bulk_create(product_facts, batch_size=1000)
 
         category_totals: dict[str, dict] = defaultdict(
