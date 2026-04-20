@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import decimal
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 from decimal import Decimal
@@ -22,6 +23,13 @@ from ventas.models import (
     EventoVentaPurchaseRequirement,
 )
 from ventas.services.financials import resolve_unit_price
+
+
+class _DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, decimal.Decimal):
+            return float(obj)
+        return super().default(obj)
 
 
 ZERO = Decimal("0")
@@ -262,5 +270,5 @@ def write_event_pipeline_audit_report(
         "after": after,
         "steps": steps,
     }
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, cls=_DecimalEncoder), encoding="utf-8")
     return path
