@@ -62,6 +62,7 @@ def dashboard_rentabilidad(request):
         SucursalRentabilidad.objects
         .filter(periodo=periodo)
         .select_related("sucursal")
+        .exclude(sucursal=None)
         .order_by("-ventas_brutas")
     )
 
