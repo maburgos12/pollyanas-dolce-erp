@@ -88,6 +88,48 @@ def _ascii_norm(value: str) -> str:
     return "".join(ch for ch in unicodedata.normalize("NFKD", raw) if not unicodedata.combining(ch))
 
 
+def _objective_notes_tokens(event: EventoVenta) -> dict[str, str]:
+    tokens: dict[str, str] = {}
+    notes = (event.objective_notes or "").strip()
+    if not notes:
+        return tokens
+    for fragment in re.split(r"[|\n]+", notes):
+        item = fragment.strip()
+        if not item or "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        normalized_key = _ascii_norm(key).replace(" ", "_")
+        tokens[normalized_key] = value.strip()
+    return tokens
+
+
+def _objective_note_decimal(event: EventoVenta, *keys: str) -> Decimal:
+    tokens = _objective_notes_tokens(event)
+    for key in keys:
+        raw = tokens.get(key)
+        if not raw:
+            continue
+        cleaned = raw.replace("$", "").replace(",", "").strip()
+        try:
+            return Decimal(cleaned).quantize(Decimal("0.01"))
+        except Exception:
+            continue
+    return ZERO
+
+
+def _objective_note_date(event: EventoVenta, *keys: str) -> date | None:
+    tokens = _objective_notes_tokens(event)
+    for key in keys:
+        raw = tokens.get(key)
+        if not raw:
+            continue
+        try:
+            return date.fromisoformat(raw.strip())
+        except ValueError:
+            continue
+    return None
+
+
 def _infer_projection_labels(*, product_name: str, family: str, category: str) -> tuple[str, str]:
     name_norm = _ascii_norm(product_name)
     family_clean = (family or "").strip()
@@ -182,6 +224,9 @@ def _replace_year_safe(value: date, year: int) -> date:
 
 
 def _event_executive_benchmark_sales(event: EventoVenta) -> Decimal:
+    token_value = _objective_note_decimal(event, "benchmark_week", "benchmark_sales", "benchmark")
+    if token_value > ZERO:
+        return token_value
     notes = (event.objective_notes or "").strip()
     if not notes:
         return ZERO
@@ -203,6 +248,9 @@ def _event_executive_benchmark_sales(event: EventoVenta) -> Decimal:
 
 
 def _event_executive_main_day_benchmark_sales(event: EventoVenta) -> Decimal:
+    token_value = _objective_note_decimal(event, "benchmark_main_day", "benchmark_dia_principal")
+    if token_value > ZERO:
+        return token_value
     notes = (event.objective_notes or "").strip()
     if not notes:
         return ZERO
@@ -1879,14 +1927,27 @@ def _event_homologue_window_candidates(event: EventoVenta) -> list[tuple[str, da
     calendar_main = _replace_year_safe(event.main_date, event.main_date.year - 1)
     start_offset = (event.analysis_start_date - event.main_date).days
     end_offset = (event.analysis_end_date - event.main_date).days
-    candidates = [
+    candidates: list[tuple[str, date, date, date]] = []
+
+    manual_main = _objective_note_date(event, "homologue_main_day")
+    if manual_main is not None:
+        candidates.append(
+            (
+                "manual_override",
+                manual_main + timedelta(days=start_offset),
+                manual_main + timedelta(days=end_offset),
+                manual_main,
+            )
+        )
+
+    candidates.append(
         (
             "calendar",
             calendar_main + timedelta(days=start_offset),
             calendar_main + timedelta(days=end_offset),
             calendar_main,
         )
-    ]
+    )
 
     weekday_main = _same_weekday_occurrence_date(event.main_date, event.main_date.year - 1)
     if weekday_main != calendar_main:
@@ -2984,6 +3045,8 @@ def _select_event_homologue_window(
 ) -> tuple[date, date, date, str]:
     best: tuple[Decimal, str, date, date, date] | None = None
     for label, start, end, main_day in _event_homologue_window_candidates(event):
+        if label == "manual_override":
+            return start, end, main_day, label
         main_total = _aggregate_historical_quantity(
             start=main_day,
             end=main_day,
