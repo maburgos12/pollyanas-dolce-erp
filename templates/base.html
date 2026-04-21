@@ -74,15 +74,21 @@
                             <span>Cierre diario</span>
                         </a>
                     </li>
-                    <li>
-                        <a href="{% url 'reportes:proyectos_inversion' %}" class="{% if '/reportes/proyectos-inversion/' in request.path %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="M6 15 10 9l4 3 4-6"/><circle cx="6" cy="15" r="1"/><circle cx="10" cy="9" r="1"/><circle cx="14" cy="12" r="1"/><circle cx="18" cy="6" r="1"/></svg>
-                            </span>
-                            <span>Proyectos inversión</span>
-                        </a>
-                    </li>
-                    {% endif %}
+	                    <li>
+	                        <a href="{% url 'reportes:proyectos_inversion' %}" class="{% if '/reportes/proyectos-inversion/' in request.path %}active{% endif %}">
+	                            <span class="nav-icon" aria-hidden="true">
+	                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="M6 15 10 9l4 3 4-6"/><circle cx="6" cy="15" r="1"/><circle cx="10" cy="9" r="1"/><circle cx="14" cy="12" r="1"/><circle cx="18" cy="6" r="1"/></svg>
+	                            </span>
+	                            <span>Proyectos inversión</span>
+	                        </a>
+	                    </li>
+	                    <li class="nav-item">
+	                        <a href="{% url 'rentabilidad:rentabilidad_dashboard' %}" class="{% if '/rentabilidad/' in request.path %}active{% endif %}">
+	                            <i class="fas fa-store"></i>
+	                            <span>Rentabilidad</span>
+	                        </a>
+	                    </li>
+	                    {% endif %}
                 </ul>
 
                 <div class="sidebar-section-label">Operación diaria</div>
