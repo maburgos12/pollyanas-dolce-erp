@@ -21,7 +21,7 @@ from .agente_rentabilidad import analizar_sucursal
 
 
 def _get_periodo(request):
-    """Lee ?periodo=2025-01 de la URL o usa el mes en curso."""
+    """Lee ?periodo=YYYY-MM o usa el último mes con datos."""
     param = request.GET.get("periodo")
     if param:
         try:
@@ -29,6 +29,9 @@ def _get_periodo(request):
             return date(year, month, 1)
         except (ValueError, AttributeError):
             pass
+    ultimo = SucursalRentabilidad.objects.order_by("-periodo").first()
+    if ultimo:
+        return ultimo.periodo
     hoy = date.today()
     return hoy.replace(day=1)
 
