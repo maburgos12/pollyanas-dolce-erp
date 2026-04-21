@@ -62,7 +62,7 @@ def dashboard_rentabilidad(request):
         SucursalRentabilidad.objects
         .filter(periodo=periodo)
         .select_related("sucursal")
-        .order_by("-utilidad_operativa")     # primero las que más ganan
+        .order_by("-ventas_brutas")
     )
 
     # Enriquecer con colores y datos calculados para el template
