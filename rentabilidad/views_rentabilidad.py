@@ -137,7 +137,7 @@ def dashboard_rentabilidad(request):
         "alertas_urgentes":     alertas_urgentes,
         "EstadoRentabilidad":   EstadoRentabilidad,
     }
-    return render(request, "rentabilidad/detalle.html", context)
+    return render(request, "rentabilidad/dashboard.html", context)
 
 
 @login_required
@@ -156,7 +156,7 @@ def detalle_sucursal(request, pk):
         "colores":  _colores_estado(rent.estado),
         "historial": list(reversed(list(historial))),
     }
-    return render(request, "rentabilidad/dashboard.html", context)
+    return render(request, "rentabilidad/detalle.html", context)
 
 
 @login_required
