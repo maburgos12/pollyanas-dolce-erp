@@ -82,36 +82,6 @@ def dashboard_rentabilidad(request):
             "semaforo_roi":     "verde" if (r.roi_anualizado or 0) >= 25 else ("amarillo" if (r.roi_anualizado or 0) >= 10 else "rojo"),
         })
 
-    # Resumen agregado
-    totales = {
-        "ventas_brutas":      sum(r.obj["obj"].ventas_brutas        for r in sucursales_data),  # noqa
-        "ventas_netas":       sum(r["obj"].ventas_netas             for r in sucursales_data),
-        "costo_variable":     sum(r["obj"].costo_variable_total     for r in sucursales_data),
-        "gasto_fijo":         sum(r["obj"].gasto_fijo_total         for r in sucursales_data),
-        "utilidad_operativa": sum(r["obj"].utilidad_operativa       for r in sucursales_data),
-    }
-
-    conteo_estados = {
-        EstadoRentabilidad.SUBSIDIADA:   sum(1 for r in sucursales_data if r["obj"].estado == EstadoRentabilidad.SUBSIDIADA),
-        EstadoRentabilidad.EQUILIBRIO:   sum(1 for r in sucursales_data if r["obj"].estado == EstadoRentabilidad.EQUILIBRIO),
-        EstadoRentabilidad.RECUPERACION: sum(1 for r in sucursales_data if r["obj"].estado == EstadoRentabilidad.RECUPERACION),
-        EstadoRentabilidad.RENTABLE:     sum(1 for r in sucursales_data if r["obj"].estado == EstadoRentabilidad.RENTABLE),
-        EstadoRentabilidad.ESTRELLA:     sum(1 for r in sucursales_data if r["obj"].estado == EstadoRentabilidad.ESTRELLA),
-    }
-
-    # Recomponer (el dict comprehension de arriba tiene un bug: corrijo)
-    sucursales_data = []
-    for r in registros:
-        colores = _colores_estado(r.estado)
-        sucursales_data.append({
-            "obj": r,
-            "colores": colores,
-            "semaforo_margen":   "verde" if r.porcentaje_margen_bruto >= 55 else ("amarillo" if r.porcentaje_margen_bruto >= 40 else "rojo"),
-            "semaforo_pe":       "verde" if r.porcentaje_avance_pe >= 100 else ("amarillo" if r.porcentaje_avance_pe >= 85 else "rojo"),
-            "semaforo_utilidad": "verde" if r.utilidad_operativa > 0 else "rojo",
-            "semaforo_roi":      "verde" if (r.roi_anualizado or 0) >= 25 else ("amarillo" if (r.roi_anualizado or 0) >= 10 else "rojo"),
-        })
-
     totales = {
         "ventas_brutas":      sum(r["obj"].ventas_brutas        for r in sucursales_data),
         "ventas_netas":       sum(r["obj"].ventas_netas         for r in sucursales_data),
