@@ -1,0 +1,525 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Rentabilidad por Sucursal — Pollyana's Dolce{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* ---- Variables de marca ---- */
+  :root {
+    --vino:   #8B2252;
+    --oro:    #C9A84C;
+    --vino-lt:#F9F0F5;
+    --oro-lt: #FFFBF0;
+  }
+
+  /* ---- Header del módulo ---- */
+  .rent-header {
+    background: linear-gradient(135deg, var(--vino) 0%, #5A1535 100%);
+    color: #fff;
+    padding: 1.5rem 2rem;
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  .rent-header h1 { font-family: 'Playfair Display', serif; font-size: 1.6rem; margin: 0; }
+  .rent-header .periodo-label { font-size: 0.9rem; opacity: 0.8; }
+
+  /* ---- Selector de periodo ---- */
+  .periodo-select {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 0.9rem;
+  }
+  .periodo-select select {
+    border: 1px solid rgba(255,255,255,0.4);
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    border-radius: 6px;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+  }
+  .periodo-select select option { background: var(--vino); }
+
+  /* ---- KPIs resumen top ---- */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .kpi-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .kpi-card .label  { font-size: 0.75rem; color: #6B7280; text-transform: uppercase; letter-spacing: 0.05em; }
+  .kpi-card .value  { font-size: 1.4rem; font-weight: 700; color: #111827; margin: 0.2rem 0; }
+  .kpi-card .value.positivo { color: #15803D; }
+  .kpi-card .value.negativo { color: #B91C1C; }
+  .kpi-card .sub    { font-size: 0.8rem; color: #9CA3AF; }
+
+  /* ---- Badges de estado ---- */
+  .estado-badge {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .estado-SUBSIDIADA   { background: #FEE2E2; color: #991B1B; }
+  .estado-EQUILIBRIO   { background: #FEF9C3; color: #854D0E; }
+  .estado-RECUPERACION { background: #DBEAFE; color: #1E3A5F; }
+  .estado-RENTABLE     { background: #DCFCE7; color: #14532D; }
+  .estado-ESTRELLA     { background: #FEF3C7; color: #78350F; }
+  .estado-SIN_DATOS    { background: #F3F4F6; color: #6B7280; }
+
+  /* ---- Semáforos ---- */
+  .sem {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-right: 3px;
+    flex-shrink: 0;
+  }
+  .sem.verde    { background: #22C55E; }
+  .sem.amarillo { background: #EAB308; }
+  .sem.rojo     { background: #EF4444; }
+
+  /* ---- Tabla principal ---- */
+  .rent-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .rent-table thead th {
+    background: var(--vino);
+    color: #fff;
+    padding: 0.65rem 0.9rem;
+    text-align: left;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .rent-table thead th:first-child { border-radius: 8px 0 0 0; }
+  .rent-table thead th:last-child  { border-radius: 0 8px 0 0; }
+  .rent-table tbody tr:nth-child(even) { background: #FAF8FB; }
+  .rent-table tbody tr:hover { background: var(--vino-lt); transition: background 0.15s; }
+  .rent-table td { padding: 0.65rem 0.9rem; border-bottom: 1px solid #F3F4F6; vertical-align: middle; }
+  .rent-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .rent-table td.positivo { color: #15803D; font-weight: 600; }
+  .rent-table td.negativo { color: #B91C1C; font-weight: 600; }
+
+  /* ---- Barra de progreso PE ---- */
+  .pe-bar-wrap { width: 100%; background: #E5E7EB; border-radius: 999px; height: 6px; margin-top: 4px; }
+  .pe-bar { height: 6px; border-radius: 999px; background: var(--oro); max-width: 100%; }
+  .pe-bar.sobre100 { background: #22C55E; }
+  .pe-bar.bajo80   { background: #EF4444; }
+
+  /* ---- Panel IA ---- */
+  .ia-panel {
+    background: #FAFAFA;
+    border: 1px solid #E5E7EB;
+    border-left: 4px solid var(--oro);
+    border-radius: 0 8px 8px 0;
+    padding: 0.9rem 1rem;
+    font-size: 0.85rem;
+    color: #374151;
+    margin-top: 0.5rem;
+    display: none;
+  }
+  .ia-panel.visible { display: block; }
+  .ia-panel .resumen { font-weight: 600; color: #111827; margin-bottom: 0.4rem; }
+  .ia-panel ul { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+  .ia-panel ul li { margin-bottom: 0.25rem; }
+
+  /* ---- Alertas urgentes ---- */
+  .alertas-box {
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  .alertas-box h3 { color: #B91C1C; font-size: 0.95rem; margin: 0 0 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+  .alertas-box ul { margin: 0; padding-left: 1.2rem; font-size: 0.88rem; color: #7F1D1D; }
+
+  /* ---- Distribución estados ---- */
+  .estado-dist {
+    display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;
+  }
+  .estado-pill {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.4rem 0.9rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 500;
+  }
+  .estado-pill .count { font-weight: 700; font-size: 1rem; }
+
+  /* ---- Botón analizar IA ---- */
+  .btn-ia {
+    background: var(--oro);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s;
+  }
+  .btn-ia:hover { background: #a8882e; }
+  .btn-ia:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-analizar-todo {
+    background: var(--vino);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0.5rem 1.2rem;
+    font-size: 0.88rem;
+    cursor: pointer;
+    font-weight: 600;
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  .btn-analizar-todo:hover { background: #6B1840; }
+
+  /* Tooltip para fórmula */
+  .formula-tip { cursor: help; border-bottom: 1px dotted #9CA3AF; }
+
+  @media (max-width: 768px) {
+    .rent-table { font-size: 0.8rem; }
+    .rent-table td, .rent-table th { padding: 0.5rem 0.6rem; }
+    .kpi-card .value { font-size: 1.1rem; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="rent-header">
+  <div>
+    <h1>📊 Rentabilidad por Sucursal</h1>
+    <div class="periodo-label">Análisis financiero · Pollyana's Dolce</div>
+  </div>
+  <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+    <div class="periodo-select">
+      <span>Periodo:</span>
+      <select onchange="window.location.search='?periodo='+this.value">
+        {% for p in periodos_disponibles %}
+        <option value="{{ p|date:'Y-m' }}" {% if p == periodo %}selected{% endif %}>
+          {{ p|date:"F Y" }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn-analizar-todo" onclick="analizarTodas(this)">
+      ✦ Analizar todas con IA
+    </button>
+  </div>
+</div>
+
+<!-- Alertas urgentes -->
+{% if alertas_urgentes %}
+<div class="alertas-box">
+  <h3>⚠ Sucursales en alerta urgente ({{ alertas_urgentes|length }})</h3>
+  <ul>
+    {% for item in alertas_urgentes %}
+    <li>
+      <strong>{{ item.obj.sucursal.nombre }}</strong> —
+      {{ item.obj.diagnostico_ia|default:"Revisar inmediatamente" }}
+      &mdash; Subsidio implícito: ${{ item.obj.monto_subsidio_implicito|floatformat:0|intcomma }}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<!-- Distribución de estados -->
+<div class="estado-dist">
+  <div class="estado-pill estado-SUBSIDIADA">
+    <span class="count">{{ conteo_estados.SUBSIDIADA }}</span> Subsidiadas
+  </div>
+  <div class="estado-pill estado-EQUILIBRIO">
+    <span class="count">{{ conteo_estados.EQUILIBRIO }}</span> Equilibrio
+  </div>
+  <div class="estado-pill estado-RECUPERACION">
+    <span class="count">{{ conteo_estados.RECUPERACION }}</span> En recuperación
+  </div>
+  <div class="estado-pill estado-RENTABLE">
+    <span class="count">{{ conteo_estados.RENTABLE }}</span> Rentables
+  </div>
+  <div class="estado-pill estado-ESTRELLA">
+    <span class="count">{{ conteo_estados.ESTRELLA }}</span> Estrellas
+  </div>
+</div>
+
+<!-- KPIs resumen -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="label">Ventas totales</div>
+    <div class="value">${{ totales.ventas_netas|floatformat:0|intcomma }}</div>
+    <div class="sub">Netas, {{ sucursales_data|length }} sucursales</div>
+  </div>
+  <div class="kpi-card">
+    <div class="label">Costos variables</div>
+    <div class="value">${{ totales.costo_variable|floatformat:0|intcomma }}</div>
+    <div class="sub">CMV + empaque</div>
+  </div>
+  <div class="kpi-card">
+    <div class="label">Gastos fijos</div>
+    <div class="value">${{ totales.gasto_fijo|floatformat:0|intcomma }}</div>
+    <div class="sub">Renta + nómina + servicios</div>
+  </div>
+  <div class="kpi-card">
+    <div class="label">Utilidad operativa</div>
+    <div class="value {% if totales.utilidad_operativa >= 0 %}positivo{% else %}negativo{% endif %}">
+      ${{ totales.utilidad_operativa|floatformat:0|intcomma }}
+    </div>
+    <div class="sub">{{ totales.pct_utilidad }}% sobre ventas</div>
+  </div>
+</div>
+
+<!-- Tabla principal -->
+<div style="overflow-x:auto; background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+  <table class="rent-table">
+    <thead>
+      <tr>
+        <th>Sucursal</th>
+        <th>Estado</th>
+        <th class="num">Ventas netas</th>
+        <th class="num">
+          <span class="formula-tip" title="Margen Bruto = (Ventas - Costos Variables) / Ventas × 100">
+            Margen bruto
+          </span>
+        </th>
+        <th class="num">
+          <span class="formula-tip" title="PE = Gastos Fijos / (1 - Costos Variables / Ventas)">
+            Punto equilibrio
+          </span>
+        </th>
+        <th>Avance PE</th>
+        <th class="num">
+          <span class="formula-tip" title="Utilidad Operativa = Margen Bruto - Gastos Fijos">
+            Utilidad op.
+          </span>
+        </th>
+        <th class="num">
+          <span class="formula-tip" title="% inversión recuperada = Utilidad Acumulada / Inversión Inicial × 100">
+            Rec. inversión
+          </span>
+        </th>
+        <th class="num">
+          <span class="formula-tip" title="Payback = Inversión Pendiente / Utilidad Mensual Promedio (últimos 3 meses)">
+            Payback
+          </span>
+        </th>
+        <th>IA</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in sucursales_data %}
+      {% with r=item.obj %}
+      <tr>
+        <!-- Sucursal -->
+        <td>
+          <a href="{% url 'rentabilidad_detalle' r.pk %}"
+             style="font-weight:600; color:var(--vino); text-decoration:none;">
+            {{ r.sucursal.nombre }}
+          </a>
+          {% if r.fecha_apertura %}
+          <div style="font-size:0.75rem; color:#9CA3AF;">
+            {{ r.meses_operando }} meses operando
+          </div>
+          {% endif %}
+        </td>
+
+        <!-- Estado -->
+        <td>
+          <span class="estado-badge estado-{{ r.estado }}">
+            {{ r.get_estado_display }}
+          </span>
+        </td>
+
+        <!-- Ventas netas -->
+        <td class="num">${{ r.ventas_netas|floatformat:0|intcomma }}</td>
+
+        <!-- Margen bruto con semáforo -->
+        <td class="num">
+          <span class="sem {{ item.semaforo_margen }}"></span>
+          {{ r.porcentaje_margen_bruto }}%
+        </td>
+
+        <!-- Punto de equilibrio -->
+        <td class="num">${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}</td>
+
+        <!-- Avance sobre PE con barra -->
+        <td>
+          <span class="sem {{ item.semaforo_pe }}"></span>
+          {{ r.porcentaje_avance_pe }}%
+          <div class="pe-bar-wrap">
+            <div class="pe-bar {% if r.porcentaje_avance_pe >= 100 %}sobre100{% elif r.porcentaje_avance_pe < 80 %}bajo80{% endif %}"
+                 style="width:{{ r.porcentaje_avance_pe|floatformat:0 }}%;"></div>
+          </div>
+        </td>
+
+        <!-- Utilidad operativa -->
+        <td class="num {% if r.utilidad_operativa >= 0 %}positivo{% else %}negativo{% endif %}">
+          ${{ r.utilidad_operativa|floatformat:0|intcomma }}
+        </td>
+
+        <!-- Recuperación inversión -->
+        <td class="num">
+          {% if r.inversion_inicial %}
+            {{ r.porcentaje_recuperacion_inversion }}%
+            {% if r.porcentaje_recuperacion_inversion >= 100 %}
+              <span style="color:#22C55E; font-size:0.75rem;">✔ recuperada</span>
+            {% else %}
+              <br><span style="font-size:0.75rem; color:#9CA3AF;">
+                ${{ r.inversion_pendiente|floatformat:0|intcomma }} pendiente
+              </span>
+            {% endif %}
+          {% else %}
+            <span style="color:#D1D5DB;">—</span>
+          {% endif %}
+        </td>
+
+        <!-- Payback -->
+        <td class="num">
+          {% if r.payback_meses_estimados is not None %}
+            {% if r.payback_meses_estimados == 0 %}
+              <span style="color:#22C55E;">Completado</span>
+            {% else %}
+              {{ r.payback_meses_estimados }} meses
+            {% endif %}
+          {% else %}
+            <span style="color:#EF4444; font-size:0.78rem;">No viable</span>
+          {% endif %}
+        </td>
+
+        <!-- Botón IA + panel expandible -->
+        <td>
+          <button class="btn-ia"
+                  data-pk="{{ r.pk }}"
+                  onclick="analizarSucursal({{ r.pk }}, this)">
+            {% if r.diagnostico_ia %}Ver{% else %}Analizar{% endif %}
+          </button>
+        </td>
+      </tr>
+
+      <!-- Fila expandible con diagnóstico IA -->
+      <tr id="ia-row-{{ r.pk }}" style="display:none;">
+        <td colspan="10" style="padding:0 0.9rem 0.9rem;">
+          <div class="ia-panel visible" id="ia-panel-{{ r.pk }}">
+            {% if r.diagnostico_ia %}
+            <div class="resumen">{{ r.diagnostico_ia }}</div>
+            {% if r.recomendaciones_ia %}
+            <ul>
+              {% for rec in r.recomendaciones_ia %}
+              <li>
+                <strong>#{{ rec.prioridad }}:</strong> {{ rec.accion }}
+                <span style="font-size:0.75rem; color:#9CA3AF;">[{{ rec.impacto }}]</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+            {% else %}
+            <em style="color:#9CA3AF;">Presiona "Analizar" para generar diagnóstico IA.</em>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+
+      {% endwith %}
+      {% empty %}
+      <tr>
+        <td colspan="10" style="text-align:center; padding:2rem; color:#9CA3AF;">
+          No hay registros de rentabilidad para este periodo.<br>
+          Genera primero los registros del periodo para visualizar el detalle.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Nota de fórmulas -->
+<div style="margin-top:1rem; font-size:0.78rem; color:#9CA3AF;">
+  <strong>Fórmulas:</strong>
+  Margen Bruto = (Ventas − CMV − Empaque) / Ventas · 
+  PE = Gastos Fijos / (1 − Ratio CV) · 
+  Utilidad Op. = Margen Bruto − Gastos Fijos · 
+  Payback = Inversión Pendiente / Utilidad Prom. últimos 3 meses · 
+  ROI = Utilidad 12 meses / Inversión Inicial
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const CSRF = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+
+async function analizarSucursal(pk, btn) {
+  const row = document.getElementById(`ia-row-${pk}`);
+  const panel = document.getElementById(`ia-panel-${pk}`);
+  const showing = row.style.display !== 'none';
+
+  // Si ya está visible y tiene contenido, solo toggle
+  if (showing) { row.style.display = 'none'; btn.textContent = 'Ver'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '...';
+  row.style.display = '';
+
+  try {
+    const res = await fetch(`/rentabilidad/${pk}/analizar/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF }
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const r = data.resultado;
+      let html = `<div class="resumen">${r.resumen_ejecutivo || r.diagnostico}</div>`;
+      if (r.recomendaciones?.length) {
+        html += '<ul>';
+        r.recomendaciones.forEach(rec => {
+          html += `<li><strong>#${rec.prioridad}:</strong> ${rec.accion} <span style="font-size:.75rem;color:#9CA3AF;">[${rec.impacto}]</span></li>`;
+        });
+        html += '</ul>';
+      }
+      panel.innerHTML = html;
+      btn.textContent = 'Ocultar';
+    } else {
+      panel.innerHTML = `<span style="color:#B91C1C;">Error: ${data.error}</span>`;
+      btn.textContent = 'Reintentar';
+    }
+  } catch(e) {
+    panel.innerHTML = `<span style="color:#B91C1C;">Error de red.</span>`;
+    btn.textContent = 'Reintentar';
+  }
+  btn.disabled = false;
+}
+
+async function analizarTodas(btn) {
+  if (!confirm('¿Analizar todas las sucursales con IA? Esto consume tokens de OpenAI.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Analizando...';
+  try {
+    const res = await fetch(`/rentabilidad/analizar-todas/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF }
+    });
+    const data = await res.json();
+    if (data.ok) {
+      alert(`Análisis completado: ${data.resultados.filter(r=>r.ok).length} sucursales procesadas.`);
+      window.location.reload();
+    }
+  } catch(e) {
+    alert('Error al analizar. Revisa consola.');
+  }
+  btn.disabled = false;
+  btn.textContent = '✦ Analizar todas con IA';
+}
+</script>
+{% endblock %}

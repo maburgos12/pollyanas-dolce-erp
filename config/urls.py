@@ -3,6 +3,7 @@ from django.urls import path, include
 from django.views.generic import RedirectView
 from core import views as core_views
 from orquestacion import chat_views as ai_chat_views
+from rentabilidad import views_rentabilidad
 
 admin.site.site_url = "/dashboard/"
 
@@ -49,6 +50,14 @@ urlpatterns = [
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
     path("orquestacion/", include(("orquestacion.urls", "orquestacion"), namespace="orquestacion")),
+    path("rentabilidad/", views_rentabilidad.dashboard_rentabilidad, name="rentabilidad_dashboard"),
+    path("rentabilidad/<int:pk>/", views_rentabilidad.detalle_sucursal, name="rentabilidad_detalle"),
+    path(
+        "rentabilidad/<int:pk>/analizar/",
+        views_rentabilidad.analizar_con_ia,
+        name="rentabilidad_analizar",
+    ),
+    path("rentabilidad/analizar-todas/", views_rentabilidad.analizar_todas, name="rentabilidad_analizar_todas"),
     path("api/", include("api.urls")),
     path("api/pos-bridge/", include(("pos_bridge.api.urls", "pos_bridge_api"), namespace="pos_bridge_api")),
 ]

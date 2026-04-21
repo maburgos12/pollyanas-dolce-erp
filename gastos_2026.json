@@ -1,0 +1,5069 @@
+[
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 9367.5
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 150.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 185.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 9367.5
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 150.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 23848.54
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 4872.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 3093.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 9367.5
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 3104.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 150.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 2554.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 2644.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Adquisición de equipo/maquinaria",
+    "categoria": "INVERSION",
+    "monto": 242822.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Mesa fria",
+    "categoria": "INVERSION",
+    "monto": 34500.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Refrigerador",
+    "categoria": "INVERSION",
+    "monto": 73150.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Vitrinas",
+    "categoria": "INVERSION",
+    "monto": 66915.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Impresora",
+    "categoria": "INVERSION",
+    "monto": 4900.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Caja registradora",
+    "categoria": "INVERSION",
+    "monto": 1199.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Televisión",
+    "categoria": "INVERSION",
+    "monto": 14396.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono",
+    "categoria": "INVERSION",
+    "monto": 949.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Computadora",
+    "categoria": "INVERSION",
+    "monto": 18003.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Camaras",
+    "categoria": "INVERSION",
+    "monto": 28810.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Microondras",
+    "categoria": "INVERSION",
+    "monto": 6699.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 170.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 8064.0
+  },
+  {
+    "sucursal_codigo": "GUAMUCHIL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Compras para sucursal",
+    "categoria": "ADMIN",
+    "monto": 41424.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 19784.52
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Vacaciones",
+    "categoria": "NOMINA",
+    "monto": 1688.27
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Prima Vacacional",
+    "categoria": "NOMINA",
+    "monto": 422.07
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 445.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3682.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2369.98
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 6960.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 7506.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 100.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 7006.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2469.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 693.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9892.26
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.08
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1771.68
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1124.74
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Gorra",
+    "categoria": "OTROS",
+    "monto": 232.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 6960.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 7506.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 100.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 7006.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 1514.52
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 623.5
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 421.76
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9892.6
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 2470.9
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2703.22
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 6960.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 805.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "EL_TUNEL",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 18390.47
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Vacaciones",
+    "categoria": "NOMINA",
+    "monto": 580.02
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Prima Vacacional",
+    "categoria": "NOMINA",
+    "monto": 145.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 350.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3900.6
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 3900.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 20243.31
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 805.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 1896.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 150.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1136.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 18839.4
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.09
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 585.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3483.14
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2171.96
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 20990.69
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 5623.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 4818.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 3188.53
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 623.5
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 150.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1078.07
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 18682.22
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 600.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3831.53
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2373.06
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 20990.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 800.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "PLAZA_NIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 150.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 10443.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 495.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1935.12
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1245.24
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 805.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 1963.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1369.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9892.26
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1771.68
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1124.74
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 11178.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 10373.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 1564.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 623.5
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1544.46
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 624.5
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 725.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 800.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2163.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Mantenimiento/remodelación instalaciones",
+    "categoria": "MANTENIMIENTO",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Mantenimiento equipo/maquinaria",
+    "categoria": "MANTENIMIENTO",
+    "monto": 350.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Computadora",
+    "categoria": "INVERSION",
+    "monto": 350.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 750.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Playera",
+    "categoria": "NOMINA",
+    "monto": 1079.84
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Gorra",
+    "categoria": "OTROS",
+    "monto": 348.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Mandil",
+    "categoria": "NOMINA",
+    "monto": 363.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 9697.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 8897.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2093.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Herramientas de trabajo",
+    "categoria": "INVERSION",
+    "monto": 100.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Mantenimiento equipo/maquinaria",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "MiniSplit",
+    "categoria": "INVERSION",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 1000.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 4,
+    "mes_nombre": "ABRIL",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 624.5
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 950.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 800.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2163.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Mantenimiento/remodelación instalaciones",
+    "categoria": "MANTENIMIENTO",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 1000.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 5,
+    "mes_nombre": "MAYO",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 825.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 15401.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 14601.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2093.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Herramientas de trabajo",
+    "categoria": "INVERSION",
+    "monto": 130.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Mantenimiento equipo/maquinaria",
+    "categoria": "MANTENIMIENTO",
+    "monto": 800.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Mesa fria",
+    "categoria": "INVERSION",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Vitrina",
+    "categoria": "INVERSION",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 6,
+    "mes_nombre": "JUNIO",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 725.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 800.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2163.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Mantenimiento/remodelación instalaciones",
+    "categoria": "MANTENIMIENTO",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 7,
+    "mes_nombre": "JULIO",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 825.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 21843.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 21043.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2093.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Herramientas de trabajo",
+    "categoria": "INVERSION",
+    "monto": 1200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 1000.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 8,
+    "mes_nombre": "AGOSTO",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 624.5
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 725.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 800.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2163.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 9,
+    "mes_nombre": "SEPTIEMBRE",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Vacaciones",
+    "categoria": "NOMINA",
+    "monto": 3747.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Prima Vacacional",
+    "categoria": "NOMINA",
+    "monto": 936.75
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 725.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 21480.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 20680.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2093.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Herramientas de trabajo",
+    "categoria": "INVERSION",
+    "monto": 100.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 1000.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 10,
+    "mes_nombre": "OCTUBRE",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 624.5
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 825.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 800.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2163.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 11,
+    "mes_nombre": "NOVIEMBRE",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 9577.22
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 950.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1235.45
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1351.61
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 393.8
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 15300.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 14500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Material de seguiridad e higiene",
+    "categoria": "HIGIENE",
+    "monto": 256.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2093.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Material impreso",
+    "categoria": "MARKETING",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Papeleria",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Mantenimiento equipo/maquinaria",
+    "categoria": "MANTENIMIENTO",
+    "monto": 800.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Mesa fria",
+    "categoria": "INVERSION",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Vitrina",
+    "categoria": "INVERSION",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 1000.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1500.0
+  },
+  {
+    "sucursal_codigo": "CRUCERO",
+    "year": 2026,
+    "mes": 12,
+    "mes_nombre": "DICIEMBRE",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 11672.24
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Vacaciones",
+    "categoria": "NOMINA",
+    "monto": 5040.64
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Prima Vacacional",
+    "categoria": "NOMINA",
+    "monto": 1260.16
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 625.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 1077.34
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2214.82
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 4371.5
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 805.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2156.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Mantenimiento/remodelación instalaciones",
+    "categoria": "MANTENIMIENTO",
+    "monto": 350.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1369.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 16004.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 300.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 2883.54
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 1771.61
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 4371.5
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 11603.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 10798.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2734.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 623.5
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1628.66
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 17342.96
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 291.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3452.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2288.88
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 805.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "COLOSIO",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 22182.69
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Vacaciones",
+    "categoria": "NOMINA",
+    "monto": 4410.56
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Prima Vacacional",
+    "categoria": "NOMINA",
+    "monto": 1102.64
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 745.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 5746.92
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 3699.61
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 4558.8
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 10471.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 9671.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2678.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1136.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 19233.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 600.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3543.36
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2249.48
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 4786.74
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 805.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 4236.98
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 623.5
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 2299.93
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 19469.82
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 600.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3922.98
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2490.48
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 4786.74
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 9475.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 8670.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "LAS_GLORIAS",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 19942.04
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 520.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3807.7
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2450.19
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 4500.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 774.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 374.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2156.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1036.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 19705.76
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.08
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 600.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3543.24
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2249.36
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 787.6
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 4665.87
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 7967.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 7567.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 1785.32
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Mantenimiento equipo/maquinaria",
+    "categoria": "MANTENIMIENTO",
+    "monto": 500.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Refigerador 1",
+    "categoria": "INVERSION",
+    "monto": 500.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 623.5
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1512.17
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 19469.77
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 600.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 3922.86
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 2490.35
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 4665.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "PAYAN",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 29991.82
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 1323.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 5742.38
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 3655.39
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 1181.4
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 3500.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 9238.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 110.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 8728.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 2036.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 896.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 28259.09
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.08
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 900.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 5220.57
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 3253.71
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 1181.4
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Gorra",
+    "categoria": "OTROS",
+    "monto": 232.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 3500.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 8978.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 150.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 8428.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 1025.52
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Vitrina",
+    "categoria": "INVERSION",
+    "monto": 600.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Refigerador 1",
+    "categoria": "INVERSION",
+    "monto": 550.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Refigerador 2",
+    "categoria": "INVERSION",
+    "monto": 550.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 623.5
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 873.29
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 28534.68
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 630.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 900.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 5790.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 3615.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 1181.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 3500.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 510.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 110.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "LEYVA",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 200.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 89581.66
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 7600.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 9883.6
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 10812.87
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 3150.4
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 13242.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 5818.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 405.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 5013.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 4963.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 1300.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 1,
+    "mes_nombre": "ENERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 963.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 76617.73
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 3150.4
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Vacaciones",
+    "categoria": "NOMINA",
+    "monto": 7479.86
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Prima Vacacional",
+    "categoria": "NOMINA",
+    "monto": 1869.96
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 3135.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 15132.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 9696.75
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 3888.37
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Playera",
+    "categoria": "NOMINA",
+    "monto": 538.54
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Gorra",
+    "categoria": "OTROS",
+    "monto": 464.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 13242.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Servicios publicos",
+    "categoria": "SERVICIOS",
+    "monto": 4955.6
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 4155.6
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Etiquetas, bolsas, cajas y empaques",
+    "categoria": "EMPAQUE",
+    "monto": 4236.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Mantenimiento equipo/maquinaria",
+    "categoria": "MANTENIMIENTO",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Refigerador 1",
+    "categoria": "INVERSION",
+    "monto": 250.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Decoración",
+    "categoria": "MARKETING",
+    "monto": 623.5
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 1300.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Artículos para aseo y limpieza",
+    "categoria": "HIGIENE",
+    "monto": 1134.72
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 2,
+    "mes_nombre": "FEBRERO",
+    "descripcion": "Gastos diversos ventas",
+    "categoria": "ADMIN",
+    "monto": 4168.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Sueldo",
+    "categoria": "NOMINA",
+    "monto": 81510.02
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Dias festivos",
+    "categoria": "NOMINA",
+    "monto": 1890.24
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Vacaciones",
+    "categoria": "NOMINA",
+    "monto": 8503.49
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Prima Vacacional",
+    "categoria": "NOMINA",
+    "monto": 2125.87
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Bono por resultados",
+    "categoria": "NOMINA",
+    "monto": 2957.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Imss",
+    "categoria": "NOMINA",
+    "monto": 17946.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Infonavit",
+    "categoria": "NOMINA",
+    "monto": 11594.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Aguinaldo",
+    "categoria": "NOMINA",
+    "monto": 3940.16
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Arrendamiento local",
+    "categoria": "RENTA",
+    "monto": 13242.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua potable",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Energia electrica",
+    "categoria": "SERVICIOS",
+    "monto": 4391.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Telefono e Internet",
+    "categoria": "SERVICIOS",
+    "monto": 400.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Fumigacion y sanitizacion",
+    "categoria": "MANTENIMIENTO",
+    "monto": 450.0
+  },
+  {
+    "sucursal_codigo": "MATRIZ",
+    "year": 2026,
+    "mes": 3,
+    "mes_nombre": "MARZO",
+    "descripcion": "Agua purificada",
+    "categoria": "SERVICIOS",
+    "monto": 1300.0
+  }
+]

@@ -1,5 +1,7 @@
 from django.contrib import admin
 from .models import Sucursal, Departamento, UserProfile, AuditLog
+from rentabilidad.admin_rentabilidad import SucursalRentabilidadAdmin
+from rentabilidad.models import SucursalRentabilidad
 
 @admin.register(Sucursal)
 class SucursalAdmin(admin.ModelAdmin):
@@ -30,3 +32,6 @@ class AuditLogAdmin(admin.ModelAdmin):
     list_filter = ("action", "model")
     search_fields = ("model", "object_id", "user__username")
     readonly_fields = ("timestamp", "user", "action", "model", "object_id", "payload")
+
+
+admin.site.register(SucursalRentabilidad, SucursalRentabilidadAdmin)

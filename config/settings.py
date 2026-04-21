@@ -134,6 +134,7 @@ INSTALLED_APPS = [
     "pos_bridge",
     "reportes",
     "orquestacion",
+    "rentabilidad",
     "api",
 ]
 
@@ -369,3 +370,9 @@ POINT_BRIDGE_SYNC_INTERVAL_HOURS = int(os.getenv("POINT_BRIDGE_SYNC_INTERVAL_HOU
 POINT_BRIDGE_RETRY_ATTEMPTS = int(os.getenv("POINT_BRIDGE_RETRY_ATTEMPTS", "3"))
 
 ORQUESTACION_POINTDAILYSALE_GUARD_ENABLED = env_bool("ORQUESTACION_POINTDAILYSALE_GUARD_ENABLED", default=True)
+
+# Umbrales de rentabilidad para el agente IA
+RENT_MARGEN_BRUTO_MIN = 55.0
+RENT_MARGEN_NETO_MIN = 15.0
+RENT_ROI_OBJETIVO = 25.0
+RENT_PAYBACK_MAX_MESES = 36

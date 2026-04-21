@@ -1,0 +1,821 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}{{ rent.sucursal.nombre }} · Rentabilidad — Pollyana's Dolce{% endblock %}
+{% block page_title %}Rentabilidad de sucursal{% endblock %}
+
+{% block extra_css %}
+<style>
+  :root {
+    --vino: #8B2252;
+    --vino-deep: #5A1535;
+    --vino-soft: #F9F0F5;
+    --oro: #C9A84C;
+    --oro-soft: #FFFBF0;
+    --ink: #111827;
+    --muted: #6B7280;
+    --line: #E5E7EB;
+    --green: #15803D;
+    --red: #B91C1C;
+  }
+
+  .rent-shell {
+    display: grid;
+    gap: 1.5rem;
+  }
+
+  .rent-header {
+    background: linear-gradient(135deg, var(--vino) 0%, var(--vino-deep) 100%);
+    color: #fff;
+    padding: 1.6rem 1.8rem;
+    border-radius: 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 1rem;
+    align-items: end;
+    box-shadow: 0 18px 40px rgba(91, 21, 53, 0.18);
+  }
+
+  .rent-header h1 {
+    margin: 0;
+    font-family: "Playfair Display", serif;
+    font-size: clamp(1.8rem, 3vw, 2.5rem);
+    line-height: 1.05;
+  }
+
+  .rent-header-copy {
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .rent-header-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    align-items: center;
+    font-size: 0.92rem;
+    color: rgba(255, 255, 255, 0.84);
+  }
+
+  .rent-back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: rgba(255, 255, 255, 0.88);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 0.84rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .rent-back-link:hover {
+    color: #fff;
+  }
+
+  .header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  .estado-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+  }
+
+  .btn-ia {
+    border: none;
+    border-radius: 999px;
+    background: var(--oro);
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0.7rem 1rem;
+    font-size: 0.88rem;
+    box-shadow: 0 10px 20px rgba(201, 168, 76, 0.28);
+  }
+
+  .btn-ia:hover {
+    background: #b79333;
+  }
+
+  .btn-ia:disabled {
+    opacity: 0.7;
+    cursor: wait;
+  }
+
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+    gap: 1rem;
+  }
+
+  .kpi-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1rem 1.1rem;
+    box-shadow: 0 1px 3px rgba(17, 24, 39, 0.05);
+  }
+
+  .kpi-card .label {
+    color: var(--muted);
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .kpi-card .value {
+    margin-top: 0.28rem;
+    font-size: 1.55rem;
+    font-weight: 800;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .kpi-card .value.positive {
+    color: var(--green);
+  }
+
+  .kpi-card .value.negative {
+    color: var(--red);
+  }
+
+  .kpi-card .sub {
+    margin-top: 0.3rem;
+    color: #9CA3AF;
+    font-size: 0.83rem;
+    line-height: 1.35;
+  }
+
+  .insight-layout {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 1.25rem;
+  }
+
+  .panel {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(17, 24, 39, 0.05);
+  }
+
+  .panel-header {
+    padding: 1rem 1.2rem 0.2rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .panel-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--ink);
+  }
+
+  .panel-subtitle {
+    color: var(--muted);
+    font-size: 0.84rem;
+  }
+
+  .chart-wrap {
+    padding: 0.6rem 1.2rem 1.2rem;
+  }
+
+  .chart-canvas-wrap {
+    position: relative;
+    height: 320px;
+  }
+
+  .ia-box {
+    padding: 0 1.2rem 1.2rem;
+  }
+
+  .ia-summary {
+    background: linear-gradient(180deg, var(--oro-soft) 0%, #fff 100%);
+    border: 1px solid #F1E3B8;
+    border-left: 5px solid var(--oro);
+    border-radius: 12px;
+    padding: 1rem;
+    color: #3F3A28;
+    line-height: 1.6;
+  }
+
+  .ia-summary strong {
+    color: var(--vino);
+  }
+
+  .ia-list {
+    margin: 0.95rem 0 0;
+    padding-left: 1.1rem;
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .ia-list li {
+    color: #374151;
+    line-height: 1.5;
+  }
+
+  .ia-meta {
+    margin-top: 0.85rem;
+    font-size: 0.8rem;
+    color: #9CA3AF;
+  }
+
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem;
+  }
+
+  .metric-group {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 1rem 1.15rem;
+  }
+
+  .metric-group h3 {
+    margin: 0 0 0.9rem;
+    font-family: "Playfair Display", serif;
+    color: var(--vino);
+    font-size: 1.1rem;
+  }
+
+  .metric-list {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: baseline;
+    padding-bottom: 0.65rem;
+    border-bottom: 1px dashed #E8E7EC;
+  }
+
+  .metric-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .metric-row dt {
+    color: var(--muted);
+    font-size: 0.86rem;
+  }
+
+  .metric-row dd {
+    margin: 0;
+    font-weight: 800;
+    color: var(--ink);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .metric-row dd.positive {
+    color: var(--green);
+  }
+
+  .metric-row dd.negative {
+    color: var(--red);
+  }
+
+  .history-table-wrap {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(17, 24, 39, 0.05);
+  }
+
+  .history-head {
+    padding: 1rem 1.2rem 0.2rem;
+  }
+
+  .history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  .history-table thead th {
+    background: var(--vino);
+    color: #fff;
+    text-align: left;
+    padding: 0.72rem 0.95rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .history-table tbody tr:nth-child(even) {
+    background: #FAF8FB;
+  }
+
+  .history-table tbody tr:hover {
+    background: var(--vino-soft);
+  }
+
+  .history-table td {
+    padding: 0.72rem 0.95rem;
+    border-bottom: 1px solid #F3F4F6;
+    vertical-align: middle;
+  }
+
+  .history-table td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .state-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.28rem 0.68rem;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--vino);
+    background: var(--vino-soft);
+  }
+
+  .state-pill.current {
+    color: #7A5A00;
+    background: #FFF3C4;
+  }
+
+  .formula-note {
+    color: #9CA3AF;
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+
+  @media (max-width: 1080px) {
+    .insight-layout,
+    .metrics-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .rent-header {
+      grid-template-columns: 1fr;
+    }
+
+    .header-actions {
+      justify-content: flex-start;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .chart-canvas-wrap {
+      height: 260px;
+    }
+
+    .history-table {
+      font-size: 0.82rem;
+    }
+
+    .history-table th,
+    .history-table td {
+      padding: 0.6rem 0.7rem;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rent-shell">
+  <section class="rent-header">
+    <div class="rent-header-copy">
+      <a class="rent-back-link" href="{% url 'rentabilidad_dashboard' %}?periodo={{ rent.periodo|date:'Y-m' }}">
+        ← Volver al dashboard
+      </a>
+      <h1>{{ rent.sucursal.nombre }}</h1>
+      <div class="rent-header-meta">
+        <span>{{ rent.sucursal.codigo }}</span>
+        <span>•</span>
+        <span>Periodo {{ rent.periodo|date:"F Y" }}</span>
+        {% if rent.fecha_apertura %}
+        <span>•</span>
+        <span>{{ rent.meses_operando }} meses operando</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="estado-badge">{{ rent.get_estado_display }}</span>
+      <button
+        id="analizarBtn"
+        class="btn-ia"
+        type="button"
+        data-url="{% url 'rentabilidad_analizar' rent.pk %}"
+      >
+        ✦ Reanalizar con IA
+      </button>
+    </div>
+  </section>
+
+  <section class="kpi-grid">
+    <article class="kpi-card">
+      <div class="label">Ventas netas</div>
+      <div class="value">${{ rent.ventas_netas|floatformat:0|intcomma }}</div>
+      <div class="sub">${{ rent.ventas_brutas|floatformat:0|intcomma }} brutas menos descuentos y devoluciones.</div>
+    </article>
+    <article class="kpi-card">
+      <div class="label">Margen bruto</div>
+      <div class="value {% if rent.margen_bruto >= 0 %}positive{% else %}negative{% endif %}">
+        {{ rent.porcentaje_margen_bruto }}%
+      </div>
+      <div class="sub">${{ rent.margen_bruto|floatformat:0|intcomma }} después de costos variables.</div>
+    </article>
+    <article class="kpi-card">
+      <div class="label">Utilidad operativa</div>
+      <div class="value {% if rent.utilidad_operativa >= 0 %}positive{% else %}negative{% endif %}">
+        ${{ rent.utilidad_operativa|floatformat:0|intcomma }}
+      </div>
+      <div class="sub">{{ rent.porcentaje_utilidad_operativa }}% sobre ventas netas.</div>
+    </article>
+    <article class="kpi-card">
+      <div class="label">Punto de equilibrio</div>
+      <div class="value">${{ rent.punto_equilibrio_mensual|floatformat:0|intcomma }}</div>
+      <div class="sub">{{ rent.porcentaje_avance_pe }}% cubierto; brecha de ${{ rent.brecha_pe|floatformat:0|intcomma }}.</div>
+    </article>
+    <article class="kpi-card">
+      <div class="label">Recuperación inversión</div>
+      <div class="value {% if rent.porcentaje_recuperacion_inversion >= 100 %}positive{% endif %}">
+        {{ rent.porcentaje_recuperacion_inversion }}%
+      </div>
+      <div class="sub">
+        {% if rent.inversion_inicial %}
+        ${{ rent.inversion_pendiente|floatformat:0|intcomma }} pendientes por recuperar.
+        {% else %}
+        Inversión inicial no registrada.
+        {% endif %}
+      </div>
+    </article>
+    <article class="kpi-card">
+      <div class="label">ROI anualizado</div>
+      <div class="value {% if rent.roi_anualizado and rent.roi_anualizado >= 0 %}positive{% endif %}">
+        {% if rent.roi_anualizado is not None %}{{ rent.roi_anualizado }}%{% else %}—{% endif %}
+      </div>
+      <div class="sub">
+        {% if rent.payback_meses_estimados is not None %}
+        Payback estimado: {{ rent.payback_meses_estimados }} meses.
+        {% else %}
+        Sin suficiente tracción para estimar payback.
+        {% endif %}
+      </div>
+    </article>
+  </section>
+
+  <section class="insight-layout">
+    <article class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Tendencia de utilidad operativa</h2>
+          <div class="panel-subtitle">Ventana de hasta 12 meses para ver aceleración, subsidio o recuperación.</div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-canvas-wrap">
+          <canvas id="utilidadTrendChart" aria-label="Tendencia mensual de utilidad operativa" role="img"></canvas>
+        </div>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Diagnóstico IA</h2>
+          <div class="panel-subtitle">Lectura completa del estado actual con acciones sugeridas.</div>
+        </div>
+      </div>
+      <div class="ia-box">
+        <div class="ia-summary" id="iaSummary">
+          {% if rent.diagnostico_ia %}
+          {{ rent.diagnostico_ia|linebreaksbr }}
+          {% else %}
+          Aún no existe un diagnóstico generado para esta sucursal. Usa el botón superior para pedir el análisis.
+          {% endif %}
+        </div>
+        <ul class="ia-list" id="iaRecommendations">
+          {% if rent.recomendaciones_ia %}
+            {% for rec in rent.recomendaciones_ia %}
+            <li>
+              {% if rec.accion %}
+              <strong>{% if rec.prioridad %}#{{ rec.prioridad }} · {% endif %}{{ rec.accion }}</strong>
+              {% if rec.impacto %}<div>Impacto esperado: {{ rec.impacto }}</div>{% endif %}
+              {% else %}
+              {{ rec }}
+              {% endif %}
+            </li>
+            {% endfor %}
+          {% else %}
+          <li>Sin recomendaciones guardadas todavía.</li>
+          {% endif %}
+        </ul>
+        <div class="ia-meta">
+          Última actualización: {{ rent.calculado_en|date:"d/m/Y H:i" }} ·
+          {% if rent.calculado_por_agente %}calculado por agente{% else %}cálculo manual o batch{% endif %}
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="metrics-grid">
+    <article class="metric-group">
+      <h3>Desglose operativo</h3>
+      <dl class="metric-list">
+        <div class="metric-row">
+          <dt>Ventas brutas</dt>
+          <dd>${{ rent.ventas_brutas|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Descuentos</dt>
+          <dd>${{ rent.descuentos|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Devoluciones</dt>
+          <dd>${{ rent.devoluciones|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Costo materia prima</dt>
+          <dd>${{ rent.costo_materia_prima|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Empaque</dt>
+          <dd>${{ rent.empaque|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Otros costos variables</dt>
+          <dd>${{ rent.otros_costos_variables|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Costo variable total</dt>
+          <dd>${{ rent.costo_variable_total|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Margen bruto</dt>
+          <dd class="{% if rent.margen_bruto >= 0 %}positive{% else %}negative{% endif %}">
+            ${{ rent.margen_bruto|floatformat:2|intcomma }}
+          </dd>
+        </div>
+      </dl>
+    </article>
+
+    <article class="metric-group">
+      <h3>Estructura fija e inversión</h3>
+      <dl class="metric-list">
+        <div class="metric-row">
+          <dt>Renta</dt>
+          <dd>${{ rent.renta|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Nómina directa</dt>
+          <dd>${{ rent.nomina_directa|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Servicios luz y agua</dt>
+          <dd>${{ rent.servicios_luz_agua|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Mantenimiento</dt>
+          <dd>${{ rent.mantenimiento|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Gastos admin prorrateados</dt>
+          <dd>${{ rent.gastos_admin_prorrateados|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Otros gastos fijos</dt>
+          <dd>${{ rent.otros_gastos_fijos|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Gasto fijo total</dt>
+          <dd>${{ rent.gasto_fijo_total|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Subsidio implícito</dt>
+          <dd class="{% if rent.monto_subsidio_implicito > 0 %}negative{% endif %}">
+            ${{ rent.monto_subsidio_implicito|floatformat:2|intcomma }}
+          </dd>
+        </div>
+        <div class="metric-row">
+          <dt>Subsidio registrado</dt>
+          <dd>${{ rent.subsidio_recibido|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Inversión inicial</dt>
+          <dd>${{ rent.inversion_inicial|floatformat:2|intcomma }}</dd>
+        </div>
+        <div class="metric-row">
+          <dt>Utilidad acumulada</dt>
+          <dd class="{% if rent.utilidad_acumulada >= 0 %}positive{% else %}negative{% endif %}">
+            ${{ rent.utilidad_acumulada|floatformat:2|intcomma }}
+          </dd>
+        </div>
+      </dl>
+    </article>
+  </section>
+
+  <section class="history-table-wrap">
+    <div class="history-head">
+      <h2 class="panel-title">Historial de los últimos 12 meses</h2>
+      <div class="panel-subtitle">Comparativo de evolución por periodo para esta sucursal.</div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Periodo</th>
+            <th>Estado</th>
+            <th class="num">Ventas netas</th>
+            <th class="num">Margen bruto</th>
+            <th class="num">Utilidad op.</th>
+            <th class="num">Avance PE</th>
+            <th class="num">ROI</th>
+            <th class="num">Payback</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in historial %}
+          <tr>
+            <td>
+              {{ item.periodo|date:"M Y" }}
+              {% if item.pk == rent.pk %}
+              <div><span class="state-pill current">Periodo actual</span></div>
+              {% endif %}
+            </td>
+            <td><span class="state-pill">{{ item.get_estado_display }}</span></td>
+            <td class="num">${{ item.ventas_netas|floatformat:0|intcomma }}</td>
+            <td class="num">{{ item.porcentaje_margen_bruto }}%</td>
+            <td class="num {% if item.utilidad_operativa >= 0 %}positive{% else %}negative{% endif %}">
+              ${{ item.utilidad_operativa|floatformat:0|intcomma }}
+            </td>
+            <td class="num">{{ item.porcentaje_avance_pe }}%</td>
+            <td class="num">{% if item.roi_anualizado is not None %}{{ item.roi_anualizado }}%{% else %}—{% endif %}</td>
+            <td class="num">
+              {% if item.payback_meses_estimados is not None %}
+                {% if item.payback_meses_estimados == 0 %}Completado{% else %}{{ item.payback_meses_estimados }} meses{% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="8" style="text-align:center; color:#9CA3AF; padding:1.8rem;">
+              No hay historial suficiente para mostrar tendencia.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="formula-note">
+    <strong>Fórmulas clave:</strong> Margen bruto = ventas netas menos costos variables. Utilidad operativa = margen bruto menos gastos fijos.
+    Punto de equilibrio = gastos fijos / (1 − costos variables / ventas netas). ROI anualizado = utilidad de los últimos 12 meses / inversión inicial.
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  const csrfToken = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || "";
+
+  function formatRecomendaciones(recomendaciones) {
+    if (!Array.isArray(recomendaciones) || !recomendaciones.length) {
+      return "<li>Sin recomendaciones guardadas todavía.</li>";
+    }
+
+    return recomendaciones.map((rec) => {
+      if (rec && typeof rec === "object") {
+        const prioridad = rec.prioridad ? `#${rec.prioridad} · ` : "";
+        const accion = rec.accion || "Recomendación";
+        const impacto = rec.impacto ? `<div>Impacto esperado: ${rec.impacto}</div>` : "";
+        return `<li><strong>${prioridad}${accion}</strong>${impacto}</li>`;
+      }
+      return `<li>${rec}</li>`;
+    }).join("");
+  }
+
+  (() => {
+    const canvas = document.getElementById("utilidadTrendChart");
+    if (!canvas) return;
+
+    const labels = [{% for item in historial %}"{{ item.periodo|date:'M Y' }}"{% if not forloop.last %}, {% endif %}{% endfor %}];
+    const values = [{% for item in historial %}{{ item.utilidad_operativa|floatformat:2 }}{% if not forloop.last %}, {% endif %}{% endfor %}];
+    const colors = values.map((value) => Number(value) >= 0 ? "#8B2252" : "#B91C1C");
+
+    new Chart(canvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "Utilidad operativa",
+          data: values,
+          borderColor: "#8B2252",
+          backgroundColor: "rgba(139, 34, 82, 0.12)",
+          pointBackgroundColor: colors,
+          pointBorderColor: "#fff",
+          pointBorderWidth: 2,
+          pointRadius: 4,
+          tension: 0.28,
+          fill: true,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const value = Number(context.raw || 0);
+                return ` Utilidad: $${value.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { color: "#6B7280" },
+          },
+          y: {
+            ticks: {
+              color: "#6B7280",
+              callback: (value) => `$${Number(value).toLocaleString("es-MX")}`,
+            },
+            grid: {
+              color: "rgba(107, 114, 128, 0.14)",
+            },
+          },
+        },
+      },
+    });
+  })();
+
+  (() => {
+    const button = document.getElementById("analizarBtn");
+    const summary = document.getElementById("iaSummary");
+    const recommendations = document.getElementById("iaRecommendations");
+    if (!button || !summary || !recommendations) return;
+
+    button.addEventListener("click", async () => {
+      const url = button.dataset.url;
+      if (!url) return;
+
+      button.disabled = true;
+      const previousText = button.textContent;
+      button.textContent = "Analizando...";
+
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "X-CSRFToken": csrfToken },
+        });
+        const data = await response.json();
+
+        if (!data.ok) {
+          throw new Error(data.error || "No se pudo analizar la sucursal.");
+        }
+
+        const result = data.resultado || {};
+        summary.innerHTML = (result.resumen_ejecutivo || result.diagnostico || "Diagnóstico actualizado.").replace(/\n/g, "<br>");
+        recommendations.innerHTML = formatRecomendaciones(result.recomendaciones);
+        button.textContent = "Diagnóstico actualizado";
+        window.setTimeout(() => {
+          button.textContent = previousText;
+          button.disabled = false;
+        }, 1200);
+      } catch (error) {
+        summary.innerHTML = `<span style="color:#B91C1C;">${error.message}</span>`;
+        button.textContent = "Reintentar análisis";
+        button.disabled = false;
+      }
+    });
+  })();
+</script>
+{% endblock %}

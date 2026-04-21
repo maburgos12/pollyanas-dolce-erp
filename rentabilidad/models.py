@@ -1,0 +1,1 @@
+from .models_rentabilidad import EstadoRentabilidad, SucursalRentabilidad
