@@ -2,6 +2,7 @@
 import os
 import socket
 import sys
+from urllib.parse import urlparse
 
 import dj_database_url
 
@@ -50,6 +51,34 @@ def env_int(name: str, default: int) -> int:
 def env_list(name: str, default: str = "") -> list[str]:
     raw = os.getenv(name, default)
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def resolve_effective_database_url() -> str:
+    """
+    Fuera de Railway, permite usar DATABASE_PUBLIC_URL cuando DATABASE_URL
+    apunta al host privado (*.railway.internal) y ese DNS no resuelve localmente.
+    """
+    db_url = (os.getenv("DATABASE_URL") or "").strip()
+    public_url = (os.getenv("DATABASE_PUBLIC_URL") or "").strip()
+    if not db_url:
+        return ""
+    if RUNNING_ON_RAILWAY or not public_url or "railway.internal" not in db_url:
+        return db_url
+
+    try:
+        host = (urlparse(db_url).hostname or "").strip()
+    except Exception:
+        host = ""
+    if not host:
+        return db_url
+
+    try:
+        socket.getaddrinfo(host, None)
+    except OSError:
+        os.environ["DATABASE_URL"] = public_url
+        return public_url
+
+    return db_url
 
 
 RUNNING_ON_RAILWAY = any(
@@ -176,7 +205,7 @@ TEMPLATES = [{
 # 1. DATABASE_URL
 # 2. DB_HOST + DB_NAME/DB_USER/DB_PASSWORD/DB_PORT
 # SQLite no es una ruta operativa valida para este ERP.
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = resolve_effective_database_url()
 if DATABASE_URL:
     DATABASES = {
         "default": dj_database_url.config(
