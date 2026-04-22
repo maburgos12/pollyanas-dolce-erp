@@ -144,6 +144,14 @@ def _dashboard_materialized_executive_context(months_window: object) -> dict[str
     payload = get_materialized_dashboard_full_payload(months_window=normalized_months)
     if not payload:
         return None
+    snapshot = dict(payload.get("daily_sales_snapshot") or {})
+    visible_cut_date = snapshot.get("date")
+    if isinstance(visible_cut_date, str):
+        try:
+            visible_cut_date = date.fromisoformat(visible_cut_date)
+        except ValueError:
+            visible_cut_date = None
+    payload["sales_refresh_status"] = _sales_refresh_status(visible_cut_date=visible_cut_date)
     payload["months_window"] = normalized_months
     payload["dashboard_exec_ready"] = True
     return payload

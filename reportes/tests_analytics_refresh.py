@@ -110,7 +110,7 @@ class BIForceRefreshEndpointTests(TestCase):
         self.assertEqual(requested.payload["reference_date"], "2026-04-05")
         self.assertEqual(requested.payload["lookback_days"], 7)
         self.assertFalse(AuditLog.objects.filter(action="INTEGRATIONS_OPERATIONAL_REFRESH_COMPLETED").exists())
-        self.assertContains(response, "La actualización operativa del dashboard quedó en cola")
+        self.assertContains(response, "Actualización del corte en proceso")
 
     @patch("reportes.views.task_operations_automation_cycle.delay", side_effect=RuntimeError("fallo refresh"))
     def test_force_refresh_logs_failure_and_releases_lock_when_queueing_fails(self, mock_delay):

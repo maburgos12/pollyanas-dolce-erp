@@ -141,11 +141,70 @@
     align-items: center;
   }
 
+  .home-exec-refresh-form {
+    width: 100%;
+    display: grid;
+    gap: 8px;
+  }
+
   .home-exec-kpi-actions .btn {
     min-height: 34px;
     padding-inline: 12px;
     border-radius: 999px;
     font-size: 0.82rem;
+  }
+
+  .home-exec-refresh-btn {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .home-exec-refresh-btn.is-loading {
+    color: #7a2853;
+    border-color: rgba(122, 40, 83, 0.28);
+    background: rgba(255, 248, 251, 0.92);
+    cursor: wait;
+  }
+
+  .home-exec-refresh-btn.is-loading::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 42%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(236, 188, 211, 0.24), rgba(146, 36, 86, 0.18), rgba(236, 188, 211, 0.24));
+    animation: home-exec-refresh-sweep 1.6s ease-in-out infinite;
+    z-index: -1;
+  }
+
+  .home-exec-refresh-progress {
+    position: relative;
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(122, 40, 83, 0.10);
+    overflow: hidden;
+  }
+
+  .home-exec-refresh-progress::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 36%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(146, 36, 86, 0.18), rgba(146, 36, 86, 0.50), rgba(146, 36, 86, 0.18));
+    animation: home-exec-refresh-sweep 1.6s ease-in-out infinite;
+  }
+
+  .home-exec-refresh-caption {
+    font-size: 0.82rem;
+    color: #8b6e78;
+  }
+
+  @keyframes home-exec-refresh-sweep {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(290%); }
   }
 
   .home-exec-kpi.is-hero {
@@ -535,12 +594,28 @@
       <div class="home-exec-note">{{ daily_sales_snapshot.date_label|default:"Sin fecha" }} · {{ daily_sales_snapshot.source_label|default:"Sin fuente" }}</div>
       {% if can_manage_orquestacion %}
       <div class="home-exec-kpi-actions">
-        <form method="post" action="{% url 'reportes:bi_force_refresh' %}">
+        <form method="post" action="{% url 'reportes:bi_force_refresh' %}" class="home-exec-refresh-form">
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <input type="hidden" name="reference_date" value="{% if daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% endif %}">
+          <input type="hidden" name="reference_date" value="{% if sales_refresh_status and sales_refresh_status.target_refresh_date_iso %}{{ sales_refresh_status.target_refresh_date_iso }}{% elif daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% endif %}">
           <input type="hidden" name="lookback_days" value="3">
-          <button type="submit" class="btn btn-secondary">Actualizar corte</button>
+          <button
+            type="submit"
+            class="btn btn-secondary home-exec-refresh-btn {% if sales_refresh_status and sales_refresh_status.button_disabled %}is-loading{% endif %}"
+            {% if sales_refresh_status and sales_refresh_status.button_disabled %}disabled aria-disabled="true" aria-busy="true"{% endif %}
+          >
+            {% if sales_refresh_status and sales_refresh_status.button_disabled %}
+              {{ sales_refresh_status.button_label|default:"Actualizando corte..." }}
+            {% else %}
+              Actualizar corte
+            {% endif %}
+          </button>
+          {% if sales_refresh_status and sales_refresh_status.button_disabled %}
+            <div class="home-exec-refresh-progress" aria-hidden="true"></div>
+            <div class="home-exec-refresh-caption">
+              Actualización en curso. El tablero se refresca solo al terminar.
+            </div>
+          {% endif %}
         </form>
       </div>
       {% endif %}
@@ -980,6 +1055,12 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
   (() => {
+    {% if sales_refresh_status and sales_refresh_status.button_disabled %}
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 12000);
+    {% endif %}
+
     const parse = (id) => {
       const node = document.getElementById(id);
       return node ? JSON.parse(node.textContent) : [];

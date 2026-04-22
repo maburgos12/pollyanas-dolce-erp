@@ -248,7 +248,7 @@ def bi_force_refresh(request: HttpRequest) -> HttpResponse:
     if not cache.add(BI_FORCE_REFRESH_LOCK_KEY, reference_date.isoformat(), BI_FORCE_REFRESH_LOCK_SECONDS):
         messages.warning(
             request,
-            "Ya hay una actualización operativa en curso. Espera unos minutos antes de volver a intentarlo.",
+            "El corte ya se está actualizando. En unos momentos verás el dato nuevo en el tablero.",
         )
         return redirect(redirect_url)
 
@@ -283,9 +283,8 @@ def bi_force_refresh(request: HttpRequest) -> HttpResponse:
     messages.success(
         request,
         (
-            "La actualización operativa del dashboard quedó en cola. "
-            f"Referencia {reference_date.isoformat()} con lookback de {lookback_days} día(s). "
-            "El corte visible se actualizará en cuanto termine el worker."
+            "Actualización del corte en proceso. "
+            f"Referencia {reference_date.isoformat()} con lookback de {lookback_days} día(s)."
         ),
     )
     return redirect(redirect_url)
