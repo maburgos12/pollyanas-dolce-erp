@@ -1044,10 +1044,22 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
             prev_tickets = 0
             prev_avg_ticket = None
         elif not prev_is_full_month:
-            prev_amount = None
-            prev_qty = None
-            prev_tickets = 0
-            prev_avg_ticket = None
+            # Fallback: calcular desde sales_daily_map aunque sea mes parcial del año previo
+            prev_amount, prev_qty = _sum_sales_daily_map(
+                sales_daily_map,
+                start_date=prev_year_start,
+                end_date=prev_year_end,
+            )
+            prev_tickets = _sum_ticket_daily_map(
+                ticket_daily_map,
+                start_date=prev_year_start,
+                end_date=prev_year_end,
+            )
+            prev_avg_ticket = (prev_amount / Decimal(str(prev_tickets))) if prev_tickets > 0 else ZERO
+            if prev_amount == ZERO:
+                prev_amount = None
+                prev_qty = None
+                prev_avg_ticket = None
         else:
             prev_amount, prev_qty = _sum_sales_daily_map(
                 sales_daily_map,
