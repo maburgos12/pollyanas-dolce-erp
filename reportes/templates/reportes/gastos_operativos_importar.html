@@ -99,6 +99,69 @@
     </article>
   </section>
 
+  <section class="investment-panel" style="margin-bottom: 2rem;">
+    <div class="investment-panel-head">
+      <div>
+        <div class="investment-kicker">Captura manual</div>
+        <h2 class="investment-panel-title">✏️ Captura manual de gasto</h2>
+      </div>
+    </div>
+    <form method="post" action="{% url 'reportes:gastos_operativos_captura_manual' %}">
+      {% csrf_token %}
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+        <div>
+          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Periodo</label>
+          <select name="periodo" required style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
+            {% for p in periodos_recientes %}
+            <option value="{{ p }}">{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Sucursal / Centro de costo</label>
+          <select name="centro_costo" required style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
+            <option value="">-- Selecciona --</option>
+            {% for c in centros_costo %}
+            <option value="{{ c.id }}">{{ c.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Categoría de gasto</label>
+          <select name="categoria_gasto" required style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
+            <option value="">-- Selecciona --</option>
+            {% for cat in categorias_gasto %}
+            <option value="{{ cat.id }}">{{ cat.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Monto ($)</label>
+          <input type="number" name="monto" step="0.01" min="0" required placeholder="0.00" style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
+        </div>
+
+        <div>
+          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Tipo</label>
+          <select name="tipo_dato" style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
+            <option value="REAL">Real</option>
+            <option value="PRESUPUESTO">Presupuesto</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Comentario (opcional)</label>
+          <input type="text" name="comentario" placeholder="Ej: Factura #123" style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
+        </div>
+      </div>
+      <button type="submit" style="background:#8B2252; color:#fff; border:none; padding:.6rem 1.5rem; border-radius:8px; font-weight:600; cursor:pointer;">
+        Registrar gasto
+      </button>
+    </form>
+  </section>
+
   <section class="opex-upload-layout">
     <article class="investment-panel">
       <div class="investment-panel-head">

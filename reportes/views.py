@@ -3847,6 +3847,60 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def gastos_operativos_captura_manual(request: HttpRequest) -> HttpResponse:
+    """Captura manual de un gasto operativo mensual."""
+    if not can_view_reportes(request.user):
+        raise PermissionDenied
+
+    if request.method == "POST":
+        from reportes.models import CategoriaGasto, CentroCosto, GastoOperativoMensual
+        import uuid
+
+        try:
+            periodo_str = request.POST.get("periodo")
+            centro_id = request.POST.get("centro_costo")
+            categoria_id = request.POST.get("categoria_gasto")
+            monto = request.POST.get("monto")
+            tipo_dato = request.POST.get("tipo_dato", "REAL")
+            comentario = request.POST.get("comentario", "")
+
+            if not all([periodo_str, centro_id, categoria_id, monto]):
+                messages.error(request, "Todos los campos obligatorios deben llenarse.")
+                return redirect("reportes:gastos_operativos_importar")
+
+            year, month = map(int, periodo_str.split("-"))
+            periodo = date(year, month, 1)
+            centro = CentroCosto.objects.get(id=centro_id)
+            categoria = CategoriaGasto.objects.get(id=categoria_id)
+            monto_decimal = Decimal(monto)
+
+            ext_key = f"MANUAL-{centro.codigo}-{periodo_str}-{categoria.codigo}-{uuid.uuid4().hex[:8]}"
+
+            GastoOperativoMensual.objects.create(
+                periodo=periodo,
+                centro_costo=centro,
+                categoria_gasto=categoria,
+                monto=monto_decimal,
+                tipo_dato=tipo_dato,
+                fuente="MANUAL",
+                comentario=comentario,
+                capturado_por=request.user,
+                external_key=ext_key,
+                es_estimado=False,
+            )
+            messages.success(
+                request,
+                f"Gasto registrado: {categoria.nombre} · {centro.nombre} · ${monto_decimal:,.2f}",
+            )
+        except Exception as exc:
+            messages.error(request, f"Error al registrar gasto: {exc}")
+
+        return redirect("reportes:gastos_operativos_importar")
+
+    return redirect("reportes:gastos_operativos_importar")
+
+
+@login_required
 def gastos_operativos_importar(request: HttpRequest) -> HttpResponse:
     if not can_view_reportes(request.user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")
@@ -3912,6 +3966,8 @@ def gastos_operativos_importar(request: HttpRequest) -> HttpResponse:
         .order_by("-processed_at", "-id")
         .first()
     )
+    from reportes.models import CategoriaGasto, CentroCosto
+
     context = {
         "module_tabs": _reportes_module_tabs("gastos_operativos"),
         "history": history,
@@ -3925,6 +3981,9 @@ def gastos_operativos_importar(request: HttpRequest) -> HttpResponse:
             "Sólo se cargan filas REAL del año 2026; PRESUPUESTO se ignora o rechaza según la política del service.",
             "Cada carga queda trazada con archivo, usuario, errores, sucursales afectadas y proyectos refrescados.",
         ],
+        "centros_costo": CentroCosto.objects.filter(tipo="SUCURSAL_VENTA").select_related("sucursal").order_by("nombre"),
+        "categorias_gasto": CategoriaGasto.objects.filter(activo=True).order_by("nombre"),
+        "periodos_recientes": ["2026-04", "2026-03", "2026-02", "2026-01"],
     }
     return render(request, "reportes/gastos_operativos_importar.html", context)
 

@@ -13,6 +13,11 @@ urlpatterns = [
     path("cierre-producto/", views.cierre_producto, name="cierre_producto"),
     path("financiero/", views.costo_receta, name="financiero"),
     path("presupuestos/importar/", views.presupuesto_importar_por_area, name="presupuesto_importar_por_area"),
+    path(
+        "gastos-operativos/captura-manual/",
+        views.gastos_operativos_captura_manual,
+        name="gastos_operativos_captura_manual",
+    ),
     path("gastos-operativos/importar/", views.gastos_operativos_importar, name="gastos_operativos_importar"),
     path("costo-receta/", views.costo_receta, name="costo_receta"),
     path("consumo/", views.consumo, name="consumo"),
