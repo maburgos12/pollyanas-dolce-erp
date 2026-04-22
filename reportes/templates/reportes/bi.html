@@ -1113,6 +1113,7 @@
         <script>
           const currentYear = {{ current_year|default:2026 }};
           const prevYear = {{ prev_year|default:2025 }};
+          const prev2Year = {{ prev2_year|default:2024 }};
         </script>
         {% with hero=yoy_panel.hero_row %}
         <div class="bi-metric-strip">
@@ -1756,16 +1757,32 @@
           datasets: [
             {
               label: String(currentYear),
-              data: yoyRows.map((row) => asNumber(row.amount)),
+              data: yoyRows.map((row) => Number(row.year) === currentYear ? asNumber(row.amount) : null),
               backgroundColor: theme.blush,
               borderColor: theme.wine,
               borderWidth: 1.2
             },
             {
               label: String(prevYear),
-              data: yoyRows.map((row) => asNumber(row.prev_amount)),
+              data: yoyRows.map((row) => {
+                if (Number(row.year) === currentYear) return asNumber(row.prev_amount);
+                if (Number(row.year) === prevYear) return asNumber(row.amount);
+                return null;
+              }),
               backgroundColor: theme.greenSoft,
               borderColor: theme.forest,
+              borderWidth: 1.2
+            },
+            {
+              label: String(prev2Year),
+              data: yoyRows.map((row) => {
+                if (Number(row.year) === currentYear) return asNumber(row.prev2_amount);
+                if (Number(row.year) === prevYear) return asNumber(row.prev_amount);
+                if (Number(row.year) === prev2Year) return asNumber(row.amount);
+                return null;
+              }),
+              backgroundColor: theme.amberSoft,
+              borderColor: theme.amber,
               borderWidth: 1.2
             }
           ]

@@ -946,24 +946,20 @@ def build_sales_forecast_panel(*, latest_date: date | None = None, lookback_week
 def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6) -> dict[str, object]:
     latest_date = latest_date or _sales_cutoff_date() or _partial_sales_cache_latest_end() or (timezone.localdate() - timedelta(days=1))
     partial_cache = _official_partial_sales_cache()
-    current_year = latest_date.year
-    year_start = date(current_year, 1, 1)
-    month_starts = []
-    cursor = year_start
-    while cursor <= latest_date:
-        month_starts.append(cursor)
-        if cursor.month == 12:
-            cursor = date(cursor.year + 1, 1, 1)
-        else:
-            cursor = date(cursor.year, cursor.month + 1, 1)
+    month_starts = [_shift_month(_month_start(latest_date), -offset) for offset in range(months - 1, -1, -1)]
     earliest_current_start = month_starts[0] if month_starts else _month_start(latest_date)
-    earliest_prev_start = date(earliest_current_start.year - 1, earliest_current_start.month, 1)
-    sales_daily_map = _sales_fact_daily_map(start_date=earliest_prev_start, end_date=latest_date)
-    ticket_daily_map = _indicator_daily_ticket_map(start_date=earliest_prev_start, end_date=latest_date)
+    earliest_prev2_start = date(earliest_current_start.year - 2, earliest_current_start.month, 1)
+    sales_daily_map = _sales_fact_daily_map(start_date=earliest_prev2_start, end_date=latest_date)
+    ticket_daily_map = _indicator_daily_ticket_map(start_date=earliest_prev2_start, end_date=latest_date)
     official_cache_map = _monthly_official_sales_cache_map(
-        month_starts=month_starts + [date(month_start.year - 1, month_start.month, 1) for month_start in month_starts]
+        month_starts=month_starts
+        + [date(month_start.year - 1, month_start.month, 1) for month_start in month_starts]
+        + [date(month_start.year - 2, month_start.month, 1) for month_start in month_starts]
     )
     rows: list[dict[str, object]] = []
+    current_year = latest_date.year
+    prev_year = current_year - 1
+    prev2_year = current_year - 2
     for month_anchor in month_starts:
         current_start = month_anchor
         current_end = _month_end(month_anchor)
@@ -974,11 +970,16 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
         prev_year_start = date(current_start.year - 1, current_start.month, 1)
         prev_year_limit_day = min(current_end.day, monthrange(prev_year_start.year, prev_year_start.month)[1])
         prev_year_end = date(prev_year_start.year, prev_year_start.month, prev_year_limit_day)
+        prev2_year_start = date(current_start.year - 2, current_start.month, 1)
+        prev2_year_limit_day = min(current_end.day, monthrange(prev2_year_start.year, prev2_year_start.month)[1])
+        prev2_year_end = date(prev2_year_start.year, prev2_year_start.month, prev2_year_limit_day)
 
         current_month_cache = official_cache_map.get(current_start)
         prev_month_cache = official_cache_map.get(prev_year_start)
+        prev2_month_cache = official_cache_map.get(prev2_year_start)
         current_is_full_month = current_end == _month_end(month_anchor)
         prev_is_full_month = prev_year_end == _month_end(prev_year_start)
+        prev2_is_full_month = prev2_year_end == _month_end(prev2_year_start)
         if not current_is_full_month:
             current_partial_payload = _best_partial_cache_payload(current_start, current_end)
         prev_partial_payload = None
@@ -987,6 +988,12 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
             prev_partial_payload = partial_ranges.get(f"{prev_year_start.isoformat()}_{prev_year_end.isoformat()}")
         if prev_partial_payload is None and not prev_is_full_month:
             prev_partial_payload = partial_cache.get(f"{prev_year_start.isoformat()}_{prev_year_end.isoformat()}")
+        prev2_partial_payload = None
+        if prev2_month_cache and not prev2_is_full_month:
+            partial_ranges = (prev2_month_cache.raw_payload or {}).get("partial_ranges") or {}
+            prev2_partial_payload = partial_ranges.get(f"{prev2_year_start.isoformat()}_{prev2_year_end.isoformat()}")
+        if prev2_partial_payload is None and not prev2_is_full_month:
+            prev2_partial_payload = partial_cache.get(f"{prev2_year_start.isoformat()}_{prev2_year_end.isoformat()}")
 
         if current_month_cache and current_is_full_month:
             amount = _to_decimal(current_month_cache.total_amount)
@@ -1073,11 +1080,56 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
             )
             prev_avg_ticket = (prev_amount / Decimal(str(prev_tickets))) if prev_tickets > 0 else ZERO
 
+        prev2_official_available = bool(prev2_month_cache and prev2_is_full_month)
+        if prev2_official_available:
+            prev2_amount = _to_decimal(prev2_month_cache.total_amount)
+            prev2_qty = _to_decimal(prev2_month_cache.total_quantity)
+            prev2_tickets = _sum_ticket_daily_map(
+                ticket_daily_map,
+                start_date=prev2_year_start,
+                end_date=prev2_year_end,
+            )
+            prev2_avg_ticket = (prev2_amount / Decimal(str(prev2_tickets))) if prev2_tickets > 0 else ZERO
+        elif prev2_partial_payload is not None:
+            prev2_amount = _to_decimal(prev2_partial_payload.get("total_amount"))
+            prev2_qty = _to_decimal(prev2_partial_payload.get("total_quantity"))
+            prev2_tickets = 0
+            prev2_avg_ticket = None
+        elif not prev2_is_full_month:
+            prev2_amount, prev2_qty = _sum_sales_daily_map(
+                sales_daily_map,
+                start_date=prev2_year_start,
+                end_date=prev2_year_end,
+            )
+            prev2_tickets = _sum_ticket_daily_map(
+                ticket_daily_map,
+                start_date=prev2_year_start,
+                end_date=prev2_year_end,
+            )
+            prev2_avg_ticket = (prev2_amount / Decimal(str(prev2_tickets))) if prev2_tickets > 0 else ZERO
+            if prev2_amount == ZERO:
+                prev2_amount = None
+                prev2_qty = None
+                prev2_avg_ticket = None
+        else:
+            prev2_amount, prev2_qty = _sum_sales_daily_map(
+                sales_daily_map,
+                start_date=prev2_year_start,
+                end_date=prev2_year_end,
+            )
+            prev2_tickets = _sum_ticket_daily_map(
+                ticket_daily_map,
+                start_date=prev2_year_start,
+                end_date=prev2_year_end,
+            )
+            prev2_avg_ticket = (prev2_amount / Decimal(str(prev2_tickets))) if prev2_tickets > 0 else ZERO
+
         amount_delta = (amount - prev_amount) if prev_amount is not None else None
         qty_delta = (qty - prev_qty) if prev_qty is not None else None
         rows.append(
             {
                 "month_label": current_start.strftime("%Y-%m"),
+                "year": current_start.year,
                 "is_partial": current_end != _month_end(month_anchor),
                 "amount": amount.quantize(Q2),
                 "quantity": qty.quantize(Q2),
@@ -1087,7 +1139,12 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
                 "prev_quantity": prev_qty.quantize(Q2) if prev_qty is not None else None,
                 "prev_tickets": prev_tickets,
                 "prev_avg_ticket": prev_avg_ticket.quantize(Q2) if prev_avg_ticket is not None else None,
+                "prev2_amount": prev2_amount.quantize(Q2) if prev2_amount is not None else None,
+                "prev2_quantity": prev2_qty.quantize(Q2) if prev2_qty is not None else None,
+                "prev2_tickets": prev2_tickets,
+                "prev2_avg_ticket": prev2_avg_ticket.quantize(Q2) if prev2_avg_ticket is not None else None,
                 "prev_official_available": prev_official_available or prev_partial_payload is not None,
+                "prev2_official_available": prev2_official_available or prev2_partial_payload is not None,
                 "amount_delta": amount_delta.quantize(Q2) if amount_delta is not None else None,
                 "qty_delta": qty_delta.quantize(Q2) if qty_delta is not None else None,
                 "amount_delta_pct": _safe_pct(amount_delta, prev_amount) if amount_delta is not None and prev_amount is not None else None,
@@ -1117,6 +1174,9 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
         "hero_row": hero_row,
         "hero_mode": hero_mode,
         "hero_note": hero_note,
+        "current_year": current_year,
+        "prev_year": prev_year,
+        "prev2_year": prev2_year,
         "basis_note": "Mes contra mismo mes del año anterior. Los meses cerrados usan cache oficial mensual Point. El mes parcial actual usa rango oficial equivalente cuando ya existe cacheado; si no, se deja sin comparativo.",
     }
 
