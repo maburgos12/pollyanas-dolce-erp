@@ -593,11 +593,11 @@
       <div class="home-exec-insight-grid">
         <article class="home-exec-insight">
           <strong>{% if hero %}${{ hero.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong>
-          <span>mes visible {{ hero.year|default:yoy_panel.current_year }}</span>
+          <span>mes visible {{ hero.month_label|slice:":4"|default:"2026" }}</span>
         </article>
         <article class="home-exec-insight">
           <strong>{% if hero and hero.prev_amount is not None %}${{ hero.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong>
-          <span>mismo corte {{ yoy_panel.prev_year }}</span>
+          <span>mismo corte {% if hero %}{{ hero.month_label|slice:":4"|add:"-1" }}{% else %}2025{% endif %}</span>
         </article>
         <article class="home-exec-insight">
           <strong>{% if hero and hero.amount_delta_pct is not None %}{{ hero.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}</strong>
@@ -678,12 +678,12 @@
       </div>
       <div class="home-exec-grid-stack">
         {% for row in yoy_panel.rows %}
-        {% if row.year == yoy_panel.current_year %}
+        {% if row.month_label|slice:":4" == yoy_panel.hero_row.month_label|slice:":4" %}
         <article class="home-exec-list-item home-exec-list-item--tight {% if row.amount_delta_pct is not None and row.amount_delta_pct >= 0 %}is-success{% else %}is-warning{% endif %}">
           <div>
             <strong>{{ row.month_label }}</strong>
             <div class="home-exec-subtle">
-              {{ row.year }} ${{ row.amount|floatformat:2|intcomma }} · {{ row.year|add:"-1" }} ${{ row.prev_amount|floatformat:2|intcomma }}
+              {{ row.month_label|slice:":4" }} ${{ row.amount|floatformat:2|intcomma }} · {{ row.month_label|slice:":4"|add:"-1" }} ${{ row.prev_amount|floatformat:2|intcomma }}
               {% if row.is_partial %}· corte parcial{% endif %}
             </div>
           </div>
@@ -967,9 +967,9 @@
     };
     const forecastRows = parse("home-forecast-weekly-data");
     const yoyRows = parse("home-yoy-data");
-    const currentYear = {{ yoy_panel.current_year|default:2026 }};
-    const prevYear = {{ yoy_panel.prev_year|default:2025 }};
-    const yoyCurrentRows = yoyRows.filter((row) => Number(row.year) === currentYear);
+    const currentYear = Number("{{ yoy_panel.hero_row.month_label|default:'2026-01'|slice:':4' }}") || 2026;
+    const prevYear = currentYear - 1;
+    const yoyCurrentRows = yoyRows.filter((row) => String(row.month_label || "").slice(0, 4) === String(currentYear));
     const theme = {
       wine: "#922456",
       forest: "#236d53",
