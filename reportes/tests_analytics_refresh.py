@@ -84,8 +84,9 @@ class BIForceRefreshEndpointTests(TestCase):
         self.user.groups.add(group)
         self.client.force_login(self.user)
 
-    @patch("reportes.views.call_command")
-    def test_force_refresh_runs_operations_cycle_inline_and_logs_audit(self, mock_call_command):
+    @patch("reportes.views.task_operations_automation_cycle.delay")
+    def test_force_refresh_queues_operations_cycle_and_logs_request(self, mock_delay):
+        mock_delay.return_value = SimpleNamespace(id="task-123")
         response = self.client.post(
             reverse("reportes:bi_force_refresh"),
             {
@@ -97,22 +98,22 @@ class BIForceRefreshEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        mock_call_command.assert_called_once_with(
-            "run_operations_automation",
-            fecha="2026-04-05",
+        mock_delay.assert_called_once_with(
+            reference_date_iso="2026-04-05",
             lookback_days=7,
+            sucursal_id=None,
+            skip_refresh=False,
+            triggered_by_id=self.user.id,
         )
         requested = AuditLog.objects.filter(action="REPORTES_BI_FORCE_REFRESH_REQUESTED").latest("timestamp")
         self.assertEqual(requested.user_id, self.user.id)
         self.assertEqual(requested.payload["reference_date"], "2026-04-05")
         self.assertEqual(requested.payload["lookback_days"], 7)
-        completed = AuditLog.objects.filter(action="INTEGRATIONS_OPERATIONAL_REFRESH_COMPLETED").latest("timestamp")
-        self.assertEqual(completed.user_id, self.user.id)
-        self.assertEqual(completed.payload["reference_date"], "2026-04-05")
-        self.assertContains(response, "Se completó la actualización operativa del dashboard")
+        self.assertFalse(AuditLog.objects.filter(action="INTEGRATIONS_OPERATIONAL_REFRESH_COMPLETED").exists())
+        self.assertContains(response, "La actualización operativa del dashboard quedó en cola")
 
-    @patch("reportes.views.call_command", side_effect=RuntimeError("fallo refresh"))
-    def test_force_refresh_logs_failure_and_releases_lock_when_inline_refresh_fails(self, mock_call_command):
+    @patch("reportes.views.task_operations_automation_cycle.delay", side_effect=RuntimeError("fallo refresh"))
+    def test_force_refresh_logs_failure_and_releases_lock_when_queueing_fails(self, mock_delay):
         response = self.client.post(
             reverse("reportes:bi_force_refresh"),
             {
@@ -124,7 +125,7 @@ class BIForceRefreshEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        mock_call_command.assert_called_once()
+        mock_delay.assert_called_once()
         failed = AuditLog.objects.filter(action="INTEGRATIONS_OPERATIONAL_REFRESH_FAILED").latest("timestamp")
         self.assertEqual(failed.payload["reference_date"], "2026-04-05")
         self.assertIn("fallo refresh", failed.payload["error"])

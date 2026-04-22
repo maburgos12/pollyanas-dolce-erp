@@ -14,7 +14,6 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
-from django.core.management import call_command
 from django.db.models import Sum, Max, Count, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -59,6 +58,7 @@ from pos_bridge.models import (
     PointSyncJob,
 )
 from pos_bridge.config import load_point_bridge_settings
+from pos_bridge.tasks.celery_tasks import task_operations_automation_cycle
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
 from ventas.services.sales_canonical_source import (
     OFFICIAL_POINT_SOURCE as CANONICAL_OFFICIAL_POINT_SOURCE,
@@ -190,7 +190,7 @@ def _bi_force_refresh_redirect_target(request: HttpRequest) -> str:
     return reverse("reportes:bi")
 
 
-def _run_operations_refresh_inline(
+def _queue_operations_refresh(
     *,
     reference_date: date,
     lookback_days: int,
@@ -205,17 +205,12 @@ def _run_operations_refresh_inline(
         "trigger": "reportes_bi_ui_inline",
     }
     try:
-        call_command(
-            "run_operations_automation",
-            fecha=reference_date.isoformat(),
+        async_result = task_operations_automation_cycle.delay(
+            reference_date_iso=reference_date.isoformat(),
             lookback_days=int(lookback_days or 7),
-        )
-        log_event(
-            triggered_by,
-            "INTEGRATIONS_OPERATIONAL_REFRESH_COMPLETED",
-            "reportes.AnalyticRefreshWindow",
-            reference_date.isoformat(),
-            payload=payload,
+            sucursal_id=None,
+            skip_refresh=False,
+            triggered_by_id=getattr(triggered_by, "id", None),
         )
     except Exception as exc:
         log_event(
@@ -225,10 +220,10 @@ def _run_operations_refresh_inline(
             reference_date.isoformat(),
             payload={**payload, "error": str(exc)},
         )
-        raise
-    finally:
         cache.delete(BI_FORCE_REFRESH_LOCK_KEY)
         cache.delete(INTEGRATIONS_OPERATIONAL_REFRESH_LOCK_KEY)
+        raise
+    payload["task_id"] = str(getattr(async_result, "id", "") or "")
     return payload
 
 
@@ -270,7 +265,7 @@ def bi_force_refresh(request: HttpRequest) -> HttpResponse:
                 "trigger": "reportes_bi_ui",
             },
         )
-        _run_operations_refresh_inline(
+        _queue_operations_refresh(
             reference_date=reference_date,
             lookback_days=lookback_days,
             triggered_by=request.user,
@@ -288,8 +283,9 @@ def bi_force_refresh(request: HttpRequest) -> HttpResponse:
     messages.success(
         request,
         (
-            "Se completó la actualización operativa del dashboard. "
-            f"Referencia {reference_date.isoformat()} con lookback de {lookback_days} día(s)."
+            "La actualización operativa del dashboard quedó en cola. "
+            f"Referencia {reference_date.isoformat()} con lookback de {lookback_days} día(s). "
+            "El corte visible se actualizará en cuanto termine el worker."
         ),
     )
     return redirect(redirect_url)
