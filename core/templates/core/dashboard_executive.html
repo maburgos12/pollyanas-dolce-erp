@@ -983,11 +983,11 @@
       } else if (rowYear === prevYear) {
         seriesCurrentYear.push(null);
         seriesPrevYear.push(amount);
-        seriesPrev2Year.push(row.prev2_amount === null || row.prev2_amount === undefined ? null : Number(row.prev2_amount || 0));
+        seriesPrev2Year.push(prevAmount);
       } else {
         seriesCurrentYear.push(null);
-        seriesPrevYear.push(amount);
-        seriesPrev2Year.push(prevAmount);
+        seriesPrevYear.push(null);
+        seriesPrev2Year.push(null);
       }
     }
     const theme = {
