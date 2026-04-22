@@ -593,11 +593,11 @@
       <div class="home-exec-insight-grid">
         <article class="home-exec-insight">
           <strong>{% if hero %}${{ hero.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong>
-          <span>mes visible actual</span>
+          <span>mes visible {{ hero.year|default:yoy_panel.current_year }}</span>
         </article>
         <article class="home-exec-insight">
           <strong>{% if hero and hero.prev_amount is not None %}${{ hero.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong>
-          <span>mismo corte año previo</span>
+          <span>mismo corte {{ yoy_panel.prev_year }}</span>
         </article>
         <article class="home-exec-insight">
           <strong>{% if hero and hero.amount_delta_pct is not None %}{{ hero.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}</strong>
@@ -682,7 +682,7 @@
           <div>
             <strong>{{ row.month_label }}</strong>
             <div class="home-exec-subtle">
-              Actual ${{ row.amount|floatformat:2|intcomma }} · previo ${{ row.prev_amount|floatformat:2|intcomma }}
+              {{ row.year }} ${{ row.amount|floatformat:2|intcomma }} · {{ row.year|add:"-1" }} ${{ row.prev_amount|floatformat:2|intcomma }}
               {% if row.is_partial %}· corte parcial{% endif %}
             </div>
           </div>
@@ -965,13 +965,17 @@
     };
     const forecastRows = parse("home-forecast-weekly-data");
     const yoyRows = parse("home-yoy-data");
+    const currentYear = {{ yoy_panel.current_year|default:2026 }};
+    const prevYear = {{ yoy_panel.prev_year|default:2025 }};
+    const prev2Year = {{ yoy_panel.prev2_year|default:2024 }};
     const theme = {
       wine: "#922456",
       forest: "#236d53",
       amber: "#b38a25",
       border: "rgba(145, 36, 86, 0.10)",
       blush: "rgba(146, 36, 86, 0.14)",
-      greenSoft: "rgba(35, 109, 83, 0.14)"
+      greenSoft: "rgba(35, 109, 83, 0.14)",
+      amberSoft: "rgba(179, 138, 37, 0.18)"
     };
 
     const makeChart = (canvasId, config) => {
@@ -1035,18 +1039,35 @@
         labels: yoyRows.map((row) => row.month_label),
         datasets: [
           {
-            label: "Actual",
-            data: yoyRows.map((row) => Number(row.amount || 0)),
+            label: String(currentYear),
+            data: yoyRows.map((row) => Number(row.year) === currentYear ? Number(row.amount || 0) : null),
             backgroundColor: theme.blush,
             borderColor: theme.wine,
             borderWidth: 1,
             borderRadius: 8
           },
           {
-            label: "Año anterior",
-            data: yoyRows.map((row) => Number(row.prev_amount || 0)),
-            backgroundColor: "rgba(35, 109, 83, 0.18)",
+            label: String(prevYear),
+            data: yoyRows.map((row) => {
+              if (Number(row.year) === currentYear) return Number(row.prev_amount || 0);
+              if (Number(row.year) === prevYear) return Number(row.amount || 0);
+              return null;
+            }),
+            backgroundColor: theme.greenSoft,
             borderColor: theme.forest,
+            borderWidth: 1,
+            borderRadius: 8
+          },
+          {
+            label: String(prev2Year),
+            data: yoyRows.map((row) => {
+              if (Number(row.year) === currentYear) return Number(row.prev2_amount || 0);
+              if (Number(row.year) === prevYear) return Number(row.prev_amount || 0);
+              if (Number(row.year) === prev2Year) return Number(row.amount || 0);
+              return null;
+            }),
+            backgroundColor: theme.amberSoft,
+            borderColor: theme.amber,
             borderWidth: 1,
             borderRadius: 8
           }
