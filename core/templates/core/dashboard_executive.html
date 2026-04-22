@@ -677,7 +677,8 @@
         </div>
       </div>
       <div class="home-exec-grid-stack">
-        {% for row in yoy_panel.rows|slice:":4" %}
+        {% for row in yoy_panel.rows %}
+        {% if row.year == yoy_panel.current_year %}
         <article class="home-exec-list-item home-exec-list-item--tight {% if row.amount_delta_pct is not None and row.amount_delta_pct >= 0 %}is-success{% else %}is-warning{% endif %}">
           <div>
             <strong>{{ row.month_label }}</strong>
@@ -690,6 +691,7 @@
             {% if row.amount_delta_pct is not None %}{{ row.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}
           </div>
         </article>
+        {% endif %}
         {% endfor %}
       </div>
     </article>
@@ -967,15 +969,14 @@
     const yoyRows = parse("home-yoy-data");
     const currentYear = {{ yoy_panel.current_year|default:2026 }};
     const prevYear = {{ yoy_panel.prev_year|default:2025 }};
-    const prev2Year = {{ yoy_panel.prev2_year|default:2024 }};
+    const yoyCurrentRows = yoyRows.filter((row) => Number(row.year) === currentYear);
     const theme = {
       wine: "#922456",
       forest: "#236d53",
       amber: "#b38a25",
       border: "rgba(145, 36, 86, 0.10)",
       blush: "rgba(146, 36, 86, 0.14)",
-      greenSoft: "rgba(35, 109, 83, 0.14)",
-      amberSoft: "rgba(179, 138, 37, 0.18)"
+      greenSoft: "rgba(35, 109, 83, 0.14)"
     };
 
     const makeChart = (canvasId, config) => {
@@ -1036,11 +1037,11 @@
     makeChart("homeYoyChart", {
       type: "bar",
       data: {
-        labels: yoyRows.map((row) => row.month_label),
+        labels: yoyCurrentRows.map((row) => row.month_label),
         datasets: [
           {
             label: String(currentYear),
-            data: yoyRows.map((row) => Number(row.year) === currentYear ? Number(row.amount || 0) : null),
+            data: yoyCurrentRows.map((row) => Number(row.amount || 0)),
             backgroundColor: theme.blush,
             borderColor: theme.wine,
             borderWidth: 1,
@@ -1048,26 +1049,9 @@
           },
           {
             label: String(prevYear),
-            data: yoyRows.map((row) => {
-              if (Number(row.year) === currentYear) return Number(row.prev_amount || 0);
-              if (Number(row.year) === prevYear) return Number(row.amount || 0);
-              return null;
-            }),
+            data: yoyCurrentRows.map((row) => Number(row.prev_amount || 0)),
             backgroundColor: theme.greenSoft,
             borderColor: theme.forest,
-            borderWidth: 1,
-            borderRadius: 8
-          },
-          {
-            label: String(prev2Year),
-            data: yoyRows.map((row) => {
-              if (Number(row.year) === currentYear) return Number(row.prev2_amount || 0);
-              if (Number(row.year) === prevYear) return Number(row.prev_amount || 0);
-              if (Number(row.year) === prev2Year) return Number(row.amount || 0);
-              return null;
-            }),
-            backgroundColor: theme.amberSoft,
-            borderColor: theme.amber,
             borderWidth: 1,
             borderRadius: 8
           }
