@@ -5183,6 +5183,8 @@ def bi(request: HttpRequest) -> HttpResponse:
         ),
         "bi_force_refresh_reference_date": timezone.localdate().isoformat(),
         "bi_force_refresh_lookback_days": 7,
+        "current_year": date.today().year,
+        "prev_year": date.today().year - 1,
         "period_days": snapshot["range"]["days"],
         "months_window": snapshot["range"]["months_window"],
         "selected_branch_id": branch_id,

@@ -946,7 +946,16 @@ def build_sales_forecast_panel(*, latest_date: date | None = None, lookback_week
 def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6) -> dict[str, object]:
     latest_date = latest_date or _sales_cutoff_date() or _partial_sales_cache_latest_end() or (timezone.localdate() - timedelta(days=1))
     partial_cache = _official_partial_sales_cache()
-    month_starts = [_shift_month(_month_start(latest_date), -offset) for offset in range(months - 1, -1, -1)]
+    current_year = latest_date.year
+    year_start = date(current_year, 1, 1)
+    month_starts = []
+    cursor = year_start
+    while cursor <= latest_date:
+        month_starts.append(cursor)
+        if cursor.month == 12:
+            cursor = date(cursor.year + 1, 1, 1)
+        else:
+            cursor = date(cursor.year, cursor.month + 1, 1)
     earliest_current_start = month_starts[0] if month_starts else _month_start(latest_date)
     earliest_prev_start = date(earliest_current_start.year - 1, earliest_current_start.month, 1)
     sales_daily_map = _sales_fact_daily_map(start_date=earliest_prev_start, end_date=latest_date)

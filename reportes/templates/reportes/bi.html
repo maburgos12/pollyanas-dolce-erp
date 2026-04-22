@@ -1110,6 +1110,10 @@
         <div class="bi-chart-stage">
           <canvas id="yoyMonthlyChart" aria-label="Comparativo mensual contra año anterior" role="img"></canvas>
         </div>
+        <script>
+          const currentYear = {{ current_year|default:2026 }};
+          const prevYear = {{ prev_year|default:2025 }};
+        </script>
         {% with hero=yoy_panel.hero_row %}
         <div class="bi-metric-strip">
           <div class="bi-metric">
@@ -1751,14 +1755,14 @@
           labels: yoyRows.map((row) => row.month_label),
           datasets: [
             {
-              label: "Venta actual",
+              label: String(currentYear),
               data: yoyRows.map((row) => asNumber(row.amount)),
               backgroundColor: theme.blush,
               borderColor: theme.wine,
               borderWidth: 1.2
             },
             {
-              label: "Año anterior",
+              label: String(prevYear),
               data: yoyRows.map((row) => asNumber(row.prev_amount)),
               backgroundColor: theme.greenSoft,
               borderColor: theme.forest,
