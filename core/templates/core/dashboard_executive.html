@@ -133,6 +133,21 @@
     line-height: 1.4;
   }
 
+  .home-exec-kpi-actions {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .home-exec-kpi-actions .btn {
+    min-height: 34px;
+    padding-inline: 12px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+  }
+
   .home-exec-kpi.is-hero {
     background:
       radial-gradient(circle at top right, rgba(146, 36, 86, 0.08), transparent 38%),
@@ -518,6 +533,17 @@
       <div class="home-exec-kpi-value">${{ daily_sales_snapshot.total_amount|default:0|floatformat:2|intcomma }}</div>
       <div class="home-exec-kpi-label">Venta último corte</div>
       <div class="home-exec-note">{{ daily_sales_snapshot.date_label|default:"Sin fecha" }} · {{ daily_sales_snapshot.source_label|default:"Sin fuente" }}</div>
+      {% if can_manage_orquestacion %}
+      <div class="home-exec-kpi-actions">
+        <form method="post" action="{% url 'reportes:bi_force_refresh' %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <input type="hidden" name="reference_date" value="{% if daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% endif %}">
+          <input type="hidden" name="lookback_days" value="3">
+          <button type="submit" class="btn btn-secondary">Actualizar corte</button>
+        </form>
+      </div>
+      {% endif %}
     </article>
     <article class="home-exec-card home-exec-kpi is-hero">
       <div class="home-exec-kpi-value {% if not daily_sales_snapshot.tickets_available %}is-warning{% endif %}">

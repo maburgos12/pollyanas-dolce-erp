@@ -25,6 +25,7 @@ from core.access import (
     ROLE_ADMIN,
     ROLE_DG,
     ROLE_ORDER,
+    can_manage_orquestacion,
     can_manage_users,
     primary_role,
     can_manage_crm,
@@ -2795,6 +2796,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             "can_view_inventario": can_view_inventario(u),
             "can_manage_inventario": can_manage_inventario(u),
             "can_view_reportes": can_view_reportes(u),
+            "can_manage_orquestacion": can_manage_orquestacion(u),
         }
     )
     if ctx.get("can_view_reportes"):
