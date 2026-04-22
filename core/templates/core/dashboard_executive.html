@@ -678,7 +678,6 @@
       </div>
       <div class="home-exec-grid-stack">
         {% for row in yoy_panel.rows %}
-        {% if row.month_label|slice:":4" == yoy_panel.hero_row.month_label|slice:":4" %}
         <article class="home-exec-list-item home-exec-list-item--tight {% if row.amount_delta_pct is not None and row.amount_delta_pct >= 0 %}is-success{% else %}is-warning{% endif %}">
           <div>
             <strong>{{ row.month_label }}</strong>
@@ -691,7 +690,6 @@
             {% if row.amount_delta_pct is not None %}{{ row.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}
           </div>
         </article>
-        {% endif %}
         {% endfor %}
       </div>
     </article>
@@ -967,16 +965,39 @@
     };
     const forecastRows = parse("home-forecast-weekly-data");
     const yoyRows = parse("home-yoy-data");
-    const currentYear = Number("{{ yoy_panel.hero_row.month_label|default:'2026-01'|slice:':4' }}") || 2026;
-    const prevYear = currentYear - 1;
-    const yoyCurrentRows = yoyRows.filter((row) => String(row.month_label || "").slice(0, 4) === String(currentYear));
+    const currentYear = Number("{{ yoy_panel.current_year|default:2026 }}") || 2026;
+    const prevYear = Number("{{ yoy_panel.prev_year|default:2025 }}") || (currentYear - 1);
+    const prev2Year = Number("{{ yoy_panel.prev2_year|default:2024 }}") || (prevYear - 1);
+    const yoyWindowRows = yoyRows;
+    const seriesCurrentYear = [];
+    const seriesPrevYear = [];
+    const seriesPrev2Year = [];
+    for (const row of yoyWindowRows) {
+      const rowYear = Number(String(row.month_label || "").slice(0, 4));
+      const amount = Number(row.amount || 0);
+      const prevAmount = row.prev_amount === null || row.prev_amount === undefined ? null : Number(row.prev_amount || 0);
+      if (rowYear === currentYear) {
+        seriesCurrentYear.push(amount);
+        seriesPrevYear.push(prevAmount);
+        seriesPrev2Year.push(null);
+      } else if (rowYear === prevYear) {
+        seriesCurrentYear.push(null);
+        seriesPrevYear.push(amount);
+        seriesPrev2Year.push(row.prev2_amount === null || row.prev2_amount === undefined ? null : Number(row.prev2_amount || 0));
+      } else {
+        seriesCurrentYear.push(null);
+        seriesPrevYear.push(amount);
+        seriesPrev2Year.push(prevAmount);
+      }
+    }
     const theme = {
       wine: "#922456",
       forest: "#236d53",
       amber: "#b38a25",
       border: "rgba(145, 36, 86, 0.10)",
       blush: "rgba(146, 36, 86, 0.14)",
-      greenSoft: "rgba(35, 109, 83, 0.14)"
+      greenSoft: "rgba(35, 109, 83, 0.14)",
+      amberSoft: "rgba(179, 138, 37, 0.16)"
     };
 
     const makeChart = (canvasId, config) => {
@@ -1037,11 +1058,11 @@
     makeChart("homeYoyChart", {
       type: "bar",
       data: {
-        labels: yoyCurrentRows.map((row) => row.month_label),
+        labels: yoyWindowRows.map((row) => row.month_label),
         datasets: [
           {
             label: String(currentYear),
-            data: yoyCurrentRows.map((row) => Number(row.amount || 0)),
+            data: seriesCurrentYear,
             backgroundColor: theme.blush,
             borderColor: theme.wine,
             borderWidth: 1,
@@ -1049,9 +1070,17 @@
           },
           {
             label: String(prevYear),
-            data: yoyCurrentRows.map((row) => Number(row.prev_amount || 0)),
+            data: seriesPrevYear,
             backgroundColor: theme.greenSoft,
             borderColor: theme.forest,
+            borderWidth: 1,
+            borderRadius: 8
+          },
+          {
+            label: String(prev2Year),
+            data: seriesPrev2Year,
+            backgroundColor: theme.amberSoft,
+            borderColor: theme.amber,
             borderWidth: 1,
             borderRadius: 8
           }
