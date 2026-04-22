@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from inventario.models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo
+from pos_bridge.historical_freeze import is_frozen
 from pos_bridge.models import (
     PointDailyBranchIndicator,
     PointDailySale,
@@ -86,6 +87,8 @@ def _mark_inventory_refresh(instance, **_kwargs) -> None:
 @receiver(post_delete, sender=PointDailyBranchIndicator)
 def _mark_sales_refresh(instance, **_kwargs) -> None:
     day = _local_day(getattr(instance, "sale_date", None) or getattr(instance, "indicator_date", None))
+    if isinstance(instance, PointDailySale) and is_frozen(day):
+        return
     _mark_after_commit(
         start_date=day,
         end_date=day,

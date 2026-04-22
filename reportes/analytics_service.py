@@ -14,6 +14,7 @@ from core.cache_versions import bump_cache_scopes
 from compras.models import OrdenCompra
 from inventario.models import MovimientoInventario
 from maestros.models import CostoInsumo
+from pos_bridge.historical_freeze import assert_not_frozen
 from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact, PointTransferLine, PointWasteLine
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import (
@@ -242,6 +243,8 @@ def _latest_recipe_unit_cost_map(recipe_ids: set[int]) -> dict[int, Decimal]:
 
 
 def rebuild_sales_facts(*, start_date: date, end_date: date) -> int:
+    for target_date in _daterange(start_date, end_date):
+        assert_not_frozen(target_date, caller="analytics_service")
     source_by_branch_day = _selected_sales_source_by_branch_day(start_date, end_date)
     if not source_by_branch_day:
         FactVentaDiaria.objects.filter(fecha__range=(start_date, end_date)).delete()
