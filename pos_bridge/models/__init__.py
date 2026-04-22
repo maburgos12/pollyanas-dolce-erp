@@ -10,6 +10,7 @@ from pos_bridge.models.recipe import PointRecipeExtractionRun, PointRecipeNode, 
 from pos_bridge.models.sales import (
     PointDailyBranchIndicator,
     PointDailySale,
+    PointMonthlySummary,
     PointMonthlySalesOfficial,
 )
 from pos_bridge.models.sales_pipeline import (
@@ -27,6 +28,7 @@ __all__ = [
     "PointBranch",
     "PointDailySale",
     "PointDailyBranchIndicator",
+    "PointMonthlySummary",
     "PointMonthlySalesOfficial",
     "PointSalesExtractionTask",
     "PointSalesRawStaging",

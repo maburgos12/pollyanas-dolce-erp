@@ -113,3 +113,31 @@ class PointMonthlySalesOfficial(models.Model):
 
     def __str__(self) -> str:
         return f"{self.month_start:%Y-%m} · {self.total_amount}"
+
+
+class PointMonthlySummary(models.Model):
+    """Totales mensuales oficiales descargados directamente de PointMeUp."""
+
+    year = models.IntegerField()
+    month = models.IntegerField()
+    branch = models.CharField(max_length=100)
+    branch_code = models.CharField(max_length=20, blank=True)
+    total_revenue = models.DecimalField(max_digits=14, decimal_places=2)
+    total_transactions = models.IntegerField(default=0)
+    source_report = models.CharField(max_length=50, default="POINT_MONTHLY")
+    downloaded_at = models.DateTimeField(auto_now_add=True)
+    raw_data = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "pos_bridge_monthly_summary"
+        ordering = ["-year", "-month", "branch", "id"]
+        unique_together = [("year", "month", "branch")]
+        indexes = [
+            models.Index(fields=["year", "month"], name="pbms_year_month_idx"),
+            models.Index(fields=["branch", "year"], name="pbms_branch_year_idx"),
+        ]
+        verbose_name = "Point monthly summary"
+        verbose_name_plural = "Point monthly summaries"
+
+    def __str__(self) -> str:
+        return f"{self.branch} {self.year}-{self.month:02d}: ${self.total_revenue:,.2f}"
