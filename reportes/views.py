@@ -3967,6 +3967,15 @@ def gastos_operativos_importar(request: HttpRequest) -> HttpResponse:
         .first()
     )
     from reportes.models import CategoriaGasto, CentroCosto
+    hoy = date.today()
+    periodos: list[str] = []
+    year, month = hoy.year, hoy.month
+    for _ in range(24):
+        periodos.append(f"{year}-{month:02d}")
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
 
     context = {
         "module_tabs": _reportes_module_tabs("gastos_operativos"),
@@ -3983,7 +3992,7 @@ def gastos_operativos_importar(request: HttpRequest) -> HttpResponse:
         ],
         "centros_costo": CentroCosto.objects.filter(tipo="SUCURSAL_VENTA").select_related("sucursal").order_by("nombre"),
         "categorias_gasto": CategoriaGasto.objects.filter(activo=True).order_by("nombre"),
-        "periodos_recientes": ["2026-04", "2026-03", "2026-02", "2026-01"],
+        "periodos_recientes": periodos,
     }
     return render(request, "reportes/gastos_operativos_importar.html", context)
 
