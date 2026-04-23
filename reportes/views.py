@@ -724,9 +724,15 @@ def _sales_refresh_status(*, visible_cut_date: date | None = None) -> dict[str, 
     request_target_date = _coerce_audit_reference_date(latest_requested)
     completed_target_date = _coerce_audit_reference_date(latest_completed)
     failed_target_date = _coerce_audit_reference_date(latest_failed)
+    request_matches_visible = bool(
+        request_target_date
+        and visible_cut_date
+        and request_target_date == visible_cut_date
+    )
     pending_recent = bool(
         requested_after_terminal
         and latest_requested
+        and (request_matches_visible or visible_cut_date is None)
         and (
             lock_active
             or (timezone.now() - latest_requested.timestamp).total_seconds() <= BI_FORCE_REFRESH_LOCK_SECONDS
