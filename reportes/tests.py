@@ -49,6 +49,7 @@ from reportes.views import (
 from reportes.models import (
     CorteOficialDiario,
     EmpresaResultadoMensual,
+    FactVentaDiaria,
     PresupuestoImport,
     PresupuestoLineaMensual,
     PresupuestoResumenMensual,
@@ -1421,6 +1422,63 @@ class ReportesBITests(TestCase):
         self.assertEqual(snapshot["comparison_label"], "Arriba")
         self.assertEqual(snapshot["comparison_tone"], "success")
         self.assertIn(prev_day.isoformat(), snapshot["comparison_detail"])
+
+    def test_bi_daily_sales_snapshot_keeps_last_closed_cut_when_current_day_has_partial_sales(self):
+        sucursal = self._create_sucursal("CUT-LAST", "Sucursal Corte Cerrado")
+        closed_cut_day = date(2026, 4, 21)
+        partial_day = date(2026, 4, 22)
+
+        CorteOficialDiario.objects.create(
+            corte_date=closed_cut_day,
+            total_amount=Decimal("92040.99"),
+            total_tickets=310,
+            avg_ticket=Decimal("296.91"),
+            contado_amount=Decimal("92040.99"),
+            credito_amount=Decimal("0"),
+            discounts_amount=Decimal("0"),
+            new_customers=3,
+            evidence_path="/tmp/corte_oficial_2026-04-21.png",
+        )
+        FactVentaDiaria.objects.create(
+            fecha=closed_cut_day,
+            sucursal=sucursal,
+            producto_clave="CUT-CLOSED",
+            producto_nombre="Pastel Corte Cerrado",
+            cantidad=Decimal("120"),
+            tickets=310,
+            venta_bruta=Decimal("92040.99"),
+            descuento=Decimal("0"),
+            venta_total=Decimal("92040.99"),
+            venta_neta=Decimal("92040.99"),
+            costo_estimado=Decimal("0"),
+            margen=Decimal("0"),
+            source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+        )
+        FactVentaDiaria.objects.create(
+            fecha=partial_day,
+            sucursal=sucursal,
+            producto_clave="CUT-PARTIAL",
+            producto_nombre="Pastel Parcial Dia Actual",
+            cantidad=Decimal("60"),
+            tickets=150,
+            venta_bruta=Decimal("47287.00"),
+            descuento=Decimal("0"),
+            venta_total=Decimal("47287.00"),
+            venta_neta=Decimal("47287.00"),
+            costo_estimado=Decimal("0"),
+            margen=Decimal("0"),
+            source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+        )
+
+        with patch("reportes.dashboard_sales_dataset.timezone.localdate", return_value=partial_day), patch(
+            "reportes.views.timezone.localdate", return_value=partial_day
+        ):
+            snapshot = _bi_daily_sales_snapshot()
+
+        self.assertEqual(snapshot["date"], closed_cut_day)
+        self.assertEqual(snapshot["date_label"], "2026-04-21")
+        self.assertEqual(snapshot["total_amount"], Decimal("92040.99"))
+        self.assertEqual(snapshot["raw_total_amount"], Decimal("92040.99"))
 
     def test_financial_view_renders(self):
         sucursal = self._create_sucursal("FIN-01", "Sucursal Finanzas")

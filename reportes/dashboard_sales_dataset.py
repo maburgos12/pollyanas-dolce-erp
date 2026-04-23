@@ -50,9 +50,8 @@ def _fetch_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
     ),
     latest AS (
         SELECT COALESCE(
-            GREATEST(latest_fact_date, latest_cut_date),
-            latest_fact_date,
             latest_cut_date,
+            latest_fact_date,
             %(today)s::date
         )::date AS latest_date
         FROM latest_dates
