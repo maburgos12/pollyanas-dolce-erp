@@ -2,7 +2,7 @@
 from .recetas import (
     recetas_list, recetas_sync_all, recetas_sync_group, recetas_sync_new,
     receta_sync_point,
-    costeo_dashboard, costeo_dashboard_snapshot,
+    costeo_dashboard, costeo_dashboard_snapshot, monitor_margenes,
     receta_create, receta_detail, receta_update, receta_delete,
     receta_sync_derivados, receta_versiones_export, receta_copy_lineas,
     linea_edit, linea_create, linea_delete, linea_apply_direct_base_replacement,

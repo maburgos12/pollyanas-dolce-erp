@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Monitor de márgenes{% endblock %}
+{% block page_title %}Monitor de márgenes{% endblock %}
+{% block body_class %}page-monitor-margenes{% endblock %}
+{% block content %}
+<style>
+  .margin-shell { display:grid; gap:18px; }
+  .margin-hero, .margin-panel { padding:20px; border-radius:20px; background:#fff; border:1px solid rgba(131,24,67,.08); }
+  .margin-hero { display:grid; gap:14px; grid-template-columns:1.4fr .9fr; align-items:start; }
+  .margin-kpis { display:grid; gap:12px; grid-template-columns:repeat(5, minmax(0,1fr)); }
+  .margin-kpi { padding:18px; border:1px solid rgba(131,24,67,.08); border-radius:18px; background:#fff; }
+  .margin-kpi .eyebrow { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:#7b6871; margin-bottom:10px; }
+  .margin-kpi .value { font-size:1.9rem; font-weight:700; color:#5a2132; line-height:1.05; }
+  .margin-kpi .note { color:#73656d; margin-top:8px; }
+  .margin-table { width:100%; border-collapse:collapse; margin-top:16px; }
+  .margin-table th, .margin-table td { padding:11px 12px; border-bottom:1px solid rgba(131,24,67,.08); vertical-align:top; }
+  .margin-table th { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:#7b6871; }
+  .status-chip { display:inline-flex; align-items:center; gap:8px; border-radius:999px; padding:6px 10px; font-weight:700; font-size:.9rem; }
+  .status-chip.is-red { background:rgba(180,51,76,.12); color:#a1223b; }
+  .status-chip.is-yellow { background:rgba(211,161,58,.16); color:#8b5d00; }
+  .status-chip.is-green { background:rgba(46,139,87,.12); color:#226748; }
+  .status-chip.is-muted { background:rgba(123,104,113,.12); color:#6e6067; }
+  .margin-negative { color:#a1223b; font-weight:700; }
+  .margin-warning { color:#8b5d00; font-weight:700; }
+  .margin-good { color:#226748; font-weight:700; }
+  .margin-muted { color:#6e6067; font-weight:700; }
+  .margin-filters { display:grid; gap:12px; grid-template-columns:minmax(0,1fr) auto auto; align-items:end; }
+  @media (max-width: 1200px) {
+    .margin-hero, .margin-kpis { grid-template-columns:1fr; }
+  }
+</style>
+
+<div class="module-shell margin-shell">
+  <section class="margin-hero">
+    <div>
+      <div class="eyebrow text-uppercase text-muted" style="letter-spacing:.12em;">Recetas · rentabilidad comercial</div>
+      <h2 style="margin:0 0 8px;">Monitor de márgenes por receta</h2>
+      <p class="text-muted mb-0">
+        Cruza el último costeo positivo de cada receta con el precio de venta resuelto desde ventas Point del periodo
+        {{ reference_start|date:"Y-m-d" }} al {{ reference_end|date:"Y-m-d" }}. Las filas sin precio quedan arriba para revisión.
+      </p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap justify-content-end">
+      <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Abrir costeo semanal</a>
+      <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Abrir recetas</a>
+    </div>
+  </section>
+
+  <section class="margin-panel">
+    <form method="get" class="margin-filters">
+      <div>
+        <label class="form-label">Buscar receta</label>
+        <input class="form-control" name="q" value="{{ q }}" placeholder="Nombre, código Point o familia">
+      </div>
+      <button class="btn btn-primary" type="submit">Aplicar</button>
+      <a class="btn btn-secondary" href="{% url 'recetas:monitor_margenes' %}">Limpiar</a>
+    </form>
+  </section>
+
+  <section class="margin-kpis">
+    <article class="margin-kpi">
+      <div class="eyebrow">Recetas visibles</div>
+      <div class="value">{{ rows|length|intcomma }}</div>
+      <div class="note">Última versión con costo mayor a cero.</div>
+    </article>
+    <article class="margin-kpi">
+      <div class="eyebrow">Alerta roja</div>
+      <div class="value">{{ red_count|intcomma }}</div>
+      <div class="note">Margen menor a 40%.</div>
+    </article>
+    <article class="margin-kpi">
+      <div class="eyebrow">Revisión</div>
+      <div class="value">{{ yellow_count|intcomma }}</div>
+      <div class="note">Margen entre 40% y 55%.</div>
+    </article>
+    <article class="margin-kpi">
+      <div class="eyebrow">Saludable</div>
+      <div class="value">{{ green_count|intcomma }}</div>
+      <div class="note">Margen de 55% o más.</div>
+    </article>
+    <article class="margin-kpi">
+      <div class="eyebrow">Sin precio</div>
+      <div class="value">{{ missing_price_count|intcomma }}</div>
+      <div class="note">No hubo precio resoluble en ventas Point.</div>
+    </article>
+  </section>
+
+  <section class="margin-panel">
+    <div class="table-responsive">
+      <table class="margin-table">
+        <thead>
+          <tr>
+            <th>Receta</th>
+            <th>Familia</th>
+            <th>Código Point</th>
+            <th>Precio</th>
+            <th>Costo</th>
+            <th>Margen</th>
+            <th>Alerta</th>
+            <th>Versión</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>
+              <strong>{{ row.receta.nombre }}</strong>
+              <div class="text-muted">{{ row.price_points }} sucursal(es) con precio resuelto</div>
+            </td>
+            <td>{{ row.receta.familia|default:"Sin familia" }}</td>
+            <td>{{ row.receta.codigo_point|default:"Sin código" }}</td>
+            <td>
+              {% if row.price > 0 %}
+              ${{ row.price|floatformat:2|intcomma }}
+              {% else %}
+              <span class="text-muted">Sin precio</span>
+              {% endif %}
+            </td>
+            <td>${{ row.cost|floatformat:2|intcomma }}</td>
+            <td>
+              {% if row.margin_pct is None %}
+              <span class="margin-muted">N/D</span>
+              {% elif row.margin_pct < 40 %}
+              <span class="margin-negative">{{ row.margin_pct|floatformat:2 }}%</span>
+              {% elif row.margin_pct < 55 %}
+              <span class="margin-warning">{{ row.margin_pct|floatformat:2 }}%</span>
+              {% else %}
+              <span class="margin-good">{{ row.margin_pct|floatformat:2 }}%</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="status-chip {% if row.status == 'ALERTA' %}is-red{% elif row.status == 'REVISION' %}is-yellow{% elif row.status == 'SALUDABLE' %}is-green{% else %}is-muted{% endif %}">
+                {{ row.status_label }}
+              </span>
+            </td>
+            <td>v{{ row.version.version_num }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="8" class="text-muted">No hay recetas con costo visible para el criterio actual.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

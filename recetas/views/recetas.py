@@ -86,6 +86,7 @@ from ..utils.normalizacion import normalizar_nombre
 from ..catalogs import familia_categoria_catalogo_json, familias_producto_catalogo
 from reportes.executive_panels import _partial_month_amount_quantity
 from ventas.models import VentaAutoritativaPoint
+from ventas.services.financials import resolve_unit_prices_bulk
 
 OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
 RECENT_POINT_SOURCE = "/Report/VentasCategorias"
@@ -5376,6 +5377,125 @@ def costeo_dashboard_snapshot(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def monitor_margenes(request: HttpRequest) -> HttpResponse:
+    if not can_view_recetas(request.user):
+        raise PermissionDenied
+
+    q = (request.GET.get("q") or "").strip()
+    reference_end = timezone.localdate()
+    reference_start = reference_end - timedelta(days=90)
+    branch_ids = set(sucursales_operativas(reference_end).values_list("id", flat=True))
+
+    latest_versions: list[RecetaCostoVersion] = []
+    seen_recipe_ids: set[int] = set()
+    version_qs = (
+        RecetaCostoVersion.objects.filter(costo_total__gt=0)
+        .select_related("receta")
+        .order_by("receta_id", "-version_num", "-id")
+    )
+    for version in version_qs:
+        if version.receta_id in seen_recipe_ids:
+            continue
+        seen_recipe_ids.add(version.receta_id)
+        latest_versions.append(version)
+
+    if q:
+        normalized_q = normalizar_nombre(q)
+        latest_versions = [
+            version
+            for version in latest_versions
+            if normalized_q in normalizar_nombre(version.receta.nombre)
+            or normalized_q in normalizar_nombre(version.receta.codigo_point or "")
+            or normalized_q in normalizar_nombre(version.receta.familia or "")
+        ]
+
+    recipe_ids = {version.receta_id for version in latest_versions}
+    price_map = resolve_unit_prices_bulk(
+        recipe_ids,
+        reference_start,
+        reference_end,
+        branch_ids=branch_ids,
+    )
+
+    rows: list[dict[str, Any]] = []
+    red_count = 0
+    yellow_count = 0
+    green_count = 0
+    missing_price_count = 0
+    total_cost = Decimal("0")
+    total_price = Decimal("0")
+
+    for version in latest_versions:
+        branch_prices = [
+            Decimal(price)
+            for (recipe_id, _branch_id), price in price_map.items()
+            if recipe_id == version.receta_id and Decimal(price or 0) > 0
+        ]
+        avg_price = (
+            (sum(branch_prices, Decimal("0")) / Decimal(len(branch_prices))).quantize(Decimal("0.01"))
+            if branch_prices
+            else Decimal("0")
+        )
+        cost = Decimal(version.costo_total or 0).quantize(Decimal("0.01"))
+        margin_pct = None
+        status = "SIN_PRECIO"
+        status_label = "Sin precio"
+        sort_margin = Decimal("-1")
+        if avg_price > 0:
+            margin_pct = (((avg_price - cost) / avg_price) * Decimal("100")).quantize(Decimal("0.01"))
+            sort_margin = margin_pct
+            if margin_pct < Decimal("40"):
+                status = "ALERTA"
+                status_label = "Rojo < 40%"
+                red_count += 1
+            elif margin_pct < Decimal("55"):
+                status = "REVISION"
+                status_label = "Amarillo < 55%"
+                yellow_count += 1
+            else:
+                status = "SALUDABLE"
+                status_label = "Verde >= 55%"
+                green_count += 1
+            total_price += avg_price
+        else:
+            missing_price_count += 1
+        total_cost += cost
+
+        rows.append(
+            {
+                "receta": version.receta,
+                "version": version,
+                "price": avg_price,
+                "cost": cost,
+                "margin_pct": margin_pct,
+                "status": status,
+                "status_label": status_label,
+                "price_points": len(branch_prices),
+                "sort_margin": sort_margin,
+            }
+        )
+
+    rows.sort(key=lambda item: (item["sort_margin"], item["receta"].nombre.lower()))
+
+    return render(
+        request,
+        "recetas/monitor_margenes.html",
+        {
+            "rows": rows,
+            "q": q,
+            "reference_start": reference_start,
+            "reference_end": reference_end,
+            "red_count": red_count,
+            "yellow_count": yellow_count,
+            "green_count": green_count,
+            "missing_price_count": missing_price_count,
+            "total_cost": total_cost,
+            "total_price": total_price,
+        },
+    )
+
+
+@login_required
 @permission_required("recetas.add_receta", raise_exception=True)
 def receta_create(request: HttpRequest) -> HttpResponse:
     familias_db = list(
@@ -8452,6 +8572,5 @@ def drivers_costeo_importar(request: HttpRequest) -> HttpResponse:
         f"Importación drivers completada. Creados: {created}. Actualizados: {updated}. Omitidos: {skipped}.",
     )
     return redirect("recetas:drivers_costeo")
-
 
 

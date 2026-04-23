@@ -21,6 +21,7 @@ urlpatterns = [
     path("recetas/<int:pk>/copiar-lineas/", views.receta_copy_lineas, name="receta_copy_lineas"),
     path("drivers-costeo/", views.drivers_costeo, name="drivers_costeo"),
     path("costeo/", views.costeo_dashboard, name="costeo_dashboard"),
+    path("monitor-margenes/", views.monitor_margenes, name="monitor_margenes"),
     path("costeo/snapshot/", views.costeo_dashboard_snapshot, name="costeo_dashboard_snapshot"),
     path("recetas/sync/grupo/", views.recetas_sync_group, name="recetas_sync_group"),
     path("recetas/sync/todo/", views.recetas_sync_all, name="recetas_sync_all"),
