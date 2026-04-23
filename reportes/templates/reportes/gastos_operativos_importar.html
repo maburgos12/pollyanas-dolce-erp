@@ -39,6 +39,16 @@
   .opex-chip-stack { display:flex; flex-wrap:wrap; gap:.4rem; }
   .opex-help-grid { display:grid; gap:.8rem; }
   .opex-empty { padding:1.1rem; border:1px dashed var(--inv-line); border-radius:18px; color:var(--inv-muted); }
+  .opex-manual-toolbar { display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; align-items:end; margin-bottom:1rem; }
+  .opex-manual-filter { display:flex; gap:.75rem; flex-wrap:wrap; align-items:end; }
+  .opex-manual-table { width:100%; border-collapse:collapse; }
+  .opex-manual-table th, .opex-manual-table td { padding:.65rem; border-bottom:1px solid #E5E7EB; vertical-align:top; }
+  .opex-manual-table th { font-size:.8rem; color:#6B7280; text-transform:uppercase; letter-spacing:.04em; }
+  .opex-manual-table select, .opex-manual-table input { width:100%; padding:.55rem; border:1px solid #D1D5DB; border-radius:8px; background:#fff; }
+  .opex-row-actions { display:flex; gap:.5rem; justify-content:flex-end; }
+  .opex-delete-btn { background:#fff; color:#9F1239; border:1px solid rgba(159,18,57,.24); padding:.5rem .7rem; border-radius:10px; font-weight:600; }
+  .opex-remove-row { background:#fff; color:#6B7280; border:1px solid #D1D5DB; padding:.5rem .7rem; border-radius:10px; font-weight:600; }
+  .opex-inline-actions { display:flex; gap:.75rem; flex-wrap:wrap; align-items:center; margin-top:1rem; }
   @media (max-width: 1080px) {
     .opex-upload-layout, .opex-summary-grid { grid-template-columns:1fr; }
   }
@@ -103,63 +113,136 @@
     <div class="investment-panel-head">
       <div>
         <div class="investment-kicker">Captura manual</div>
-        <h2 class="investment-panel-title">✏️ Captura manual de gasto</h2>
+        <h2 class="investment-panel-title">✏️ Captura manual de gastos operativos</h2>
       </div>
+    </div>
+    <div class="opex-manual-toolbar">
+      <div class="investment-muted">Registro directo en ERP sin tocar la importación por Excel.</div>
+      <form method="get" class="opex-manual-filter">
+        <div>
+          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Periodo visible</label>
+          <select name="manual_periodo" style="min-width:180px; padding:.5rem; border:1px solid #D1D5DB; border-radius:8px; margin-top:.3rem;">
+            {% for p in periodos_recientes %}
+            <option value="{{ p }}" {% if manual_selected_period == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="investment-button" style="padding:.7rem 1.1rem;">Ver periodo</button>
+      </form>
     </div>
     <form method="post" action="{% url 'reportes:gastos_operativos_captura_manual' %}">
       {% csrf_token %}
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
-        <div>
-          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Periodo</label>
-          <select name="periodo" required style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
-            {% for p in periodos_recientes %}
-            <option value="{{ p }}">{{ p }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div>
-          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Sucursal / Centro de costo</label>
-          <select name="centro_costo" required style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
-            <option value="">-- Selecciona --</option>
-            {% for c in centros_costo %}
-            <option value="{{ c.id }}">{{ c.nombre }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div>
-          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Categoría de gasto</label>
-          <select name="categoria_gasto" required style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
-            <option value="">-- Selecciona --</option>
-            {% for cat in categorias_gasto %}
-            <option value="{{ cat.id }}">{{ cat.nombre }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div>
-          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Monto ($)</label>
-          <input type="number" name="monto" step="0.01" min="0" required placeholder="0.00" style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
-        </div>
-
-        <div>
-          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Tipo</label>
-          <select name="tipo_dato" style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
-            <option value="REAL">Real</option>
-            <option value="PRESUPUESTO">Presupuesto</option>
-          </select>
-        </div>
-
-        <div>
-          <label style="font-size: .85rem; font-weight: 600; color: #374151;">Comentario (opcional)</label>
-          <input type="text" name="comentario" placeholder="Ej: Factura #123" style="width:100%; padding:.5rem; border:1px solid #D1D5DB; border-radius:6px; margin-top:.3rem;">
-        </div>
+      <table class="opex-manual-table">
+        <thead>
+          <tr>
+            <th>Periodo</th>
+            <th>Sucursal</th>
+            <th>Categoría</th>
+            <th>Monto</th>
+            <th>Tipo</th>
+            <th>Comentario</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="manual-opex-body">
+          <tr>
+            <td>
+              <select name="periodo" required>
+                {% for p in periodos_recientes %}
+                <option value="{{ p }}" {% if manual_selected_period == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <select name="centro_costo" required>
+                <option value="">-- Selecciona --</option>
+                {% for c in centros_costo %}
+                <option value="{{ c.id }}">{{ c.nombre }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <select name="categoria_gasto" required>
+                <option value="">-- Selecciona --</option>
+                {% for cat in categorias_gasto %}
+                <option value="{{ cat.id }}">{{ cat.codigo }} · {{ cat.nombre }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td><input type="number" name="monto" step="0.01" min="0" required placeholder="0.00"></td>
+            <td>
+              <select name="tipo_dato">
+                <option value="REAL">REAL</option>
+                <option value="PRESUPUESTO">PRESUPUESTO</option>
+              </select>
+            </td>
+            <td><input type="text" name="comentario" placeholder="Comentario opcional"></td>
+            <td class="opex-row-actions">
+              <button type="button" class="opex-remove-row" data-remove-row hidden>Quitar</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="opex-inline-actions">
+        <button type="button" class="investment-action-link is-ghost" id="add-manual-row">Agregar fila</button>
+        <button type="submit" style="background:#8B2252; color:#fff; border:none; padding:.6rem 1.5rem; border-radius:8px; font-weight:600; cursor:pointer;">
+          Guardar filas manuales
+        </button>
       </div>
-      <button type="submit" style="background:#8B2252; color:#fff; border:none; padding:.6rem 1.5rem; border-radius:8px; font-weight:600; cursor:pointer;">
-        Registrar gasto
-      </button>
     </form>
+  </section>
+
+  <section class="investment-panel" style="margin-bottom: 2rem;">
+    <div class="investment-panel-head">
+      <div>
+        <div class="investment-kicker">Registros manuales</div>
+        <h2 class="investment-panel-title">Tabla del periodo {{ manual_selected_period }}</h2>
+      </div>
+    </div>
+    {% if manual_records %}
+    <div class="investment-table-wrap">
+      <table class="investment-table opex-table">
+        <thead>
+          <tr>
+            <th>Periodo</th>
+            <th>Sucursal</th>
+            <th>Categoría</th>
+            <th>Monto</th>
+            <th>Tipo</th>
+            <th>Capturado por</th>
+            <th>Fecha</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in manual_records %}
+          <tr>
+            <td>{{ row.periodo|date:"Y-m" }}</td>
+            <td>{{ row.centro_costo.nombre }}</td>
+            <td>{{ row.categoria_gasto.codigo }} · {{ row.categoria_gasto.nombre }}</td>
+            <td>${{ row.monto|floatformat:2|intcomma }}</td>
+            <td>{{ row.get_tipo_dato_display }}</td>
+            <td>{{ row.capturado_por.get_full_name|default:row.capturado_por.username|default:"Sistema" }}</td>
+            <td>{{ row.creado_en|date:"Y-m-d H:i" }}</td>
+            <td>
+              {% if row.can_delete_recent %}
+              <form method="post" action="{% url 'reportes:gastos_operativos_manual_delete' row.id %}" onsubmit="return confirm('¿Eliminar este registro manual?');">
+                {% csrf_token %}
+                <input type="hidden" name="manual_periodo" value="{{ manual_selected_period }}">
+                <button type="submit" class="opex-delete-btn">Eliminar</button>
+              </form>
+              {% else %}
+              <span class="investment-muted">Bloqueado</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="opex-empty">No hay registros visibles para {{ manual_selected_period }}.</div>
+    {% endif %}
   </section>
 
   <section class="opex-upload-layout">
@@ -286,6 +369,45 @@
   </article>
 </div>
 
+<template id="manual-opex-row-template">
+  <tr>
+    <td>
+      <select name="periodo" required>
+        {% for p in periodos_recientes %}
+        <option value="{{ p }}" {% if manual_selected_period == p %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </td>
+    <td>
+      <select name="centro_costo" required>
+        <option value="">-- Selecciona --</option>
+        {% for c in centros_costo %}
+        <option value="{{ c.id }}">{{ c.nombre }}</option>
+        {% endfor %}
+      </select>
+    </td>
+    <td>
+      <select name="categoria_gasto" required>
+        <option value="">-- Selecciona --</option>
+        {% for cat in categorias_gasto %}
+        <option value="{{ cat.id }}">{{ cat.codigo }} · {{ cat.nombre }}</option>
+        {% endfor %}
+      </select>
+    </td>
+    <td><input type="number" name="monto" step="0.01" min="0" required placeholder="0.00"></td>
+    <td>
+      <select name="tipo_dato">
+        <option value="REAL">REAL</option>
+        <option value="PRESUPUESTO">PRESUPUESTO</option>
+      </select>
+    </td>
+    <td><input type="text" name="comentario" placeholder="Comentario opcional"></td>
+    <td class="opex-row-actions">
+      <button type="button" class="opex-remove-row" data-remove-row>Quitar</button>
+    </td>
+  </tr>
+</template>
+
 <script>
   (function () {
     const dropzone = document.getElementById("opex-dropzone");
@@ -308,6 +430,39 @@
         input.files = event.dataTransfer.files;
       }
     });
+  })();
+
+  (function () {
+    const addButton = document.getElementById("add-manual-row");
+    const body = document.getElementById("manual-opex-body");
+    const template = document.getElementById("manual-opex-row-template");
+    if (!addButton || !body || !template) return;
+
+    function syncRemoveButtons() {
+      const rows = body.querySelectorAll("tr");
+      rows.forEach((row, index) => {
+        const removeButton = row.querySelector("[data-remove-row]");
+        if (!removeButton) return;
+        removeButton.hidden = rows.length === 1 && index === 0;
+      });
+    }
+
+    addButton.addEventListener("click", function () {
+      const fragment = template.content.cloneNode(true);
+      body.appendChild(fragment);
+      syncRemoveButtons();
+    });
+
+    body.addEventListener("click", function (event) {
+      const removeButton = event.target.closest("[data-remove-row]");
+      if (!removeButton) return;
+      const row = removeButton.closest("tr");
+      if (!row) return;
+      row.remove();
+      syncRemoveButtons();
+    });
+
+    syncRemoveButtons();
   })();
 </script>
 {% endblock %}

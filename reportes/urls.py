@@ -18,6 +18,11 @@ urlpatterns = [
         views.gastos_operativos_captura_manual,
         name="gastos_operativos_captura_manual",
     ),
+    path(
+        "gastos-operativos/manual/<int:gasto_id>/eliminar/",
+        views.gastos_operativos_manual_delete,
+        name="gastos_operativos_manual_delete",
+    ),
     path("gastos-operativos/importar/", views.gastos_operativos_importar, name="gastos_operativos_importar"),
     path("costo-receta/", views.costo_receta, name="costo_receta"),
     path("consumo/", views.consumo, name="consumo"),

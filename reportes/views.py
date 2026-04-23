@@ -14,20 +14,25 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Sum, Max, Count, Q
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 from unidecode import unidecode
 
 from core.access import (
+    ROLE_ADMIN,
+    ROLE_DG,
     can_build_product_closure,
     can_manage_orquestacion,
     can_lock_product_closure,
     can_rebuild_product_closure,
     can_view_product_closure,
     can_view_reportes,
+    has_any_role,
 )
 from core.audit import log_event
 from core.cache_versions import get_or_set_versioned_cache
@@ -110,8 +115,11 @@ from .executive_panels import (
 )
 from .models import (
     Alert,
+    CategoriaGasto,
     CargaGastoOperativoArchivo,
+    CentroCosto,
     CorteOficialDiario,
+    GastoOperativoMensual,
     OperationsMetricSnapshot,
     PresupuestoImport,
     ProductionOrder,
@@ -3891,56 +3899,121 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def gastos_operativos_captura_manual(request: HttpRequest) -> HttpResponse:
-    """Captura manual de un gasto operativo mensual."""
     if not can_view_reportes(request.user):
         raise PermissionDenied
 
     if request.method == "POST":
-        from reportes.models import CategoriaGasto, CentroCosto, GastoOperativoMensual
         import uuid
 
-        try:
-            periodo_str = request.POST.get("periodo")
-            centro_id = request.POST.get("centro_costo")
-            categoria_id = request.POST.get("categoria_gasto")
-            monto = request.POST.get("monto")
-            tipo_dato = request.POST.get("tipo_dato", "REAL")
-            comentario = request.POST.get("comentario", "")
+        periodo_values = request.POST.getlist("periodo") or [request.POST.get("periodo", "")]
+        centro_values = request.POST.getlist("centro_costo") or [request.POST.get("centro_costo", "")]
+        categoria_values = request.POST.getlist("categoria_gasto") or [request.POST.get("categoria_gasto", "")]
+        monto_values = request.POST.getlist("monto") or [request.POST.get("monto", "")]
+        tipo_values = request.POST.getlist("tipo_dato") or [request.POST.get("tipo_dato", "REAL")]
+        comentario_values = request.POST.getlist("comentario") or [request.POST.get("comentario", "")]
 
-            if not all([periodo_str, centro_id, categoria_id, monto]):
-                messages.error(request, "Todos los campos obligatorios deben llenarse.")
+        max_rows = max(
+            len(periodo_values),
+            len(centro_values),
+            len(categoria_values),
+            len(monto_values),
+            len(tipo_values),
+            len(comentario_values),
+        )
+
+        payloads: list[dict[str, object]] = []
+        first_period_query = ""
+        try:
+            for idx in range(max_rows):
+                periodo_str = (periodo_values[idx] if idx < len(periodo_values) else "").strip()
+                centro_id = (centro_values[idx] if idx < len(centro_values) else "").strip()
+                categoria_id = (categoria_values[idx] if idx < len(categoria_values) else "").strip()
+                monto_raw = (monto_values[idx] if idx < len(monto_values) else "").strip()
+                tipo_dato = (tipo_values[idx] if idx < len(tipo_values) else GastoOperativoMensual.TIPO_DATO_REAL).strip() or GastoOperativoMensual.TIPO_DATO_REAL
+                comentario = (comentario_values[idx] if idx < len(comentario_values) else "").strip()
+
+                if not any([periodo_str, centro_id, categoria_id, monto_raw, comentario]):
+                    continue
+                if not all([periodo_str, centro_id, categoria_id, monto_raw]):
+                    raise ValueError(f"Fila {idx + 1}: completa periodo, sucursal, categoría y monto.")
+
+                year, month = map(int, periodo_str.split("-"))
+                periodo = date(year, month, 1)
+                centro = CentroCosto.objects.get(id=centro_id)
+                categoria = CategoriaGasto.objects.get(id=categoria_id)
+                monto_decimal = Decimal(monto_raw)
+                ext_key = f"MANUAL-{centro.codigo}-{periodo_str}-{categoria.codigo}-{uuid.uuid4().hex[:8]}"
+                payloads.append(
+                    {
+                        "periodo": periodo,
+                        "periodo_str": periodo_str,
+                        "centro": centro,
+                        "categoria": categoria,
+                        "monto": monto_decimal,
+                        "tipo_dato": tipo_dato,
+                        "comentario": comentario,
+                        "external_key": ext_key,
+                    }
+                )
+                if not first_period_query:
+                    first_period_query = periodo_str
+
+            if not payloads:
+                messages.error(request, "Agrega por lo menos una fila válida antes de guardar.")
                 return redirect("reportes:gastos_operativos_importar")
 
-            year, month = map(int, periodo_str.split("-"))
-            periodo = date(year, month, 1)
-            centro = CentroCosto.objects.get(id=centro_id)
-            categoria = CategoriaGasto.objects.get(id=categoria_id)
-            monto_decimal = Decimal(monto)
+            with transaction.atomic():
+                for payload in payloads:
+                    GastoOperativoMensual.objects.create(
+                        periodo=payload["periodo"],
+                        centro_costo=payload["centro"],
+                        categoria_gasto=payload["categoria"],
+                        monto=payload["monto"],
+                        tipo_dato=payload["tipo_dato"],
+                        fuente=GastoOperativoMensual.FUENTE_MANUAL,
+                        comentario=payload["comentario"],
+                        capturado_por=request.user,
+                        external_key=payload["external_key"],
+                        es_estimado=False,
+                    )
 
-            ext_key = f"MANUAL-{centro.codigo}-{periodo_str}-{categoria.codigo}-{uuid.uuid4().hex[:8]}"
-
-            GastoOperativoMensual.objects.create(
-                periodo=periodo,
-                centro_costo=centro,
-                categoria_gasto=categoria,
-                monto=monto_decimal,
-                tipo_dato=tipo_dato,
-                fuente="MANUAL",
-                comentario=comentario,
-                capturado_por=request.user,
-                external_key=ext_key,
-                es_estimado=False,
-            )
-            messages.success(
-                request,
-                f"Gasto registrado: {categoria.nombre} · {centro.nombre} · ${monto_decimal:,.2f}",
-            )
+            messages.success(request, f"Se registraron {len(payloads)} gasto(s) manual(es) correctamente.")
         except Exception as exc:
             messages.error(request, f"Error al registrar gasto: {exc}")
 
-        return redirect("reportes:gastos_operativos_importar")
+        next_url = reverse("reportes:gastos_operativos_importar")
+        if first_period_query:
+            next_url = f"{next_url}?manual_periodo={first_period_query}"
+        return redirect(next_url)
 
     return redirect("reportes:gastos_operativos_importar")
+
+
+@login_required
+@require_POST
+def gastos_operativos_manual_delete(request: HttpRequest, gasto_id: int) -> HttpResponse:
+    if not can_view_reportes(request.user):
+        raise PermissionDenied
+
+    gasto = get_object_or_404(
+        GastoOperativoMensual.objects.select_related("capturado_por", "centro_costo", "categoria_gasto"),
+        id=gasto_id,
+        fuente=GastoOperativoMensual.FUENTE_MANUAL,
+    )
+    period_query = (request.POST.get("manual_periodo") or gasto.periodo.strftime("%Y-%m")).strip()
+    next_url = f"{reverse('reportes:gastos_operativos_importar')}?manual_periodo={period_query}"
+    delete_window_start = timezone.now() - timedelta(hours=72)
+    can_force_delete = has_any_role(request.user, ROLE_DG, ROLE_ADMIN)
+    if gasto.creado_en < delete_window_start:
+        messages.error(request, "Sólo se pueden eliminar registros manuales creados en las últimas 72 horas.")
+        return redirect(next_url)
+    if gasto.capturado_por_id not in {None, request.user.id} and not can_force_delete:
+        raise PermissionDenied
+
+    descripcion = f"{gasto.categoria_gasto.nombre} · {gasto.centro_costo.nombre} · ${gasto.monto:,.2f}"
+    gasto.delete()
+    messages.success(request, f"Registro eliminado: {descripcion}")
+    return redirect(next_url)
 
 
 @login_required
@@ -4009,7 +4082,6 @@ def gastos_operativos_importar(request: HttpRequest) -> HttpResponse:
         .order_by("-processed_at", "-id")
         .first()
     )
-    from reportes.models import CategoriaGasto, CentroCosto
     hoy = date.today()
     periodos: list[str] = []
     year, month = hoy.year, hoy.month
@@ -4019,6 +4091,30 @@ def gastos_operativos_importar(request: HttpRequest) -> HttpResponse:
         if month == 0:
             month = 12
             year -= 1
+
+    manual_selected_period = ((request.GET.get("manual_periodo") or periodos[0]) if periodos else hoy.strftime("%Y-%m")).strip()
+    if manual_selected_period not in periodos and periodos:
+        manual_selected_period = periodos[0]
+    try:
+        selected_year, selected_month = map(int, manual_selected_period.split("-"))
+        manual_period_date = date(selected_year, selected_month, 1)
+    except Exception:
+        manual_period_date = date(hoy.year, hoy.month, 1)
+        manual_selected_period = manual_period_date.strftime("%Y-%m")
+
+    manual_records = list(
+        GastoOperativoMensual.objects.filter(periodo=manual_period_date)
+        .select_related("centro_costo", "categoria_gasto", "capturado_por")
+        .order_by("-creado_en", "-id")
+    )
+    delete_window_start = timezone.now() - timedelta(hours=72)
+    can_force_delete = has_any_role(request.user, ROLE_DG, ROLE_ADMIN)
+    for row in manual_records:
+        row.can_delete_recent = (
+            row.fuente == GastoOperativoMensual.FUENTE_MANUAL
+            and row.creado_en >= delete_window_start
+            and (row.capturado_por_id in {None, request.user.id} or can_force_delete)
+        )
 
     context = {
         "module_tabs": _reportes_module_tabs("gastos_operativos"),
@@ -4036,6 +4132,8 @@ def gastos_operativos_importar(request: HttpRequest) -> HttpResponse:
         "centros_costo": CentroCosto.objects.filter(tipo="SUCURSAL_VENTA").select_related("sucursal").order_by("nombre"),
         "categorias_gasto": CategoriaGasto.objects.filter(activo=True).order_by("nombre"),
         "periodos_recientes": periodos,
+        "manual_selected_period": manual_selected_period,
+        "manual_records": manual_records,
     }
     return render(request, "reportes/gastos_operativos_importar.html", context)
 
