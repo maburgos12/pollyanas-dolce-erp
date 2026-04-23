@@ -1480,6 +1480,53 @@ class ReportesBITests(TestCase):
         self.assertEqual(snapshot["total_amount"], Decimal("92040.99"))
         self.assertEqual(snapshot["raw_total_amount"], Decimal("92040.99"))
 
+    def test_bi_daily_sales_snapshot_clamps_to_operational_cutoff_without_official_cut_row(self):
+        sucursal = self._create_sucursal("CUT-OPS", "Sucursal Corte Operativo")
+        closed_cut_day = date(2026, 4, 21)
+        partial_day = date(2026, 4, 22)
+
+        FactVentaDiaria.objects.create(
+            fecha=closed_cut_day,
+            sucursal=sucursal,
+            producto_clave="OPS-CLOSED",
+            producto_nombre="Pastel Dia Cerrado",
+            cantidad=Decimal("110"),
+            tickets=280,
+            venta_bruta=Decimal("90500.00"),
+            descuento=Decimal("0"),
+            venta_total=Decimal("90500.00"),
+            venta_neta=Decimal("90500.00"),
+            costo_estimado=Decimal("0"),
+            margen=Decimal("0"),
+            source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+        )
+        FactVentaDiaria.objects.create(
+            fecha=partial_day,
+            sucursal=sucursal,
+            producto_clave="OPS-PARTIAL",
+            producto_nombre="Pastel Dia Parcial",
+            cantidad=Decimal("55"),
+            tickets=145,
+            venta_bruta=Decimal("47287.00"),
+            descuento=Decimal("0"),
+            venta_total=Decimal("47287.00"),
+            venta_neta=Decimal("47287.00"),
+            costo_estimado=Decimal("0"),
+            margen=Decimal("0"),
+            source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+        )
+
+        mocked_now = datetime(2026, 4, 22, 16, 40, tzinfo=timezone.get_current_timezone())
+        with patch("reportes.dashboard_sales_dataset.timezone.localtime", return_value=mocked_now), patch(
+            "reportes.dashboard_sales_dataset.timezone.localdate", return_value=partial_day
+        ), patch("reportes.views.timezone.localdate", return_value=partial_day):
+            snapshot = _bi_daily_sales_snapshot()
+
+        self.assertEqual(snapshot["date"], closed_cut_day)
+        self.assertEqual(snapshot["date_label"], "2026-04-21")
+        self.assertEqual(snapshot["total_amount"], Decimal("90500.00"))
+        self.assertEqual(snapshot["raw_total_amount"], Decimal("90500.00"))
+
     def test_financial_view_renders(self):
         sucursal = self._create_sucursal("FIN-01", "Sucursal Finanzas")
         receta = Receta.objects.create(

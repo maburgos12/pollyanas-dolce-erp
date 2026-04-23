@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -41,7 +41,15 @@ def _coerce_json(value):
     return value
 
 
-def _fetch_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, object]:
+def _expected_operational_visible_cutoff(*, today: date | None = None) -> date:
+    now = timezone.localtime()
+    if today is not None and today != now.date():
+        now = now.replace(year=today.year, month=today.month, day=today.day)
+    cutoff_has_run = (now.hour, now.minute) >= (3, 35)
+    return now.date() - timedelta(days=1 if cutoff_has_run else 2)
+
+
+def _fetch_dashboard_sales_dataset(*, today: date, months: int, visible_cutoff: date) -> dict[str, object]:
     sql = """
     WITH latest_dates AS (
         SELECT
@@ -51,7 +59,8 @@ def _fetch_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
     latest AS (
         SELECT COALESCE(
             latest_cut_date,
-            latest_fact_date,
+            LEAST(latest_fact_date, %(visible_cutoff)s::date),
+            %(visible_cutoff)s::date,
             %(today)s::date
         )::date AS latest_date
         FROM latest_dates
@@ -281,7 +290,7 @@ def _fetch_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
         (SELECT rows FROM present_branch_ids) AS present_branch_ids;
     """
     with connection.cursor() as cursor:
-        cursor.execute(sql, {"today": today, "months": months})
+        cursor.execute(sql, {"today": today, "months": months, "visible_cutoff": visible_cutoff})
         row = cursor.fetchone()
     columns = [
         "latest_date",
@@ -327,7 +336,8 @@ def _fetch_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
 
 
 def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, object]:
-    raw = _fetch_dashboard_sales_dataset(today=today, months=months)
+    visible_cutoff = _expected_operational_visible_cutoff(today=today)
+    raw = _fetch_dashboard_sales_dataset(today=today, months=months, visible_cutoff=visible_cutoff)
     canonical_latest_date = canonical_point_max_date()
     should_use_canonical_daily_fallback = bool(
         canonical_latest_date
