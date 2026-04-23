@@ -216,6 +216,15 @@ def asegurar_version_costeo(
     snapshot = calcular_costeo_receta(receta, lote_referencia=lote_referencia)
 
     with transaction.atomic():
+        existing = (
+            RecetaCostoVersion.objects.select_for_update()
+            .filter(receta=receta, hash_snapshot=snapshot.hash_snapshot)
+            .order_by("-version_num", "-id")
+            .first()
+        )
+        if existing:
+            return existing, False
+
         latest = (
             RecetaCostoVersion.objects.select_for_update()
             .filter(receta=receta)
@@ -228,27 +237,34 @@ def asegurar_version_costeo(
 
         next_version = 1 if not latest else latest.version_num + 1
         try:
-            created = RecetaCostoVersion.objects.create(
-                receta=receta,
-                version_num=next_version,
-                hash_snapshot=snapshot.hash_snapshot,
-                lote_referencia=snapshot.lote_referencia,
-                driver_scope=snapshot.driver.scope if snapshot.driver else "",
-                driver_nombre=snapshot.driver.nombre if snapshot.driver else "",
-                mo_pct=snapshot.driver.mo_pct if snapshot.driver else Decimal("0"),
-                indirecto_pct=snapshot.driver.indirecto_pct if snapshot.driver else Decimal("0"),
-                mo_fijo=snapshot.driver.mo_fijo if snapshot.driver else Decimal("0"),
-                indirecto_fijo=snapshot.driver.indirecto_fijo if snapshot.driver else Decimal("0"),
-                costo_mp=snapshot.costo_mp,
-                costo_mo=snapshot.costo_mo,
-                costo_indirecto=snapshot.costo_indirecto,
-                costo_total=snapshot.costo_total,
-                rendimiento_cantidad=receta.rendimiento_cantidad,
-                rendimiento_unidad=(receta.rendimiento_unidad.codigo if receta.rendimiento_unidad_id and receta.rendimiento_unidad else ""),
-                costo_por_unidad_rendimiento=snapshot.costo_por_unidad_rendimiento,
-                fuente=(fuente or "AUTO")[:40],
-            )
-            return created, True
+            with transaction.atomic():
+                created, was_created = RecetaCostoVersion.objects.get_or_create(
+                    receta=receta,
+                    hash_snapshot=snapshot.hash_snapshot,
+                    defaults={
+                        "version_num": next_version,
+                        "lote_referencia": snapshot.lote_referencia,
+                        "driver_scope": snapshot.driver.scope if snapshot.driver else "",
+                        "driver_nombre": snapshot.driver.nombre if snapshot.driver else "",
+                        "mo_pct": snapshot.driver.mo_pct if snapshot.driver else Decimal("0"),
+                        "indirecto_pct": snapshot.driver.indirecto_pct if snapshot.driver else Decimal("0"),
+                        "mo_fijo": snapshot.driver.mo_fijo if snapshot.driver else Decimal("0"),
+                        "indirecto_fijo": snapshot.driver.indirecto_fijo if snapshot.driver else Decimal("0"),
+                        "costo_mp": snapshot.costo_mp,
+                        "costo_mo": snapshot.costo_mo,
+                        "costo_indirecto": snapshot.costo_indirecto,
+                        "costo_total": snapshot.costo_total,
+                        "rendimiento_cantidad": receta.rendimiento_cantidad,
+                        "rendimiento_unidad": (
+                            receta.rendimiento_unidad.codigo
+                            if receta.rendimiento_unidad_id and receta.rendimiento_unidad
+                            else ""
+                        ),
+                        "costo_por_unidad_rendimiento": snapshot.costo_por_unidad_rendimiento,
+                        "fuente": (fuente or "AUTO")[:40],
+                    },
+                )
+            return created, was_created
         except IntegrityError:
             existing = (
                 RecetaCostoVersion.objects.filter(receta=receta, hash_snapshot=snapshot.hash_snapshot)
