@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 from celery import shared_task
 from django.core.cache import cache
 from django.core.management import call_command
+from django.db.models import Sum
 
 from core.audit import log_event
+from pos_bridge.models import PointDailyBranchIndicator, PointSyncJob
 from pos_bridge.services.realtime_inventory_service import deliver_ecommerce_webhook, run_realtime_inventory_sync
 from pos_bridge.tasks.retry_failed_jobs import retry_failed_jobs
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
@@ -18,10 +21,79 @@ from pos_bridge.tasks.run_recipe_gap_audit import run_recipe_gap_audit
 from pos_bridge.tasks.run_transfer_sync import run_transfer_sync
 from pos_bridge.tasks.run_waste_sync import run_waste_sync
 from pos_bridge.tasks.run_weekly_cost_snapshot import run_weekly_cost_snapshot
+from reportes.analytics_service import refresh_dashboard_full_materialized_view
+from reportes.dashboard_full_dataset import get_materialized_dashboard_full_payload
+from reportes.models import FactVentaDiaria
 
 BI_FORCE_REFRESH_LOCK_KEY = "reportes:bi-force-refresh-lock"
 INTEGRATIONS_ANALYTICS_REFRESH_LOCK_KEY = "integraciones:analytics-refresh-lock"
 INTEGRATIONS_OPERATIONAL_REFRESH_LOCK_KEY = "integraciones:operational-refresh-lock"
+VISIBLE_CUT_REFRESH_TOLERANCE = Decimal("0.01")
+
+
+def _decimal_total(value) -> Decimal:
+    return Decimal(str(value or 0)).quantize(VISIBLE_CUT_REFRESH_TOLERANCE)
+
+
+def _totals_match(left: Decimal, right: Decimal) -> bool:
+    return abs(left - right) <= VISIBLE_CUT_REFRESH_TOLERANCE
+
+
+def _coerce_snapshot_date(value):
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _read_materialized_visible_cut(*, months_window: int = 6) -> dict[str, object]:
+    payload = get_materialized_dashboard_full_payload(months_window=months_window) or {}
+    snapshot = dict(payload.get("daily_sales_snapshot") or {})
+    return {
+        "date": _coerce_snapshot_date(snapshot.get("date")),
+        "total_amount": _decimal_total(snapshot.get("total_amount")),
+    }
+
+
+def _validate_visible_cut_refresh(*, reference_date: date) -> dict[str, object]:
+    fact_total = _decimal_total(
+        FactVentaDiaria.objects.filter(fecha=reference_date).aggregate(total=Sum("venta_total")).get("total")
+    )
+    indicator_total = _decimal_total(
+        PointDailyBranchIndicator.objects.filter(indicator_date=reference_date).aggregate(total=Sum("total_amount")).get("total")
+    )
+
+    snapshot = _read_materialized_visible_cut()
+    if snapshot["date"] != reference_date or not _totals_match(snapshot["total_amount"], fact_total):
+        refresh_dashboard_full_materialized_view(months_windows=(6,), concurrently=False)
+        snapshot = _read_materialized_visible_cut()
+
+    if indicator_total > 0 and not _totals_match(fact_total, indicator_total):
+        raise RuntimeError(
+            "Visible cut mismatch after sync: "
+            f"fact={fact_total} indicator={indicator_total} date={reference_date.isoformat()}"
+        )
+    if snapshot["date"] != reference_date:
+        raise RuntimeError(
+            "Visible cut snapshot date mismatch after sync: "
+            f"expected={reference_date.isoformat()} got={snapshot['date']}"
+        )
+    if not _totals_match(snapshot["total_amount"], fact_total):
+        raise RuntimeError(
+            "Visible cut snapshot total mismatch after sync: "
+            f"fact={fact_total} snapshot={snapshot['total_amount']} date={reference_date.isoformat()}"
+        )
+
+    return {
+        "fact_total": f"{fact_total:.2f}",
+        "indicator_total": f"{indicator_total:.2f}",
+        "materialized_total": f"{snapshot['total_amount']:.2f}",
+        "materialized_date": snapshot["date"].isoformat() if snapshot["date"] else "",
+    }
 
 
 @shared_task(name="pos_bridge.daily_sales_sync", bind=True, max_retries=2, default_retry_delay=300, acks_late=True)
@@ -352,6 +424,11 @@ def task_visible_cut_refresh_cycle(
         )
         payload["sync_job_id"] = getattr(sync_job, "id", None)
         payload["sync_status"] = getattr(sync_job, "status", "")
+        if getattr(sync_job, "status", "") not in {PointSyncJob.STATUS_SUCCESS, PointSyncJob.STATUS_PARTIAL}:
+            raise RuntimeError(
+                f"Visible cut sync finished with unexpected status {getattr(sync_job, 'status', '') or 'UNKNOWN'}."
+            )
+        payload.update(_validate_visible_cut_refresh(reference_date=reference_date))
         log_event(
             triggered_by,
             "INTEGRATIONS_OPERATIONAL_REFRESH_COMPLETED",

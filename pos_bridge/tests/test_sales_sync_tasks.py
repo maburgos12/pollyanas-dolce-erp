@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
 
 from pos_bridge.models import PointSyncJob
+from pos_bridge.tasks.celery_tasks import task_visible_cut_refresh_cycle
 from pos_bridge.tasks.run_monthly_product_closure import run_monthly_product_closure
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_production_sync import run_production_sync
@@ -326,3 +327,52 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
             approval_reason="scheduled_monthly_automation",
             approval_channel="celery_monthly_product_closure",
         )
+
+
+class VisibleCutRefreshTaskTests(SimpleTestCase):
+    def test_visible_cut_refresh_cycle_records_validation_totals(self):
+        fake_job = SimpleNamespace(id=321, status=PointSyncJob.STATUS_SUCCESS)
+
+        with (
+            patch("pos_bridge.tasks.celery_tasks.run_daily_sales_sync", return_value=fake_job) as sync_mock,
+            patch(
+                "pos_bridge.tasks.celery_tasks._validate_visible_cut_refresh",
+                return_value={
+                    "fact_total": "92035.99",
+                    "indicator_total": "92035.99",
+                    "materialized_total": "92035.99",
+                    "materialized_date": "2026-04-21",
+                },
+            ) as validate_mock,
+            patch("pos_bridge.tasks.celery_tasks.log_event") as log_mock,
+            patch("pos_bridge.tasks.celery_tasks.cache.delete"),
+        ):
+            payload = task_visible_cut_refresh_cycle.run(reference_date_iso="2026-04-21", triggered_by_id=None)
+
+        sync_mock.assert_called_once()
+        validate_mock.assert_called_once_with(reference_date=date(2026, 4, 21))
+        self.assertEqual(payload["sync_job_id"], 321)
+        self.assertEqual(payload["sync_status"], PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(payload["fact_total"], "92035.99")
+        self.assertEqual(payload["materialized_date"], "2026-04-21")
+        log_mock.assert_called_once()
+
+    def test_visible_cut_refresh_cycle_fails_when_validation_detects_mismatch(self):
+        fake_job = SimpleNamespace(id=654, status=PointSyncJob.STATUS_SUCCESS)
+
+        with (
+            patch("pos_bridge.tasks.celery_tasks.run_daily_sales_sync", return_value=fake_job),
+            patch(
+                "pos_bridge.tasks.celery_tasks._validate_visible_cut_refresh",
+                side_effect=RuntimeError("Visible cut mismatch after sync"),
+            ),
+            patch("pos_bridge.tasks.celery_tasks.log_event") as log_mock,
+            patch("pos_bridge.tasks.celery_tasks.cache.delete"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Visible cut mismatch after sync"):
+                task_visible_cut_refresh_cycle.run(reference_date_iso="2026-04-21", triggered_by_id=None)
+
+        self.assertEqual(log_mock.call_count, 1)
+        args, kwargs = log_mock.call_args
+        self.assertEqual(args[1], "INTEGRATIONS_OPERATIONAL_REFRESH_FAILED")
+        self.assertIn("Visible cut mismatch after sync", kwargs["payload"]["error"])
