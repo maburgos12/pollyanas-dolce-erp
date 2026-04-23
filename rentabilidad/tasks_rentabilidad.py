@@ -122,27 +122,43 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
             categoria_gasto__codigo="NOMINA"
         ).aggregate(t=Sum("monto"))["t"] or Decimal("0")
 
-        # ---- COSTO MATERIA PRIMA (real desde RecetaCostoVersion) ----
+        # ---- COSTO MATERIA PRIMA (historico mensual si existe, fallback por fecha) ----
+        from datetime import timedelta
+        from django.db.models import Case, IntegerField, When
+        from reportes.models import RecetaCostoHistoricoMensual
+
         receta_ids = list(
             ventas_qs.filter(receta__isnull=False).values_list("receta_id", flat=True).distinct()
         )
 
-        from django.db.models import Case, IntegerField, When
-
         versiones = {}
-        for rv in RecetaCostoVersion.objects.filter(
-            receta_id__in=receta_ids
-        ).annotate(
-            fuente_prioridad=Case(
-                When(fuente="POINT_PRODUCTION_REPORT", then=0),
-                When(fuente="POINT_COST_CAPTURE", then=1),
-                When(fuente="POINT_COST_CAPTURE_FIX", then=2),
-                default=3,
-                output_field=IntegerField(),
-            )
-        ).order_by("receta_id", "fuente_prioridad", "-version_num"):
-            if rv.receta_id not in versiones:
-                versiones[rv.receta_id] = rv.costo_total
+
+        # Primero intentar usar costeo historico del mes (congelado al cierre)
+        historicos = RecetaCostoHistoricoMensual.objects.filter(
+            receta_id__in=receta_ids,
+            periodo=periodo,
+        )
+        for historico in historicos:
+            versiones[historico.receta_id] = historico.costo_total
+
+        # Para recetas sin historico del mes, usar costo vigente hasta esa fecha
+        recetas_sin_historico = [receta_id for receta_id in receta_ids if receta_id not in versiones]
+        if recetas_sin_historico:
+            fin_periodo = ((periodo.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
+            for rv in RecetaCostoVersion.objects.filter(
+                receta_id__in=recetas_sin_historico,
+                creado_en__date__lte=fin_periodo,
+            ).annotate(
+                fuente_prioridad=Case(
+                    When(fuente="POINT_PRODUCTION_REPORT", then=0),
+                    When(fuente="POINT_COST_CAPTURE", then=1),
+                    When(fuente="POINT_COST_CAPTURE_FIX", then=2),
+                    default=3,
+                    output_field=IntegerField(),
+                )
+            ).order_by("receta_id", "fuente_prioridad", "-version_num"):
+                if rv.receta_id not in versiones:
+                    versiones[rv.receta_id] = rv.costo_total
 
         costo_mp_real = Decimal("0")
         for venta in ventas_qs.filter(receta__isnull=False):
