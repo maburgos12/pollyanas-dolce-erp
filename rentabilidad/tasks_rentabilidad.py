@@ -144,6 +144,10 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
         # Si no se pudo calcular costo real (0 recetas vinculadas), usar estimado 30%
         if costo_mp_real == Decimal("0") and ventas_brutas > 0:
             costo_mp_real = (ventas_brutas * Decimal("0.30")).quantize(Decimal("0.01"))
+        # Cap de seguridad: si CMV supera 80% de ventas, el costeo está mal escalado
+        # Usar fallback 30% hasta que el costeo real se corrija
+        elif ventas_brutas > 0 and costo_mp_real > (ventas_brutas * Decimal("0.80")):
+            costo_mp_real = (ventas_brutas * Decimal("0.30")).quantize(Decimal("0.01"))
 
         # ---- GASTOS CORPORATIVOS PRORRATEADOS ----
         # Tomamos gastos de centros de costo CORPORATIVO y los dividimos entre 9 sucursales
