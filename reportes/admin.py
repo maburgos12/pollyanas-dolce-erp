@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from reportes.models import (
     Alert,
+    AnalyticAuditLog,
     AutoControlSettings,
     AutoPurchaseRequestSnapshot,
     CargaGastoOperativoArchivo,
@@ -35,6 +36,14 @@ from reportes.models import (
     ReglaAsignacionGasto,
     SupplierLeadTime,
 )
+
+
+@admin.register(AnalyticAuditLog)
+class AnalyticAuditLogAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "audit_type", "status", "date_from", "date_to", "discrepancy_count")
+    list_filter = ("audit_type", "status", "date_from", "date_to")
+    search_fields = ("audit_type", "message")
+    readonly_fields = ("created_at",)
 
 
 @admin.register(CargaGastoOperativoArchivo)

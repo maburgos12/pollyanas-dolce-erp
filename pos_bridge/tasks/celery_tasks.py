@@ -23,7 +23,7 @@ from pos_bridge.tasks.run_waste_sync import run_waste_sync
 from pos_bridge.tasks.run_weekly_cost_snapshot import run_weekly_cost_snapshot
 from reportes.analytics_service import refresh_dashboard_full_materialized_view
 from reportes.dashboard_full_dataset import get_materialized_dashboard_full_payload
-from reportes.models import FactVentaDiaria
+from reportes.models import AnalyticAuditLog, FactVentaDiaria
 
 BI_FORCE_REFRESH_LOCK_KEY = "reportes:bi-force-refresh-lock"
 INTEGRATIONS_ANALYTICS_REFRESH_LOCK_KEY = "integraciones:analytics-refresh-lock"
@@ -94,6 +94,25 @@ def _validate_visible_cut_refresh(*, reference_date: date) -> dict[str, object]:
         "materialized_total": f"{snapshot['total_amount']:.2f}",
         "materialized_date": snapshot["date"].isoformat() if snapshot["date"] else "",
     }
+
+
+def _record_visible_cut_audit(
+    *,
+    reference_date: date,
+    status: str,
+    message: str,
+    payload: dict[str, object],
+    discrepancy_count: int = 0,
+) -> None:
+    AnalyticAuditLog.objects.create(
+        audit_type="VISIBLE_CUT_REFRESH",
+        status=status,
+        date_from=reference_date,
+        date_to=reference_date,
+        discrepancy_count=max(int(discrepancy_count or 0), 0),
+        message=message,
+        payload=payload,
+    )
 
 
 @shared_task(name="pos_bridge.daily_sales_sync", bind=True, max_retries=2, default_retry_delay=300, acks_late=True)
@@ -429,6 +448,12 @@ def task_visible_cut_refresh_cycle(
                 f"Visible cut sync finished with unexpected status {getattr(sync_job, 'status', '') or 'UNKNOWN'}."
             )
         payload.update(_validate_visible_cut_refresh(reference_date=reference_date))
+        _record_visible_cut_audit(
+            reference_date=reference_date,
+            status=AnalyticAuditLog.STATUS_OK,
+            message="Visible cut refresh validated against facts, indicators, and dashboard snapshot.",
+            payload=payload,
+        )
         log_event(
             triggered_by,
             "INTEGRATIONS_OPERATIONAL_REFRESH_COMPLETED",
@@ -437,6 +462,13 @@ def task_visible_cut_refresh_cycle(
             payload=payload,
         )
     except Exception as exc:
+        _record_visible_cut_audit(
+            reference_date=reference_date,
+            status=AnalyticAuditLog.STATUS_ERROR,
+            message=f"Visible cut refresh failed: {exc}",
+            payload={**payload, "error": str(exc)},
+            discrepancy_count=1,
+        )
         log_event(
             triggered_by,
             "INTEGRATIONS_OPERATIONAL_REFRESH_FAILED",

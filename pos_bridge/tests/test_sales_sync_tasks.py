@@ -344,6 +344,7 @@ class VisibleCutRefreshTaskTests(SimpleTestCase):
                     "materialized_date": "2026-04-21",
                 },
             ) as validate_mock,
+            patch("pos_bridge.tasks.celery_tasks._record_visible_cut_audit") as audit_mock,
             patch("pos_bridge.tasks.celery_tasks.log_event") as log_mock,
             patch("pos_bridge.tasks.celery_tasks.cache.delete"),
         ):
@@ -355,6 +356,7 @@ class VisibleCutRefreshTaskTests(SimpleTestCase):
         self.assertEqual(payload["sync_status"], PointSyncJob.STATUS_SUCCESS)
         self.assertEqual(payload["fact_total"], "92035.99")
         self.assertEqual(payload["materialized_date"], "2026-04-21")
+        audit_mock.assert_called_once()
         log_mock.assert_called_once()
 
     def test_visible_cut_refresh_cycle_fails_when_validation_detects_mismatch(self):
@@ -366,12 +368,14 @@ class VisibleCutRefreshTaskTests(SimpleTestCase):
                 "pos_bridge.tasks.celery_tasks._validate_visible_cut_refresh",
                 side_effect=RuntimeError("Visible cut mismatch after sync"),
             ),
+            patch("pos_bridge.tasks.celery_tasks._record_visible_cut_audit") as audit_mock,
             patch("pos_bridge.tasks.celery_tasks.log_event") as log_mock,
             patch("pos_bridge.tasks.celery_tasks.cache.delete"),
         ):
             with self.assertRaisesRegex(RuntimeError, "Visible cut mismatch after sync"):
                 task_visible_cut_refresh_cycle.run(reference_date_iso="2026-04-21", triggered_by_id=None)
 
+        audit_mock.assert_called_once()
         self.assertEqual(log_mock.call_count, 1)
         args, kwargs = log_mock.call_args
         self.assertEqual(args[1], "INTEGRATIONS_OPERATIONAL_REFRESH_FAILED")
