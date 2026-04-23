@@ -597,8 +597,9 @@
         <form method="post" action="{% url 'reportes:bi_force_refresh' %}" class="home-exec-refresh-form">
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <input type="hidden" name="reference_date" value="{% if sales_refresh_status and sales_refresh_status.target_refresh_date_iso %}{{ sales_refresh_status.target_refresh_date_iso }}{% elif daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% endif %}">
-          <input type="hidden" name="lookback_days" value="3">
+          <input type="hidden" name="refresh_scope" value="cutoff">
+          <input type="hidden" name="reference_date" value="{% if daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% elif sales_refresh_status and sales_refresh_status.target_refresh_date_iso %}{{ sales_refresh_status.target_refresh_date_iso }}{% endif %}">
+          <input type="hidden" name="lookback_days" value="1">
           <button
             type="submit"
             class="btn btn-secondary home-exec-refresh-btn {% if sales_refresh_status and sales_refresh_status.button_disabled %}is-loading{% endif %}"

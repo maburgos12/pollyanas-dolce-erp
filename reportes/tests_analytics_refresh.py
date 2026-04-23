@@ -112,6 +112,32 @@ class BIForceRefreshEndpointTests(TestCase):
         self.assertFalse(AuditLog.objects.filter(action="INTEGRATIONS_OPERATIONAL_REFRESH_COMPLETED").exists())
         self.assertContains(response, "Actualización del corte en proceso")
 
+    @patch("reportes.views.task_visible_cut_refresh_cycle.delay")
+    def test_force_refresh_queues_visible_cut_refresh_for_dashboard_scope(self, mock_delay):
+        mock_delay.return_value = SimpleNamespace(id="task-cut-123")
+
+        response = self.client.post(
+            reverse("reportes:bi_force_refresh"),
+            {
+                "reference_date": "2026-04-21",
+                "lookback_days": "3",
+                "refresh_scope": "cutoff",
+                "next": reverse("reportes:bi"),
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_delay.assert_called_once_with(
+            reference_date_iso="2026-04-21",
+            triggered_by_id=self.user.id,
+        )
+        requested = AuditLog.objects.filter(action="REPORTES_BI_FORCE_REFRESH_REQUESTED").latest("timestamp")
+        self.assertEqual(requested.payload["reference_date"], "2026-04-21")
+        self.assertEqual(requested.payload["lookback_days"], 1)
+        self.assertEqual(requested.payload["scope"], "visible_cut")
+        self.assertContains(response, "Actualización del corte en proceso")
+
     @patch("reportes.views.task_operations_automation_cycle.delay", side_effect=RuntimeError("fallo refresh"))
     def test_force_refresh_logs_failure_and_releases_lock_when_queueing_fails(self, mock_delay):
         response = self.client.post(

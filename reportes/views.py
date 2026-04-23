@@ -58,7 +58,7 @@ from pos_bridge.models import (
     PointSyncJob,
 )
 from pos_bridge.config import load_point_bridge_settings
-from pos_bridge.tasks.celery_tasks import task_operations_automation_cycle
+from pos_bridge.tasks.celery_tasks import task_operations_automation_cycle, task_visible_cut_refresh_cycle
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
 from ventas.services.sales_canonical_source import (
     OFFICIAL_POINT_SOURCE as CANONICAL_OFFICIAL_POINT_SOURCE,
@@ -227,6 +227,39 @@ def _queue_operations_refresh(
     return payload
 
 
+def _queue_visible_cut_refresh(
+    *,
+    reference_date: date,
+    triggered_by,
+) -> dict[str, object]:
+    payload = {
+        "reference_date": reference_date.isoformat(),
+        "lookback_days": 1,
+        "lag_days": 0,
+        "scope": "visible_cut",
+        "triggered_by_id": getattr(triggered_by, "id", None),
+        "trigger": "dashboard_visible_cut_refresh",
+    }
+    try:
+        async_result = task_visible_cut_refresh_cycle.delay(
+            reference_date_iso=reference_date.isoformat(),
+            triggered_by_id=getattr(triggered_by, "id", None),
+        )
+    except Exception as exc:
+        log_event(
+            triggered_by,
+            "INTEGRATIONS_OPERATIONAL_REFRESH_FAILED",
+            "reportes.AnalyticRefreshWindow",
+            reference_date.isoformat(),
+            payload={**payload, "error": str(exc)},
+        )
+        cache.delete(BI_FORCE_REFRESH_LOCK_KEY)
+        cache.delete(INTEGRATIONS_OPERATIONAL_REFRESH_LOCK_KEY)
+        raise
+    payload["task_id"] = str(getattr(async_result, "id", "") or "")
+    return payload
+
+
 @login_required
 def bi_force_refresh(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
@@ -235,6 +268,7 @@ def bi_force_refresh(request: HttpRequest) -> HttpResponse:
         raise PermissionDenied
 
     redirect_url = _bi_force_refresh_redirect_target(request)
+    refresh_scope = (request.POST.get("refresh_scope") or "").strip().lower()
     reference_date_raw = (request.POST.get("reference_date") or "").strip()
     try:
         reference_date = date.fromisoformat(reference_date_raw) if reference_date_raw else timezone.localdate()
@@ -244,6 +278,8 @@ def bi_force_refresh(request: HttpRequest) -> HttpResponse:
         lookback_days = max(1, min(int(request.POST.get("lookback_days") or 7), 30))
     except (TypeError, ValueError):
         lookback_days = 7
+    if refresh_scope == "cutoff":
+        lookback_days = 1
 
     if not cache.add(BI_FORCE_REFRESH_LOCK_KEY, reference_date.isoformat(), BI_FORCE_REFRESH_LOCK_SECONDS):
         messages.warning(
@@ -261,15 +297,21 @@ def bi_force_refresh(request: HttpRequest) -> HttpResponse:
             payload={
                 "reference_date": reference_date.isoformat(),
                 "lookback_days": lookback_days,
-                "scope": "analytics_and_operations_cycle",
+                "scope": "visible_cut" if refresh_scope == "cutoff" else "analytics_and_operations_cycle",
                 "trigger": "reportes_bi_ui",
             },
         )
-        _queue_operations_refresh(
-            reference_date=reference_date,
-            lookback_days=lookback_days,
-            triggered_by=request.user,
-        )
+        if refresh_scope == "cutoff":
+            _queue_visible_cut_refresh(
+                reference_date=reference_date,
+                triggered_by=request.user,
+            )
+        else:
+            _queue_operations_refresh(
+                reference_date=reference_date,
+                lookback_days=lookback_days,
+                triggered_by=request.user,
+            )
     except Exception as exc:
         messages.error(
             request,
@@ -284,7 +326,7 @@ def bi_force_refresh(request: HttpRequest) -> HttpResponse:
         request,
         (
             "Actualización del corte en proceso. "
-            f"Referencia {reference_date.isoformat()} con lookback de {lookback_days} día(s)."
+            f"Referencia {reference_date.isoformat()}."
         ),
     )
     return redirect(redirect_url)
@@ -751,8 +793,8 @@ def _sales_refresh_status(*, visible_cut_date: date | None = None) -> dict[str, 
         last_event = latest_requested
         status_title = "Pendiente sin rezago"
         status_message = (
-            f"El corte visible ya está al día ({visible_cut_date_iso or expected_cut_date_iso}). "
-            "La solicitud quedó en cola para validar nuevamente el ciclo operativo."
+            f"Se está revalidando el corte visible {request_target_date.isoformat() if request_target_date else (visible_cut_date_iso or expected_cut_date_iso)}. "
+            "No hace falta volver a solicitar la actualización."
         )
         action_label = "Actualización en curso"
         status_label = "Pendiente sin rezago"
@@ -776,7 +818,7 @@ def _sales_refresh_status(*, visible_cut_date: date | None = None) -> dict[str, 
                 "Aún no hay una ejecución auditada que cierre ese rezago."
             )
         else:
-            status_message = "El botón sólo encola la actualización; el procesamiento real depende del worker operativo."
+            status_message = "El botón encola la actualización del corte visible y el worker la procesa en segundo plano."
         action_label = "Actualizar ventas"
         status_label = "Sin ejecución"
 

@@ -319,6 +319,62 @@ def task_analytics_refresh_cycle(
 
 
 @shared_task(
+    name="reportes.visible_cut_refresh_cycle",
+    bind=True,
+    max_retries=1,
+    default_retry_delay=600,
+    acks_late=True,
+    time_limit=2400,
+    soft_time_limit=2100,
+)
+def task_visible_cut_refresh_cycle(
+    self,
+    *,
+    reference_date_iso: str | None = None,
+    triggered_by_id: int | None = None,
+):
+    reference_date = date.fromisoformat(reference_date_iso) if reference_date_iso else date.today()
+    triggered_by = _resolve_user(triggered_by_id)
+    payload = {
+        "reference_date": reference_date.isoformat(),
+        "lookback_days": 1,
+        "lag_days": 0,
+        "scope": "visible_cut",
+        "triggered_by_id": triggered_by_id,
+    }
+    try:
+        sync_job = run_daily_sales_sync(
+            triggered_by=triggered_by,
+            lookback_days=1,
+            lag_days=0,
+            anchor_date=reference_date,
+            publish_analytics=True,
+        )
+        payload["sync_job_id"] = getattr(sync_job, "id", None)
+        payload["sync_status"] = getattr(sync_job, "status", "")
+        log_event(
+            triggered_by,
+            "INTEGRATIONS_OPERATIONAL_REFRESH_COMPLETED",
+            "reportes.AnalyticRefreshWindow",
+            reference_date.isoformat(),
+            payload=payload,
+        )
+    except Exception as exc:
+        log_event(
+            triggered_by,
+            "INTEGRATIONS_OPERATIONAL_REFRESH_FAILED",
+            "reportes.AnalyticRefreshWindow",
+            reference_date.isoformat(),
+            payload={**payload, "error": str(exc)},
+        )
+        raise
+    finally:
+        cache.delete(BI_FORCE_REFRESH_LOCK_KEY)
+        cache.delete(INTEGRATIONS_OPERATIONAL_REFRESH_LOCK_KEY)
+    return payload
+
+
+@shared_task(
     name="reportes.operations_automation_cycle",
     bind=True,
     max_retries=1,
