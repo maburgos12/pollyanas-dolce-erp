@@ -127,10 +127,20 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
             ventas_qs.filter(receta__isnull=False).values_list("receta_id", flat=True).distinct()
         )
 
+        from django.db.models import Case, IntegerField, When
+
         versiones = {}
         for rv in RecetaCostoVersion.objects.filter(
             receta_id__in=receta_ids
-        ).order_by("receta_id", "-version_num"):
+        ).annotate(
+            fuente_prioridad=Case(
+                When(fuente="POINT_PRODUCTION_REPORT", then=0),
+                When(fuente="POINT_COST_CAPTURE", then=1),
+                When(fuente="POINT_COST_CAPTURE_FIX", then=2),
+                default=3,
+                output_field=IntegerField(),
+            )
+        ).order_by("receta_id", "fuente_prioridad", "-version_num"):
             if rv.receta_id not in versiones:
                 versiones[rv.receta_id] = rv.costo_total
 
