@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from django.db import transaction
+from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.audit import log_event
@@ -185,6 +186,7 @@ class BranchRealOperatingExpenseImportService:
         sheet_name: str,
         target_year: int,
         non_real_policy: str,
+        allow_open_month_real: bool,
     ) -> tuple[BranchRealOperatingExpenseImportSummary, list[_NormalizedExpenseRow]]:
         summary = BranchRealOperatingExpenseImportSummary()
         branch_index = self._branch_index()
@@ -221,6 +223,16 @@ class BranchRealOperatingExpenseImportService:
                     workbook_name=workbook_name,
                     sheet_name=sheet_name,
                 )
+                current_period = timezone.localdate().replace(day=1)
+                if (
+                    row_type == GastoOperativoMensual.TIPO_DATO_REAL
+                    and period == current_period
+                    and not allow_open_month_real
+                ):
+                    raise ValueError(
+                        "no se permite cargar gasto REAL del mes en curso por canal automático; "
+                        "usa captura manual o importación web explícita"
+                    )
                 if row_type != GastoOperativoMensual.TIPO_DATO_REAL:
                     if non_real_policy == NON_REAL_POLICY_IGNORE:
                         summary.skipped_non_real += 1
@@ -305,6 +317,7 @@ class BranchRealOperatingExpenseImportService:
         refresh_until: date | None = None,
         user=None,
         sheet_name: str | None = None,
+        allow_open_month_real: bool = True,
     ) -> BranchRealOperatingExpenseImportSummary:
         if non_real_policy not in {NON_REAL_POLICY_IGNORE, NON_REAL_POLICY_REJECT}:
             raise ValueError(f"non_real_policy inválida: {non_real_policy}")
@@ -320,6 +333,7 @@ class BranchRealOperatingExpenseImportService:
             sheet_name=selected_sheet,
             target_year=target_year,
             non_real_policy=non_real_policy,
+            allow_open_month_real=allow_open_month_real,
         )
         center_index = self._cost_center_index()
         affected_branch_codes: set[str] = set()

@@ -319,6 +319,12 @@ class OperatingExpenseImportAutomationService:
                 refresh_projects=refresh_projects,
                 refresh_until=refresh_until,
                 user=user or run.uploaded_by,
+                allow_open_month_real=(
+                    run.source_channel in {
+                        CargaGastoOperativoArchivo.SOURCE_WEB,
+                        CargaGastoOperativoArchivo.SOURCE_COMMAND,
+                    }
+                ),
             )
         except BranchRealOperatingExpenseImportValidationError as exc:
             self._prepare_error_run(
