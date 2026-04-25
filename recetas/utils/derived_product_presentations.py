@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, When
 from django.db.models import DecimalField
 
 from maestros.utils.canonical_catalog import latest_costo_canonico
-from recetas.models import LineaReceta, Receta, RecetaPresentacionDerivada
+from recetas.models import LineaReceta, Receta, RecetaCostoVersion, RecetaPresentacionDerivada
 from recetas.utils.costeo_snapshot import (
     convert_unit_cost,
     resolve_insumo_unit_cost,
@@ -17,6 +17,34 @@ from recetas.utils.normalizacion import normalizar_nombre
 
 ZERO = Decimal("0")
 LINE_COST_OUTPUT_FIELD = DecimalField(max_digits=24, decimal_places=6)
+
+
+def _prioritized_version_cost_map(recipe_ids: set[int]) -> dict[int, Decimal]:
+    if not recipe_ids:
+        return {}
+
+    costs: dict[int, Decimal] = {}
+    for version in (
+        RecetaCostoVersion.objects.filter(receta_id__in=recipe_ids, costo_total__gt=0)
+        .annotate(
+            fuente_prioridad=Case(
+                When(fuente="POINT_PRODUCTION_REPORT", then=0),
+                When(fuente="POINT_COST_CAPTURE", then=1),
+                When(fuente="POINT_COST_CAPTURE_FIX", then=2),
+                When(fuente="WEEKLY_SNAPSHOT", then=3),
+                default=4,
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("receta_id", "fuente_prioridad", "-version_num", "-creado_en", "-id")
+    ):
+        if version.receta_id not in costs:
+            costs[int(version.receta_id)] = Decimal(str(version.costo_total or 0))
+    return costs
+
+
+def _prioritized_version_cost(receta: Receta) -> Decimal | None:
+    return _prioritized_version_cost_map({int(receta.id)}).get(int(receta.id))
 
 
 def _resolve_line_total_cost(linea: LineaReceta) -> Decimal:
@@ -69,7 +97,9 @@ def get_parent_unit_cost(receta: Receta) -> Decimal | None:
     units = Decimal(str(relation.unidades_por_padre or 0))
     if units <= 0:
         return None
-    parent_total = relation.receta_padre.costo_total_estimado_decimal
+    parent_total = _prioritized_version_cost(relation.receta_padre)
+    if parent_total is None or parent_total <= 0:
+        parent_total = relation.receta_padre.costo_total_estimado_decimal
     if parent_total <= 0:
         return None
     return parent_total / units
@@ -268,6 +298,7 @@ def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> di
 
     memo: dict[int, Decimal] = {}
     visiting: set[int] = set()
+    version_cost_by_parent = _prioritized_version_cost_map({parent_id for parent_id, _units in relation_by_recipe.values()})
 
     def resolve(recipe_id: int) -> Decimal:
         if recipe_id in memo:
@@ -280,7 +311,9 @@ def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> di
         if relation:
             parent_id, units = relation
             if units > ZERO:
-                parent_total = resolve(parent_id)
+                parent_total = version_cost_by_parent.get(parent_id)
+                if parent_total is None or parent_total <= ZERO:
+                    parent_total = resolve(parent_id)
                 if parent_total > ZERO:
                     total += parent_total / units
         visiting.discard(recipe_id)
