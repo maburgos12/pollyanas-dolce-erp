@@ -6,7 +6,7 @@ from pos_bridge.services.point_inventory_cost_capture_service import PointInvent
 
 
 class Command(BaseCommand):
-    help = "Captura costo unitario desde Point -> Existencias -> ALMACEN y opcionalmente lo persiste en CostoInsumo."
+    help = "Captura costo unitario desde Point -> Existencias -> ALMACEN y opcionalmente lo persiste en CostoInsumo y costo de reventa."
 
     def add_arguments(self, parser):
         parser.add_argument("--branch", default="ALMACEN", help="Sucursal de existencias a consultar (default: ALMACEN).")
@@ -37,7 +37,14 @@ class Command(BaseCommand):
 
         created = 0
         skipped = 0
+        resale_created = 0
+        resale_skipped = 0
         for row in rows:
+            _resale_cost, resale_was_created, resale_status = service.persist_resale_product_cost_row(row)
+            if resale_was_created:
+                resale_created += 1
+            else:
+                resale_skipped += 1
             _cost, was_created, status = service.persist_cost_row(row)
             if was_created:
                 created += 1
@@ -47,3 +54,5 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"Costos creados: {created}"))
         self.stdout.write(f"  - omitidos: {skipped}")
+        self.stdout.write(self.style.SUCCESS(f"Costos reventa creados: {resale_created}"))
+        self.stdout.write(f"  - reventa omitidos: {resale_skipped}")

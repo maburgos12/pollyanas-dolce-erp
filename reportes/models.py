@@ -565,6 +565,79 @@ class RecetaCostoHistoricoMensual(models.Model):
         return f"{self.periodo:%Y-%m} · {self.receta.nombre}"
 
 
+class ProductoReventaCosto(models.Model):
+    FUENTE_POINT_ALMACEN = "POINT_ALMACEN"
+    FUENTE_POINT_HISTORIAL = "POINT_PRODUCT_HISTORY"
+    FUENTE_MANUAL = "MANUAL"
+    FUENTE_CHOICES = [
+        (FUENTE_POINT_ALMACEN, "Point ALMACEN"),
+        (FUENTE_POINT_HISTORIAL, "Historial producto Point"),
+        (FUENTE_MANUAL, "Manual"),
+    ]
+
+    producto_point = models.ForeignKey(
+        "pos_bridge.PointProduct",
+        on_delete=models.CASCADE,
+        related_name="costos_reventa",
+    )
+    costo_unitario = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    fecha_vigencia = models.DateField(db_index=True)
+    fuente = models.CharField(max_length=40, choices=FUENTE_CHOICES, default=FUENTE_POINT_ALMACEN, db_index=True)
+    proveedor_nombre = models.CharField(max_length=255, blank=True, default="")
+    unidad = models.CharField(max_length=40, blank=True, default="")
+    cantidad_snapshot = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    source_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_vigencia", "producto_point__name"]
+        verbose_name = "Costo de producto de reventa"
+        verbose_name_plural = "Costos de productos de reventa"
+        indexes = [
+            models.Index(fields=["producto_point", "fecha_vigencia"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.producto_point.name} · {self.fecha_vigencia:%Y-%m-%d} · {self.costo_unitario}"
+
+
+class ProductoReventaCostoHistoricoMensual(models.Model):
+    METODO_PROMEDIO_MENSUAL = "MONTHLY_WEIGHTED"
+    METODO_ARRASTRE = "ROLLED_FORWARD"
+    METODO_POINT_ALMACEN = "POINT_ALMACEN"
+    METODO_CHOICES = [
+        (METODO_PROMEDIO_MENSUAL, "Promedio ponderado mensual"),
+        (METODO_ARRASTRE, "Arrastre último costo"),
+        (METODO_POINT_ALMACEN, "Costo Point ALMACEN"),
+    ]
+
+    periodo = models.DateField(db_index=True)
+    producto_point = models.ForeignKey(
+        "pos_bridge.PointProduct",
+        on_delete=models.CASCADE,
+        related_name="costos_reventa_historicos_mensuales",
+    )
+    costo_promedio = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    metodo = models.CharField(max_length=30, choices=METODO_CHOICES, default=METODO_PROMEDIO_MENSUAL, db_index=True)
+    source_date = models.DateField(null=True, blank=True)
+    sample_count = models.PositiveIntegerField(default=0)
+    weighted_quantity = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-periodo", "producto_point__name"]
+        verbose_name = "Costo histórico mensual de producto de reventa"
+        verbose_name_plural = "Costos históricos mensuales de productos de reventa"
+        unique_together = [("periodo", "producto_point")]
+
+    def __str__(self) -> str:
+        return f"{self.periodo:%Y-%m} · {self.producto_point.name}"
+
+
 class PresupuestoImport(models.Model):
     TIPO_GENERAL = "GENERAL"
     TIPO_DETALLE = "DETALLE"

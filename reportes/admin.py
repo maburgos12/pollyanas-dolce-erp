@@ -30,6 +30,8 @@ from reportes.models import (
     ProyectoInversionSnapshotMensual,
     ProductoCostoOperativoMensual,
     ProductoPricingDecisionMensual,
+    ProductoReventaCosto,
+    ProductoReventaCostoHistoricoMensual,
     ProductoSucursalContribucionMensual,
     RecetaCostoHistoricoMensual,
     ReglaCostoHistoricoInsumo,
@@ -160,6 +162,20 @@ class RecetaCostoHistoricoMensualAdmin(admin.ModelAdmin):
     list_display = ("periodo", "receta", "costo_total", "costo_por_unidad_rendimiento", "coverage_pct")
     list_filter = ("periodo",)
     search_fields = ("receta__nombre", "receta__codigo_point")
+
+
+@admin.register(ProductoReventaCosto)
+class ProductoReventaCostoAdmin(admin.ModelAdmin):
+    list_display = ("fecha_vigencia", "producto_point", "costo_unitario", "fuente", "unidad", "cantidad_snapshot")
+    list_filter = ("fecha_vigencia", "fuente")
+    search_fields = ("producto_point__name", "producto_point__external_id", "producto_point__sku", "proveedor_nombre")
+
+
+@admin.register(ProductoReventaCostoHistoricoMensual)
+class ProductoReventaCostoHistoricoMensualAdmin(admin.ModelAdmin):
+    list_display = ("periodo", "producto_point", "costo_promedio", "metodo", "source_date", "sample_count")
+    list_filter = ("periodo", "metodo")
+    search_fields = ("producto_point__name", "producto_point__external_id", "producto_point__sku")
 
 
 @admin.register(PresupuestoImport)

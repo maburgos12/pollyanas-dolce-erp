@@ -24,6 +24,7 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 f"snapshot_historical_costing period={summary.period_start:%Y-%m} "
                 f"insumo_rows={summary.insumo_rows} receta_rows={summary.receta_rows} "
-                f"missing_recipe_rows={summary.missing_recipe_rows}"
+                f"missing_recipe_rows={summary.missing_recipe_rows} "
+                f"producto_reventa_rows={summary.producto_reventa_rows}"
             )
         )

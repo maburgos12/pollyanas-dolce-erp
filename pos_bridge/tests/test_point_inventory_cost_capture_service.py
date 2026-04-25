@@ -4,7 +4,9 @@ from django.test import TestCase
 from unittest.mock import patch
 
 from maestros.models import Insumo, InsumoAlias, UnidadMedida
+from pos_bridge.models import PointProduct
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService, PointInventoryCostRow
+from reportes.models import ProductoReventaCosto
 
 
 class PointInventoryCostCaptureServiceTests(TestCase):
@@ -44,6 +46,12 @@ class PointInventoryCostCaptureServiceTests(TestCase):
             nombre_point="COSTO CERO",
             nombre="COSTO CERO",
             unidad_base=unidad,
+        )
+        PointProduct.objects.create(
+            external_id="009",
+            sku="009",
+            name="SUSTITUTO DE CREMA",
+            category="Insumos",
         )
         service = PointInventoryCostCaptureService()
         rows = [
@@ -99,7 +107,12 @@ class PointInventoryCostCaptureServiceTests(TestCase):
         self.assertEqual(result.rows_seen, 3)
         self.assertEqual(result.costs_created, 1)
         self.assertEqual(result.costs_existing, 0)
+        self.assertEqual(result.resale_costs_created, 1)
+        self.assertEqual(result.resale_costs_existing, 0)
         self.assertEqual(result.unresolved_matches, 1)
         self.assertEqual(result.zero_cost_matches, 1)
         self.assertEqual(second.costs_created, 0)
         self.assertEqual(second.costs_existing, 1)
+        self.assertEqual(second.resale_costs_created, 0)
+        self.assertEqual(second.resale_costs_existing, 1)
+        self.assertEqual(ProductoReventaCosto.objects.count(), 1)

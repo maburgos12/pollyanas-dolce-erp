@@ -80,6 +80,7 @@ def _construir_contexto(rent) -> str:
         "",
         "=== COSTOS VARIABLES ===",
         f"Materia prima (CMV):   ${rent.costo_materia_prima:,.2f}",
+        f"Reventa:               ${rent.costo_reventa:,.2f}",
         f"Empaque:               ${rent.empaque:,.2f}",
         f"Otros variables:       ${rent.otros_costos_variables:,.2f}",
         f"Total costos variables:${rent.costo_variable_total:,.2f}",

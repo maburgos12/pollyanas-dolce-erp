@@ -62,6 +62,9 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
         GastoOperativoMensual,
         CentroCosto,
         CategoriaGasto,
+        ProductBusinessRule,
+        ProductoReventaCosto,
+        ProductoReventaCostoHistoricoMensual,
         ProyectoInversion,
         ProyectoInversionGasto,
     )
@@ -126,6 +129,7 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
         from datetime import timedelta
         from django.db.models import Case, IntegerField, When
         from reportes.models import RecetaCostoHistoricoMensual
+        fin_periodo = ((periodo.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
 
         receta_ids = list(
             ventas_qs.filter(receta__isnull=False).values_list("receta_id", flat=True).distinct()
@@ -144,7 +148,6 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
         # Para recetas sin historico del mes, usar costo vigente hasta esa fecha
         recetas_sin_historico = [receta_id for receta_id in receta_ids if receta_id not in versiones]
         if recetas_sin_historico:
-            fin_periodo = ((periodo.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
             for rv in RecetaCostoVersion.objects.filter(
                 receta_id__in=recetas_sin_historico,
                 creado_en__date__lte=fin_periodo,
@@ -166,14 +169,60 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
             costo_mp_real += costo * venta.quantity
 
         costo_mp_real = costo_mp_real.quantize(Decimal("0.01"))
+        ventas_produccion_brutas = ventas_qs.filter(receta__isnull=False).aggregate(
+            t=Sum("gross_amount")
+        )["t"] or Decimal("0")
 
         # Si no se pudo calcular costo real (0 recetas vinculadas), usar estimado 30%
-        if costo_mp_real == Decimal("0") and ventas_brutas > 0:
-            costo_mp_real = (ventas_brutas * Decimal("0.30")).quantize(Decimal("0.01"))
+        if costo_mp_real == Decimal("0") and ventas_produccion_brutas > 0:
+            costo_mp_real = (ventas_produccion_brutas * Decimal("0.30")).quantize(Decimal("0.01"))
         # Cap de seguridad: si CMV supera 80% de ventas, el costeo está mal escalado
         # Usar fallback 30% hasta que el costeo real se corrija
-        elif ventas_brutas > 0 and costo_mp_real > (ventas_brutas * Decimal("0.80")):
-            costo_mp_real = (ventas_brutas * Decimal("0.30")).quantize(Decimal("0.01"))
+        elif ventas_produccion_brutas > 0 and costo_mp_real > (ventas_produccion_brutas * Decimal("0.80")):
+            costo_mp_real = (ventas_produccion_brutas * Decimal("0.30")).quantize(Decimal("0.01"))
+
+        # ---- COSTO REVENTA (productos sin receta con costo de adquisicion Point) ----
+        ventas_reventa_qs = ventas_qs.filter(receta__isnull=True, product_id__isnull=False)
+        producto_reventa_ids = list(
+            ventas_reventa_qs.values_list("product_id", flat=True).distinct()
+        )
+        costos_reventa = {}
+
+        historicos_reventa = ProductoReventaCostoHistoricoMensual.objects.filter(
+            producto_point_id__in=producto_reventa_ids,
+            periodo=periodo,
+        )
+        for historico in historicos_reventa:
+            costos_reventa[historico.producto_point_id] = historico.costo_promedio
+
+        productos_sin_historico = [
+            producto_id for producto_id in producto_reventa_ids if producto_id not in costos_reventa
+        ]
+        if productos_sin_historico:
+            for costo_producto in ProductoReventaCosto.objects.filter(
+                producto_point_id__in=productos_sin_historico,
+                fecha_vigencia__lte=fin_periodo,
+            ).order_by("producto_point_id", "-fecha_vigencia", "-id"):
+                if costo_producto.producto_point_id not in costos_reventa:
+                    costos_reventa[costo_producto.producto_point_id] = costo_producto.costo_unitario
+
+        nombres_reventa_fija = set(
+            ProductBusinessRule.objects.filter(
+                classification=ProductBusinessRule.CLASSIFICATION_REVENTA,
+                is_fixed=True,
+            ).values_list("normalized_name", flat=True)
+        )
+        productos_con_costo = set(costos_reventa.keys())
+        costo_reventa = Decimal("0")
+        for venta in ventas_reventa_qs.select_related("product"):
+            product_name = ProductBusinessRule.normalize_product_name(venta.product.name if venta.product_id else "")
+            es_reventa = venta.product_id in productos_con_costo or product_name in nombres_reventa_fija
+            if not es_reventa:
+                continue
+            costo = costos_reventa.get(venta.product_id, Decimal("0"))
+            costo_reventa += costo * venta.quantity
+
+        costo_reventa = costo_reventa.quantize(Decimal("0.01"))
 
         # ---- GASTOS CORPORATIVOS PRORRATEADOS ----
         # Tomamos gastos de centros de costo CORPORATIVO y los dividimos entre 9 sucursales
@@ -213,6 +262,7 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
                 "descuentos": descuentos,
                 "devoluciones": Decimal("0"),
                 "costo_materia_prima": costo_mp_real,
+                "costo_reventa": costo_reventa,
                 "empaque": Decimal("0"),
                 "otros_costos_variables": Decimal("0"),
                 "renta": renta,

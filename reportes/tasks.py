@@ -18,4 +18,5 @@ def snapshot_historical_costing_task():
         "insumo_rows": summary.insumo_rows,
         "receta_rows": summary.receta_rows,
         "missing_recipe_rows": summary.missing_recipe_rows,
+        "producto_reventa_rows": summary.producto_reventa_rows,
     }

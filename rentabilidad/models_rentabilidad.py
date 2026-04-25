@@ -56,12 +56,14 @@ class SucursalRentabilidad(models.Model):
     # ------------------------------------------------------------------ #
     costo_materia_prima  = models.DecimalField(max_digits=14, decimal_places=2, default=0,
         help_text="Costo total de ingredientes vendidos (CMV)")
+    costo_reventa        = models.DecimalField(max_digits=14, decimal_places=2, default=0,
+        help_text="Costo de adquisición de mercancía revendida")
     empaque              = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     otros_costos_variables = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     @property
     def costo_variable_total(self):
-        return self.costo_materia_prima + self.empaque + self.otros_costos_variables
+        return self.costo_materia_prima + self.costo_reventa + self.empaque + self.otros_costos_variables
 
     @property
     def margen_bruto(self):

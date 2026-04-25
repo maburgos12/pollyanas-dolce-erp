@@ -6,12 +6,14 @@ from datetime import datetime
 from decimal import Decimal
 
 from maestros.models import CostoInsumo, Proveedor
+from pos_bridge.models import PointProduct
 from pos_bridge.browser.client import PlaywrightBrowserClient
 from pos_bridge.browser.inventory_page import PointInventoryPage
 from pos_bridge.browser.session import BrowserSessionManager
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.services.auth_service import PointAuthService
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
+from reportes.models import ProductoReventaCosto
 from recetas.utils.normalizacion import normalizar_nombre
 
 
@@ -42,6 +44,8 @@ class PointInventoryCostCaptureResult:
     zero_cost_matches: int
     unresolved_samples: list[dict[str, str]]
     zero_cost_samples: list[dict[str, str]]
+    resale_costs_created: int = 0
+    resale_costs_existing: int = 0
 
 
 class PointInventoryCostCaptureService:
@@ -60,6 +64,15 @@ class PointInventoryCostCaptureService:
             return Decimal(str(value or 0))
         except Exception:
             return Decimal("0")
+
+    @staticmethod
+    def _row_date(row: PointInventoryCostRow):
+        if row.last_movement:
+            try:
+                return datetime.fromisoformat(row.last_movement.replace("Z", "+00:00")).date()
+            except Exception:
+                pass
+        return datetime.today().date()
 
     def _normalize_supply_row(self, *, category_name: str, branch_name: str, row: list[str]) -> PointInventoryCostRow | None:
         cells = [str(cell or "").strip() for cell in row]
@@ -199,6 +212,27 @@ class PointInventoryCostCaptureService:
             include_all_rows=True,
         )
 
+    def _resolve_point_product(self, row: PointInventoryCostRow) -> PointProduct | None:
+        codes: list[str] = []
+        for code in [row.point_code, row.point_code.lstrip("0"), row.point_code.zfill(4)]:
+            code = str(code or "").strip()
+            if code and code not in codes:
+                codes.append(code)
+        if codes:
+            product = PointProduct.objects.filter(external_id__in=codes).order_by("id").first()
+            if product is not None:
+                return product
+            product = PointProduct.objects.filter(sku__in=codes).order_by("id").first()
+            if product is not None:
+                return product
+
+        normalized_name = normalizar_nombre(row.point_name)
+        if normalized_name:
+            product = PointProduct.objects.filter(normalized_name=normalized_name).order_by("id").first()
+            if product is not None:
+                return product
+        return None
+
     def persist_cost_row(self, row: PointInventoryCostRow, *, supplier_name: str = "POINT EXISTENCIA ALMACEN") -> tuple[CostoInsumo | None, bool, str]:
         resolved = self.identity_service.resolve_insumo(point_code=row.point_code, point_name=row.point_name)
         if resolved.insumo is None:
@@ -236,6 +270,49 @@ class PointInventoryCostCaptureService:
         )
         return cost, created, "CREATED" if created else "EXISTS"
 
+    def persist_resale_product_cost_row(
+        self,
+        row: PointInventoryCostRow,
+        *,
+        supplier_name: str = "POINT EXISTENCIA ALMACEN",
+    ) -> tuple[ProductoReventaCosto | None, bool, str]:
+        if row.unit_cost <= 0:
+            return None, False, "UNIT_COST_ZERO"
+        product = self._resolve_point_product(row)
+        if product is None:
+            return None, False, "NO_MATCH_POINT_PRODUCT"
+
+        source_hash = hashlib.sha256(
+            f"POINT_REVENTA_ALMACEN|{product.id}|{row.branch_name}|{row.point_code}|{row.unit_cost}|{row.last_movement}".encode("utf-8")
+        ).hexdigest()
+        cost, created = ProductoReventaCosto.objects.get_or_create(
+            source_hash=source_hash,
+            defaults={
+                "producto_point": product,
+                "costo_unitario": row.unit_cost,
+                "fecha_vigencia": self._row_date(row),
+                "fuente": ProductoReventaCosto.FUENTE_POINT_ALMACEN,
+                "proveedor_nombre": supplier_name,
+                "unidad": row.unit,
+                "cantidad_snapshot": row.quantity,
+                "metadata": {
+                    "source": "POINT_EXISTENCIA_ALMACEN",
+                    "branch": row.branch_name,
+                    "category": row.category_name,
+                    "point_code": row.point_code,
+                    "point_name": row.point_name,
+                    "point_category": row.point_category,
+                    "quantity": str(row.quantity),
+                    "unit": row.unit,
+                    "unit_cost": str(row.unit_cost),
+                    "total_cost": str(row.total_cost),
+                    "last_movement": row.last_movement,
+                    "raw_row": row.raw_row,
+                },
+            },
+        )
+        return cost, created, "CREATED" if created else "EXISTS"
+
     def capture_and_persist_all(
         self,
         *,
@@ -248,12 +325,23 @@ class PointInventoryCostCaptureService:
         existing = 0
         unresolved = 0
         zero_cost = 0
+        resale_created = 0
+        resale_existing = 0
         unresolved_samples: list[dict[str, str]] = []
         zero_cost_samples: list[dict[str, str]] = []
         branch_name = branch_hint
 
         for row in rows:
             branch_name = row.branch_name or branch_name
+            _resale_cost, resale_was_created, resale_status = self.persist_resale_product_cost_row(
+                row,
+                supplier_name=supplier_name,
+            )
+            if resale_status == "CREATED":
+                resale_created += 1
+            elif resale_status == "EXISTS":
+                resale_existing += 1
+
             _cost, was_created, status = self.persist_cost_row(row, supplier_name=supplier_name)
             if status == "NO_MATCH_ERP":
                 unresolved += 1
@@ -292,4 +380,6 @@ class PointInventoryCostCaptureService:
             zero_cost_matches=zero_cost,
             unresolved_samples=unresolved_samples,
             zero_cost_samples=zero_cost_samples,
+            resale_costs_created=resale_created,
+            resale_costs_existing=resale_existing,
         )

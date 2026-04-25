@@ -38,6 +38,8 @@ from reportes.models import (
     ProyectoInversionSnapshotMensual,
     ProductoCostoOperativoMensual,
     ProductoPricingDecisionMensual,
+    ProductoReventaCosto,
+    ProductoReventaCostoHistoricoMensual,
     ProductoSucursalContribucionMensual,
     RecetaCostoHistoricoMensual,
     ReglaCostoHistoricoInsumo,
@@ -826,6 +828,44 @@ class MonthlyHistoricalCostingServiceTests(TestCase):
         historical_row = RecetaCostoHistoricoMensual.objects.get(periodo=date(2026, 1, 1), receta=resale_recipe)
         self.assertEqual(historical_row.costo_total, Decimal("10.470000"))
         self.assertEqual(historical_row.coverage_pct, Decimal("100.000000"))
+
+    def test_historical_snapshot_freezes_non_recipe_resale_product_cost(self):
+        point_branch = PointBranch.objects.create(external_id="13", name="Sucursal 13")
+        point_product = PointProduct.objects.create(
+            external_id="COCA450",
+            sku="COCA450",
+            name="COCA-COLA 450 ML",
+            category="Bebidas",
+        )
+        ProductoReventaCosto.objects.create(
+            producto_point=point_product,
+            costo_unitario=Decimal("13.25"),
+            fecha_vigencia=date(2026, 3, 15),
+            fuente=ProductoReventaCosto.FUENTE_POINT_ALMACEN,
+            unidad="pza",
+            cantidad_snapshot=Decimal("24"),
+            source_hash="hist_resale_product_coca",
+        )
+        PointDailySale.objects.create(
+            branch=point_branch,
+            product=point_product,
+            receta=None,
+            sale_date=date(2026, 3, 18),
+            quantity=Decimal("2"),
+            total_amount=Decimal("50"),
+            gross_amount=Decimal("50"),
+            net_amount=Decimal("50"),
+        )
+
+        summary = MonthlyHistoricalCostingService().build_period(period_start=date(2026, 3, 1))
+
+        historical_row = ProductoReventaCostoHistoricoMensual.objects.get(
+            periodo=date(2026, 3, 1),
+            producto_point=point_product,
+        )
+        self.assertEqual(summary.producto_reventa_rows, 1)
+        self.assertEqual(historical_row.costo_promedio, Decimal("13.250000"))
+        self.assertEqual(historical_row.metodo, ProductoReventaCostoHistoricoMensual.METODO_POINT_ALMACEN)
 
 
 class OperatingFinanceResaleTests(TestCase):

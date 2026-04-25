@@ -47,7 +47,7 @@ class SucursalRentabilidadAdmin(admin.ModelAdmin):
             "fields": ("ventas_brutas", "descuentos", "devoluciones"),
         }),
         ("Costos variables", {
-            "fields": ("costo_materia_prima", "empaque", "otros_costos_variables"),
+            "fields": ("costo_materia_prima", "costo_reventa", "empaque", "otros_costos_variables"),
         }),
         ("Gastos fijos", {
             "fields": ("renta", "nomina_directa", "servicios_luz_agua",

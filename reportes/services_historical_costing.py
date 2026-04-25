@@ -8,6 +8,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 
 from maestros.models import CostoInsumo, Insumo, InsumoAlias
+from pos_bridge.models import PointDailySale
 from recetas.models import LineaReceta, Receta, RecetaPresentacion
 from recetas.utils.costeo_snapshot import (
     convert_unit_cost,
@@ -16,6 +17,8 @@ from recetas.utils.costeo_snapshot import (
 from recetas.utils.derived_product_presentations import get_active_derived_relation
 from reportes.models import (
     InsumoCostoHistoricoMensual,
+    ProductoReventaCosto,
+    ProductoReventaCostoHistoricoMensual,
     RecetaCostoHistoricoMensual,
     ReglaCostoHistoricoInsumo,
 )
@@ -66,6 +69,7 @@ class HistoricalCostSnapshotSummary:
     insumo_rows: int
     receta_rows: int
     missing_recipe_rows: int
+    producto_reventa_rows: int = 0
 
 
 @dataclass
@@ -89,6 +93,63 @@ class MonthlyHistoricalCostingService:
             CostoInsumo.objects.filter(insumo=insumo, fecha__lte=period_end).order_by("fecha", "id")
         )
         return [row for row in rows if _raw_source(row) not in DERIVED_SOURCES]
+
+    def _resale_product_costs(self, *, producto_point_id: int, period_end: date):
+        return list(
+            ProductoReventaCosto.objects.filter(
+                producto_point_id=producto_point_id,
+                fecha_vigencia__lte=period_end,
+                costo_unitario__gt=0,
+            ).order_by("fecha_vigencia", "id")
+        )
+
+    def _build_resale_product_monthly_cost(
+        self,
+        *,
+        period_start: date,
+        producto_point_id: int,
+    ) -> ProductoReventaCostoHistoricoMensual | None:
+        period_start, period_end = _month_bounds(period_start)
+        rows = self._resale_product_costs(producto_point_id=producto_point_id, period_end=period_end)
+        if not rows:
+            return None
+
+        same_month = [row for row in rows if period_start <= row.fecha_vigencia <= period_end]
+        source_rows = same_month or [rows[-1]]
+        weighted_total = Decimal("0")
+        weighted_qty = Decimal("0")
+        for row in source_rows:
+            weight = Decimal(str(row.cantidad_snapshot or 0))
+            if weight <= 0:
+                weight = Decimal("1")
+            weighted_qty += weight
+            weighted_total += Decimal(str(row.costo_unitario or 0)) * weight
+
+        cost_value = _q6(weighted_total / weighted_qty) if weighted_qty > 0 else _q6(source_rows[-1].costo_unitario)
+        method = (
+            ProductoReventaCostoHistoricoMensual.METODO_POINT_ALMACEN
+            if same_month and any(row.fuente == ProductoReventaCosto.FUENTE_POINT_ALMACEN for row in same_month)
+            else ProductoReventaCostoHistoricoMensual.METODO_PROMEDIO_MENSUAL
+            if same_month
+            else ProductoReventaCostoHistoricoMensual.METODO_ARRASTRE
+        )
+        row, _ = ProductoReventaCostoHistoricoMensual.objects.update_or_create(
+            periodo=period_start,
+            producto_point_id=producto_point_id,
+            defaults={
+                "costo_promedio": cost_value,
+                "metodo": method,
+                "source_date": source_rows[-1].fecha_vigencia,
+                "sample_count": len(source_rows),
+                "weighted_quantity": _q6(weighted_qty),
+                "metadata": {
+                    "period_end": period_end.isoformat(),
+                    "source_rows": [source.id for source in source_rows],
+                    "source": "PRODUCTO_REVENTA_COSTO",
+                },
+            },
+        )
+        return row
 
     def _resolve_resale_insumo(self, *, receta: Receta) -> Insumo | None:
         codigo_point = (receta.codigo_point or "").strip()
@@ -530,6 +591,29 @@ class MonthlyHistoricalCostingService:
             if result.costed_lines < result.total_lines:
                 missing_recipe_rows += 1
 
+        productos_reventa_ids = set(
+            PointDailySale.objects.filter(
+                sale_date__range=(period_start, period_end),
+                receta__isnull=True,
+                product_id__isnull=False,
+                total_amount__gt=0,
+            )
+            .values_list("product_id", flat=True)
+            .distinct()
+        )
+        productos_reventa_costeados: set[int] = set()
+        for producto_id in productos_reventa_ids:
+            row = self._build_resale_product_monthly_cost(
+                period_start=period_start,
+                producto_point_id=producto_id,
+            )
+            if row is not None:
+                productos_reventa_costeados.add(producto_id)
+
+        ProductoReventaCostoHistoricoMensual.objects.filter(periodo=period_start).exclude(
+            producto_point_id__in=productos_reventa_costeados
+        ).delete()
+
         recipe_ids = {receta_id for snapshot_period, receta_id in self._recipe_cache if snapshot_period == period_start}
         RecetaCostoHistoricoMensual.objects.filter(periodo=period_start).exclude(receta_id__in=recipe_ids).delete()
         for receta_id in recipe_ids:
@@ -563,4 +647,5 @@ class MonthlyHistoricalCostingService:
             insumo_rows=len(touched_insumos),
             receta_rows=len(recipe_ids),
             missing_recipe_rows=missing_recipe_rows,
+            producto_reventa_rows=len(productos_reventa_costeados),
         )
