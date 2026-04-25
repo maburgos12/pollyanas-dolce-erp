@@ -70,11 +70,34 @@ PRODUCTION_OVERHEAD_CATEGORY_MAP = {
     "MATERIAL DE SEGUIRIDAD E HIGIENE": "INDIRECTO_PROD",
     "HERRAMIENTAS DE TRABAJO": "INDIRECTO_PROD",
     "FUMIGACION Y SANITIZACION": "INDIRECTO_PROD",
+    "BATIDORA": "INDIRECTO_PROD",
+    "MESA DE TRABAJO": "INDIRECTO_PROD",
+    "MICROONDAS": "INDIRECTO_PROD",
+    "MASCARILLA Y FILTROS": "INDIRECTO_PROD",
+    "COMPRAS ESPECIALES": "INDIRECTO_PROD",
     "MANTENIMIENTO REMODELACION INSTALACIONES": "INDIRECTO_PROD",
     "MANTANIMIENTO EQUIPO MAQUINARIA": "INDIRECTO_PROD",
     "CAPACITACION": "INDIRECTO_PROD",
+    "COEPRIS": "INDIRECTO_PROD",
     "DIVERSOS": "INDIRECTO_PROD",
     "AGUA PURIFICADA": "INDIRECTO_PROD",
+}
+
+PRODUCTION_PAYROLL_CATEGORY_MAP = {
+    "SUELDO": "MANO_OBRA_PROD",
+    "DIAS FESTIVOS": "MANO_OBRA_PROD",
+    "VACACIONES": "MANO_OBRA_PROD",
+    "PRIMA VACACIONAL": "MANO_OBRA_PROD",
+    "BONO POR RESULTADOS": "MANO_OBRA_PROD",
+    "BONO DE PUNTUALIDAD Y ASISTENCIA": "MANO_OBRA_PROD",
+    "IMSS": "MANO_OBRA_PROD",
+    "INFONAVIT": "MANO_OBRA_PROD",
+    "AGUINALDO": "MANO_OBRA_PROD",
+    "UTILIDADES": "MANO_OBRA_PROD",
+    "PLAYERA": "MANO_OBRA_PROD",
+    "GORRA": "MANO_OBRA_PROD",
+    "MANDIL": "MANO_OBRA_PROD",
+    "BLUSA": "MANO_OBRA_PROD",
 }
 
 
@@ -118,6 +141,8 @@ class ProductionExpenseImportService:
     PRODUCTION_SHEET = "PRESUPUESTO PRODUCCIÓN"
     PAYROLL_SHEET = "PRODUCCCION"
     OUTLIER_BUDGET_RATIO = Decimal("5")
+    WATER_DECIMAL_SHIFT_RATIO = Decimal("5")
+    WATER_DECIMAL_SHIFT_MIN_AMOUNT = Decimal("50000")
 
     def __init__(self):
         self.prod_center = CentroCosto.objects.get(codigo="PROD")
@@ -224,6 +249,35 @@ class ProductionExpenseImportService:
                 ratio=ratio,
             )
 
+    def _correct_amount_if_needed(
+        self,
+        *,
+        summary: ProductionExpenseImportSummary,
+        source: str,
+        concept: str,
+        period: date,
+        budget: Decimal,
+        amount: Decimal,
+    ) -> Decimal:
+        normalized_concept = _normalize_key(concept)
+        if (
+            normalized_concept == "AGUA POTABLE"
+            and budget > 0
+            and amount >= self.WATER_DECIMAL_SHIFT_MIN_AMOUNT
+            and (amount / budget) >= self.WATER_DECIMAL_SHIFT_RATIO
+        ):
+            corrected = amount / Decimal("100")
+            summary.register_outlier(
+                source=source,
+                concept=f"{concept} (corregido dos decimales)",
+                period=period,
+                budget=budget,
+                actual=amount,
+                ratio=amount / budget,
+            )
+            return corrected
+        return amount
+
     def _import_payroll(
         self,
         workbook_path: Path,
@@ -248,6 +302,14 @@ class ProductionExpenseImportService:
                     continue
                 amount = _to_decimal(raw_amount)
                 budget = _to_decimal(worksheet.cell(row_index, budget_col).value) if budget_col else Decimal("0")
+                amount = self._correct_amount_if_needed(
+                    summary=summary,
+                    source=self.PAYROLL_SHEET,
+                    concept=str(raw_concept or "").strip(),
+                    period=period,
+                    budget=budget,
+                    amount=amount,
+                )
                 self._register_outlier_if_needed(
                     summary=summary,
                     source=self.PAYROLL_SHEET,
@@ -273,6 +335,9 @@ class ProductionExpenseImportService:
         workbook_path: Path,
         summary: ProductionExpenseImportSummary,
         seen_keys: dict[tuple[str, str], set[str]],
+        *,
+        include_payroll_from_production: bool = False,
+        through_month: int | None = None,
     ) -> None:
         workbook = load_workbook(workbook_path, data_only=True, read_only=True)
         worksheet = workbook[self.PRODUCTION_SHEET]
@@ -283,14 +348,26 @@ class ProductionExpenseImportService:
             if not normalized_concept:
                 continue
             category_code = PRODUCTION_OVERHEAD_CATEGORY_MAP.get(normalized_concept)
+            if category_code is None and include_payroll_from_production:
+                category_code = PRODUCTION_PAYROLL_CATEGORY_MAP.get(normalized_concept)
             if not category_code:
                 continue
             for _, period, budget_col, actual_col in actual_columns:
+                if through_month is not None and period.month > through_month:
+                    continue
                 raw_amount = worksheet.cell(row_index, actual_col).value
                 if raw_amount is None:
                     continue
                 amount = _to_decimal(raw_amount)
                 budget = _to_decimal(worksheet.cell(row_index, budget_col).value) if budget_col else Decimal("0")
+                amount = self._correct_amount_if_needed(
+                    summary=summary,
+                    source=self.PRODUCTION_SHEET,
+                    concept=str(raw_concept or "").strip(),
+                    period=period,
+                    budget=budget,
+                    amount=amount,
+                )
                 self._register_outlier_if_needed(
                     summary=summary,
                     source=self.PRODUCTION_SHEET,
@@ -310,6 +387,29 @@ class ProductionExpenseImportService:
                     category_code=category_code,
                     amount=amount,
                 )
+
+    @transaction.atomic
+    def import_production_workbook(
+        self,
+        workbook_path: str | Path,
+        *,
+        through_month: int | None = None,
+    ) -> ProductionExpenseImportSummary:
+        path = Path(workbook_path).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(path)
+        summary = ProductionExpenseImportSummary()
+        seen_keys: dict[tuple[str, str], set[str]] = {}
+        self._import_production_overhead(
+            path,
+            summary,
+            seen_keys,
+            include_payroll_from_production=True,
+            through_month=through_month,
+        )
+        for (source_file, source_sheet), keys in seen_keys.items():
+            self._cleanup_stale_rows(summary=summary, source_file=source_file, source_sheet=source_sheet, seen_keys=keys)
+        return summary
 
     @transaction.atomic
     def import_folder(self, folder_path: str | Path) -> ProductionExpenseImportSummary:

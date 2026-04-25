@@ -2283,6 +2283,50 @@ class ProductionExpenseImportServiceTests(TestCase):
                 )
             )
 
+    def test_import_production_workbook_uses_detail_rows_and_corrects_water_decimal_shift(self):
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "PRESUPUESTO PRODUCCIÓN 2026 AUTORIZADO.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "PRESUPUESTO PRODUCCIÓN"
+            ws["F3"] = "ENERO"
+            ws["I3"] = "FEBRERO"
+            ws["F4"] = "PRESUPUESTADO"
+            ws["G4"] = "REAL"
+            ws["I4"] = "PRESUPUESTADO"
+            ws["J4"] = "REAL"
+            ws["B5"] = "PRODUCCIÓN"
+            ws["B6"] = "Costo de producción"
+            ws["B7"] = None
+            ws["B8"] = "Sueldo"
+            ws["B24"] = "Servicios publicos"
+            ws["B25"] = "Agua potable"
+            ws["B26"] = "Energia electrica"
+            ws["B29"] = "Gas"
+            ws["B43"] = "Mantanimiento equipo/maquinaria"
+            ws["G5"] = Decimal("999999")
+            ws["G6"] = Decimal("888888")
+            ws["G7"] = Decimal("999999")
+            ws["G8"] = Decimal("900")
+            ws["G25"] = Decimal("100")
+            ws["G26"] = Decimal("200")
+            ws["G29"] = Decimal("300")
+            ws["G43"] = Decimal("400")
+            ws["I25"] = Decimal("100")
+            ws["J25"] = Decimal("100000")
+            wb.save(path)
+
+            summary = ProductionExpenseImportService().import_production_workbook(path, through_month=2)
+
+            self.assertEqual(summary.created, 6)
+            self.assertFalse(GastoOperativoMensual.objects.filter(comentario="PRODUCCIÓN").exists())
+            self.assertFalse(GastoOperativoMensual.objects.filter(comentario="Costo de producción").exists())
+            self.assertFalse(GastoOperativoMensual.objects.filter(monto=Decimal("999999")).exists())
+            sueldo = GastoOperativoMensual.objects.get(comentario="Sueldo", periodo=date(2026, 1, 1))
+            self.assertEqual(sueldo.categoria_gasto.codigo, "MANO_OBRA_PROD")
+            agua_febrero = GastoOperativoMensual.objects.get(comentario="Agua potable", periodo=date(2026, 2, 1))
+            self.assertEqual(agua_febrero.monto, Decimal("1000.00"))
+
 
 class BranchAdminExpenseImportServiceTests(TestCase):
     def setUp(self):
