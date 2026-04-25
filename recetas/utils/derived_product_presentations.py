@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Case, IntegerField, Q, When
+from django.db.models import Q
 from django.db.models import DecimalField
 
 from maestros.utils.canonical_catalog import latest_costo_canonico
@@ -24,19 +24,15 @@ def _prioritized_version_cost_map(recipe_ids: set[int]) -> dict[int, Decimal]:
         return {}
 
     costs: dict[int, Decimal] = {}
+    # Los reportes de produccion de Point son costo unitario de producto terminado.
+    # Otros snapshots pueden representar capturas intermedias y no siempre son
+    # equivalentes para dividir presentaciones derivadas.
     for version in (
-        RecetaCostoVersion.objects.filter(receta_id__in=recipe_ids, costo_total__gt=0)
-        .annotate(
-            fuente_prioridad=Case(
-                When(fuente="POINT_PRODUCTION_REPORT", then=0),
-                When(fuente="POINT_COST_CAPTURE", then=1),
-                When(fuente="POINT_COST_CAPTURE_FIX", then=2),
-                When(fuente="WEEKLY_SNAPSHOT", then=3),
-                default=4,
-                output_field=IntegerField(),
-            )
-        )
-        .order_by("receta_id", "fuente_prioridad", "-version_num", "-creado_en", "-id")
+        RecetaCostoVersion.objects.filter(
+            receta_id__in=recipe_ids,
+            fuente="POINT_PRODUCTION_REPORT",
+            costo_total__gt=0,
+        ).order_by("receta_id", "-version_num", "-creado_en", "-id")
     ):
         if version.receta_id not in costs:
             costs[int(version.receta_id)] = Decimal(str(version.costo_total or 0))
