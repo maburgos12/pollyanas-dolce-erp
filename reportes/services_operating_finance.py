@@ -377,6 +377,23 @@ class OperatingFinanceSnapshotService:
                 "costo_total": as_decimal(row.costo_total),
                 "source": "WEEKLY_SNAPSHOT",
             }
+
+        fallback_qs = (
+            RecetaCostoSemanal.objects.filter(
+                scope_type=RecetaCostoSemanal.SCOPE_RECIPE,
+                receta__tipo="PRODUCTO_FINAL",
+            )
+            .select_related("receta")
+            .order_by("receta_id", "-week_start", "-id")
+        )
+        for row in fallback_qs:
+            if row.receta_id in latest:
+                continue
+            latest[row.receta_id] = {
+                "costo_mp": as_decimal(row.costo_mp),
+                "costo_total": as_decimal(row.costo_total),
+                "source": "WEEKLY_SNAPSHOT_LATEST_FALLBACK",
+            }
         return latest
 
     def _sales_by_recipe_branch(self, period_start: date, period_end: date) -> dict[tuple[int, int], dict]:
@@ -588,6 +605,7 @@ class OperatingFinanceSnapshotService:
                     "costo_fabricacion_unit": costo_fabricacion_unit,
                     "metadata": {
                         "period_end": period_end.isoformat(),
+                        "cost_source": base_cost.get("source", ""),
                     },
                 },
             )
