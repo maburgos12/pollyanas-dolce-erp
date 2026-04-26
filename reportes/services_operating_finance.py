@@ -21,6 +21,8 @@ from reportes.models import (
     ProductBusinessRule,
     ProductoCostoOperativoMensual,
     ProductoPricingDecisionMensual,
+    ProductoReventaCosto,
+    ProductoReventaCostoHistoricoMensual,
     ProductoSucursalContribucionMensual,
     RecetaCostoHistoricoMensual,
     ReglaAsignacionGasto,
@@ -495,6 +497,114 @@ class OperatingFinanceSnapshotService:
             )
         return non_recipe_total, candidate_recipe_total
 
+    def _resale_cost_total(self, period_start: date, period_end: date) -> tuple[Decimal, dict[str, Decimal | int]]:
+        resale_rows = []
+        all_product_ids = set()
+        dynamic_recipe_resolutions = 0
+        rows = (
+            PointDailySale.objects.filter(
+                sale_date__range=(period_start, period_end),
+                product_id__isnull=False,
+            )
+            .select_related("product", "receta")
+            .order_by("id")
+        )
+        row_buffer = list(rows)
+        for row in row_buffer:
+            all_product_ids.add(row.product_id)
+
+        costs: dict[int, Decimal] = {}
+        for historical in ProductoReventaCostoHistoricoMensual.objects.filter(
+            producto_point_id__in=all_product_ids,
+            periodo=period_start,
+        ):
+            costs[historical.producto_point_id] = as_decimal(historical.costo_promedio)
+
+        missing_product_ids = [product_id for product_id in all_product_ids if product_id not in costs]
+        if missing_product_ids:
+            for current in ProductoReventaCosto.objects.filter(
+                producto_point_id__in=missing_product_ids,
+                fecha_vigencia__lte=period_end,
+            ).order_by("producto_point_id", "-fecha_vigencia", "-id"):
+                if current.producto_point_id not in costs:
+                    costs[current.producto_point_id] = as_decimal(current.costo_unitario)
+
+        forced_resale_names = {
+            name
+            for name, (classification, is_fixed) in self._load_product_business_rule_cache().items()
+            if is_fixed and classification == ProductBusinessRule.CLASSIFICATION_REVENTA
+        }
+        for row in row_buffer:
+            receta, resolved_dynamically = self._resolve_recipe_for_row(row)
+            if resolved_dynamically:
+                dynamic_recipe_resolutions += 1
+            product_name = normalize_product_name(row.product.name if row.product_id else "")
+            forced_bucket = self._forced_non_recipe_bucket_for_row(row)
+            is_recipe_resale = receta is not None and receta.modo_costeo == Receta.MODO_COSTEO_REVENTA
+            is_fixed_resale = forced_bucket == ProductBusinessRule.CLASSIFICATION_REVENTA or product_name in forced_resale_names
+            has_resale_cost = row.product_id in costs
+            if not is_recipe_resale and not is_fixed_resale and not has_resale_cost:
+                continue
+            resale_rows.append(row)
+
+        total = Decimal("0")
+        rows_with_cost = 0
+        rows_without_cost = 0
+        sale_total = Decimal("0")
+        for row in resale_rows:
+            sale_total += as_decimal(row.total_amount)
+            cost = costs.get(row.product_id)
+            if cost is None:
+                rows_without_cost += 1
+                continue
+            rows_with_cost += 1
+            total += cost * as_decimal(row.quantity)
+
+        return total.quantize(Decimal("0.01")), {
+            "venta_reventa_total": sale_total.quantize(Decimal("0.01")),
+            "reventa_rows": len(resale_rows),
+            "reventa_rows_with_cost": rows_with_cost,
+            "reventa_rows_without_cost": rows_without_cost,
+            "reventa_products_with_cost": len(costs),
+            "dynamic_recipe_resolutions": dynamic_recipe_resolutions,
+        }
+
+    def _profitability_totals(self, period_start: date) -> dict[str, Decimal | int]:
+        try:
+            from rentabilidad.models_rentabilidad import SucursalRentabilidad
+        except Exception:
+            return {}
+
+        rows = list(SucursalRentabilidad.objects.filter(periodo=period_start))
+        if not rows:
+            return {}
+
+        ventas_brutas = sum((as_decimal(row.ventas_brutas) for row in rows), Decimal("0"))
+        descuentos = sum((as_decimal(row.descuentos) for row in rows), Decimal("0"))
+        devoluciones = sum((as_decimal(row.devoluciones) for row in rows), Decimal("0"))
+        costo_materia_prima = sum((as_decimal(row.costo_materia_prima) for row in rows), Decimal("0"))
+        costo_reventa = sum((as_decimal(row.costo_reventa) for row in rows), Decimal("0"))
+        gasto_fijo = sum(
+            (
+                as_decimal(row.renta)
+                + as_decimal(row.nomina_directa)
+                + as_decimal(row.servicios_luz_agua)
+                + as_decimal(row.mantenimiento)
+                + as_decimal(row.gastos_admin_prorrateados)
+                + as_decimal(row.otros_gastos_fijos)
+                for row in rows
+            ),
+            Decimal("0"),
+        )
+        ventas_netas = ventas_brutas - descuentos - devoluciones
+        return {
+            "rows": len(rows),
+            "ventas_netas": ventas_netas.quantize(Decimal("0.01")),
+            "costo_materia_prima": costo_materia_prima.quantize(Decimal("0.01")),
+            "costo_reventa": costo_reventa.quantize(Decimal("0.01")),
+            "gasto_fijo": gasto_fijo.quantize(Decimal("0.01")),
+        }
+
     def _allocate_amounts(
         self,
         *,
@@ -532,7 +642,10 @@ class OperatingFinanceSnapshotService:
         company_expense_total = Decimal("0")
 
         gastos = (
-            GastoOperativoMensual.objects.filter(periodo=period_start)
+            GastoOperativoMensual.objects.filter(
+                periodo=period_start,
+                tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
+            )
             .select_related("centro_costo", "categoria_gasto")
             .order_by("id")
         )
@@ -651,33 +764,86 @@ class OperatingFinanceSnapshotService:
         venta_total, sales_total_source = self._company_sales_total(period_start, period_end)
         venta_sin_mapear_total = max(venta_total - venta_costeada_total, Decimal("0"))
         venta_no_receta_total, venta_receta_sin_match_total = self._split_unmapped_sales(period_start, period_end)
-        costo_fabricacion_total = sum(
+        costo_fabricacion_total_calculado = sum(
             (row.costo_producto_total for row in ProductoSucursalContribucionMensual.objects.filter(periodo=period_start)),
             Decimal("0"),
         )
-        gasto_comercial_total = sum(
+        costo_materia_prima_total_calculado = sum(
+            (row.costo_mp_unit * row.unidades_base for row in ProductoCostoOperativoMensual.objects.filter(periodo=period_start)),
+            Decimal("0"),
+        ).quantize(Decimal("0.01"))
+        mano_obra_prod_total = sum(
+            (row.mano_obra_prod_unit * row.unidades_base for row in ProductoCostoOperativoMensual.objects.filter(periodo=period_start)),
+            Decimal("0"),
+        ).quantize(Decimal("0.01"))
+        indirecto_prod_total = sum(
+            (row.indirecto_prod_unit * row.unidades_base for row in ProductoCostoOperativoMensual.objects.filter(periodo=period_start)),
+            Decimal("0"),
+        ).quantize(Decimal("0.01"))
+        empaque_prod_total = sum(
+            (row.empaque_prod_unit * row.unidades_base for row in ProductoCostoOperativoMensual.objects.filter(periodo=period_start)),
+            Decimal("0"),
+        ).quantize(Decimal("0.01"))
+        costo_reventa_total_calculado, resale_metadata = self._resale_cost_total(period_start, period_end)
+        gasto_comercial_total_calculado = sum(
             (row.gasto_comercial_total for row in ProductoSucursalContribucionMensual.objects.filter(periodo=period_start)),
             Decimal("0"),
         )
-        margen_bruto_total = venta_costeada_total - costo_fabricacion_total
+        profitability_totals = self._profitability_totals(period_start)
+        uses_profitability_source = bool(profitability_totals)
+        costo_materia_prima_total = as_decimal(
+            profitability_totals.get("costo_materia_prima") if uses_profitability_source else costo_materia_prima_total_calculado
+        )
+        costo_reventa_total = as_decimal(
+            profitability_totals.get("costo_reventa") if uses_profitability_source else costo_reventa_total_calculado
+        )
+        gasto_comercial_total = as_decimal(
+            profitability_totals.get("gasto_fijo") if uses_profitability_source else gasto_comercial_total_calculado
+        )
+        costo_fabricacion_total = (
+            costo_materia_prima_total + mano_obra_prod_total + indirecto_prod_total + empaque_prod_total
+        ).quantize(Decimal("0.01"))
+        margen_bruto_total = venta_total - costo_materia_prima_total - costo_reventa_total
         contribucion_total = margen_bruto_total - gasto_comercial_total
+        utilidad_operativa_total = contribucion_total - company_expense_total
+        if not uses_profitability_source:
+            utilidad_operativa_total -= mano_obra_prod_total + indirecto_prod_total + empaque_prod_total
         _, company_created = EmpresaResultadoMensual.objects.update_or_create(
             periodo=period_start,
             defaults={
                 "venta_total": venta_total,
+                "costo_materia_prima_total": costo_materia_prima_total,
+                "costo_reventa_total": costo_reventa_total,
+                "mano_obra_prod_total": mano_obra_prod_total,
+                "indirecto_prod_total": indirecto_prod_total,
+                "empaque_prod_total": empaque_prod_total,
                 "costo_fabricacion_total": costo_fabricacion_total,
                 "margen_bruto_total": margen_bruto_total,
                 "gasto_comercial_total": gasto_comercial_total,
                 "contribucion_total": contribucion_total,
                 "gasto_corporativo_total": company_expense_total,
-                "utilidad_operativa_total": contribucion_total - company_expense_total,
+                "utilidad_operativa_total": utilidad_operativa_total,
                 "metadata": {
                     "period_end": period_end.isoformat(),
                     "sales_total_source": sales_total_source,
+                    "financial_totals_source": (
+                        "RENTABILIDAD_SUCURSAL" if uses_profitability_source else "OPERATING_FINANCE_CALCULATED"
+                    ),
+                    "rentabilidad_rows": int(profitability_totals.get("rows", 0)) if uses_profitability_source else 0,
+                    "rentabilidad_ventas_netas": str(profitability_totals.get("ventas_netas", "0")) if uses_profitability_source else "0",
+                    "costo_materia_prima_calculado": str(costo_materia_prima_total_calculado),
+                    "costo_reventa_calculado": str(costo_reventa_total_calculado),
+                    "gasto_comercial_calculado": str(gasto_comercial_total_calculado),
+                    "costo_fabricacion_calculado": str(costo_fabricacion_total_calculado),
                     "venta_costeada_total": str(venta_costeada_total),
                     "venta_sin_mapear_total": str(venta_sin_mapear_total),
                     "venta_no_receta_total": str(venta_no_receta_total),
                     "venta_receta_sin_match_total": str(venta_receta_sin_match_total),
+                    "venta_reventa_total": str(resale_metadata["venta_reventa_total"]),
+                    "reventa_rows": resale_metadata["reventa_rows"],
+                    "reventa_rows_with_cost": resale_metadata["reventa_rows_with_cost"],
+                    "reventa_rows_without_cost": resale_metadata["reventa_rows_without_cost"],
+                    "reventa_products_with_cost": resale_metadata["reventa_products_with_cost"],
                     "sales_mapping_coverage_pct": str(
                         (venta_costeada_total / venta_total * Decimal("100")) if venta_total > 0 else Decimal("0")
                     ),

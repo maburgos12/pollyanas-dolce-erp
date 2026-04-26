@@ -238,6 +238,11 @@ class Command(BaseCommand):
             },
             "company_result": {
                 "venta_total": str(_as_decimal(company.venta_total if company else 0)),
+                "costo_materia_prima_total": str(_as_decimal(company.costo_materia_prima_total if company else 0)),
+                "costo_reventa_total": str(_as_decimal(company.costo_reventa_total if company else 0)),
+                "mano_obra_prod_total": str(_as_decimal(company.mano_obra_prod_total if company else 0)),
+                "indirecto_prod_total": str(_as_decimal(company.indirecto_prod_total if company else 0)),
+                "empaque_prod_total": str(_as_decimal(company.empaque_prod_total if company else 0)),
                 "costo_fabricacion_total": str(_as_decimal(company.costo_fabricacion_total if company else 0)),
                 "gasto_comercial_total": str(_as_decimal(company.gasto_comercial_total if company else 0)),
                 "gasto_corporativo_total": str(_as_decimal(company.gasto_corporativo_total if company else 0)),

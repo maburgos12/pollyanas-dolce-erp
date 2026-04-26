@@ -2059,9 +2059,34 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         if monthly_official is not None:
             sales_total = _to_decimal(monthly_official.total_amount)
         manufacturing_total = _to_decimal(getattr(finance, "costo_fabricacion_total", ZERO))
+        materia_prima_total = _to_decimal(getattr(finance, "costo_materia_prima_total", ZERO))
+        resale_cost_total = _to_decimal(getattr(finance, "costo_reventa_total", ZERO))
+        production_labor_total = _to_decimal(getattr(finance, "mano_obra_prod_total", ZERO))
+        production_overhead_total = _to_decimal(getattr(finance, "indirecto_prod_total", ZERO))
+        production_packaging_total = _to_decimal(getattr(finance, "empaque_prod_total", ZERO))
+        has_finance_breakdown = any(
+            value > 0
+            for value in (
+                materia_prima_total,
+                resale_cost_total,
+                production_labor_total,
+                production_overhead_total,
+                production_packaging_total,
+            )
+        )
+        product_variable_cost_total = (
+            materia_prima_total + resale_cost_total
+            if has_finance_breakdown
+            else manufacturing_total
+        )
         commercial_total = _to_decimal(getattr(finance, "gasto_comercial_total", ZERO))
         corporate_total = _to_decimal(getattr(finance, "gasto_corporativo_total", ZERO))
-        operating_expense_total = commercial_total + corporate_total
+        production_load_total = (
+            production_labor_total + production_overhead_total + production_packaging_total
+            if has_finance_breakdown
+            else ZERO
+        )
+        operating_expense_total = production_load_total + commercial_total + corporate_total
         operating_profit_total = _to_decimal(getattr(finance, "utilidad_operativa_total", ZERO))
         finance_meta = getattr(finance, "metadata", {}) or {}
         costed_sales_total = _to_decimal(finance_meta.get("venta_costeada_total", ZERO))
@@ -2073,7 +2098,7 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
             and costed_sales_total > 0
             and operating_expense_total > 0
         )
-        gross_margin_total = sales_total - manufacturing_total
+        gross_margin_total = sales_total - product_variable_cost_total
         gross_margin_pct = _safe_pct(gross_margin_total, sales_total)
 
         if budget is not None:
@@ -2095,7 +2120,7 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
                 ytd_sales += sales_total
                 ytd_costed_sales += costed_sales_total
                 ytd_non_recipe += non_recipe_total
-                ytd_manufacturing += manufacturing_total
+                ytd_manufacturing += product_variable_cost_total
                 ytd_commercial += commercial_total
                 ytd_corporate += corporate_total
                 ytd_actual_expense += operating_expense_total
@@ -2109,13 +2134,13 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         product_cost_budget_mix_pct = _safe_pct(product_cost_budget_total, sales_budget_total)
         recurrent_expense_budget_mix_pct = _safe_pct(recurrent_expense_budget_total, sales_budget_total)
         budget_result_margin_pct = _safe_pct(budget_result_total, sales_budget_total)
-        actual_product_cost_mix_pct = _safe_pct(manufacturing_total, sales_total)
+        actual_product_cost_mix_pct = _safe_pct(product_variable_cost_total, sales_total)
         actual_expense_mix_pct = _safe_pct(operating_expense_total, sales_total)
         operating_margin_pct = _safe_pct(operating_profit_total, sales_total)
         sales_signal = _attainment_signal(sales_budget_attainment_pct)
         product_cost_signal = (
             _cost_ratio_signal(actual_product_cost_mix_pct)
-            if finance is not None and sales_total > 0 and manufacturing_total > 0
+            if finance is not None and sales_total > 0 and product_variable_cost_total > 0
             else _pending_signal("Sin lectura", "Todavía no hay costo real suficiente para comparar contra la venta.")
         )
         expense_signal = (
@@ -2130,7 +2155,7 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         )
         gross_margin_signal = (
             _gross_margin_signal(gross_margin_pct)
-            if finance is not None and sales_total > 0 and manufacturing_total > 0
+            if finance is not None and sales_total > 0 and product_variable_cost_total > 0
             else _pending_signal("Sin lectura", "Todavía no hay costo real suficiente para calcular margen bruto real.")
         )
         health_signal = (
@@ -2158,6 +2183,13 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
                 "costed_coverage_pct": costed_coverage_pct,
                 "finance_close_complete": finance_close_complete,
                 "manufacturing_total": manufacturing_total,
+                "materia_prima_total": materia_prima_total,
+                "resale_cost_total": resale_cost_total,
+                "production_labor_total": production_labor_total,
+                "production_overhead_total": production_overhead_total,
+                "production_packaging_total": production_packaging_total,
+                "product_variable_cost_total": product_variable_cost_total,
+                "production_load_total": production_load_total,
                 "gross_margin_total": gross_margin_total,
                 "gross_margin_pct": gross_margin_pct,
                 "commercial_total": commercial_total,
