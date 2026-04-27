@@ -3,6 +3,7 @@ from django.contrib import admin
 from reportes.models import (
     Alert,
     AnalyticAuditLog,
+    AreaPresupuesto,
     AutoControlSettings,
     AutoPurchaseRequestSnapshot,
     CargaGastoOperativoArchivo,
@@ -36,7 +37,9 @@ from reportes.models import (
     RecetaCostoHistoricoMensual,
     ReglaCostoHistoricoInsumo,
     ReglaAsignacionGasto,
+    RubroPresupuesto,
     SupplierLeadTime,
+    LineaPresupuestoMensual,
 )
 
 
@@ -197,6 +200,27 @@ class PresupuestoResumenMensualAdmin(admin.ModelAdmin):
     list_display = ("period", "tipo", "fuente_nombre", "total_budget", "total_actual", "total_variance", "line_count")
     list_filter = ("period", "tipo", "fuente_nombre")
     search_fields = ("fuente_nombre",)
+
+
+@admin.register(AreaPresupuesto)
+class AreaPresupuestoAdmin(admin.ModelAdmin):
+    list_display = ("orden", "nombre", "codigo", "activa")
+    list_filter = ("activa",)
+    search_fields = ("nombre", "codigo")
+
+
+@admin.register(RubroPresupuesto)
+class RubroPresupuestoAdmin(admin.ModelAdmin):
+    list_display = ("area", "concepto", "codigo_cuenta", "tipo", "sucursal", "activo")
+    list_filter = ("area", "tipo", "activo", "sucursal")
+    search_fields = ("concepto", "codigo_cuenta", "area__nombre", "area__codigo", "sucursal__codigo", "sucursal__nombre")
+
+
+@admin.register(LineaPresupuestoMensual)
+class LineaPresupuestoMensualAdmin(admin.ModelAdmin):
+    list_display = ("periodo", "version", "rubro", "monto_presupuesto", "monto_real", "fuente_real")
+    list_filter = ("periodo", "version", "rubro__area", "rubro__tipo")
+    search_fields = ("rubro__concepto", "rubro__codigo_cuenta", "fuente_real")
 
 
 @admin.register(ProductionExecutionLog)

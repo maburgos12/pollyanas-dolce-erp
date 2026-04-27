@@ -12,6 +12,7 @@ urlpatterns = [
     path("cierre-operativo/", views.cierre_operativo, name="cierre_operativo"),
     path("cierre-producto/", views.cierre_producto, name="cierre_producto"),
     path("financiero/", views.costo_receta, name="financiero"),
+    path("presupuesto-maestro/", views.presupuesto_maestro, name="presupuesto_maestro"),
     path("presupuestos/importar/", views.presupuesto_importar_por_area, name="presupuesto_importar_por_area"),
     path(
         "gastos-operativos/captura-manual/",

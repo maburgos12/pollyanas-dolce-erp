@@ -755,6 +755,111 @@ class PresupuestoResumenMensual(models.Model):
         return f"{self.period:%Y-%m} · {label}"
 
 
+class AreaPresupuesto(models.Model):
+    nombre = models.CharField(max_length=100, unique=True)
+    codigo = models.SlugField(max_length=50, unique=True)
+    orden = models.PositiveSmallIntegerField(default=0)
+    activa = models.BooleanField(default=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["orden", "nombre"]
+        verbose_name = "Área de presupuesto"
+        verbose_name_plural = "Áreas de presupuesto"
+
+    def __str__(self) -> str:
+        return self.nombre
+
+
+class RubroPresupuesto(models.Model):
+    TIPO_INGRESO = "INGRESO"
+    TIPO_EGRESO = "EGRESO"
+    TIPO_COSTO = "COSTO"
+    TIPO_CAPEX = "CAPEX"
+    TIPO_CHOICES = [
+        (TIPO_INGRESO, "Ingreso"),
+        (TIPO_EGRESO, "Egreso"),
+        (TIPO_COSTO, "Costo"),
+        (TIPO_CAPEX, "Capex"),
+    ]
+
+    area = models.ForeignKey(
+        AreaPresupuesto,
+        on_delete=models.PROTECT,
+        related_name="rubros",
+    )
+    concepto = models.CharField(max_length=200)
+    codigo_cuenta = models.CharField(max_length=50, blank=True, default="")
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, db_index=True)
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rubros_presupuesto",
+    )
+    activo = models.BooleanField(default=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["area__orden", "area__nombre", "concepto", "sucursal__codigo"]
+        verbose_name = "Rubro de presupuesto"
+        verbose_name_plural = "Rubros de presupuesto"
+        indexes = [
+            models.Index(fields=["area", "tipo"], name="rubro_presu_area_tipo_idx"),
+            models.Index(fields=["codigo_cuenta"], name="rubro_presu_cuenta_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["area", "concepto", "codigo_cuenta", "sucursal"],
+                name="uniq_rubro_presu_area_concept_suc",
+            )
+        ]
+
+    def __str__(self) -> str:
+        branch = f" · {self.sucursal.codigo}" if self.sucursal_id else ""
+        return f"{self.area.codigo} · {self.concepto}{branch}"
+
+
+class LineaPresupuestoMensual(models.Model):
+    VERSION_ORIGINAL = "ORIGINAL"
+    VERSION_REVISADO = "REVISADO"
+    VERSION_CHOICES = [
+        (VERSION_ORIGINAL, "Original"),
+        (VERSION_REVISADO, "Revisado"),
+    ]
+
+    rubro = models.ForeignKey(
+        RubroPresupuesto,
+        on_delete=models.PROTECT,
+        related_name="lineas_mensuales",
+    )
+    periodo = models.DateField(db_index=True)
+    version = models.CharField(max_length=20, choices=VERSION_CHOICES, default=VERSION_ORIGINAL, db_index=True)
+    monto_presupuesto = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    monto_real = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    fuente_real = models.CharField(max_length=100, blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-periodo", "rubro__area__orden", "rubro__concepto"]
+        verbose_name = "Línea de presupuesto mensual"
+        verbose_name_plural = "Líneas de presupuesto mensual"
+        unique_together = [("rubro", "periodo", "version")]
+        indexes = [
+            models.Index(fields=["periodo", "version"], name="linea_presu_period_ver_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.periodo:%Y-%m} · {self.rubro.concepto} · {self.version}"
+
+
 class FactVentaDiaria(models.Model):
     SOURCE_AUTHORITATIVE = "AUTHORITATIVE"
     SOURCE_V2 = "V2_FACT"
