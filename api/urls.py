@@ -104,6 +104,13 @@ from .logistica_views import (
 )
 from .reportes_bi_views import ReportesBIDashboardView
 from .reportes_budget_views import BudgetVsActualView
+from .reportes_presupuesto_maestro_views import (
+    PresupuestoAreasView,
+    PresupuestoConsolidadoView as PresupuestoMaestroConsolidadoView,
+    PresupuestoLineaView,
+    PresupuestoRubroLineasView,
+    PresupuestoRubrosView,
+)
 from .reportes_investment_views import (
     InvestmentProjectDashboardView,
     InvestmentProjectScenarioSimulationView,
@@ -322,6 +329,11 @@ urlpatterns = [
     path("logistica/rutas/<int:ruta_id>/entregas/", LogisticaRutaEntregasView.as_view(), name="api_logistica_ruta_entregas"),
     path("reportes/bi/dashboard/", ReportesBIDashboardView.as_view(), name="api_reportes_bi_dashboard"),
     path("reportes/presupuesto-vs-real/<str:periodo>/", BudgetVsActualView.as_view(), name="api_reportes_budget_vs_actual"),
+    path("presupuesto/areas/", PresupuestoAreasView.as_view(), name="api_presupuesto_areas"),
+    path("presupuesto/rubros/", PresupuestoRubrosView.as_view(), name="api_presupuesto_rubros"),
+    path("presupuesto/consolidado/", PresupuestoMaestroConsolidadoView.as_view(), name="api_presupuesto_consolidado"),
+    path("presupuesto/rubros/<int:rubro_id>/lineas/", PresupuestoRubroLineasView.as_view(), name="api_presupuesto_rubro_lineas"),
+    path("presupuesto/lineas/<int:line_id>/", PresupuestoLineaView.as_view(), name="api_presupuesto_linea"),
     path(
         "reportes/investment-projects/<int:project_id>/dashboard/",
         InvestmentProjectDashboardView.as_view(),

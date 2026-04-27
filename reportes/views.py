@@ -1,5 +1,6 @@
 import csv
 import re
+import tempfile
 from collections import defaultdict
 from io import BytesIO
 from datetime import date, timedelta
@@ -115,6 +116,7 @@ from .executive_panels import (
 )
 from .models import (
     Alert,
+    AreaPresupuesto,
     CategoriaGasto,
     CargaGastoOperativoArchivo,
     CentroCosto,
@@ -122,10 +124,19 @@ from .models import (
     GastoOperativoMensual,
     OperationsMetricSnapshot,
     PresupuestoImport,
+    RubroPresupuesto,
     ProductionOrder,
 )
 from .services_budget_area_upload import BudgetAreaUploadService
 from .services_budget_vs_actual import BudgetVsActualSnapshotService, parse_period as parse_budget_period
+from .services_presupuesto_maestro import (
+    AREA_DEFINITIONS,
+    PresupuestoMaestroImportService,
+    PresupuestoMaestroService,
+    ensure_master_budget_areas,
+    normalize_area_code,
+    normalize_version,
+)
 from .operations_metrics_service import rebuild_operations_metrics
 from .services_operating_expense_automation import OperatingExpenseImportAutomationService
 
@@ -179,6 +190,7 @@ def _reportes_module_tabs(active: str) -> list[dict[str, str | bool]]:
         ("cierre_operativo", reverse("reportes:cierre_operativo"), "Cierre diario"),
         ("cierre_producto", reverse("reportes:cierre_producto"), "Cierre producto"),
         ("financiero", reverse("reportes:financiero"), "Financiero"),
+        ("presupuesto_maestro", reverse("reportes:presupuesto_maestro"), "Presupuesto Maestro"),
         ("presupuestos", reverse("reportes:presupuesto_importar_por_area"), "Presupuestos"),
         ("gastos_operativos", reverse("reportes:gastos_operativos_importar"), "Importar gastos"),
         ("consumo", reverse("reportes:consumo"), "Consumo"),
@@ -370,6 +382,13 @@ def _parse_ui_date(value: str | None) -> date:
         return date.fromisoformat(str(value))
     except ValueError:
         return timezone.localdate()
+
+
+def _parse_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _normalize_branch_token(value: str | None) -> str:
@@ -4272,6 +4291,84 @@ def presupuesto_importar_por_area(request: HttpRequest) -> HttpResponse:
         ],
     }
     return render(request, "reportes/presupuesto_importar_por_area.html", context)
+
+
+@login_required
+def presupuesto_maestro(request: HttpRequest) -> HttpResponse:
+    if not can_view_reportes(request.user):
+        raise PermissionDenied("No tienes permisos para ver Reportes.")
+
+    ensure_master_budget_areas()
+    selected_year = _parse_int(request.GET.get("year"), 2026)
+    selected_year = max(2020, min(selected_year, 2035))
+    selected_version = normalize_version(request.GET.get("version"))
+    selected_area = normalize_area_code(request.GET.get("area") or "")
+    if selected_area and selected_area not in {code for code, _, _ in AREA_DEFINITIONS}:
+        selected_area = ""
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        try:
+            if action == "add_rubro":
+                PresupuestoMaestroService().create_rubro_with_empty_year(
+                    area_code=request.POST.get("area") or selected_area or "ventas",
+                    concepto=request.POST.get("concepto") or "",
+                    tipo=request.POST.get("tipo") or "",
+                    year=selected_year,
+                    version=selected_version,
+                    codigo_cuenta=request.POST.get("codigo_cuenta") or "",
+                    sucursal_id=_parse_int(request.POST.get("sucursal_id"), 0) or None,
+                )
+                messages.success(request, "Concepto agregado al presupuesto maestro.")
+            elif action == "import_file":
+                uploaded_file = request.FILES.get("budget_file")
+                if uploaded_file is None:
+                    raise ValueError("Selecciona un archivo CSV o XLSX.")
+                suffix = "." + uploaded_file.name.rsplit(".", 1)[-1].lower() if "." in uploaded_file.name else ".xlsx"
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
+                    for chunk in uploaded_file.chunks():
+                        tmp.write(chunk)
+                    tmp.flush()
+                    summary = PresupuestoMaestroImportService().import_file(
+                        archivo=tmp.name,
+                        area_code=request.POST.get("area") or selected_area or "ventas",
+                        version=selected_version,
+                        year=selected_year,
+                        source_name=request.POST.get("fuente") or uploaded_file.name,
+                    )
+                messages.success(
+                    request,
+                    (
+                        f"Presupuesto importado: {summary.lines_created} línea(s) nuevas, "
+                        f"{summary.lines_updated} actualizadas."
+                    ),
+                )
+            else:
+                messages.error(request, "Acción inválida.")
+        except Exception as exc:
+            messages.error(request, f"No se pudo guardar el presupuesto: {exc}")
+        query = urlencode({"year": selected_year, "version": selected_version, "area": selected_area})
+        return redirect(f"{reverse('reportes:presupuesto_maestro')}?{query}")
+
+    service = PresupuestoMaestroService()
+    matrix = service.annual_matrix(year=selected_year, version=selected_version, area=selected_area or None)
+    consolidado = service.build_consolidado(
+        periodo=date(selected_year, 1, 1),
+        version=selected_version,
+        area=selected_area or None,
+    )
+    context = {
+        "module_tabs": _reportes_module_tabs("presupuesto_maestro"),
+        "matrix": matrix,
+        "consolidado": consolidado,
+        "areas": AreaPresupuesto.objects.filter(activa=True).order_by("orden", "nombre"),
+        "selected_year": selected_year,
+        "selected_version": selected_version,
+        "selected_area": selected_area,
+        "versions": ["ORIGINAL", "REVISADO"],
+        "rubro_types": RubroPresupuesto.TIPO_CHOICES,
+    }
+    return render(request, "reportes/presupuesto_maestro.html", context)
 
 
 @login_required
