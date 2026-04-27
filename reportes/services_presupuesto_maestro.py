@@ -22,6 +22,8 @@ from reportes.models import (
 from reportes.services_budget_vs_actual import MONTH_COLUMNS, money_decimal, parse_period, variance_pct
 
 
+MONTH_NAME_TO_NUMBER = {month_name: month_number for month_name, month_number in MONTH_COLUMNS}
+
 AREA_DEFINITIONS = [
     ("ventas", "Ventas", 10),
     ("produccion", "Producción", 20),
@@ -162,17 +164,169 @@ def month_periods(year: int) -> list[date]:
 
 
 class PresupuestoMaestroImportService:
+    def _normalize_cell(self, value: object) -> str:
+        return " ".join(str(value or "").strip().lower().split())
+
     def _csv_rows(self, path: Path) -> Iterable[dict[str, object]]:
         with path.open("r", newline="", encoding="utf-8-sig") as fh:
             yield from csv.DictReader(fh)
 
     def _xlsx_rows(self, path: Path) -> Iterable[dict[str, object]]:
         workbook = load_workbook(path, read_only=True, data_only=True)
-        sheet = workbook.active
-        rows = sheet.iter_rows(values_only=True)
-        headers = [str(value or "").strip().lower() for value in next(rows, [])]
-        for values in rows:
-            yield {headers[idx]: value for idx, value in enumerate(values or []) if idx < len(headers)}
+        for sheet in workbook.worksheets:
+            yield from self._sales_projection_rows(sheet)
+            yield from self._budget_table_rows(sheet)
+
+    def _sales_projection_rows(self, sheet) -> Iterable[dict[str, object]]:
+        rows = list(sheet.iter_rows(values_only=True))
+        if len(rows) < 5:
+            return
+        month_row = rows[1]
+        projection_row = rows[2]
+        metric_row = rows[3]
+        if not any("proyeccion 2026" in self._normalize_cell(value).replace("ó", "o") for value in projection_row):
+            return
+
+        month_starts: list[tuple[str, int]] = []
+        for idx, value in enumerate(month_row):
+            month_name = self._normalize_cell(value)
+            if month_name in MONTH_NAME_TO_NUMBER:
+                month_starts.append((month_name, idx))
+        if not month_starts:
+            return
+
+        budget_columns: dict[str, int] = {}
+        for pos, (month_name, start_idx) in enumerate(month_starts):
+            end_idx = month_starts[pos + 1][1] if pos + 1 < len(month_starts) else len(month_row)
+            for idx in range(start_idx, end_idx):
+                projection_label = self._normalize_cell(projection_row[idx]).replace("ó", "o")
+                if "proyeccion 2026" not in projection_label:
+                    continue
+                venta_idx = idx + 1
+                if venta_idx < len(metric_row) and self._normalize_cell(metric_row[venta_idx]) == "venta":
+                    budget_columns[month_name] = venta_idx
+                    break
+        if not budget_columns:
+            return
+
+        branch_name = "" if self._normalize_cell(sheet.title) == "general" else sheet.title
+        for row in rows[4:]:
+            concept = str(row[0] or "").strip() if row else ""
+            if not concept or concept.upper().startswith("TOTAL"):
+                continue
+            output = {
+                "concepto": concept,
+                "tipo": RubroPresupuesto.TIPO_INGRESO,
+                "sucursal": branch_name,
+                "codigo_cuenta": "",
+            }
+            has_value = False
+            for month_name, col_idx in budget_columns.items():
+                value = row[col_idx] if col_idx < len(row) else None
+                output[month_name] = value
+                has_value = has_value or money(value) != 0
+            if has_value:
+                yield output
+
+    def _budget_table_rows(self, sheet) -> Iterable[dict[str, object]]:
+        rows = list(sheet.iter_rows(values_only=True))
+        if not rows:
+            return
+
+        for header_idx in range(min(8, len(rows))):
+            budget_columns = self._month_budget_columns(rows, header_idx)
+            if not budget_columns:
+                continue
+            concept_col = self._concept_column(rows, header_idx)
+            if concept_col is None:
+                continue
+            account_col = self._account_column(rows, header_idx)
+            branch_name = self._branch_from_sheet(sheet.title)
+            for row in rows[header_idx + 1 :]:
+                concept = str(row[concept_col] or "").strip() if concept_col < len(row) else ""
+                if not concept or self._is_total_or_noise(concept):
+                    continue
+                output = {
+                    "concepto": concept,
+                    "tipo": "",
+                    "sucursal": branch_name,
+                    "codigo_cuenta": str(row[account_col] or "").strip() if account_col is not None and account_col < len(row) else "",
+                }
+                has_value = False
+                for month_name, col_idx in budget_columns.items():
+                    value = row[col_idx] if col_idx < len(row) else None
+                    output[month_name] = value
+                    has_value = has_value or money(value) != 0
+                if has_value:
+                    yield output
+            return
+
+    def _month_budget_columns(self, rows: list[tuple[object, ...]], header_idx: int) -> dict[str, int]:
+        header = rows[header_idx]
+        next_row = rows[header_idx + 1] if header_idx + 1 < len(rows) else ()
+        columns: dict[str, int] = {}
+
+        for idx, value in enumerate(header):
+            label = self._normalize_cell(value)
+            for month_name in MONTH_NAME_TO_NUMBER:
+                if label == month_name or label == f"{month_name} presupuestado":
+                    if "presupuestado" in label:
+                        columns[month_name] = idx
+                    elif idx < len(next_row) and self._normalize_cell(next_row[idx]) == "presupuestado":
+                        columns[month_name] = idx
+
+        if columns:
+            return columns
+
+        for idx, value in enumerate(header):
+            label = self._normalize_cell(value)
+            if label in MONTH_NAME_TO_NUMBER:
+                columns[label] = idx
+        return columns if len(columns) >= 3 else {}
+
+    def _concept_column(self, rows: list[tuple[object, ...]], header_idx: int) -> int | None:
+        candidates = [rows[header_idx]]
+        if header_idx + 1 < len(rows):
+            candidates.append(rows[header_idx + 1])
+        accepted = {"concepto", "conceptos", "descripcion", "descripción", "producto/insumo", "unidad de negocio"}
+        for row in candidates:
+            for idx, value in enumerate(row):
+                if self._normalize_cell(value) in accepted:
+                    return idx
+        return 1 if len(rows[header_idx]) > 1 else 0
+
+    def _account_column(self, rows: list[tuple[object, ...]], header_idx: int) -> int | None:
+        candidates = [rows[header_idx]]
+        if header_idx + 1 < len(rows):
+            candidates.append(rows[header_idx + 1])
+        for row in candidates:
+            for idx, value in enumerate(row):
+                if self._normalize_cell(value) in {"cuenta", "clave"}:
+                    return idx
+        return None
+
+    def _branch_from_sheet(self, title: str) -> str:
+        normalized = self._normalize_cell(title)
+        if normalized in {
+            "general",
+            "admon",
+            "administracion",
+            "produccion",
+            "producccion",
+            "logistica",
+            "logística",
+            "mantenimiento",
+            "costo de produccion",
+            "costo de producción",
+            "presupuesto produccion",
+            "presupuesto producción",
+        }:
+            return ""
+        return title
+
+    def _is_total_or_noise(self, concept: str) -> bool:
+        normalized = self._normalize_cell(concept)
+        return normalized in {"gasto", "cuenta", "conceptos"} or normalized.startswith("total ")
 
     def _rows(self, path: Path) -> Iterable[dict[str, object]]:
         suffix = path.suffix.lower()
