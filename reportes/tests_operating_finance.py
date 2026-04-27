@@ -1815,7 +1815,7 @@ class BudgetVsActualServiceTests(TestCase):
 
             summary = BudgetCsvImportService().import_csv(exported)
 
-            self.assertEqual(summary.lines_created, 72)
+            self.assertEqual(summary.lines_created, 132)
             self.assertEqual(summary.lines_updated, 0)
             self.assertEqual(summary.missing_required_concepts, [])
             enero_ventas = PresupuestoLineaMensual.objects.get(
@@ -1827,7 +1827,7 @@ class BudgetVsActualServiceTests(TestCase):
             summary = BudgetCsvImportService().import_csv(exported)
 
             self.assertEqual(summary.lines_created, 0)
-            self.assertEqual(summary.lines_updated, 72)
+            self.assertEqual(summary.lines_updated, 132)
 
     def test_budget_vs_actual_snapshot_reads_empresa_resultado_and_persists_summary(self):
         import_obj = PresupuestoImport.objects.create(
@@ -1895,18 +1895,25 @@ class BudgetVsActualServiceTests(TestCase):
     def test_budget_vs_actual_prefers_master_budget_lines(self):
         ventas_area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas", orden=1)
         produccion_area = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion", orden=2)
+        compras_area = AreaPresupuesto.objects.create(nombre="Compras", codigo="compras", orden=3)
         admin_area = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion", orden=3)
         nomina_area = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina", orden=4)
         logistica_area = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica", orden=5)
         gastos_area = AreaPresupuesto.objects.create(nombre="Gastos venta", codigo="gastos-venta", orden=6)
         master_rows = [
             (ventas_area, "Venta total", RubroPresupuesto.TIPO_INGRESO, Decimal("1000.00")),
-            (produccion_area, "Costo producción", RubroPresupuesto.TIPO_COSTO, Decimal("300.00")),
+            (produccion_area, "Costo de producción", RubroPresupuesto.TIPO_COSTO, Decimal("300.00")),
+            (produccion_area, "Queso Crema", RubroPresupuesto.TIPO_COSTO, Decimal("900.00")),
             (produccion_area, "Producción indirecta", RubroPresupuesto.TIPO_EGRESO, Decimal("999.00")),
-            (admin_area, "Administración", RubroPresupuesto.TIPO_EGRESO, Decimal("100.00")),
-            (nomina_area, "Nómina", RubroPresupuesto.TIPO_EGRESO, Decimal("80.00")),
+            (compras_area, "Costo reventa", RubroPresupuesto.TIPO_COSTO, Decimal("20.00")),
+            (admin_area, "Venta postres", RubroPresupuesto.TIPO_EGRESO, Decimal("500.00")),
+            (admin_area, "Venta complementos", RubroPresupuesto.TIPO_EGRESO, Decimal("500.00")),
+            (admin_area, "Costos insumos/productos", RubroPresupuesto.TIPO_EGRESO, Decimal("300.00")),
+            (admin_area, "Costos complementos", RubroPresupuesto.TIPO_EGRESO, Decimal("20.00")),
+            (admin_area, "Arrendamiento local", RubroPresupuesto.TIPO_EGRESO, Decimal("100.00")),
+            (nomina_area, "Sueldo", RubroPresupuesto.TIPO_EGRESO, Decimal("80.00")),
             (logistica_area, "Logística", RubroPresupuesto.TIPO_EGRESO, Decimal("40.00")),
-            (gastos_area, "Gastos venta", RubroPresupuesto.TIPO_EGRESO, Decimal("60.00")),
+            (gastos_area, "Publicidad", RubroPresupuesto.TIPO_EGRESO, Decimal("60.00")),
         ]
         for area, concept, rubro_type, amount in master_rows:
             rubro = RubroPresupuesto.objects.create(area=area, concepto=concept, tipo=rubro_type)
@@ -1931,11 +1938,14 @@ class BudgetVsActualServiceTests(TestCase):
         self.assertEqual(summary.budget_source, "MAESTRO")
         self.assertEqual(next(row for row in summary.rows if row["concept"] == "ventas")["budget"], Decimal("1000.00"))
         self.assertEqual(next(row for row in summary.rows if row["concept"] == "costo_mp")["budget"], Decimal("300.00"))
+        self.assertEqual(next(row for row in summary.rows if row["concept"] == "costo_reventa")["budget"], Decimal("20.00"))
+        self.assertEqual(next(row for row in summary.rows if row["concept"] == "gasto_fijo")["budget"], Decimal("100.00"))
+        self.assertEqual(next(row for row in summary.rows if row["concept"] == "nomina")["budget"], Decimal("80.00"))
         self.assertEqual(next(row for row in summary.rows if row["concept"] == "logistica")["budget"], Decimal("40.00"))
         self.assertEqual(next(row for row in summary.rows if row["concept"] == "gastos_venta")["budget"], Decimal("60.00"))
         self.assertEqual(
             next(row for row in summary.rows if row["concept"] == "utilidad_operativa")["budget"],
-            Decimal("420.00"),
+            Decimal("400.00"),
         )
         snapshot = PresupuestoResumenMensual.objects.get(
             period=date(2026, 1, 1),
