@@ -328,6 +328,11 @@ class ProductoSucursalContribucionMensual(models.Model):
 class EmpresaResultadoMensual(models.Model):
     periodo = models.DateField(unique=True, db_index=True)
     venta_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    costo_materia_prima_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    costo_reventa_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    mano_obra_prod_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    indirecto_prod_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    empaque_prod_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     costo_fabricacion_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     margen_bruto_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     gasto_comercial_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)

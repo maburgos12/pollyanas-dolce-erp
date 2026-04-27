@@ -194,9 +194,100 @@ class OperatingFinanceSnapshotServiceTests(TestCase):
         )
         self.assertEqual(branch_row.gasto_comercial_total, Decimal("500"))
         company_row = EmpresaResultadoMensual.objects.get(periodo=date(2026, 3, 1))
+        self.assertEqual(company_row.costo_materia_prima_total, Decimal("588.06"))
+        self.assertEqual(company_row.costo_reventa_total, Decimal("0.00"))
+        self.assertEqual(company_row.mano_obra_prod_total, Decimal("1000.00"))
+        self.assertEqual(company_row.indirecto_prod_total, Decimal("0.00"))
+        self.assertEqual(company_row.margen_bruto_total, Decimal("1261.94"))
         self.assertEqual(company_row.gasto_corporativo_total, Decimal("200"))
         pricing_row = ProductoPricingDecisionMensual.objects.get(periodo=date(2026, 3, 1), receta=self.receta)
         self.assertTrue(pricing_row.accion_sugerida)
+
+    def test_build_snapshot_keeps_resale_cost_separate_from_manufacturing(self):
+        resale_product = PointProduct.objects.create(
+            external_id="PTE_RESALE",
+            sku="TE-RESALE",
+            name="TE DEL JARDIN",
+            category="Te",
+        )
+        ProductBusinessRule.objects.create(
+            product_name="TE DEL JARDIN",
+            classification=ProductBusinessRule.CLASSIFICATION_REVENTA,
+            is_fixed=True,
+        )
+        ProductoReventaCostoHistoricoMensual.objects.create(
+            periodo=date(2026, 3, 1),
+            producto_point=resale_product,
+            costo_promedio=Decimal("12.50"),
+        )
+        cost_only_product = PointProduct.objects.create(
+            external_id="PCOST_RESALE",
+            sku="COST-RESALE",
+            name="Producto con costo adquisicion",
+            category="Bebidas",
+        )
+        ProductoReventaCostoHistoricoMensual.objects.create(
+            periodo=date(2026, 3, 1),
+            producto_point=cost_only_product,
+            costo_promedio=Decimal("8.00"),
+        )
+        PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=resale_product,
+            receta=None,
+            sale_date=date(2026, 3, 16),
+            quantity=Decimal("4"),
+            total_amount=Decimal("120"),
+            gross_amount=Decimal("120"),
+            net_amount=Decimal("103.45"),
+        )
+        PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=cost_only_product,
+            receta=None,
+            sale_date=date(2026, 3, 17),
+            quantity=Decimal("3"),
+            total_amount=Decimal("90"),
+            gross_amount=Decimal("90"),
+            net_amount=Decimal("77.59"),
+        )
+        PointMonthlySalesOfficial.objects.create(
+            month_start=date(2026, 3, 1),
+            month_end=date(2026, 3, 31),
+            total_quantity=Decimal("17"),
+            gross_amount=Decimal("2060"),
+            discount_amount=Decimal("0"),
+            total_amount=Decimal("2060"),
+            tax_amount=Decimal("0"),
+            net_amount=Decimal("1775.86"),
+        )
+
+        OperatingFinanceSnapshotService().build_snapshot(period_start=date(2026, 3, 1))
+
+        company_row = EmpresaResultadoMensual.objects.get(periodo=date(2026, 3, 1))
+        self.assertEqual(company_row.costo_materia_prima_total, Decimal("588.06"))
+        self.assertEqual(company_row.costo_reventa_total, Decimal("74.00"))
+        self.assertEqual(company_row.costo_fabricacion_total, Decimal("1588.06"))
+        self.assertEqual(company_row.margen_bruto_total, Decimal("1397.94"))
+        self.assertEqual(company_row.metadata["venta_reventa_total"], "210.00")
+        self.assertEqual(company_row.metadata["reventa_rows"], 2)
+
+    def test_build_snapshot_ignores_budget_expenses_for_real_financial_result(self):
+        GastoOperativoMensual.objects.create(
+            periodo=date(2026, 3, 1),
+            centro_costo=self.prod_center,
+            categoria_gasto=CategoriaGasto.objects.get(codigo="INDIRECTO_PROD"),
+            monto=Decimal("9999"),
+            tipo_dato=GastoOperativoMensual.TIPO_DATO_PRESUPUESTO,
+        )
+
+        OperatingFinanceSnapshotService().build_snapshot(period_start=date(2026, 3, 1))
+
+        company_row = EmpresaResultadoMensual.objects.get(periodo=date(2026, 3, 1))
+        product_row = ProductoCostoOperativoMensual.objects.get(periodo=date(2026, 3, 1), receta=self.receta)
+        self.assertEqual(product_row.indirecto_prod_unit, Decimal("0"))
+        self.assertEqual(company_row.indirecto_prod_total, Decimal("0.00"))
+        self.assertEqual(company_row.utilidad_operativa_total, Decimal("-438.06"))
 
     def test_branch_expense_uses_exact_center_rule_before_generic_rule(self):
         categoria = CategoriaGasto.objects.get(codigo="RENTA_SUC")
