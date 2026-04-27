@@ -94,6 +94,8 @@ class PointSalesMatchingService:
     def __init__(self):
         self._point_name_index_built = False
         self._point_name_to_receta: dict[str, Receta] = {}
+        self._point_code_index_built = False
+        self._point_code_to_receta: dict[str, Receta] = {}
 
     def infer_cost_mode(self, payload: dict) -> str:
         familia = normalizar_nombre(payload.get("family") or payload.get("Familia") or "")
@@ -160,20 +162,35 @@ class PointSalesMatchingService:
                 self._point_name_to_receta[key] = alias.receta
         self._point_name_index_built = True
 
+    def _build_point_code_index(self) -> None:
+        if self._point_code_index_built:
+            return
+        recetas_qs = Receta.objects.exclude(codigo_point="").exclude(codigo_point__isnull=True).only("id", "nombre", "codigo_point")
+        for receta in recetas_qs:
+            raw_code = (receta.codigo_point or "").strip().lower()
+            normalized_code = normalizar_codigo_point(receta.codigo_point)
+            for key in {raw_code, normalized_code}:
+                if key and key not in self._point_code_to_receta:
+                    self._point_code_to_receta[key] = receta
+        alias_qs = RecetaCodigoPointAlias.objects.filter(activo=True).select_related("receta")
+        for alias in alias_qs:
+            if not alias.receta_id:
+                continue
+            raw_code = (alias.codigo_point or "").strip().lower()
+            normalized_code = alias.codigo_point_normalizado or normalizar_codigo_point(alias.codigo_point)
+            for key in {raw_code, normalized_code}:
+                if key and key not in self._point_code_to_receta:
+                    self._point_code_to_receta[key] = alias.receta
+        self._point_code_index_built = True
+
     def resolve_receta(self, *, codigo_point: str, point_name: str) -> Receta | None:
         if codigo_point:
-            receta = Receta.objects.filter(codigo_point__iexact=codigo_point).order_by("id").first()
+            self._build_point_code_index()
+            raw_code = (codigo_point or "").strip().lower()
+            code_norm = normalizar_codigo_point(codigo_point)
+            receta = self._point_code_to_receta.get(raw_code) or self._point_code_to_receta.get(code_norm)
             if receta is not None:
                 return receta
-            code_norm = normalizar_codigo_point(codigo_point)
-            if code_norm:
-                alias = (
-                    RecetaCodigoPointAlias.objects.filter(codigo_point_normalizado=code_norm, activo=True)
-                    .select_related("receta")
-                    .first()
-                )
-                if alias and alias.receta_id:
-                    return alias.receta
 
         if point_name:
             self._build_point_name_index()

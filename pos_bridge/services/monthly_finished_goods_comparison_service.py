@@ -111,6 +111,36 @@ class MonthlyFinishedGoodsComparisonService:
             "export_path": str(export_path),
         }
 
+    def dry_run(self, *, month: str | date) -> dict[str, Any]:
+        month_start = self._parse_month(month)
+        month_end = self._month_end(month_start)
+        coverage = self.inspect_month_coverage(month_start=month_start, month_end=month_end)
+        payload: dict[str, Any] = {
+            "month": month_start.strftime("%Y-%m"),
+            "month_start": month_start.isoformat(),
+            "month_end": month_end.isoformat(),
+            "dry_run": True,
+            "persisted": False,
+            "coverage": coverage.as_dict(),
+        }
+        try:
+            plan = self.closure_service.preview(month=month_start)
+        except Exception as exc:  # noqa: BLE001
+            payload["closure_preview_error"] = str(exc)
+            return payload
+
+        validation = dict((plan.get("metadata") or {}).get("validation") or {})
+        payload["closure_preview"] = {
+            "opening_source": plan.get("opening_source"),
+            "opening_reference_date": plan.get("opening_reference_date"),
+            "line_count": len(plan.get("line_rows") or []),
+            "totals": {key: str(value) for key, value in dict(plan.get("totals") or {}).items()},
+            "lock_ready": bool(validation.get("lock_ready")),
+            "warnings": list(validation.get("warnings") or []),
+            "blocking_issues": list(validation.get("blocking_issues") or []),
+        }
+        return payload
+
     def inspect_month_coverage(self, *, month_start: date, month_end: date) -> CoverageSnapshot:
         sales_qs = VentaHistorica.objects.filter(
             fecha__gte=month_start,

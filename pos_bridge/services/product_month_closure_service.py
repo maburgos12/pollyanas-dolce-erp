@@ -6,8 +6,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.conf import settings
-from django.db import transaction
-from django.db.models import OuterRef, Subquery
+from django.db import connection, transaction
 from django.utils import timezone
 
 from pos_bridge.models import PointDailySale, PointInventorySnapshot, PointProductionLine, PointSyncJob, PointWasteLine
@@ -505,20 +504,43 @@ class ProductMonthClosureService:
 
     def _load_opening_from_snapshots(self, *, snapshot_date: date):
         tolerance_days = getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", self.DEFAULT_SNAPSHOT_TOLERANCE_DAYS)
-        tolerance_start = snapshot_date - timedelta(days=max(int(tolerance_days), 0))
-        latest_snapshot_id = (
-            PointInventorySnapshot.objects.filter(
-                branch_id=OuterRef("branch_id"),
-                product_id=OuterRef("product_id"),
-                captured_at__date__gte=tolerance_start,
-                captured_at__date__lte=snapshot_date,
-            )
+        target_start = timezone.make_aware(datetime.combine(snapshot_date, time.min), timezone.get_current_timezone())
+        target_end = timezone.make_aware(datetime.combine(snapshot_date, time.max), timezone.get_current_timezone())
+        before_at = (
+            PointInventorySnapshot.objects.filter(captured_at__lte=target_end)
             .order_by("-captured_at", "-id")
-            .values("id")[:1]
+            .values_list("captured_at", flat=True)
+            .first()
         )
+        after_at = (
+            PointInventorySnapshot.objects.filter(captured_at__gte=target_start)
+            .order_by("captured_at", "id")
+            .values_list("captured_at", flat=True)
+            .first()
+        )
+        candidates = [value for value in [before_at, after_at] if value is not None]
+        if not candidates:
+            raise ProductMonthClosureError(
+                f"No existe snapshot Point para resolver inventario inicial al cierre de {snapshot_date.isoformat()}."
+            )
+        selected_at = min(candidates, key=lambda value: abs(value - target_start))
+        effective_date = selected_at.date()
+        day_start = timezone.make_aware(datetime.combine(effective_date, time.min), timezone.get_current_timezone())
+        day_end = timezone.make_aware(datetime.combine(effective_date, time.max), timezone.get_current_timezone())
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT DISTINCT ON (branch_id, product_id) id
+                FROM pos_bridge_inventory_snapshots
+                WHERE captured_at >= %s AND captured_at <= %s
+                ORDER BY branch_id, product_id, captured_at DESC, id DESC
+                """,
+                [day_start, day_end],
+            )
+            snapshot_ids = [row[0] for row in cursor.fetchall()]
         snapshots = (
             PointInventorySnapshot.objects.select_related("product", "branch")
-            .filter(id=Subquery(latest_snapshot_id))
+            .filter(id__in=snapshot_ids)
             .order_by("product__name", "branch__name", "id")
         )
         if not snapshots.exists():
@@ -549,16 +571,16 @@ class ProductMonthClosureService:
             raise ProductMonthClosureError(
                 f"Los snapshots Point de {snapshot_date.isoformat()} no pudieron homologarse a recetas ERP."
             )
-        effective_dates = sorted({snap.captured_at.date() for snap in snapshots}, reverse=True)
-        effective_date = effective_dates[0] if effective_dates else snapshot_date
         snapshot_missing_exact_day = effective_date != snapshot_date
+        days_from_target = abs((effective_date - snapshot_date).days)
         return buckets, {
             "snapshot_date": snapshot_date.isoformat(),
             "snapshot_effective_date": effective_date.isoformat(),
             "snapshot_tolerance_days": int(tolerance_days),
             "snapshot_missing_exact_day": snapshot_missing_exact_day,
-            "snapshot_within_tolerance": bool((snapshot_date - effective_date).days <= int(tolerance_days)),
+            "snapshot_within_tolerance": bool(days_from_target <= int(tolerance_days)),
             "snapshot_fallback_used": snapshot_missing_exact_day,
+            "snapshot_days_from_target": days_from_target,
             "unmatched_products": unmatched_products[:50],
         }
 
