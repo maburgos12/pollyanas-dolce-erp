@@ -18,7 +18,7 @@ from recetas.models import (
     Receta,
     VentaHistorica,
 )
-from recetas.utils.derived_product_presentations import get_active_derived_relation
+from recetas.utils.cierre_equivalencias import resolve_closure_recipe_quantity
 from recetas.utils.normalizacion import normalizar_nombre
 
 ZERO = Decimal("0")
@@ -556,6 +556,8 @@ class ProductMonthClosureService:
                 unmatched_products.append(snap.product.name)
                 continue
             parent_receta, qty, issue_note, is_derived = self._canonical_recipe_quantity(receta=receta, quantity=Decimal(str(snap.stock or 0)))
+            if parent_receta is None:
+                continue
             bucket = buckets.setdefault(parent_receta.id, _AggregateBucket())
             bucket.value += qty
             bucket.snapshot_count += 1
@@ -602,6 +604,8 @@ class ProductMonthClosureService:
                 receta=row.receta,
                 quantity=Decimal(str(row.produced_quantity or 0)),
             )
+            if parent_receta is None:
+                continue
             bucket = buckets.setdefault(parent_receta.id, _AggregateBucket())
             bucket.value += qty
             bucket.row_count += 1
@@ -669,6 +673,8 @@ class ProductMonthClosureService:
                 receta=row.receta,
                 quantity=Decimal(str(row.quantity or 0)),
             )
+            if parent_receta is None:
+                continue
             bucket = buckets.setdefault(parent_receta.id, _AggregateBucket())
             bucket.value += qty
             bucket.row_count += 1
@@ -703,6 +709,8 @@ class ProductMonthClosureService:
                 receta=row.receta,
                 quantity=Decimal(str(row.cantidad or 0)),
             )
+            if parent_receta is None:
+                continue
             bucket = buckets.setdefault(parent_receta.id, _AggregateBucket())
             bucket.value += qty
             bucket.row_count += 1
@@ -742,6 +750,8 @@ class ProductMonthClosureService:
                 receta=receta,
                 quantity=Decimal(str(row.get("Cantidad") or 0)),
             )
+            if parent_receta is None:
+                continue
             bucket = buckets.setdefault(parent_receta.id, _AggregateBucket())
             bucket.value += qty
             bucket.row_count += 1
@@ -777,6 +787,8 @@ class ProductMonthClosureService:
                 receta=row.receta,
                 quantity=Decimal(str(row.quantity or 0)),
             )
+            if parent_receta is None:
+                continue
             bucket = buckets.setdefault(parent_receta.id, _AggregateBucket())
             bucket.value += qty
             bucket.row_count += 1
@@ -790,13 +802,8 @@ class ProductMonthClosureService:
         return buckets
 
     def _canonical_recipe_quantity(self, *, receta: Receta, quantity: Decimal):
-        relation = get_active_derived_relation(receta)
-        if relation is None:
-            return receta, quantity, "", False
-        units_per_parent = Decimal(str(relation.unidades_por_padre or 0))
-        if units_per_parent <= 0:
-            return receta, quantity, f"Relacion derivada sin unidades_por_padre para {receta.nombre}", False
-        return relation.receta_padre, quantity / units_per_parent, "", True
+        parent_receta, qty, issue_note, is_derived, _source = resolve_closure_recipe_quantity(receta, quantity)
+        return parent_receta, qty, issue_note, is_derived
 
     def _build_validation_summary(self, *, opening_meta: dict) -> dict[str, object]:
         unmatched_products = list(opening_meta.get("unmatched_products") or [])
@@ -948,6 +955,8 @@ class ProductMonthClosureService:
                 receta=receta,
                 quantity=Decimal(str(row.get("quantity") or 0)),
             )
+            if parent_receta is None:
+                continue
             if not self._is_recipe_eligible_for_closure(parent_receta):
                 continue
             if is_derived:
@@ -997,6 +1006,8 @@ class ProductMonthClosureService:
         return line_rows, opening_meta, validation
 
     def _is_recipe_eligible_for_closure(self, receta: Receta) -> bool:
+        if receta.excluir_cierre:
+            return False
         if receta.tipo != Receta.TIPO_PRODUCTO_FINAL:
             return False
         normalized_name = normalizar_nombre(receta.nombre or "")

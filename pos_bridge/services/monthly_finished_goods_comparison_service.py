@@ -16,8 +16,8 @@ from pos_bridge.models import PointProductionLine, PointWasteLine
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from pos_bridge.services.official_sales_backfill_service import OfficialSalesBackfillService
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureService
-from recetas.models import ProductoMonthClosure, Receta, RecetaPresentacionDerivada, VentaHistorica
-from recetas.utils.derived_product_presentations import get_active_derived_relation
+from recetas.models import ProductoMonthClosure, Receta, RecetaEquivalencia, RecetaPresentacionDerivada, VentaHistorica
+from recetas.utils.cierre_equivalencias import resolve_closure_recipe_quantity
 from ventas.services.sales_canonical_source import POINT_BRIDGE_SALES_SOURCE
 
 
@@ -311,6 +311,7 @@ class MonthlyFinishedGoodsComparisonService:
                 receta__isnull=False,
                 receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
             )
+            .exclude(receta__excluir_cierre=True)
             .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
             .order_by("production_date", "id")
         ):
@@ -342,6 +343,7 @@ class MonthlyFinishedGoodsComparisonService:
                 fuente=POINT_BRIDGE_SALES_SOURCE,
                 receta__isnull=False,
             )
+            .exclude(receta__excluir_cierre=True)
             .order_by("fecha", "id")
         ):
             receta = sale.receta
@@ -372,6 +374,7 @@ class MonthlyFinishedGoodsComparisonService:
                 movement_at__date__lte=month_end,
                 receta__isnull=False,
             )
+            .exclude(receta__excluir_cierre=True)
             .order_by("movement_at", "id")
         ):
             receta = waste.receta
@@ -498,12 +501,15 @@ class MonthlyFinishedGoodsComparisonService:
         rows = (
             base_qs.select_related("receta")
             .filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+            .exclude(receta__excluir_cierre=True)
             .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
             .order_by("id")
         )
         buckets: dict[int, dict[str, Any]] = {}
         for row in rows:
             parent_receta, qty = self._canonical_recipe_quantity(receta=row.receta, quantity=Decimal(str(row.produced_quantity or 0)))
+            if parent_receta is None:
+                continue
             bucket = self._recipe_bucket(buckets, parent_receta)
             bucket["units"] += qty
             bucket["rows"] += 1
@@ -520,23 +526,24 @@ class MonthlyFinishedGoodsComparisonService:
                 receta__isnull=False,
                 receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
             )
+            .exclude(receta__excluir_cierre=True)
             .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
             .order_by("id")
         )
         buckets: dict[int, dict[str, Any]] = {}
         for row in rows:
             parent_receta, qty = self._canonical_recipe_quantity(receta=row.receta, quantity=Decimal(str(row.cantidad or 0)))
+            if parent_receta is None:
+                continue
             bucket = self._recipe_bucket(buckets, parent_receta)
             bucket["units"] += qty
             bucket["rows"] += 1
             bucket["source_recipes"].add(row.receta.nombre)
         return buckets, {"rows": rows.count()}
 
-    def _canonical_recipe_quantity(self, *, receta: Receta, quantity: Decimal) -> tuple[Receta, Decimal]:
-        relation = get_active_derived_relation(receta)
-        if relation is None or Decimal(str(relation.unidades_por_padre or 0)) <= 0:
-            return receta, quantity
-        return relation.receta_padre, quantity / Decimal(str(relation.unidades_por_padre))
+    def _canonical_recipe_quantity(self, *, receta: Receta, quantity: Decimal) -> tuple[Receta | None, Decimal]:
+        parent_receta, qty, _issue_note, _is_derived, _source = resolve_closure_recipe_quantity(receta, quantity)
+        return parent_receta, qty
 
     def _recipe_bucket(self, buckets: dict[int, dict[str, Any]], receta: Receta) -> dict[str, Any]:
         bucket = buckets.get(receta.id)
@@ -598,10 +605,17 @@ class MonthlyFinishedGoodsComparisonService:
             .select_related("receta_derivada", "receta_padre")
             .order_by("receta_padre_id", "id")
         }
+        equivalence_by_parent = {
+            row.receta_padre_id: row
+            for row in RecetaEquivalencia.objects.filter(receta_padre_id__in=sales_only_ids, activo=True)
+            .select_related("receta_porcion", "receta_padre")
+            .order_by("receta_padre_id", "id")
+        }
         payload = []
         for receta_id in sorted(sales_only_ids, key=lambda key: sales_buckets[key]["units"], reverse=True):
             bucket = sales_buckets[receta_id]
             relation = relation_by_parent.get(receta_id)
+            equivalence = equivalence_by_parent.get(receta_id)
             payload.append(
                 {
                     "receta_id": receta_id,
@@ -610,9 +624,15 @@ class MonthlyFinishedGoodsComparisonService:
                     "categoria": bucket["categoria"],
                     "sold_units": str(bucket["units"]),
                     "possible_parent": bucket["nombre"],
-                    "has_derived_children": relation is not None,
-                    "example_derived_child": relation.receta_derivada.nombre if relation else "",
-                    "units_per_parent": str(relation.unidades_por_padre) if relation else "",
+                    "has_derived_children": relation is not None or equivalence is not None,
+                    "example_derived_child": (
+                        relation.receta_derivada.nombre
+                        if relation
+                        else equivalence.receta_porcion.nombre
+                        if equivalence
+                        else ""
+                    ),
+                    "units_per_parent": str(relation.unidades_por_padre) if relation else str(equivalence.factor_conversion) if equivalence else "",
                     "source_recipes": sorted(bucket["source_recipes"])[:8],
                 }
             )
@@ -626,6 +646,7 @@ class MonthlyFinishedGoodsComparisonService:
                 receta__isnull=False,
                 receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
             )
+            .exclude(receta__excluir_cierre=True)
             .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
             .values_list("receta_id", flat=True)
             .distinct()
@@ -638,6 +659,7 @@ class MonthlyFinishedGoodsComparisonService:
                 receta__isnull=False,
                 receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
             )
+            .exclude(receta__excluir_cierre=True)
             .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
             .exclude(receta_id__in=production_recipe_ids)
             .values(
@@ -658,10 +680,17 @@ class MonthlyFinishedGoodsComparisonService:
             .select_related("receta_padre", "receta_derivada")
             .order_by("receta_derivada_id", "id")
         }
+        equivalences = {
+            equivalence.receta_porcion_id: equivalence
+            for equivalence in RecetaEquivalencia.objects.filter(receta_porcion_id__in=recipe_ids, activo=True)
+            .select_related("receta_padre", "receta_porcion")
+            .order_by("receta_porcion_id", "id")
+        }
         payload = []
         for row in sales_rows:
             recipe_id = int(row["receta_id"])
             relation = relations.get(recipe_id)
+            equivalence = equivalences.get(recipe_id)
             payload.append(
                 {
                     "receta_id": recipe_id,
@@ -669,10 +698,29 @@ class MonthlyFinishedGoodsComparisonService:
                     "nombre": row["receta__nombre"],
                     "categoria": row["receta__categoria"],
                     "sold_units": str(row["units"] or Decimal("0")),
-                    "possible_parent": relation.receta_padre.nombre if relation else "",
-                    "parent_codigo_point": relation.receta_padre.codigo_point if relation else "",
-                    "units_per_parent": str(relation.unidades_por_padre) if relation else "",
-                    "has_formal_parent_relation": relation is not None,
+                    "possible_parent": (
+                        equivalence.receta_padre.nombre
+                        if equivalence
+                        else relation.receta_padre.nombre
+                        if relation
+                        else ""
+                    ),
+                    "parent_codigo_point": (
+                        equivalence.receta_padre.codigo_point
+                        if equivalence
+                        else relation.receta_padre.codigo_point
+                        if relation
+                        else ""
+                    ),
+                    "units_per_parent": (
+                        str(equivalence.factor_conversion)
+                        if equivalence
+                        else str(relation.unidades_por_padre)
+                        if relation
+                        else ""
+                    ),
+                    "has_formal_parent_relation": relation is not None or equivalence is not None,
+                    "parent_relation_source": "RecetaEquivalencia" if equivalence else "RecetaPresentacionDerivada" if relation else "",
                 }
             )
         return payload

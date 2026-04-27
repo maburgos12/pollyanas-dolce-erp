@@ -56,6 +56,7 @@ class Receta(models.Model):
     )
     temporalidad_detalle = models.CharField(max_length=120, blank=True, default="")
     usa_presentaciones = models.BooleanField(default=False)
+    excluir_cierre = models.BooleanField(default=False, db_index=True)
     sheet_name = models.CharField(max_length=120, blank=True, default="")
     rendimiento_cantidad = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     rendimiento_unidad = models.ForeignKey(
@@ -121,6 +122,33 @@ class Receta(models.Model):
 
     def __str__(self) -> str:
         return self.nombre
+
+
+class RecetaEquivalencia(models.Model):
+    receta_porcion = models.OneToOneField(
+        Receta,
+        related_name="equivalencia_cierre",
+        on_delete=models.CASCADE,
+    )
+    receta_padre = models.ForeignKey(
+        Receta,
+        related_name="equivalencias_hijas_cierre",
+        on_delete=models.PROTECT,
+    )
+    factor_conversion = models.DecimalField(max_digits=18, decimal_places=6, default=Decimal("1"))
+    activo = models.BooleanField(default=True, db_index=True)
+    fuente = models.CharField(max_length=80, blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Equivalencia de receta para cierre"
+        verbose_name_plural = "Equivalencias de recetas para cierre"
+        ordering = ["receta_porcion__nombre"]
+
+    def __str__(self) -> str:
+        return f"{self.receta_porcion} -> {self.receta_padre} x {self.factor_conversion}"
 
 
 class CostoDriver(models.Model):
