@@ -1902,6 +1902,7 @@ class BudgetVsActualServiceTests(TestCase):
         master_rows = [
             (ventas_area, "Venta total", RubroPresupuesto.TIPO_INGRESO, Decimal("1000.00")),
             (produccion_area, "Costo producción", RubroPresupuesto.TIPO_COSTO, Decimal("300.00")),
+            (produccion_area, "Producción indirecta", RubroPresupuesto.TIPO_EGRESO, Decimal("999.00")),
             (admin_area, "Administración", RubroPresupuesto.TIPO_EGRESO, Decimal("100.00")),
             (nomina_area, "Nómina", RubroPresupuesto.TIPO_EGRESO, Decimal("80.00")),
             (logistica_area, "Logística", RubroPresupuesto.TIPO_EGRESO, Decimal("40.00")),

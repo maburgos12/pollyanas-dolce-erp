@@ -80,6 +80,7 @@ LEGACY_BUDGET_SOURCE = "LEGACY"
 MASTER_BUDGET_MAPPING = {
     "ventas": {"area": "ventas", "type": "INGRESO"},
     "costo_mp": {"area": "produccion", "type": "COSTO"},
+    "costo_reventa": {"area": "compras", "type": "COSTO"},
     "gasto_fijo": {"area": "administracion", "type": "EGRESO"},
     "mano_obra": {"area": "nomina", "type": "EGRESO"},
     "logistica": {"area": "logistica", "type": "EGRESO"},
@@ -315,6 +316,7 @@ class BudgetVsActualSnapshotService:
                     periodo=period_start,
                     version=LineaPresupuestoMensual.VERSION_ORIGINAL,
                     rubro__area__codigo=config["area"],
+                    rubro__tipo=config["type"],
                 ).aggregate(total=Sum("monto_presupuesto"))["total"]
                 or Decimal("0")
             )
@@ -323,6 +325,7 @@ class BudgetVsActualSnapshotService:
         utility_budget = (
             budgets.get("ventas", Decimal("0"))
             - budgets.get("costo_mp", Decimal("0"))
+            - budgets.get("costo_reventa", Decimal("0"))
             - budgets.get("gasto_fijo", Decimal("0"))
             - budgets.get("mano_obra", Decimal("0"))
             - budgets.get("logistica", Decimal("0"))

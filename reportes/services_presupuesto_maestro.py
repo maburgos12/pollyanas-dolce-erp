@@ -89,6 +89,32 @@ CAPEX_GUAMUCHIL_ROWS = [
     ("CAPEX Guamúchil equipo", 2026, 3, Decimal("159806.29")),
 ]
 
+TOTALIZER_KEYWORDS = (
+    "total",
+    "subtotal",
+    "utilidad",
+    "perdida",
+    "pérdida",
+    "presupuesto",
+)
+
+SECTION_HEADER_CONCEPTS = {
+    "produccion",
+    "producción",
+    "logistica",
+    "logística",
+    "ingresos",
+    "egresos",
+    "ingreso",
+    "egreso",
+    "costos",
+    "gastos",
+    "administracion",
+    "administración",
+    "nomina",
+    "nómina",
+}
+
 
 @dataclass(frozen=True)
 class PresupuestoImportSummary:
@@ -135,6 +161,24 @@ def normalize_rubro_type(value: str | None, area_code: str) -> str:
     return RubroPresupuesto.TIPO_EGRESO
 
 
+def infer_rubro_type(value: str | None, area_code: str, concept: str) -> str:
+    raw = str(value or "").strip().upper()
+    if raw in RUBRO_TYPES:
+        return raw
+    normalized_concept = normalize_concept_text(concept)
+    if area_code == "ventas":
+        return RubroPresupuesto.TIPO_INGRESO
+    if area_code == "capex":
+        return RubroPresupuesto.TIPO_CAPEX
+    if area_code == "compras":
+        return RubroPresupuesto.TIPO_COSTO
+    if area_code == "produccion":
+        if "costo" in normalized_concept or "insumo" in normalized_concept or "producto" in normalized_concept:
+            return RubroPresupuesto.TIPO_COSTO
+        return RubroPresupuesto.TIPO_EGRESO
+    return RubroPresupuesto.TIPO_EGRESO
+
+
 def normalize_actual_key(*values: str) -> str:
     joined = " ".join(str(value or "") for value in values).strip().lower()
     compact = " ".join(joined.replace("-", " ").replace("_", " ").split())
@@ -146,6 +190,26 @@ def normalize_actual_key(*values: str) -> str:
 
 def money(value) -> Decimal:
     return money_decimal(value)
+
+
+def normalize_concept_text(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def is_totalizer_budget_concept(concept: object, *, area_code: str = "") -> bool:
+    normalized = normalize_concept_text(concept)
+    if not normalized:
+        return True
+    if normalized in {"gasto", "cuenta", "concepto", "conceptos", "descripcion", "descripción"}:
+        return True
+    if any(keyword in normalized for keyword in TOTALIZER_KEYWORDS):
+        return True
+    if normalized in SECTION_HEADER_CONCEPTS:
+        return True
+    normalized_area = normalize_concept_text(area_code).replace("-", " ")
+    if normalized_area and normalized == normalized_area:
+        return True
+    return False
 
 
 def ensure_master_budget_areas() -> dict[str, AreaPresupuesto]:
@@ -165,7 +229,7 @@ def month_periods(year: int) -> list[date]:
 
 class PresupuestoMaestroImportService:
     def _normalize_cell(self, value: object) -> str:
-        return " ".join(str(value or "").strip().lower().split())
+        return normalize_concept_text(value)
 
     def _csv_rows(self, path: Path) -> Iterable[dict[str, object]]:
         with path.open("r", newline="", encoding="utf-8-sig") as fh:
@@ -212,7 +276,7 @@ class PresupuestoMaestroImportService:
         branch_name = "" if self._normalize_cell(sheet.title) == "general" else sheet.title
         for row in rows[4:]:
             concept = str(row[0] or "").strip() if row else ""
-            if not concept or concept.upper().startswith("TOTAL"):
+            if is_totalizer_budget_concept(concept, area_code="ventas"):
                 continue
             output = {
                 "concepto": concept,
@@ -244,7 +308,7 @@ class PresupuestoMaestroImportService:
             branch_name = self._branch_from_sheet(sheet.title)
             for row in rows[header_idx + 1 :]:
                 concept = str(row[concept_col] or "").strip() if concept_col < len(row) else ""
-                if not concept or self._is_total_or_noise(concept):
+                if is_totalizer_budget_concept(concept, area_code=sheet.title):
                     continue
                 output = {
                     "concepto": concept,
@@ -324,10 +388,6 @@ class PresupuestoMaestroImportService:
             return ""
         return title
 
-    def _is_total_or_noise(self, concept: str) -> bool:
-        normalized = self._normalize_cell(concept)
-        return normalized in {"gasto", "cuenta", "conceptos"} or normalized.startswith("total ")
-
     def _rows(self, path: Path) -> Iterable[dict[str, object]]:
         suffix = path.suffix.lower()
         if suffix == ".csv":
@@ -376,12 +436,12 @@ class PresupuestoMaestroImportService:
 
         for row in self._rows(path):
             concept = str(row.get("concepto") or row.get("concept") or "").strip()
-            if not concept:
+            if is_totalizer_budget_concept(concept, area_code=normalized_area):
                 skipped_rows += 1
                 continue
             branch = self._resolve_branch(row.get("sucursal"))
             account_code = str(row.get("codigo_cuenta") or row.get("cuenta") or "").strip()
-            rubro_type = normalize_rubro_type(row.get("tipo"), normalized_area)
+            rubro_type = infer_rubro_type(row.get("tipo"), normalized_area, concept)
             rubro, was_created = RubroPresupuesto.objects.update_or_create(
                 area=area,
                 concepto=concept,
