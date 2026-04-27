@@ -23,7 +23,9 @@ class Command(BaseCommand):
             period_start=period_start,
             dry_run=bool(options.get("dry_run")),
         )
-        self.stdout.write(f"Presupuesto vs Real · {summary.period:%Y-%m} · persisted={summary.persisted}")
+        self.stdout.write(
+            f"Presupuesto vs Real · {summary.period:%Y-%m} · persisted={summary.persisted} · presupuesto_fuente={summary.budget_source}"
+        )
         self.stdout.write("Concepto | Presupuesto | Real | Varianza | Varianza %")
         for row in summary.rows:
             self.stdout.write(

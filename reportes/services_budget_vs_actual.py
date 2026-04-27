@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -9,8 +10,13 @@ from pathlib import Path
 from typing import Iterable
 
 from django.db import transaction
-
-from reportes.models import EmpresaResultadoMensual, PresupuestoImport, PresupuestoLineaMensual, PresupuestoResumenMensual
+from reportes.models import (
+    EmpresaResultadoMensual,
+    LineaPresupuestoMensual,
+    PresupuestoImport,
+    PresupuestoLineaMensual,
+    PresupuestoResumenMensual,
+)
 
 
 MONTH_COLUMNS = [
@@ -32,9 +38,14 @@ REQUIRED_BUDGET_CONCEPTS = [
     "ventas",
     "costo_mp",
     "costo_reventa",
+    "utilidad_bruta",
+    "nomina",
     "gasto_fijo",
-    "mano_obra",
+    "gastos_venta",
+    "logistica",
+    "capex",
     "utilidad_operativa",
+    "resultado_neto",
 ]
 
 BUDGET_VS_ACTUAL_SOURCE = "PRESUPUESTO_VS_REAL"
@@ -45,20 +56,212 @@ CONCEPT_LABELS = {
     "ventas": "Ventas",
     "costo_mp": "Costo materia prima",
     "costo_reventa": "Costo reventa",
-    "gasto_fijo": "Gasto fijo",
+    "utilidad_bruta": "Utilidad bruta",
+    "nomina": "Nómina total",
+    "gasto_fijo": "Gasto fijo operativo",
     "mano_obra": "Mano de obra producción",
     "indirectos": "Indirectos producción",
+    "logistica": "Logística",
+    "gastos_venta": "Gastos de venta",
+    "capex": "CAPEX / Apertura sucursales",
     "utilidad_operativa": "Utilidad operativa",
+    "resultado_neto": "Resultado neto",
 }
 
 CONCEPT_TYPES = {
     "ventas": "INGRESO",
+    "utilidad_bruta": "INGRESO",
     "utilidad_operativa": "INGRESO",
+    "resultado_neto": "INGRESO",
     "costo_mp": "COSTO",
     "costo_reventa": "COSTO",
     "gasto_fijo": "COSTO",
+    "nomina": "COSTO",
     "mano_obra": "COSTO",
     "indirectos": "COSTO",
+    "logistica": "COSTO",
+    "gastos_venta": "COSTO",
+    "capex": "COSTO",
+}
+
+MASTER_BUDGET_SOURCE = "MAESTRO"
+LEGACY_BUDGET_SOURCE = "LEGACY"
+
+PNL_STRUCTURE = {
+    "ventas": {
+        "label": "Ventas",
+        "line_type": "INGRESO",
+        "filter": {"rubro__area__codigo": "administracion", "rubro__tipo": "EGRESO"},
+        "include_concepts": ["Venta postres", "Venta complementos"],
+        "fallback_filter": {"rubro__area__codigo": "ventas", "rubro__tipo": "INGRESO"},
+    },
+    "costo_mp": {
+        "label": "Costo materia prima",
+        "line_type": "COSTO",
+        "filter": {"rubro__area__codigo": "administracion", "rubro__tipo": "EGRESO"},
+        "include_concepts": ["Costos insumos/productos"],
+        "fallback_filter": {"rubro__area__codigo": "produccion", "rubro__tipo": "COSTO"},
+        "fallback_include_concepts": ["Costo de producción"],
+    },
+    "costo_reventa": {
+        "label": "Costo reventa",
+        "line_type": "COSTO",
+        "filter": {"rubro__area__codigo": "administracion", "rubro__tipo": "EGRESO"},
+        "include_concepts": ["Costos complementos"],
+        "fallback_filter": {"rubro__area__codigo": "compras", "rubro__tipo": "COSTO"},
+    },
+    "nomina": {
+        "label": "Nómina total",
+        "line_type": "EGRESO",
+        "filter": {"rubro__area__codigo": "gastos-venta", "rubro__tipo": "EGRESO"},
+        "fallback_filter": {"rubro__area__codigo": "nomina", "rubro__tipo": "EGRESO"},
+        "fallback_include_concepts": [
+            "Sueldo",
+            "IMSS",
+            "Infonavit",
+            "RCV",
+            "ISR",
+            "Impuesto sobre Nómina",
+            "Otras retenciones",
+            "Aguinaldo",
+            "Vacaciones",
+            "Prima Vacacional",
+            "PTU",
+            "Bono por resultados",
+            "Bono puntualidad",
+            "Bono por asistencia",
+            "Dias festivos",
+            "Uniformes",
+            "Utilidades",
+        ],
+        "include_concepts": [
+            "Sueldo",
+            "IMSS",
+            "Infonavit",
+            "RCV",
+            "ISR",
+            "Impuesto sobre Nómina",
+            "Otras retenciones",
+            "Aguinaldo",
+            "Vacaciones",
+            "Prima Vacacional",
+            "PTU",
+            "Bono por resultados",
+            "Bono puntualidad",
+            "Bono por asistencia",
+            "Dias festivos",
+            "Uniformes",
+            "Utilidades",
+        ],
+    },
+    "gasto_fijo": {
+        "label": "Gasto fijo operativo",
+        "line_type": "EGRESO",
+        "filter": {"rubro__area__codigo": "administracion", "rubro__tipo": "EGRESO"},
+        "include_concepts": [
+            "Arrendamiento local",
+            "Honorarios personas fisicas",
+            "Honorarios personas morales",
+            "Servicios publicos",
+            "Agua potable",
+            "Energia electrica",
+            "Telefono e Internet",
+            "Servicios de celular",
+            "Servicio de monitoreo de alarmas y seguridad",
+            "Licencias y servicios de sistemas",
+            "CONTPAQ",
+            "POINT",
+            "Cuotas y suscriciones",
+            "Fumigacion y sanitizacion",
+            "Gas",
+            "Mantenimiento eq. de computo",
+            "Mant. eq. de oficina",
+            "Mant. Instalaciones",
+            "Mantanimiento equipo/maquinaria",
+            "Mantenimiento equipo de transporte",
+            "Seguros y fianzas",
+            "Placas y tenencias",
+            "Comisiones bancarias",
+            "Intereses bancarios",
+            "STM FINANCIAL INTERESES CREDITO",
+            "TARJETA DE CREDITO BAJIO",
+            "Papeleria",
+            "Agua purificada",
+            "Articulos para aseo y limpieza",
+            "No deducibles",
+            "Recargo fiscales",
+            "Recargos bancarios",
+            "Gasolina",
+            "Diesel",
+            "Fletes",
+            "Paqueteria",
+            "Diversos",
+            "Puentes y peajes",
+            "Gastos de viaje",
+            "Capacitacion",
+            "Material de seguiridad e higiene",
+            "Derechos e impuestos",
+        ],
+        "exclude_concepts": [
+            "Sueldo",
+            "IMSS",
+            "Infonavit",
+            "ISR",
+            "Impuesto sobre Nomina",
+            "Otras retenciones",
+            "Aguinaldo",
+            "Vacaciones",
+            "Prima Vacacional",
+            "PTU",
+            "Bono por resultados",
+            "Bono puntualidad",
+            "Bono por asistencia",
+            "Dias festivos",
+            "Uniformes",
+            "Utilidades",
+            "Publicidad",
+            "Patrocinios",
+            "Decoracion",
+            "Material impreso",
+            "Menus",
+            "Apertura sucursal",
+            "Adquisicion de equipo/maquinaria",
+            "Herramientas de trabajo",
+            "INGRESOS",
+            "Venta postres",
+            "Venta complementos",
+            "COSTOS",
+            "Costos insumos/productos",
+            "Merma",
+            "UTILIDAD BRUTA",
+            "EGRESOS",
+            "UTILIDAD O PERDIDA",
+        ],
+    },
+    "gastos_venta": {
+        "label": "Gastos de venta",
+        "line_type": "EGRESO",
+        "filter": {"rubro__area__codigo": "gastos-venta", "rubro__tipo": "EGRESO"},
+        "include_concepts": [
+            "Publicidad",
+            "Patrocinios",
+            "Decoracion",
+            "Material impreso",
+            "Menus",
+            "Etiquetas, bolsas, cajas y empaques",
+            "Te, Hielo",
+        ],
+    },
+    "logistica": {
+        "label": "Logística",
+        "line_type": "EGRESO",
+        "filter": {"rubro__area__codigo": "logistica", "rubro__tipo": "EGRESO"},
+    },
+    "capex": {
+        "label": "CAPEX / Apertura sucursales",
+        "line_type": "CAPEX",
+        "filter": {"rubro__area__codigo": "capex", "rubro__tipo": "CAPEX"},
+    },
 }
 
 CONCEPT_ALIASES = {
@@ -80,6 +283,8 @@ CONCEPT_ALIASES = {
     "mano obra": "mano_obra",
     "mano de obra": "mano_obra",
     "mano de obra produccion": "mano_obra",
+    "nomina": "nomina",
+    "nómina": "nomina",
     "indirectos": "indirectos",
     "indirecto": "indirectos",
     "indirectos produccion": "indirectos",
@@ -109,6 +314,7 @@ class BudgetVsActualSummary:
     persisted: bool
     has_budget: bool
     has_actual: bool
+    budget_source: str
 
 
 def parse_period(value: str | date) -> date:
@@ -126,6 +332,12 @@ def normalize_budget_concept(value: str) -> str:
     raw = " ".join(str(value or "").strip().lower().replace("-", "_").split())
     raw = raw.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
     return CONCEPT_ALIASES.get(raw, raw.replace(" ", "_"))
+
+
+def normalize_pnl_concept(value: str) -> str:
+    raw = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+    without_accents = "".join(char for char in raw if not unicodedata.combining(char))
+    return " ".join(without_accents.split())
 
 
 def money_decimal(value) -> Decimal:
@@ -275,12 +487,86 @@ class BudgetCsvImportService:
 
 
 class BudgetVsActualSnapshotService:
-    def _budget_by_concept(self, period_start: date) -> dict[str, Decimal]:
+    def _sum_lines_with_config(
+        self,
+        period_start: date,
+        *,
+        query_filter: dict[str, str],
+        include_concepts: list[str] | None = None,
+        exclude_concepts: list[str] | None = None,
+    ) -> Decimal:
+        qs = LineaPresupuestoMensual.objects.filter(
+            periodo=period_start,
+            version=LineaPresupuestoMensual.VERSION_ORIGINAL,
+            **query_filter,
+        ).select_related("rubro")
+        include_set = {normalize_pnl_concept(concept) for concept in include_concepts or []}
+        exclude_set = {normalize_pnl_concept(concept) for concept in exclude_concepts or []}
+
+        total = Decimal("0")
+        for line in qs:
+            normalized_concept = normalize_pnl_concept(line.rubro.concepto)
+            if include_set and normalized_concept not in include_set:
+                continue
+            if exclude_set and normalized_concept in exclude_set:
+                continue
+            total += money_decimal(line.monto_presupuesto)
+        return money_decimal(total)
+
+    def _sum_master_pnl_line(self, period_start: date, concept_key: str) -> Decimal:
+        config = PNL_STRUCTURE[concept_key]
+        total = self._sum_lines_with_config(
+            period_start,
+            query_filter=config["filter"],
+            include_concepts=config.get("include_concepts"),
+            exclude_concepts=config.get("exclude_concepts"),
+        )
+        if total != 0 or "fallback_filter" not in config:
+            return total
+        return self._sum_lines_with_config(
+            period_start,
+            query_filter=config["fallback_filter"],
+            include_concepts=config.get("fallback_include_concepts"),
+            exclude_concepts=config.get("fallback_exclude_concepts"),
+        )
+
+    def _master_budget_by_concept(self, period_start: date) -> dict[str, Decimal]:
+        if not LineaPresupuestoMensual.objects.filter(
+            periodo=period_start,
+            version=LineaPresupuestoMensual.VERSION_ORIGINAL,
+        ).exists():
+            return {}
+
+        budgets = {concept_key: self._sum_master_pnl_line(period_start, concept_key) for concept_key in PNL_STRUCTURE}
+        budgets["utilidad_bruta"] = money_decimal(
+            budgets.get("ventas", Decimal("0"))
+            - budgets.get("costo_mp", Decimal("0"))
+            - budgets.get("costo_reventa", Decimal("0"))
+        )
+        budgets["utilidad_operativa"] = money_decimal(
+            budgets.get("utilidad_bruta", Decimal("0"))
+            - budgets.get("nomina", Decimal("0"))
+            - budgets.get("gasto_fijo", Decimal("0"))
+            - budgets.get("gastos_venta", Decimal("0"))
+            - budgets.get("logistica", Decimal("0"))
+        )
+        budgets["resultado_neto"] = money_decimal(
+            budgets.get("utilidad_operativa", Decimal("0")) - budgets.get("capex", Decimal("0"))
+        )
+        return budgets
+
+    def _legacy_budget_by_concept(self, period_start: date) -> dict[str, Decimal]:
         budgets: dict[str, Decimal] = {}
         for line in PresupuestoLineaMensual.objects.filter(period=period_start).select_related("importacion"):
             concept_key = line.metadata.get("concept_key") or normalize_budget_concept(line.account_code or line.concept)
             budgets[concept_key] = budgets.get(concept_key, Decimal("0")) + money_decimal(line.monthly_budget)
         return budgets
+
+    def _budget_by_concept(self, period_start: date) -> tuple[dict[str, Decimal], str]:
+        master_budgets = self._master_budget_by_concept(period_start)
+        if any(value != 0 for value in master_budgets.values()):
+            return master_budgets, MASTER_BUDGET_SOURCE
+        return self._legacy_budget_by_concept(period_start), LEGACY_BUDGET_SOURCE
 
     def _actual_by_concept(self, result: EmpresaResultadoMensual | None) -> dict[str, Decimal]:
         if result is None:
@@ -289,16 +575,20 @@ class BudgetVsActualSnapshotService:
             "ventas": money_decimal(result.venta_total),
             "costo_mp": money_decimal(result.costo_materia_prima_total),
             "costo_reventa": money_decimal(result.costo_reventa_total),
+            "utilidad_bruta": money_decimal(
+                result.venta_total - result.costo_materia_prima_total - result.costo_reventa_total
+            ),
+            "nomina": money_decimal(result.mano_obra_prod_total),
             "gasto_fijo": money_decimal(result.gasto_comercial_total) + money_decimal(result.gasto_corporativo_total),
-            "mano_obra": money_decimal(result.mano_obra_prod_total),
             "indirectos": money_decimal(result.indirecto_prod_total) + money_decimal(result.empaque_prod_total),
             "utilidad_operativa": money_decimal(result.utilidad_operativa_total),
+            "resultado_neto": money_decimal(result.utilidad_operativa_total),
         }
 
     def build_snapshot(self, *, period_start: str | date, dry_run: bool = False) -> BudgetVsActualSummary:
         period = parse_period(period_start)
         result = EmpresaResultadoMensual.objects.filter(periodo=period).first()
-        budgets = self._budget_by_concept(period)
+        budgets, budget_source = self._budget_by_concept(period)
         actuals = self._actual_by_concept(result)
         concept_keys = list(dict.fromkeys([*REQUIRED_BUDGET_CONCEPTS, "indirectos", *budgets.keys(), *actuals.keys()]))
         rows = []
@@ -336,8 +626,13 @@ class BudgetVsActualSnapshotService:
                     "line_count": len(rows),
                     "metadata": {
                         "source": BUDGET_VS_ACTUAL_SOURCE,
+                        "presupuesto_fuente": budget_source,
                         "real_source_model": "reportes.EmpresaResultadoMensual",
-                        "budget_source_model": "reportes.PresupuestoLineaMensual",
+                        "budget_source_model": (
+                            "reportes.LineaPresupuestoMensual"
+                            if budget_source == MASTER_BUDGET_SOURCE
+                            else "reportes.PresupuestoLineaMensual"
+                        ),
                         "empresa_resultado_id": result.id if result else None,
                         "empresa_resultado_financial_source": (result.metadata or {}).get("financial_totals_source") if result else "",
                         "rows": [
@@ -363,4 +658,5 @@ class BudgetVsActualSnapshotService:
             persisted=not dry_run,
             has_budget=any(value != 0 for value in budgets.values()),
             has_actual=result is not None,
+            budget_source=budget_source,
         )
