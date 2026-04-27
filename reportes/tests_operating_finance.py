@@ -60,6 +60,12 @@ from reportes.services_operating_finance_io import (
     OperatingFinanceTemplateService,
 )
 from reportes.services_budget_import import GeneralBudgetImportService
+from reportes.services_budget_vs_actual import (
+    BUDGET_VS_ACTUAL_SOURCE,
+    BudgetCsvImportService,
+    BudgetVsActualSnapshotService,
+    write_example_budget_csv,
+)
 from reportes.services_budget_detail_import import (
     BudgetAuditMaterializationService,
     BudgetGeneralAuditService,
@@ -1790,6 +1796,97 @@ class BudgetMonitoringSnapshotServiceTests(TestCase):
         self.assertEqual(global_row.total_actual, Decimal("850"))
         self.assertEqual(global_row.line_count, 2)
         self.assertEqual(global_row.metadata["global_mode"], "sum_sources")
+
+
+class BudgetVsActualServiceTests(TestCase):
+    def test_write_example_budget_csv_and_import_is_idempotent(self):
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "presupuesto_2026_ejemplo.csv"
+            exported = write_example_budget_csv(path)
+            self.assertEqual(exported.name, "presupuesto_2026_ejemplo.csv")
+
+            text = exported.read_text(encoding="utf-8")
+            text = text.replace("ventas,0.00", "ventas,1000.00", 1)
+            text = text.replace("utilidad_operativa,0.00", "utilidad_operativa,300.00", 1)
+            exported.write_text(text, encoding="utf-8")
+
+            summary = BudgetCsvImportService().import_csv(exported)
+
+            self.assertEqual(summary.lines_created, 72)
+            self.assertEqual(summary.lines_updated, 0)
+            self.assertEqual(summary.missing_required_concepts, [])
+            enero_ventas = PresupuestoLineaMensual.objects.get(
+                period=date(2026, 1, 1),
+                account_code="ventas",
+            )
+            self.assertEqual(enero_ventas.monthly_budget, Decimal("1000.00"))
+
+            summary = BudgetCsvImportService().import_csv(exported)
+
+            self.assertEqual(summary.lines_created, 0)
+            self.assertEqual(summary.lines_updated, 72)
+
+    def test_budget_vs_actual_snapshot_reads_empresa_resultado_and_persists_summary(self):
+        import_obj = PresupuestoImport.objects.create(
+            tipo=PresupuestoImport.TIPO_GENERAL,
+            fuente_nombre="PRESUPUESTO_2026_CSV",
+            archivo_ruta="/tmp/presupuesto.csv",
+            archivo_hash="hash-budget",
+            sheet_name="CSV_2026",
+            titulo="PRESUPUESTO 2026 CSV",
+            metadata={"year": 2026},
+        )
+        rows = {
+            "ventas": Decimal("900.00"),
+            "costo_mp": Decimal("350.00"),
+            "costo_reventa": Decimal("50.00"),
+            "gasto_fijo": Decimal("200.00"),
+            "mano_obra": Decimal("100.00"),
+            "utilidad_operativa": Decimal("250.00"),
+        }
+        for index, (concept, amount) in enumerate(rows.items(), start=1):
+            PresupuestoLineaMensual.objects.create(
+                importacion=import_obj,
+                external_key=f"budget:{concept}:2026-01",
+                period=date(2026, 1, 1),
+                account_code=concept,
+                concept=concept,
+                monthly_budget=amount,
+                metadata={"concept_key": concept},
+                row_index=index,
+            )
+        EmpresaResultadoMensual.objects.create(
+            periodo=date(2026, 1, 1),
+            venta_total=Decimal("1000.00"),
+            costo_materia_prima_total=Decimal("300.00"),
+            costo_reventa_total=Decimal("40.00"),
+            mano_obra_prod_total=Decimal("120.00"),
+            indirecto_prod_total=Decimal("30.00"),
+            gasto_comercial_total=Decimal("180.00"),
+            gasto_corporativo_total=Decimal("20.00"),
+            utilidad_operativa_total=Decimal("460.00"),
+            metadata={"financial_totals_source": "RENTABILIDAD_SUCURSAL"},
+        )
+
+        summary = BudgetVsActualSnapshotService().build_snapshot(period_start=date(2026, 1, 1))
+
+        ventas = next(row for row in summary.rows if row["concept"] == "ventas")
+        costo_mp = next(row for row in summary.rows if row["concept"] == "costo_mp")
+        self.assertEqual(ventas["variance"], Decimal("100.00"))
+        self.assertEqual(ventas["variance_pct"], Decimal("11.11"))
+        self.assertEqual(ventas["tone"], "success")
+        self.assertEqual(costo_mp["variance"], Decimal("-50.00"))
+        self.assertEqual(costo_mp["tone"], "success")
+
+        snapshot = PresupuestoResumenMensual.objects.get(
+            period=date(2026, 1, 1),
+            tipo=PresupuestoResumenMensual.TIPO_FUENTE,
+            fuente_nombre=BUDGET_VS_ACTUAL_SOURCE,
+        )
+        self.assertEqual(snapshot.total_budget, Decimal("250.00"))
+        self.assertEqual(snapshot.total_actual, Decimal("460.00"))
+        self.assertEqual(snapshot.metadata["real_source_model"], "reportes.EmpresaResultadoMensual")
+        self.assertEqual(snapshot.metadata["empresa_resultado_financial_source"], "RENTABILIDAD_SUCURSAL")
 
 
 class TrustedBudgetDetailImportServiceTests(TestCase):
