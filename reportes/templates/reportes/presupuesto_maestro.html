@@ -105,6 +105,7 @@
     padding:0 .45rem;
     text-align:right;
     background:#f7f9fb;
+    font-variant-numeric:tabular-nums;
   }
   .budget-master-cell:focus {
     outline:2px solid rgba(23,50,77,.25);
@@ -288,9 +289,9 @@
           {% for cell in row.months %}
           <td>
             {% if cell.linea_id %}
-            <input class="budget-master-cell" data-line-id="{{ cell.linea_id }}" value="{{ cell.amount|floatformat:2 }}">
+            <input class="budget-master-cell" inputmode="decimal" data-line-id="{{ cell.linea_id }}" value="${{ cell.amount|floatformat:2|intcomma }}">
             {% else %}
-            <input class="budget-master-cell" disabled value="0.00">
+            <input class="budget-master-cell" disabled value="$0.00">
             {% endif %}
           </td>
           {% endfor %}
@@ -365,13 +366,14 @@
         input.classList.remove('is-saved');
         input.classList.add('is-saving');
         timers.set(lineId, setTimeout(() => {
+          const cleanValue = input.value.replace(/[$,\s]/g, '');
           fetch(`/api/presupuesto/lineas/${lineId}/`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
               'X-CSRFToken': token
             },
-            body: JSON.stringify({ monto_presupuesto: input.value })
+            body: JSON.stringify({ monto_presupuesto: cleanValue })
           }).then((response) => {
             input.classList.remove('is-saving');
             input.classList.toggle('is-saved', response.ok);

@@ -14,6 +14,7 @@ from reportes.models import AreaPresupuesto, LineaPresupuestoMensual, RubroPresu
 from reportes.services_presupuesto_maestro import (
     PresupuestoMaestroService,
     ensure_master_budget_areas,
+    money,
     normalize_area_code,
     normalize_version,
 )
@@ -158,10 +159,7 @@ class PresupuestoLineaView(APIView):
     def put(self, request, line_id: int):
         if not _require_reportes(request.user):
             return Response({"detail": "No tienes permisos para editar presupuesto."}, status=status.HTTP_403_FORBIDDEN)
-        try:
-            amount = Decimal(str(request.data.get("monto_presupuesto", "0")))
-        except (InvalidOperation, TypeError, ValueError):
-            return Response({"detail": "Monto inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        amount = money(request.data.get("monto_presupuesto", "0"))
         line = PresupuestoMaestroService().update_line_amount(line_id=line_id, amount=amount)
         return Response(
             {

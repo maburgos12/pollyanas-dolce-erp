@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -115,6 +116,25 @@ SECTION_HEADER_CONCEPTS = {
     "nómina",
 }
 
+SALES_PARENT_CONCEPTS = {
+    "bollo",
+    "pastel mini",
+    "pastel chico",
+    "pastel mediano",
+    "pastel grande",
+    "pastel rebanadas",
+    "rosca",
+    "pay mediano",
+    "pay grande",
+    "pay rebanada",
+    "flan",
+    "pan de la casa",
+    "galleta",
+    "cheesecake",
+    "vaso preparado",
+    "bebidas/otros",
+}
+
 
 @dataclass(frozen=True)
 class PresupuestoImportSummary:
@@ -126,6 +146,21 @@ class PresupuestoImportSummary:
     lines_created: int
     lines_updated: int
     skipped_rows: int
+
+
+@dataclass(frozen=True)
+class VentasReimportSummary:
+    year: int
+    version: str
+    dry_run: bool
+    deleted_rubros: int
+    deleted_lines: int
+    rubros_created: int
+    rubros_updated: int
+    lines_created: int
+    lines_updated: int
+    skipped_rows: int
+    monthly_totals: dict[str, Decimal]
 
 
 def normalize_area_code(value: str) -> str:
@@ -196,6 +231,14 @@ def normalize_concept_text(value: object) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
+def normalize_header_text(value: object) -> str:
+    text = normalize_concept_text(value)
+    text = "".join(
+        char for char in unicodedata.normalize("NFKD", text) if not unicodedata.combining(char)
+    )
+    return text.replace("_", " ").replace("-", " ")
+
+
 def is_totalizer_budget_concept(concept: object, *, area_code: str = "") -> bool:
     normalized = normalize_concept_text(concept)
     if not normalized:
@@ -237,60 +280,141 @@ class PresupuestoMaestroImportService:
 
     def _xlsx_rows(self, path: Path) -> Iterable[dict[str, object]]:
         workbook = load_workbook(path, read_only=True, data_only=True)
+        general_sheet = self._find_general_sales_sheet(workbook)
+        if general_sheet is not None:
+            yield from self._sales_projection_rows(general_sheet)
+            return
         for sheet in workbook.worksheets:
             yield from self._sales_projection_rows(sheet)
             yield from self._budget_table_rows(sheet)
 
+    def _find_general_sales_sheet(self, workbook):
+        for sheet in workbook.worksheets:
+            if self._normalize_cell(sheet.title) == "general" and self._sales_projection_layout(sheet):
+                return sheet
+        return None
+
     def _sales_projection_rows(self, sheet) -> Iterable[dict[str, object]]:
         rows = list(sheet.iter_rows(values_only=True))
-        if len(rows) < 5:
-            return
-        month_row = rows[1]
-        projection_row = rows[2]
-        metric_row = rows[3]
-        if not any("proyeccion 2026" in self._normalize_cell(value).replace("ó", "o") for value in projection_row):
+        layout = self._sales_projection_layout(sheet, rows=rows)
+        if layout is None:
             return
 
-        month_starts: list[tuple[str, int]] = []
-        for idx, value in enumerate(month_row):
-            month_name = self._normalize_cell(value)
-            if month_name in MONTH_NAME_TO_NUMBER:
-                month_starts.append((month_name, idx))
-        if not month_starts:
-            return
-
-        budget_columns: dict[str, int] = {}
-        for pos, (month_name, start_idx) in enumerate(month_starts):
-            end_idx = month_starts[pos + 1][1] if pos + 1 < len(month_starts) else len(month_row)
-            for idx in range(start_idx, end_idx):
-                projection_label = self._normalize_cell(projection_row[idx]).replace("ó", "o")
-                if "proyeccion 2026" not in projection_label:
-                    continue
-                venta_idx = idx + 1
-                if venta_idx < len(metric_row) and self._normalize_cell(metric_row[venta_idx]) == "venta":
-                    budget_columns[month_name] = venta_idx
-                    break
-        if not budget_columns:
-            return
-
-        branch_name = "" if self._normalize_cell(sheet.title) == "general" else sheet.title
-        for row in rows[4:]:
-            concept = str(row[0] or "").strip() if row else ""
+        branch_name = ""
+        current_parent = ""
+        for row in rows[layout["data_start"] :]:
+            concept = self._sales_concept_from_row(row)
             if is_totalizer_budget_concept(concept, area_code="ventas"):
                 continue
+            if normalize_header_text(concept) in SALES_PARENT_CONCEPTS:
+                current_parent = concept
+                continue
+            output_concept = f"{current_parent} · {concept}" if current_parent else concept
             output = {
-                "concepto": concept,
+                "concepto": output_concept,
                 "tipo": RubroPresupuesto.TIPO_INGRESO,
                 "sucursal": branch_name,
                 "codigo_cuenta": "",
             }
             has_value = False
-            for month_name, col_idx in budget_columns.items():
+            for month_name, col_idx in layout["budget_columns"].items():
                 value = row[col_idx] if col_idx < len(row) else None
                 output[month_name] = value
                 has_value = has_value or money(value) != 0
+            for month_name, col_idx in layout["actual_columns"].items():
+                value = row[col_idx] if col_idx < len(row) else None
+                output[f"{month_name}_real"] = value
             if has_value:
                 yield output
+
+    def _sales_projection_layout(self, sheet, *, rows: list[tuple[object, ...]] | None = None) -> dict[str, object] | None:
+        rows = rows if rows is not None else list(sheet.iter_rows(values_only=True))
+        if len(rows) < 4:
+            return None
+
+        for month_row_idx in range(min(12, len(rows))):
+            month_row = rows[month_row_idx]
+            month_starts: list[tuple[str, int]] = []
+            boundaries: list[int] = []
+            for idx, value in enumerate(month_row):
+                month_name = normalize_header_text(value)
+                if month_name in MONTH_NAME_TO_NUMBER:
+                    month_starts.append((month_name, idx))
+                    boundaries.append(idx)
+                elif month_name in {"anual", "costo"} or month_name.startswith("%"):
+                    boundaries.append(idx)
+            if len(month_starts) < 3:
+                continue
+            boundaries = sorted(set(boundaries + [len(month_row)]))
+
+            header_row_indexes = list(range(month_row_idx + 1, min(month_row_idx + 5, len(rows))))
+            budget_columns: dict[str, int] = {}
+            actual_columns: dict[str, int] = {}
+            for pos, (month_name, start_idx) in enumerate(month_starts):
+                end_idx = next((boundary for boundary in boundaries if boundary > start_idx), len(month_row))
+                for col_idx in range(start_idx, end_idx):
+                    if self._is_sales_value_column(rows, header_row_indexes, col_idx, kind="budget"):
+                        budget_columns[month_name] = col_idx
+                    if self._is_sales_value_column(rows, header_row_indexes, col_idx, kind="actual"):
+                        actual_columns[month_name] = col_idx
+                if month_name not in budget_columns:
+                    continue
+
+            if budget_columns:
+                last_header_idx = month_row_idx
+                for row_idx in header_row_indexes:
+                    labels = [normalize_header_text(value) for value in rows[row_idx]]
+                    if any(
+                        label in {"cant", "cantidad", "venta", "dif"}
+                        or "proy" in label
+                        or "proyeccion" in label
+                        or "result" in label
+                        or "2026" in label
+                        for label in labels
+                    ):
+                        last_header_idx = row_idx
+                return {
+                    "data_start": min(last_header_idx + 1, len(rows)),
+                    "budget_columns": budget_columns,
+                    "actual_columns": actual_columns,
+                }
+        return None
+
+    def _is_sales_value_column(
+        self,
+        rows: list[tuple[object, ...]],
+        header_row_indexes: list[int],
+        col_idx: int,
+        *,
+        kind: str,
+    ) -> bool:
+        current_labels = []
+        previous_labels = []
+        for row_idx in header_row_indexes:
+            row = rows[row_idx]
+            current_labels.append(normalize_header_text(row[col_idx] if col_idx < len(row) else ""))
+            previous_labels.append(normalize_header_text(row[col_idx - 1] if col_idx > 0 and col_idx - 1 < len(row) else ""))
+        labels = " ".join(label for label in current_labels + previous_labels if label)
+        current = " ".join(label for label in current_labels if label)
+        is_sale_amount = "venta" in current and "cant" not in current and "cantidad" not in current
+        if not is_sale_amount:
+            return False
+        if kind == "budget":
+            return "proy" in labels or "proyeccion" in labels
+        return ("result" in labels or "real" in labels) and "2026" in labels
+
+    def _sales_concept_from_row(self, row: tuple[object, ...]) -> str:
+        for value in list(row[:4]):
+            concept = str(value or "").strip()
+            if not concept:
+                continue
+            normalized = normalize_header_text(concept)
+            if normalized.replace(".", "", 1).isdigit():
+                continue
+            if normalized in {"cant", "cantidad", "venta", "dif", "diferencia"}:
+                continue
+            return concept
+        return str(row[0] or "").strip() if row else ""
 
     def _budget_table_rows(self, sheet) -> Iterable[dict[str, object]]:
         rows = list(sheet.iter_rows(values_only=True))
@@ -462,17 +586,25 @@ class PresupuestoMaestroImportService:
             for month_name, month_number in MONTH_COLUMNS:
                 period = date(year, month_number, 1)
                 amount = money(row.get(month_name))
+                line_defaults = {
+                    "monto_presupuesto": amount,
+                    "metadata": {
+                        "source": source,
+                        "source_file": path.name,
+                    },
+                }
+                if f"{month_name}_real" in row:
+                    line_defaults.update(
+                        {
+                            "monto_real": money(row.get(f"{month_name}_real")),
+                            "fuente_real": source,
+                        }
+                    )
                 _, line_created = LineaPresupuestoMensual.objects.update_or_create(
                     rubro=rubro,
                     periodo=period,
                     version=version,
-                    defaults={
-                        "monto_presupuesto": amount,
-                        "metadata": {
-                            "source": source,
-                            "source_file": path.name,
-                        },
-                    },
+                    defaults=line_defaults,
                 )
                 lines_created += int(line_created)
                 lines_updated += int(not line_created)
@@ -488,8 +620,106 @@ class PresupuestoMaestroImportService:
             skipped_rows=skipped_rows,
         )
 
+    def reimport_sales_projection(
+        self,
+        *,
+        archivo: str | Path,
+        version: str = LineaPresupuestoMensual.VERSION_ORIGINAL,
+        year: int = 2026,
+        source_name: str = "",
+        clear_first: bool = False,
+        dry_run: bool = False,
+    ) -> VentasReimportSummary:
+        path = Path(archivo).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(path)
+
+        version = normalize_version(version)
+
+        if dry_run:
+            parsed_rows = list(self._rows(path))
+            unique_concepts = {
+                (
+                    str(row.get("concepto") or "").strip(),
+                    str(row.get("codigo_cuenta") or row.get("cuenta") or "").strip(),
+                    str(row.get("sucursal") or "").strip(),
+                )
+                for row in parsed_rows
+            }
+            monthly_totals = {
+                month_name: sum((money(row.get(month_name)) for row in parsed_rows), Decimal("0"))
+                for month_name, _month_number in MONTH_COLUMNS
+            }
+            return VentasReimportSummary(
+                year=year,
+                version=version,
+                dry_run=True,
+                deleted_rubros=0,
+                deleted_lines=0,
+                rubros_created=len(unique_concepts),
+                rubros_updated=0,
+                lines_created=len(unique_concepts) * 12,
+                lines_updated=0,
+                skipped_rows=0,
+                monthly_totals=monthly_totals,
+            )
+
+        areas = ensure_master_budget_areas()
+        area = areas["ventas"]
+        deleted_rubros = 0
+        deleted_lines = 0
+
+        with transaction.atomic():
+            if clear_first:
+                rubros_qs = RubroPresupuesto.objects.filter(area=area)
+                deleted_rubros = rubros_qs.count()
+                deleted_lines = LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs).count()
+                LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs).delete()
+                rubros_qs.delete()
+
+            summary = self.import_file(
+                archivo=path,
+                area_code="ventas",
+                version=version,
+                year=year,
+                source_name=source_name or path.stem.upper(),
+            )
+            monthly_totals = {
+                month_name: money(
+                    LineaPresupuestoMensual.objects.filter(
+                        rubro__area=area,
+                        rubro__tipo=RubroPresupuesto.TIPO_INGRESO,
+                        periodo=date(year, month_number, 1),
+                        version=version,
+                    ).aggregate(total=Sum("monto_presupuesto"))["total"]
+                )
+                for month_name, month_number in MONTH_COLUMNS
+            }
+
+        return VentasReimportSummary(
+            year=year,
+            version=version,
+            dry_run=dry_run,
+            deleted_rubros=deleted_rubros,
+            deleted_lines=deleted_lines,
+            rubros_created=summary.rubros_created,
+            rubros_updated=summary.rubros_updated,
+            lines_created=summary.lines_created,
+            lines_updated=summary.lines_updated,
+            skipped_rows=summary.skipped_rows,
+            monthly_totals=monthly_totals,
+        )
+
 
 class PresupuestoMaestroService:
+    AREA_ACTUAL_KEYS = {
+        "ventas": "ventas",
+        "produccion": "costo_mp",
+        "compras": "costo_reventa",
+        "administracion": "gasto_fijo",
+        "nomina": "mano_obra",
+    }
+
     def actuals_for_period(self, period: date) -> dict[str, Decimal]:
         result = EmpresaResultadoMensual.objects.filter(periodo=period).first()
         if result is None:
@@ -588,6 +818,17 @@ class PresupuestoMaestroService:
 
         areas = list(area_map.values())
         for area_payload in areas:
+            actual_key = self.AREA_ACTUAL_KEYS.get(str(area_payload["codigo"]))
+            if actual_key and actual_key in actuals:
+                previous_actual = money(area_payload["total_real"])
+                canonical_actual = money(actuals[actual_key])
+                previous_variance = money(area_payload["total_varianza"])
+                canonical_variance = canonical_actual - money(area_payload["total_presupuesto"])
+                area_payload["total_real"] = canonical_actual
+                area_payload["total_varianza"] = canonical_variance
+                total_actual += canonical_actual - previous_actual
+                total_variance += canonical_variance - previous_variance
+                area_payload["fuente_real"] = "reportes.EmpresaResultadoMensual"
             area_payload["varianza_pct"] = variance_pct(area_payload["total_varianza"], area_payload["total_presupuesto"])
             area_payload["tone"] = "neutral"
 
@@ -615,11 +856,14 @@ class PresupuestoMaestroService:
         rubros = RubroPresupuesto.objects.filter(area__in=areas_qs, activo=True).select_related("area", "sucursal").order_by(
             "area__orden", "area__nombre", "concepto", "sucursal__codigo"
         )
+        if normalize_area_code(area or "") == "ventas":
+            rubros = rubros.filter(tipo=RubroPresupuesto.TIPO_INGRESO)
         lines_by_rubro_period = {
             (line.rubro_id, line.periodo.month): line
             for line in LineaPresupuestoMensual.objects.filter(periodo__year=year, version=version, rubro__in=rubros)
         }
         rows = []
+        total_anual = Decimal("0")
         for rubro in rubros:
             month_cells = []
             total = Decimal("0")
@@ -635,6 +879,9 @@ class PresupuestoMaestroService:
                         "amount": amount,
                     }
                 )
+            if total == 0:
+                continue
+            total_anual += total
             rows.append(
                 {
                     "rubro": rubro,
@@ -650,7 +897,7 @@ class PresupuestoMaestroService:
             "months": MONTH_COLUMNS,
             "areas": list(areas_qs),
             "rows": rows,
-            "total_anual": sum((row["total"] for row in rows), Decimal("0")),
+            "total_anual": total_anual,
         }
 
     def update_line_amount(self, *, line_id: int, amount: Decimal) -> LineaPresupuestoMensual:
