@@ -203,6 +203,30 @@ class OperatingFinanceSnapshotServiceTests(TestCase):
         pricing_row = ProductoPricingDecisionMensual.objects.get(periodo=date(2026, 3, 1), receta=self.receta)
         self.assertTrue(pricing_row.accion_sugerida)
 
+    def test_build_snapshot_uses_profitability_sales_when_available(self):
+        profitability_totals = {
+            "rows": 1,
+            "ventas_netas": Decimal("1700.00"),
+            "costo_materia_prima": Decimal("600.00"),
+            "costo_reventa": Decimal("50.00"),
+            "gasto_fijo": Decimal("300.00"),
+        }
+
+        with patch.object(
+            OperatingFinanceSnapshotService,
+            "_profitability_totals",
+            return_value=profitability_totals,
+        ):
+            OperatingFinanceSnapshotService().build_snapshot(period_start=date(2026, 3, 1))
+
+        company_row = EmpresaResultadoMensual.objects.get(periodo=date(2026, 3, 1))
+        self.assertEqual(company_row.venta_total, Decimal("1700.00"))
+        self.assertEqual(company_row.margen_bruto_total, Decimal("1050.00"))
+        self.assertEqual(company_row.gasto_comercial_total, Decimal("300.00"))
+        self.assertEqual(company_row.utilidad_operativa_total, Decimal("550.00"))
+        self.assertEqual(company_row.metadata["financial_totals_source"], "RENTABILIDAD_SUCURSAL")
+        self.assertEqual(company_row.metadata["venta_total_calculada"], "1850.00")
+
     def test_build_snapshot_keeps_resale_cost_separate_from_manufacturing(self):
         resale_product = PointProduct.objects.create(
             external_id="PTE_RESALE",

@@ -791,6 +791,9 @@ class OperatingFinanceSnapshotService:
         )
         profitability_totals = self._profitability_totals(period_start)
         uses_profitability_source = bool(profitability_totals)
+        venta_financiera_total = as_decimal(
+            profitability_totals.get("ventas_netas") if uses_profitability_source else venta_total
+        )
         costo_materia_prima_total = as_decimal(
             profitability_totals.get("costo_materia_prima") if uses_profitability_source else costo_materia_prima_total_calculado
         )
@@ -803,7 +806,7 @@ class OperatingFinanceSnapshotService:
         costo_fabricacion_total = (
             costo_materia_prima_total + mano_obra_prod_total + indirecto_prod_total + empaque_prod_total
         ).quantize(Decimal("0.01"))
-        margen_bruto_total = venta_total - costo_materia_prima_total - costo_reventa_total
+        margen_bruto_total = venta_financiera_total - costo_materia_prima_total - costo_reventa_total
         contribucion_total = margen_bruto_total - gasto_comercial_total
         utilidad_operativa_total = contribucion_total - company_expense_total
         if not uses_profitability_source:
@@ -811,7 +814,7 @@ class OperatingFinanceSnapshotService:
         _, company_created = EmpresaResultadoMensual.objects.update_or_create(
             periodo=period_start,
             defaults={
-                "venta_total": venta_total,
+                "venta_total": venta_financiera_total,
                 "costo_materia_prima_total": costo_materia_prima_total,
                 "costo_reventa_total": costo_reventa_total,
                 "mano_obra_prod_total": mano_obra_prod_total,
@@ -831,6 +834,7 @@ class OperatingFinanceSnapshotService:
                     ),
                     "rentabilidad_rows": int(profitability_totals.get("rows", 0)) if uses_profitability_source else 0,
                     "rentabilidad_ventas_netas": str(profitability_totals.get("ventas_netas", "0")) if uses_profitability_source else "0",
+                    "venta_total_calculada": str(venta_total),
                     "costo_materia_prima_calculado": str(costo_materia_prima_total_calculado),
                     "costo_reventa_calculado": str(costo_reventa_total_calculado),
                     "gasto_comercial_calculado": str(gasto_comercial_total_calculado),
