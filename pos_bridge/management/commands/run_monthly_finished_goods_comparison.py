@@ -44,6 +44,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Previsualiza cobertura y cierre teórico sin persistir ni exportar XLSX.",
         )
+        parser.add_argument(
+            "--validate-only",
+            action="store_true",
+            help="Valida criterios de confianza del cierre sin persistir ni exportar XLSX.",
+        )
 
     def handle(self, *args, **options):
         actor = None
@@ -58,7 +63,9 @@ class Command(BaseCommand):
             if not month:
                 raise CommandError("Usa --month YYYY-MM o --period YYYY-MM.")
             service = MonthlyFinishedGoodsComparisonService()
-            if options.get("dry_run"):
+            if options.get("validate_only"):
+                result = service.validate_operational_readiness(month=month)
+            elif options.get("dry_run"):
                 result = service.dry_run(month=month)
             else:
                 result = service.run(

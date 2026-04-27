@@ -3,11 +3,12 @@ from __future__ import annotations
 from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 import json
 from pathlib import Path
 from typing import Any
 
-from django.db.models import Max
+from django.db.models import Max, Sum
 from django.utils import timezone
 from openpyxl import Workbook
 
@@ -15,7 +16,8 @@ from pos_bridge.models import PointProductionLine, PointWasteLine
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from pos_bridge.services.official_sales_backfill_service import OfficialSalesBackfillService
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureService
-from recetas.models import MovimientoProductoCedis, ProductoMonthClosure, VentaHistorica
+from recetas.models import ProductoMonthClosure, Receta, RecetaPresentacionDerivada, VentaHistorica
+from recetas.utils.derived_product_presentations import get_active_derived_relation
 from ventas.services.sales_canonical_source import POINT_BRIDGE_SALES_SOURCE
 
 
@@ -115,6 +117,7 @@ class MonthlyFinishedGoodsComparisonService:
         month_start = self._parse_month(month)
         month_end = self._month_end(month_start)
         coverage = self.inspect_month_coverage(month_start=month_start, month_end=month_end)
+        operational_validation = self.validate_operational_readiness(month=month_start)
         payload: dict[str, Any] = {
             "month": month_start.strftime("%Y-%m"),
             "month_start": month_start.isoformat(),
@@ -122,6 +125,7 @@ class MonthlyFinishedGoodsComparisonService:
             "dry_run": True,
             "persisted": False,
             "coverage": coverage.as_dict(),
+            "operational_validation": operational_validation,
         }
         try:
             plan = self.closure_service.preview(month=month_start)
@@ -141,6 +145,69 @@ class MonthlyFinishedGoodsComparisonService:
         }
         return payload
 
+    def validate_operational_readiness(self, *, month: str | date) -> dict[str, Any]:
+        month_start = self._parse_month(month)
+        month_end = self._month_end(month_start)
+        production_buckets, production_raw = self._production_finished_good_buckets(month_start=month_start, month_end=month_end)
+        sales_buckets, sales_raw = self._sales_finished_good_buckets(month_start=month_start, month_end=month_end)
+
+        production_ids = set(production_buckets)
+        sales_ids = set(sales_buckets)
+        overlap_ids = production_ids & sales_ids
+        sales_only_ids = sales_ids - production_ids
+        production_only_ids = production_ids - sales_ids
+
+        total_produced = sum((bucket["units"] for bucket in production_buckets.values()), Decimal("0"))
+        total_sold = sum((bucket["units"] for bucket in sales_buckets.values()), Decimal("0"))
+        global_diff_pct = self._pct((total_produced - total_sold), total_sold)
+        product_coverage_pct = self._pct(Decimal(len(overlap_ids)), Decimal(len(sales_ids))) if sales_ids else Decimal("0")
+
+        over_3x_rows = []
+        within_30_count = 0
+        compared_count = 0
+        for receta_id in sorted(overlap_ids):
+            produced = production_buckets[receta_id]["units"]
+            sold = sales_buckets[receta_id]["units"]
+            if sold > 0:
+                compared_count += 1
+                diff_pct = self._pct(produced - sold, sold)
+                if abs(diff_pct) <= Decimal("30"):
+                    within_30_count += 1
+                if produced <= 0 or sold > produced * Decimal("3"):
+                    over_3x_rows.append(self._comparison_payload(receta_id, production_buckets, sales_buckets, diff_pct=diff_pct))
+
+        criteria = {
+            "coverage_pct_min_70": product_coverage_pct >= Decimal("70"),
+            "global_diff_abs_pct_max_40": abs(global_diff_pct) <= Decimal("40"),
+            "no_sales_gt_3x_production": not over_3x_rows,
+        }
+        sales_only_payload = self._sales_only_payload(sales_only_ids=sales_only_ids, sales_buckets=sales_buckets)[:35]
+
+        return {
+            "month": month_start.strftime("%Y-%m"),
+            "passed": all(criteria.values()),
+            "criteria": criteria,
+            "production_rows_after_filter": int(production_raw["rows_after_filter"]),
+            "production_rows_before_filter": int(production_raw["rows_before_filter"]),
+            "production_recipes_after_filter": len(production_ids),
+            "sales_recipes": len(sales_ids),
+            "recipes_in_both": len(overlap_ids),
+            "recipes_only_sales": len(sales_only_ids),
+            "recipes_only_production": len(production_only_ids),
+            "total_produced_units": str(total_produced),
+            "total_sold_units": str(total_sold),
+            "global_diff_pct": str(global_diff_pct),
+            "sales_product_coverage_pct": str(product_coverage_pct),
+            "products_within_30_pct_count": within_30_count,
+            "products_compared_count": compared_count,
+            "sales_gt_3x_production_count": len(over_3x_rows),
+            "sales_gt_3x_production": over_3x_rows[:10],
+            "top_production": self._top_bucket_payload(production_buckets)[:10],
+            "top_sales": self._top_bucket_payload(sales_buckets)[:10],
+            "sales_only_with_parent": sales_only_payload,
+            "raw_sales_only_with_parent": self._raw_sales_only_with_parent(month_start=month_start, month_end=month_end)[:35],
+        }
+
     def inspect_month_coverage(self, *, month_start: date, month_end: date) -> CoverageSnapshot:
         sales_qs = VentaHistorica.objects.filter(
             fecha__gte=month_start,
@@ -151,7 +218,9 @@ class MonthlyFinishedGoodsComparisonService:
             production_date__gte=month_start,
             production_date__lte=month_end,
             receta__isnull=False,
+            receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
         )
+        production_qs = production_qs.exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
         waste_qs = PointWasteLine.objects.filter(
             movement_at__date__gte=month_start,
             movement_at__date__lte=month_end,
@@ -235,13 +304,15 @@ class MonthlyFinishedGoodsComparisonService:
         waste_raw: list[dict[str, Any]] = []
 
         for movement in (
-            MovimientoProductoCedis.objects.select_related("receta")
+            PointProductionLine.objects.select_related("receta")
             .filter(
-                fecha__date__gte=month_start,
-                fecha__date__lte=month_end,
-                tipo=MovimientoProductoCedis.TIPO_ENTRADA,
+                production_date__gte=month_start,
+                production_date__lte=month_end,
+                receta__isnull=False,
+                receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
             )
-            .order_by("fecha", "id")
+            .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
+            .order_by("production_date", "id")
         ):
             receta = movement.receta
             if not self.closure_service._is_recipe_eligible_for_closure(receta):
@@ -250,16 +321,16 @@ class MonthlyFinishedGoodsComparisonService:
             if not code:
                 continue
             bucket = self._comparison_bucket(buckets, code=code, product_name=receta.nombre)
-            quantity = float(movement.cantidad or 0)
+            quantity = float(movement.produced_quantity or 0)
             bucket["ingreso_produccion"] += quantity
-            bucket["production_refs"].add((movement.referencia or "").strip())
+            bucket["production_refs"].add((movement.production_external_id or "").strip())
             raw_row = {
-                "fecha": self._date_to_text(movement.fecha),
+                "fecha": self._date_to_text(movement.production_date),
                 "codigo_point": code,
                 "producto": receta.nombre,
                 "cantidad": quantity,
-                "referencia": movement.referencia or "",
-                "tipo": movement.tipo,
+                "referencia": movement.production_external_id or "",
+                "tipo": "POINT_PRODUCTION_LINE",
             }
             production_raw.append(raw_row)
 
@@ -417,6 +488,199 @@ class MonthlyFinishedGoodsComparisonService:
             )
 
         return actions
+
+    def _production_finished_good_buckets(self, *, month_start: date, month_end: date) -> tuple[dict[int, dict[str, Any]], dict[str, Any]]:
+        base_qs = PointProductionLine.objects.filter(
+            production_date__gte=month_start,
+            production_date__lte=month_end,
+            receta__isnull=False,
+        )
+        rows = (
+            base_qs.select_related("receta")
+            .filter(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
+            .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
+            .order_by("id")
+        )
+        buckets: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            parent_receta, qty = self._canonical_recipe_quantity(receta=row.receta, quantity=Decimal(str(row.produced_quantity or 0)))
+            bucket = self._recipe_bucket(buckets, parent_receta)
+            bucket["units"] += qty
+            bucket["rows"] += 1
+            bucket["source_recipes"].add(row.receta.nombre)
+        return buckets, {"rows_before_filter": base_qs.count(), "rows_after_filter": rows.count()}
+
+    def _sales_finished_good_buckets(self, *, month_start: date, month_end: date) -> tuple[dict[int, dict[str, Any]], dict[str, Any]]:
+        rows = (
+            VentaHistorica.objects.select_related("receta")
+            .filter(
+                fecha__gte=month_start,
+                fecha__lte=month_end,
+                fuente=POINT_BRIDGE_SALES_SOURCE,
+                receta__isnull=False,
+                receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
+            )
+            .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
+            .order_by("id")
+        )
+        buckets: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            parent_receta, qty = self._canonical_recipe_quantity(receta=row.receta, quantity=Decimal(str(row.cantidad or 0)))
+            bucket = self._recipe_bucket(buckets, parent_receta)
+            bucket["units"] += qty
+            bucket["rows"] += 1
+            bucket["source_recipes"].add(row.receta.nombre)
+        return buckets, {"rows": rows.count()}
+
+    def _canonical_recipe_quantity(self, *, receta: Receta, quantity: Decimal) -> tuple[Receta, Decimal]:
+        relation = get_active_derived_relation(receta)
+        if relation is None or Decimal(str(relation.unidades_por_padre or 0)) <= 0:
+            return receta, quantity
+        return relation.receta_padre, quantity / Decimal(str(relation.unidades_por_padre))
+
+    def _recipe_bucket(self, buckets: dict[int, dict[str, Any]], receta: Receta) -> dict[str, Any]:
+        bucket = buckets.get(receta.id)
+        if bucket is None:
+            bucket = {
+                "receta_id": receta.id,
+                "codigo_point": receta.codigo_point,
+                "nombre": receta.nombre,
+                "tipo": receta.tipo,
+                "modo_costeo": receta.modo_costeo,
+                "categoria": receta.categoria,
+                "units": Decimal("0"),
+                "rows": 0,
+                "source_recipes": set(),
+            }
+            buckets[receta.id] = bucket
+        return bucket
+
+    def _top_bucket_payload(self, buckets: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+        rows = []
+        for bucket in buckets.values():
+            rows.append(
+                {
+                    "receta_id": bucket["receta_id"],
+                    "codigo_point": bucket["codigo_point"],
+                    "nombre": bucket["nombre"],
+                    "categoria": bucket["categoria"],
+                    "units": str(bucket["units"]),
+                    "rows": bucket["rows"],
+                    "source_recipes": sorted(bucket["source_recipes"])[:5],
+                }
+            )
+        return sorted(rows, key=lambda row: Decimal(str(row["units"] or "0")), reverse=True)
+
+    def _comparison_payload(
+        self,
+        receta_id: int,
+        production_buckets: dict[int, dict[str, Any]],
+        sales_buckets: dict[int, dict[str, Any]],
+        *,
+        diff_pct: Decimal,
+    ) -> dict[str, Any]:
+        sales_bucket = sales_buckets[receta_id]
+        production_bucket = production_buckets.get(receta_id)
+        produced = production_bucket["units"] if production_bucket else Decimal("0")
+        return {
+            "receta_id": receta_id,
+            "codigo_point": sales_bucket["codigo_point"],
+            "nombre": sales_bucket["nombre"],
+            "produced_units": str(produced),
+            "sold_units": str(sales_bucket["units"]),
+            "diff_pct": str(diff_pct),
+        }
+
+    def _sales_only_payload(self, *, sales_only_ids: set[int], sales_buckets: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+        relation_by_parent = {
+            row.receta_padre_id: row
+            for row in RecetaPresentacionDerivada.objects.filter(receta_padre_id__in=sales_only_ids, activo=True)
+            .select_related("receta_derivada", "receta_padre")
+            .order_by("receta_padre_id", "id")
+        }
+        payload = []
+        for receta_id in sorted(sales_only_ids, key=lambda key: sales_buckets[key]["units"], reverse=True):
+            bucket = sales_buckets[receta_id]
+            relation = relation_by_parent.get(receta_id)
+            payload.append(
+                {
+                    "receta_id": receta_id,
+                    "codigo_point": bucket["codigo_point"],
+                    "nombre": bucket["nombre"],
+                    "categoria": bucket["categoria"],
+                    "sold_units": str(bucket["units"]),
+                    "possible_parent": bucket["nombre"],
+                    "has_derived_children": relation is not None,
+                    "example_derived_child": relation.receta_derivada.nombre if relation else "",
+                    "units_per_parent": str(relation.unidades_por_padre) if relation else "",
+                    "source_recipes": sorted(bucket["source_recipes"])[:8],
+                }
+            )
+        return payload
+
+    def _raw_sales_only_with_parent(self, *, month_start: date, month_end: date) -> list[dict[str, Any]]:
+        production_recipe_ids = set(
+            PointProductionLine.objects.filter(
+                production_date__gte=month_start,
+                production_date__lte=month_end,
+                receta__isnull=False,
+                receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
+            )
+            .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
+            .values_list("receta_id", flat=True)
+            .distinct()
+        )
+        sales_rows = list(
+            VentaHistorica.objects.filter(
+                fecha__gte=month_start,
+                fecha__lte=month_end,
+                fuente=POINT_BRIDGE_SALES_SOURCE,
+                receta__isnull=False,
+                receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
+            )
+            .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
+            .exclude(receta_id__in=production_recipe_ids)
+            .values(
+                "receta_id",
+                "receta__codigo_point",
+                "receta__nombre",
+                "receta__categoria",
+                "receta__tipo",
+                "receta__modo_costeo",
+            )
+            .annotate(units=Sum("cantidad"))
+            .order_by("-units")
+        )
+        recipe_ids = [int(row["receta_id"]) for row in sales_rows]
+        relations = {
+            relation.receta_derivada_id: relation
+            for relation in RecetaPresentacionDerivada.objects.filter(receta_derivada_id__in=recipe_ids, activo=True)
+            .select_related("receta_padre", "receta_derivada")
+            .order_by("receta_derivada_id", "id")
+        }
+        payload = []
+        for row in sales_rows:
+            recipe_id = int(row["receta_id"])
+            relation = relations.get(recipe_id)
+            payload.append(
+                {
+                    "receta_id": recipe_id,
+                    "codigo_point": row["receta__codigo_point"],
+                    "nombre": row["receta__nombre"],
+                    "categoria": row["receta__categoria"],
+                    "sold_units": str(row["units"] or Decimal("0")),
+                    "possible_parent": relation.receta_padre.nombre if relation else "",
+                    "parent_codigo_point": relation.receta_padre.codigo_point if relation else "",
+                    "units_per_parent": str(relation.unidades_por_padre) if relation else "",
+                    "has_formal_parent_relation": relation is not None,
+                }
+            )
+        return payload
+
+    def _pct(self, numerator: Decimal, denominator: Decimal) -> Decimal:
+        if denominator == 0:
+            return Decimal("0")
+        return (numerator / denominator * Decimal("100")).quantize(Decimal("0.01"))
 
     def _comparison_bucket(self, buckets: dict[str, dict[str, Any]], *, code: str, product_name: str) -> dict[str, Any]:
         bucket = buckets.get(code)

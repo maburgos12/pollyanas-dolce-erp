@@ -588,7 +588,13 @@ class ProductMonthClosureService:
         buckets: dict[int, _AggregateBucket] = {}
         rows = (
             PointProductionLine.objects.select_related("receta")
-            .filter(production_date__gte=month_start, production_date__lte=month_end, receta__isnull=False)
+            .filter(
+                production_date__gte=month_start,
+                production_date__lte=month_end,
+                receta__isnull=False,
+                receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
+            )
+            .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
             .order_by("id")
         )
         for row in rows:
