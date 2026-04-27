@@ -9,8 +9,15 @@ from pathlib import Path
 from typing import Iterable
 
 from django.db import transaction
+from django.db.models import Sum
 
-from reportes.models import EmpresaResultadoMensual, PresupuestoImport, PresupuestoLineaMensual, PresupuestoResumenMensual
+from reportes.models import (
+    EmpresaResultadoMensual,
+    LineaPresupuestoMensual,
+    PresupuestoImport,
+    PresupuestoLineaMensual,
+    PresupuestoResumenMensual,
+)
 
 
 MONTH_COLUMNS = [
@@ -34,6 +41,8 @@ REQUIRED_BUDGET_CONCEPTS = [
     "costo_reventa",
     "gasto_fijo",
     "mano_obra",
+    "logistica",
+    "gastos_venta",
     "utilidad_operativa",
 ]
 
@@ -48,6 +57,8 @@ CONCEPT_LABELS = {
     "gasto_fijo": "Gasto fijo",
     "mano_obra": "Mano de obra producción",
     "indirectos": "Indirectos producción",
+    "logistica": "Logística",
+    "gastos_venta": "Gastos de venta",
     "utilidad_operativa": "Utilidad operativa",
 }
 
@@ -59,6 +70,20 @@ CONCEPT_TYPES = {
     "gasto_fijo": "COSTO",
     "mano_obra": "COSTO",
     "indirectos": "COSTO",
+    "logistica": "COSTO",
+    "gastos_venta": "COSTO",
+}
+
+MASTER_BUDGET_SOURCE = "MAESTRO"
+LEGACY_BUDGET_SOURCE = "LEGACY"
+
+MASTER_BUDGET_MAPPING = {
+    "ventas": {"area": "ventas", "type": "INGRESO"},
+    "costo_mp": {"area": "produccion", "type": "COSTO"},
+    "gasto_fijo": {"area": "administracion", "type": "EGRESO"},
+    "mano_obra": {"area": "nomina", "type": "EGRESO"},
+    "logistica": {"area": "logistica", "type": "EGRESO"},
+    "gastos_venta": {"area": "gastos-venta", "type": "EGRESO"},
 }
 
 CONCEPT_ALIASES = {
@@ -109,6 +134,7 @@ class BudgetVsActualSummary:
     persisted: bool
     has_budget: bool
     has_actual: bool
+    budget_source: str
 
 
 def parse_period(value: str | date) -> date:
@@ -275,12 +301,48 @@ class BudgetCsvImportService:
 
 
 class BudgetVsActualSnapshotService:
-    def _budget_by_concept(self, period_start: date) -> dict[str, Decimal]:
+    def _master_budget_by_concept(self, period_start: date) -> dict[str, Decimal]:
+        if not LineaPresupuestoMensual.objects.filter(
+            periodo=period_start,
+            version=LineaPresupuestoMensual.VERSION_ORIGINAL,
+        ).exists():
+            return {}
+
+        budgets: dict[str, Decimal] = {}
+        for concept_key, config in MASTER_BUDGET_MAPPING.items():
+            total = (
+                LineaPresupuestoMensual.objects.filter(
+                    periodo=period_start,
+                    version=LineaPresupuestoMensual.VERSION_ORIGINAL,
+                    rubro__area__codigo=config["area"],
+                ).aggregate(total=Sum("monto_presupuesto"))["total"]
+                or Decimal("0")
+            )
+            budgets[concept_key] = money_decimal(total)
+
+        utility_budget = (
+            budgets.get("ventas", Decimal("0"))
+            - budgets.get("costo_mp", Decimal("0"))
+            - budgets.get("gasto_fijo", Decimal("0"))
+            - budgets.get("mano_obra", Decimal("0"))
+            - budgets.get("logistica", Decimal("0"))
+            - budgets.get("gastos_venta", Decimal("0"))
+        )
+        budgets["utilidad_operativa"] = money_decimal(utility_budget)
+        return budgets
+
+    def _legacy_budget_by_concept(self, period_start: date) -> dict[str, Decimal]:
         budgets: dict[str, Decimal] = {}
         for line in PresupuestoLineaMensual.objects.filter(period=period_start).select_related("importacion"):
             concept_key = line.metadata.get("concept_key") or normalize_budget_concept(line.account_code or line.concept)
             budgets[concept_key] = budgets.get(concept_key, Decimal("0")) + money_decimal(line.monthly_budget)
         return budgets
+
+    def _budget_by_concept(self, period_start: date) -> tuple[dict[str, Decimal], str]:
+        master_budgets = self._master_budget_by_concept(period_start)
+        if any(value != 0 for value in master_budgets.values()):
+            return master_budgets, MASTER_BUDGET_SOURCE
+        return self._legacy_budget_by_concept(period_start), LEGACY_BUDGET_SOURCE
 
     def _actual_by_concept(self, result: EmpresaResultadoMensual | None) -> dict[str, Decimal]:
         if result is None:
@@ -298,7 +360,7 @@ class BudgetVsActualSnapshotService:
     def build_snapshot(self, *, period_start: str | date, dry_run: bool = False) -> BudgetVsActualSummary:
         period = parse_period(period_start)
         result = EmpresaResultadoMensual.objects.filter(periodo=period).first()
-        budgets = self._budget_by_concept(period)
+        budgets, budget_source = self._budget_by_concept(period)
         actuals = self._actual_by_concept(result)
         concept_keys = list(dict.fromkeys([*REQUIRED_BUDGET_CONCEPTS, "indirectos", *budgets.keys(), *actuals.keys()]))
         rows = []
@@ -336,8 +398,13 @@ class BudgetVsActualSnapshotService:
                     "line_count": len(rows),
                     "metadata": {
                         "source": BUDGET_VS_ACTUAL_SOURCE,
+                        "presupuesto_fuente": budget_source,
                         "real_source_model": "reportes.EmpresaResultadoMensual",
-                        "budget_source_model": "reportes.PresupuestoLineaMensual",
+                        "budget_source_model": (
+                            "reportes.LineaPresupuestoMensual"
+                            if budget_source == MASTER_BUDGET_SOURCE
+                            else "reportes.PresupuestoLineaMensual"
+                        ),
                         "empresa_resultado_id": result.id if result else None,
                         "empresa_resultado_financial_source": (result.metadata or {}).get("financial_totals_source") if result else "",
                         "rows": [
@@ -363,4 +430,5 @@ class BudgetVsActualSnapshotService:
             persisted=not dry_run,
             has_budget=any(value != 0 for value in budgets.values()),
             has_actual=result is not None,
+            budget_source=budget_source,
         )
