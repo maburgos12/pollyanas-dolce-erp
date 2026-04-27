@@ -46,6 +46,14 @@
   .finance-definition-card { padding:14px 16px; border-radius:16px; border:1px solid rgba(131,24,67,.08); background:rgba(255,255,255,.92); }
   .finance-definition-card strong { display:block; margin-bottom:6px; }
   .finance-definition-card span { color:#6d5f67; font-size:.9rem; line-height:1.45; display:block; }
+  .finance-period-form { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+  .finance-period-form label { display:block; font-size:.78rem; color:#7b6871; margin-bottom:4px; }
+  .finance-period-form input { min-height:36px; border:1px solid rgba(131,24,67,.14); border-radius:8px; padding:6px 9px; }
+  .finance-period-form button { min-height:36px; }
+  .finance-variance { font-weight:700; }
+  .finance-variance.success { color:#236d53; }
+  .finance-variance.danger { color:#a53434; }
+  .finance-variance.neutral { color:#6d5f67; }
   .finance-table {
     width: max(100%, 860px);
     min-width: 860px;
@@ -258,6 +266,67 @@
       <strong>{{ pricing_decision_counts.defender|default:0 }}</strong>
       <span>Defender</span>
     </article>
+  </section>
+
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Presupuesto vs Real</div>
+        <h2 class="bi-panel-title">Lectura mensual ejecutiva</h2>
+      </div>
+      <form class="finance-period-form" method="get">
+        <input type="hidden" name="scope" value="{{ selected_scope }}">
+        <input type="hidden" name="familia" value="{{ selected_familia|default:'' }}">
+        <input type="hidden" name="categoria" value="{{ selected_categoria|default:'' }}">
+        <input type="hidden" name="coverage" value="{{ selected_coverage|default:'' }}">
+        <input type="hidden" name="bucket" value="{{ selected_bucket|default:'' }}">
+        <input type="hidden" name="q" value="{{ selected_q }}">
+        <input type="hidden" name="margen" value="{{ margen_pct|floatformat:2 }}">
+        <div>
+          <label for="budget_period">Periodo</label>
+          <input id="budget_period" name="budget_period" type="month" value="{{ selected_budget_period }}">
+        </div>
+        <button class="btn btn-secondary btn-sm" type="submit">Ver</button>
+      </form>
+    </div>
+    <div class="bi-note">
+      El real se lee desde Resultado mensual empresa; el presupuesto viene de las líneas mensuales importadas. Esta vista no usa gasto futuro como real cerrado.
+    </div>
+    {% if not budget_vs_actual.has_budget %}
+    <div class="finance-empty">Todavía no hay presupuesto cargado para {{ selected_budget_period }}.</div>
+    {% endif %}
+    {% if not budget_vs_actual.has_actual %}
+    <div class="finance-empty">Todavía no hay resultado mensual real para {{ selected_budget_period }}.</div>
+    {% endif %}
+    <div class="table-responsive">
+      <table class="bi-table finance-table">
+        <thead>
+          <tr>
+            <th>Concepto</th>
+            <th class="text-end">Presupuesto</th>
+            <th class="text-end">Real</th>
+            <th class="text-end">Varianza</th>
+            <th class="text-end">% Varianza</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in budget_vs_actual.rows %}
+          <tr>
+            <td>
+              <strong>{{ row.label }}</strong>
+              <div class="bi-subtle">{% if row.type == "INGRESO" %}Ingreso / utilidad{% else %}Costo / gasto{% endif %}</div>
+            </td>
+            <td class="text-end">${{ row.budget|floatformat:2|intcomma }}</td>
+            <td class="text-end">${{ row.actual|floatformat:2|intcomma }}</td>
+            <td class="text-end finance-variance {{ row.tone }}">{% if row.variance > 0 %}+{% endif %}${{ row.variance|floatformat:2|intcomma }}</td>
+            <td class="text-end finance-variance {{ row.tone }}">{% if row.variance_pct > 0 %}+{% endif %}{{ row.variance_pct|floatformat:2 }}%</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="text-muted">Sin conceptos para el periodo.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section class="bi-panel">

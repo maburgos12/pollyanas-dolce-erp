@@ -125,6 +125,7 @@ from .models import (
     ProductionOrder,
 )
 from .services_budget_area_upload import BudgetAreaUploadService
+from .services_budget_vs_actual import BudgetVsActualSnapshotService, parse_period as parse_budget_period
 from .operations_metrics_service import rebuild_operations_metrics
 from .services_operating_expense_automation import OperatingExpenseImportAutomationService
 
@@ -3874,6 +3875,11 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
     if selected_coverage not in valid_coverages:
         selected_coverage = None
     selected_q = (request.GET.get("q") or "").strip()
+    selected_budget_period_raw = (request.GET.get("budget_period") or timezone.localdate().strftime("%Y-%m")).strip()
+    try:
+        selected_budget_period = parse_budget_period(selected_budget_period_raw)
+    except Exception:
+        selected_budget_period = date(timezone.localdate().year, timezone.localdate().month, 1)
     finance_context = _build_financial_cost_context(
         margen_pct=margen_pct,
         recipe_scope=selected_scope,
@@ -3884,6 +3890,10 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
         q=selected_q,
     )
     profitability_panel = finance_context["profitability_panel"]
+    budget_vs_actual = BudgetVsActualSnapshotService().build_snapshot(
+        period_start=selected_budget_period,
+        dry_run=True,
+    )
     hero_delta_pct = _safe_pct_local(
         _to_decimal(finance_context["total_delta"], "0"),
         _to_decimal(finance_context["previous_total"], "0"),
@@ -3891,6 +3901,8 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
     context = {
         **finance_context,
         "margen_pct": margen_pct,
+        "selected_budget_period": selected_budget_period.strftime("%Y-%m"),
+        "budget_vs_actual": budget_vs_actual,
         "hero_delta_pct": hero_delta_pct.quantize(Decimal("0.01")) if hero_delta_pct is not None else None,
         "module_tabs": _reportes_module_tabs("financiero"),
     }
