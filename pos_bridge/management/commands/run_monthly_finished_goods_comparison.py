@@ -16,7 +16,8 @@ class Command(BaseCommand):
     )
 
     def add_arguments(self, parser):
-        parser.add_argument("--month", required=True, help="Mes a procesar en formato YYYY-MM.")
+        parser.add_argument("--month", help="Mes a procesar en formato YYYY-MM.")
+        parser.add_argument("--period", help="Alias de --month en formato YYYY-MM.")
         parser.add_argument(
             "--output-dir",
             default="output/monthly_finished_goods_comparison",
@@ -38,6 +39,11 @@ class Command(BaseCommand):
             help="Filtro opcional de sucursal Point para troubleshooting.",
         )
         parser.add_argument("--actor-username", default="", help="Usuario ERP para registrar la ejecución.")
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Previsualiza cobertura y cierre teórico sin persistir ni exportar XLSX.",
+        )
 
     def handle(self, *args, **options):
         actor = None
@@ -48,14 +54,21 @@ class Command(BaseCommand):
                 raise CommandError(f"No existe actor_username '{actor_username}'.")
 
         try:
-            result = MonthlyFinishedGoodsComparisonService().run(
-                month=options["month"],
-                output_dir=Path(options["output_dir"]),
-                triggered_by=actor,
-                rebuild=bool(options.get("rebuild")),
-                fallback_to_point=not bool(options.get("skip_point_fallback")),
-                branch_filter=(options.get("branch") or "").strip() or None,
-            )
+            month = (options.get("month") or options.get("period") or "").strip()
+            if not month:
+                raise CommandError("Usa --month YYYY-MM o --period YYYY-MM.")
+            service = MonthlyFinishedGoodsComparisonService()
+            if options.get("dry_run"):
+                result = service.dry_run(month=month)
+            else:
+                result = service.run(
+                    month=month,
+                    output_dir=Path(options["output_dir"]),
+                    triggered_by=actor,
+                    rebuild=bool(options.get("rebuild")),
+                    fallback_to_point=not bool(options.get("skip_point_fallback")),
+                    branch_filter=(options.get("branch") or "").strip() or None,
+                )
         except ValueError as exc:
             raise CommandError("month debe tener formato YYYY-MM.") from exc
         except Exception as exc:

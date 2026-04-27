@@ -1050,6 +1050,40 @@ class SnapshotFlujoCentralMensual(models.Model):
         return f"{self.month_start:%Y-%m}"
 
 
+class StockMensualSucursal(models.Model):
+    periodo = models.DateField(db_index=True)
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        on_delete=models.PROTECT,
+        related_name="stock_mensual_producto",
+    )
+    producto = models.ForeignKey(
+        "pos_bridge.PointProduct",
+        on_delete=models.PROTECT,
+        related_name="stock_mensual_sucursal",
+    )
+    stock_apertura = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    stock_cierre = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    fuente_apertura = models.DateTimeField()
+    fuente_cierre = models.DateTimeField()
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-periodo", "sucursal__codigo", "producto__name"]
+        verbose_name = "Stock mensual por sucursal"
+        verbose_name_plural = "Stocks mensuales por sucursal"
+        unique_together = [("periodo", "sucursal", "producto")]
+        indexes = [
+            models.Index(fields=["periodo", "sucursal"], name="rstock_mes_branch_idx"),
+            models.Index(fields=["periodo", "producto"], name="rstock_mes_product_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.periodo:%Y-%m} · {self.sucursal.codigo} · {self.producto.name}"
+
+
 class ForecastInput(models.Model):
     fecha = models.DateField(db_index=True)
     receta = models.ForeignKey(
