@@ -66,7 +66,7 @@ class PresupuestoMaestroTests(TestCase):
         path = self._csv_file(
             [
                 {
-                    "concepto": "Ventas",
+                    "concepto": "Pay de Queso Grande",
                     "tipo": "INGRESO",
                     "sucursal": "",
                     "enero": "100.00",
@@ -100,7 +100,7 @@ class PresupuestoMaestroTests(TestCase):
         path = self._csv_file(
             [
                 {
-                    "concepto": "Ventas",
+                    "concepto": "Pay de Queso Grande",
                     "tipo": "INGRESO",
                     "sucursal": "",
                     "enero": "90.00",
@@ -147,7 +147,7 @@ class PresupuestoMaestroTests(TestCase):
         path = self._csv_file(
             [
                 {
-                    "concepto": "Ventas",
+                    "concepto": "Pay de Queso Grande",
                     "tipo": "INGRESO",
                     "sucursal": "",
                     "enero": "90.00",
@@ -172,6 +172,94 @@ class PresupuestoMaestroTests(TestCase):
         summary = PresupuestoMaestroService().build_consolidado(periodo="2026-01", version="ORIGINAL", area="ventas")
 
         self.assertEqual(summary["totales"]["real"], Decimal("120.00"))
+
+    def test_kpis_todas_usan_solo_ventas_y_real_empresa_resultado(self):
+        ventas_path = self._csv_file(
+            [
+                {
+                    "concepto": "Pay de Queso Grande",
+                    "tipo": "INGRESO",
+                    "sucursal": "",
+                    "enero": "4525810.00",
+                    "febrero": "4801150.00",
+                    "marzo": "4770210.00",
+                    "abril": "5000000.00",
+                    "mayo": "5000000.00",
+                    "junio": "5000000.00",
+                    "julio": "5000000.00",
+                    "agosto": "5000000.00",
+                    "septiembre": "5000000.00",
+                    "octubre": "5000000.00",
+                    "noviembre": "5000000.00",
+                    "diciembre": "7328919.00",
+                }
+            ]
+        )
+        admin_path = self._csv_file(
+            [
+                {
+                    "concepto": "Gasto fijo",
+                    "tipo": "EGRESO",
+                    "sucursal": "",
+                    "enero": "1000000.00",
+                    "febrero": "0",
+                    "marzo": "0",
+                    "abril": "0",
+                    "mayo": "0",
+                    "junio": "0",
+                    "julio": "0",
+                    "agosto": "0",
+                    "septiembre": "0",
+                    "octubre": "0",
+                    "noviembre": "0",
+                    "diciembre": "0",
+                }
+            ]
+        )
+        PresupuestoMaestroImportService().import_file(archivo=ventas_path, area_code="ventas", version="ORIGINAL", year=2026)
+        PresupuestoMaestroImportService().import_file(archivo=admin_path, area_code="administracion", version="ORIGINAL", year=2026)
+        EmpresaResultadoMensual.objects.create(periodo=date(2026, 1, 1), venta_total=Decimal("3519375.91"))
+
+        kpis = PresupuestoMaestroService().executive_kpis(year=2026, month=1, version="ORIGINAL")
+
+        self.assertEqual(kpis["annual_budget"], Decimal("61426089.00"))
+        self.assertEqual(kpis["monthly_budget"], Decimal("4525810.00"))
+        self.assertEqual(kpis["real_month"], Decimal("3519375.91"))
+        self.assertEqual(kpis["variance"], Decimal("-1006434.09"))
+        self.assertEqual(kpis["budget_scope"], "ventas_ingreso")
+
+    def test_kpis_area_especifica_usa_presupuesto_con_signo(self):
+        admin_path = self._csv_file(
+            [
+                {
+                    "concepto": "Gasto fijo",
+                    "tipo": "EGRESO",
+                    "sucursal": "",
+                    "enero": "100.00",
+                    "febrero": "200.00",
+                    "marzo": "0",
+                    "abril": "0",
+                    "mayo": "0",
+                    "junio": "0",
+                    "julio": "0",
+                    "agosto": "0",
+                    "septiembre": "0",
+                    "octubre": "0",
+                    "noviembre": "0",
+                    "diciembre": "0",
+                }
+            ]
+        )
+        PresupuestoMaestroImportService().import_file(archivo=admin_path, area_code="administracion", version="ORIGINAL", year=2026)
+        EmpresaResultadoMensual.objects.create(periodo=date(2026, 1, 1), venta_total=Decimal("120.00"))
+
+        kpis = PresupuestoMaestroService().executive_kpis(year=2026, month=1, version="ORIGINAL", area="administracion")
+
+        self.assertEqual(kpis["annual_budget"], Decimal("-300.00"))
+        self.assertEqual(kpis["monthly_budget"], Decimal("-100.00"))
+        self.assertEqual(kpis["real_month"], Decimal("120.00"))
+        self.assertEqual(kpis["variance"], Decimal("220.00"))
+        self.assertEqual(kpis["budget_scope"], "area_signed")
 
     def test_api_actualiza_celda(self):
         User = get_user_model()
