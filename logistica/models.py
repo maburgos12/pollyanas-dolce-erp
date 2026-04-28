@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
@@ -148,6 +148,7 @@ class Unidad(models.Model):
     sucursal = models.ForeignKey(Sucursal, on_delete=models.PROTECT, related_name="unidades_logistica")
     placa = models.CharField(max_length=30, blank=True, default="")
     activa = models.BooleanField(default=True)
+    folio_consecutivo = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["codigo"]
@@ -285,15 +286,18 @@ class BitacoraSalidaLlegada(models.Model):
     repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT)
     unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT)
     fecha = models.DateField(auto_now_add=True)
-    folio = models.CharField(max_length=20, blank=True)
-    hora_salida = models.DateTimeField(auto_now_add=True)
+    folio = models.CharField(max_length=30, editable=False)
+    hora_salida = models.DateTimeField(null=True, blank=True)
     km_salida = models.PositiveIntegerField()
     nivel_gas_salida = models.CharField(max_length=10, choices=NIVEL_GAS)
+    foto_tablero_salida = models.ImageField(upload_to="bitacora/")
     hora_llegada = models.DateTimeField(null=True, blank=True)
     km_llegada = models.PositiveIntegerField(null=True, blank=True)
     nivel_gas_llegada = models.CharField(max_length=10, choices=NIVEL_GAS, blank=True)
+    foto_tablero_llegada = models.ImageField(upload_to="bitacora/", null=True, blank=True)
     litros_cargados = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     costo_combustible = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    cerrada = models.BooleanField(default=False)
     ip_registro = models.GenericIPAddressField(null=True)
     latitud_salida = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitud_salida = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -305,6 +309,18 @@ class BitacoraSalidaLlegada(models.Model):
 
     def __str__(self) -> str:
         return f"{self.repartidor} · {self.unidad.codigo} · {self.fecha:%Y-%m-%d}"
+
+    def save(self, *args, **kwargs):
+        if not self.pk:
+            with transaction.atomic():
+                if not self.hora_salida:
+                    self.hora_salida = timezone.now()
+                unidad = Unidad.objects.select_for_update().get(pk=self.unidad_id)
+                unidad.folio_consecutivo += 1
+                unidad.save(update_fields=["folio_consecutivo"])
+                self.folio = f"{unidad.codigo}-{unidad.folio_consecutivo:04d}"
+                return super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
 
 class InspeccionVehiculo(models.Model):
