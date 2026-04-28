@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -10,10 +11,13 @@ from core.access import ROLE_ALMACEN, ROLE_LECTURA
 from core.models import Sucursal
 from inventario.models import ExistenciaInsumo
 from maestros.models import Insumo, UnidadMedida
+from pos_bridge.models import PointBranch, PointTransferLine, PointWasteLine
 from recetas.models import LineaReceta, Receta
+from recetas.models import VentaHistorica
 
-from .models import MermaPOS, VentaPOS
+from .models import DevolucionSucursalMatriz, MermaMensualSucursal, MermaPOS, VentaPOS
 from .services import build_discrepancias_report
+from .services_mermas_devoluciones import MermaDevolucionAuditService
 
 
 class ControlViewsTests(TestCase):
@@ -158,6 +162,7 @@ class ControlViewsTests(TestCase):
         self.assertIn("erp_command_center", resp.context)
         self.assertIn("dependency_status", resp.context["enterprise_chain"][0])
         self.assertIn("release_gate_rows", resp.context)
+
         self.assertIn("release_gate_completion", resp.context)
         self.assertIn("critical_path_rows", resp.context)
         self.assertIn("maturity_summary", resp.context)
@@ -282,3 +287,82 @@ class ControlViewsTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertAlmostEqual(rows[0]["ventas_pos"], 6.0, places=2)
         self.assertAlmostEqual(rows[0]["inventario_real"], 10.0, places=2)
+
+
+class MermaDevolucionAuditServiceTests(TestCase):
+    def setUp(self):
+        self.sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        self.branch = PointBranch.objects.create(external_id="1", name="MATRIZ", erp_branch=self.sucursal)
+        self.origin = PointBranch.objects.create(external_id="12", name="DEVOLUCIONES")
+        self.receta = Receta.objects.create(
+            nombre="Pastel merma test",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            codigo_point="PMT",
+            hash_contenido="hash-pastel-merma-test",
+        )
+        self.service = MermaDevolucionAuditService()
+
+    def test_consolidar_mermas_groups_cost_and_sales_pct(self):
+        PointWasteLine.objects.create(
+            branch=self.branch,
+            erp_branch=self.sucursal,
+            receta=self.receta,
+            movement_external_id="waste-test-1",
+            source_hash="waste-test-hash-1",
+            movement_at=timezone.make_aware(datetime(2026, 4, 10, 10, 0, 0)),
+            item_name=self.receta.nombre,
+            item_code=self.receta.codigo_point,
+            quantity=Decimal("2"),
+            unit_cost=Decimal("10"),
+            total_cost=Decimal("20"),
+            justification="Vencimiento",
+        )
+        VentaHistorica.objects.create(
+            receta=self.receta,
+            sucursal=self.sucursal,
+            fecha=datetime(2026, 4, 10).date(),
+            cantidad=Decimal("100"),
+            fuente="POINT_BRIDGE_SALES",
+        )
+
+        dry = self.service.consolidar_mermas(period="2026-04", dry_run=True)
+        persisted = self.service.consolidar_mermas(period="2026-04", dry_run=False)
+
+        self.assertEqual(dry.grouped_rows, 1)
+        self.assertEqual(dry.total_cost, Decimal("20.00"))
+        self.assertEqual(persisted.created, 1)
+        row = MermaMensualSucursal.objects.get()
+        self.assertEqual(row.unidades_merma, Decimal("2"))
+        self.assertEqual(row.costo_merma, Decimal("20.00"))
+        self.assertEqual(row.unidades_vendidas, Decimal("100"))
+        self.assertEqual(row.pct_merma_sobre_venta, Decimal("2.00"))
+
+    def test_clasificar_devoluciones_reads_transfer_without_modifying_source(self):
+        transfer = PointTransferLine.objects.create(
+            origin_branch=self.origin,
+            destination_branch=self.branch,
+            erp_destination_branch=self.sucursal,
+            receta=self.receta,
+            transfer_external_id="transfer-test-1",
+            detail_external_id="transfer-detail-test-1",
+            source_hash="transfer-hash-test-1",
+            registered_at=timezone.make_aware(datetime(2026, 4, 12, 12, 0, 0)),
+            item_name=self.receta.nombre,
+            item_code=self.receta.codigo_point,
+            unit_cost=Decimal("15"),
+            requested_quantity=Decimal("3"),
+            sent_quantity=Decimal("3"),
+            received_quantity=Decimal("3"),
+        )
+
+        dry = self.service.clasificar_devoluciones(period="2026-04", dry_run=True)
+        persisted = self.service.clasificar_devoluciones(period="2026-04", dry_run=False)
+
+        self.assertEqual(dry.source_rows, 1)
+        self.assertEqual(dry.total_cost, Decimal("45.00"))
+        self.assertEqual(persisted.created, 1)
+        row = DevolucionSucursalMatriz.objects.get()
+        self.assertEqual(row.transfer_line, transfer)
+        self.assertEqual(row.unidades, Decimal("3"))
+        self.assertEqual(row.costo_estimado, Decimal("45.00"))
+        self.assertEqual(row.motivo, DevolucionSucursalMatriz.MOTIVO_VIDA_UTIL)
