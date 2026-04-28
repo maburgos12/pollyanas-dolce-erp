@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Forecast quincenal{% endblock %}
+
+{% block content %}
+<div class="module-shell plan-produccion-shell">
+  <div class="card">
+    <div class="card-header">Forecast quincenal</div>
+    <form method="get" class="form-grid-auto">
+      <div class="form-group">
+        <label class="form-label">Fecha de inicio</label>
+        <input class="form-control" type="date" name="fecha_inicio" value="{{ fecha_inicio|date:'Y-m-d' }}">
+      </div>
+      <div class="form-group" style="align-self:end;">
+        <button class="btn btn-secondary" type="submit">Ver</button>
+      </div>
+    </form>
+    <div class="toolbar" style="margin-top: 12px;">
+      <form method="post" action="{% url 'proyecciones:forecast_quincenal_generar' %}">
+        {% csrf_token %}
+        <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio|date:'Y-m-d' }}">
+        <button class="btn btn-primary" type="submit">Generar forecast</button>
+      </form>
+    </div>
+  </div>
+
+  {% if latest_run %}
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card"><div class="kpi-number">#{{ latest_run.id }}</div><div class="kpi-label">Run</div></article>
+    <article class="kpi-card"><div class="kpi-number">{{ latest_run.fecha_inicio|date:'d/m' }}-{{ latest_run.fecha_fin|date:'d/m' }}</div><div class="kpi-label">Periodo</div></article>
+    <article class="kpi-card"><div class="kpi-number">{{ latest_run.recetas_proyectadas }}</div><div class="kpi-label">Recetas</div></article>
+    <article class="kpi-card"><div class="kpi-number">{{ latest_run.recetas_anomalas }}</div><div class="kpi-label">Anomalías</div></article>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-header">Proyecciones</div>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Sucursal</th>
+            <th>Producto</th>
+            <th class="text-end">Venta proyectada</th>
+            <th class="text-end">Unidades ajustadas</th>
+            <th>Confianza</th>
+            <th>Método</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ row.periodo|date:'Y-m-d' }}</td>
+            <td>{% if row.sucursal %}{{ row.sucursal.codigo }}{% else %}TODAS{% endif %}</td>
+            <td>{{ row.receta.nombre }}</td>
+            <td class="text-end">{{ row.venta_proyectada|floatformat:1 }}</td>
+            <td class="text-end">{{ row.unidades_proyectadas_ajustadas|floatformat:1 }}</td>
+            <td>{{ row.get_confianza_display }}</td>
+            <td>{{ row.metodo }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" class="muted">No hay forecast generado para este rango.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

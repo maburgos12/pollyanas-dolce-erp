@@ -39,6 +39,7 @@ urlpatterns = [
     path("plan-produccion/", RedirectView.as_view(url="/recetas/plan-produccion/", permanent=False)),
     path("maestros/", include(("maestros.urls", "maestros"), namespace="maestros")),
     path("recetas/", include(("recetas.urls", "recetas"), namespace="recetas")),
+    path("proyecciones/", include(("proyecciones.urls", "proyecciones"), namespace="proyecciones")),
     path("compras/", include(("compras.urls", "compras"), namespace="compras")),
     path("inventario/", include(("inventario.urls", "inventario"), namespace="inventario")),
     path("activos/", include(("activos.urls", "activos"), namespace="activos")),

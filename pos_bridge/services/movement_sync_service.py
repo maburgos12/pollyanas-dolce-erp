@@ -457,6 +457,7 @@ class PointMovementSyncService:
                 "is_received": item.is_received,
                 "is_cancelled": item.is_cancelled,
                 "is_finalized": item.is_finalized,
+                "is_open": getattr(item, "is_open", False),
                 "source_endpoint": "/Transfer/GetTransfer",
                 "raw_payload": item.raw_payload,
             }

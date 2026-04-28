@@ -142,6 +142,44 @@ class Command(BaseCommand):
             },
         )
 
+        open_transfer_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="5",
+            hour="22",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="pos_bridge: transferencias abiertas diario",
+            defaults={
+                "task": "pos_bridge.open_transfer_sync",
+                "crontab": open_transfer_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
+        cedis_consolidado_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="30",
+            hour="22",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="recetas: consolidado nocturno CEDIS",
+            defaults={
+                "task": "recetas.consolidado_nocturno_cedis",
+                "crontab": cedis_consolidado_cron,
+                "interval": None,
+                "kwargs": json.dumps({"sincronizar_point": True}),
+                "enabled": True,
+            },
+        )
+
         analytics_refresh_hour = _env_int("REPORTES_ANALYTICS_REFRESH_HOUR", 3, minimum=0, maximum=23)
         analytics_refresh_minute = _env_int("REPORTES_ANALYTICS_REFRESH_MINUTE", 35, minimum=0, maximum=59)
         analytics_lookback_days = _env_int("REPORTES_ANALYTICS_REFRESH_LOOKBACK_DAYS", 7, minimum=1, maximum=30)
@@ -288,6 +326,25 @@ class Command(BaseCommand):
             defaults={
                 "task": "proyecciones.generar_proyeccion_semana_siguiente",
                 "crontab": projection_weekly_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
+        forecast_quincenal_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="7",
+            day_of_week="5",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="proyecciones: forecast quincenal semanal",
+            defaults={
+                "task": "proyecciones.generar_forecast_quincenal",
+                "crontab": forecast_quincenal_cron,
                 "interval": None,
                 "kwargs": json.dumps({}),
                 "enabled": True,

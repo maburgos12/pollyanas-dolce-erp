@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -37,6 +37,7 @@ class ExtractedTransferLine:
     is_received: bool
     is_cancelled: bool
     is_finalized: bool
+    is_open: bool = False
     raw_payload: dict = field(default_factory=dict)
     source_hash: str = ""
 
@@ -58,11 +59,25 @@ class PointTransferExtractor:
         aware = timezone.make_aware(datetime.combine(value, time.min), timezone.get_current_timezone())
         return int(aware.timestamp() * 1000)
 
-    def _raw_export_path(self, *, start_date: date, end_date: date, branch_filter: str | None) -> Path:
+    def _to_epoch_ms_end(self, value: date) -> int:
+        next_day = value + timedelta(days=1)
+        aware = timezone.make_aware(datetime.combine(next_day, time.min), timezone.get_current_timezone())
+        return int(aware.timestamp() * 1000) - 1
+
+    def _raw_export_path(
+        self,
+        *,
+        start_date: date | None,
+        end_date: date | None,
+        branch_filter: str | None,
+        mode: str = "received",
+    ) -> Path:
         token = timezone.localtime().strftime("%Y%m%d_%H%M%S")
         branch_token = safe_slug(branch_filter or "all")
+        start_token = start_date.isoformat() if start_date else "all"
+        end_token = end_date.isoformat() if end_date else "all"
         return self.settings.raw_exports_dir / (
-            f"{token}_point_transfers_{start_date.isoformat()}_{end_date.isoformat()}_{branch_token}.json"
+            f"{token}_point_transfers_{mode}_{start_token}_{end_token}_{branch_token}.json"
         )
 
     def _parse_point_datetime(self, value: str | None) -> datetime | None:
@@ -103,23 +118,27 @@ class PointTransferExtractor:
                     return pk
         raise ExtractionError(f"No fue posible resolver la sucursal '{branch_filter}' en Point.")
 
-    def extract(
+    def _extract(
         self,
         *,
-        start_date: date,
-        end_date: date,
+        start_date: date | None,
+        end_date: date | None,
         branch_filter: str | None = None,
+        received: bool,
+        mode: str,
     ) -> list[ExtractedTransferLine]:
         auth_session = self.http_session_service.create()
         sucursal_param = self._resolve_branch_filter_value(auth_session.session, branch_filter)
+        fecha_inicio = str(self._to_epoch_ms(start_date)) if start_date else "0"
+        fecha_fin = str(self._to_epoch_ms_end(end_date)) if end_date else "0"
         response = auth_session.session.get(
             urljoin(self.settings.base_url.rstrip("/") + "/", self.LIST_PATH.lstrip("/")),
             params={
                 "sucursal": sucursal_param,
                 "cancelado": "false",
-                "recibido": "true",
-                "fechaInicio": str(self._to_epoch_ms(start_date)),
-                "fechaFin": str(self._to_epoch_ms(end_date)),
+                "recibido": "true" if received else "false",
+                "fechaInicio": fecha_inicio,
+                "fechaFin": fecha_fin,
             },
             timeout=self.settings.timeout_ms / 1000,
         )
@@ -131,9 +150,10 @@ class PointTransferExtractor:
 
         extracted: list[ExtractedTransferLine] = []
         raw_export = {
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat(),
+            "start_date": start_date.isoformat() if start_date else "",
+            "end_date": end_date.isoformat() if end_date else "",
             "branch_filter": branch_filter or "",
+            "received": received,
             "transfers": [],
         }
 
@@ -198,13 +218,44 @@ class PointTransferExtractor:
                         is_received=bool(transfer.get("isRecibido")),
                         is_cancelled=bool(transfer.get("Cancelado")),
                         is_finalized=bool(transfer.get("isFinalizado")),
+                        is_open=not bool(transfer.get("isRecibido")) and not bool(transfer.get("Cancelado")),
                         raw_payload={"transfer": transfer, "detail": detail},
                         source_hash=source_hash,
                     )
                 )
 
         write_json_file(
-            self._raw_export_path(start_date=start_date, end_date=end_date, branch_filter=branch_filter),
+            self._raw_export_path(start_date=start_date, end_date=end_date, branch_filter=branch_filter, mode=mode),
             raw_export,
         )
         return extracted
+
+    def extract(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        branch_filter: str | None = None,
+    ) -> list[ExtractedTransferLine]:
+        return self._extract(
+            start_date=start_date,
+            end_date=end_date,
+            branch_filter=branch_filter,
+            received=True,
+            mode="received",
+        )
+
+    def extract_open(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        branch_filter: str | None = None,
+    ) -> list[ExtractedTransferLine]:
+        return self._extract(
+            start_date=start_date,
+            end_date=end_date,
+            branch_filter=branch_filter,
+            received=False,
+            mode="open",
+        )

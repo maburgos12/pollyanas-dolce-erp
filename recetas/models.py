@@ -623,6 +623,17 @@ class PlanProduccion(models.Model):
     )
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR, db_index=True)
     consumo_aplicado = models.BooleanField(default=False)
+    autorizado = models.BooleanField(default=False, db_index=True)
+    autorizado_en = models.DateTimeField(null=True, blank=True)
+    autorizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="planes_produccion_autorizados",
+    )
+    origen_automatizacion = models.CharField(max_length=80, blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
     consumo_aplicado_en = models.DateTimeField(null=True, blank=True)
     consumo_aplicado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -662,7 +673,10 @@ class PlanProduccionItem(models.Model):
     plan = models.ForeignKey(PlanProduccion, related_name="items", on_delete=models.CASCADE)
     receta = models.ForeignKey(Receta, related_name="plan_items", on_delete=models.PROTECT)
     cantidad = models.DecimalField(max_digits=18, decimal_places=3, default=1)
+    cantidad_sugerida = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    cantidad_autorizada = models.DecimalField(max_digits=18, decimal_places=3, default=0)
     notas = models.CharField(max_length=160, blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
     creado_en = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -677,6 +691,65 @@ class PlanProduccionItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.plan.nombre}: {self.receta.nombre} x {self.cantidad}"
+
+
+class ConsolidadoNocturnoCEDIS(models.Model):
+    ESTADO_BORRADOR = "BORRADOR"
+    ESTADO_LISTO_REVISION = "LISTO_REVISION"
+    ESTADO_PLAN_GENERADO = "PLAN_GENERADO"
+    ESTADO_CHOICES = [
+        (ESTADO_BORRADOR, "Borrador"),
+        (ESTADO_LISTO_REVISION, "Listo para revisión"),
+        (ESTADO_PLAN_GENERADO, "Plan generado"),
+    ]
+
+    fecha_operacion = models.DateField(unique=True, db_index=True)
+    estado = models.CharField(max_length=24, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR, db_index=True)
+    sync_job = models.ForeignKey(
+        "pos_bridge.PointSyncJob",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="consolidados_nocturnos_cedis",
+    )
+    plan_produccion = models.ForeignKey(
+        PlanProduccion,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="consolidados_nocturnos_cedis",
+    )
+    sucursales_esperadas = models.PositiveIntegerField(default=0)
+    sucursales_con_solicitud = models.PositiveIntegerField(default=0)
+    sucursales_sin_solicitud = models.PositiveIntegerField(default=0)
+    productos_consolidados = models.PositiveIntegerField(default=0)
+    total_sugerido = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    total_solicitado = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    total_plan_produccion = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="consolidados_nocturnos_cedis_creados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Consolidado nocturno CEDIS"
+        verbose_name_plural = "Consolidados nocturnos CEDIS"
+        ordering = ["-fecha_operacion"]
+
+    @property
+    def cobertura_pct(self) -> Decimal:
+        if not self.sucursales_esperadas:
+            return Decimal("0")
+        return (Decimal(str(self.sucursales_con_solicitud)) / Decimal(str(self.sucursales_esperadas))) * Decimal("100")
+
+    def __str__(self) -> str:
+        return f"Consolidado CEDIS {self.fecha_operacion:%Y-%m-%d}"
 
 
 class PoliticaStockSucursalProducto(models.Model):
