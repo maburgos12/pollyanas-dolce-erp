@@ -1,6 +1,15 @@
 from django.contrib import admin
 
-from .models import BitacoraRepartidor, EntregaRuta, Repartidor, ReporteUnidad, RutaEntrega, Unidad
+from .models import (
+    BitacoraRepartidor,
+    BitacoraSalidaLlegada,
+    EntregaRuta,
+    InspeccionVehiculo,
+    Repartidor,
+    ReporteUnidad,
+    RutaEntrega,
+    Unidad,
+)
 
 
 @admin.register(RutaEntrega)
@@ -99,3 +108,39 @@ class BitacoraRepartidorAdmin(admin.ModelAdmin):
     search_fields = ("repartidor__user__username", "repartidor__user__first_name", "repartidor__user__last_name", "novedades")
     readonly_fields = ("creado_en", "actualizado_en")
     autocomplete_fields = ("repartidor",)
+
+
+@admin.register(BitacoraSalidaLlegada)
+class BitacoraSalidaLlegadaAdmin(admin.ModelAdmin):
+    list_display = (
+        "fecha",
+        "repartidor",
+        "unidad",
+        "km_salida",
+        "km_llegada",
+        "nivel_gas_salida",
+        "nivel_gas_llegada",
+        "ip_registro",
+    )
+    list_filter = ("fecha", "unidad__sucursal", "nivel_gas_salida", "nivel_gas_llegada")
+    search_fields = ("folio", "repartidor__user__username", "unidad__codigo", "ip_registro")
+    readonly_fields = ("fecha", "hora_salida", "hora_llegada", "ip_registro")
+    autocomplete_fields = ("repartidor", "unidad")
+
+
+@admin.register(InspeccionVehiculo)
+class InspeccionVehiculoAdmin(admin.ModelAdmin):
+    list_display = (
+        "fecha",
+        "repartidor",
+        "unidad",
+        "km_entrada",
+        "km_salida",
+        "nivel_gas_entrada",
+        "tiene_golpes",
+        "ip_registro",
+    )
+    list_filter = ("fecha", "unidad__sucursal", "nivel_gas_entrada", "tiene_golpes")
+    search_fields = ("repartidor__user__username", "unidad__codigo", "descripcion_golpes", "observaciones", "ip_registro")
+    readonly_fields = ("fecha", "ip_registro")
+    autocomplete_fields = ("repartidor", "unidad")
