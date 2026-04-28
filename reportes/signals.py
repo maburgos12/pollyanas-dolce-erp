@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save
@@ -28,10 +28,12 @@ from ventas.models import VentaAutoritativaPoint
 def _local_day(value) -> date:
     if value is None:
         return timezone.localdate()
+    if isinstance(value, datetime):
+        if timezone.is_aware(value):
+            return timezone.localtime(value).date()
+        return value.date()
     if isinstance(value, date):
         return value
-    if timezone.is_aware(value):
-        return timezone.localtime(value).date()
     return value.date()
 
 
