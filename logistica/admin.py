@@ -73,6 +73,7 @@ class ReporteUnidadAdmin(admin.ModelAdmin):
         "severidad",
         "estatus",
         "fecha_reporte",
+        "ip_reporte",
         "asignado_a",
         "proveedor_servicio",
         "costo_servicio",

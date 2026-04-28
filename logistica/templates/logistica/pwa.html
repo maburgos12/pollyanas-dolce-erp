@@ -594,7 +594,19 @@
       }
 
       function startNuevoReporte() {
-        state.reporteDraft = { step: 1, tipo: "", tipoLabel: "", severidad: "", descripcion: "", foto: null, kilometraje: "", latitud: "", longitud: "", geoLabel: "" };
+        state.reporteDraft = {
+          step: 1,
+          tipo: "",
+          tipoLabel: "",
+          severidad: "",
+          descripcion: "",
+          foto: null,
+          kilometraje: "",
+          latitud: "",
+          longitud: "",
+          geoStatus: "idle",
+          geoLabel: "",
+        };
         showScreen("nuevo_reporte");
       }
 
@@ -622,6 +634,16 @@
             </div>
           `;
         } else if (draft.step === 2) {
+          if (draft.geoStatus === "idle") {
+            setTimeout(capturarUbicacionReporte, 0);
+          }
+          const geoMessage = draft.geoStatus === "loading"
+            ? `<p class="muted">📍 Obteniendo ubicación...</p>`
+            : draft.geoStatus === "ready"
+              ? `<p class="success">📍 Ubicación registrada</p>`
+              : draft.geoStatus === "error"
+                ? `<p class="error">Se requiere ubicación para continuar</p>`
+                : "";
           body = `
             <h1 class="screen-title">Detalles</h1>
             ${progressDots(2)}
@@ -644,12 +666,11 @@
               <label for="kilometraje">Kilometraje</label>
               <input id="kilometraje" type="number" min="0" value="${escapeHtml(draft.kilometraje)}" oninput="state.reporteDraft.kilometraje = this.value">
             </div>
-            <button class="secondary-btn" onclick="guardarUbicacion()">Guardar ubicación actual</button>
-            ${draft.geoLabel ? `<p class="success">${escapeHtml(draft.geoLabel)}</p>` : ""}
+            ${geoMessage}
             ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
             <div class="actions">
               <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
-              <button class="primary-btn" onclick="nextReporteStep()">Siguiente</button>
+              <button class="primary-btn" onclick="nextReporteStep()" ${draft.geoStatus === "ready" ? "" : "disabled"}>Siguiente</button>
             </div>
           `;
         } else {
@@ -660,13 +681,13 @@
               <div class="kv"><b>Tipo</b><span>${escapeHtml(draft.tipoLabel)}</span></div>
               <div class="kv"><b>Severidad</b><span>${escapeHtml(draft.severidad)}</span></div>
               <div class="kv"><b>Kilometraje</b><span>${escapeHtml(draft.kilometraje || "-")}</span></div>
-              <div class="kv"><b>Ubicación</b><span>${draft.latitud ? `${escapeHtml(draft.latitud)}, ${escapeHtml(draft.longitud)}` : "-"}</span></div>
+              <div class="kv"><b>Ubicación</b><span>${draft.latitud ? "📍 Ubicación registrada" : "-"}</span></div>
               <div class="kv"><b>Descripción</b><span>${escapeHtml(draft.descripcion)}</span></div>
             </section>
             ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
             <div class="actions">
               <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
-              <button class="primary-btn" onclick="enviarReporte()">Enviar reporte</button>
+              <button class="primary-btn" onclick="enviarReporte()" ${draft.latitud ? "" : "disabled"}>Enviar reporte</button>
             </div>
           `;
         }
@@ -690,6 +711,9 @@
         if (draft.step === 2 && (!draft.severidad || !draft.descripcion.trim())) {
           return renderNuevoReporte("Selecciona severidad y escribe una descripción.");
         }
+        if (draft.step === 2 && !draft.latitud) {
+          return renderNuevoReporte("Se requiere ubicación para continuar");
+        }
         draft.step = Math.min(3, draft.step + 1);
         renderNuevoReporte();
       }
@@ -699,18 +723,25 @@
         renderNuevoReporte();
       }
 
-      function guardarUbicacion() {
+      function capturarUbicacionReporte() {
         if (!navigator.geolocation) {
-          state.reporteDraft.geoLabel = "Tu navegador no permite geolocalización.";
+          state.reporteDraft.geoStatus = "error";
+          state.reporteDraft.geoLabel = "Se requiere ubicación para continuar";
           return renderNuevoReporte();
         }
+        state.reporteDraft.geoStatus = "loading";
+        renderNuevoReporte();
         navigator.geolocation.getCurrentPosition((position) => {
           state.reporteDraft.latitud = position.coords.latitude.toFixed(6);
           state.reporteDraft.longitud = position.coords.longitude.toFixed(6);
-          state.reporteDraft.geoLabel = "Ubicación guardada.";
+          state.reporteDraft.geoStatus = "ready";
+          state.reporteDraft.geoLabel = "📍 Ubicación registrada";
           renderNuevoReporte();
         }, () => {
-          state.reporteDraft.geoLabel = "No se pudo obtener la ubicación.";
+          state.reporteDraft.latitud = "";
+          state.reporteDraft.longitud = "";
+          state.reporteDraft.geoStatus = "error";
+          state.reporteDraft.geoLabel = "Se requiere ubicación para continuar";
           renderNuevoReporte();
         }, { enableHighAccuracy: true, timeout: 8000 });
       }
