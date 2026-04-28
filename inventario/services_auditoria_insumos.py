@@ -16,6 +16,37 @@ from .models import ConsumoInsumoMensual, ExistenciaInsumo, MovimientoInventario
 
 
 DECIMAL_ZERO = Decimal("0")
+ANOMALO_COST_CAP = Decimal("50000")
+CONVERSION = {
+    ("g", "kg"): Decimal("0.001"),
+    ("kg", "g"): Decimal("1000"),
+    ("mg", "kg"): Decimal("0.000001"),
+    ("oz", "kg"): Decimal("0.028349"),
+    ("lb", "kg"): Decimal("0.453592"),
+    ("ml", "lt"): Decimal("0.001"),
+    ("ml", "l"): Decimal("0.001"),
+    ("lt", "ml"): Decimal("1000"),
+    ("l", "ml"): Decimal("1000"),
+    ("kg", "kg"): Decimal("1"),
+    ("g", "g"): Decimal("1"),
+    ("lt", "lt"): Decimal("1"),
+    ("l", "lt"): Decimal("1"),
+    ("lt", "l"): Decimal("1"),
+    ("ml", "ml"): Decimal("1"),
+    ("pza", "pza"): Decimal("1"),
+    ("pz", "pza"): Decimal("1"),
+    ("pza", "pz"): Decimal("1"),
+    ("pz", "pz"): Decimal("1"),
+}
+
+
+@dataclass
+class CostoUnitarioAudit:
+    costo: Decimal
+    unidad: str
+    fuente: str
+    razon: str = ""
+    anomalous: bool = False
 
 
 @dataclass
@@ -43,6 +74,23 @@ class ConsumoAuditSummary:
     @property
     def top_diferencias(self) -> list[ConsumoInsumoMensual]:
         return sorted(self.rows, key=lambda row: abs(row.diferencia_costo or DECIMAL_ZERO), reverse=True)[:5]
+
+    @property
+    def costo_fuentes(self) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for row in self.rows:
+            source = str((row.metadata or {}).get("costo_fuente") or "SIN_COSTO")
+            result[source] = result.get(source, 0) + 1
+        return result
+
+    @property
+    def razones(self) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for row in self.rows:
+            reason = str((row.metadata or {}).get("razon") or "")
+            if reason:
+                result[reason] = result.get(reason, 0) + 1
+        return result
 
 
 def parse_period(value: str) -> date:
@@ -88,18 +136,31 @@ class ConsumoInsumoAuditService:
         candidate_ids = set(teorico_por_insumo) | movimiento_insumo_ids | existencia_insumo_ids
 
         costos = self._costos_unitarios(candidate_ids, period_end)
-        unidades = self._unidad_por_insumo(candidate_ids, teorico_por_insumo)
+        unidades = self._unidad_por_insumo(candidate_ids)
         real_by_insumo = self._consumo_real_bulk(period_start, period_end, candidate_ids)
         rows: list[ConsumoInsumoMensual] = []
 
         for insumo in Insumo.objects.filter(id__in=candidate_ids).select_related("unidad_base").order_by("nombre"):
-            teorico = _q4(teorico_por_insumo.get(insumo.id, DECIMAL_ZERO))
-            costo_unitario = costos.get(insumo.id, DECIMAL_ZERO)
+            teorico_data = teorico_por_insumo.get(insumo.id, self._empty_teorico_data())
+            teorico = _q4(Decimal(str(teorico_data["cantidad"] or 0)))
+            costo_info = costos.get(insumo.id) or CostoUnitarioAudit(DECIMAL_ZERO, unidades.get(insumo.id, ""), "SIN_COSTO")
+            snapshot_unit_cost = (
+                Decimal(str(teorico_data["costo_snapshot"] or 0)) / teorico
+                if teorico > 0 and Decimal(str(teorico_data["costo_snapshot"] or 0)) > 0
+                else DECIMAL_ZERO
+            )
+            if costo_info.fuente == "SIN_COSTO" and snapshot_unit_cost > 0:
+                costo_info = CostoUnitarioAudit(snapshot_unit_cost, unidades.get(insumo.id, ""), "BOM_SNAPSHOT")
+            costo_unitario = costo_info.costo
             real_data = real_by_insumo.get(insumo.id) or self._empty_real_data()
             consumo_real = _q4(real_data["consumo_real"])
             diferencia = _q4(consumo_real - teorico)
             diferencia_pct = _pct((diferencia / teorico) * Decimal("100")) if teorico > 0 else Decimal("0.00")
             alerta = self.clasificar_alerta(teorico, consumo_real, diferencia_pct, real_data)
+            if costo_info.anomalous:
+                alerta = ConsumoInsumoMensual.ALERTA_SIN_DATOS
+            if teorico_data["unidad_incompatible_count"]:
+                alerta = ConsumoInsumoMensual.ALERTA_SIN_DATOS
             metadata = {
                 "metodo_consumo": "DIFERENCIAL",
                 "produccion_recetas": real_data.get("produccion_recetas", 0),
@@ -108,7 +169,16 @@ class ConsumoInsumoAuditService:
                 "stock_reconstruido": real_data["stock_reconstruido"],
                 "real_data_limited": real_data["real_data_limited"],
                 "costo_unitario_usado": str(costo_unitario),
+                "costo_fuente": costo_info.fuente,
+                "costo_unidad": costo_info.unidad,
+                "lineas_bom": teorico_data["lineas"],
+                "unidad_incompatible_count": teorico_data["unidad_incompatible_count"],
+                "costo_snapshot_total": str(teorico_data["costo_snapshot"]),
             }
+            if costo_info.razon:
+                metadata["razon"] = costo_info.razon
+            elif teorico_data["unidad_incompatible_count"]:
+                metadata["razon"] = "UNIDAD_INCOMPATIBLE"
             row = ConsumoInsumoMensual(
                 periodo=periodo,
                 insumo=insumo,
@@ -165,10 +235,10 @@ class ConsumoInsumoAuditService:
         )
         return {int(row["receta_id"]): Decimal(str(row["total"] or 0)) for row in rows}
 
-    def _consumo_teorico_por_insumo(self, produccion_por_receta: dict[int, Decimal]) -> dict[int, Decimal]:
+    def _consumo_teorico_por_insumo(self, produccion_por_receta: dict[int, Decimal]) -> dict[int, dict[str, object]]:
         if not produccion_por_receta:
             return {}
-        totals: dict[int, Decimal] = {}
+        totals: dict[int, dict[str, object]] = {}
         lineas = (
             LineaReceta.objects.filter(
                 receta_id__in=produccion_por_receta.keys(),
@@ -176,29 +246,76 @@ class ConsumoInsumoAuditService:
                 cantidad__isnull=False,
             )
             .exclude(tipo_linea=LineaReceta.TIPO_SUBSECCION)
-            .select_related("insumo", "unidad")
+            .select_related("insumo", "insumo__unidad_base", "unidad")
         )
         for linea in lineas:
             cantidad = Decimal(str(linea.cantidad or 0))
             if cantidad <= 0:
                 continue
             producido = produccion_por_receta.get(linea.receta_id, DECIMAL_ZERO)
-            totals[linea.insumo_id] = totals.get(linea.insumo_id, DECIMAL_ZERO) + (cantidad * producido)
+            if producido <= 0:
+                continue
+            target_unit = self._unit_code(linea.insumo.unidad_base) or self._unit_code(linea.unidad)
+            source_unit = self._unit_code(linea.unidad) or self._normalize_unit(linea.unidad_texto) or target_unit
+            entry = totals.setdefault(linea.insumo_id, self._empty_teorico_data())
+            entry["lineas"] = int(entry["lineas"]) + 1
+            converted_qty = self._convert_quantity(cantidad * producido, source_unit, target_unit)
+            if converted_qty is None:
+                entry["unidad_incompatible_count"] = int(entry["unidad_incompatible_count"]) + 1
+                continue
+            entry["cantidad"] = Decimal(str(entry["cantidad"])) + converted_qty
+            snapshot_cost = Decimal(str(linea.costo_unitario_snapshot or 0))
+            if snapshot_cost > 0:
+                entry["costo_snapshot"] = Decimal(str(entry["costo_snapshot"])) + ((cantidad * producido) * snapshot_cost)
         return totals
 
-    def _unidad_por_insumo(self, insumo_ids: set[int], teorico_por_insumo: dict[int, Decimal]) -> dict[int, str]:
+    def _empty_teorico_data(self) -> dict[str, object]:
+        return {
+            "cantidad": DECIMAL_ZERO,
+            "costo_snapshot": DECIMAL_ZERO,
+            "lineas": 0,
+            "unidad_incompatible_count": 0,
+        }
+
+    def _unidad_por_insumo(self, insumo_ids: set[int]) -> dict[int, str]:
         units: dict[int, str] = {}
-        if teorico_por_insumo:
-            for row in (
-                LineaReceta.objects.filter(insumo_id__in=teorico_por_insumo.keys())
-                .values("insumo_id", "unidad__codigo", "unidad_texto")
-                .annotate(n=Count("id"))
-                .order_by("insumo_id", "-n")
-            ):
-                units.setdefault(int(row["insumo_id"]), row["unidad__codigo"] or row["unidad_texto"] or "")
         for insumo in Insumo.objects.filter(id__in=insumo_ids).select_related("unidad_base"):
             units.setdefault(insumo.id, insumo.unidad_base.codigo if insumo.unidad_base_id else "")
         return units
+
+    def _unit_code(self, unit) -> str:
+        return self._normalize_unit(getattr(unit, "codigo", "") if unit else "")
+
+    def _normalize_unit(self, value: str) -> str:
+        raw = (value or "").strip().lower()
+        aliases = {
+            "gr": "g",
+            "gramo": "g",
+            "gramos": "g",
+            "kilogramo": "kg",
+            "kilogramos": "kg",
+            "litro": "lt",
+            "litros": "lt",
+            "lts": "lt",
+            "l": "lt",
+            "mililitro": "ml",
+            "mililitros": "ml",
+            "pieza": "pza",
+            "piezas": "pza",
+            "unidad": "pza",
+            "unidades": "pza",
+        }
+        return aliases.get(raw, raw)
+
+    def _convert_quantity(self, quantity: Decimal, source_unit: str, target_unit: str) -> Decimal | None:
+        source = self._normalize_unit(source_unit)
+        target = self._normalize_unit(target_unit)
+        if not source or not target:
+            return None
+        factor = CONVERSION.get((source, target))
+        if factor is None:
+            return None
+        return Decimal(str(quantity or 0)) * factor
 
     def _consumo_real_bulk(self, period_start: date, period_end: date, insumo_ids: set[int]) -> dict[int, dict[str, object]]:
         if not insumo_ids:
@@ -300,30 +417,60 @@ class ConsumoInsumoAuditService:
             result[insumo_id] = result.get(insumo_id, DECIMAL_ZERO) + delta
         return result
 
-    def _costos_unitarios(self, insumo_ids: set[int], period_end: date) -> dict[int, Decimal]:
-        result: dict[int, Decimal] = {insumo_id: DECIMAL_ZERO for insumo_id in insumo_ids}
+    def _costos_unitarios(self, insumo_ids: set[int], period_end: date) -> dict[int, CostoUnitarioAudit]:
+        result: dict[int, CostoUnitarioAudit] = {
+            insumo_id: CostoUnitarioAudit(DECIMAL_ZERO, "", "SIN_COSTO") for insumo_id in insumo_ids
+        }
         rows = (
             CostoInsumo.objects.filter(insumo_id__in=insumo_ids, fecha__lte=period_end)
+            .exclude(raw__source="RECETA_PREPARACION")
+            .select_related("insumo__unidad_base")
             .order_by("insumo_id", "-fecha", "-id")
-            .values("insumo_id", "costo_unitario")
         )
         for row in rows:
-            insumo_id = int(row["insumo_id"])
-            if result[insumo_id] == DECIMAL_ZERO:
-                result[insumo_id] = Decimal(str(row["costo_unitario"] or 0))
+            insumo_id = int(row.insumo_id)
+            if result[insumo_id].fuente != "SIN_COSTO":
+                continue
+            raw_source = str((row.raw or {}).get("source") or "COSTO_INSUMO")
+            unit_code = self._unit_code(row.insumo.unidad_base)
+            cost = Decimal(str(row.costo_unitario or 0))
+            anomalous = self._is_anomalous_cost(cost, unit_code)
+            result[insumo_id] = CostoUnitarioAudit(
+                cost,
+                unit_code,
+                raw_source,
+                razon="COSTO_ANOMALO" if anomalous else "",
+                anomalous=anomalous,
+            )
 
-        missing_ids = {insumo_id for insumo_id, costo in result.items() if costo == DECIMAL_ZERO}
+        missing_ids = {insumo_id for insumo_id, costo in result.items() if costo.fuente == "SIN_COSTO"}
         if missing_ids:
             fallback_rows = (
                 CostoInsumo.objects.filter(insumo_id__in=missing_ids)
+                .exclude(raw__source="RECETA_PREPARACION")
+                .select_related("insumo__unidad_base")
                 .order_by("insumo_id", "-fecha", "-id")
-                .values("insumo_id", "costo_unitario")
             )
             for row in fallback_rows:
-                insumo_id = int(row["insumo_id"])
-                if result[insumo_id] == DECIMAL_ZERO:
-                    result[insumo_id] = Decimal(str(row["costo_unitario"] or 0))
+                insumo_id = int(row.insumo_id)
+                if result[insumo_id].fuente != "SIN_COSTO":
+                    continue
+                raw_source = str((row.raw or {}).get("source") or "COSTO_INSUMO")
+                unit_code = self._unit_code(row.insumo.unidad_base)
+                cost = Decimal(str(row.costo_unitario or 0))
+                anomalous = self._is_anomalous_cost(cost, unit_code)
+                result[insumo_id] = CostoUnitarioAudit(
+                    cost,
+                    unit_code,
+                    raw_source,
+                    razon="COSTO_ANOMALO" if anomalous else "",
+                    anomalous=anomalous,
+                )
         return result
+
+    def _is_anomalous_cost(self, cost: Decimal, unit_code: str) -> bool:
+        unit = self._normalize_unit(unit_code)
+        return unit in {"kg", "lt", "l"} and cost > ANOMALO_COST_CAP
 
     def calcular_consumo_real(self, period_start: date, period_end: date, insumo: Insumo) -> dict[str, object]:
         stock_actual = Decimal(

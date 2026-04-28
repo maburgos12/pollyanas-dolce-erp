@@ -30,6 +30,18 @@ class Command(BaseCommand):
             f"FALTANTE={by_alerta.get('FALTANTE', 0)} | "
             f"SIN_DATOS={by_alerta.get('SIN_DATOS', 0)}"
         )
+        self.stdout.write(
+            "Fuentes costo: "
+            + " | ".join(f"{source}={count}" for source, count in sorted(summary.costo_fuentes.items()))
+        )
+        self.stdout.write(
+            "Razones: "
+            + (
+                " | ".join(f"{reason}={count}" for reason, count in sorted(summary.razones.items()))
+                if summary.razones
+                else "sin anomalías de unidad/costo"
+            )
+        )
         self.stdout.write("")
         self.stdout.write("Top 5 desviaciones por costo absoluto:")
         self.stdout.write("Insumo | Teórico | Real | Dif | Dif % | Dif costo | Alerta")
