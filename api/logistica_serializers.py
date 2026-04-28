@@ -4,7 +4,16 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import serializers
 
-from logistica.models import BitacoraRepartidor, EntregaRuta, Repartidor, ReporteUnidad, RutaEntrega, Unidad
+from logistica.models import (
+    BitacoraRepartidor,
+    BitacoraSalidaLlegada,
+    EntregaRuta,
+    InspeccionVehiculo,
+    Repartidor,
+    ReporteUnidad,
+    RutaEntrega,
+    Unidad,
+)
 
 
 class LogisticaRutaSerializer(serializers.ModelSerializer):
@@ -242,3 +251,106 @@ class LogisticaBitacoraSerializer(serializers.ModelSerializer):
         if km_fin is not None and km_inicio is not None and km_fin < km_inicio:
             raise serializers.ValidationError("El kilometraje final no puede ser menor al inicial.")
         return attrs
+
+
+class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
+    repartidor_nombre = serializers.SerializerMethodField()
+    unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
+    unidad_descripcion = serializers.CharField(source="unidad.descripcion", read_only=True)
+
+    class Meta:
+        model = BitacoraSalidaLlegada
+        fields = [
+            "id",
+            "repartidor",
+            "repartidor_nombre",
+            "unidad",
+            "unidad_codigo",
+            "unidad_descripcion",
+            "fecha",
+            "folio",
+            "hora_salida",
+            "km_salida",
+            "nivel_gas_salida",
+            "hora_llegada",
+            "km_llegada",
+            "nivel_gas_llegada",
+            "litros_cargados",
+            "costo_combustible",
+            "ip_registro",
+            "latitud_salida",
+            "longitud_salida",
+        ]
+        read_only_fields = [
+            "id",
+            "repartidor",
+            "repartidor_nombre",
+            "unidad",
+            "unidad_codigo",
+            "unidad_descripcion",
+            "fecha",
+            "hora_salida",
+            "hora_llegada",
+            "ip_registro",
+        ]
+
+    def get_repartidor_nombre(self, obj):
+        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+
+
+class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BitacoraSalidaLlegada
+        fields = ["folio", "km_salida", "nivel_gas_salida", "latitud_salida", "longitud_salida"]
+
+    def create(self, validated_data):
+        repartidor = self.context["repartidor"]
+        if repartidor.unidad_asignada is None:
+            raise serializers.ValidationError("No tienes una unidad asignada para iniciar bitácora.")
+        return BitacoraSalidaLlegada.objects.create(
+            repartidor=repartidor,
+            unidad=repartidor.unidad_asignada,
+            **validated_data,
+        )
+
+
+class LogisticaBitacoraLlegadaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BitacoraSalidaLlegada
+        fields = ["km_llegada", "nivel_gas_llegada", "litros_cargados", "costo_combustible"]
+
+    def validate(self, attrs):
+        km_llegada = attrs.get("km_llegada")
+        if km_llegada is not None and self.instance and km_llegada < self.instance.km_salida:
+            raise serializers.ValidationError("El kilometraje de llegada no puede ser menor al de salida.")
+        return attrs
+
+
+class LogisticaInspeccionVehiculoSerializer(serializers.ModelSerializer):
+    repartidor_nombre = serializers.SerializerMethodField()
+    unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
+    unidad_descripcion = serializers.CharField(source="unidad.descripcion", read_only=True)
+
+    class Meta:
+        model = InspeccionVehiculo
+        fields = "__all__"
+        read_only_fields = ["id", "repartidor", "unidad", "fecha", "ip_registro", "repartidor_nombre", "unidad_codigo", "unidad_descripcion"]
+
+    def get_repartidor_nombre(self, obj):
+        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+
+
+class LogisticaInspeccionVehiculoCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InspeccionVehiculo
+        exclude = ["repartidor", "unidad", "fecha", "ip_registro"]
+
+    def create(self, validated_data):
+        repartidor = self.context["repartidor"]
+        if repartidor.unidad_asignada is None:
+            raise serializers.ValidationError("No tienes una unidad asignada para inspeccionar.")
+        return InspeccionVehiculo.objects.create(
+            repartidor=repartidor,
+            unidad=repartidor.unidad_asignada,
+            **validated_data,
+        )

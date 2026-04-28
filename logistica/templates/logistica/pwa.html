@@ -399,6 +399,44 @@
         font-size: 54px;
         margin-bottom: 8px;
       }
+
+      .section-toggle {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        color: var(--text);
+        text-align: left;
+        font-weight: 900;
+        margin: 10px 0;
+        padding: 12px 14px;
+      }
+
+      .check-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border-bottom: 1px solid var(--border);
+        padding: 10px 0;
+      }
+
+      .check-row:last-child { border-bottom: 0; }
+
+      .chip {
+        min-width: 72px;
+        border-radius: 999px;
+        color: white;
+        font-size: 12px;
+        font-weight: 900;
+        padding: 7px 10px;
+      }
+
+      .chip.ok { background: var(--success); }
+      .chip.fail { background: var(--danger); }
     </style>
   </head>
   <body>
@@ -413,6 +451,8 @@
         pantallaActual: "login",
         reportes: [],
         bitacoras: [],
+        bitacoraSalida: null,
+        inspeccionDraft: null,
         reporteDraft: {
           step: 1,
           tipo: "",
@@ -423,6 +463,7 @@
           kilometraje: "",
           latitud: "",
           longitud: "",
+          geoStatus: "idle",
           geoLabel: ""
         }
       };
@@ -440,6 +481,74 @@
         { icon: "🟢", label: "Informativo", value: "informativo", color: "var(--success)" },
         { icon: "🟡", label: "Urgente", value: "urgente", color: "var(--warning)" },
         { icon: "🔴", label: "Crítico", value: "critico", color: "var(--danger)" }
+      ];
+
+      const nivelesGas = [
+        { icon: "🪫", label: "Vacío", value: "vacio" },
+        { icon: "⛽", label: "1/4", value: "1/4" },
+        { icon: "⛽", label: "1/2", value: "1/2" },
+        { icon: "⛽", label: "3/4", value: "3/4" },
+        { icon: "🔋", label: "Lleno", value: "lleno" }
+      ];
+
+      const inspeccionSecciones = [
+        {
+          key: "exterior",
+          title: "🔧 Accesorios Exterior",
+          items: [
+            ["ext_llanta_refaccion", "Llanta de refacción"],
+            ["ext_gato", "Gato"],
+            ["ext_llave_rueda", "Llave de rueda"],
+            ["ext_rines", "Rines"],
+            ["ext_aire_neumaticos", "Aire neumáticos"],
+            ["ext_claxon", "Claxon"],
+            ["ext_limpiaparabrisas", "Limpiaparabrisas"],
+            ["ext_luces", "Luces"],
+            ["ext_direccionales", "Direccionales"],
+            ["ext_control_llave", "Control/llave"],
+            ["ext_antena", "Antena"],
+            ["ext_tapon_gas", "Tapón de gas"]
+          ]
+        },
+        {
+          key: "interior",
+          title: "🚗 Accesorios Interior",
+          items: [
+            ["int_espejos", "Espejos"],
+            ["int_encendedor", "Encendedor"],
+            ["int_luz_interior", "Luz interior"],
+            ["int_ac", "A/C"],
+            ["int_radio", "Radio"],
+            ["int_botones_radio", "Botones radio"],
+            ["int_rejillas_ac", "Rejillas A/C"],
+            ["int_tapetes", "Tapetes"],
+            ["int_cinturones", "Cinturones"],
+            ["int_tarjeta_circulacion", "Tarjeta circulación"]
+          ]
+        },
+        {
+          key: "niveles",
+          title: "🔋 Niveles",
+          items: [
+            ["niv_aceite", "Aceite"],
+            ["niv_frenos", "Frenos"],
+            ["niv_bateria", "Batería"],
+            ["niv_agua_limpiadores", "Agua limpiadores"],
+            ["niv_agua_radiador", "Agua radiador"]
+          ]
+        },
+        {
+          key: "estetica",
+          title: "✨ Estética Interior",
+          items: [
+            ["est_asientos_delanteros", "Asientos delanteros"],
+            ["est_asientos_traseros", "Asientos traseros"],
+            ["est_cajuela", "Cajuela"],
+            ["est_tablero", "Tablero"],
+            ["est_panel_puertas", "Panel puertas"],
+            ["est_visera", "Visera"]
+          ]
+        }
       ];
 
       function escapeHtml(value) {
@@ -529,6 +638,8 @@
         if (nombre === "mis_reportes") return renderMisReportes();
         if (nombre === "mi_unidad") return renderMiUnidad();
         if (nombre === "bitacora") return renderBitacora();
+        if (nombre === "bitacora_salida") return renderBitacoraSalida();
+        if (nombre === "inspeccion_vehiculo") return renderInspeccionVehiculo();
       }
 
       function renderLogin(error = "") {
@@ -589,6 +700,8 @@
             <button class="dash-btn" onclick="showScreen('mis_reportes')">📂<br>Mis Reportes ${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
             <button class="dash-btn" onclick="showScreen('mi_unidad')">🛵<br>Mi Unidad</button>
             <button class="dash-btn" onclick="showScreen('bitacora')">📝<br>Bitácora</button>
+            <button class="dash-btn" onclick="showScreen('inspeccion_vehiculo')">📋<br>Inspección</button>
+            <button class="dash-btn" onclick="showScreen('bitacora_salida')">🚗<br>Bitácora salida/llegada</button>
           </div>
         `));
       }
@@ -881,6 +994,369 @@
         if (!response.ok) return renderBitacora("No se pudo guardar. Revisa el kilometraje.");
         state.editandoBitacora = false;
         await renderBitacora("Bitácora guardada.");
+      }
+
+      function gasSelector(current, onSelect) {
+        return `
+          <div class="card-grid">
+            ${nivelesGas.map((nivel) => `
+              <button type="button" class="option-card ${current === nivel.value ? "selected" : ""}" onclick="${onSelect}('${nivel.value}')">
+                <span>${nivel.icon}</span><br>${nivel.label}
+              </button>
+            `).join("")}
+          </div>
+        `;
+      }
+
+      function ensureBitacoraSalidaDraft() {
+        if (!state.bitacoraSalidaDraft) {
+          state.bitacoraSalidaDraft = {
+            folio: "",
+            km_salida: "",
+            nivel_gas_salida: "",
+            latitud_salida: "",
+            longitud_salida: "",
+            geoStatus: "idle"
+          };
+        }
+        return state.bitacoraSalidaDraft;
+      }
+
+      function capturarUbicacionSalida() {
+        const draft = ensureBitacoraSalidaDraft();
+        if (!navigator.geolocation) {
+          draft.geoStatus = "error";
+          return renderBitacoraSalida();
+        }
+        draft.geoStatus = "loading";
+        renderBitacoraSalida();
+        navigator.geolocation.getCurrentPosition((position) => {
+          draft.latitud_salida = position.coords.latitude.toFixed(6);
+          draft.longitud_salida = position.coords.longitude.toFixed(6);
+          draft.geoStatus = "ready";
+          renderBitacoraSalida();
+        }, () => {
+          draft.latitud_salida = "";
+          draft.longitud_salida = "";
+          draft.geoStatus = "error";
+          renderBitacoraSalida();
+        }, { enableHighAccuracy: true, timeout: 8000 });
+      }
+
+      async function loadBitacoraSalidaHoy() {
+        const response = await apiFetch("/bitacora-salida/hoy/");
+        state.bitacoraSalida = response.ok ? await response.json() : {};
+        return state.bitacoraSalida;
+      }
+
+      async function renderBitacoraSalida(message = "") {
+        const actual = await loadBitacoraSalidaHoy();
+        const draft = ensureBitacoraSalidaDraft();
+        const tieneSalida = Boolean(actual?.id);
+        const llegadaPendiente = tieneSalida && !actual.hora_llegada;
+        let body = "";
+        if (!tieneSalida) {
+          if (draft.geoStatus === "idle") setTimeout(capturarUbicacionSalida, 0);
+          const geo = draft.geoStatus === "loading"
+            ? `<p class="muted">📍 Obteniendo ubicación...</p>`
+            : draft.geoStatus === "ready"
+              ? `<p class="success">📍 Ubicación registrada</p>`
+              : draft.geoStatus === "error"
+                ? `<p class="error">Se requiere ubicación para continuar</p>`
+                : "";
+          body = `
+            <form onsubmit="guardarSalida(event)">
+              <div class="field">
+                <label for="km_salida">KM salida</label>
+                <input id="km_salida" name="km_salida" type="number" min="0" required value="${escapeHtml(draft.km_salida)}" oninput="state.bitacoraSalidaDraft.km_salida = this.value">
+              </div>
+              <div class="field">
+                <label>Nivel gas salida</label>
+                ${gasSelector(draft.nivel_gas_salida, "selectGasSalida")}
+              </div>
+              <div class="field">
+                <label for="folio_salida">Folio</label>
+                <input id="folio_salida" name="folio" value="${escapeHtml(draft.folio)}" oninput="state.bitacoraSalidaDraft.folio = this.value">
+              </div>
+              ${geo}
+              <button class="primary-btn" type="submit" ${draft.geoStatus === "ready" ? "" : "disabled"}>Iniciar turno</button>
+            </form>
+          `;
+        } else if (llegadaPendiente) {
+          body = `
+            <section class="card report-card">
+              <div class="kv"><b>Salida</b><span>${formatDate(actual.hora_salida)}</span></div>
+              <div class="kv"><b>KM salida</b><span>${escapeHtml(actual.km_salida)}</span></div>
+              <div class="kv"><b>Gas salida</b><span>${escapeHtml(actual.nivel_gas_salida)}</span></div>
+              <div class="kv"><b>Folio</b><span>${escapeHtml(actual.folio || "-")}</span></div>
+            </section>
+            <form onsubmit="guardarLlegada(event)">
+              <div class="field">
+                <label for="km_llegada">KM llegada</label>
+                <input id="km_llegada" name="km_llegada" type="number" min="0" required>
+              </div>
+              <div class="field">
+                <label>Nivel gas llegada</label>
+                ${gasSelector(state.nivelGasLlegada || "", "selectGasLlegada")}
+              </div>
+              <div class="field">
+                <label for="litros_cargados">Litros cargados</label>
+                <input id="litros_cargados" name="litros_cargados" type="number" min="0" step="0.01">
+              </div>
+              <div class="field">
+                <label for="costo_combustible">Costo combustible</label>
+                <input id="costo_combustible" name="costo_combustible" type="number" min="0" step="0.01">
+              </div>
+              <button class="primary-btn" type="submit" ${state.nivelGasLlegada ? "" : "disabled"}>Registrar llegada</button>
+            </form>
+          `;
+        } else {
+          body = `
+            <section class="card report-card">
+              <div class="kv"><b>Salida</b><span>${formatDate(actual.hora_salida)}</span></div>
+              <div class="kv"><b>Llegada</b><span>${formatDate(actual.hora_llegada)}</span></div>
+              <div class="kv"><b>KM</b><span>${escapeHtml(actual.km_salida)} → ${escapeHtml(actual.km_llegada)}</span></div>
+              <div class="kv"><b>Gas</b><span>${escapeHtml(actual.nivel_gas_salida)} → ${escapeHtml(actual.nivel_gas_llegada)}</span></div>
+            </section>
+          `;
+        }
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <h1 class="screen-title" style="margin-top:16px;">Bitácora del día</h1>
+          ${message ? `<p class="success">${escapeHtml(message)}</p>` : ""}
+          ${body}
+        `));
+      }
+
+      function selectGasSalida(value) {
+        ensureBitacoraSalidaDraft().nivel_gas_salida = value;
+        renderBitacoraSalida();
+      }
+
+      function selectGasLlegada(value) {
+        state.nivelGasLlegada = value;
+        renderBitacoraSalida();
+      }
+
+      async function guardarSalida(event) {
+        event.preventDefault();
+        const draft = ensureBitacoraSalidaDraft();
+        if (!draft.nivel_gas_salida || !draft.latitud_salida) return renderBitacoraSalida("Completa gas y ubicación.");
+        const payload = {
+          folio: draft.folio,
+          km_salida: Number(draft.km_salida),
+          nivel_gas_salida: draft.nivel_gas_salida,
+          latitud_salida: draft.latitud_salida,
+          longitud_salida: draft.longitud_salida
+        };
+        const response = await apiFetch("/bitacora-salida/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) return renderBitacoraSalida("No se pudo iniciar el turno.");
+        state.bitacoraSalidaDraft = null;
+        await renderBitacoraSalida("Turno iniciado.");
+      }
+
+      async function guardarLlegada(event) {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const payload = {
+          km_llegada: Number(form.get("km_llegada")),
+          nivel_gas_llegada: state.nivelGasLlegada,
+          litros_cargados: form.get("litros_cargados") || null,
+          costo_combustible: form.get("costo_combustible") || null
+        };
+        const response = await apiFetch(`/bitacora-salida/${state.bitacoraSalida.id}/`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) return renderBitacoraSalida("No se pudo registrar la llegada.");
+        state.nivelGasLlegada = "";
+        await renderBitacoraSalida("Llegada registrada.");
+      }
+
+      function ensureInspeccionDraft() {
+        if (!state.inspeccionDraft) {
+          const checks = {};
+          inspeccionSecciones.forEach((section) => section.items.forEach(([field]) => { checks[field] = false; }));
+          state.inspeccionDraft = {
+            km_entrada: "",
+            nivel_gas_entrada: "",
+            tiene_golpes: false,
+            descripcion_golpes: "",
+            foto_golpes: null,
+            observaciones: "",
+            latitud: "",
+            longitud: "",
+            geoStatus: "idle",
+            expanded: { exterior: true },
+            checks
+          };
+        }
+        return state.inspeccionDraft;
+      }
+
+      function capturarUbicacionInspeccion() {
+        const draft = ensureInspeccionDraft();
+        if (!navigator.geolocation) {
+          draft.geoStatus = "error";
+          return renderInspeccionVehiculo();
+        }
+        draft.geoStatus = "loading";
+        renderInspeccionVehiculo();
+        navigator.geolocation.getCurrentPosition((position) => {
+          draft.latitud = position.coords.latitude.toFixed(6);
+          draft.longitud = position.coords.longitude.toFixed(6);
+          draft.geoStatus = "ready";
+          renderInspeccionVehiculo();
+        }, () => {
+          draft.latitud = "";
+          draft.longitud = "";
+          draft.geoStatus = "error";
+          renderInspeccionVehiculo();
+        }, { enableHighAccuracy: true, timeout: 8000 });
+      }
+
+      function renderChecklistSection(section) {
+        const draft = ensureInspeccionDraft();
+        const open = Boolean(draft.expanded[section.key]);
+        return `
+          <button class="section-toggle" type="button" onclick="toggleInspeccionSection('${section.key}')">
+            <span>${section.title}</span><span>${open ? "−" : "+"}</span>
+          </button>
+          ${open ? `
+            <section class="card report-card">
+              <button class="secondary-btn" type="button" onclick="marcarSeccionOk('${section.key}')">Marcar todos OK</button>
+              ${section.items.map(([field, label]) => `
+                <div class="check-row">
+                  <span>${escapeHtml(label)}</span>
+                  <button class="chip ${draft.checks[field] ? "ok" : "fail"}" type="button" onclick="toggleInspeccionItem('${field}')">
+                    ${draft.checks[field] ? "OK" : "Falta"}
+                  </button>
+                </div>
+              `).join("")}
+            </section>
+          ` : ""}
+        `;
+      }
+
+      async function renderInspeccionVehiculo(message = "") {
+        const draft = ensureInspeccionDraft();
+        const unidad = state.perfil?.unidad || {};
+        if (draft.geoStatus === "idle") setTimeout(capturarUbicacionInspeccion, 0);
+        const geo = draft.geoStatus === "loading"
+          ? `<p class="muted">📍 Obteniendo ubicación...</p>`
+          : draft.geoStatus === "ready"
+            ? `<p class="success">📍 Ubicación registrada</p>`
+            : draft.geoStatus === "error"
+              ? `<p class="error">Se requiere ubicación para continuar</p>`
+              : "";
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <h1 class="screen-title" style="margin-top:16px;">Inspección de unidad</h1>
+          <p class="unit-line">${escapeHtml(unidad.codigo || "-")} · ${escapeHtml(unidad.descripcion || "")}</p>
+          ${message ? `<p class="success">${escapeHtml(message)}</p>` : ""}
+          <form onsubmit="enviarInspeccion(event)">
+            <section class="card report-card">
+              <div class="field">
+                <label for="km_entrada">KM entrada</label>
+                <input id="km_entrada" type="number" min="0" required value="${escapeHtml(draft.km_entrada)}" oninput="state.inspeccionDraft.km_entrada = this.value">
+              </div>
+              <div class="field">
+                <label>Nivel gas entrada</label>
+                ${gasSelector(draft.nivel_gas_entrada, "selectGasInspeccion")}
+              </div>
+            </section>
+            ${inspeccionSecciones.map(renderChecklistSection).join("")}
+            <section class="card report-card">
+              <div class="check-row">
+                <span>¿Presenta golpes o hendiduras?</span>
+                <button class="chip ${draft.tiene_golpes ? "fail" : "ok"}" type="button" onclick="toggleGolpes()">
+                  ${draft.tiene_golpes ? "Sí" : "No"}
+                </button>
+              </div>
+              ${draft.tiene_golpes ? `
+                <div class="field">
+                  <label for="descripcion_golpes">Descripción de golpes</label>
+                  <textarea id="descripcion_golpes" oninput="state.inspeccionDraft.descripcion_golpes = this.value">${escapeHtml(draft.descripcion_golpes)}</textarea>
+                </div>
+                <div class="field">
+                  <label for="foto_golpes">Foto</label>
+                  <input id="foto_golpes" type="file" accept="image/*" capture="environment" onchange="state.inspeccionDraft.foto_golpes = this.files[0] || null">
+                </div>
+              ` : ""}
+            </section>
+            <div class="field">
+              <label for="observaciones">Observaciones</label>
+              <textarea id="observaciones" oninput="state.inspeccionDraft.observaciones = this.value">${escapeHtml(draft.observaciones)}</textarea>
+            </div>
+            ${geo}
+            <button class="primary-btn" type="submit" ${draft.geoStatus === "ready" ? "" : "disabled"}>Enviar inspección</button>
+          </form>
+        `));
+      }
+
+      function selectGasInspeccion(value) {
+        ensureInspeccionDraft().nivel_gas_entrada = value;
+        renderInspeccionVehiculo();
+      }
+
+      function toggleInspeccionSection(key) {
+        const draft = ensureInspeccionDraft();
+        draft.expanded[key] = !draft.expanded[key];
+        renderInspeccionVehiculo();
+      }
+
+      function toggleInspeccionItem(field) {
+        const draft = ensureInspeccionDraft();
+        draft.checks[field] = !draft.checks[field];
+        renderInspeccionVehiculo();
+      }
+
+      function marcarSeccionOk(key) {
+        const draft = ensureInspeccionDraft();
+        const section = inspeccionSecciones.find((item) => item.key === key);
+        section.items.forEach(([field]) => { draft.checks[field] = true; });
+        renderInspeccionVehiculo();
+      }
+
+      function toggleGolpes() {
+        const draft = ensureInspeccionDraft();
+        draft.tiene_golpes = !draft.tiene_golpes;
+        renderInspeccionVehiculo();
+      }
+
+      async function enviarInspeccion(event) {
+        event.preventDefault();
+        const draft = ensureInspeccionDraft();
+        if (!draft.km_entrada || !draft.nivel_gas_entrada || !draft.latitud) {
+          return renderInspeccionVehiculo("Completa KM, gas y ubicación.");
+        }
+        const form = new FormData();
+        form.append("km_entrada", draft.km_entrada);
+        form.append("nivel_gas_entrada", draft.nivel_gas_entrada);
+        form.append("tiene_golpes", draft.tiene_golpes ? "true" : "false");
+        form.append("descripcion_golpes", draft.descripcion_golpes);
+        form.append("observaciones", draft.observaciones);
+        form.append("latitud", draft.latitud);
+        form.append("longitud", draft.longitud);
+        if (draft.foto_golpes) form.append("foto_golpes", draft.foto_golpes);
+        Object.entries(draft.checks).forEach(([field, value]) => form.append(field, value ? "true" : "false"));
+        const faltantes = inspeccionSecciones.flatMap((section) => section.items.filter(([field]) => !draft.checks[field]).map(([, label]) => label));
+        const response = await apiFetch("/inspeccion/", { method: "POST", body: form });
+        if (!response.ok) return renderInspeccionVehiculo("No se pudo enviar la inspección.");
+        state.inspeccionDraft = null;
+        render(shell(`
+          <section class="confirm">
+            <div class="confirm-mark">✅</div>
+            <h1 class="screen-title">Inspección enviada</h1>
+            ${faltantes.length ? `<p class="muted">Faltantes: ${escapeHtml(faltantes.join(", "))}</p>` : `<p class="success">Todos los puntos marcados OK.</p>`}
+            <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+          </section>
+        `));
       }
 
       async function boot() {

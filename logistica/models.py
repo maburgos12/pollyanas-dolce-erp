@@ -271,3 +271,95 @@ class BitacoraRepartidor(models.Model):
 
     def __str__(self) -> str:
         return f"{self.repartidor} · {self.fecha:%Y-%m-%d}"
+
+
+class BitacoraSalidaLlegada(models.Model):
+    NIVEL_GAS = [
+        ("vacio", "Vacío"),
+        ("1/4", "1/4"),
+        ("1/2", "1/2"),
+        ("3/4", "3/4"),
+        ("lleno", "Lleno"),
+    ]
+
+    repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT)
+    unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT)
+    fecha = models.DateField(auto_now_add=True)
+    folio = models.CharField(max_length=20, blank=True)
+    hora_salida = models.DateTimeField(auto_now_add=True)
+    km_salida = models.PositiveIntegerField()
+    nivel_gas_salida = models.CharField(max_length=10, choices=NIVEL_GAS)
+    hora_llegada = models.DateTimeField(null=True, blank=True)
+    km_llegada = models.PositiveIntegerField(null=True, blank=True)
+    nivel_gas_llegada = models.CharField(max_length=10, choices=NIVEL_GAS, blank=True)
+    litros_cargados = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    costo_combustible = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    ip_registro = models.GenericIPAddressField(null=True)
+    latitud_salida = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud_salida = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+
+    class Meta:
+        ordering = ["-fecha", "-hora_salida"]
+        verbose_name = "Bitácora salida/llegada"
+        verbose_name_plural = "Bitácoras salida/llegada"
+
+    def __str__(self) -> str:
+        return f"{self.repartidor} · {self.unidad.codigo} · {self.fecha:%Y-%m-%d}"
+
+
+class InspeccionVehiculo(models.Model):
+    repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT)
+    unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT)
+    fecha = models.DateTimeField(auto_now_add=True)
+    km_entrada = models.PositiveIntegerField()
+    km_salida = models.PositiveIntegerField(null=True, blank=True)
+    nivel_gas_entrada = models.CharField(max_length=10, choices=BitacoraSalidaLlegada.NIVEL_GAS)
+    nivel_gas_salida = models.CharField(max_length=10, choices=BitacoraSalidaLlegada.NIVEL_GAS, blank=True)
+    ext_llanta_refaccion = models.BooleanField(default=False)
+    ext_gato = models.BooleanField(default=False)
+    ext_llave_rueda = models.BooleanField(default=False)
+    ext_rines = models.BooleanField(default=False)
+    ext_aire_neumaticos = models.BooleanField(default=False)
+    ext_claxon = models.BooleanField(default=False)
+    ext_limpiaparabrisas = models.BooleanField(default=False)
+    ext_luces = models.BooleanField(default=False)
+    ext_direccionales = models.BooleanField(default=False)
+    ext_control_llave = models.BooleanField(default=False)
+    ext_antena = models.BooleanField(default=False)
+    ext_tapon_gas = models.BooleanField(default=False)
+    int_espejos = models.BooleanField(default=False)
+    int_encendedor = models.BooleanField(default=False)
+    int_luz_interior = models.BooleanField(default=False)
+    int_ac = models.BooleanField(default=False)
+    int_radio = models.BooleanField(default=False)
+    int_botones_radio = models.BooleanField(default=False)
+    int_rejillas_ac = models.BooleanField(default=False)
+    int_tapetes = models.BooleanField(default=False)
+    int_cinturones = models.BooleanField(default=False)
+    int_tarjeta_circulacion = models.BooleanField(default=False)
+    niv_aceite = models.BooleanField(default=False)
+    niv_frenos = models.BooleanField(default=False)
+    niv_bateria = models.BooleanField(default=False)
+    niv_agua_limpiadores = models.BooleanField(default=False)
+    niv_agua_radiador = models.BooleanField(default=False)
+    est_asientos_delanteros = models.BooleanField(default=False)
+    est_asientos_traseros = models.BooleanField(default=False)
+    est_cajuela = models.BooleanField(default=False)
+    est_tablero = models.BooleanField(default=False)
+    est_panel_puertas = models.BooleanField(default=False)
+    est_visera = models.BooleanField(default=False)
+    tiene_golpes = models.BooleanField(default=False)
+    descripcion_golpes = models.TextField(blank=True)
+    foto_golpes = models.ImageField(upload_to="inspecciones/", null=True, blank=True)
+    observaciones = models.TextField(blank=True)
+    ip_registro = models.GenericIPAddressField(null=True)
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+
+    class Meta:
+        ordering = ["-fecha"]
+        verbose_name = "Inspección de vehículo"
+        verbose_name_plural = "Inspecciones de vehículo"
+
+    def __str__(self) -> str:
+        return f"{self.unidad.codigo} · {self.repartidor} · {self.fecha:%Y-%m-%d %H:%M}"

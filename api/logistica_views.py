@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -17,12 +18,17 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from core.access import can_manage_logistica, can_view_logistica
 from core.audit import log_event
 from crm.models import PedidoCliente
-from logistica.models import BitacoraRepartidor, EntregaRuta, Repartidor, ReporteUnidad, RutaEntrega
+from logistica.models import BitacoraRepartidor, BitacoraSalidaLlegada, EntregaRuta, InspeccionVehiculo, Repartidor, ReporteUnidad, RutaEntrega
 
 from .logistica_serializers import (
     LogisticaBitacoraSerializer,
+    LogisticaBitacoraLlegadaSerializer,
+    LogisticaBitacoraSalidaCreateSerializer,
+    LogisticaBitacoraSalidaLlegadaSerializer,
     LogisticaEntregaCreateSerializer,
     LogisticaEntregaSerializer,
+    LogisticaInspeccionVehiculoCreateSerializer,
+    LogisticaInspeccionVehiculoSerializer,
     LogisticaRepartidorSerializer,
     LogisticaReporteCreateSerializer,
     LogisticaReportePatchSerializer,
@@ -221,6 +227,78 @@ class LogisticaBitacoraView(_LogisticaBaseView):
             },
         )
         return Response(LogisticaBitacoraSerializer(bitacora).data, status=status.HTTP_201_CREATED)
+
+
+class LogisticaBitacoraSalidaView(_LogisticaBaseView):
+    parser_classes = [JSONParser, FormParser]
+
+    def post(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _is_repartidor(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden iniciar bitácora."}, status=status.HTTP_403_FORBIDDEN)
+
+        existente = BitacoraSalidaLlegada.objects.filter(repartidor=repartidor, fecha=timezone.localdate()).first()
+        if existente:
+            return Response(
+                {"detail": "Ya existe una bitácora de salida para hoy.", "bitacora": LogisticaBitacoraSalidaLlegadaSerializer(existente).data},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = LogisticaBitacoraSalidaCreateSerializer(data=request.data, context={"repartidor": repartidor})
+        serializer.is_valid(raise_exception=True)
+        bitacora = serializer.save(ip_registro=request.META.get("REMOTE_ADDR"))
+        return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_201_CREATED)
+
+
+class LogisticaBitacoraSalidaDetailView(_LogisticaBaseView):
+    parser_classes = [JSONParser, FormParser]
+
+    def patch(self, request, bitacora_id: int):
+        repartidor = _get_repartidor_for_user(request.user)
+        bitacora = get_object_or_404(BitacoraSalidaLlegada.objects.select_related("repartidor__user", "unidad"), pk=bitacora_id)
+        if not repartidor or bitacora.repartidor_id != repartidor.id:
+            return Response({"detail": "No tienes permisos para actualizar esta bitácora."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = LogisticaBitacoraLlegadaSerializer(bitacora, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        bitacora = serializer.save(hora_llegada=timezone.now())
+        return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_200_OK)
+
+
+class LogisticaBitacoraSalidaHoyView(_LogisticaBaseView):
+    def get(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+        bitacora = BitacoraSalidaLlegada.objects.filter(repartidor=repartidor, fecha=timezone.localdate()).first()
+        if not bitacora:
+            return Response({}, status=status.HTTP_200_OK)
+        return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_200_OK)
+
+
+class LogisticaInspeccionView(_LogisticaBaseView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _is_repartidor(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden capturar inspección."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = LogisticaInspeccionVehiculoCreateSerializer(data=request.data, context={"repartidor": repartidor})
+        serializer.is_valid(raise_exception=True)
+        inspeccion = serializer.save(ip_registro=request.META.get("REMOTE_ADDR"))
+        return Response(LogisticaInspeccionVehiculoSerializer(inspeccion).data, status=status.HTTP_201_CREATED)
+
+
+class LogisticaInspeccionUltimaView(_LogisticaBaseView):
+    def get(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not repartidor.unidad_asignada_id:
+            return Response({"detail": "No tienes unidad asignada."}, status=status.HTTP_404_NOT_FOUND)
+        inspeccion = InspeccionVehiculo.objects.filter(unidad=repartidor.unidad_asignada).select_related("repartidor__user", "unidad").first()
+        if not inspeccion:
+            return Response({}, status=status.HTTP_200_OK)
+        return Response(LogisticaInspeccionVehiculoSerializer(inspeccion).data, status=status.HTTP_200_OK)
 
 
 class LogisticaRutasView(_LogisticaBaseView):
