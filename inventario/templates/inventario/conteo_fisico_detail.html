@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Inventario - Conteo {{ conteo.periodo|date:"Y-m" }}{% endblock %}
+{% block page_title %}Inventario · Conteo {{ conteo.periodo|date:"Y-m" }}{% endblock %}
+{% block body_class %}page-inventario-conteo-fisico-detail{% endblock %}
+
+{% block content %}
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:conteo_fisico_list' %}">Conteos</a>
+  <a class="module-tab active" href="{% url 'inventario:conteo_fisico_detail' conteo.id %}">{{ conteo.periodo|date:"Y-m" }}</a>
+  <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Resumen</div>
+  <div class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-number">{{ conteo.get_estatus_display }}</div>
+      <div class="kpi-label">Estatus</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ pct }}%</div>
+      <div class="kpi-label">Capturado</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">{{ ajustes_count }}</div>
+      <div class="kpi-label">Líneas con ajuste</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-number">${{ costo_total_ajuste|floatformat:2 }}</div>
+      <div class="kpi-label">Costo diferencia</div>
+    </article>
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:16px;">
+    <a class="btn btn-secondary" href="{% url 'inventario:conteo_fisico_export' conteo.id %}">Exportar Excel</a>
+    {% if can_manage_inventario and conteo.estatus == "BORRADOR" and captured == total and total > 0 %}
+    <form method="post" action="{% url 'inventario:conteo_fisico_revision' conteo.id %}">
+      {% csrf_token %}
+      <button class="btn btn-primary" type="submit">Enviar a revisión</button>
+    </form>
+    {% endif %}
+    {% if can_manage_inventario and conteo.estatus == "REVISION" %}
+    <form method="post" action="{% url 'inventario:conteo_fisico_cerrar' conteo.id %}">
+      {% csrf_token %}
+      <button class="btn btn-primary" type="submit">Aprobar y cerrar</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+
+{% if conteo.estatus == "BORRADOR" and can_manage_inventario %}
+<form method="post">
+  {% csrf_token %}
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Insumos</div>
+  {% include "inventario/partials/conteo_fisico_table.html" with lines=insumo_lines editable=can_manage_inventario %}
+</section>
+
+<section class="card">
+  <div class="card-header">Producto terminado</div>
+  {% include "inventario/partials/conteo_fisico_table.html" with lines=producto_lines editable=can_manage_inventario %}
+</section>
+
+{% if conteo.estatus == "BORRADOR" and can_manage_inventario %}
+  <div style="position:sticky; bottom:16px; text-align:right;">
+    <span id="autosave-status" class="muted" style="margin-right:12px;">Guardado automático activo</span>
+    <button class="btn btn-primary" type="submit">Guardar captura</button>
+  </div>
+</form>
+<script>
+  (function () {
+    const form = document.querySelector('form[method="post"]');
+    const status = document.getElementById("autosave-status");
+    const token = form ? form.querySelector('input[name="csrfmiddlewaretoken"]') : null;
+    const timers = new Map();
+
+    function money(value) {
+      return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(value || 0);
+    }
+
+    function tone(diff, stock) {
+      const pct = stock ? Math.abs(diff / stock) * 100 : Math.abs(diff ? 100 : 0);
+      if (pct <= 2) return "text-success";
+      if (pct <= 10) return "text-warning";
+      return "text-danger";
+    }
+
+    function updatePreview(input) {
+      const id = input.dataset.lineId;
+      const stock = Number(input.dataset.stockTeorico || 0);
+      const cost = Number(input.dataset.costoUnitario || 0);
+      const counted = input.value === "" ? null : Number(input.value);
+      const diff = counted === null ? 0 : counted - stock;
+      const diffEl = document.getElementById(`diff-${id}`);
+      const costEl = document.getElementById(`cost-diff-${id}`);
+      if (diffEl) {
+        diffEl.textContent = diff.toFixed(3);
+        diffEl.className = tone(diff, stock);
+      }
+      if (costEl) costEl.textContent = money(diff * cost);
+    }
+
+    function autosave(input) {
+      const id = input.dataset.lineId;
+      window.clearTimeout(timers.get(id));
+      timers.set(id, window.setTimeout(function () {
+        const body = new URLSearchParams();
+        body.append("csrfmiddlewaretoken", token.value);
+        body.append(input.name, input.value);
+        if (status) status.textContent = "Guardando...";
+        fetch(window.location.href, {
+          method: "POST",
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          body
+        }).then(function (response) {
+          if (!response.ok) throw new Error("No se pudo guardar");
+          return response.json();
+        }).then(function () {
+          if (status) status.textContent = "Guardado";
+        }).catch(function () {
+          if (status) status.textContent = "Error al guardar";
+        });
+      }, 500));
+    }
+
+    document.querySelectorAll(".js-conteo-stock").forEach(function (input) {
+      input.addEventListener("input", function () {
+        updatePreview(input);
+        autosave(input);
+      });
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

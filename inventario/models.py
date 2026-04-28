@@ -221,3 +221,90 @@ class ConsumoInsumoMensual(models.Model):
 
     def __str__(self):
         return f"{self.periodo:%Y-%m} · {self.insumo.nombre}"
+
+
+class ConteoFisicoMensual(models.Model):
+    ESTATUS_BORRADOR = "BORRADOR"
+    ESTATUS_REVISION = "REVISION"
+    ESTATUS_CERRADO = "CERRADO"
+    ESTATUS_CHOICES = [
+        (ESTATUS_BORRADOR, "En captura"),
+        (ESTATUS_REVISION, "En revisión"),
+        (ESTATUS_CERRADO, "Cerrado"),
+    ]
+
+    periodo = models.DateField()
+    fecha_conteo = models.DateField()
+    responsable = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_BORRADOR)
+    observaciones = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    cerrado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Conteo físico mensual"
+        verbose_name_plural = "Conteos físicos mensuales"
+        ordering = ["-periodo"]
+        unique_together = ["periodo"]
+
+    def __str__(self):
+        return f"Conteo físico {self.periodo:%Y-%m}"
+
+
+class LineaConteoFisico(models.Model):
+    conteo = models.ForeignKey(ConteoFisicoMensual, on_delete=models.CASCADE, related_name="lineas")
+    insumo = models.ForeignKey("maestros.Insumo", null=True, blank=True, on_delete=models.PROTECT)
+    producto = models.ForeignKey("recetas.Receta", null=True, blank=True, on_delete=models.PROTECT)
+    nombre = models.CharField(max_length=200)
+    unidad = models.CharField(max_length=50)
+    stock_teorico = models.DecimalField(max_digits=12, decimal_places=3)
+    stock_contado = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    diferencia = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    costo_unitario = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    costo_diferencia = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    ajuste_aplicado = models.BooleanField(default=False)
+    movimiento_inventario = models.ForeignKey(
+        "inventario.MovimientoInventario",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    movimiento_producto_cedis = models.ForeignKey(
+        "recetas.MovimientoProductoCedis",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    observacion_linea = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Línea de conteo físico"
+        verbose_name_plural = "Líneas de conteo físico"
+        ordering = ["conteo", "nombre"]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(insumo__isnull=False, producto__isnull=True)
+                    | models.Q(insumo__isnull=True, producto__isnull=False)
+                ),
+                name="conteo_linea_insumo_o_producto",
+            ),
+            models.UniqueConstraint(
+                fields=["conteo", "insumo"],
+                condition=models.Q(insumo__isnull=False),
+                name="uniq_conteo_insumo",
+            ),
+            models.UniqueConstraint(
+                fields=["conteo", "producto"],
+                condition=models.Q(producto__isnull=False),
+                name="uniq_conteo_producto",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["conteo", "insumo"]),
+            models.Index(fields=["conteo", "producto"]),
+        ]
+
+    def __str__(self):
+        return f"{self.conteo.periodo:%Y-%m} · {self.nombre}"

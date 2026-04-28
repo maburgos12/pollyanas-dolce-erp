@@ -19,8 +19,8 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook, load_workbook
@@ -66,7 +66,16 @@ from inventario.stock_trace import (
     set_stock_trace,
 )
 
-from .models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, InventarioConfig, MovimientoInventario
+from .models import (
+    AjusteInventario,
+    AlmacenSyncRun,
+    ConteoFisicoMensual,
+    ExistenciaInsumo,
+    InventarioConfig,
+    LineaConteoFisico,
+    MovimientoInventario,
+)
+from .services_conteo_fisico import ConteoFisicoError, ConteoFisicoService, parse_conteo_period
 
 
 SOURCE_TO_FILENAME = {
@@ -5966,3 +5975,172 @@ def alertas(request: HttpRequest) -> HttpResponse:
     context["daily_critical_close_focus"] = _inventory_daily_critical_close_focus(context["commercial_priority_rows"])
     context["supply_focus_rows"] = _inventory_supply_focus_rows(context["commercial_priority_rows"])
     return render(request, "inventario/alertas.html", context)
+
+
+@login_required
+def conteo_fisico_list(request: HttpRequest) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+    conteos = (
+        ConteoFisicoMensual.objects.select_related("responsable")
+        .prefetch_related("lineas")
+        .order_by("-periodo")
+    )
+    rows = []
+    for conteo in conteos:
+        total = conteo.lineas.count()
+        captured = conteo.lineas.filter(stock_contado__isnull=False).count()
+        rows.append(
+            {
+                "conteo": conteo,
+                "total": total,
+                "captured": captured,
+                "pct": round((captured / total) * 100, 1) if total else 0,
+            }
+        )
+    return render(
+        request,
+        "inventario/conteo_fisico_list.html",
+        {
+            "rows": rows,
+            "can_manage_inventario": can_manage_inventario(request.user),
+        },
+    )
+
+
+@login_required
+def conteo_fisico_detail(request: HttpRequest, conteo_id: int) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para ver Inventario.")
+    conteo = get_object_or_404(ConteoFisicoMensual.objects.select_related("responsable"), pk=conteo_id)
+    if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied("No tienes permisos para capturar conteo físico.")
+        if conteo.estatus != ConteoFisicoMensual.ESTATUS_BORRADOR:
+            messages.error(request, "Solo se puede capturar un conteo en BORRADOR.")
+            return redirect("inventario:conteo_fisico_detail", conteo_id=conteo.id)
+        is_ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
+        updated = 0
+        last_line = None
+        for key, value in request.POST.items():
+            if not key.startswith("stock_contado_"):
+                continue
+            line_id = key.removeprefix("stock_contado_")
+            raw = (value or "").strip()
+            if raw == "":
+                counted = None
+            else:
+                try:
+                    counted = Decimal(raw)
+                except InvalidOperation:
+                    messages.error(request, f"Cantidad inválida en línea {line_id}.")
+                    return redirect("inventario:conteo_fisico_detail", conteo_id=conteo.id)
+            line = conteo.lineas.filter(id=line_id).first()
+            if line is None:
+                continue
+            line.stock_contado = counted
+            if counted is not None:
+                line.diferencia = counted - Decimal(str(line.stock_teorico or 0))
+                line.costo_diferencia = line.diferencia * Decimal(str(line.costo_unitario or 0))
+            else:
+                line.diferencia = Decimal("0")
+                line.costo_diferencia = Decimal("0")
+            line.save(update_fields=["stock_contado", "diferencia", "costo_diferencia"])
+            last_line = line
+            updated += 1
+        if is_ajax:
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "updated": updated,
+                    "line_id": last_line.id if last_line else None,
+                    "stock_contado": str(last_line.stock_contado) if last_line and last_line.stock_contado is not None else "",
+                    "diferencia": str(last_line.diferencia) if last_line else "0",
+                    "costo_diferencia": str(last_line.costo_diferencia) if last_line else "0",
+                }
+            )
+        messages.success(request, f"Captura actualizada: {updated} líneas.")
+        return redirect("inventario:conteo_fisico_detail", conteo_id=conteo.id)
+
+    lines_qs = conteo.lineas.select_related("insumo", "producto").order_by("nombre")
+    insumo_lines = list(lines_qs.filter(insumo__isnull=False))
+    producto_lines = list(lines_qs.filter(producto__isnull=False))
+    total = len(insumo_lines) + len(producto_lines)
+    captured = sum(1 for line in [*insumo_lines, *producto_lines] if line.stock_contado is not None)
+    ajustes = [line for line in [*insumo_lines, *producto_lines] if line.diferencia != 0]
+    costo_total_ajuste = sum((line.costo_diferencia or Decimal("0")) for line in ajustes)
+    return render(
+        request,
+        "inventario/conteo_fisico_detail.html",
+        {
+            "conteo": conteo,
+            "insumo_lines": insumo_lines,
+            "producto_lines": producto_lines,
+            "total": total,
+            "captured": captured,
+            "pct": round((captured / total) * 100, 1) if total else 0,
+            "ajustes_count": len(ajustes),
+            "costo_total_ajuste": costo_total_ajuste,
+            "can_manage_inventario": can_manage_inventario(request.user),
+        },
+    )
+
+
+@login_required
+def conteo_fisico_revision(request: HttpRequest, conteo_id: int) -> HttpResponse:
+    if request.method != "POST":
+        return redirect("inventario:conteo_fisico_detail", conteo_id=conteo_id)
+    if not can_manage_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para enviar conteo a revisión.")
+    try:
+        ConteoFisicoService().enviar_a_revision(conteo_id)
+        messages.success(request, "Conteo enviado a revisión.")
+    except ConteoFisicoError as exc:
+        messages.error(request, str(exc))
+    return redirect("inventario:conteo_fisico_detail", conteo_id=conteo_id)
+
+
+@login_required
+def conteo_fisico_cerrar(request: HttpRequest, conteo_id: int) -> HttpResponse:
+    if request.method != "POST":
+        return redirect("inventario:conteo_fisico_detail", conteo_id=conteo_id)
+    if not can_manage_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para cerrar conteo físico.")
+    try:
+        ConteoFisicoService().cerrar_conteo(conteo_id, request.user)
+        messages.success(request, "Conteo cerrado y ajustes aplicados.")
+    except ConteoFisicoError as exc:
+        messages.error(request, str(exc))
+    return redirect("inventario:conteo_fisico_detail", conteo_id=conteo_id)
+
+
+@login_required
+def conteo_fisico_export(request: HttpRequest, conteo_id: int) -> HttpResponse:
+    if not can_view_inventario(request.user):
+        raise PermissionDenied("No tienes permisos para exportar conteo físico.")
+    conteo = get_object_or_404(ConteoFisicoMensual, pk=conteo_id)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Conteo fisico"
+    ws.append(["Tipo", "Nombre", "Unidad", "Stock teorico", "Stock contado", "Diferencia", "Costo diferencia"])
+    for line in conteo.lineas.select_related("insumo", "producto").order_by("insumo_id", "producto_id", "nombre"):
+        ws.append(
+            [
+                "Insumo" if line.insumo_id else "Producto",
+                line.nombre,
+                line.unidad,
+                float(line.stock_teorico or 0),
+                "" if line.stock_contado is None else float(line.stock_contado),
+                float(line.diferencia or 0),
+                float(line.costo_diferencia or 0),
+            ]
+        )
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="conteo_fisico_{conteo.periodo:%Y_%m}.xlsx"'
+    return response
