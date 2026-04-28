@@ -115,7 +115,7 @@ class LogisticaReporteCreateView(_LogisticaBaseView):
 
         serializer = LogisticaReporteCreateSerializer(data=request.data, context={"repartidor": repartidor})
         serializer.is_valid(raise_exception=True)
-        reporte = serializer.save()
+        reporte = serializer.save(ip_reporte=request.META.get("REMOTE_ADDR"))
         log_event(
             request.user,
             "CREATE",
