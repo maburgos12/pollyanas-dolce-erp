@@ -147,6 +147,9 @@ class Unidad(models.Model):
     descripcion = models.CharField(max_length=180)
     sucursal = models.ForeignKey(Sucursal, on_delete=models.PROTECT, related_name="unidades_logistica")
     placa = models.CharField(max_length=30, blank=True, default="")
+    color = models.CharField(max_length=40, null=True, blank=True)
+    modelo = models.CharField(max_length=40, null=True, blank=True)
+    marca = models.CharField(max_length=80, null=True, blank=True)
     activa = models.BooleanField(default=True)
     folio_consecutivo = models.PositiveIntegerField(default=0)
 

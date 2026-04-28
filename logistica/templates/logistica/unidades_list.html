@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Logística · Unidades{% endblock %}
+{% block page_title %}Logística · Unidades{% endblock %}
+
+{% block extra_css %}
+<style>
+  .unit-shell { display: grid; gap: 18px; }
+  .unit-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  .unit-search { display: flex; flex-wrap: wrap; gap: 10px; }
+  .unit-badge { display: inline-flex; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 800; padding: 5px 10px; }
+  .unit-badge.active { background: #236d53; }
+  .unit-badge.inactive { background: #bc3b3b; }
+  .unit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .unit-pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 14px; }
+  @media (max-width: 760px) {
+    .unit-head, .unit-search, .unit-actions, .unit-pager { align-items: stretch; flex-direction: column; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="unit-shell">
+  <section class="module-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="unit-head">
+      <div>
+        <div class="card-header">Gestión de Unidades</div>
+        <p class="muted">Control de unidades activas, placas y datos operativos.</p>
+      </div>
+      <a class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" href="{% url 'logistica:unidad_create' %}">Nueva unidad</a>
+    </div>
+    <form class="unit-search" method="get">
+      <input class="input-field" type="text" name="q" value="{{ query }}" placeholder="Buscar por código, placa o descripción">
+      <button class="btn btn-primary" type="submit">Buscar</button>
+      <a class="btn btn-secondary" href="{% url 'logistica:unidades_list' %}">Limpiar</a>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Descripción</th>
+            <th>Marca</th>
+            <th>Modelo</th>
+            <th>Placa</th>
+            <th>Color</th>
+            <th>Sucursal</th>
+            <th>Estatus</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for unidad in unidades %}
+          <tr>
+            <td>{{ unidad.codigo }}</td>
+            <td>{{ unidad.descripcion }}</td>
+            <td>{{ unidad.marca|default:"-" }}</td>
+            <td>{{ unidad.modelo|default:"-" }}</td>
+            <td>{{ unidad.placa|default:"-" }}</td>
+            <td>{{ unidad.color|default:"-" }}</td>
+            <td>{{ unidad.sucursal }}</td>
+            <td>
+              {% if unidad.activa %}
+              <span class="unit-badge active">Activa</span>
+              {% else %}
+              <span class="unit-badge inactive">Inactiva</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="unit-actions">
+                <a class="btn btn-secondary btn-small" href="{% url 'logistica:unidad_edit' unidad.id %}">Editar</a>
+                <form method="post" action="{% url 'logistica:unidad_toggle' unidad.id %}">
+                  {% csrf_token %}
+                  <button class="btn btn-secondary btn-small" type="submit">{% if unidad.activa %}Desactivar{% else %}Activar{% endif %}</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="9" class="muted">No hay unidades registradas</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if unidades.paginator.num_pages > 1 %}
+    <nav class="unit-pager" aria-label="Paginación de unidades">
+      {% if unidades.has_previous %}
+      <a class="btn btn-secondary btn-small" href="?q={{ query }}&page={{ unidades.previous_page_number }}">Anterior</a>
+      {% endif %}
+      <span class="muted">Página {{ unidades.number }} de {{ unidades.paginator.num_pages }}</span>
+      {% if unidades.has_next %}
+      <a class="btn btn-secondary btn-small" href="?q={{ query }}&page={{ unidades.next_page_number }}">Siguiente</a>
+      {% endif %}
+    </nav>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

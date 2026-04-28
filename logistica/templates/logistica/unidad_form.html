@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Logística · {% if unidad %}Editar unidad{% else %}Nueva unidad{% endif %}{% endblock %}
+{% block page_title %}Logística · {% if unidad %}Editar unidad{% else %}Nueva unidad{% endif %}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .unit-form-shell { display: grid; gap: 18px; max-width: 920px; }
+  .unit-form-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .unit-form-field { display: grid; gap: 6px; }
+  .unit-form-field label { font-weight: 800; color: var(--vino); }
+  .unit-form-field .is-required::after { content: " *"; color: #bc3b3b; }
+  .unit-form-error { color: #bc3b3b; font-size: 13px; font-weight: 700; }
+  .unit-form-check { display: inline-flex; gap: 8px; align-items: center; font-weight: 800; color: var(--vino); }
+  .unit-form-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  @media (max-width: 760px) {
+    .unit-form-grid { grid-template-columns: 1fr; }
+    .unit-form-actions { flex-direction: column; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="unit-form-shell">
+  <section class="module-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">{% if unidad %}Editar unidad{% else %}Nueva unidad{% endif %}</div>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <div class="unit-form-grid">
+        <div class="unit-form-field">
+          <label class="is-required" for="id_codigo">Código</label>
+          <input class="input-field" id="id_codigo" name="codigo" type="text" value="{{ unidad.codigo|default:'' }}" required>
+          {% if errors.codigo %}<div class="unit-form-error">{{ errors.codigo }}</div>{% endif %}
+        </div>
+        <div class="unit-form-field">
+          <label class="is-required" for="id_descripcion">Descripción</label>
+          <input class="input-field" id="id_descripcion" name="descripcion" type="text" value="{{ unidad.descripcion|default:'' }}" required>
+          {% if errors.descripcion %}<div class="unit-form-error">{{ errors.descripcion }}</div>{% endif %}
+        </div>
+        <div class="unit-form-field">
+          <label for="id_marca">Marca</label>
+          <input class="input-field" id="id_marca" name="marca" type="text" value="{{ unidad.marca|default:'' }}">
+        </div>
+        <div class="unit-form-field">
+          <label for="id_modelo">Modelo</label>
+          <input class="input-field" id="id_modelo" name="modelo" type="text" value="{{ unidad.modelo|default:'' }}">
+        </div>
+        <div class="unit-form-field">
+          <label for="id_placa">Placa</label>
+          <input class="input-field" id="id_placa" name="placa" type="text" value="{{ unidad.placa|default:'' }}">
+        </div>
+        <div class="unit-form-field">
+          <label for="id_color">Color</label>
+          <input class="input-field" id="id_color" name="color" type="text" value="{{ unidad.color|default:'' }}">
+        </div>
+        <div class="unit-form-field">
+          <label class="is-required" for="id_sucursal">Sucursal</label>
+          <select class="input-field" id="id_sucursal" name="sucursal" required>
+            <option value="">Selecciona sucursal</option>
+            {% for sucursal in sucursales %}
+            <option value="{{ sucursal.id }}" {% if unidad and unidad.sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal }}</option>
+            {% endfor %}
+          </select>
+          {% if errors.sucursal %}<div class="unit-form-error">{{ errors.sucursal }}</div>{% endif %}
+        </div>
+        <div class="unit-form-field">
+          <label>Estatus</label>
+          <label class="unit-form-check" for="id_activa">
+            <input id="id_activa" name="activa" type="checkbox" {% if not unidad or unidad.activa %}checked{% endif %}>
+            Unidad activa
+          </label>
+        </div>
+      </div>
+      <div class="unit-form-actions">
+        <button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="submit">Guardar</button>
+        <a class="btn btn-secondary" href="{% url 'logistica:unidades_list' %}">Cancelar</a>
+      </div>
+    </form>
+  </section>
+</div>
+{% endblock %}
