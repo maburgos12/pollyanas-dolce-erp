@@ -89,6 +89,8 @@ class MermaMensualSucursal(models.Model):
     periodo = models.DateField(db_index=True)
     sucursal = models.ForeignKey(
         "core.Sucursal",
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         related_name="mermas_mensuales",
     )
@@ -121,7 +123,8 @@ class MermaMensualSucursal(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.periodo:%Y-%m} · {self.sucursal.codigo} · {self.nombre_producto} · ${self.costo_merma}"
+        sucursal = self.sucursal.codigo if self.sucursal_id else self.metadata.get("branch_point", "SIN_SUCURSAL")
+        return f"{self.periodo:%Y-%m} · {sucursal} · {self.nombre_producto} · ${self.costo_merma}"
 
 
 class DevolucionSucursalMatriz(models.Model):
@@ -175,4 +178,5 @@ class DevolucionSucursalMatriz(models.Model):
     def __str__(self) -> str:
         origen = self.sucursal_origen.codigo if self.sucursal_origen_id else self.metadata.get("origin_branch_name", "SIN_ORIGEN")
         receta = self.receta.nombre if self.receta_id else self.metadata.get("item_name", "SIN_RECETA")
-        return f"{self.periodo:%Y-%m} · {origen} -> MATRIZ · {receta} · {self.unidades}"
+        destino = self.metadata.get("destination_branch_name", "DEVOLUCIONES")
+        return f"{self.periodo:%Y-%m} · {origen} -> {destino} · {receta} · {self.unidades}"

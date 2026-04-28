@@ -113,7 +113,7 @@
     </article>
     <article class="waste-kpi">
       <span>Top sucursales</span>
-      <strong>{% for row in kpis.top_sucursales %}{{ row.sucursal.codigo }}{% if not forloop.last %}, {% endif %}{% empty %}Sin datos{% endfor %}</strong>
+      <strong>{% for row in kpis.top_sucursales %}{{ row.sucursal_label }}{% if not forloop.last %}, {% endif %}{% empty %}Sin datos{% endfor %}</strong>
     </article>
   </section>
 
@@ -134,7 +134,7 @@
         {% for row in mermas %}
         <tr>
           <td>{{ row.nombre_producto }}</td>
-          <td>{{ row.sucursal.codigo }}</td>
+          <td>{% if row.sucursal %}{{ row.sucursal.codigo }}{% else %}{{ row.metadata.branch_point|default:"Sin sucursal ERP" }}{% endif %}</td>
           <td>{{ row.unidades_merma|floatformat:3|intcomma }}</td>
           <td>${{ row.costo_merma|floatformat:2|intcomma }}</td>
           <td>
@@ -152,12 +152,13 @@
   </section>
 
   <section class="waste-panel">
-    <h2>Devoluciones</h2>
+    <h2>Devoluciones a punto intermedio</h2>
     <table class="waste-table">
       <thead>
         <tr>
           <th>Producto</th>
           <th>Sucursal origen</th>
+          <th>Destino</th>
           <th>Unidades</th>
           <th>Motivo</th>
           <th>Fecha</th>
@@ -168,12 +169,13 @@
         <tr>
           <td>{% if row.receta %}{{ row.receta.nombre }}{% else %}{{ row.metadata.item_name }}{% endif %}</td>
           <td>{% if row.sucursal_origen %}{{ row.sucursal_origen.codigo }}{% else %}{{ row.metadata.origin_branch_name }}{% endif %}</td>
+          <td>{{ row.metadata.destination_branch_name|default:"DEVOLUCIONES" }}</td>
           <td>{{ row.unidades|floatformat:3|intcomma }}</td>
           <td>{{ row.get_motivo_display }}</td>
           <td>{{ row.transfer_line.registered_at|date:"Y-m-d H:i" }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="5">Sin devoluciones clasificadas para el filtro actual.</td></tr>
+        <tr><td colspan="6">Sin devoluciones clasificadas para el filtro actual.</td></tr>
         {% endfor %}
       </tbody>
     </table>
