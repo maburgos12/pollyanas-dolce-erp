@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .views import consolidado_cedis as consolidado_views
 
 app_name = "recetas"
 
@@ -128,5 +129,12 @@ urlpatterns = [
     path("reabasto-cedis/export/", views.reabasto_cedis_consolidado_export, name="reabasto_cedis_consolidado_export"),
     path("reabasto-cedis/generar-plan/", views.reabasto_cedis_generar_plan, name="reabasto_cedis_generar_plan"),
     path("reabasto-cedis/generar-compras/", views.reabasto_cedis_generar_compras, name="reabasto_cedis_generar_compras"),
+    path("consolidado-cedis/", consolidado_views.consolidado_cedis_revision, name="consolidado_cedis_revision"),
+    path("consolidado-cedis/generar/", consolidado_views.consolidado_cedis_generar, name="consolidado_cedis_generar"),
+    path(
+        "consolidado-cedis/autorizar-plan/",
+        consolidado_views.consolidado_cedis_autorizar_plan,
+        name="consolidado_cedis_autorizar_plan",
+    ),
     path("mrp/", views.mrp_form, name="mrp_form"),
 ]

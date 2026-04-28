@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Consolidado CEDIS{% endblock %}
+
+{% block content %}
+<div class="module-shell plan-produccion-shell">
+  <div class="card">
+    <div class="card-header">Consolidado CEDIS</div>
+    <form method="get" class="form-grid-auto">
+      <div class="form-group">
+        <label class="form-label">Fecha de operación</label>
+        <input class="form-control" type="date" name="fecha" value="{{ fecha_operacion|date:'Y-m-d' }}">
+      </div>
+      <div class="form-group" style="align-self:end;">
+        <button class="btn btn-secondary" type="submit">Ver</button>
+      </div>
+    </form>
+    <div class="toolbar" style="margin-top: 12px;">
+      <a class="btn btn-secondary" href="?fecha={{ fecha_prev|date:'Y-m-d' }}">Día anterior</a>
+      <a class="btn btn-secondary" href="?fecha={{ fecha_next|date:'Y-m-d' }}">Día siguiente</a>
+      <form method="post" action="{% url 'recetas:consolidado_cedis_generar' %}">
+        {% csrf_token %}
+        <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+        <input type="hidden" name="next" value="{% url 'recetas:consolidado_cedis_revision' %}">
+        <button class="btn btn-primary" type="submit">Sincronizar y consolidar</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="kpi-grid kpi-mini">
+    <article class="kpi-card"><div class="kpi-number">{{ cobertura.sucursales_esperadas }}</div><div class="kpi-label">Esperadas</div></article>
+    <article class="kpi-card"><div class="kpi-number">{{ cobertura.sucursales_con_solicitud }}</div><div class="kpi-label">Con solicitud</div></article>
+    <article class="kpi-card"><div class="kpi-number">{{ cobertura.sucursales_sin_solicitud }}</div><div class="kpi-label">Sin solicitud</div></article>
+    <article class="kpi-card"><div class="kpi-number">{{ rows|length }}</div><div class="kpi-label">Productos</div></article>
+  </div>
+
+  {% if consolidado %}
+  <div class="card">
+    <div class="card-header">Resumen</div>
+    <p class="muted mb-0">Consolidado #{{ consolidado.id }} · {{ consolidado.get_estado_display }} · Plan {% if plan %}#{{ plan.id }}{% else %}-{% endif %}</p>
+  </div>
+  {% endif %}
+
+  <form method="post" action="{% url 'recetas:consolidado_cedis_autorizar_plan' %}">
+    {% csrf_token %}
+    <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
+    <div class="card">
+      <div class="card-header">Productos consolidados</div>
+      <div class="table-responsive">
+        <table class="table table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Sucursales</th>
+              <th class="text-end">Sugerido</th>
+              <th class="text-end">Solicitado</th>
+              <th class="text-end">Disponible CEDIS</th>
+              <th class="text-end">A producir</th>
+              <th class="text-end">Autorizado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td>{{ row.receta }}</td>
+              <td>{{ row.sucursales }}</td>
+              <td class="text-end">{{ row.total_sugerido|floatformat:1 }}</td>
+              <td class="text-end">{{ row.total_solicitado|floatformat:1 }}</td>
+              <td class="text-end">{{ row.cedis_disponible|floatformat:1 }}</td>
+              <td class="text-end">{{ row.cedis_faltante_producir|floatformat:1 }}</td>
+              <td class="text-end">
+                {% if row.plan_item_id %}
+                <input class="form-control text-end" type="number" step="0.001" min="0" name="cantidad_autorizada_{{ row.plan_item_id }}" value="{{ row.cantidad_autorizada|floatformat:3 }}">
+                {% else %}
+                {{ row.cantidad_autorizada|floatformat:1 }}
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7" class="muted">No hay solicitudes consolidadas para esta fecha.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% if plan %}
+    <div class="toolbar">
+      <button class="btn btn-primary" type="submit" {% if plan.autorizado %}disabled{% endif %}>
+        {% if plan.autorizado %}Plan autorizado{% else %}Autorizar plan{% endif %}
+      </button>
+      <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan.id %}">Exportar plan</a>
+    </div>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

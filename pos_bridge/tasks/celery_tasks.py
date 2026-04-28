@@ -10,6 +10,7 @@ from django.db.models import Sum
 
 from core.audit import log_event
 from pos_bridge.models import PointDailyBranchIndicator, PointSyncJob
+from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService
 from pos_bridge.services.realtime_inventory_service import deliver_ecommerce_webhook, run_realtime_inventory_sync
 from pos_bridge.tasks.retry_failed_jobs import retry_failed_jobs
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
@@ -354,6 +355,31 @@ def task_transfer_sync(
         lookback_days=days,
         lag_days=lag_days,
     )
+
+
+@shared_task(
+    name="pos_bridge.open_transfer_sync",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=300,
+    acks_late=True,
+    time_limit=1800,
+)
+def task_open_transfer_sync(
+    self,
+    *,
+    fecha_operacion: str | None = None,
+    branch_filter: str | None = None,
+    triggered_by_id: int | None = None,
+):
+    fecha = date.fromisoformat(fecha_operacion) if fecha_operacion else date.today()
+    user = _resolve_user(triggered_by_id)
+    job = OpenTransferSyncService().sync_open_transfers(
+        fecha=fecha,
+        branch_filter=branch_filter,
+        triggered_by=user,
+    )
+    return _serialize_job(job)
 
 
 @shared_task(
