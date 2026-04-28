@@ -41,6 +41,7 @@ from core.branch_catalog import eligible_operational_branch_qs
 from core.models import AuditLog
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from control.models import MermaPOS, VentaPOS
+from control.services_mermas_devoluciones import merma_audit_context, parse_month as parse_merma_month
 from maestros.models import CostoInsumo, Insumo
 from maestros.utils.canonical_catalog import canonicalized_active_insumos, enterprise_readiness_profile, latest_costo_canonico
 from recetas.models import (
@@ -192,6 +193,7 @@ def _reportes_module_tabs(active: str) -> list[dict[str, str | bool]]:
         ("cierre_producto", reverse("reportes:cierre_producto"), "Cierre producto"),
         ("financiero", reverse("reportes:financiero"), "Financiero"),
         ("presupuesto_maestro", reverse("reportes:presupuesto_maestro"), "Presupuesto Maestro"),
+        ("mermas_devoluciones", reverse("reportes:mermas_devoluciones"), "Mermas y Devoluciones"),
         ("presupuestos", reverse("reportes:presupuesto_importar_por_area"), "Presupuestos"),
         ("gastos_operativos", reverse("reportes:gastos_operativos_importar"), "Importar gastos"),
         ("consumo", reverse("reportes:consumo"), "Consumo"),
@@ -4382,6 +4384,28 @@ def presupuesto_maestro(request: HttpRequest) -> HttpResponse:
         "rubro_types": RubroPresupuesto.TIPO_CHOICES,
     }
     return render(request, "reportes/presupuesto_maestro.html", context)
+
+
+@login_required
+def mermas_devoluciones(request: HttpRequest) -> HttpResponse:
+    if not can_view_reportes(request.user):
+        raise PermissionDenied("No tienes permisos para ver Reportes.")
+    default_period = timezone.localdate().strftime("%Y-%m")
+    period_raw = request.GET.get("period") or default_period
+    try:
+        period = parse_merma_month(period_raw)
+    except ValueError:
+        period = parse_merma_month(default_period)
+    sucursal_id = _parse_int(request.GET.get("sucursal_id"), 0) or None
+    context = merma_audit_context(period=period, sucursal_id=sucursal_id)
+    context.update(
+        {
+            "module_tabs": _reportes_module_tabs("mermas_devoluciones"),
+            "selected_period": period.strftime("%Y-%m"),
+            "selected_sucursal_id": sucursal_id or "",
+        }
+    )
+    return render(request, "reportes/mermas_devoluciones.html", context)
 
 
 @login_required

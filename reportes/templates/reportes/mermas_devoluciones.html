@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Reportes - Mermas y Devoluciones{% endblock %}
+{% block page_title %}Reportes · Mermas y Devoluciones{% endblock %}
+
+{% block extra_css %}
+<style>
+  .waste-shell { display:grid; gap:1rem; }
+  .waste-toolbar, .waste-kpi, .waste-panel {
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+  }
+  .waste-toolbar {
+    display:flex;
+    justify-content:space-between;
+    gap:.75rem;
+    flex-wrap:wrap;
+    padding:1rem;
+    align-items:end;
+  }
+  .waste-controls { display:flex; gap:.7rem; flex-wrap:wrap; align-items:end; }
+  .waste-field { display:grid; gap:.25rem; min-width:160px; }
+  .waste-field label { font-size:.78rem; color:var(--muted); font-weight:700; text-transform:uppercase; }
+  .waste-field input, .waste-field select {
+    height:38px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:0 .65rem;
+    background:#fff;
+  }
+  .waste-button {
+    height:38px;
+    border:0;
+    border-radius:6px;
+    padding:0 .9rem;
+    background:#17324d;
+    color:#fff;
+    font-weight:700;
+  }
+  .waste-kpis {
+    display:grid;
+    grid-template-columns:repeat(4, minmax(0, 1fr));
+    gap:.75rem;
+  }
+  .waste-kpi { padding:1rem; }
+  .waste-kpi span { display:block; color:var(--muted); font-size:.78rem; font-weight:700; text-transform:uppercase; }
+  .waste-kpi strong { display:block; margin-top:.25rem; font-size:1.2rem; color:#17324d; }
+  .waste-panel { overflow:auto; }
+  .waste-panel h2 { margin:0; padding:1rem 1rem .5rem; font-size:1rem; color:#17324d; }
+  .waste-table {
+    width:100%;
+    min-width:980px;
+    border-collapse:separate;
+    border-spacing:0;
+  }
+  .waste-table th, .waste-table td {
+    padding:.55rem .65rem;
+    border-top:1px solid var(--line);
+    white-space:nowrap;
+    text-align:left;
+  }
+  .waste-table th {
+    background:#f8fafc;
+    color:#44546a;
+    font-size:.75rem;
+    text-transform:uppercase;
+  }
+  .waste-risk { font-weight:800; }
+  .waste-risk.green { color:#16794a; }
+  .waste-risk.yellow { color:#b7791f; }
+  .waste-risk.red { color:#b42318; }
+  @media (max-width: 900px) {
+    .waste-kpis { grid-template-columns:1fr 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="waste-shell">
+  <form class="waste-toolbar" method="get">
+    <div class="waste-controls">
+      <div class="waste-field">
+        <label for="period">Periodo</label>
+        <input id="period" name="period" type="month" value="{{ selected_period }}">
+      </div>
+      <div class="waste-field">
+        <label for="sucursal">Sucursal</label>
+        <select id="sucursal" name="sucursal_id">
+          <option value="">Todas</option>
+          {% for sucursal in sucursales %}
+          <option value="{{ sucursal.id }}" {% if selected_sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal.codigo }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <button class="waste-button" type="submit">Actualizar</button>
+  </form>
+
+  <section class="waste-kpis">
+    <article class="waste-kpi">
+      <span>Total costo merma</span>
+      <strong>${{ kpis.total_costo_merma|floatformat:2|intcomma }}</strong>
+    </article>
+    <article class="waste-kpi">
+      <span>% merma sobre venta</span>
+      <strong>{{ kpis.pct_merma_sobre_venta|floatformat:2 }}%</strong>
+    </article>
+    <article class="waste-kpi">
+      <span>Top productos</span>
+      <strong>{% for row in kpis.top_productos %}{{ row.nombre_producto }}{% if not forloop.last %}, {% endif %}{% empty %}Sin datos{% endfor %}</strong>
+    </article>
+    <article class="waste-kpi">
+      <span>Top sucursales</span>
+      <strong>{% for row in kpis.top_sucursales %}{{ row.sucursal.codigo }}{% if not forloop.last %}, {% endif %}{% empty %}Sin datos{% endfor %}</strong>
+    </article>
+  </section>
+
+  <section class="waste-panel">
+    <h2>Mermas</h2>
+    <table class="waste-table">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Sucursal</th>
+          <th>Unidades merma</th>
+          <th>Costo merma</th>
+          <th>% sobre venta</th>
+          <th>Justificación</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in mermas %}
+        <tr>
+          <td>{{ row.nombre_producto }}</td>
+          <td>{{ row.sucursal.codigo }}</td>
+          <td>{{ row.unidades_merma|floatformat:3|intcomma }}</td>
+          <td>${{ row.costo_merma|floatformat:2|intcomma }}</td>
+          <td>
+            <span class="waste-risk {% if row.pct_merma_sobre_venta > 5 %}red{% elif row.pct_merma_sobre_venta >= 2 %}yellow{% else %}green{% endif %}">
+              {{ row.pct_merma_sobre_venta|floatformat:2 }}%
+            </span>
+          </td>
+          <td>{{ row.justificacion_principal|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">Sin mermas consolidadas para el filtro actual.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="waste-panel">
+    <h2>Devoluciones</h2>
+    <table class="waste-table">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Sucursal origen</th>
+          <th>Unidades</th>
+          <th>Motivo</th>
+          <th>Fecha</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in devoluciones %}
+        <tr>
+          <td>{% if row.receta %}{{ row.receta.nombre }}{% else %}{{ row.metadata.item_name }}{% endif %}</td>
+          <td>{% if row.sucursal_origen %}{{ row.sucursal_origen.codigo }}{% else %}{{ row.metadata.origin_branch_name }}{% endif %}</td>
+          <td>{{ row.unidades|floatformat:3|intcomma }}</td>
+          <td>{{ row.get_motivo_display }}</td>
+          <td>{{ row.transfer_line.registered_at|date:"Y-m-d H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5">Sin devoluciones clasificadas para el filtro actual.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="waste-panel">
+    <h2>Tendencia</h2>
+    <table class="waste-table">
+      <thead><tr><th>Periodo</th><th>Costo merma</th></tr></thead>
+      <tbody>
+        {% for row in trend %}
+        <tr><td>{{ row.periodo }}</td><td>${{ row.costo_merma|floatformat:2|intcomma }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2">Sin tendencia disponible.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}
