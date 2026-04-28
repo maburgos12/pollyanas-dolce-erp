@@ -174,3 +174,50 @@ class InventarioConfig(models.Model):
 
     def __str__(self):
         return f"Umbral manual PR: {self.reorder_max_diff_pct}%"
+
+
+class ConsumoInsumoMensual(models.Model):
+    ALERTA_OK = "OK"
+    ALERTA_MERMA = "MERMA"
+    ALERTA_FALTANTE = "FALTANTE"
+    ALERTA_SIN_DATOS = "SIN_DATOS"
+    ALERTA_CHOICES = [
+        (ALERTA_OK, "Dentro de rango"),
+        (ALERTA_MERMA, "Merma excesiva"),
+        (ALERTA_FALTANTE, "Consumo mayor al teórico"),
+        (ALERTA_SIN_DATOS, "Datos insuficientes"),
+    ]
+
+    periodo = models.DateField(db_index=True)
+    insumo = models.ForeignKey(Insumo, on_delete=models.PROTECT, related_name="consumos_mensuales")
+    unidad = models.CharField(max_length=50, blank=True, default="")
+
+    consumo_teorico = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    costo_teorico = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    entradas_periodo = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    stock_inicial = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    stock_final = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    consumo_real = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    costo_real = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    diferencia_unidades = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    diferencia_pct = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    diferencia_costo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    alerta = models.CharField(max_length=20, choices=ALERTA_CHOICES, default=ALERTA_SIN_DATOS, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Consumo mensual de insumo"
+        verbose_name_plural = "Consumos mensuales de insumos"
+        ordering = ["periodo", "insumo__nombre"]
+        unique_together = [("periodo", "insumo")]
+        indexes = [
+            models.Index(fields=["periodo", "alerta"]),
+            models.Index(fields=["insumo", "periodo"]),
+        ]
+
+    def __str__(self):
+        return f"{self.periodo:%Y-%m} · {self.insumo.nombre}"

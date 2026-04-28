@@ -41,7 +41,7 @@ from core.branch_catalog import eligible_operational_branch_qs
 from proyecciones.models import ProyeccionProduccion
 from proyecciones.services import ProyeccionProduccionService
 from core.models import AuditLog, Sucursal
-from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.models import ConsumoInsumoMensual, ExistenciaInsumo, MovimientoInventario
 from control.models import MermaPOS, VentaPOS
 from control.services_mermas_devoluciones import merma_audit_context, parse_month as parse_merma_month
 from maestros.models import CostoInsumo, Insumo
@@ -196,6 +196,7 @@ def _reportes_module_tabs(active: str) -> list[dict[str, str | bool]]:
         ("financiero", reverse("reportes:financiero"), "Financiero"),
         ("presupuesto_maestro", reverse("reportes:presupuesto_maestro"), "Presupuesto Maestro"),
         ("mermas_devoluciones", reverse("reportes:mermas_devoluciones"), "Mermas y Devoluciones"),
+        ("auditoria_insumos", reverse("reportes:auditoria_insumos"), "Auditoría Insumos"),
         ("proyeccion_produccion", reverse("reportes:proyeccion_produccion"), "Proyección Producción"),
         ("presupuestos", reverse("reportes:presupuesto_importar_por_area"), "Presupuestos"),
         ("gastos_operativos", reverse("reportes:gastos_operativos_importar"), "Importar gastos"),
@@ -4409,6 +4410,118 @@ def mermas_devoluciones(request: HttpRequest) -> HttpResponse:
         }
     )
     return render(request, "reportes/mermas_devoluciones.html", context)
+
+
+@login_required
+def auditoria_insumos(request: HttpRequest) -> HttpResponse:
+    if not can_view_reportes(request.user):
+        raise PermissionDenied("No tienes permisos para ver Reportes.")
+    default_period = timezone.localdate().strftime("%Y-%m")
+    period_raw = request.GET.get("period") or default_period
+    try:
+        year_raw, month_raw = period_raw.split("-", 1)
+        periodo = date(int(year_raw), int(month_raw), 1)
+    except Exception:
+        periodo = date(timezone.localdate().year, timezone.localdate().month, 1)
+    categoria = (request.GET.get("categoria") or "").strip()
+    alerta = (request.GET.get("alerta") or "").strip()
+
+    rows_qs = (
+        ConsumoInsumoMensual.objects.select_related("insumo", "insumo__unidad_base")
+        .filter(periodo=periodo)
+        .order_by("-diferencia_costo", "insumo__nombre")
+    )
+    if categoria:
+        rows_qs = rows_qs.filter(insumo__categoria=categoria)
+    if alerta:
+        rows_qs = rows_qs.filter(alerta=alerta)
+    rows = list(rows_qs)
+
+    if request.GET.get("export") == "xlsx":
+        return _export_auditoria_insumos_xlsx(rows, periodo=periodo)
+
+    total_rows = len(rows)
+    ok_rows = sum(1 for row in rows if row.alerta == ConsumoInsumoMensual.ALERTA_OK)
+    active_alerts = sum(1 for row in rows if row.alerta in {ConsumoInsumoMensual.ALERTA_MERMA, ConsumoInsumoMensual.ALERTA_FALTANTE})
+    stock_rows = list(
+        ExistenciaInsumo.objects.select_related("insumo", "insumo__unidad_base")
+        .filter(insumo__activo=True)
+        .order_by("insumo__nombre")[:500]
+    )
+    for stock in stock_rows:
+        stock.stock_estado = (
+            "critico"
+            if stock.stock_actual <= 0
+            else "bajo"
+            if stock.punto_reorden and stock.stock_actual < stock.punto_reorden
+            else "ok"
+        )
+    context = {
+        "module_tabs": _reportes_module_tabs("auditoria_insumos"),
+        "selected_period": periodo.strftime("%Y-%m"),
+        "selected_categoria": categoria,
+        "selected_alerta": alerta,
+        "categorias": [
+            value
+            for value in Insumo.objects.filter(activo=True)
+            .exclude(categoria="")
+            .order_by("categoria")
+            .values_list("categoria", flat=True)
+            .distinct()
+        ],
+        "alerta_choices": ConsumoInsumoMensual.ALERTA_CHOICES,
+        "rows": rows,
+        "stock_rows": stock_rows,
+        "kpis": {
+            "total_rows": total_rows,
+            "desviacion_total": sum((row.diferencia_costo for row in rows), Decimal("0")),
+            "ok_pct": (Decimal(ok_rows) * Decimal("100") / Decimal(total_rows)) if total_rows else Decimal("0"),
+            "active_alerts": active_alerts,
+        },
+    }
+    return render(request, "reportes/auditoria_insumos.html", context)
+
+
+def _export_auditoria_insumos_xlsx(rows: list[ConsumoInsumoMensual], *, periodo: date) -> HttpResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Auditoria insumos"
+    ws.append(
+        [
+            "Periodo",
+            "Insumo",
+            "Unidad",
+            "Consumo teórico",
+            "Consumo real",
+            "Diferencia",
+            "Diferencia %",
+            "Costo diferencia",
+            "Alerta",
+        ]
+    )
+    for row in rows:
+        ws.append(
+            [
+                periodo.strftime("%Y-%m"),
+                row.insumo.nombre,
+                row.unidad,
+                float(row.consumo_teorico),
+                float(row.consumo_real),
+                float(row.diferencia_unidades),
+                float(row.diferencia_pct),
+                float(row.diferencia_costo),
+                row.alerta,
+            ]
+        )
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="auditoria_insumos_{periodo:%Y%m}.xlsx"'
+    return response
 
 
 @login_required
