@@ -165,12 +165,14 @@ class ConsumoInsumoAuditService:
             if teorico_data["unidad_incompatible_count"]:
                 alerta = ConsumoInsumoMensual.ALERTA_SIN_DATOS
             metadata = {
-                "metodo_consumo": "DIFERENCIAL",
+                "metodo_consumo": real_data["metodo_consumo"],
                 "produccion_recetas": real_data.get("produccion_recetas", 0),
                 "movimientos_periodo": real_data["movimientos_periodo"],
                 "movimientos_por_tipo": real_data["movimientos_por_tipo"],
                 "stock_reconstruido": real_data["stock_reconstruido"],
                 "real_data_limited": real_data["real_data_limited"],
+                "entradas_periodo": str(real_data["entradas_periodo"]),
+                "consumos_periodo": str(real_data["consumos_periodo"]),
                 "costo_unitario_usado": str(costo_unitario),
                 "costo_fuente": costo_info.fuente,
                 "costo_unidad": costo_info.unidad,
@@ -231,7 +233,7 @@ class ConsumoInsumoAuditService:
             PointProductionLine.objects.filter(
                 production_date__range=(period_start, period_end),
                 receta__isnull=False,
-                receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
+                produced_quantity__gt=0,
             )
             .exclude(receta__modo_costeo=Receta.MODO_COSTEO_SERVICIO)
             .values("receta_id")
@@ -352,7 +354,7 @@ class ConsumoInsumoAuditService:
             insumo_id = int(row["insumo_id"])
             item = period_by_insumo.setdefault(
                 insumo_id,
-                {"entradas": DECIMAL_ZERO, "movimientos": 0, "por_tipo": {}},
+                {"entradas": DECIMAL_ZERO, "consumos": DECIMAL_ZERO, "movimientos": 0, "por_tipo": {}},
             )
             tipo = row["tipo"]
             qty = Decimal(str(row["total"] or 0))
@@ -360,6 +362,8 @@ class ConsumoInsumoAuditService:
             item["por_tipo"][tipo] = int(row["n"] or 0)
             if tipo == MovimientoInventario.TIPO_ENTRADA:
                 item["entradas"] = Decimal(str(item["entradas"])) + qty
+            elif tipo == MovimientoInventario.TIPO_CONSUMO:
+                item["consumos"] = Decimal(str(item["consumos"])) + qty
 
         after_start = self._signed_rows_by_insumo(after_start_rows)
         after_end = self._signed_rows_by_insumo(after_end_rows)
@@ -367,29 +371,29 @@ class ConsumoInsumoAuditService:
         result: dict[int, dict[str, object]] = {}
         for insumo_id in insumo_ids:
             stock_actual = stock_by_insumo.get(insumo_id, DECIMAL_ZERO)
-            period_data = period_by_insumo.get(insumo_id, {"entradas": DECIMAL_ZERO, "movimientos": 0, "por_tipo": {}})
+            period_data = period_by_insumo.get(
+                insumo_id,
+                {"entradas": DECIMAL_ZERO, "consumos": DECIMAL_ZERO, "movimientos": 0, "por_tipo": {}},
+            )
             stock_inicial = stock_actual - after_start.get(insumo_id, DECIMAL_ZERO)
             stock_final = stock_actual - after_end.get(insumo_id, DECIMAL_ZERO)
             entradas = Decimal(str(period_data["entradas"] or 0))
+            consumos = Decimal(str(period_data["consumos"] or 0))
             movimientos_por_tipo = dict(period_data["por_tipo"])
-            consumo_real = stock_inicial + entradas - stock_final
-            real_data_limited = not any(
-                movimientos_por_tipo.get(tipo, 0)
-                for tipo in [
-                    MovimientoInventario.TIPO_SALIDA,
-                    MovimientoInventario.TIPO_CONSUMO,
-                    MovimientoInventario.TIPO_AJUSTE,
-                ]
-            )
+            metodo_consumo = "CONSUMO_DIRECTO" if consumos > 0 else "DIFERENCIAL"
+            consumo_real = consumos if metodo_consumo == "CONSUMO_DIRECTO" else stock_inicial + entradas - stock_final
+            real_data_limited = metodo_consumo != "CONSUMO_DIRECTO"
             result[insumo_id] = {
                 "stock_inicial": stock_inicial,
                 "stock_final": stock_final,
                 "entradas_periodo": entradas,
+                "consumos_periodo": consumos,
                 "consumo_real": consumo_real,
                 "movimientos_periodo": int(period_data["movimientos"] or 0),
                 "movimientos_por_tipo": movimientos_por_tipo,
                 "stock_reconstruido": True,
                 "real_data_limited": real_data_limited,
+                "metodo_consumo": metodo_consumo,
             }
         return result
 
@@ -398,11 +402,13 @@ class ConsumoInsumoAuditService:
             "stock_inicial": DECIMAL_ZERO,
             "stock_final": DECIMAL_ZERO,
             "entradas_periodo": DECIMAL_ZERO,
+            "consumos_periodo": DECIMAL_ZERO,
             "consumo_real": DECIMAL_ZERO,
             "movimientos_periodo": 0,
             "movimientos_por_tipo": {},
             "stock_reconstruido": True,
             "real_data_limited": True,
+            "metodo_consumo": "SIN_DATOS",
         }
 
     def _signed_rows_by_insumo(self, rows: list[dict[str, object]]) -> dict[int, Decimal]:
@@ -556,7 +562,7 @@ class ConsumoInsumoAuditService:
     ) -> str:
         if consumo_teorico <= 0 and consumo_real <= 0:
             return ConsumoInsumoMensual.ALERTA_SIN_DATOS
-        if real_data.get("real_data_limited") and consumo_real <= 0:
+        if real_data.get("metodo_consumo") != "CONSUMO_DIRECTO":
             return ConsumoInsumoMensual.ALERTA_SIN_DATOS
         if consumo_teorico <= 0:
             return ConsumoInsumoMensual.ALERTA_MERMA if consumo_real > 0 else ConsumoInsumoMensual.ALERTA_SIN_DATOS
