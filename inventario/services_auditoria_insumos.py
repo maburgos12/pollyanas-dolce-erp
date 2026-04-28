@@ -45,6 +45,7 @@ class CostoUnitarioAudit:
     costo: Decimal
     unidad: str
     fuente: str
+    unidad_original: str = ""
     razon: str = ""
     anomalous: bool = False
 
@@ -159,6 +160,8 @@ class ConsumoInsumoAuditService:
             alerta = self.clasificar_alerta(teorico, consumo_real, diferencia_pct, real_data)
             if costo_info.anomalous:
                 alerta = ConsumoInsumoMensual.ALERTA_SIN_DATOS
+            if costo_info.razon == "UNIDAD_INCOMPATIBLE":
+                alerta = ConsumoInsumoMensual.ALERTA_SIN_DATOS
             if teorico_data["unidad_incompatible_count"]:
                 alerta = ConsumoInsumoMensual.ALERTA_SIN_DATOS
             metadata = {
@@ -171,6 +174,7 @@ class ConsumoInsumoAuditService:
                 "costo_unitario_usado": str(costo_unitario),
                 "costo_fuente": costo_info.fuente,
                 "costo_unidad": costo_info.unidad,
+                "costo_unidad_original": costo_info.unidad_original,
                 "lineas_bom": teorico_data["lineas"],
                 "unidad_incompatible_count": teorico_data["unidad_incompatible_count"],
                 "costo_snapshot_total": str(teorico_data["costo_snapshot"]),
@@ -431,17 +435,7 @@ class ConsumoInsumoAuditService:
             insumo_id = int(row.insumo_id)
             if result[insumo_id].fuente != "SIN_COSTO":
                 continue
-            raw_source = str((row.raw or {}).get("source") or "COSTO_INSUMO")
-            unit_code = self._unit_code(row.insumo.unidad_base)
-            cost = Decimal(str(row.costo_unitario or 0))
-            anomalous = self._is_anomalous_cost(cost, unit_code)
-            result[insumo_id] = CostoUnitarioAudit(
-                cost,
-                unit_code,
-                raw_source,
-                razon="COSTO_ANOMALO" if anomalous else "",
-                anomalous=anomalous,
-            )
+            result[insumo_id] = self._audit_cost_from_row(row)
 
         missing_ids = {insumo_id for insumo_id, costo in result.items() if costo.fuente == "SIN_COSTO"}
         if missing_ids:
@@ -455,18 +449,38 @@ class ConsumoInsumoAuditService:
                 insumo_id = int(row.insumo_id)
                 if result[insumo_id].fuente != "SIN_COSTO":
                     continue
-                raw_source = str((row.raw or {}).get("source") or "COSTO_INSUMO")
-                unit_code = self._unit_code(row.insumo.unidad_base)
-                cost = Decimal(str(row.costo_unitario or 0))
-                anomalous = self._is_anomalous_cost(cost, unit_code)
-                result[insumo_id] = CostoUnitarioAudit(
-                    cost,
-                    unit_code,
-                    raw_source,
-                    razon="COSTO_ANOMALO" if anomalous else "",
-                    anomalous=anomalous,
-                )
+                result[insumo_id] = self._audit_cost_from_row(row)
         return result
+
+    def _audit_cost_from_row(self, row: CostoInsumo) -> CostoUnitarioAudit:
+        raw = row.raw or {}
+        raw_source = str(raw.get("source") or "COSTO_INSUMO")
+        target_unit = self._unit_code(row.insumo.unidad_base)
+        original_unit = self._normalize_unit(str(raw.get("unit") or "")) or target_unit
+        raw_cost = Decimal(str(row.costo_unitario or 0))
+        normalized_cost = raw_cost
+        reason = ""
+        if original_unit and target_unit and original_unit != target_unit:
+            factor = self._convert_quantity(Decimal("1"), target_unit, original_unit)
+            if factor is None:
+                normalized_cost = DECIMAL_ZERO
+                reason = "UNIDAD_INCOMPATIBLE"
+            else:
+                normalized_cost = raw_cost * factor
+        anomalous = self._is_anomalous_cost(raw_cost, original_unit) or self._is_anomalous_cost(
+            normalized_cost,
+            target_unit,
+        )
+        if anomalous:
+            reason = "COSTO_ANOMALO"
+        return CostoUnitarioAudit(
+            normalized_cost,
+            target_unit,
+            raw_source,
+            unidad_original=original_unit,
+            razon=reason,
+            anomalous=anomalous,
+        )
 
     def _is_anomalous_cost(self, cost: Decimal, unit_code: str) -> bool:
         unit = self._normalize_unit(unit_code)
