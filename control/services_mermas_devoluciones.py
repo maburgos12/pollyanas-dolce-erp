@@ -20,6 +20,7 @@ from ventas.services.sales_canonical_source import POINT_BRIDGE_SALES_SOURCE
 
 
 ZERO = Decimal("0")
+NON_PUBLIC_BRANCH_CODES = {"CEDIS", "MATRIZ", "DEVOLUCIONES"}
 
 
 @dataclass
@@ -302,16 +303,23 @@ class MermaDevolucionAuditService:
 
 def merma_audit_context(*, period: str | date, sucursal_id: int | None = None) -> dict[str, object]:
     month_start = parse_month(period)
+    previous_month = _previous_month(month_start)
     mermas = MermaMensualSucursal.objects.select_related("sucursal", "receta").filter(periodo=month_start)
     devoluciones = DevolucionSucursalMatriz.objects.select_related("sucursal_origen", "receta", "transfer_line").filter(periodo=month_start)
     if sucursal_id:
         mermas = mermas.filter(sucursal_id=sucursal_id)
         devoluciones = devoluciones.filter(sucursal_origen_id=sucursal_id)
     merma_rows = list(mermas.order_by("-costo_merma", "sucursal__codigo", "nombre_producto"))
+    previous_costs = _previous_waste_costs(previous_month=previous_month)
+    for row in merma_rows:
+        row.es_sucursal_no_publica = _is_non_public_waste_row(row)
+        previous_cost = previous_costs.get(_waste_row_key(row))
+        row.tendencia_merma = _waste_trend(row.costo_merma, previous_cost)
     devolucion_rows = list(devoluciones.order_by("-unidades", "receta__nombre")[:200])
     total_cost = sum((row.costo_merma for row in merma_rows), ZERO)
-    total_waste_units = sum((row.unidades_merma for row in merma_rows), ZERO)
-    total_sold_units = sum((row.unidades_vendidas for row in merma_rows), ZERO)
+    public_merma_rows = [row for row in merma_rows if not row.es_sucursal_no_publica]
+    total_waste_units = sum((row.unidades_merma for row in public_merma_rows), ZERO)
+    total_sold_units = sum((row.unidades_vendidas for row in public_merma_rows), ZERO)
     pct = ZERO
     if total_sold_units > 0:
         pct = (total_waste_units / total_sold_units * Decimal("100")).quantize(Decimal("0.01"))
@@ -352,6 +360,38 @@ def _top_sucursales(rows: list[MermaMensualSucursal]) -> list[dict[str, object]]
         )
         bucket["costo"] += row.costo_merma
     return sorted(buckets.values(), key=lambda item: item["costo"], reverse=True)[:3]
+
+
+def _previous_month(month_start: date) -> date:
+    if month_start.month == 1:
+        return date(month_start.year - 1, 12, 1)
+    return date(month_start.year, month_start.month - 1, 1)
+
+
+def _previous_waste_costs(*, previous_month: date) -> dict[tuple[int | None, str, int | None, str], Decimal]:
+    rows = MermaMensualSucursal.objects.filter(periodo=previous_month)
+    return {_waste_row_key(row): row.costo_merma for row in rows}
+
+
+def _waste_row_key(row: MermaMensualSucursal) -> tuple[int | None, str, int | None, str]:
+    branch_label = _normalize_match_text(row.sucursal.codigo if row.sucursal_id else row.metadata.get("branch_point", ""))
+    return (row.sucursal_id, branch_label, row.receta_id, row.nombre_producto)
+
+
+def _waste_trend(current_cost: Decimal, previous_cost: Decimal | None) -> str:
+    if previous_cost is None:
+        return "first"
+    if current_cost > previous_cost:
+        return "up"
+    if current_cost < previous_cost:
+        return "down"
+    return "flat"
+
+
+def _is_non_public_waste_row(row: MermaMensualSucursal) -> bool:
+    label = row.sucursal.codigo if row.sucursal_id else row.metadata.get("branch_point", "")
+    normalized = _normalize_match_text(label).upper().replace(" ", "_")
+    return normalized in NON_PUBLIC_BRANCH_CODES
 
 
 def _normalize_match_text(value: str) -> str:

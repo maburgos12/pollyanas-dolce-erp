@@ -71,6 +71,10 @@
   .waste-risk.green { color:#16794a; }
   .waste-risk.yellow { color:#b7791f; }
   .waste-risk.red { color:#b42318; }
+  .waste-risk.muted, .waste-trend.flat { color:#667085; }
+  .waste-trend { font-weight:900; font-size:1.05rem; }
+  .waste-trend.up { color:#b42318; }
+  .waste-trend.down { color:#16794a; }
   @media (max-width: 900px) {
     .waste-kpis { grid-template-columns:1fr 1fr; }
   }
@@ -127,6 +131,7 @@
           <th>Unidades merma</th>
           <th>Costo merma</th>
           <th>% sobre venta</th>
+          <th>Tendencia</th>
           <th>Justificación</th>
         </tr>
       </thead>
@@ -138,14 +143,27 @@
           <td>{{ row.unidades_merma|floatformat:3|intcomma }}</td>
           <td>${{ row.costo_merma|floatformat:2|intcomma }}</td>
           <td>
+            {% if row.es_sucursal_no_publica %}
+            <span class="waste-risk muted">N/A</span>
+            {% else %}
             <span class="waste-risk {% if row.pct_merma_sobre_venta > 5 %}red{% elif row.pct_merma_sobre_venta >= 2 %}yellow{% else %}green{% endif %}">
               {{ row.pct_merma_sobre_venta|floatformat:2 }}%
             </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.tendencia_merma == "up" %}
+            <span class="waste-trend up">↑</span>
+            {% elif row.tendencia_merma == "down" %}
+            <span class="waste-trend down">↓</span>
+            {% else %}
+            <span class="waste-trend flat">→</span>
+            {% endif %}
           </td>
           <td>{{ row.justificacion_principal|default:"-" }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="6">Sin mermas consolidadas para el filtro actual.</td></tr>
+        <tr><td colspan="7">Sin mermas consolidadas para el filtro actual.</td></tr>
         {% endfor %}
       </tbody>
     </table>

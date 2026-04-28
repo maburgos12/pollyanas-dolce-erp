@@ -55,15 +55,20 @@ class ProyeccionProduccionServiceTests(TestCase):
         self.assertEqual(row.receta, self.receta)
         self.assertEqual(row.factor_merma, Decimal("0.1000"))
         self.assertEqual(row.unidades_proyectadas_ajustadas, Decimal("11.000"))
+        self.assertEqual(row.metadata["factor_fuente"], "PROMEDIO_RED")
+        self.assertFalse(row.metadata["factor_capped"])
         self.assertEqual(row.confianza, ProyeccionProduccion.CONFIANZA_MEDIA)
 
-    def test_excludes_products_with_less_than_three_history_days(self):
+    def test_excludes_products_with_less_than_seven_history_days(self):
         target = date(2026, 4, 28)
-        for offset in (1, 2):
+        for offset in range(1, 8):
+            day = target - timedelta(days=offset)
+            if day.weekday() == 6:
+                continue
             VentaHistorica.objects.create(
                 receta=self.receta,
                 sucursal=self.sucursal,
-                fecha=target - timedelta(days=offset),
+                fecha=day,
                 cantidad=Decimal("10"),
                 fuente=POINT_BRIDGE_SALES_SOURCE,
             )
@@ -72,3 +77,27 @@ class ProyeccionProduccionServiceTests(TestCase):
 
         self.assertEqual(summary.rows, [])
         self.assertEqual(summary.skipped, 1)
+        self.assertIn("HISTORIAL_INSUFICIENTE", summary.warnings[0])
+
+    def test_uses_defaults_and_caps_factors_for_short_history_without_network_average(self):
+        target = date(2026, 4, 28)
+        for offset in range(1, 11):
+            day = target - timedelta(days=offset)
+            if day.weekday() == 6:
+                continue
+            VentaHistorica.objects.create(
+                receta=self.receta,
+                sucursal=self.sucursal,
+                fecha=day,
+                cantidad=Decimal("10"),
+                fuente=POINT_BRIDGE_SALES_SOURCE,
+            )
+
+        summary = ProyeccionProduccionService().proyectar_dia(target, dry_run=True)
+
+        self.assertEqual(len(summary.rows), 1)
+        row = summary.rows[0]
+        self.assertEqual(row["factor_fuente"], "DEFAULT")
+        self.assertEqual(row["factor_merma"], Decimal("0.0300"))
+        self.assertEqual(row["factor_devolucion"], Decimal("0.0500"))
+        self.assertFalse(row["factor_capped"])
