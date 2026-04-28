@@ -38,7 +38,9 @@ from core.access import (
 from core.audit import log_event
 from core.cache_versions import get_or_set_versioned_cache
 from core.branch_catalog import eligible_operational_branch_qs
-from core.models import AuditLog
+from proyecciones.models import ProyeccionProduccion
+from proyecciones.services import ProyeccionProduccionService
+from core.models import AuditLog, Sucursal
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from control.models import MermaPOS, VentaPOS
 from control.services_mermas_devoluciones import merma_audit_context, parse_month as parse_merma_month
@@ -194,6 +196,7 @@ def _reportes_module_tabs(active: str) -> list[dict[str, str | bool]]:
         ("financiero", reverse("reportes:financiero"), "Financiero"),
         ("presupuesto_maestro", reverse("reportes:presupuesto_maestro"), "Presupuesto Maestro"),
         ("mermas_devoluciones", reverse("reportes:mermas_devoluciones"), "Mermas y Devoluciones"),
+        ("proyeccion_produccion", reverse("reportes:proyeccion_produccion"), "Proyección Producción"),
         ("presupuestos", reverse("reportes:presupuesto_importar_por_area"), "Presupuestos"),
         ("gastos_operativos", reverse("reportes:gastos_operativos_importar"), "Importar gastos"),
         ("consumo", reverse("reportes:consumo"), "Consumo"),
@@ -4406,6 +4409,133 @@ def mermas_devoluciones(request: HttpRequest) -> HttpResponse:
         }
     )
     return render(request, "reportes/mermas_devoluciones.html", context)
+
+
+@login_required
+def proyeccion_produccion(request: HttpRequest) -> HttpResponse:
+    if not can_view_reportes(request.user):
+        raise PermissionDenied("No tienes permisos para ver Reportes.")
+    today = timezone.localdate()
+    mode = request.GET.get("modo") or request.POST.get("modo") or "dia"
+    target_raw = request.GET.get("fecha") or request.POST.get("fecha") or today.isoformat()
+    try:
+        target_date = date.fromisoformat(target_raw)
+    except ValueError:
+        target_date = today
+    sucursal_id = _parse_int(request.GET.get("sucursal_id") or request.POST.get("sucursal_id"), 0) or None
+    sucursal = Sucursal.objects.filter(id=sucursal_id).first() if sucursal_id else None
+
+    if request.method == "POST":
+        summary = (
+            ProyeccionProduccionService().proyectar_semana(target_date, sucursal=sucursal, dry_run=False)
+            if mode == "semana"
+            else ProyeccionProduccionService().proyectar_dia(target_date, sucursal=sucursal, dry_run=False)
+        )
+        messages.success(request, f"Proyección generada: {summary.created} nuevas, {summary.updated} actualizadas.")
+        query = urlencode({"modo": mode, "fecha": target_date.isoformat(), "sucursal_id": sucursal_id or ""})
+        return redirect(f"{reverse('reportes:proyeccion_produccion')}?{query}")
+
+    dates = _projection_dates(mode, target_date)
+    rows = list(
+        ProyeccionProduccion.objects.select_related("receta", "sucursal")
+        .filter(periodo__in=dates)
+        .order_by("periodo", "sucursal__codigo", "receta__nombre")
+    )
+    if sucursal_id:
+        rows = [row for row in rows if row.sucursal_id == sucursal_id]
+
+    if request.GET.get("export") == "xlsx":
+        return _export_proyeccion_xlsx(rows, mode=mode, target_date=target_date)
+
+    context = {
+        "module_tabs": _reportes_module_tabs("proyeccion_produccion"),
+        "mode": mode,
+        "target_date": target_date,
+        "target_date_value": target_date.isoformat(),
+        "selected_sucursal_id": sucursal_id or "",
+        "sucursales": Sucursal.objects.filter(activa=True).order_by("codigo"),
+        "rows": rows,
+        "weekly_rows": _weekly_projection_rows(rows, dates),
+        "week_dates": dates,
+        "summary": {
+            "rows": len(rows),
+            "total_units": sum((row.unidades_proyectadas_ajustadas for row in rows), Decimal("0")),
+            "high_confidence": sum(1 for row in rows if row.confianza == ProyeccionProduccion.CONFIANZA_ALTA),
+        },
+    }
+    return render(request, "reportes/proyeccion_produccion.html", context)
+
+
+def _projection_dates(mode: str, target_date: date) -> list[date]:
+    if mode == "semana":
+        start = target_date - timedelta(days=target_date.weekday())
+        return [start + timedelta(days=offset) for offset in range(6)]
+    return [target_date]
+
+
+def _weekly_projection_rows(rows: list[ProyeccionProduccion], dates: list[date]) -> list[dict[str, object]]:
+    buckets: dict[tuple[int, int | None], dict[str, object]] = {}
+    for row in rows:
+        key = (row.receta_id, row.sucursal_id)
+        bucket = buckets.setdefault(
+            key,
+            {
+                "receta": row.receta,
+                "sucursal": row.sucursal,
+                "dias": {},
+                "total": Decimal("0"),
+                "confianza": row.confianza,
+            },
+        )
+        bucket["dias"][row.periodo] = row.unidades_proyectadas_ajustadas
+        bucket["total"] += row.unidades_proyectadas_ajustadas
+    weekly_rows = []
+    for bucket in buckets.values():
+        bucket["cells"] = [bucket["dias"].get(day, Decimal("0")) for day in dates]
+        weekly_rows.append(bucket)
+    return sorted(weekly_rows, key=lambda item: item["total"], reverse=True)
+
+
+def _export_proyeccion_xlsx(rows: list[ProyeccionProduccion], *, mode: str, target_date: date) -> HttpResponse:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Proyección producción"
+    sheet.append(
+        [
+            "Fecha",
+            "Sucursal",
+            "Producto",
+            "Venta proyectada",
+            "Stock actual",
+            "Factor merma",
+            "Factor devolución",
+            "Producir",
+            "Confianza",
+        ]
+    )
+    for row in rows:
+        sheet.append(
+            [
+                row.periodo.isoformat(),
+                row.sucursal.codigo if row.sucursal_id else "TODAS",
+                row.receta.nombre,
+                float(row.venta_proyectada),
+                float(row.stock_actual),
+                float(row.factor_merma),
+                float(row.factor_devolucion),
+                float(row.unidades_proyectadas_ajustadas),
+                row.confianza,
+            ]
+        )
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="proyeccion_produccion_{mode}_{target_date:%Y%m%d}.xlsx"'
+    return response
 
 
 @login_required

@@ -256,6 +256,44 @@ class Command(BaseCommand):
             },
         )
 
+        projection_daily_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="20",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="proyecciones: producción día siguiente",
+            defaults={
+                "task": "proyecciones.generar_proyeccion_dia_siguiente",
+                "crontab": projection_daily_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
+        projection_weekly_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="21",
+            day_of_week="0",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="proyecciones: producción semana siguiente",
+            defaults={
+                "task": "proyecciones.generar_proyeccion_semana_siguiente",
+                "crontab": projection_weekly_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         orchestration_daily_plan_hour = _env_int("ORQUESTACION_DAILY_PLAN_HOUR", 9, minimum=0, maximum=23)
         orchestration_daily_plan_minute = _env_int("ORQUESTACION_DAILY_PLAN_MINUTE", 5, minimum=0, maximum=59)
         orchestration_daily_plan_cron, _ = CrontabSchedule.objects.get_or_create(
