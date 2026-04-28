@@ -1,6 +1,7 @@
 from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from crm.models import Cliente, PedidoCliente
 from logistica.models import EntregaRuta, RutaEntrega
@@ -23,7 +24,7 @@ class LogisticaViewsTests(TestCase):
         )
         ruta = RutaEntrega.objects.create(
             nombre="Ruta Centro",
-            fecha_ruta="2026-03-25",
+            fecha_ruta=timezone.localdate(),
             chofer="Mario",
             unidad="Van 1",
             estatus=RutaEntrega.ESTATUS_EN_RUTA,

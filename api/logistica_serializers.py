@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import serializers
 
-from logistica.models import EntregaRuta, RutaEntrega
+from logistica.models import BitacoraRepartidor, EntregaRuta, Repartidor, ReporteUnidad, RutaEntrega, Unidad
 
 
 class LogisticaRutaSerializer(serializers.ModelSerializer):
@@ -77,3 +79,166 @@ class LogisticaEntregaCreateSerializer(serializers.Serializer):
     estatus = serializers.ChoiceField(choices=EntregaRuta.ESTATUS_CHOICES, required=False, default=EntregaRuta.ESTATUS_PENDIENTE)
     monto_estimado = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
     comentario = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class LogisticaUnidadSerializer(serializers.ModelSerializer):
+    sucursal_codigo = serializers.CharField(source="sucursal.codigo", read_only=True)
+    sucursal_nombre = serializers.CharField(source="sucursal.nombre", read_only=True)
+
+    class Meta:
+        model = Unidad
+        fields = ["id", "codigo", "descripcion", "sucursal", "sucursal_codigo", "sucursal_nombre", "placa", "activa"]
+        read_only_fields = ["id", "sucursal_codigo", "sucursal_nombre"]
+
+
+class LogisticaRepartidorSerializer(serializers.ModelSerializer):
+    nombre = serializers.SerializerMethodField()
+    username = serializers.CharField(source="user.username", read_only=True)
+    unidad_asignada = LogisticaUnidadSerializer(read_only=True)
+    sucursal_codigo = serializers.CharField(source="sucursal.codigo", read_only=True)
+    sucursal_nombre = serializers.CharField(source="sucursal.nombre", read_only=True)
+
+    class Meta:
+        model = Repartidor
+        fields = [
+            "id",
+            "username",
+            "nombre",
+            "telefono",
+            "sucursal",
+            "sucursal_codigo",
+            "sucursal_nombre",
+            "unidad_asignada",
+        ]
+        read_only_fields = fields
+
+    def get_nombre(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+
+class LogisticaReporteSerializer(serializers.ModelSerializer):
+    repartidor_nombre = serializers.SerializerMethodField()
+    unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
+    unidad_placa = serializers.CharField(source="unidad.placa", read_only=True)
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    severidad_display = serializers.CharField(source="get_severidad_display", read_only=True)
+    estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
+    asignado_a_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReporteUnidad
+        fields = [
+            "id",
+            "repartidor",
+            "repartidor_nombre",
+            "unidad",
+            "unidad_codigo",
+            "unidad_placa",
+            "tipo",
+            "tipo_display",
+            "severidad",
+            "severidad_display",
+            "descripcion",
+            "foto",
+            "kilometraje",
+            "latitud",
+            "longitud",
+            "estatus",
+            "estatus_display",
+            "fecha_reporte",
+            "asignado_a",
+            "asignado_a_nombre",
+            "proveedor_servicio",
+            "fecha_servicio_programado",
+            "costo_servicio",
+            "notas_compras",
+            "notificacion_escalada",
+            "actualizado_en",
+        ]
+        read_only_fields = [
+            "id",
+            "repartidor",
+            "repartidor_nombre",
+            "unidad_codigo",
+            "unidad_placa",
+            "tipo_display",
+            "severidad_display",
+            "estatus_display",
+            "fecha_reporte",
+            "asignado_a_nombre",
+            "notificacion_escalada",
+            "actualizado_en",
+        ]
+
+    def get_repartidor_nombre(self, obj):
+        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+
+    def get_asignado_a_nombre(self, obj):
+        if not obj.asignado_a_id:
+            return ""
+        return obj.asignado_a.get_full_name() or obj.asignado_a.username
+
+
+class LogisticaReporteCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReporteUnidad
+        fields = ["tipo", "severidad", "descripcion", "foto", "kilometraje", "latitud", "longitud"]
+
+    def create(self, validated_data):
+        repartidor = self.context["repartidor"]
+        unidad = repartidor.unidad_asignada
+        if unidad is None:
+            raise serializers.ValidationError("No tienes una unidad asignada para levantar reportes.")
+        return ReporteUnidad.objects.create(repartidor=repartidor, unidad=unidad, **validated_data)
+
+
+class LogisticaReportePatchSerializer(serializers.ModelSerializer):
+    asignado_a = serializers.PrimaryKeyRelatedField(queryset=get_user_model().objects.all(), required=False, allow_null=True)
+
+    class Meta:
+        model = ReporteUnidad
+        fields = [
+            "tipo",
+            "severidad",
+            "descripcion",
+            "foto",
+            "kilometraje",
+            "latitud",
+            "longitud",
+            "estatus",
+            "asignado_a",
+            "proveedor_servicio",
+            "fecha_servicio_programado",
+            "costo_servicio",
+            "notas_compras",
+        ]
+
+
+class LogisticaBitacoraSerializer(serializers.ModelSerializer):
+    fecha = serializers.DateField(required=False, default=timezone.localdate)
+    repartidor_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BitacoraRepartidor
+        fields = [
+            "id",
+            "repartidor",
+            "repartidor_nombre",
+            "fecha",
+            "km_inicio",
+            "km_fin",
+            "novedades",
+            "creado_en",
+            "actualizado_en",
+        ]
+        read_only_fields = ["id", "repartidor", "repartidor_nombre", "creado_en", "actualizado_en"]
+
+    def get_repartidor_nombre(self, obj):
+        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+
+    def validate(self, attrs):
+        km_inicio = attrs.get("km_inicio")
+        km_fin = attrs.get("km_fin")
+        if km_fin is not None and km_inicio is not None and km_fin < km_inicio:
+            raise serializers.ValidationError("El kilometraje final no puede ser menor al inicial.")
+        return attrs

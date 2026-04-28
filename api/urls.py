@@ -97,10 +97,17 @@ from .rrhh_views import (
     RRHHNominasView,
 )
 from .logistica_views import (
+    LogisticaBitacoraView,
     LogisticaDashboardView,
+    LogisticaMiPerfilView,
+    LogisticaMisReportesView,
+    LogisticaReporteCreateView,
+    LogisticaReporteDetailView,
     LogisticaRutasView,
     LogisticaRutaEntregasView,
     LogisticaRutaStatusView,
+    LogisticaTodosReportesView,
+    LogisticaTokenView,
 )
 from .reportes_bi_views import ReportesBIDashboardView
 from .reportes_budget_views import BudgetVsActualView
@@ -324,6 +331,13 @@ urlpatterns = [
     path("rrhh/nominas/", RRHHNominasView.as_view(), name="api_rrhh_nominas"),
     path("rrhh/nominas/<int:nomina_id>/lineas/", RRHHNominaLineasView.as_view(), name="api_rrhh_nomina_lineas"),
     path("logistica/dashboard/", LogisticaDashboardView.as_view(), name="api_logistica_dashboard"),
+    path("logistica/auth/token/", LogisticaTokenView.as_view(), name="api_logistica_auth_token"),
+    path("logistica/mi-perfil/", LogisticaMiPerfilView.as_view(), name="api_logistica_mi_perfil"),
+    path("logistica/reportes/", LogisticaReporteCreateView.as_view(), name="api_logistica_reportes"),
+    path("logistica/reportes/mis/", LogisticaMisReportesView.as_view(), name="api_logistica_reportes_mis"),
+    path("logistica/reportes/todos/", LogisticaTodosReportesView.as_view(), name="api_logistica_reportes_todos"),
+    path("logistica/reportes/<int:reporte_id>/", LogisticaReporteDetailView.as_view(), name="api_logistica_reporte_detail"),
+    path("logistica/bitacora/", LogisticaBitacoraView.as_view(), name="api_logistica_bitacora"),
     path("logistica/rutas/", LogisticaRutasView.as_view(), name="api_logistica_rutas"),
     path("logistica/rutas/<int:ruta_id>/estatus/", LogisticaRutaStatusView.as_view(), name="api_logistica_ruta_estatus"),
     path("logistica/rutas/<int:ruta_id>/entregas/", LogisticaRutaEntregasView.as_view(), name="api_logistica_ruta_entregas"),
