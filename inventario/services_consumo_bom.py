@@ -266,7 +266,7 @@ class ConsumoInsumoAutoService:
         new_qty = Decimal(str(item.cantidad or 0))
         changed = (
             existing.tipo != MovimientoInventario.TIPO_CONSUMO
-            or existing.insumo_id != item.insumo_id
+            or existing.insumo_id != item.insumo.id
             or old_qty != new_qty
             or existing.referencia != defaults["referencia"]
         )
