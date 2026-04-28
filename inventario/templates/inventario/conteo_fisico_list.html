@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Inventario - Conteo Físico{% endblock %}
+{% block page_title %}Inventario · Conteo Físico{% endblock %}
+{% block body_class %}page-inventario-conteo-fisico{% endblock %}
+
+{% block content %}
+<nav class="module-tabs">
+  <a class="module-tab" href="{% url 'inventario:home' %}">Dashboard</a>
+  <a class="module-tab" href="{% url 'inventario:existencias' %}">Existencias</a>
+  <a class="module-tab" href="{% url 'inventario:movimientos' %}">Movimientos</a>
+  <a class="module-tab" href="{% url 'inventario:ajustes' %}">Ajustes</a>
+  <a class="module-tab active" href="{% url 'inventario:conteo_fisico_list' %}">Conteo Físico</a>
+  <a class="module-tab" href="{% url 'inventario:alertas' %}">Alertas</a>
+  <a class="module-tab" href="{% url 'inventario:aliases_catalog' %}">Referencias</a>
+  <a class="module-tab" href="{% url 'inventario:importar_archivos' %}">Cortes Almacén</a>
+</nav>
+
+<section class="card">
+  <div class="card-header">Conteos físicos mensuales</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Periodo</th>
+          <th>Responsable</th>
+          <th>Estatus</th>
+          <th>% capturado</th>
+          <th>Líneas</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.conteo.periodo|date:"Y-m" }}</td>
+          <td>{{ row.conteo.responsable }}</td>
+          <td>{{ row.conteo.get_estatus_display }}</td>
+          <td>{{ row.pct }}%</td>
+          <td>{{ row.captured }} / {{ row.total }}</td>
+          <td>
+            <a class="btn btn-secondary btn-small" href="{% url 'inventario:conteo_fisico_detail' row.conteo.id %}">Abrir</a>
+            <a class="btn btn-secondary btn-small" href="{% url 'inventario:conteo_fisico_export' row.conteo.id %}">Exportar Excel</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6" class="muted">Aún no hay conteos físicos inicializados.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
