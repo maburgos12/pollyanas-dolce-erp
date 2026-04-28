@@ -343,7 +343,13 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", os.getenv("EMAIL_HOST_USER", "webmaster@localhost"))
+EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", default=False)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", default=False)
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "webmaster@localhost")
 DIRECTOR_EMAIL = os.getenv("DIRECTOR_EMAIL", DEFAULT_FROM_EMAIL)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
