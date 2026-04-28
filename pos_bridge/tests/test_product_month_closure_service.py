@@ -18,6 +18,7 @@ from recetas.models import (
     ProductoMonthClosure,
     ProductoMonthClosureLine,
     Receta,
+    RecetaEquivalencia,
     RecetaPresentacionDerivada,
     VentaHistorica,
 )
@@ -121,6 +122,102 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(line.venta_derivada_equivalente, Decimal("2"))
         self.assertEqual(line.merma_derivada_equivalente, Decimal("0.5"))
         self.assertEqual(line.inventario_final_teorico, Decimal("27.5"))
+
+    def test_build_uses_closure_equivalence_before_derived_presentations(self):
+        cheesecake_parent = Receta.objects.create(
+            nombre="Cheesecake Mediano",
+            codigo_point="CH-M",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-cheesecake-mediano",
+        )
+        cheesecake_slice = Receta.objects.create(
+            nombre="Cheesecake Rebanada",
+            codigo_point="CH-R",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-cheesecake-rebanada",
+        )
+        RecetaEquivalencia.objects.create(
+            receta_porcion=cheesecake_slice,
+            receta_padre=cheesecake_parent,
+            factor_conversion=Decimal("8"),
+            fuente="test",
+        )
+        previous = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 8, 1),
+            month_end=date(2025, 8, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_BOOTSTRAP_SEED,
+            opening_reference_date=date(2025, 8, 31),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=previous,
+            receta_padre=cheesecake_parent,
+            inventario_final_teorico=Decimal("4"),
+        )
+        PointProductionLine.objects.create(
+            branch=self.point_branch,
+            erp_branch=self.sucursal,
+            receta=cheesecake_parent,
+            production_external_id="prod-cheesecake-1",
+            detail_external_id="detail-cheesecake-1",
+            source_hash="prod-cheesecake-hash-1",
+            production_date=date(2025, 9, 5),
+            item_name=cheesecake_parent.nombre,
+            item_code=cheesecake_parent.codigo_point,
+            produced_quantity=Decimal("6"),
+        )
+        VentaHistorica.objects.create(
+            receta=cheesecake_slice,
+            sucursal=self.sucursal,
+            fecha=date(2025, 9, 11),
+            cantidad=Decimal("16"),
+            fuente="POINT_BRIDGE_SALES",
+        )
+
+        closure = self.service.build(month="2025-09")
+
+        line = closure.lines.get(receta_padre=cheesecake_parent)
+        self.assertEqual(line.produccion_mes, Decimal("6"))
+        self.assertEqual(line.venta_derivada_equivalente, Decimal("2"))
+        self.assertEqual(line.inventario_final_teorico, Decimal("8"))
+
+    def test_build_ignores_recipes_marked_excluir_cierre(self):
+        empaque = Receta.objects.create(
+            nombre="Empaque Rebanada Especial",
+            codigo_point="EMP-R",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            excluir_cierre=True,
+            hash_contenido="hash-empaque-rebanada-especial",
+        )
+        previous = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 8, 1),
+            month_end=date(2025, 8, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_BOOTSTRAP_SEED,
+            opening_reference_date=date(2025, 8, 31),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=previous,
+            receta_padre=self.parent,
+            inventario_final_teorico=Decimal("5"),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=previous,
+            receta_padre=empaque,
+            inventario_final_teorico=Decimal("50"),
+        )
+        VentaHistorica.objects.create(
+            receta=empaque,
+            sucursal=self.sucursal,
+            fecha=date(2025, 9, 11),
+            cantidad=Decimal("30"),
+            fuente="POINT_BRIDGE_SALES",
+        )
+
+        closure = self.service.build(month="2025-09")
+
+        names = list(closure.lines.select_related("receta_padre").values_list("receta_padre__nombre", flat=True))
+        self.assertEqual(names, [self.parent.nombre])
 
     def test_build_uses_snapshot_opening_when_previous_closure_missing(self):
         point_parent = PointProduct.objects.create(external_id="point-parent", sku="SNK-M", name=self.parent.nombre)
@@ -296,6 +393,44 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertIn('"month": "2025-09"', payload)
         self.assertIn('"status": "warning"', payload)
         self.assertIn("requiere validacion manual previa al lock", payload)
+
+    def test_cargar_equivalencias_porciones_command_is_idempotent(self):
+        cheesecake_parent = Receta.objects.create(
+            nombre="Cheesecake Mediano Command",
+            codigo_point="CH-M-C",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-cheesecake-mediano-command",
+        )
+        cheesecake_slice = Receta.objects.create(
+            nombre="Cheesecake Rebanada Command",
+            codigo_point="CH-R-C",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-cheesecake-rebanada-command",
+        )
+        empaque = Receta.objects.create(
+            nombre="Empaque Command",
+            codigo_point="EMP-C",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-empaque-command",
+        )
+        csv_payload = (
+            "receta_porcion,receta_padre_confirmada,factor_conversion,confirmado\n"
+            f"{cheesecake_slice.nombre},{cheesecake_parent.nombre},8,SI\n"
+            f"{empaque.nombre},{empaque.nombre},1,EXCLUIR\n"
+        )
+
+        with NamedTemporaryFile(mode="w+", suffix=".csv", encoding="utf-8") as tmp:
+            tmp.write(csv_payload)
+            tmp.flush()
+            call_command("cargar_equivalencias_porciones", archivo=tmp.name, ejecutar=True, stdout=StringIO())
+            call_command("cargar_equivalencias_porciones", archivo=tmp.name, ejecutar=True, stdout=StringIO())
+
+        equivalence = RecetaEquivalencia.objects.get(receta_porcion=cheesecake_slice)
+        empaque.refresh_from_db()
+        self.assertEqual(equivalence.receta_padre, cheesecake_parent)
+        self.assertEqual(equivalence.factor_conversion, Decimal("8.000000"))
+        self.assertTrue(empaque.excluir_cierre)
+        self.assertEqual(RecetaEquivalencia.objects.filter(receta_porcion=cheesecake_slice).count(), 1)
 
     def test_build_carries_forward_previous_opening_issues(self):
         previous = ProductoMonthClosure.objects.create(
