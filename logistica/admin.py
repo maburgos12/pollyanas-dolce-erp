@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import EntregaRuta, RutaEntrega
+from .models import BitacoraRepartidor, EntregaRuta, Repartidor, ReporteUnidad, RutaEntrega, Unidad
 
 
 @admin.register(RutaEntrega)
@@ -46,3 +46,55 @@ class EntregaRutaAdmin(admin.ModelAdmin):
     list_filter = ("estatus", "ruta__fecha_ruta")
     search_fields = ("ruta__folio", "cliente_nombre", "pedido__folio", "direccion", "contacto")
     autocomplete_fields = ("ruta", "pedido")
+
+
+@admin.register(Unidad)
+class UnidadAdmin(admin.ModelAdmin):
+    list_display = ("codigo", "descripcion", "sucursal", "placa", "activa")
+    list_filter = ("activa", "sucursal")
+    search_fields = ("codigo", "descripcion", "placa", "sucursal__nombre", "sucursal__codigo")
+
+
+@admin.register(Repartidor)
+class RepartidorAdmin(admin.ModelAdmin):
+    list_display = ("user", "telefono", "sucursal", "unidad_asignada")
+    list_filter = ("sucursal", "unidad_asignada")
+    search_fields = ("user__username", "user__first_name", "user__last_name", "telefono", "unidad_asignada__codigo")
+    autocomplete_fields = ("user", "unidad_asignada", "sucursal")
+
+
+@admin.register(ReporteUnidad)
+class ReporteUnidadAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "unidad",
+        "repartidor",
+        "tipo",
+        "severidad",
+        "estatus",
+        "fecha_reporte",
+        "asignado_a",
+        "proveedor_servicio",
+        "costo_servicio",
+        "notificacion_escalada",
+    )
+    list_filter = ("estatus", "severidad", "tipo", "fecha_reporte", "unidad__sucursal", "notificacion_escalada")
+    search_fields = (
+        "unidad__codigo",
+        "unidad__placa",
+        "repartidor__user__username",
+        "descripcion",
+        "proveedor_servicio",
+        "notas_compras",
+    )
+    readonly_fields = ("fecha_reporte", "actualizado_en")
+    autocomplete_fields = ("repartidor", "unidad", "asignado_a")
+
+
+@admin.register(BitacoraRepartidor)
+class BitacoraRepartidorAdmin(admin.ModelAdmin):
+    list_display = ("repartidor", "fecha", "km_inicio", "km_fin", "actualizado_en")
+    list_filter = ("fecha", "repartidor__sucursal")
+    search_fields = ("repartidor__user__username", "repartidor__user__first_name", "repartidor__user__last_name", "novedades")
+    readonly_fields = ("creado_en", "actualizado_en")
+    autocomplete_fields = ("repartidor",)

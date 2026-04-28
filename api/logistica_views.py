@@ -6,23 +6,38 @@ from django.db import transaction
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from core.access import can_manage_logistica, can_view_logistica
 from core.audit import log_event
 from crm.models import PedidoCliente
-from logistica.models import EntregaRuta, RutaEntrega
+from logistica.models import BitacoraRepartidor, EntregaRuta, Repartidor, ReporteUnidad, RutaEntrega
 
 from .logistica_serializers import (
+    LogisticaBitacoraSerializer,
     LogisticaEntregaCreateSerializer,
     LogisticaEntregaSerializer,
+    LogisticaRepartidorSerializer,
+    LogisticaReporteCreateSerializer,
+    LogisticaReportePatchSerializer,
+    LogisticaReporteSerializer,
     LogisticaRutaSerializer,
 )
 
 
+LOGISTICA_ROLE_REPARTIDOR = "repartidor"
+LOGISTICA_ROLE_COMPRAS = "compras_logistica"
+LOGISTICA_ROLE_SUPERVISOR = "supervisor_logistica"
+
+
 class _LogisticaBaseView(APIView):
+    authentication_classes = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     @staticmethod
@@ -32,6 +47,180 @@ class _LogisticaBaseView(APIView):
         except (TypeError, ValueError):
             parsed = default
         return max(min_value, min(parsed, max_value))
+
+
+def _has_group(user, group_name: str) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    target = group_name.lower()
+    return user.is_superuser or user.groups.filter(name__iexact=target).exists()
+
+
+def _is_repartidor(user) -> bool:
+    return _has_group(user, LOGISTICA_ROLE_REPARTIDOR)
+
+
+def _is_compras_logistica(user) -> bool:
+    return _has_group(user, LOGISTICA_ROLE_COMPRAS)
+
+
+def _is_supervisor_logistica(user) -> bool:
+    return _has_group(user, LOGISTICA_ROLE_SUPERVISOR)
+
+
+def _can_view_all_reportes(user) -> bool:
+    return _is_compras_logistica(user) or _is_supervisor_logistica(user)
+
+
+def _get_repartidor_for_user(user) -> Repartidor | None:
+    try:
+        return user.repartidor_logistica
+    except Repartidor.DoesNotExist:
+        return None
+
+
+class LogisticaTokenView(TokenObtainPairView):
+    parser_classes = [JSONParser, FormParser]
+
+
+class LogisticaMiPerfilView(_LogisticaBaseView):
+    def get(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        data = {
+            "user": {
+                "id": request.user.id,
+                "username": request.user.username,
+                "nombre": request.user.get_full_name() or request.user.username,
+                "email": request.user.email,
+            },
+            "roles": list(request.user.groups.values_list("name", flat=True)),
+            "repartidor": LogisticaRepartidorSerializer(repartidor).data if repartidor else None,
+            "ultimos_servicios": [],
+        }
+        if repartidor and repartidor.unidad_asignada_id:
+            servicios = ReporteUnidad.objects.filter(unidad=repartidor.unidad_asignada).exclude(
+                estatus=ReporteUnidad.ESTATUS_ABIERTO
+            )[:10]
+            data["ultimos_servicios"] = LogisticaReporteSerializer(servicios, many=True).data
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class LogisticaReporteCreateView(_LogisticaBaseView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _is_repartidor(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden levantar reportes."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = LogisticaReporteCreateSerializer(data=request.data, context={"repartidor": repartidor})
+        serializer.is_valid(raise_exception=True)
+        reporte = serializer.save()
+        log_event(
+            request.user,
+            "CREATE",
+            "logistica.ReporteUnidad",
+            str(reporte.id),
+            {"unidad": reporte.unidad.codigo, "tipo": reporte.tipo, "severidad": reporte.severidad},
+        )
+        return Response(LogisticaReporteSerializer(reporte).data, status=status.HTTP_201_CREATED)
+
+
+class LogisticaMisReportesView(_LogisticaBaseView):
+    def get(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+        reportes = ReporteUnidad.objects.filter(repartidor=repartidor).select_related("unidad", "repartidor__user", "asignado_a")
+        return Response(LogisticaReporteSerializer(reportes, many=True).data, status=status.HTTP_200_OK)
+
+
+class LogisticaTodosReportesView(_LogisticaBaseView):
+    def get(self, request):
+        if not _can_view_all_reportes(request.user):
+            return Response({"detail": "No tienes permisos para consultar todos los reportes."}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = ReporteUnidad.objects.select_related("unidad", "repartidor__user", "asignado_a")
+        estatus_filtro = (request.query_params.get("estatus") or "").strip()
+        severidad = (request.query_params.get("severidad") or "").strip()
+        if estatus_filtro:
+            qs = qs.filter(estatus=estatus_filtro)
+        if severidad:
+            qs = qs.filter(severidad=severidad)
+        return Response(LogisticaReporteSerializer(qs, many=True).data, status=status.HTTP_200_OK)
+
+
+class LogisticaReporteDetailView(_LogisticaBaseView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def patch(self, request, reporte_id: int):
+        reporte = get_object_or_404(
+            ReporteUnidad.objects.select_related("repartidor__user", "unidad", "asignado_a"),
+            pk=reporte_id,
+        )
+        repartidor = _get_repartidor_for_user(request.user)
+        is_owner = repartidor and reporte.repartidor_id == repartidor.id
+        is_compras = _is_compras_logistica(request.user)
+        is_supervisor = _is_supervisor_logistica(request.user)
+        if not (is_owner or is_compras or is_supervisor):
+            return Response({"detail": "No tienes permisos para actualizar este reporte."}, status=status.HTTP_403_FORBIDDEN)
+        if request.data.get("estatus") == ReporteUnidad.ESTATUS_CERRADO and not is_supervisor:
+            return Response({"detail": "Solo supervisor_logistica puede cerrar reportes."}, status=status.HTTP_403_FORBIDDEN)
+
+        mutable_for_owner = {"descripcion", "foto", "kilometraje", "latitud", "longitud"}
+        if is_owner and not (is_compras or is_supervisor):
+            forbidden = set(request.data.keys()) - mutable_for_owner
+            if forbidden:
+                return Response({"detail": "El repartidor solo puede actualizar evidencia y datos del reporte."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = LogisticaReportePatchSerializer(reporte, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        reporte = serializer.save()
+        log_event(
+            request.user,
+            "UPDATE",
+            "logistica.ReporteUnidad",
+            str(reporte.id),
+            {"estatus": reporte.estatus, "severidad": reporte.severidad},
+        )
+        return Response(LogisticaReporteSerializer(reporte).data, status=status.HTTP_200_OK)
+
+
+class LogisticaBitacoraView(_LogisticaBaseView):
+    def get(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if _can_view_all_reportes(request.user):
+            qs = BitacoraRepartidor.objects.select_related("repartidor__user").all()
+            repartidor_id = request.query_params.get("repartidor")
+            fecha = request.query_params.get("fecha")
+            if repartidor_id:
+                qs = qs.filter(repartidor_id=repartidor_id)
+            if fecha:
+                qs = qs.filter(fecha=fecha)
+        elif repartidor:
+            qs = BitacoraRepartidor.objects.select_related("repartidor__user").filter(repartidor=repartidor)
+        else:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(LogisticaBitacoraSerializer(qs, many=True).data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _is_repartidor(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden capturar bitácora."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = LogisticaBitacoraSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+        bitacora, _ = BitacoraRepartidor.objects.update_or_create(
+            repartidor=repartidor,
+            fecha=payload.get("fecha"),
+            defaults={
+                "km_inicio": payload["km_inicio"],
+                "km_fin": payload.get("km_fin"),
+                "novedades": payload.get("novedades") or "",
+            },
+        )
+        return Response(LogisticaBitacoraSerializer(bitacora).data, status=status.HTTP_201_CREATED)
 
 
 class LogisticaRutasView(_LogisticaBaseView):

@@ -1,81 +1,129 @@
 from django.contrib.auth.models import Group, User
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient
 
-from crm.models import Cliente, PedidoCliente
+from core.models import Sucursal
+from logistica.models import Repartidor, ReporteUnidad, Unidad
 
 
-class LogisticaApiTests(APITestCase):
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class LogisticaReportesApiTests(TestCase):
     def setUp(self):
-        self.user_logistica = User.objects.create_user(username="logistica_api", password="pass123")
-        log_group, _ = Group.objects.get_or_create(name="LOGISTICA")
-        self.user_logistica.groups.add(log_group)
+        self.client = APIClient()
+        self.grupo_repartidor = Group.objects.create(name="repartidor")
+        self.grupo_compras = Group.objects.create(name="compras_logistica")
 
-        self.user_lectura = User.objects.create_user(username="lectura_log", password="pass123")
-        lectura_group, _ = Group.objects.get_or_create(name="LECTURA")
-        self.user_lectura.groups.add(lectura_group)
+        self.user_repartidor = User.objects.create_user(
+            username="repartidor.api",
+            password="pass123",
+            email="repartidor@example.com",
+        )
+        self.user_repartidor.groups.add(self.grupo_repartidor)
 
-    def test_rutas_create_and_list(self):
-        self.client.force_authenticate(self.user_logistica)
-        rutas_url = reverse("api_logistica_rutas")
-        resp_create = self.client.post(
-            rutas_url,
+        self.user_compras = User.objects.create_user(
+            username="compras.logistica",
+            password="pass123",
+            email="compras@example.com",
+        )
+        self.user_compras.groups.add(self.grupo_compras)
+
+        self.user_sin_grupo = User.objects.create_user(username="sin.grupo", password="pass123")
+
+        self.sucursal = Sucursal.objects.create(codigo="LOG-TST", nombre="Sucursal Logística Test", activa=True)
+        self.unidad = Unidad.objects.create(
+            codigo="UNI-TST-01",
+            descripcion="Unidad de reparto test",
+            sucursal=self.sucursal,
+            placa="TST-001",
+        )
+        self.repartidor = Repartidor.objects.create(
+            user=self.user_repartidor,
+            unidad_asignada=self.unidad,
+            telefono="6871000000",
+            sucursal=self.sucursal,
+        )
+
+    def _jwt_for(self, username: str, password: str = "pass123") -> str:
+        response = self.client.post(
+            reverse("api_logistica_auth_token"),
+            {"username": username, "password": password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response.data["access"]
+
+    def _auth(self, token: str):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    def test_repartidor_crea_reporte_via_api(self):
+        self._auth(self._jwt_for("repartidor.api"))
+        response = self.client.post(
+            reverse("api_logistica_reportes"),
             {
-                "nombre": "Ruta API Centro",
-                "fecha_ruta": "2026-02-24",
-                "chofer": "Mario",
-                "unidad": "Van 2",
-                "estatus": "PLANEADA",
+                "tipo": ReporteUnidad.TIPO_FALLA,
+                "severidad": ReporteUnidad.SEVERIDAD_URGENTE,
+                "descripcion": "La unidad presenta ruido en frenos.",
+                "kilometraje": 42100,
             },
             format="json",
         )
-        self.assertEqual(resp_create.status_code, status.HTTP_201_CREATED)
 
-        resp_list = self.client.get(rutas_url)
-        self.assertEqual(resp_list.status_code, status.HTTP_200_OK)
-        self.assertGreaterEqual(resp_list.data["count"], 1)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(ReporteUnidad.objects.count(), 1)
+        self.assertEqual(response.data["unidad_codigo"], self.unidad.codigo)
 
-    def test_entregas_create_and_dashboard(self):
-        self.client.force_authenticate(self.user_logistica)
-        cliente = Cliente.objects.create(nombre="Cliente API Log")
-        pedido = PedidoCliente.objects.create(cliente=cliente, descripcion="Pedido API Log")
-
-        rutas_url = reverse("api_logistica_rutas")
-        ruta_resp = self.client.post(
-            rutas_url,
-            {"nombre": "Ruta API Norte", "fecha_ruta": "2026-02-24", "estatus": "PLANEADA"},
-            format="json",
-        )
-        self.assertEqual(ruta_resp.status_code, status.HTTP_201_CREATED)
-        ruta_id = ruta_resp.data["id"]
-
-        entregas_url = reverse("api_logistica_ruta_entregas", kwargs={"ruta_id": ruta_id})
-        entrega_resp = self.client.post(
-            entregas_url,
+    def test_crear_reporte_sin_autenticacion_devuelve_401(self):
+        response = self.client.post(
+            reverse("api_logistica_reportes"),
             {
-                "secuencia": 1,
-                "pedido_id": pedido.id,
-                "direccion": "Sucursal Centro",
-                "estatus": "PENDIENTE",
-                "monto_estimado": "1200.00",
+                "tipo": ReporteUnidad.TIPO_FALLA,
+                "severidad": ReporteUnidad.SEVERIDAD_URGENTE,
+                "descripcion": "Reporte sin sesión.",
             },
             format="json",
         )
-        self.assertEqual(entrega_resp.status_code, status.HTTP_201_CREATED)
 
-        dashboard_url = reverse("api_logistica_dashboard")
-        dash_resp = self.client.get(dashboard_url)
-        self.assertEqual(dash_resp.status_code, status.HTTP_200_OK)
-        self.assertIn("rutas", dash_resp.data)
-        self.assertIn("entregas", dash_resp.data)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_lectura_can_view_but_not_create(self):
-        self.client.force_authenticate(self.user_lectura)
-        rutas_url = reverse("api_logistica_rutas")
+    def test_compras_logistica_puede_actualizar_reporte(self):
+        reporte = ReporteUnidad.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            tipo=ReporteUnidad.TIPO_MANTENIMIENTO,
+            severidad=ReporteUnidad.SEVERIDAD_URGENTE,
+            descripcion="Servicio preventivo pendiente.",
+        )
 
-        resp_list = self.client.get(rutas_url)
-        self.assertEqual(resp_list.status_code, status.HTTP_200_OK)
+        self._auth(self._jwt_for("compras.logistica"))
+        response = self.client.patch(
+            reverse("api_logistica_reporte_detail", kwargs={"reporte_id": reporte.id}),
+            {
+                "estatus": ReporteUnidad.ESTATUS_EN_PROCESO,
+                "proveedor_servicio": "Taller autorizado",
+                "notas_compras": "Cotización solicitada.",
+            },
+            format="json",
+        )
 
-        resp_create = self.client.post(rutas_url, {"nombre": "No permitido"}, format="json")
-        self.assertEqual(resp_create.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["estatus"], ReporteUnidad.ESTATUS_EN_PROCESO)
+
+    def test_repartidor_no_puede_actualizar_estatus_de_reporte(self):
+        reporte = ReporteUnidad.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            tipo=ReporteUnidad.TIPO_MANTENIMIENTO,
+            severidad=ReporteUnidad.SEVERIDAD_URGENTE,
+            descripcion="Servicio preventivo pendiente.",
+        )
+
+        self._auth(self._jwt_for("repartidor.api"))
+        response = self.client.patch(
+            reverse("api_logistica_reporte_detail", kwargs={"reporte_id": reporte.id}),
+            {"estatus": ReporteUnidad.ESTATUS_EN_PROCESO},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
