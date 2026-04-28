@@ -343,6 +343,9 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", os.getenv("EMAIL_HOST_USER", "webmaster@localhost"))
+DIRECTOR_EMAIL = os.getenv("DIRECTOR_EMAIL", DEFAULT_FROM_EMAIL)
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 POS_BRIDGE_AGENT_MODEL = os.getenv("POS_BRIDGE_AGENT_MODEL", "gpt-4o-mini")
 

@@ -313,6 +313,44 @@ class Command(BaseCommand):
             },
         )
 
+        monthly_data_check_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="6",
+            day_of_week="*",
+            day_of_month="3",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="core: verificar datos mes anterior",
+            defaults={
+                "task": "core.tasks.verificar_datos_mes",
+                "crontab": monthly_data_check_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
+        monthly_auto_close_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="6",
+            day_of_week="*",
+            day_of_month="5",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="core: cierre automático mes anterior",
+            defaults={
+                "task": "core.tasks.cerrar_mes_anterior",
+                "crontab": monthly_auto_close_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         orchestration_daily_plan_hour = _env_int("ORQUESTACION_DAILY_PLAN_HOUR", 9, minimum=0, maximum=23)
         orchestration_daily_plan_minute = _env_int("ORQUESTACION_DAILY_PLAN_MINUTE", 5, minimum=0, maximum=59)
         orchestration_daily_plan_cron, _ = CrontabSchedule.objects.get_or_create(
