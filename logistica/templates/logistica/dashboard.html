@@ -90,6 +90,35 @@
     <article class="bi-kpi-card"><div class="bi-kpi-value {% if incidencias %}danger{% else %}success{% endif %}">{{ incidencias|intcomma }}</div><div class="bi-kpi-label">Incidencias abiertas</div><div class="bi-kpi-note">Casos que todavía frenan el cierre total.</div></article>
   </section>
 
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Unidades</div>
+        <h2 class="bi-panel-title">Gestión de Unidades</h2>
+      </div>
+      <div class="bi-panel-actions">
+        <a class="btn btn-secondary btn-sm" href="{% url 'logistica:unidades_list' %}">Gestionar unidades</a>
+      </div>
+    </div>
+    <div class="bi-summary-band">
+      <div class="bi-summary-chip"><span>Unidades activas</span><strong>{{ unidades_activas|intcomma }}</strong></div>
+    </div>
+    <div class="bi-list bi-list-dense">
+      {% for unidad in ultimas_unidades %}
+      <article class="bi-list-item is-tight">
+        <strong>{{ unidad.codigo }} · {{ unidad.descripcion }}</strong>
+        <div>{{ unidad.marca|default:"Sin marca" }} · {{ unidad.modelo|default:"Sin modelo" }} · {{ unidad.placa|default:"Sin placa" }}</div>
+        <div class="bi-subtle">{{ unidad.sucursal }} · {% if unidad.activa %}Activa{% else %}Inactiva{% endif %}</div>
+      </article>
+      {% empty %}
+      <article class="bi-list-item">
+        <strong>Sin unidades registradas</strong>
+        <div class="bi-subtle">Carga las unidades operativas para habilitar el control de flotilla.</div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
   {% if has_visible_data %}
   <section class="bi-grid-feature">
     <article class="bi-panel">

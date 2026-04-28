@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -14,9 +15,10 @@ from django.utils import timezone
 
 from core.access import can_manage_logistica, can_view_logistica
 from core.audit import log_event
+from core.models import Sucursal
 from crm.models import PedidoCliente
 
-from .models import EntregaRuta, RutaEntrega
+from .models import EntregaRuta, RutaEntrega, Unidad
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -43,7 +45,16 @@ def _module_tabs(active: str) -> list[dict]:
     return [
         {"label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
         {"label": "Rutas", "url_name": "logistica:rutas", "active": active == "rutas"},
+        {"label": "Unidades", "url_name": "logistica:unidades_list", "active": active == "unidades"},
     ]
+
+
+def _can_manage_unidades(user) -> bool:
+    if not user.is_authenticated:
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+    return user.groups.filter(name__in=["supervisor_logistica", "dg"]).exists()
 
 
 def _logistica_enterprise_chain(
@@ -642,6 +653,8 @@ def dashboard(request):
         entregas_qs.filter(estatus__in=[EntregaRuta.ESTATUS_PENDIENTE, EntregaRuta.ESTATUS_INCIDENCIA])
         .order_by("-updated_at", "-id")[:4]
     )
+    unidades_activas = Unidad.objects.filter(activa=True).count()
+    ultimas_unidades = list(Unidad.objects.select_related("sucursal").order_by("-id")[:5])
     dashboard_query = {
         "date_from": date_from.isoformat(),
         "date_to": date_to.isoformat(),
@@ -670,6 +683,8 @@ def dashboard(request):
         "latest_routes": latest_routes,
         "incident_routes": incident_routes,
         "pending_deliveries": pending_deliveries,
+        "unidades_activas": unidades_activas,
+        "ultimas_unidades": ultimas_unidades,
         "has_visible_data": any([rutas_total, entregas_total]),
         "date_from": date_from.isoformat(),
         "date_to": date_to.isoformat(),
@@ -683,6 +698,124 @@ def dashboard(request):
         "rutas_incidencias_url": reverse("logistica:rutas") + f"?{urlencode({**dashboard_query, 'enterprise_focus': 'INCIDENCIAS'})}",
     }
     return render(request, "logistica/dashboard.html", context)
+
+
+def _unidad_payload_from_request(request):
+    return {
+        "codigo": (request.POST.get("codigo") or "").strip(),
+        "descripcion": (request.POST.get("descripcion") or "").strip(),
+        "marca": (request.POST.get("marca") or "").strip() or None,
+        "modelo": (request.POST.get("modelo") or "").strip() or None,
+        "placa": (request.POST.get("placa") or "").strip(),
+        "color": (request.POST.get("color") or "").strip() or None,
+        "activa": request.POST.get("activa") == "on",
+        "sucursal_id": request.POST.get("sucursal") or None,
+    }
+
+
+def _render_unidad_form(request, *, unidad=None, errors=None):
+    return render(
+        request,
+        "logistica/unidad_form.html",
+        {
+            "module_tabs": _module_tabs("unidades"),
+            "unidad": unidad,
+            "sucursales": Sucursal.objects.filter(activa=True).order_by("codigo", "nombre"),
+            "errors": errors or {},
+        },
+    )
+
+
+@login_required
+def unidades_list(request):
+    if not _can_manage_unidades(request.user):
+        raise PermissionDenied("No tienes permisos para gestionar unidades de Logística")
+
+    query = (request.GET.get("q") or "").strip()
+    qs = Unidad.objects.select_related("sucursal").order_by("codigo")
+    if query:
+        qs = qs.filter(Q(codigo__icontains=query) | Q(placa__icontains=query) | Q(descripcion__icontains=query))
+    paginator = Paginator(qs, 10)
+    unidades = paginator.get_page(request.GET.get("page"))
+    return render(
+        request,
+        "logistica/unidades_list.html",
+        {
+            "module_tabs": _module_tabs("unidades"),
+            "unidades": unidades,
+            "query": query,
+        },
+    )
+
+
+@login_required
+def unidad_create(request):
+    if not _can_manage_unidades(request.user):
+        raise PermissionDenied("No tienes permisos para gestionar unidades de Logística")
+
+    if request.method == "POST":
+        payload = _unidad_payload_from_request(request)
+        errors = {}
+        if not payload["codigo"]:
+            errors["codigo"] = "El código es obligatorio."
+        if not payload["descripcion"]:
+            errors["descripcion"] = "La descripción es obligatoria."
+        if not payload["sucursal_id"]:
+            errors["sucursal"] = "La sucursal es obligatoria."
+        if Unidad.objects.filter(codigo=payload["codigo"]).exists():
+            errors["codigo"] = "Ya existe una unidad con este código."
+        if not errors:
+            Unidad.objects.create(**payload)
+            messages.success(request, "Unidad creada correctamente.")
+            return redirect("logistica:unidades_list")
+        unidad = Unidad(**{key: value for key, value in payload.items() if key != "sucursal_id"})
+        unidad.sucursal_id = payload["sucursal_id"]
+        return _render_unidad_form(request, unidad=unidad, errors=errors)
+
+    return _render_unidad_form(request)
+
+
+@login_required
+def unidad_edit(request, pk):
+    if not _can_manage_unidades(request.user):
+        raise PermissionDenied("No tienes permisos para gestionar unidades de Logística")
+
+    unidad = get_object_or_404(Unidad, pk=pk)
+    if request.method == "POST":
+        payload = _unidad_payload_from_request(request)
+        errors = {}
+        if not payload["codigo"]:
+            errors["codigo"] = "El código es obligatorio."
+        if not payload["descripcion"]:
+            errors["descripcion"] = "La descripción es obligatoria."
+        if not payload["sucursal_id"]:
+            errors["sucursal"] = "La sucursal es obligatoria."
+        if Unidad.objects.filter(codigo=payload["codigo"]).exclude(pk=unidad.pk).exists():
+            errors["codigo"] = "Ya existe una unidad con este código."
+        if not errors:
+            for field, value in payload.items():
+                setattr(unidad, field, value)
+            unidad.save()
+            messages.success(request, "Unidad actualizada correctamente.")
+            return redirect("logistica:unidades_list")
+        for field, value in payload.items():
+            setattr(unidad, field, value)
+        return _render_unidad_form(request, unidad=unidad, errors=errors)
+
+    return _render_unidad_form(request, unidad=unidad)
+
+
+@login_required
+def unidad_toggle(request, pk):
+    if not _can_manage_unidades(request.user):
+        raise PermissionDenied("No tienes permisos para gestionar unidades de Logística")
+    if request.method != "POST":
+        return redirect("logistica:unidades_list")
+    unidad = get_object_or_404(Unidad, pk=pk)
+    unidad.activa = not unidad.activa
+    unidad.save(update_fields=["activa"])
+    messages.success(request, f"Unidad {unidad.codigo} {'activada' if unidad.activa else 'desactivada'}.")
+    return redirect("logistica:unidades_list")
 
 
 @login_required
