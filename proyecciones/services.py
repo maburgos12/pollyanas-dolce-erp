@@ -6,13 +6,12 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
-from django.db.models import OuterRef, Subquery, Sum
+from django.db.models import Sum
 from django.utils import timezone
 
 from control.models import DevolucionSucursalMatriz, MermaMensualSucursal
 from core.models import Sucursal, sucursales_operativas
 from pos_bridge.models import PointInventorySnapshot
-from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import Receta, VentaHistorica
 from reportes.models import FactVentaDiaria
 from ventas.services.sales_canonical_source import POINT_BRIDGE_SALES_SOURCE
@@ -279,31 +278,29 @@ class ProyeccionProduccionService:
         if not keys:
             return {}
         branch_ids = sorted({branch_id for branch_id, _recipe_id in keys})
-        latest_snapshot_id = (
-            PointInventorySnapshot.objects.filter(branch_id=OuterRef("branch_id"), product_id=OuterRef("product_id"))
-            .order_by("-captured_at", "-id")
-            .values("id")[:1]
+        recipe_ids = sorted({recipe_id for _branch_id, recipe_id in keys})
+        product_recipe_map = self._point_products_for_recipes(recipe_ids=recipe_ids)
+        if not product_recipe_map:
+            return {}
+        product_ids = sorted(product_recipe_map)
+        latest_captured_at = (
+            PointInventorySnapshot.objects.filter(branch__erp_branch_id__in=branch_ids, product_id__in=product_ids)
+            .order_by("-captured_at")
+            .values_list("captured_at", flat=True)
+            .first()
         )
+        if latest_captured_at is None:
+            return {}
         snapshots = list(
-            PointInventorySnapshot.objects.select_related("product", "branch__erp_branch")
-            .filter(branch__erp_branch_id__in=branch_ids, id=Subquery(latest_snapshot_id))
+            PointInventorySnapshot.objects.select_related("branch")
+            .filter(
+                branch__erp_branch_id__in=branch_ids,
+                product_id__in=product_ids,
+                captured_at=latest_captured_at,
+            )
+            .only("branch__erp_branch_id", "product_id", "stock")
             .order_by("branch_id", "product_id")
         )
-        product_ids = {snapshot.product_id for snapshot in snapshots}
-        product_recipe_map = dict(
-            FactVentaDiaria.objects.filter(point_product_id__in=product_ids, receta_id__isnull=False)
-            .order_by("point_product_id", "-fecha")
-            .distinct("point_product_id")
-            .values_list("point_product_id", "receta_id")
-        )
-        matcher = PointSalesMatchingService()
-        for snapshot in snapshots:
-            if snapshot.product_id in product_recipe_map:
-                continue
-            receta = matcher.resolve_receta(codigo_point=snapshot.product.sku, point_name=snapshot.product.name)
-            if receta is not None:
-                product_recipe_map[snapshot.product_id] = receta.id
-
         stock_map: dict[tuple[int, int], Decimal] = defaultdict(lambda: ZERO)
         for snapshot in snapshots:
             branch_id = getattr(snapshot.branch, "erp_branch_id", None)
@@ -314,6 +311,18 @@ class ProyeccionProduccionService:
             if key in keys:
                 stock_map[key] += _to_decimal(snapshot.stock)
         return dict(stock_map)
+
+    def _point_products_for_recipes(self, *, recipe_ids: list[int]) -> dict[int, int]:
+        rows = (
+            FactVentaDiaria.objects.filter(receta_id__in=recipe_ids, point_product_id__isnull=False)
+            .order_by("point_product_id", "-fecha")
+            .distinct("point_product_id")
+            .values("point_product_id", "receta_id")
+        )
+        product_recipe_map: dict[int, int] = {}
+        for row in rows:
+            product_recipe_map[int(row["point_product_id"])] = int(row["receta_id"])
+        return product_recipe_map
 
     def _confidence(self, history_days: int) -> str:
         if history_days >= 14:
