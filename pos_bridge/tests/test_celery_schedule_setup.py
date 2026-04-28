@@ -39,6 +39,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "pos_bridge: snapshot semanal costeo",
                 "proyecciones: producción día siguiente",
                 "proyecciones: producción semana siguiente",
+                "inventario: consumos BOM día anterior",
                 "reportes: refresh analytics operativo",
                 "orquestacion: plan diario faltante",
                 "orquestacion: cadena plan demanda-produccion-compras",
@@ -46,7 +47,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "orquestacion: guardia ajustes inventario",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 18)
+        self.assertEqual(PeriodicTask.objects.count(), 19)
         realtime = PeriodicTask.objects.get(name="pos_bridge: inventario realtime")
         self.assertEqual(realtime.interval.every, 5)
         monthly = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
@@ -74,6 +75,9 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(projection_weekly.crontab.hour, "21")
         self.assertEqual(projection_weekly.crontab.minute, "0")
         self.assertEqual(projection_weekly.crontab.day_of_week, "0")
+        bom_consumption = PeriodicTask.objects.get(name="inventario: consumos BOM día anterior")
+        self.assertEqual(bom_consumption.crontab.hour, "22")
+        self.assertEqual(bom_consumption.crontab.minute, "30")
 
     def test_respects_orchestration_schedule_overrides(self):
         from django_celery_beat.models import PeriodicTask

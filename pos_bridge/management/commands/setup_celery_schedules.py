@@ -294,6 +294,25 @@ class Command(BaseCommand):
             },
         )
 
+        bom_consumption_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="30",
+            hour="22",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="inventario: consumos BOM día anterior",
+            defaults={
+                "task": "inventario.generar_consumos_bom_dia_anterior",
+                "crontab": bom_consumption_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         orchestration_daily_plan_hour = _env_int("ORQUESTACION_DAILY_PLAN_HOUR", 9, minimum=0, maximum=23)
         orchestration_daily_plan_minute = _env_int("ORQUESTACION_DAILY_PLAN_MINUTE", 5, minimum=0, maximum=59)
         orchestration_daily_plan_cron, _ = CrontabSchedule.objects.get_or_create(
