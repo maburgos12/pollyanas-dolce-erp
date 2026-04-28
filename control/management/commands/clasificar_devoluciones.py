@@ -6,7 +6,7 @@ from control.services_mermas_devoluciones import MermaDevolucionAuditService
 
 
 class Command(BaseCommand):
-    help = "Clasifica devoluciones sucursal/devoluciones -> matriz desde PointTransferLine."
+    help = "Clasifica devoluciones sucursal -> DEVOLUCIONES desde PointTransferLine; no las trata como merma."
 
     def add_arguments(self, parser):
         parser.add_argument("--period", required=True, help="Periodo YYYY-MM.")

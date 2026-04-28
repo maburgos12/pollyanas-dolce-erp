@@ -293,7 +293,9 @@ class MermaDevolucionAuditServiceTests(TestCase):
     def setUp(self):
         self.sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
         self.branch = PointBranch.objects.create(external_id="1", name="MATRIZ", erp_branch=self.sucursal)
-        self.origin = PointBranch.objects.create(external_id="12", name="DEVOLUCIONES")
+        self.store = Sucursal.objects.create(codigo="CRUCERO", nombre="Crucero", activa=True)
+        self.origin = PointBranch.objects.create(external_id="12", name="CRUCERO", erp_branch=self.store)
+        self.devoluciones = PointBranch.objects.create(external_id="98", name="DEVOLUCIONES")
         self.receta = Receta.objects.create(
             nombre="Pastel merma test",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
@@ -337,11 +339,60 @@ class MermaDevolucionAuditServiceTests(TestCase):
         self.assertEqual(row.unidades_vendidas, Decimal("100"))
         self.assertEqual(row.pct_merma_sobre_venta, Decimal("2.00"))
 
+    def test_consolidar_mermas_homologates_missing_erp_branch_by_name(self):
+        point_branch = PointBranch.objects.create(external_id="13", name="Crucero")
+        PointWasteLine.objects.create(
+            branch=point_branch,
+            receta=self.receta,
+            movement_external_id="waste-test-branch-match",
+            source_hash="waste-test-branch-match-hash",
+            movement_at=timezone.make_aware(datetime(2026, 4, 10, 10, 0, 0)),
+            item_name=self.receta.nombre,
+            item_code=self.receta.codigo_point,
+            quantity=Decimal("2"),
+            unit_cost=Decimal("10"),
+            total_cost=Decimal("20"),
+            justification="Vencimiento",
+        )
+
+        result = self.service.consolidar_mermas(period="2026-04", dry_run=False)
+
+        self.assertEqual(result.branch_homologated_rows, 1)
+        row = MermaMensualSucursal.objects.get()
+        self.assertEqual(row.sucursal, self.store)
+        self.assertEqual(row.metadata["branch_point"], "Crucero")
+        self.assertEqual(row.metadata["branch_resolution"], "NAME_MATCH")
+
+    def test_consolidar_mermas_keeps_unresolved_branch_instead_of_skipping(self):
+        point_branch = PointBranch.objects.create(external_id="14", name="Sucursal fantasma")
+        PointWasteLine.objects.create(
+            branch=point_branch,
+            receta=self.receta,
+            movement_external_id="waste-test-unresolved-branch",
+            source_hash="waste-test-unresolved-branch-hash",
+            movement_at=timezone.make_aware(datetime(2026, 4, 10, 10, 0, 0)),
+            item_name=self.receta.nombre,
+            item_code=self.receta.codigo_point,
+            quantity=Decimal("2"),
+            unit_cost=Decimal("10"),
+            total_cost=Decimal("20"),
+            justification="Vencimiento",
+        )
+
+        result = self.service.consolidar_mermas(period="2026-04", dry_run=False)
+
+        self.assertEqual(result.unresolved_branch_rows, 1)
+        self.assertEqual(result.skipped, 0)
+        row = MermaMensualSucursal.objects.get()
+        self.assertIsNone(row.sucursal)
+        self.assertEqual(row.metadata["branch_point"], "Sucursal fantasma")
+        self.assertEqual(row.metadata["branch_resolution"], "UNRESOLVED")
+
     def test_clasificar_devoluciones_reads_transfer_without_modifying_source(self):
         transfer = PointTransferLine.objects.create(
             origin_branch=self.origin,
-            destination_branch=self.branch,
-            erp_destination_branch=self.sucursal,
+            destination_branch=self.devoluciones,
+            erp_origin_branch=self.store,
             receta=self.receta,
             transfer_external_id="transfer-test-1",
             detail_external_id="transfer-detail-test-1",
@@ -366,3 +417,28 @@ class MermaDevolucionAuditServiceTests(TestCase):
         self.assertEqual(row.unidades, Decimal("3"))
         self.assertEqual(row.costo_estimado, Decimal("45.00"))
         self.assertEqual(row.motivo, DevolucionSucursalMatriz.MOTIVO_VIDA_UTIL)
+        self.assertFalse(row.metadata["es_perdida"])
+        self.assertEqual(row.metadata["flujo"], "SUCURSAL_DEVOLUCIONES")
+
+    def test_clasificar_devoluciones_ignores_devoluciones_to_matriz_recovery(self):
+        PointTransferLine.objects.create(
+            origin_branch=self.devoluciones,
+            destination_branch=self.branch,
+            erp_destination_branch=self.sucursal,
+            receta=self.receta,
+            transfer_external_id="transfer-test-2",
+            detail_external_id="transfer-detail-test-2",
+            source_hash="transfer-hash-test-2",
+            registered_at=timezone.make_aware(datetime(2026, 4, 12, 12, 0, 0)),
+            item_name=self.receta.nombre,
+            item_code=self.receta.codigo_point,
+            unit_cost=Decimal("15"),
+            requested_quantity=Decimal("3"),
+            sent_quantity=Decimal("3"),
+            received_quantity=Decimal("3"),
+        )
+
+        result = self.service.clasificar_devoluciones(period="2026-04", dry_run=True)
+
+        self.assertEqual(result.source_rows, 0)
+        self.assertEqual(result.total_cost, Decimal("0.00"))
