@@ -162,6 +162,7 @@ INSTALLED_APPS = [
     "horarios_especiales",
     "pos_bridge",
     "reportes",
+    "proyecciones",
     "orquestacion",
     "rentabilidad",
     "api",

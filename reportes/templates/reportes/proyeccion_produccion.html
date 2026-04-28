@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Reportes - Proyección Producción{% endblock %}
+{% block page_title %}Reportes · Proyección Producción{% endblock %}
+
+{% block extra_css %}
+<style>
+  .projection-shell { display:grid; gap:1rem; }
+  .projection-toolbar, .projection-kpi, .projection-panel {
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+  }
+  .projection-toolbar {
+    display:flex;
+    justify-content:space-between;
+    gap:.75rem;
+    flex-wrap:wrap;
+    align-items:end;
+    padding:1rem;
+  }
+  .projection-controls { display:flex; gap:.7rem; flex-wrap:wrap; align-items:end; }
+  .projection-field { display:grid; gap:.25rem; min-width:150px; }
+  .projection-field label { color:var(--muted); font-size:.78rem; font-weight:700; text-transform:uppercase; }
+  .projection-field input, .projection-field select {
+    height:38px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:0 .65rem;
+    background:#fff;
+  }
+  .projection-actions { display:flex; gap:.5rem; flex-wrap:wrap; }
+  .projection-button {
+    height:38px;
+    border:0;
+    border-radius:6px;
+    padding:0 .9rem;
+    background:#17324d;
+    color:#fff;
+    font-weight:700;
+    text-decoration:none;
+    display:inline-flex;
+    align-items:center;
+  }
+  .projection-button.secondary { background:#526173; }
+  .projection-kpis { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:.75rem; }
+  .projection-kpi { padding:1rem; }
+  .projection-kpi span { display:block; color:var(--muted); font-size:.78rem; font-weight:700; text-transform:uppercase; }
+  .projection-kpi strong { display:block; margin-top:.25rem; color:#17324d; font-size:1.2rem; }
+  .projection-panel { overflow:auto; }
+  .projection-panel h2 { margin:0; padding:1rem 1rem .5rem; color:#17324d; font-size:1rem; }
+  .projection-table { width:100%; min-width:1100px; border-collapse:separate; border-spacing:0; }
+  .projection-table th, .projection-table td {
+    padding:.55rem .65rem;
+    border-top:1px solid var(--line);
+    white-space:nowrap;
+    text-align:left;
+  }
+  .projection-table th { background:#f8fafc; color:#44546a; font-size:.75rem; text-transform:uppercase; }
+  .confidence { font-weight:800; }
+  .confidence.ALTA { color:#16794a; }
+  .confidence.MEDIA { color:#b7791f; }
+  .confidence.BAJA { color:#b42318; }
+  @media (max-width: 900px) {
+    .projection-kpis { grid-template-columns:1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="projection-shell">
+  <form class="projection-toolbar" method="get">
+    <div class="projection-controls">
+      <div class="projection-field">
+        <label for="modo">Vista</label>
+        <select id="modo" name="modo">
+          <option value="dia" {% if mode == "dia" %}selected{% endif %}>Día</option>
+          <option value="semana" {% if mode == "semana" %}selected{% endif %}>Semana</option>
+        </select>
+      </div>
+      <div class="projection-field">
+        <label for="fecha">Fecha</label>
+        <input id="fecha" name="fecha" type="date" value="{{ target_date_value }}">
+      </div>
+      <div class="projection-field">
+        <label for="sucursal">Sucursal</label>
+        <select id="sucursal" name="sucursal_id">
+          <option value="">Todas</option>
+          {% for sucursal in sucursales %}
+          <option value="{{ sucursal.id }}" {% if selected_sucursal_id == sucursal.id %}selected{% endif %}>{{ sucursal.codigo }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="projection-actions">
+      <button class="projection-button" type="submit">Actualizar</button>
+      <a class="projection-button secondary" href="?modo={{ mode }}&fecha={{ target_date_value }}&sucursal_id={{ selected_sucursal_id }}&export=xlsx">Exportar Excel</a>
+    </div>
+  </form>
+
+  <form method="post" class="projection-toolbar">
+    {% csrf_token %}
+    <input type="hidden" name="modo" value="{{ mode }}">
+    <input type="hidden" name="fecha" value="{{ target_date_value }}">
+    <input type="hidden" name="sucursal_id" value="{{ selected_sucursal_id }}">
+    <span>Genera o actualiza la proyección con ventas, merma, devoluciones y stock actuales.</span>
+    <button class="projection-button" type="submit">Generar ahora</button>
+  </form>
+
+  <section class="projection-kpis">
+    <article class="projection-kpi">
+      <span>Filas proyectadas</span>
+      <strong>{{ summary.rows|intcomma }}</strong>
+    </article>
+    <article class="projection-kpi">
+      <span>Unidades a producir</span>
+      <strong>{{ summary.total_units|floatformat:3|intcomma }}</strong>
+    </article>
+    <article class="projection-kpi">
+      <span>Confianza alta</span>
+      <strong>{{ summary.high_confidence|intcomma }}</strong>
+    </article>
+  </section>
+
+  {% if mode == "semana" %}
+  <section class="projection-panel">
+    <h2>Vista semana</h2>
+    <table class="projection-table">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Sucursal</th>
+          {% for day in week_dates %}<th>{{ day|date:"D d" }}</th>{% endfor %}
+          <th>Total semana</th>
+          <th>Confianza</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in weekly_rows %}
+        <tr>
+          <td>{{ row.receta.nombre }}</td>
+          <td>{% if row.sucursal %}{{ row.sucursal.codigo }}{% else %}Todas{% endif %}</td>
+          {% for value in row.cells %}
+          <td>{{ value|floatformat:3|intcomma }}</td>
+          {% endfor %}
+          <td><strong>{{ row.total|floatformat:3|intcomma }}</strong></td>
+          <td><span class="confidence {{ row.confianza }}">{{ row.confianza }}</span></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="10">Sin proyección generada para el filtro actual.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% else %}
+  <section class="projection-panel">
+    <h2>Vista día</h2>
+    <table class="projection-table">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Sucursal</th>
+          <th>Stock actual</th>
+          <th>Venta proyectada</th>
+          <th>Factor merma</th>
+          <th>Factor dev</th>
+          <th>Producir hoy</th>
+          <th>Confianza</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.receta.nombre }}</td>
+          <td>{% if row.sucursal %}{{ row.sucursal.codigo }}{% else %}Todas{% endif %}</td>
+          <td>{{ row.stock_actual|floatformat:3|intcomma }}</td>
+          <td>{{ row.venta_proyectada|floatformat:3|intcomma }}</td>
+          <td>{{ row.factor_merma|floatformat:4 }}</td>
+          <td>{{ row.factor_devolucion|floatformat:4 }}</td>
+          <td><strong>{{ row.unidades_proyectadas_ajustadas|floatformat:3|intcomma }}</strong></td>
+          <td><span class="confidence {{ row.confianza }}">{{ row.confianza }}</span></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8">Sin proyección generada para el filtro actual.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
