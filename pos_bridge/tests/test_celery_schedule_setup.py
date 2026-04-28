@@ -40,6 +40,8 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "proyecciones: producción día siguiente",
                 "proyecciones: producción semana siguiente",
                 "inventario: consumos BOM día anterior",
+                "core: verificar datos mes anterior",
+                "core: cierre automático mes anterior",
                 "reportes: refresh analytics operativo",
                 "orquestacion: plan diario faltante",
                 "orquestacion: cadena plan demanda-produccion-compras",
@@ -47,7 +49,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "orquestacion: guardia ajustes inventario",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 19)
+        self.assertEqual(PeriodicTask.objects.count(), 21)
         realtime = PeriodicTask.objects.get(name="pos_bridge: inventario realtime")
         self.assertEqual(realtime.interval.every, 5)
         monthly = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
@@ -78,6 +80,16 @@ class SetupCelerySchedulesCommandTests(TestCase):
         bom_consumption = PeriodicTask.objects.get(name="inventario: consumos BOM día anterior")
         self.assertEqual(bom_consumption.crontab.hour, "22")
         self.assertEqual(bom_consumption.crontab.minute, "30")
+        data_check = PeriodicTask.objects.get(name="core: verificar datos mes anterior")
+        self.assertEqual(data_check.task, "core.tasks.verificar_datos_mes")
+        self.assertEqual(data_check.crontab.day_of_month, "3")
+        self.assertEqual(data_check.crontab.hour, "6")
+        self.assertEqual(data_check.crontab.minute, "0")
+        auto_close = PeriodicTask.objects.get(name="core: cierre automático mes anterior")
+        self.assertEqual(auto_close.task, "core.tasks.cerrar_mes_anterior")
+        self.assertEqual(auto_close.crontab.day_of_month, "5")
+        self.assertEqual(auto_close.crontab.hour, "6")
+        self.assertEqual(auto_close.crontab.minute, "0")
 
     def test_respects_orchestration_schedule_overrides(self):
         from django_celery_beat.models import PeriodicTask
