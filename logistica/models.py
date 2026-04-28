@@ -224,6 +224,7 @@ class ReporteUnidad(models.Model):
     kilometraje = models.PositiveIntegerField(null=True, blank=True)
     latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    ip_reporte = models.GenericIPAddressField(null=True, blank=True)
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_ABIERTO)
     fecha_reporte = models.DateTimeField(auto_now_add=True)
     asignado_a = models.ForeignKey(
