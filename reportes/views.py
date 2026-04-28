@@ -131,6 +131,7 @@ from .services_budget_area_upload import BudgetAreaUploadService
 from .services_budget_vs_actual import BudgetVsActualSnapshotService, parse_period as parse_budget_period
 from .services_presupuesto_maestro import (
     AREA_DEFINITIONS,
+    MONTH_COLUMNS,
     PresupuestoMaestroImportService,
     PresupuestoMaestroService,
     ensure_master_budget_areas,
@@ -4301,6 +4302,8 @@ def presupuesto_maestro(request: HttpRequest) -> HttpResponse:
     ensure_master_budget_areas()
     selected_year = _parse_int(request.GET.get("year"), 2026)
     selected_year = max(2020, min(selected_year, 2035))
+    selected_month = _parse_int(request.GET.get("month"), timezone.localdate().month)
+    selected_month = max(1, min(selected_month, 12))
     selected_version = normalize_version(request.GET.get("version"))
     selected_area = normalize_area_code(request.GET.get("area") or "")
     if selected_area and selected_area not in {code for code, _, _ in AREA_DEFINITIONS}:
@@ -4347,13 +4350,19 @@ def presupuesto_maestro(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "Acción inválida.")
         except Exception as exc:
             messages.error(request, f"No se pudo guardar el presupuesto: {exc}")
-        query = urlencode({"year": selected_year, "version": selected_version, "area": selected_area})
+        query = urlencode({"year": selected_year, "month": selected_month, "version": selected_version, "area": selected_area})
         return redirect(f"{reverse('reportes:presupuesto_maestro')}?{query}")
 
     service = PresupuestoMaestroService()
     matrix = service.annual_matrix(year=selected_year, version=selected_version, area=selected_area or None)
     consolidado = service.build_consolidado(
-        periodo=date(selected_year, 1, 1),
+        periodo=date(selected_year, selected_month, 1),
+        version=selected_version,
+        area=selected_area or None,
+    )
+    kpis = service.executive_kpis(
+        year=selected_year,
+        month=selected_month,
         version=selected_version,
         area=selected_area or None,
     )
@@ -4361,10 +4370,14 @@ def presupuesto_maestro(request: HttpRequest) -> HttpResponse:
         "module_tabs": _reportes_module_tabs("presupuesto_maestro"),
         "matrix": matrix,
         "consolidado": consolidado,
+        "kpis": kpis,
         "areas": AreaPresupuesto.objects.filter(activa=True).order_by("orden", "nombre"),
         "selected_year": selected_year,
+        "selected_month": selected_month,
+        "selected_month_name": next((name for name, number in MONTH_COLUMNS if number == selected_month), "mes"),
         "selected_version": selected_version,
         "selected_area": selected_area,
+        "month_options": MONTH_COLUMNS,
         "versions": ["ORIGINAL", "REVISADO"],
         "rubro_types": RubroPresupuesto.TIPO_CHOICES,
     }

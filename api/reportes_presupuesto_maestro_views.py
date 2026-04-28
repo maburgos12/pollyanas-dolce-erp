@@ -91,6 +91,12 @@ class PresupuestoConsolidadoView(APIView):
         area = request.GET.get("area") or None
         try:
             data = PresupuestoMaestroService().build_consolidado(periodo=periodo, version=version, area=area)
+            kpis = PresupuestoMaestroService().executive_kpis(
+                year=data["periodo"].year,
+                month=data["periodo"].month,
+                version=version,
+                area=area,
+            )
         except Exception:
             return Response({"detail": "Periodo inválido. Usa formato YYYY-MM."}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
@@ -99,6 +105,16 @@ class PresupuestoConsolidadoView(APIView):
                 "version": data["version"],
                 "actual_source": data["actual_source"],
                 "totales": {key: _money_payload(value) for key, value in data["totales"].items()},
+                "kpis": {
+                    "presupuesto_anual": _money_payload(kpis["annual_budget"]),
+                    "presupuesto_mes": _money_payload(kpis["monthly_budget"]),
+                    "real_mes": _money_payload(kpis["real_month"]),
+                    "varianza_mes": _money_payload(kpis["variance"]),
+                    "varianza_pct": _money_payload(kpis["variance_pct"]),
+                    "real_source": kpis["real_source"],
+                    "real_note": kpis["real_note"],
+                    "budget_scope": kpis["budget_scope"],
+                },
                 "areas": [
                     {
                         "id": area_payload["id"],

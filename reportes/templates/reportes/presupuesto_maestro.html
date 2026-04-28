@@ -119,6 +119,23 @@
     color:#17324d;
     font-weight:800;
   }
+  .budget-master-total-row td {
+    background:#f8fafc;
+    color:#17324d;
+    font-weight:800;
+  }
+  .budget-master-row.is-income td { background:#f3fbf6; }
+  .budget-master-row.is-income td:first-child { background:#e9f8ee; }
+  .budget-master-row.is-expense td,
+  .budget-master-row.is-cost td,
+  .budget-master-row.is-capex td { background:#fff7f7; }
+  .budget-master-row.is-expense td:first-child,
+  .budget-master-row.is-cost td:first-child,
+  .budget-master-row.is-capex td:first-child { background:#feecec; }
+  .budget-master-type.is-income { color:#16794a; }
+  .budget-master-type.is-expense,
+  .budget-master-type.is-cost,
+  .budget-master-type.is-capex { color:#b42318; }
   .budget-master-type { color:var(--muted); font-size:.8rem; }
   .budget-master-consolidado {
     display:grid;
@@ -183,6 +200,14 @@
         <label for="budget-year">Año</label>
         <input id="budget-year" name="year" type="number" min="2020" max="2035" value="{{ selected_year }}">
       </div>
+      <div class="budget-master-field">
+        <label for="budget-month">Mes KPI</label>
+        <select id="budget-month" name="month">
+          {% for month_name, month_number in month_options %}
+          <option value="{{ month_number }}" {% if selected_month == month_number %}selected{% endif %}>{{ month_name|capfirst }}</option>
+          {% endfor %}
+        </select>
+      </div>
     </div>
     <div class="budget-master-actions">
       <button class="budget-master-button" type="submit">Actualizar</button>
@@ -193,19 +218,20 @@
   <section class="budget-master-summary">
     <article class="budget-master-kpi">
       <span>Presupuesto anual</span>
-      <strong>${{ matrix.total_anual|floatformat:2|intcomma }}</strong>
+      <strong>${{ kpis.annual_budget|floatformat:2|intcomma }}</strong>
     </article>
     <article class="budget-master-kpi">
-      <span>Presupuesto enero</span>
-      <strong>${{ consolidado.totales.presupuesto|floatformat:2|intcomma }}</strong>
+      <span>Presupuesto {{ selected_month_name }}</span>
+      <strong>${{ kpis.monthly_budget|floatformat:2|intcomma }}</strong>
     </article>
     <article class="budget-master-kpi">
-      <span>Real enero</span>
-      <strong>${{ consolidado.totales.real|floatformat:2|intcomma }}</strong>
+      <span>Real {{ selected_month_name }}</span>
+      <strong>${{ kpis.real_month|floatformat:2|intcomma }}</strong>
+      {% if kpis.real_note %}<small>{{ kpis.real_note }}</small>{% endif %}
     </article>
     <article class="budget-master-kpi">
-      <span>Varianza enero</span>
-      <strong>${{ consolidado.totales.varianza|floatformat:2|intcomma }}</strong>
+      <span>Varianza {{ selected_month_name }}</span>
+      <strong>${{ kpis.variance|floatformat:2|intcomma }}</strong>
     </article>
   </section>
 
@@ -279,10 +305,10 @@
           <td colspan="14">{{ group.grouper.nombre }}</td>
         </tr>
         {% for row in group.list %}
-        <tr>
+        <tr class="budget-master-row {{ row.type_class }}">
           <td>
             <strong>{{ row.rubro.concepto }}</strong>
-            <div class="budget-master-type">
+            <div class="budget-master-type {{ row.type_class }}">
               {{ row.rubro.tipo }}{% if row.rubro.sucursal %} · {{ row.rubro.sucursal.codigo }}{% endif %}{% if row.rubro.codigo_cuenta %} · {{ row.rubro.codigo_cuenta }}{% endif %}
             </div>
           </td>
@@ -297,6 +323,17 @@
           {% endfor %}
           <td><strong>${{ row.total|floatformat:2|intcomma }}</strong></td>
         </tr>
+        {% if forloop.last %}
+        <tr class="budget-master-total-row">
+          <td>Total {{ group.grouper.nombre }}</td>
+          <td colspan="12"></td>
+          <td>
+            {% for area_total in matrix.area_totals %}
+              {% if area_total.area.id == group.grouper.id %}${{ area_total.total|floatformat:2|intcomma }}{% endif %}
+            {% endfor %}
+          </td>
+        </tr>
+        {% endif %}
         {% empty %}
         <tr>
           <td colspan="14">Sin rubros para el filtro actual.</td>
@@ -312,7 +349,7 @@
   </section>
 
   <section class="budget-master-consolidado">
-    <h2>Consolidado enero {{ selected_year }}</h2>
+    <h2>Consolidado {{ selected_month_name }} {{ selected_year }}</h2>
     <div class="budget-master-table-wrap">
       <table class="budget-master-table">
         <thead>
@@ -334,7 +371,7 @@
             <td>{{ area.varianza_pct|floatformat:2 }}%</td>
           </tr>
           {% for row in area.rubros %}
-          <tr>
+          <tr class="budget-master-row {{ row.type_class }}">
             <td>{{ row.concepto }}</td>
             <td>${{ row.presupuesto|floatformat:2|intcomma }}</td>
             <td>{% if row.real is not None %}${{ row.real|floatformat:2|intcomma }}{% else %}-{% endif %}</td>

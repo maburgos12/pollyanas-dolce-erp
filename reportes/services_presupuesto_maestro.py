@@ -734,6 +734,68 @@ class PresupuestoMaestroService:
             "utilidad_operativa": money(result.utilidad_operativa_total),
         }
 
+    def _signed_budget(self, amount: Decimal, rubro_type: str) -> Decimal:
+        value = money(amount)
+        if rubro_type in {
+            RubroPresupuesto.TIPO_EGRESO,
+            RubroPresupuesto.TIPO_COSTO,
+            RubroPresupuesto.TIPO_CAPEX,
+        }:
+            return -value
+        return value
+
+    def _budget_lines_for_kpi(self, *, year: int, version: str, area: str | None = None):
+        area_code = normalize_area_code(area or "")
+        qs = LineaPresupuestoMensual.objects.filter(periodo__year=year, version=version).select_related(
+            "rubro", "rubro__area"
+        )
+        if area_code:
+            return qs.filter(rubro__area__codigo=area_code, rubro__activo=True)
+        return qs.filter(
+            rubro__area__codigo="ventas",
+            rubro__tipo=RubroPresupuesto.TIPO_INGRESO,
+            rubro__activo=True,
+        )
+
+    def executive_kpis(
+        self,
+        *,
+        year: int,
+        month: int,
+        version: str = LineaPresupuestoMensual.VERSION_ORIGINAL,
+        area: str | None = None,
+    ) -> dict[str, object]:
+        version = normalize_version(version)
+        area_code = normalize_area_code(area or "")
+        month = max(1, min(int(month or 1), 12))
+        period = date(year, month, 1)
+        annual_budget = Decimal("0")
+        monthly_budget = Decimal("0")
+        for line in self._budget_lines_for_kpi(year=year, version=version, area=area_code or None):
+            amount = money(line.monto_presupuesto)
+            signed_amount = self._signed_budget(amount, line.rubro.tipo) if area_code else amount
+            annual_budget += signed_amount
+            if line.periodo == period:
+                monthly_budget += signed_amount
+
+        result = EmpresaResultadoMensual.objects.filter(periodo=period).first()
+        real_month = money(result.venta_total) if result is not None else Decimal("0")
+        variance = real_month - monthly_budget
+        return {
+            "year": year,
+            "month": month,
+            "periodo": period,
+            "area": area_code,
+            "annual_budget": annual_budget,
+            "monthly_budget": monthly_budget,
+            "real_month": real_month,
+            "variance": variance,
+            "variance_pct": variance_pct(variance, monthly_budget),
+            "real_source": "reportes.EmpresaResultadoMensual" if result is not None else "",
+            "real_note": "" if result is not None else "Sin datos",
+            "budget_scope": "area_signed" if area_code else "ventas_ingreso",
+        }
+
     def _line_actual(self, line: LineaPresupuestoMensual, actuals: dict[str, Decimal], consumed: set[str]) -> tuple[Decimal | None, str]:
         rubro = line.rubro
         actual_key = str((rubro.metadata or {}).get("actual_key") or "")
@@ -783,12 +845,14 @@ class PresupuestoMaestroService:
                     "orden": rubro.area.orden,
                     "rubros": [],
                     "total_presupuesto": Decimal("0"),
+                    "total_presupuesto_signed": Decimal("0"),
                     "total_real": Decimal("0"),
                     "total_varianza": Decimal("0"),
                 },
             )
             actual, fuente_real = self._line_actual(line, actuals, consumed_actuals)
             budget = money(line.monto_presupuesto)
+            signed_budget = self._signed_budget(budget, rubro.tipo)
             actual_value = money(actual) if actual is not None else Decimal("0")
             variance = actual_value - budget
             pct = variance_pct(variance, budget)
@@ -799,8 +863,11 @@ class PresupuestoMaestroService:
                 "concepto": rubro.concepto,
                 "codigo_cuenta": rubro.codigo_cuenta,
                 "tipo": rubro.tipo,
+                "tipo_label": rubro.get_tipo_display(),
+                "type_class": self._type_class(rubro.tipo),
                 "sucursal": rubro.sucursal.codigo if rubro.sucursal_id else "",
                 "presupuesto": budget,
+                "presupuesto_signed": signed_budget,
                 "real": actual_value if actual is not None else None,
                 "fuente_real": fuente_real,
                 "varianza": variance if actual is not None else None,
@@ -809,6 +876,7 @@ class PresupuestoMaestroService:
             }
             area_payload["rubros"].append(row)
             area_payload["total_presupuesto"] += budget
+            area_payload["total_presupuesto_signed"] += signed_budget
             total_budget += budget
             if actual is not None:
                 area_payload["total_real"] += actual_value
@@ -831,6 +899,7 @@ class PresupuestoMaestroService:
                 area_payload["fuente_real"] = "reportes.EmpresaResultadoMensual"
             area_payload["varianza_pct"] = variance_pct(area_payload["total_varianza"], area_payload["total_presupuesto"])
             area_payload["tone"] = "neutral"
+            area_payload["tipo_mix"] = self._area_type_mix(area_payload["rubros"])
 
         return {
             "periodo": period,
@@ -846,6 +915,12 @@ class PresupuestoMaestroService:
             "actuals": {key: value for key, value in actuals.items()},
             "actual_labels": ACTUAL_LABELS,
         }
+
+    def _area_type_mix(self, rows: list[dict[str, object]]) -> str:
+        types = {str(row.get("tipo") or "") for row in rows}
+        if len(types) == 1:
+            return next(iter(types), "")
+        return "MIXTO"
 
     def annual_matrix(self, *, year: int, version: str, area: str | None = None) -> dict[str, object]:
         version = normalize_version(version)
@@ -863,14 +938,17 @@ class PresupuestoMaestroService:
             for line in LineaPresupuestoMensual.objects.filter(periodo__year=year, version=version, rubro__in=rubros)
         }
         rows = []
+        area_totals: dict[int, dict[str, object]] = {}
         total_anual = Decimal("0")
         for rubro in rubros:
             month_cells = []
             total = Decimal("0")
+            signed_total = Decimal("0")
             for month_name, month_number in MONTH_COLUMNS:
                 line = lines_by_rubro_period.get((rubro.id, month_number))
                 amount = money(line.monto_presupuesto if line else Decimal("0"))
                 total += amount
+                signed_total += self._signed_budget(amount, rubro.tipo)
                 month_cells.append(
                     {
                         "name": month_name,
@@ -882,12 +960,26 @@ class PresupuestoMaestroService:
             if total == 0:
                 continue
             total_anual += total
+            area_total = area_totals.setdefault(
+                rubro.area_id,
+                {
+                    "area": rubro.area,
+                    "total": Decimal("0"),
+                    "signed_total": Decimal("0"),
+                    "row_count": 0,
+                },
+            )
+            area_total["total"] += total
+            area_total["signed_total"] += signed_total
+            area_total["row_count"] += 1
             rows.append(
                 {
                     "rubro": rubro,
                     "area": rubro.area,
                     "months": month_cells,
                     "total": total,
+                    "signed_total": signed_total,
+                    "type_class": self._type_class(rubro.tipo),
                 }
             )
         return {
@@ -897,8 +989,17 @@ class PresupuestoMaestroService:
             "months": MONTH_COLUMNS,
             "areas": list(areas_qs),
             "rows": rows,
+            "area_totals": sorted(area_totals.values(), key=lambda row: (row["area"].orden, row["area"].nombre)),
             "total_anual": total_anual,
         }
+
+    def _type_class(self, rubro_type: str) -> str:
+        return {
+            RubroPresupuesto.TIPO_INGRESO: "is-income",
+            RubroPresupuesto.TIPO_EGRESO: "is-expense",
+            RubroPresupuesto.TIPO_COSTO: "is-cost",
+            RubroPresupuesto.TIPO_CAPEX: "is-capex",
+        }.get(rubro_type, "is-mixed")
 
     def update_line_amount(self, *, line_id: int, amount: Decimal) -> LineaPresupuestoMensual:
         line = LineaPresupuestoMensual.objects.select_related("rubro").get(pk=line_id)
