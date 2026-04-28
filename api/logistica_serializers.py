@@ -272,11 +272,14 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
             "hora_salida",
             "km_salida",
             "nivel_gas_salida",
+            "foto_tablero_salida",
             "hora_llegada",
             "km_llegada",
             "nivel_gas_llegada",
+            "foto_tablero_llegada",
             "litros_cargados",
             "costo_combustible",
+            "cerrada",
             "ip_registro",
             "latitud_salida",
             "longitud_salida",
@@ -289,8 +292,10 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
             "unidad_codigo",
             "unidad_descripcion",
             "fecha",
+            "folio",
             "hora_salida",
             "hora_llegada",
+            "cerrada",
             "ip_registro",
         ]
 
@@ -301,15 +306,16 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
 class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = BitacoraSalidaLlegada
-        fields = ["folio", "km_salida", "nivel_gas_salida", "latitud_salida", "longitud_salida"]
+        fields = ["unidad", "km_salida", "nivel_gas_salida", "foto_tablero_salida", "latitud_salida", "longitud_salida"]
 
     def create(self, validated_data):
         repartidor = self.context["repartidor"]
-        if repartidor.unidad_asignada is None:
-            raise serializers.ValidationError("No tienes una unidad asignada para iniciar bitácora.")
+        unidad = validated_data.pop("unidad", None)
+        if not unidad or not unidad.activa:
+            raise serializers.ValidationError("Selecciona una unidad activa para iniciar bitácora.")
         return BitacoraSalidaLlegada.objects.create(
             repartidor=repartidor,
-            unidad=repartidor.unidad_asignada,
+            unidad=unidad,
             **validated_data,
         )
 
@@ -317,12 +323,18 @@ class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
 class LogisticaBitacoraLlegadaSerializer(serializers.ModelSerializer):
     class Meta:
         model = BitacoraSalidaLlegada
-        fields = ["km_llegada", "nivel_gas_llegada", "litros_cargados", "costo_combustible"]
+        fields = ["km_llegada", "nivel_gas_llegada", "litros_cargados", "costo_combustible", "foto_tablero_llegada"]
 
     def validate(self, attrs):
         km_llegada = attrs.get("km_llegada")
+        if km_llegada is None and self.instance and self.instance.km_llegada is None:
+            raise serializers.ValidationError("El kilometraje de llegada es obligatorio.")
+        if not attrs.get("nivel_gas_llegada") and self.instance and not self.instance.nivel_gas_llegada:
+            raise serializers.ValidationError("El nivel de gas de llegada es obligatorio.")
         if km_llegada is not None and self.instance and km_llegada < self.instance.km_salida:
             raise serializers.ValidationError("El kilometraje de llegada no puede ser menor al de salida.")
+        if not attrs.get("foto_tablero_llegada") and self.instance and not self.instance.foto_tablero_llegada:
+            raise serializers.ValidationError("La foto del tablero de llegada es obligatoria.")
         return attrs
 
 

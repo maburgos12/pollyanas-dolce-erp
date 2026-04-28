@@ -99,6 +99,7 @@ from .rrhh_views import (
 from .logistica_views import (
     LogisticaBitacoraView,
     LogisticaBitacoraSalidaDetailView,
+    LogisticaBitacoraSalidaActivaView,
     LogisticaBitacoraSalidaHoyView,
     LogisticaBitacoraSalidaView,
     LogisticaDashboardView,
@@ -113,6 +114,7 @@ from .logistica_views import (
     LogisticaRutaStatusView,
     LogisticaTodosReportesView,
     LogisticaTokenView,
+    LogisticaUnidadesView,
 )
 from .reportes_bi_views import ReportesBIDashboardView
 from .reportes_budget_views import BudgetVsActualView
@@ -338,12 +340,14 @@ urlpatterns = [
     path("logistica/dashboard/", LogisticaDashboardView.as_view(), name="api_logistica_dashboard"),
     path("logistica/auth/token/", LogisticaTokenView.as_view(), name="api_logistica_auth_token"),
     path("logistica/mi-perfil/", LogisticaMiPerfilView.as_view(), name="api_logistica_mi_perfil"),
+    path("logistica/unidades/", LogisticaUnidadesView.as_view(), name="api_logistica_unidades"),
     path("logistica/reportes/", LogisticaReporteCreateView.as_view(), name="api_logistica_reportes"),
     path("logistica/reportes/mis/", LogisticaMisReportesView.as_view(), name="api_logistica_reportes_mis"),
     path("logistica/reportes/todos/", LogisticaTodosReportesView.as_view(), name="api_logistica_reportes_todos"),
     path("logistica/reportes/<int:reporte_id>/", LogisticaReporteDetailView.as_view(), name="api_logistica_reporte_detail"),
     path("logistica/bitacora/", LogisticaBitacoraView.as_view(), name="api_logistica_bitacora"),
     path("logistica/bitacora-salida/", LogisticaBitacoraSalidaView.as_view(), name="api_logistica_bitacora_salida"),
+    path("logistica/bitacora-salida/activa/", LogisticaBitacoraSalidaActivaView.as_view(), name="api_logistica_bitacora_salida_activa"),
     path("logistica/bitacora-salida/hoy/", LogisticaBitacoraSalidaHoyView.as_view(), name="api_logistica_bitacora_salida_hoy"),
     path("logistica/bitacora-salida/<int:bitacora_id>/", LogisticaBitacoraSalidaDetailView.as_view(), name="api_logistica_bitacora_salida_detail"),
     path("logistica/inspeccion/", LogisticaInspeccionView.as_view(), name="api_logistica_inspeccion"),

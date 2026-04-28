@@ -59,7 +59,7 @@ class EntregaRutaAdmin(admin.ModelAdmin):
 
 @admin.register(Unidad)
 class UnidadAdmin(admin.ModelAdmin):
-    list_display = ("codigo", "descripcion", "sucursal", "placa", "activa")
+    list_display = ("codigo", "descripcion", "sucursal", "placa", "activa", "folio_consecutivo")
     list_filter = ("activa", "sucursal")
     search_fields = ("codigo", "descripcion", "placa", "sucursal__nombre", "sucursal__codigo")
 
@@ -113,18 +113,19 @@ class BitacoraRepartidorAdmin(admin.ModelAdmin):
 @admin.register(BitacoraSalidaLlegada)
 class BitacoraSalidaLlegadaAdmin(admin.ModelAdmin):
     list_display = (
-        "fecha",
+        "folio",
         "repartidor",
         "unidad",
+        "hora_salida",
+        "hora_llegada",
         "km_salida",
         "km_llegada",
-        "nivel_gas_salida",
-        "nivel_gas_llegada",
+        "cerrada",
         "ip_registro",
     )
-    list_filter = ("fecha", "unidad__sucursal", "nivel_gas_salida", "nivel_gas_llegada")
+    list_filter = ("cerrada", "unidad", "fecha")
     search_fields = ("folio", "repartidor__user__username", "unidad__codigo", "ip_registro")
-    readonly_fields = ("fecha", "hora_salida", "hora_llegada", "ip_registro")
+    readonly_fields = ("fecha", "folio", "hora_salida", "hora_llegada", "ip_registro")
     autocomplete_fields = ("repartidor", "unidad")
 
 

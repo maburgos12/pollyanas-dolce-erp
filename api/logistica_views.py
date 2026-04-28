@@ -18,7 +18,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from core.access import can_manage_logistica, can_view_logistica
 from core.audit import log_event
 from crm.models import PedidoCliente
-from logistica.models import BitacoraRepartidor, BitacoraSalidaLlegada, EntregaRuta, InspeccionVehiculo, Repartidor, ReporteUnidad, RutaEntrega
+from logistica.models import BitacoraRepartidor, BitacoraSalidaLlegada, EntregaRuta, InspeccionVehiculo, Repartidor, ReporteUnidad, RutaEntrega, Unidad
 
 from .logistica_serializers import (
     LogisticaBitacoraSerializer,
@@ -34,6 +34,7 @@ from .logistica_serializers import (
     LogisticaReportePatchSerializer,
     LogisticaReporteSerializer,
     LogisticaRutaSerializer,
+    LogisticaUnidadSerializer,
 )
 
 
@@ -229,18 +230,29 @@ class LogisticaBitacoraView(_LogisticaBaseView):
         return Response(LogisticaBitacoraSerializer(bitacora).data, status=status.HTTP_201_CREATED)
 
 
+class LogisticaUnidadesView(_LogisticaBaseView):
+    def get(self, request):
+        unidades = Unidad.objects.filter(activa=True).select_related("sucursal").order_by("codigo")
+        return Response(LogisticaUnidadSerializer(unidades, many=True).data, status=status.HTTP_200_OK)
+
+
 class LogisticaBitacoraSalidaView(_LogisticaBaseView):
-    parser_classes = [JSONParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request):
         repartidor = _get_repartidor_for_user(request.user)
         if not repartidor or not _is_repartidor(request.user):
             return Response({"detail": "Solo repartidores registrados pueden iniciar bitácora."}, status=status.HTTP_403_FORBIDDEN)
 
-        existente = BitacoraSalidaLlegada.objects.filter(repartidor=repartidor, fecha=timezone.localdate()).first()
-        if existente:
+        abierta = BitacoraSalidaLlegada.objects.select_related("unidad").filter(repartidor=repartidor, cerrada=False).first()
+        if abierta:
             return Response(
-                {"detail": "Ya existe una bitácora de salida para hoy.", "bitacora": LogisticaBitacoraSalidaLlegadaSerializer(existente).data},
+                {
+                    "error": "turno_abierto",
+                    "mensaje": f"Tienes un turno abierto en la unidad {abierta.unidad.codigo}. Debes cerrarlo antes de iniciar uno nuevo.",
+                    "bitacora_id": abierta.id,
+                    "bitacora": LogisticaBitacoraSalidaLlegadaSerializer(abierta).data,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -251,29 +263,35 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
 
 
 class LogisticaBitacoraSalidaDetailView(_LogisticaBaseView):
-    parser_classes = [JSONParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def patch(self, request, bitacora_id: int):
         repartidor = _get_repartidor_for_user(request.user)
         bitacora = get_object_or_404(BitacoraSalidaLlegada.objects.select_related("repartidor__user", "unidad"), pk=bitacora_id)
         if not repartidor or bitacora.repartidor_id != repartidor.id:
             return Response({"detail": "No tienes permisos para actualizar esta bitácora."}, status=status.HTTP_403_FORBIDDEN)
+        if bitacora.cerrada:
+            return Response({"error": "ya_cerrada"}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = LogisticaBitacoraLlegadaSerializer(bitacora, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        bitacora = serializer.save(hora_llegada=timezone.now())
+        bitacora = serializer.save(hora_llegada=timezone.now(), cerrada=True)
         return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_200_OK)
 
 
-class LogisticaBitacoraSalidaHoyView(_LogisticaBaseView):
+class LogisticaBitacoraSalidaActivaView(_LogisticaBaseView):
     def get(self, request):
         repartidor = _get_repartidor_for_user(request.user)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
-        bitacora = BitacoraSalidaLlegada.objects.filter(repartidor=repartidor, fecha=timezone.localdate()).first()
+        bitacora = BitacoraSalidaLlegada.objects.filter(repartidor=repartidor, cerrada=False).select_related("unidad", "repartidor__user").first()
         if not bitacora:
-            return Response({}, status=status.HTTP_200_OK)
+            return Response({"detail": "No hay turno abierto."}, status=status.HTTP_404_NOT_FOUND)
         return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_200_OK)
+
+
+class LogisticaBitacoraSalidaHoyView(LogisticaBitacoraSalidaActivaView):
+    pass
 
 
 class LogisticaInspeccionView(_LogisticaBaseView):

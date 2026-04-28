@@ -42,7 +42,7 @@
         padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
       }
 
-      button, input, textarea {
+      button, input, textarea, select {
         font: inherit;
       }
 
@@ -110,7 +110,7 @@
         font-weight: 800;
       }
 
-      input, textarea {
+      input, textarea, select {
         width: 100%;
         min-height: 48px;
         border: 1px solid var(--border);
@@ -229,6 +229,19 @@
         color: white;
         font-size: 12px;
         font-weight: 900;
+      }
+
+      .badge.turno {
+        margin-top: 6px;
+        min-width: 0;
+        height: auto;
+        background: #676771;
+        padding: 4px 8px;
+      }
+
+      .badge.turno.abierto {
+        background: var(--warning);
+        color: #17120a;
       }
 
       .dash-btn .badge {
@@ -437,6 +450,15 @@
 
       .chip.ok { background: var(--success); }
       .chip.fail { background: var(--danger); }
+
+      .thumb {
+        width: 100%;
+        max-height: 180px;
+        object-fit: cover;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-top: 8px;
+      }
     </style>
   </head>
   <body>
@@ -452,6 +474,7 @@
         reportes: [],
         bitacoras: [],
         bitacoraSalida: null,
+        unidades: [],
         inspeccionDraft: null,
         reporteDraft: {
           step: 1,
@@ -689,10 +712,31 @@
         return state.reportes;
       }
 
+      async function loadUnidades() {
+        const response = await apiFetch("/unidades/");
+        state.unidades = response.ok ? await response.json() : [];
+        return state.unidades;
+      }
+
+      async function loadTurnoActivo() {
+        const response = await apiFetch("/bitacora-salida/activa/");
+        state.bitacoraSalida = response.ok ? await response.json() : null;
+        return state.bitacoraSalida;
+      }
+
       async function renderDashboard() {
         await loadReportes();
+        let turnoActivo = null;
+        try {
+          turnoActivo = await loadTurnoActivo();
+        } catch (error) {
+          turnoActivo = null;
+        }
         const abiertos = state.reportes.filter((r) => r.estatus !== "cerrado").length;
         const unidad = state.perfil?.unidad || {};
+        const turnoBadge = turnoActivo?.id
+          ? `<span class="badge turno abierto">ABIERTO</span>`
+          : `<span class="badge turno">Sin turno</span>`;
         render(shell(`
           <p class="unit-line">Unidad: ${escapeHtml(unidad.codigo || "Sin unidad asignada")}</p>
           <div class="dash-grid">
@@ -701,7 +745,7 @@
             <button class="dash-btn" onclick="showScreen('mi_unidad')">🛵<br>Mi Unidad</button>
             <button class="dash-btn" onclick="showScreen('bitacora')">📝<br>Bitácora</button>
             <button class="dash-btn" onclick="showScreen('inspeccion_vehiculo')">📋<br>Inspección</button>
-            <button class="dash-btn" onclick="showScreen('bitacora_salida')">🚗<br>Bitácora salida/llegada</button>
+            <button class="dash-btn" onclick="showScreen('bitacora_salida')">🚗<br>Bitácora<br>${turnoBadge}</button>
           </div>
         `));
       }
@@ -1011,12 +1055,18 @@
       function ensureBitacoraSalidaDraft() {
         if (!state.bitacoraSalidaDraft) {
           state.bitacoraSalidaDraft = {
-            folio: "",
+            unidad: "",
             km_salida: "",
             nivel_gas_salida: "",
+            foto_tablero_salida: null,
+            fotoSalidaPreview: "",
             latitud_salida: "",
             longitud_salida: "",
-            geoStatus: "idle"
+            geoStatus: "idle",
+            km_llegada: "",
+            nivel_gas_llegada: "",
+            foto_tablero_llegada: null,
+            fotoLlegadaPreview: ""
           };
         }
         return state.bitacoraSalidaDraft;
@@ -1043,17 +1093,24 @@
         }, { enableHighAccuracy: true, timeout: 8000 });
       }
 
-      async function loadBitacoraSalidaHoy() {
-        const response = await apiFetch("/bitacora-salida/hoy/");
-        state.bitacoraSalida = response.ok ? await response.json() : {};
-        return state.bitacoraSalida;
+      function setFotoBitacora(input, campo, previewCampo) {
+        const draft = ensureBitacoraSalidaDraft();
+        const file = input.files[0] || null;
+        draft[campo] = file;
+        draft[previewCampo] = file ? URL.createObjectURL(file) : "";
+        renderBitacoraSalida();
       }
 
       async function renderBitacoraSalida(message = "") {
-        const actual = await loadBitacoraSalidaHoy();
+        let actual = null;
+        try {
+          actual = await loadTurnoActivo();
+        } catch (error) {
+          actual = null;
+        }
+        await loadUnidades();
         const draft = ensureBitacoraSalidaDraft();
         const tieneSalida = Boolean(actual?.id);
-        const llegadaPendiente = tieneSalida && !actual.hora_llegada;
         let body = "";
         if (!tieneSalida) {
           if (draft.geoStatus === "idle") setTimeout(capturarUbicacionSalida, 0);
@@ -1067,6 +1124,13 @@
           body = `
             <form onsubmit="guardarSalida(event)">
               <div class="field">
+                <label for="unidad_salida">Unidad</label>
+                <select id="unidad_salida" name="unidad" required onchange="state.bitacoraSalidaDraft.unidad = this.value">
+                  <option value="">Selecciona unidad</option>
+                  ${state.unidades.map((unidad) => `<option value="${unidad.id}" ${String(draft.unidad) === String(unidad.id) ? "selected" : ""}>${escapeHtml(unidad.codigo)} · ${escapeHtml(unidad.descripcion || "")}</option>`).join("")}
+                </select>
+              </div>
+              <div class="field">
                 <label for="km_salida">KM salida</label>
                 <input id="km_salida" name="km_salida" type="number" min="0" required value="${escapeHtml(draft.km_salida)}" oninput="state.bitacoraSalidaDraft.km_salida = this.value">
               </div>
@@ -1075,29 +1139,31 @@
                 ${gasSelector(draft.nivel_gas_salida, "selectGasSalida")}
               </div>
               <div class="field">
-                <label for="folio_salida">Folio</label>
-                <input id="folio_salida" name="folio" value="${escapeHtml(draft.folio)}" oninput="state.bitacoraSalidaDraft.folio = this.value">
+                <label for="foto_salida">Foto tablero</label>
+                <input id="foto_salida" type="file" accept="image/*" capture="environment" required onchange="setFotoBitacora(this, 'foto_tablero_salida', 'fotoSalidaPreview')">
+                ${draft.fotoSalidaPreview ? `<img class="thumb" src="${draft.fotoSalidaPreview}" alt="Vista previa tablero salida">` : ""}
               </div>
               ${geo}
               <button class="primary-btn" type="submit" ${draft.geoStatus === "ready" ? "" : "disabled"}>Iniciar turno</button>
             </form>
           `;
-        } else if (llegadaPendiente) {
+        } else {
           body = `
+            <p class="unit-line">Turno activo · ${escapeHtml(actual.unidad_codigo)} · Folio: ${escapeHtml(actual.folio)}</p>
             <section class="card report-card">
               <div class="kv"><b>Salida</b><span>${formatDate(actual.hora_salida)}</span></div>
               <div class="kv"><b>KM salida</b><span>${escapeHtml(actual.km_salida)}</span></div>
               <div class="kv"><b>Gas salida</b><span>${escapeHtml(actual.nivel_gas_salida)}</span></div>
-              <div class="kv"><b>Folio</b><span>${escapeHtml(actual.folio || "-")}</span></div>
+              ${actual.foto_tablero_salida ? `<img class="thumb" src="${escapeHtml(actual.foto_tablero_salida)}" alt="Tablero salida">` : ""}
             </section>
             <form onsubmit="guardarLlegada(event)">
               <div class="field">
                 <label for="km_llegada">KM llegada</label>
-                <input id="km_llegada" name="km_llegada" type="number" min="0" required>
+                <input id="km_llegada" name="km_llegada" type="number" min="${escapeHtml(actual.km_salida)}" required value="${escapeHtml(draft.km_llegada)}" oninput="state.bitacoraSalidaDraft.km_llegada = this.value">
               </div>
               <div class="field">
                 <label>Nivel gas llegada</label>
-                ${gasSelector(state.nivelGasLlegada || "", "selectGasLlegada")}
+                ${gasSelector(draft.nivel_gas_llegada || "", "selectGasLlegada")}
               </div>
               <div class="field">
                 <label for="litros_cargados">Litros cargados</label>
@@ -1107,17 +1173,13 @@
                 <label for="costo_combustible">Costo combustible</label>
                 <input id="costo_combustible" name="costo_combustible" type="number" min="0" step="0.01">
               </div>
-              <button class="primary-btn" type="submit" ${state.nivelGasLlegada ? "" : "disabled"}>Registrar llegada</button>
+              <div class="field">
+                <label for="foto_llegada">Foto tablero llegada</label>
+                <input id="foto_llegada" type="file" accept="image/*" capture="environment" required onchange="setFotoBitacora(this, 'foto_tablero_llegada', 'fotoLlegadaPreview')">
+                ${draft.fotoLlegadaPreview ? `<img class="thumb" src="${draft.fotoLlegadaPreview}" alt="Vista previa tablero llegada">` : ""}
+              </div>
+              <button class="primary-btn" type="submit" ${draft.nivel_gas_llegada ? "" : "disabled"}>Cerrar turno</button>
             </form>
-          `;
-        } else {
-          body = `
-            <section class="card report-card">
-              <div class="kv"><b>Salida</b><span>${formatDate(actual.hora_salida)}</span></div>
-              <div class="kv"><b>Llegada</b><span>${formatDate(actual.hora_llegada)}</span></div>
-              <div class="kv"><b>KM</b><span>${escapeHtml(actual.km_salida)} → ${escapeHtml(actual.km_llegada)}</span></div>
-              <div class="kv"><b>Gas</b><span>${escapeHtml(actual.nivel_gas_salida)} → ${escapeHtml(actual.nivel_gas_llegada)}</span></div>
-            </section>
           `;
         }
         render(shell(`
@@ -1134,48 +1196,60 @@
       }
 
       function selectGasLlegada(value) {
-        state.nivelGasLlegada = value;
+        ensureBitacoraSalidaDraft().nivel_gas_llegada = value;
         renderBitacoraSalida();
       }
 
       async function guardarSalida(event) {
         event.preventDefault();
         const draft = ensureBitacoraSalidaDraft();
-        if (!draft.nivel_gas_salida || !draft.latitud_salida) return renderBitacoraSalida("Completa gas y ubicación.");
-        const payload = {
-          folio: draft.folio,
-          km_salida: Number(draft.km_salida),
-          nivel_gas_salida: draft.nivel_gas_salida,
-          latitud_salida: draft.latitud_salida,
-          longitud_salida: draft.longitud_salida
-        };
+        if (!draft.unidad || !draft.nivel_gas_salida || !draft.foto_tablero_salida || !draft.latitud_salida) {
+          return renderBitacoraSalida("Completa unidad, gas, foto y ubicación.");
+        }
+        const payload = new FormData();
+        payload.append("unidad", draft.unidad);
+        payload.append("km_salida", draft.km_salida);
+        payload.append("nivel_gas_salida", draft.nivel_gas_salida);
+        payload.append("foto_tablero_salida", draft.foto_tablero_salida);
+        payload.append("latitud_salida", draft.latitud_salida);
+        payload.append("longitud_salida", draft.longitud_salida);
         const response = await apiFetch("/bitacora-salida/", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          body: payload
         });
-        if (!response.ok) return renderBitacoraSalida("No se pudo iniciar el turno.");
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          if (error.error === "turno_abierto") {
+            state.bitacoraSalida = error.bitacora || state.bitacoraSalida;
+            return renderBitacoraSalida(`⚠️ Tienes un turno abierto en ${error.bitacora?.unidad_codigo || "otra unidad"}.`);
+          }
+          return renderBitacoraSalida("No se pudo iniciar el turno.");
+        }
+        const creado = await response.json();
         state.bitacoraSalidaDraft = null;
-        await renderBitacoraSalida("Turno iniciado.");
+        await renderBitacoraSalida(`✅ Turno iniciado · Folio: ${creado.folio}`);
       }
 
       async function guardarLlegada(event) {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
-        const payload = {
-          km_llegada: Number(form.get("km_llegada")),
-          nivel_gas_llegada: state.nivelGasLlegada,
-          litros_cargados: form.get("litros_cargados") || null,
-          costo_combustible: form.get("costo_combustible") || null
-        };
+        const draft = ensureBitacoraSalidaDraft();
+        if (!draft.foto_tablero_llegada) return renderBitacoraSalida("La foto del tablero de llegada es obligatoria.");
+        const payload = new FormData();
+        payload.append("km_llegada", form.get("km_llegada"));
+        payload.append("nivel_gas_llegada", draft.nivel_gas_llegada);
+        if (form.get("litros_cargados")) payload.append("litros_cargados", form.get("litros_cargados"));
+        if (form.get("costo_combustible")) payload.append("costo_combustible", form.get("costo_combustible"));
+        payload.append("foto_tablero_llegada", draft.foto_tablero_llegada);
         const response = await apiFetch(`/bitacora-salida/${state.bitacoraSalida.id}/`, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          body: payload
         });
         if (!response.ok) return renderBitacoraSalida("No se pudo registrar la llegada.");
-        state.nivelGasLlegada = "";
-        await renderBitacoraSalida("Llegada registrada.");
+        const cerrada = await response.json();
+        state.bitacoraSalidaDraft = null;
+        state.bitacoraSalida = null;
+        await renderBitacoraSalida(`✅ Turno cerrado · ${formatDate(cerrada.hora_llegada)}`);
       }
 
       function ensureInspeccionDraft() {
