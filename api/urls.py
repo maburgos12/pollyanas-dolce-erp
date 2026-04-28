@@ -118,6 +118,7 @@ from .logistica_views import (
 )
 from .reportes_bi_views import ReportesBIDashboardView
 from .reportes_budget_views import BudgetVsActualView
+from .reportes_dashboard_charts_views import ReportesDashboardChartsView
 from .reportes_presupuesto_maestro_views import (
     PresupuestoAreasView,
     PresupuestoConsolidadoView as PresupuestoMaestroConsolidadoView,
@@ -356,6 +357,7 @@ urlpatterns = [
     path("logistica/rutas/<int:ruta_id>/estatus/", LogisticaRutaStatusView.as_view(), name="api_logistica_ruta_estatus"),
     path("logistica/rutas/<int:ruta_id>/entregas/", LogisticaRutaEntregasView.as_view(), name="api_logistica_ruta_entregas"),
     path("reportes/bi/dashboard/", ReportesBIDashboardView.as_view(), name="api_reportes_bi_dashboard"),
+    path("reportes/dashboard-charts/", ReportesDashboardChartsView.as_view(), name="api_reportes_dashboard_charts"),
     path("reportes/presupuesto-vs-real/<str:periodo>/", BudgetVsActualView.as_view(), name="api_reportes_budget_vs_actual"),
     path("presupuesto/areas/", PresupuestoAreasView.as_view(), name="api_presupuesto_areas"),
     path("presupuesto/rubros/", PresupuestoRubrosView.as_view(), name="api_presupuesto_rubros"),

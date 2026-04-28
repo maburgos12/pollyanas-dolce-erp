@@ -54,6 +54,13 @@
   .finance-variance.success { color:#236d53; }
   .finance-variance.danger { color:#a53434; }
   .finance-variance.neutral { color:#6d5f67; }
+  .finance-dashboard-chart-grid { display:grid; gap:16px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .finance-dashboard-chart-card { min-width:0; padding:16px; border:1px solid rgba(139,34,82,.10); border-radius:8px; background:#FFF8F5; box-shadow:0 8px 20px rgba(65,38,50,.05); }
+  .finance-dashboard-chart-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .finance-dashboard-chart-head strong { display:block; color:#3f3138; font-size:1rem; }
+  .finance-dashboard-chart-head span { display:block; color:#7b6871; font-size:.85rem; margin-top:3px; }
+  .finance-dashboard-chart-stage { height:300px; position:relative; }
+  .finance-dashboard-chart-status { color:#7b6871; font-size:.9rem; }
   .finance-table {
     width: max(100%, 860px);
     min-width: 860px;
@@ -69,6 +76,11 @@
   }
   @media (max-width: 1200px) {
     .finance-alert-grid, .finance-split, .finance-hero-grid, .finance-signal-grid, .finance-action-summary-grid, .finance-definition-grid { grid-template-columns:1fr; }
+  }
+  @media (max-width: 760px) {
+    .finance-dashboard-chart-grid { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; padding-bottom:8px; }
+    .finance-dashboard-chart-card { flex:0 0 92%; scroll-snap-align:start; }
+    .finance-dashboard-chart-stage { height:280px; }
   }
 </style>
 {% endblock %}
@@ -228,6 +240,59 @@
       <div class="bi-kpi-label">Brechas de precio</div>
       <div class="bi-kpi-note">Productos con ASP por debajo o cerca del precio sugerido con margen real contra venta.</div>
     </article>
+  </section>
+
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Panel ejecutivo</div>
+        <h2 class="bi-panel-title">Tendencias financieras</h2>
+      </div>
+      <div class="bi-panel-actions">
+        <span id="financeDashboardChartsStatus" class="finance-dashboard-chart-status">Cargando gráficas...</span>
+      </div>
+    </div>
+    <div class="bi-note">
+      Datos desde Resultado mensual empresa, snapshots de Presupuesto vs Real y mermas consolidadas.
+    </div>
+    <div class="finance-dashboard-chart-grid" data-dashboard-charts-year="{{ dashboard_charts_year }}">
+      <article class="finance-dashboard-chart-card">
+        <div class="finance-dashboard-chart-head">
+          <div>
+            <strong>Ventas vs presupuesto</strong>
+            <span>Barras agrupadas con cumplimiento mensual</span>
+          </div>
+        </div>
+        <div class="finance-dashboard-chart-stage"><canvas id="financeSalesBudgetChart"></canvas></div>
+      </article>
+      <article class="finance-dashboard-chart-card">
+        <div class="finance-dashboard-chart-head">
+          <div>
+            <strong>Utilidad operativa mensual</strong>
+            <span>Real contra utilidad presupuestada</span>
+          </div>
+        </div>
+        <div class="finance-dashboard-chart-stage"><canvas id="financeOperatingProfitChart"></canvas></div>
+      </article>
+      <article class="finance-dashboard-chart-card">
+        <div class="finance-dashboard-chart-head">
+          <div>
+            <strong>Desglose de costos</strong>
+            <span>MP, reventa, nómina, gasto fijo y logística</span>
+          </div>
+        </div>
+        <div class="finance-dashboard-chart-stage"><canvas id="financeCostBreakdownChart"></canvas></div>
+      </article>
+      <article class="finance-dashboard-chart-card">
+        <div class="finance-dashboard-chart-head">
+          <div>
+            <strong>Merma mensual</strong>
+            <span>Costo de merma y % sobre ventas</span>
+          </div>
+        </div>
+        <div class="finance-dashboard-chart-stage"><canvas id="financeWasteChart"></canvas></div>
+      </article>
+    </div>
   </section>
 
   <section class="finance-signal-grid">
@@ -839,6 +904,128 @@
     const success = '#2e8b57';
     const ink = '#5a2132';
     const neutral = '#7b6871';
+    const brandWine = '#8B2252';
+    const brandGold = '#C9A84C';
+    const brandGrey = '#CCCCCC';
+    const dashboardGrid = document.querySelector('[data-dashboard-charts-year]');
+    const dashboardStatus = document.getElementById('financeDashboardChartsStatus');
+    const asNumbers = (values) => (values || []).map((value) => Number(value || 0));
+
+    const renderDashboardCharts = (payload) => {
+      const charts = (payload && payload.charts) || {};
+      const sales = charts.ventas_vs_presupuesto || {};
+      const profit = charts.utilidad_operativa || {};
+      const costs = charts.desglose_costos || {};
+      const waste = charts.merma_mensual || {};
+
+      const salesCtx = document.getElementById('financeSalesBudgetChart');
+      if (salesCtx) {
+        new Chart(salesCtx, {
+          data: {
+            labels: sales.labels || [],
+            datasets: [
+              { type: 'bar', label: 'Ventas reales', data: asNumbers(sales.real), backgroundColor: brandWine, borderRadius: 8, yAxisID: 'y' },
+              { type: 'bar', label: 'Presupuesto ventas', data: asNumbers(sales.presupuesto), backgroundColor: brandGrey, borderRadius: 8, yAxisID: 'y' },
+              { type: 'line', label: '% cumplimiento', data: asNumbers(sales.cumplimiento_pct), borderColor: brandGold, backgroundColor: brandGold, yAxisID: 'pct', tension: 0.35, borderWidth: 3, pointRadius: 4 },
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { color: neutral } }, tooltip: { callbacks: { label: (ctx) => ctx.dataset.yAxisID === 'pct' ? `${ctx.dataset.label}: ${Number(ctx.raw || 0).toFixed(1)}%` : `${ctx.dataset.label}: ${money(ctx.raw)}` } } },
+            scales: {
+              x: { grid: { display: false }, ticks: { color: neutral } },
+              y: { position: 'left', grid: { color: baseGrid }, ticks: { color: neutral, callback: (value) => money(value) } },
+              pct: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: neutral, callback: (value) => `${value}%` } },
+            },
+          },
+        });
+      }
+
+      const profitCtx = document.getElementById('financeOperatingProfitChart');
+      if (profitCtx) {
+        new Chart(profitCtx, {
+          type: 'line',
+          data: {
+            labels: profit.labels || [],
+            datasets: [
+              { label: 'Utilidad real', data: asNumbers(profit.real), borderColor: brandGold, backgroundColor: 'rgba(201,168,76,.20)', tension: 0.35, fill: true, borderWidth: 3, pointRadius: 4 },
+              { label: 'Utilidad presupuestada', data: asNumbers(profit.presupuesto), borderColor: brandWine, backgroundColor: 'transparent', tension: 0.35, fill: false, borderDash: [6, 6], borderWidth: 2, pointRadius: 3 },
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: neutral } }, tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${money(ctx.raw)}` } } },
+            scales: { x: { grid: { display: false }, ticks: { color: neutral } }, y: { grid: { color: baseGrid }, ticks: { color: neutral, callback: (value) => money(value) } } },
+          },
+        });
+      }
+
+      const costCtx = document.getElementById('financeCostBreakdownChart');
+      if (costCtx) {
+        new Chart(costCtx, {
+          data: {
+            labels: costs.labels || [],
+            datasets: [
+              { type: 'bar', label: 'MP', data: asNumbers(costs.mp), backgroundColor: brandWine, stack: 'costos', borderRadius: 4 },
+              { type: 'bar', label: 'Reventa', data: asNumbers(costs.reventa), backgroundColor: '#B85C7F', stack: 'costos', borderRadius: 4 },
+              { type: 'bar', label: 'Nómina', data: asNumbers(costs.nomina), backgroundColor: brandGold, stack: 'costos', borderRadius: 4 },
+              { type: 'bar', label: 'Gasto fijo', data: asNumbers(costs.gasto_fijo), backgroundColor: '#E3C875', stack: 'costos', borderRadius: 4 },
+              { type: 'bar', label: 'Logística', data: asNumbers(costs.logistica), backgroundColor: '#6D5F67', stack: 'costos', borderRadius: 4 },
+              { type: 'line', label: 'Ventas', data: asNumbers(costs.ventas), borderColor: '#2F2A2D', backgroundColor: '#2F2A2D', yAxisID: 'sales', tension: 0.35, borderWidth: 3, pointRadius: 3 },
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { color: neutral } }, tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${money(ctx.raw)}` } } },
+            scales: {
+              x: { stacked: true, grid: { display: false }, ticks: { color: neutral } },
+              y: { stacked: true, grid: { color: baseGrid }, ticks: { color: neutral, callback: (value) => money(value) } },
+              sales: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: neutral, callback: (value) => money(value) } },
+            },
+          },
+        });
+      }
+
+      const wasteCtx = document.getElementById('financeWasteChart');
+      if (wasteCtx) {
+        new Chart(wasteCtx, {
+          data: {
+            labels: waste.labels || [],
+            datasets: [
+              { type: 'bar', label: 'Costo merma', data: asNumbers(waste.costo_merma), backgroundColor: brandWine, borderRadius: 8, yAxisID: 'y' },
+              { type: 'line', label: '% sobre ventas', data: asNumbers(waste.pct_sobre_ventas), borderColor: brandGold, backgroundColor: brandGold, yAxisID: 'pct', tension: 0.35, borderWidth: 3, pointRadius: 4 },
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: neutral } }, tooltip: { callbacks: { label: (ctx) => ctx.dataset.yAxisID === 'pct' ? `${ctx.dataset.label}: ${Number(ctx.raw || 0).toFixed(2)}%` : `${ctx.dataset.label}: ${money(ctx.raw)}` } } },
+            scales: {
+              x: { grid: { display: false }, ticks: { color: neutral } },
+              y: { position: 'left', grid: { color: baseGrid }, ticks: { color: neutral, callback: (value) => money(value) } },
+              pct: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: neutral, callback: (value) => `${value}%` } },
+            },
+          },
+        });
+      }
+    };
+
+    if (dashboardGrid) {
+      const year = dashboardGrid.dataset.dashboardChartsYear || new Date().getFullYear();
+      fetch(`/api/reportes/dashboard-charts/?año=${encodeURIComponent(year)}`, { headers: { 'Accept': 'application/json' } })
+        .then((response) => {
+          if (!response.ok) throw new Error('No se pudo cargar dashboard-charts');
+          return response.json();
+        })
+        .then((payload) => {
+          renderDashboardCharts(payload);
+          if (dashboardStatus) dashboardStatus.textContent = `Datos ${payload.year}`;
+        })
+        .catch(() => {
+          if (dashboardStatus) dashboardStatus.textContent = 'No se pudieron cargar las gráficas';
+        });
+    }
 
     const trendCtx = document.getElementById('financeWeeklyCostChart');
     if (trendCtx) {
