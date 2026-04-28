@@ -3929,6 +3929,7 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
         "margen_pct": margen_pct,
         "selected_budget_period": selected_budget_period.strftime("%Y-%m"),
         "budget_vs_actual": budget_vs_actual,
+        "dashboard_charts_year": selected_budget_period.year,
         "hero_delta_pct": hero_delta_pct.quantize(Decimal("0.01")) if hero_delta_pct is not None else None,
         "module_tabs": _reportes_module_tabs("financiero"),
     }
