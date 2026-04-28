@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -23,6 +24,12 @@ ZERO = Decimal("0")
 ONE = Decimal("1")
 UNIT = Decimal("0.001")
 RATE = Decimal("0.0001")
+DEFAULT_WASTE_FACTOR = Decimal("0.03")
+DEFAULT_RETURN_FACTOR = Decimal("0.05")
+MIN_HISTORY_DAYS = 7
+NETWORK_FACTOR_HISTORY_THRESHOLD = 21
+MAX_WASTE_FACTOR = Decimal("0.10")
+MAX_RETURN_FACTOR = Decimal("0.15")
 
 
 @dataclass
@@ -44,6 +51,7 @@ class ProjectionSummary:
         return sum((_to_decimal(row.get("unidades_proyectadas_ajustadas")) for row in self.rows), ZERO).quantize(UNIT)
 
     def as_dict(self) -> dict[str, object]:
+        factor_sources = Counter(str(row.get("factor_fuente") or "") for row in self.rows)
         return {
             "periodos": [item.isoformat() for item in self.target_dates],
             "dry_run": self.dry_run,
@@ -52,6 +60,11 @@ class ProjectionSummary:
             "updated": self.updated,
             "skipped": self.skipped,
             "total_units": str(self.total_units),
+            "factor_fuentes": dict(sorted(factor_sources.items())),
+            "factor_capped": sum(1 for row in self.rows if row.get("factor_capped")),
+            "max_factor_merma": str(max((_to_decimal(row.get("factor_merma")) for row in self.rows), default=ZERO).quantize(RATE)),
+            "max_factor_devolucion": str(max((_to_decimal(row.get("factor_devolucion")) for row in self.rows), default=ZERO).quantize(RATE)),
+            "confianza": dict(sorted(Counter(str(row.get("confianza") or "") for row in self.rows).items())),
             "warnings": self.warnings[:40],
             "top_10": [_json_safe(row) for row in self.rows[:10]],
         }
@@ -102,6 +115,8 @@ class ProyeccionProduccionService:
         stock_map = self._latest_stock_by_branch_recipe(candidate_keys)
         waste_factor_map = self._waste_factor_by_key(fecha_objetivo, candidate_keys)
         returned_factor_map = self._returned_factor_by_key(fecha_objetivo, candidate_keys, sales_by_key)
+        network_waste_factor_map = self._network_waste_factor_by_recipe(fecha_objetivo, {recipe_id for _branch_id, recipe_id in candidate_keys})
+        network_return_factor_map = self._network_returned_factor_by_recipe(fecha_objetivo, {recipe_id for _branch_id, recipe_id in candidate_keys})
         recipe_map = {recipe.id: recipe for recipe in recipes}
         branch_map = {branch.id: branch for branch in sucursales}
 
@@ -112,14 +127,25 @@ class ProyeccionProduccionService:
             branch_id, recipe_id = key
             history = sales_by_key.get(key, {})
             history_days = len([qty for qty in history.values() if qty > ZERO])
-            if history_days < 3:
+            if history_days < MIN_HISTORY_DAYS:
                 skipped += 1
-                warnings.append(f"Sin historial suficiente: {branch_map[branch_id].codigo} · {recipe_map[recipe_id].nombre} ({history_days} días)")
+                warnings.append(
+                    f"HISTORIAL_INSUFICIENTE: {branch_map[branch_id].codigo} · {recipe_map[recipe_id].nombre} ({history_days} días)"
+                )
                 continue
 
             projected_sales = self._weighted_sales_average(history, fecha_objetivo)
-            waste_factor = waste_factor_map.get(key, ZERO)
-            returned_factor = returned_factor_map.get(key, ZERO)
+            waste_factor, returned_factor, factor_source = self._resolve_factors(
+                key=key,
+                history_days=history_days,
+                waste_factor_map=waste_factor_map,
+                returned_factor_map=returned_factor_map,
+                network_waste_factor_map=network_waste_factor_map,
+                network_return_factor_map=network_return_factor_map,
+            )
+            waste_factor, waste_capped = _cap_factor(waste_factor, MAX_WASTE_FACTOR)
+            returned_factor, returned_capped = _cap_factor(returned_factor, MAX_RETURN_FACTOR)
+            factor_capped = waste_capped or returned_capped
             stock = stock_map.get(key, ZERO)
             raw_units = projected_sales * (ONE + waste_factor + returned_factor)
             adjusted_units = max(raw_units - stock, ZERO)
@@ -140,6 +166,8 @@ class ProyeccionProduccionService:
                     "confianza": confidence,
                     "dias_historial": history_days,
                     "metodo": self.metodo,
+                    "factor_fuente": factor_source,
+                    "factor_capped": factor_capped,
                 }
             )
 
@@ -203,6 +231,8 @@ class ProyeccionProduccionService:
                         "metadata": {
                             "source": "ProyeccionProduccionService",
                             "generated_at": now.isoformat(),
+                            "factor_fuente": row["factor_fuente"],
+                            "factor_capped": row["factor_capped"],
                         },
                         "generado_en": now,
                     },
@@ -244,7 +274,7 @@ class ProyeccionProduccionService:
             sold = _to_decimal(row.get("vendido"))
             if sold <= ZERO:
                 continue
-            factors[(int(row["sucursal_id"]), int(row["receta_id"]))] = min(_to_decimal(row.get("merma")) / sold, Decimal("0.30"))
+            factors[(int(row["sucursal_id"]), int(row["receta_id"]))] = _to_decimal(row.get("merma")) / sold
         return factors
 
     def _returned_factor_by_key(
@@ -271,8 +301,80 @@ class ProyeccionProduccionService:
             key = (int(row["sucursal_origen_id"]), int(row["receta_id"]))
             sold = sum(sales_by_key.get(key, {}).values(), ZERO)
             if sold > ZERO:
-                factors[key] = min(_to_decimal(row.get("unidades")) / sold, Decimal("0.30"))
+                factors[key] = _to_decimal(row.get("unidades")) / sold
         return factors
+
+    def _network_waste_factor_by_recipe(self, target_date: date, recipe_ids: set[int]) -> dict[int, Decimal]:
+        if not recipe_ids:
+            return {}
+        month_start = (target_date - timedelta(days=28)).replace(day=1)
+        rows = (
+            MermaMensualSucursal.objects.filter(
+                periodo__gte=month_start,
+                periodo__lte=target_date.replace(day=1),
+                receta_id__in=recipe_ids,
+                unidades_vendidas__gt=0,
+            )
+            .values("receta_id")
+            .annotate(merma=Sum("unidades_merma"), vendido=Sum("unidades_vendidas"))
+        )
+        factors = {}
+        for row in rows:
+            sold = _to_decimal(row.get("vendido"))
+            if sold > ZERO:
+                factors[int(row["receta_id"])] = _to_decimal(row.get("merma")) / sold
+        return factors
+
+    def _network_returned_factor_by_recipe(self, target_date: date, recipe_ids: set[int]) -> dict[int, Decimal]:
+        if not recipe_ids:
+            return {}
+        month_start = (target_date - timedelta(days=28)).replace(day=1)
+        returns = {
+            int(row["receta_id"]): _to_decimal(row.get("unidades"))
+            for row in DevolucionSucursalMatriz.objects.filter(
+                periodo__gte=month_start,
+                periodo__lte=target_date.replace(day=1),
+                receta_id__in=recipe_ids,
+            )
+            .values("receta_id")
+            .annotate(unidades=Sum("unidades"))
+        }
+        sales = {
+            int(row["receta_id"]): _to_decimal(row.get("cantidad"))
+            for row in VentaHistorica.objects.filter(
+                fecha__gte=target_date - timedelta(days=28),
+                fecha__lt=target_date,
+                fuente=POINT_BRIDGE_SALES_SOURCE,
+                receta_id__in=recipe_ids,
+            )
+            .values("receta_id")
+            .annotate(cantidad=Sum("cantidad"))
+        }
+        factors = {}
+        for recipe_id, units in returns.items():
+            sold = sales.get(recipe_id, ZERO)
+            if sold > ZERO:
+                factors[recipe_id] = units / sold
+        return factors
+
+    def _resolve_factors(
+        self,
+        *,
+        key: tuple[int, int],
+        history_days: int,
+        waste_factor_map: dict[tuple[int, int], Decimal],
+        returned_factor_map: dict[tuple[int, int], Decimal],
+        network_waste_factor_map: dict[int, Decimal],
+        network_return_factor_map: dict[int, Decimal],
+    ) -> tuple[Decimal, Decimal, str]:
+        _branch_id, recipe_id = key
+        if history_days >= NETWORK_FACTOR_HISTORY_THRESHOLD:
+            return waste_factor_map.get(key, ZERO), returned_factor_map.get(key, ZERO), "HISTORICO_PROPIO"
+        network_waste = network_waste_factor_map.get(recipe_id)
+        network_return = network_return_factor_map.get(recipe_id)
+        if network_waste is not None or network_return is not None:
+            return network_waste or ZERO, network_return or ZERO, "PROMEDIO_RED"
+        return DEFAULT_WASTE_FACTOR, DEFAULT_RETURN_FACTOR, "DEFAULT"
 
     def _latest_stock_by_branch_recipe(self, keys: set[tuple[int, int]]) -> dict[tuple[int, int], Decimal]:
         if not keys:
@@ -343,6 +445,12 @@ def _avg(values: list[Decimal]) -> Decimal:
     if not values:
         return ZERO
     return sum(values, ZERO) / Decimal(len(values))
+
+
+def _cap_factor(value: Decimal, cap: Decimal) -> tuple[Decimal, bool]:
+    if value > cap:
+        return cap, True
+    return value, False
 
 
 def _json_safe(row: dict[str, object]) -> dict[str, object]:
