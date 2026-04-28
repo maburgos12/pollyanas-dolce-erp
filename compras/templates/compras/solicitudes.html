@@ -31,6 +31,8 @@
         data-demanda-lead="{{ i.demanda_lead_time }}"
         data-lead-time="{{ i.lead_time_dias }}"
         data-recomendado="{{ i.recomendado }}"
+        data-unidad="{{ i.unidad }}"
+        data-proveedor-id="{{ i.proveedor_sugerido_id }}"
         data-proveedor="{{ i.proveedor_sugerido }}"
       >
         {{ i.nombre }}
@@ -38,10 +40,18 @@
       {% endfor %}
     </select>
     <input class="input-field" id="cantidad" type="number" step="0.001" min="0" name="cantidad" placeholder="Cantidad" required>
+    <input class="input-field" id="unidad_display" type="text" placeholder="Unidad" readonly>
+    <select class="input-field" id="proveedor_sugerido_id" name="proveedor_sugerido_id">
+      <option value="">Proveedor sugerido</option>
+      {% for p in proveedor_options %}
+      <option value="{{ p.id }}">{{ p.nombre }}</option>
+      {% endfor %}
+    </select>
     <input class="input-field" type="date" name="fecha_requerida" required>
     <select class="input-field" name="estatus">
       {% for value, label in status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
     </select>
+    <input class="input-field" name="justificacion_excepcion" placeholder="Justificación">
     <button class="btn btn-primary" type="submit">Guardar solicitud</button>
   </form>
   <p id="stock-hint" class="muted mb-0">Selecciona un insumo para ver stock, seguridad, tránsito, lead time, sugerencia y proveedor principal.</p>
@@ -1037,6 +1047,8 @@
   (function () {
     const insumoSelect = document.getElementById("insumo_id");
     const cantidadInput = document.getElementById("cantidad");
+    const unidadDisplay = document.getElementById("unidad_display");
+    const proveedorSelect = document.getElementById("proveedor_sugerido_id");
     const stockHint = document.getElementById("stock-hint");
     if (insumoSelect && cantidadInput && stockHint) {
       const insumoFilter = document.getElementById("insumo_filter");
@@ -1079,6 +1091,7 @@
         const selected = insumoSelect.options[insumoSelect.selectedIndex];
         if (!selected || !selected.value) {
           stockHint.textContent = "Selecciona un insumo para ver stock, seguridad, tránsito, lead time y sugerencia de compra.";
+          if (unidadDisplay) unidadDisplay.value = "";
           return;
         }
 
@@ -1090,6 +1103,9 @@
         const leadTime = Number(selected.dataset.leadTime || 0);
         const recomendado = Number(selected.dataset.recomendado || 0);
         const proveedor = selected.dataset.proveedor || "-";
+        const proveedorId = selected.dataset.proveedorId || "";
+        if (unidadDisplay) unidadDisplay.value = selected.dataset.unidad || "";
+        if (proveedorSelect && proveedorId) proveedorSelect.value = proveedorId;
 
         if (!Number.isNaN(recomendado) && recomendado > 0) {
           cantidadInput.value = recomendado.toFixed(3);

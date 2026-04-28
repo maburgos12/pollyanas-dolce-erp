@@ -14,6 +14,7 @@ urlpatterns = [
     path("financiero/", views.costo_receta, name="financiero"),
     path("presupuesto-maestro/", views.presupuesto_maestro, name="presupuesto_maestro"),
     path("mermas-devoluciones/", views.mermas_devoluciones, name="mermas_devoluciones"),
+    path("auditoria-insumos/", views.auditoria_insumos, name="auditoria_insumos"),
     path("proyeccion-produccion/", views.proyeccion_produccion, name="proyeccion_produccion"),
     path("presupuestos/importar/", views.presupuesto_importar_por_area, name="presupuesto_importar_por_area"),
     path(

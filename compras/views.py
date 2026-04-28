@@ -3926,6 +3926,8 @@ def _build_insumo_options(limit: int = 1200):
                 "id": insumo.id,
                 "nombre": _insumo_display_name(insumo),
                 "canonical_variant_count": row["variant_count"],
+                "unidad": insumo.unidad_base.codigo if insumo.unidad_base_id else "",
+                "proveedor_sugerido_id": insumo.proveedor_principal_id or "",
                 "proveedor_sugerido": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
                 "stock_actual": stock_actual,
                 "punto_reorden": punto_reorden,
@@ -6906,6 +6908,12 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "El insumo seleccionado no es válido.")
                 return _redirect_scoped_list("compras:solicitudes", request)
             fuera_de_catalogo = _to_bool_flag(request.POST.get("fuera_de_catalogo"))
+            proveedor_sugerido = None
+            proveedor_sugerido_id = request.POST.get("proveedor_sugerido_id")
+            if proveedor_sugerido_id:
+                proveedor_sugerido = Proveedor.objects.filter(id=proveedor_sugerido_id, activo=True).first()
+            if proveedor_sugerido is None:
+                proveedor_sugerido = insumo.proveedor_principal
             cotizaciones_requeridas = _to_non_negative_int(
                 request.POST.get("cotizaciones_requeridas"),
                 default=3 if fuera_de_catalogo else 0,
@@ -6919,7 +6927,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
                 ),
                 solicitante=request.POST.get("solicitante", request.user.username).strip() or request.user.username,
                 insumo=insumo,
-                proveedor_sugerido=insumo.proveedor_principal,
+                proveedor_sugerido=proveedor_sugerido,
                 cantidad=_to_decimal(request.POST.get("cantidad"), "1"),
                 fecha_requerida=request.POST.get("fecha_requerida") or date.today(),
                 estatus=request.POST.get("estatus") or SolicitudCompra.STATUS_BORRADOR,
