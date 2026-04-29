@@ -37,9 +37,31 @@ FAMILY_RULES = [
 
 POINT_CLASS_RULES = [
     ("TOPPING", ["topping", "empaque pay"]),
-    ("SERVICIO_ACCESORIO", ["servicio domicilio", "letrero", "pirotecnia", "chispas", "encendedor", "vela"]),
+    ("SERVICIO_ACCESORIO", ["servicio domicilio", "letrero", "pirotecnia", "chispas", "encendedor", "vela", "tarjeta de regalo"]),
     ("REVENTA", ["coca-cola", "coca cola", "espagueti", "aderezo"]),
 ]
+
+# Resoluciones revisadas contra el nombre de Point y los candidatos ERP vendidos.
+# La llave usa el codigo Point normalizado (external_id o sku). No se usa matching
+# por cercania cuando cruza familias distintas.
+AMBIGUOS_RESUELTOS = {
+    "116": 5,  # Bollo Chocolate -> Bollo Chocolate, no Navidad
+    "117": 11,  # Bollo Vainilla -> Bollo Vainilla, no Navidad
+    "118": 14,  # Bollo Zanahoria -> Bollo Zanahoria, no Navidad
+    "125": 19,  # Galleta Chispas Chocolate -> Galleta Chispas Chocolate
+    "1015": 141,  # Latte Vainilla -> Latte Vainilla
+    "1003": 91,  # Pastel Lotus Chico -> Pastel Lotus Chico
+    "1004": 95,  # Pastel Lotus Mediano -> Pastel Lotus Mediano
+    "1002": 98,  # Pastel Lotus Mini -> Pastel Lotus Mini, nunca Pascua
+    "445": 26,  # Pastel de 3 Leches Individual -> Pastel de 3 Leches Individual
+    "100": 48,  # Pastel de Fresas Con Crema Mediano -> mismo producto
+}
+
+# No existe receta segura para esta venta: los candidatos detectados eran pasteles.
+# Se fuerza como no-receta para clasificarla como accesorio/servicio.
+AMBIGUOS_SIN_RECETA = {
+    "310": "SERVICIO_ACCESORIO",  # TARJETA DE REGALO
+}
 
 
 @dataclass
@@ -62,6 +84,8 @@ class ClassificationSummary:
     recipe_family_assignments: list[SoldRecipeRow] = field(default_factory=list)
     point_unmatched: list[UnmatchedPointRow] = field(default_factory=list)
     point_ambiguous: list[tuple[PointProduct, list[Receta]]] = field(default_factory=list)
+    point_resolved_ambiguous: list[tuple[PointProduct, Receta]] = field(default_factory=list)
+    point_forced_unmatched: list[tuple[PointProduct, str]] = field(default_factory=list)
 
 
 class Command(BaseCommand):
@@ -107,8 +131,12 @@ class Command(BaseCommand):
                 if len(candidates) == 1:
                     receta = candidates[0]
                     matched_recipe_ids.add(int(receta.id))
+                    if self._resolved_recipe_id_for_product(product):
+                        summary.point_resolved_ambiguous.append((product, receta))
                 elif len(candidates) > 1:
                     summary.point_ambiguous.append((product, candidates))
+                elif self._forced_unmatched_type_for_product(product):
+                    summary.point_forced_unmatched.append((product, self._forced_unmatched_type_for_product(product) or ""))
 
             recipes_to_classify = (
                 Receta.objects.filter(
@@ -165,6 +193,17 @@ class Command(BaseCommand):
             self.stdout.write(f"  {row.receta.codigo_point} | {row.receta.nombre} -> {row.family}")
 
         self.stdout.write("")
+        self.stdout.write(f"Point ambiguos resueltos por lista blanca: {len(summary.point_resolved_ambiguous)}")
+        for product, receta in summary.point_resolved_ambiguous:
+            self.stdout.write(
+                f"  {product.external_id} | {product.sku or ''} | {product.name} -> "
+                f"{receta.id}:{receta.codigo_point}:{receta.nombre}"
+            )
+        self.stdout.write(f"Point forzados como no-receta: {len(summary.point_forced_unmatched)}")
+        for product, suggested_type in summary.point_forced_unmatched:
+            self.stdout.write(f"  {product.external_id} | {product.sku or ''} | {product.name} -> {suggested_type}")
+
+        self.stdout.write("")
         self.stdout.write(f"Point vendidos sin receta ERP: {len(summary.point_unmatched)}")
         point_by_type = Counter(row.suggested_type for row in summary.point_unmatched)
         for suggested_type, count in sorted(point_by_type.items()):
@@ -215,6 +254,13 @@ class Command(BaseCommand):
         }
 
     def _match_recipes_for_product(self, product: PointProduct, recipes_by_code: dict[str, list[Receta]]) -> list[Receta]:
+        if self._forced_unmatched_type_for_product(product):
+            return []
+        resolved_id = self._resolved_recipe_id_for_product(product)
+        if resolved_id:
+            receta = Receta.objects.filter(id=resolved_id, tipo=Receta.TIPO_PRODUCTO_FINAL).first()
+            if receta:
+                return [receta]
         keys = {self._normalize_code(product.external_id), self._normalize_code(product.sku)}
         keys.discard("")
         candidates: list[Receta] = []
@@ -238,6 +284,9 @@ class Command(BaseCommand):
         return "Otros postres"
 
     def _suggest_point_type(self, product: PointProduct) -> str:
+        forced_type = self._forced_unmatched_type_for_product(product)
+        if forced_type:
+            return forced_type
         haystack = self._normalize_name(f"{product.name} {product.category}")
         for suggested_type, tokens in POINT_CLASS_RULES:
             for token in tokens:
@@ -259,3 +308,20 @@ class Command(BaseCommand):
 
     def _normalize_name(self, value: str | None) -> str:
         return " ".join(unidecode(value or "").casefold().strip().split())
+
+    def _product_keys(self, product: PointProduct) -> set[str]:
+        keys = {self._normalize_code(product.external_id), self._normalize_code(product.sku)}
+        keys.discard("")
+        return keys
+
+    def _resolved_recipe_id_for_product(self, product: PointProduct) -> int | None:
+        for key in self._product_keys(product):
+            if key in AMBIGUOS_RESUELTOS:
+                return AMBIGUOS_RESUELTOS[key]
+        return None
+
+    def _forced_unmatched_type_for_product(self, product: PointProduct) -> str:
+        for key in self._product_keys(product):
+            if key in AMBIGUOS_SIN_RECETA:
+                return AMBIGUOS_SIN_RECETA[key]
+        return ""
