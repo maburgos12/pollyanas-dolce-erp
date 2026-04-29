@@ -12010,7 +12010,7 @@ def _export_plan_point_xlsx(plan: PlanProduccion) -> HttpResponse:
                 receta.codigo_point or "",
                 receta.nombre,
                 float(item.cantidad or 0),
-                1 if receta.tipo == Receta.TIPO_PREPARACION else 0,
+                "true" if receta.tipo == Receta.TIPO_PREPARACION else "false",
             ]
         )
 
@@ -19453,6 +19453,48 @@ def _resolve_receta_reabasto(receta_txt: str, codigo_point: str) -> Receta | Non
     return Receta.objects.filter(nombre_normalizado=name).order_by("id").first()
 
 
+def _point_cedis_stock_por_receta(receta_ids: list[int]) -> dict[int, Decimal]:
+    recetas = {
+        row["id"]: (row["codigo_point"] or "").strip()
+        for row in Receta.objects.filter(id__in=receta_ids).values("id", "codigo_point")
+    }
+    code_to_receta = {
+        code: receta_id
+        for receta_id, code in recetas.items()
+        if code
+    }
+    if not code_to_receta:
+        return {}
+
+    product_by_id = {
+        product.id: product.sku
+        for product in PointProduct.objects.filter(sku__in=code_to_receta.keys()).only("id", "sku")
+    }
+    if not product_by_id:
+        return {}
+
+    latest_by_product: dict[int, PointInventorySnapshot] = {}
+    snapshots = (
+        PointInventorySnapshot.objects.filter(
+            branch__name__iexact="CEDIS",
+            product_id__in=product_by_id.keys(),
+        )
+        .select_related("product")
+        .order_by("product_id", "-captured_at", "-id")
+    )
+    for snapshot in snapshots:
+        if snapshot.product_id in latest_by_product:
+            continue
+        latest_by_product[snapshot.product_id] = snapshot
+
+    stock_by_receta: dict[int, Decimal] = {}
+    for product_id, snapshot in latest_by_product.items():
+        receta_id = code_to_receta.get(product_by_id.get(product_id))
+        if receta_id:
+            stock_by_receta[receta_id] = _to_decimal_safe(snapshot.stock)
+    return stock_by_receta
+
+
 def _consolidado_reabasto_por_fecha(fecha_operacion: date) -> list[dict]:
     totals = (
         SolicitudReabastoCedisLinea.objects.filter(solicitud__fecha_operacion=fecha_operacion)
@@ -19465,15 +19507,19 @@ def _consolidado_reabasto_por_fecha(fecha_operacion: date) -> list[dict]:
         )
         .order_by("receta__nombre")
     )
+    receta_ids = [row["receta_id"] for row in totals]
+    point_cedis_stock = _point_cedis_stock_por_receta(receta_ids)
     inv_map = {
         x.receta_id: x
-        for x in InventarioCedisProducto.objects.filter(receta_id__in=[row["receta_id"] for row in totals]).select_related("receta")
+        for x in InventarioCedisProducto.objects.filter(receta_id__in=receta_ids).select_related("receta")
     }
     rows: list[dict] = []
     for row in totals:
         rid = row["receta_id"]
         inv = inv_map.get(rid)
-        disponible = inv.disponible if inv else Decimal("0")
+        disponible = point_cedis_stock.get(rid)
+        if disponible is None:
+            disponible = inv.disponible if inv else Decimal("0")
         solicitado = _to_decimal_safe(row.get("total_solicitado"))
         faltante = max(Decimal("0"), solicitado - disponible)
         rows.append(
@@ -20686,5 +20732,3 @@ def reabasto_cedis_generar_compras(request: HttpRequest) -> HttpResponse:
         }
     )
     return redirect(f"{reverse('compras:solicitudes')}?{compras_query}")
-
-
