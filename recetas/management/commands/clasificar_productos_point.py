@@ -37,7 +37,10 @@ FAMILY_RULES = [
 
 POINT_CLASS_RULES = [
     ("TOPPING", ["topping", "empaque pay"]),
-    ("SERVICIO_ACCESORIO", ["servicio domicilio", "letrero", "pirotecnia", "chispas", "encendedor", "vela", "tarjeta de regalo"]),
+    (
+        "SERVICIO_ACCESORIO",
+        ["servicio domicilio", "letrero", "pirotecnia", "chispas", "encendedor", "vela", "tarjeta de regalo", "extra 100"],
+    ),
     ("REVENTA", ["coca-cola", "coca cola", "espagueti", "aderezo"]),
 ]
 
