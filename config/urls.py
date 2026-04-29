@@ -50,6 +50,7 @@ urlpatterns = [
     path("ventas/", include(("ventas.urls", "ventas"), namespace="ventas")),
     path("rrhh/", include(("rrhh.urls", "rrhh"), namespace="rrhh")),
     path("logistica/", include(("logistica.urls", "logistica"), namespace="logistica")),
+    path("fallas/", include(("fallas.urls", "fallas"), namespace="fallas")),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
     path("orquestacion/", include(("orquestacion.urls", "orquestacion"), namespace="orquestacion")),
@@ -62,6 +63,7 @@ urlpatterns = [
     ),
     path("rentabilidad/analizar-todas/", views_rentabilidad.analizar_todas, name="rentabilidad_analizar_todas"),
     path("api/", include("api.urls")),
+    path("api/fallas/", include(("fallas.urls", "fallas_api"), namespace="fallas_api")),
     path("api/pos-bridge/", include(("pos_bridge.api.urls", "pos_bridge_api"), namespace="pos_bridge_api")),
 ]
 

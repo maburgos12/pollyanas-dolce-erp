@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Dashboard de Fallas{% endblock %}
+{% block page_title %}Fallas · Dashboard{% endblock %}
+{% block body_class %}page-fallas-dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+<style>
+  .fallas-toolbar { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+  .fallas-toolbar select, .fallas-toolbar button, .fallas-modal select, .fallas-modal input, .fallas-modal textarea { min-height:42px; border:1px solid var(--border-soft, #e5dce1); border-radius:10px; padding:8px 10px; font:inherit; }
+  .fallas-table { width:100%; border-collapse:collapse; }
+  .fallas-table th, .fallas-table td { padding:12px 10px; border-bottom:1px solid rgba(139,34,82,.12); text-align:left; vertical-align:top; }
+  .fallas-table th { color:#6f3150; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .fallas-badge { display:inline-flex; align-items:center; min-height:26px; border-radius:999px; padding:3px 9px; font-size:12px; font-weight:800; }
+  .p-critica { background:#fef2f2; color:#991b1b; border:1px solid #fca5a5; }
+  .p-alta { background:#fff7ed; color:#c2410c; border:1px solid #fdba74; }
+  .p-media { background:#fffbeb; color:#92400e; border:1px solid #fde68a; }
+  .p-baja { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; }
+  .fallas-modal-backdrop { position:fixed; inset:0; z-index:20; display:none; background:rgba(24,12,18,.54); padding:24px; overflow:auto; }
+  .fallas-modal-backdrop.is-open { display:block; }
+  .fallas-modal { width:min(860px, 100%); margin:40px auto; background:#fff; border-radius:14px; box-shadow:0 18px 60px rgba(0,0,0,.28); overflow:hidden; }
+  .fallas-modal-head { display:flex; justify-content:space-between; gap:12px; align-items:center; background:#8B2252; color:#fff; padding:16px 18px; }
+  .fallas-modal-body { padding:18px; }
+  .fallas-detail-grid { display:grid; grid-template-columns:1.2fr .8fr; gap:18px; }
+  .fallas-modal-actions { display:flex; justify-content:flex-end; gap:10px; padding:14px 18px; border-top:1px solid #eee; }
+  @media (max-width: 820px) {
+    .fallas-toolbar, .fallas-detail-grid { grid-template-columns:1fr; }
+    .fallas-table { min-width:760px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell" id="fallas-app">
+  <nav class="module-tabs">
+    <a href="{% url 'fallas:dashboard' %}" class="module-tab active">Dashboard</a>
+    <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab">PWA reporte</a>
+    <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab">Mis reportes</a>
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Mantenimiento correctivo</div>
+      <h1 class="bi-hero-title">Fallas en sucursal</h1>
+      <p class="bi-copy">Reportes móviles con evidencia, prioridad, bitácora y seguimiento para Compras y DG.</p>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card"><span class="bi-status-label">Abiertos</span><strong id="kpi-abiertos">-</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Críticos</span><strong id="kpi-criticos">-</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Resueltos 30d</span><strong id="kpi-resueltos">-</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Respuesta prom.</span><strong id="kpi-tiempo">-</strong></article>
+      </div>
+    </div>
+  </section>
+
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div><div class="bi-kicker">Filtros</div><h2 class="bi-panel-title">Bandeja de reportes</h2></div>
+      <div class="bi-panel-actions"><span class="fallas-badge p-media" id="total-badge">0 registros</span></div>
+    </div>
+    <div class="fallas-toolbar">
+      <select id="f-estatus">
+        <option value="">Todos los estatus</option>
+        <option value="abierto">Abierto</option>
+        <option value="en_revision">En revisión</option>
+        <option value="en_proceso">En proceso</option>
+        <option value="resuelto">Resuelto</option>
+        <option value="cerrado">Cerrado</option>
+        <option value="cancelado">Cancelado</option>
+      </select>
+      <select id="f-prioridad">
+        <option value="">Todas las prioridades</option>
+        <option value="critica">Crítica</option>
+        <option value="alta">Alta</option>
+        <option value="media">Media</option>
+        <option value="baja">Baja</option>
+      </select>
+      <select id="f-sucursal"><option value="">Todas las sucursales</option></select>
+      <button class="btn btn-primary" type="button" id="btn-filtrar">Filtrar</button>
+    </div>
+    <div style="overflow:auto; margin-top:14px;">
+      <table class="fallas-table">
+        <thead>
+          <tr><th>#</th><th>Sucursal</th><th>Falla</th><th>Categoría</th><th>Prioridad</th><th>Estatus</th><th>Fecha</th><th>Acciones</th></tr>
+        </thead>
+        <tbody id="tabla-body"><tr><td colspan="8">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<div class="fallas-modal-backdrop" id="modal">
+  <div class="fallas-modal">
+    <div class="fallas-modal-head">
+      <strong>Detalle de falla</strong>
+      <button type="button" class="btn btn-secondary btn-small" id="modal-close">Cerrar</button>
+    </div>
+    <div class="fallas-modal-body" id="modal-body">Cargando...</div>
+    <div class="fallas-modal-actions">
+      <button type="button" class="btn btn-secondary" id="modal-cancel">Cerrar</button>
+      <button type="button" class="btn btn-primary" id="btn-actualizar">Actualizar estatus</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = "/api/fallas";
+const token = localStorage.getItem("pd_logistica_access") || localStorage.getItem("fallas_jwt") || localStorage.getItem("access_token") || "";
+const csrf = "{{ csrf_token }}";
+const h = (json=false) => {
+  const headers = {"X-CSRFToken": csrf};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (json) headers["Content-Type"] = "application/json";
+  return headers;
+};
+const prioridad = {
+  critica: '<span class="fallas-badge p-critica">Crítica</span>',
+  alta: '<span class="fallas-badge p-alta">Alta</span>',
+  media: '<span class="fallas-badge p-media">Media</span>',
+  baja: '<span class="fallas-badge p-baja">Baja</span>',
+};
+let reporteActual = null;
+
+async function cargarKPIs() {
+  const res = await fetch(`${API}/dashboard/stats/`, {headers:h()});
+  if (!res.ok) return;
+  const data = await res.json();
+  document.getElementById("kpi-abiertos").textContent = data.total_abiertos ?? "-";
+  document.getElementById("kpi-criticos").textContent = data.criticos_activos ?? "-";
+  document.getElementById("kpi-resueltos").textContent = data.resueltos_mes ?? "-";
+  document.getElementById("kpi-tiempo").textContent = data.tiempo_respuesta_promedio_horas != null ? `${data.tiempo_respuesta_promedio_horas}h` : "-";
+}
+async function cargarSucursales() {
+  const res = await fetch(`${API}/sucursales/`, {headers:h()});
+  const data = await res.json();
+  const sel = document.getElementById("f-sucursal");
+  (data.results || data).forEach(s => sel.insertAdjacentHTML("beforeend", `<option value="${s.id}">${s.nombre}</option>`));
+}
+async function cargarReportes() {
+  const params = new URLSearchParams();
+  ["estatus", "prioridad", "sucursal"].forEach((key, index) => {
+    const ids = ["f-estatus", "f-prioridad", "f-sucursal"];
+    const value = document.getElementById(ids[index]).value;
+    if (value) params.set(key, value);
+  });
+  const res = await fetch(`${API}/reportes/?${params.toString()}`, {headers:h()});
+  const data = await res.json();
+  const items = data.results || data;
+  document.getElementById("total-badge").textContent = `${items.length} registros`;
+  document.getElementById("tabla-body").innerHTML = items.length ? items.map(rep => {
+    const fecha = new Date(rep.fecha_reporte).toLocaleString("es-MX", {day:"2-digit", month:"2-digit", year:"2-digit", hour:"2-digit", minute:"2-digit"});
+    return `<tr>
+      <td><strong>#${rep.id}</strong></td>
+      <td>${rep.sucursal_nombre}</td>
+      <td><strong>${rep.titulo}</strong><br><span class="bi-subtle">${rep.reportado_por_nombre || ""}</span></td>
+      <td>${rep.categoria_nombre}</td>
+      <td>${prioridad[rep.prioridad] || rep.prioridad}</td>
+      <td>${rep.estatus_display}</td>
+      <td>${fecha}</td>
+      <td><button type="button" class="btn btn-secondary btn-small" onclick="abrirDetalle(${rep.id})">Ver</button></td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="8">Sin resultados</td></tr>';
+}
+async function abrirDetalle(id) {
+  reporteActual = id;
+  document.getElementById("modal").classList.add("is-open");
+  document.getElementById("modal-body").textContent = "Cargando...";
+  const res = await fetch(`${API}/reportes/${id}/`, {headers:h()});
+  const rep = await res.json();
+  const bitacora = (rep.bitacora || []).map(row => `<article class="bi-list-item is-tight"><strong>${row.usuario_nombre}</strong><div>${row.estatus_nuevo_display || ""} · ${row.comentario || ""}</div></article>`).join("");
+  document.getElementById("modal-body").innerHTML = `
+    <div class="fallas-detail-grid">
+      <div>
+        <p><strong>Sucursal:</strong> ${rep.sucursal_nombre}</p>
+        <p><strong>Categoría:</strong> ${rep.categoria_nombre}</p>
+        <p><strong>Título:</strong> ${rep.titulo}</p>
+        <p><strong>Descripción:</strong><br>${rep.descripcion}</p>
+        ${rep.activo_nombre ? `<p><strong>Activo:</strong> ${rep.activo_nombre}</p>` : ""}
+        ${rep.latitud ? `<p><strong>GPS:</strong> ${rep.latitud}, ${rep.longitud}</p>` : ""}
+      </div>
+      <div>
+        ${rep.foto_evidencia ? `<img src="${rep.foto_evidencia}" alt="Evidencia" style="width:100%; max-height:260px; object-fit:cover; border-radius:12px;">` : ""}
+        <p><strong>Respuesta:</strong> ${rep.tiempo_respuesta_horas != null ? rep.tiempo_respuesta_horas + "h" : "-"}</p>
+        <p><strong>Resolución:</strong> ${rep.tiempo_resolucion_horas != null ? rep.tiempo_resolucion_horas + "h" : "-"}</p>
+      </div>
+    </div>
+    <hr>
+    <div class="fallas-detail-grid">
+      <div>
+        <label for="nuevo-estatus">Cambiar estatus</label>
+        <select id="nuevo-estatus">
+          <option value="">Seleccionar</option>
+          <option value="en_revision">En revisión</option>
+          <option value="en_proceso">En proceso</option>
+          <option value="resuelto">Resuelto</option>
+          <option value="cerrado">Cerrado</option>
+          <option value="cancelado">Cancelado</option>
+        </select>
+      </div>
+      <div>
+        <label for="costo-est">Costo estimado</label>
+        <input id="costo-est" type="number" step="0.01" placeholder="0.00">
+      </div>
+    </div>
+    <label for="comentario-estatus" style="display:block; margin-top:12px;">Comentario</label>
+    <textarea id="comentario-estatus" rows="3"></textarea>
+    <hr>
+    <h3 class="bi-panel-title" style="font-size:18px;">Bitácora</h3>
+    <div class="bi-list bi-list-dense">${bitacora || '<article class="bi-list-item">Sin historial.</article>'}</div>`;
+}
+async function actualizarEstatus() {
+  const estatus = document.getElementById("nuevo-estatus")?.value;
+  if (!estatus || !reporteActual) return;
+  const body = {
+    estatus,
+    comentario: document.getElementById("comentario-estatus")?.value || "",
+    costo_estimado: document.getElementById("costo-est")?.value || null,
+  };
+  const res = await fetch(`${API}/reportes/${reporteActual}/estatus/`, {method:"POST", headers:h(true), body:JSON.stringify(body)});
+  if (res.ok) {
+    cerrarModal();
+    cargarKPIs();
+    cargarReportes();
+  } else {
+    alert("Error al actualizar. Verifica los datos.");
+  }
+}
+function cerrarModal() {
+  document.getElementById("modal").classList.remove("is-open");
+}
+document.getElementById("btn-filtrar").addEventListener("click", cargarReportes);
+document.getElementById("modal-close").addEventListener("click", cerrarModal);
+document.getElementById("modal-cancel").addEventListener("click", cerrarModal);
+document.getElementById("btn-actualizar").addEventListener("click", actualizarEstatus);
+cargarKPIs();
+cargarSucursales();
+cargarReportes();
+</script>
+{% endblock %}

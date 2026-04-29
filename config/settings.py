@@ -158,6 +158,7 @@ INSTALLED_APPS = [
     "ventas",
     "rrhh",
     "logistica",
+    "fallas",
     "integraciones",
     "horarios_especiales",
     "pos_bridge",

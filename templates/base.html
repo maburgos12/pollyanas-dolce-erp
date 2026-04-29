@@ -247,6 +247,16 @@
                         </a>
                     </li>
                     {% endif %}
+                    {% if ui_access.can_view_logistica %}
+                    <li>
+                        <a href="{% url 'fallas:dashboard' %}" class="{% if '/fallas/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.2 3.2 10.3a2.4 2.4 0 0 0 0 3.4l7.1 7.1a2.4 2.4 0 0 0 3.4 0l7.1-7.1a2.4 2.4 0 0 0 0-3.4l-7.1-7.1a2.4 2.4 0 0 0-3.4 0Z"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>
+                            </span>
+                            <span>Fallas</span>
+                        </a>
+                    </li>
+                    {% endif %}
                     {% if ui_access.can_view_rrhh %}
                     <li>
                         <a href="{% url 'rrhh:empleados' %}" class="{% if '/rrhh/' in request.path %}active{% endif %}">
