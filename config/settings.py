@@ -270,6 +270,8 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
+MEDIA_URL = os.getenv("MEDIA_URL", "/media/")
+MEDIA_ROOT = os.getenv("MEDIA_ROOT", os.path.join(BASE_DIR, "storage", "media"))
 if "test" in sys.argv:
     # Evita dependencia de manifest/collectstatic en la suite de tests.
     STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
