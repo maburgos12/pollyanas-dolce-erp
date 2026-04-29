@@ -36,8 +36,13 @@ class ConsolidadoNocturnoCedisService:
         usuario=None,
         sincronizar_point: bool = True,
         sincronizar_inventario_cedis: bool = True,
+        forzar_recalculo: bool = False,
     ) -> ConsolidadoNocturnoCEDIS:
         fecha_operacion = fecha_operacion or timezone.localdate()
+        consolidado_existente = ConsolidadoNocturnoCEDIS.objects.filter(fecha_operacion=fecha_operacion).first()
+        if consolidado_existente and not forzar_recalculo:
+            return consolidado_existente
+
         inventory_sync_job = None
         sync_job = None
         if sincronizar_point:
