@@ -514,6 +514,38 @@
         font-size: 13px;
         font-weight: 800;
       }
+
+      .file-picker {
+        display: grid;
+        gap: 8px;
+      }
+
+      .file-input {
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        overflow: hidden;
+        position: absolute;
+        pointer-events: none;
+      }
+
+      .file-trigger {
+        display: flex;
+        min-height: 48px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #111118;
+        color: var(--text);
+        font-weight: 900;
+        padding: 12px 13px;
+      }
+
+      .file-trigger.loaded {
+        border-color: var(--success);
+        color: var(--success);
+      }
     </style>
   </head>
   <body>
@@ -754,6 +786,15 @@
         return fallback;
       }
 
+      function fotoInput(id, loaded, onChange) {
+        return `
+          <div class="file-picker">
+            <input id="${id}" class="file-input" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="${onChange}">
+            <label class="file-trigger ${loaded ? "loaded" : ""}" for="${id}">${loaded ? "✅ Imagen cargada" : "Tomar foto"}</label>
+          </div>
+        `;
+      }
+
       function normalizePerfil(raw) {
         const repartidor = raw?.repartidor || {};
         const unidad = raw?.unidad || repartidor?.unidad_asignada || {};
@@ -985,7 +1026,7 @@
               </div>
               <div class="field">
                 <label for="foto">Foto</label>
-                <input id="foto" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="setFotoReporte(this)">
+                ${fotoInput("foto", Boolean(draft.foto), "setFotoReporte(this)")}
                 ${draft.fotoError ? `<p class="error">${escapeHtml(draft.fotoError)}</p>` : ""}
               </div>
               <div class="field">
@@ -1279,7 +1320,7 @@
                 </div>
                 <div class="field">
                   <label for="foto_salida">Foto tablero</label>
-                  <input id="foto_salida" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="setFotoBitacora(this, 'foto_tablero_salida', 'fotoSalidaPreview')">
+                  ${fotoInput("foto_salida", Boolean(draft.foto_tablero_salida), "setFotoBitacora(this, 'foto_tablero_salida', 'fotoSalidaPreview')")}
                   ${draft.fotoSalidaPreview ? `<img class="thumb" src="${draft.fotoSalidaPreview}" alt="Vista previa tablero salida">` : ""}
                   ${draft.fotoSalidaError ? `<p class="error">${escapeHtml(draft.fotoSalidaError)}</p>` : ""}
                 </div>
@@ -1317,7 +1358,7 @@
               </div>
               <div class="field">
                 <label for="foto_llegada">Foto tablero llegada</label>
-                <input id="foto_llegada" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="setFotoBitacora(this, 'foto_tablero_llegada', 'fotoLlegadaPreview')">
+                ${fotoInput("foto_llegada", Boolean(draft.foto_tablero_llegada), "setFotoBitacora(this, 'foto_tablero_llegada', 'fotoLlegadaPreview')")}
                 ${draft.fotoLlegadaPreview ? `<img class="thumb" src="${draft.fotoLlegadaPreview}" alt="Vista previa tablero llegada">` : ""}
                 ${draft.fotoLlegadaError ? `<p class="error">${escapeHtml(draft.fotoLlegadaError)}</p>` : ""}
               </div>
@@ -1491,7 +1532,7 @@
                   </div>
                   <div class="field">
                     <label for="foto_golpes">Foto</label>
-                    <input id="foto_golpes" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="setFotoGolpes(this)">
+                    ${fotoInput("foto_golpes", Boolean(draft.foto_golpes), "setFotoGolpes(this)")}
                     ${draft.fotoGolpesPreview ? `<img class="thumb" src="${draft.fotoGolpesPreview}" alt="Vista previa golpes">` : ""}
                     ${draft.fotoGolpesError ? `<p class="error">${escapeHtml(draft.fotoGolpesError)}</p>` : ""}
                   </div>
