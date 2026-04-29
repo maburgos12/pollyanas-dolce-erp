@@ -1,30 +1,38 @@
 """Callable tasks for pos_bridge."""
 from pos_bridge.tasks.celery_tasks import (
+    task_analytics_refresh_cycle,
     task_daily_sales_sync,
+    task_ecommerce_webhook_delivery,
     task_inventory_sync,
     task_monthly_product_closure,
     task_open_transfer_sync,
+    task_operations_automation_cycle,
     task_production_sync,
     task_product_recipe_sync,
     task_realtime_inventory_sync,
     task_recipe_gap_audit,
     task_retry_failed_jobs,
     task_transfer_sync,
+    task_visible_cut_refresh_cycle,
     task_weekly_cost_snapshot,
     task_waste_sync,
 )
 
 __all__ = (
+    "task_analytics_refresh_cycle",
     "task_daily_sales_sync",
+    "task_ecommerce_webhook_delivery",
     "task_inventory_sync",
     "task_monthly_product_closure",
     "task_open_transfer_sync",
+    "task_operations_automation_cycle",
     "task_production_sync",
     "task_product_recipe_sync",
     "task_realtime_inventory_sync",
     "task_recipe_gap_audit",
     "task_retry_failed_jobs",
     "task_transfer_sync",
+    "task_visible_cut_refresh_cycle",
     "task_weekly_cost_snapshot",
     "task_waste_sync",
 )

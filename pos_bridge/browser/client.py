@@ -21,11 +21,16 @@ class PlaywrightBrowserClient:
                 "`python -m playwright install chromium`.",
             ) from exc
 
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=self.settings.headless,
-            slow_mo=self.settings.browser_slow_mo_ms,
-        )
+        playwright = sync_playwright().start()
+        self._playwright = playwright
+        try:
+            self._browser = playwright.chromium.launch(
+                headless=self.settings.headless,
+                slow_mo=self.settings.browser_slow_mo_ms,
+            )
+        except Exception:
+            self.stop()
+            raise
         return self._browser
 
     def stop(self) -> None:

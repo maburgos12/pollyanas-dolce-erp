@@ -16,6 +16,19 @@ from pos_bridge.tasks.run_waste_sync import run_waste_sync
 
 
 class PointSalesSyncTaskRoutingTests(SimpleTestCase):
+    def test_pos_bridge_tasks_exports_dashboard_refresh_tasks_for_celery_autodiscovery(self):
+        import pos_bridge.tasks as tasks
+
+        expected_task_exports = {
+            "task_analytics_refresh_cycle",
+            "task_operations_automation_cycle",
+            "task_visible_cut_refresh_cycle",
+        }
+
+        self.assertTrue(expected_task_exports.issubset(set(tasks.__all__)))
+        for task_name in expected_task_exports:
+            self.assertTrue(hasattr(tasks, task_name))
+
     @override_settings(POINT_SALES_SYNC_SOURCE_MODE="OFFICIAL", POINT_SALES_SYNC_CREDITO_SCOPES=["null"])
     def test_run_sales_history_sync_defaults_to_official_source(self):
         fake_job = object()

@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r re
 
 FROM python:3.12-slim-bookworm
 
-ARG INSTALL_PLAYWRIGHT_BROWSER=0
+ARG INSTALL_PLAYWRIGHT_BROWSER=1
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
