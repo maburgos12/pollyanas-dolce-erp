@@ -67,7 +67,7 @@ class OpenTransferSyncService:
             )
             summary = self.movement_service.persist_transfer_lines(sync_job, lines)
             transfer_ids = {line.transfer_external_id for line in lines if line.transfer_external_id}
-            branch_ids = self._requesting_branch_ids(fecha=fecha, transfer_ids=transfer_ids)
+            branch_ids = self._requesting_branch_ids(fecha=fecha, transfer_ids=transfer_ids, sync_job=sync_job)
             active_branch_ids = set(sucursales_operativas(fecha).values_list("id", flat=True))
             summary.update(
                 {
@@ -87,17 +87,25 @@ class OpenTransferSyncService:
                 PersistenceError(f"Error no controlado en sync de transferencias abiertas Point: {exc}"),
             )
 
-    def _requesting_branch_ids(self, *, fecha: date, transfer_ids: set[str]) -> set[int]:
+    def _requesting_branch_ids(self, *, fecha: date, transfer_ids: set[str], sync_job: PointSyncJob | None = None) -> set[int]:
         if not transfer_ids:
             return set()
+        filters = {
+            "transfer_external_id__in": transfer_ids,
+            "is_open": True,
+            "is_cancelled": False,
+        }
+        if sync_job is not None:
+            filters["sync_job"] = sync_job
+        else:
+            filters["registered_at__date"] = fecha
         lines = (
-            PointTransferLine.objects.filter(
-                transfer_external_id__in=transfer_ids,
-                is_open=True,
-                is_cancelled=False,
-                registered_at__date=fecha,
+            PointTransferLine.objects.filter(**filters).select_related(
+                "origin_branch",
+                "destination_branch",
+                "erp_origin_branch",
+                "erp_destination_branch",
             )
-            .select_related("origin_branch", "destination_branch", "erp_origin_branch", "erp_destination_branch")
         )
         branch_ids = set()
         for line in lines:

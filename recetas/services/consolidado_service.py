@@ -43,7 +43,7 @@ class ConsolidadoNocturnoCedisService:
                 fecha=fecha_operacion,
                 triggered_by=usuario,
             )
-            self._crear_solicitudes_desde_point(fecha_operacion=fecha_operacion, usuario=usuario)
+            self._crear_solicitudes_desde_point(fecha_operacion=fecha_operacion, usuario=usuario, sync_job=sync_job)
 
         rows = _consolidado_reabasto_por_fecha(fecha_operacion)
         plan, _, total_plan = _upsert_plan_reabasto_cedis(fecha_operacion, usuario)
@@ -99,15 +99,24 @@ class ConsolidadoNocturnoCedisService:
             "cobertura": self._calcular_cobertura(fecha_operacion),
         }
 
-    def _crear_solicitudes_desde_point(self, *, fecha_operacion: date, usuario=None) -> dict:
+    def _crear_solicitudes_desde_point(self, *, fecha_operacion: date, usuario=None, sync_job=None) -> dict:
+        filters = {
+            "is_open": True,
+            "is_cancelled": False,
+            "receta__isnull": False,
+        }
+        if sync_job is not None:
+            filters["sync_job"] = sync_job
+        else:
+            filters["registered_at__date"] = fecha_operacion
         transfer_lines = (
-            PointTransferLine.objects.filter(
-                is_open=True,
-                is_cancelled=False,
-                registered_at__date=fecha_operacion,
-                receta__isnull=False,
+            PointTransferLine.objects.filter(**filters).select_related(
+                "origin_branch",
+                "destination_branch",
+                "erp_origin_branch",
+                "erp_destination_branch",
+                "receta",
             )
-            .select_related("origin_branch", "destination_branch", "erp_origin_branch", "erp_destination_branch", "receta")
         )
         grouped = defaultdict(lambda: defaultdict(Decimal))
         for line in transfer_lines:
