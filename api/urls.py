@@ -1,4 +1,5 @@
 from django.urls import path
+from rest_framework_simplejwt.views import TokenRefreshView
 from .ai_gateway_views import (
     AIGatewayApprovalDecisionView,
     AIGatewayApprovalExecuteView,
@@ -340,6 +341,7 @@ urlpatterns = [
     path("rrhh/nominas/<int:nomina_id>/lineas/", RRHHNominaLineasView.as_view(), name="api_rrhh_nomina_lineas"),
     path("logistica/dashboard/", LogisticaDashboardView.as_view(), name="api_logistica_dashboard"),
     path("logistica/auth/token/", LogisticaTokenView.as_view(), name="api_logistica_auth_token"),
+    path("logistica/auth/token/refresh/", TokenRefreshView.as_view(), name="api_logistica_auth_token_refresh"),
     path("logistica/mi-perfil/", LogisticaMiPerfilView.as_view(), name="api_logistica_mi_perfil"),
     path("logistica/unidades/", LogisticaUnidadesView.as_view(), name="api_logistica_unidades"),
     path("logistica/reportes/", LogisticaReporteCreateView.as_view(), name="api_logistica_reportes"),
