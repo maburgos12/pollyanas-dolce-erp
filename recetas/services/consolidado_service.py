@@ -9,11 +9,12 @@ from django.db.models import Count
 from django.utils import timezone
 
 from core.models import sucursales_operativas
-from pos_bridge.models import PointTransferLine
+from pos_bridge.models import PointSyncJob, PointTransferLine
 from pos_bridge.services.open_transfer_sync_service import (
     OpenTransferSyncService,
     resolve_requesting_erp_branch,
 )
+from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
 from recetas.models import (
     ConsolidadoNocturnoCEDIS,
     PlanProduccion,
@@ -28,50 +29,80 @@ class ConsolidadoNocturnoCedisService:
     def __init__(self, open_transfer_sync_service: OpenTransferSyncService | None = None):
         self.open_transfer_sync_service = open_transfer_sync_service or OpenTransferSyncService()
 
-    @transaction.atomic
     def consolidar(
         self,
         *,
         fecha_operacion: date | None = None,
         usuario=None,
         sincronizar_point: bool = True,
+        sincronizar_inventario_cedis: bool = True,
     ) -> ConsolidadoNocturnoCEDIS:
         fecha_operacion = fecha_operacion or timezone.localdate()
+        inventory_sync_job = None
         sync_job = None
         if sincronizar_point:
+            if sincronizar_inventario_cedis:
+                inventory_sync_job = self._sincronizar_inventario_cedis(usuario=usuario)
             sync_job = self.open_transfer_sync_service.sync_open_transfers(
                 fecha=fecha_operacion,
                 triggered_by=usuario,
             )
-            self._crear_solicitudes_desde_point(fecha_operacion=fecha_operacion, usuario=usuario, sync_job=sync_job)
 
-        rows = _consolidado_reabasto_por_fecha(fecha_operacion)
-        plan, _, total_plan = _upsert_plan_reabasto_cedis(fecha_operacion, usuario)
-        cobertura = self._calcular_cobertura(fecha_operacion)
-        total_sugerido = sum((Decimal(str(row.get("total_sugerido") or 0)) for row in rows), Decimal("0"))
-        total_solicitado = sum((Decimal(str(row.get("total_solicitado") or 0)) for row in rows), Decimal("0"))
-        consolidado, _ = ConsolidadoNocturnoCEDIS.objects.update_or_create(
-            fecha_operacion=fecha_operacion,
-            defaults={
-                "estado": ConsolidadoNocturnoCEDIS.ESTADO_PLAN_GENERADO,
-                "sync_job": sync_job,
-                "plan_produccion": plan,
-                "sucursales_esperadas": cobertura["sucursales_esperadas"],
-                "sucursales_con_solicitud": cobertura["sucursales_con_solicitud"],
-                "sucursales_sin_solicitud": cobertura["sucursales_sin_solicitud"],
-                "productos_consolidados": len(rows),
-                "total_sugerido": total_sugerido,
-                "total_solicitado": total_solicitado,
-                "total_plan_produccion": Decimal(str(total_plan or 0)),
-                "metadata": {
-                    "sync_job_id": sync_job.id if sync_job else None,
-                    "coverage_branch_ids": cobertura["branch_ids"],
+        with transaction.atomic():
+            if sincronizar_point:
+                self._crear_solicitudes_desde_point(fecha_operacion=fecha_operacion, usuario=usuario, sync_job=sync_job)
+
+            rows = _consolidado_reabasto_por_fecha(fecha_operacion)
+            plan, _, total_plan = _upsert_plan_reabasto_cedis(fecha_operacion, usuario)
+            cobertura = self._calcular_cobertura(fecha_operacion)
+            total_sugerido = sum((Decimal(str(row.get("total_sugerido") or 0)) for row in rows), Decimal("0"))
+            total_solicitado = sum((Decimal(str(row.get("total_solicitado") or 0)) for row in rows), Decimal("0"))
+            consolidado, _ = ConsolidadoNocturnoCEDIS.objects.update_or_create(
+                fecha_operacion=fecha_operacion,
+                defaults={
+                    "estado": ConsolidadoNocturnoCEDIS.ESTADO_PLAN_GENERADO,
+                    "sync_job": sync_job,
+                    "plan_produccion": plan,
+                    "sucursales_esperadas": cobertura["sucursales_esperadas"],
+                    "sucursales_con_solicitud": cobertura["sucursales_con_solicitud"],
+                    "sucursales_sin_solicitud": cobertura["sucursales_sin_solicitud"],
+                    "productos_consolidados": len(rows),
+                    "total_sugerido": total_sugerido,
+                    "total_solicitado": total_solicitado,
+                    "total_plan_produccion": Decimal(str(total_plan or 0)),
+                    "metadata": {
+                        "inventory_sync_job_id": inventory_sync_job.id if inventory_sync_job else None,
+                        "sync_job_id": sync_job.id if sync_job else None,
+                        "coverage_branch_ids": cobertura["branch_ids"],
+                        "source_order": [
+                            "point_inventory_cedis",
+                            "point_open_transfers",
+                            "erp_solicitudes_reabasto_cedis",
+                            "plan_produccion",
+                        ],
+                    },
+                    "creado_por": usuario,
                 },
-                "creado_por": usuario,
-            },
+            )
+            self._marcar_plan_automatico(plan=plan, total_plan=total_plan)
+            return consolidado
+
+    def _sincronizar_inventario_cedis(self, *, usuario=None) -> PointSyncJob:
+        sync_job = run_inventory_sync(
+            triggered_by=usuario,
+            branch_filter="CEDIS",
+            limit_branches=1,
+            capture_costs=False,
         )
-        self._marcar_plan_automatico(plan=plan, total_plan=total_plan)
-        return consolidado
+        if sync_job.status != PointSyncJob.STATUS_SUCCESS:
+            raise RuntimeError(
+                "No se pudo sincronizar inventario CEDIS desde PointMeUp antes del consolidado: "
+                f"{sync_job.error_message or sync_job.status}"
+            )
+        summary = sync_job.result_summary or {}
+        if int(summary.get("snapshots_created") or 0) <= 0:
+            raise RuntimeError("La sincronización de inventario CEDIS desde PointMeUp no creó snapshots.")
+        return sync_job
 
     def get_resumen(self, *, fecha_operacion: date | None = None) -> dict:
         fecha_operacion = fecha_operacion or timezone.localdate()
