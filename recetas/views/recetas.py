@@ -1273,6 +1273,18 @@ def _recipe_source_display(receta: Receta) -> str:
     return "Sin costeo"
 
 
+def _active_point_product_codes() -> set[str]:
+    return {
+        normalizar_codigo_point(code)
+        for code in PointProduct.objects.filter(active=True).exclude(sku="").values_list("sku", flat=True)
+        if normalizar_codigo_point(code)
+    }
+
+
+def _recipe_has_active_point_product(receta: Receta, active_point_codes: set[str]) -> bool:
+    return bool(receta.codigo_point and normalizar_codigo_point(receta.codigo_point) in active_point_codes)
+
+
 def _recipe_master_blockers(
     lineas: list[LineaReceta],
     *,
@@ -4663,9 +4675,17 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         usa_presentaciones=True,
     ).count()
     total_batidas_base = max(total_insumos - total_subinsumos, 0)
+    active_point_codes = _active_point_product_codes()
+    product_status_rows = list(
+        recetas_base.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).only("id", "codigo_point")
+    )
+    recetas_activas_count = sum(
+        1 for receta in product_status_rows if _recipe_has_active_point_product(receta, active_point_codes)
+    )
+    recetas_archivadas_count = max(total_productos - recetas_activas_count, 0)
 
     # Vista rápida por botones: por defecto mostramos Productos para evitar lista mezclada.
-    if vista not in {"productos", "insumos", "subinsumos", "todo"}:
+    if vista not in {"productos", "insumos", "subinsumos", "todo", "archivados"}:
         if tipo == Receta.TIPO_PRODUCTO_FINAL:
             vista = "productos"
         elif tipo == Receta.TIPO_PREPARACION:
@@ -4694,6 +4714,8 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         ),
     )
     if vista == "productos":
+        recetas = recetas.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
+    elif vista == "archivados":
         recetas = recetas.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
     elif vista == "insumos":
         recetas = recetas.filter(tipo=Receta.TIPO_PREPARACION)
@@ -4741,7 +4763,15 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         else:
             recetas = recetas.filter(categoria=categoria)
     if not isinstance(recetas, list):
-        recetas = list(recetas.order_by("nombre"))
+        recetas = list(
+            recetas.prefetch_related("lineas", "lineas__insumo").order_by("familia", "nombre")
+        )
+    for receta in recetas:
+        receta.point_active = _recipe_has_active_point_product(receta, active_point_codes)
+    if vista == "archivados":
+        recetas = [r for r in recetas if r.tipo == Receta.TIPO_PRODUCTO_FINAL and not r.point_active]
+    elif vista == "productos":
+        recetas = [r for r in recetas if r.tipo == Receta.TIPO_PRODUCTO_FINAL and r.point_active]
     if estado == "pendientes":
         recetas = [r for r in recetas if _recipe_operational_pending_count(r) > 0]
     elif estado == "ok":
@@ -4826,7 +4856,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
     }
     qs_base = urlencode({k: v for k, v in qs_filters.items() if v})
 
-    paginator = Paginator(recetas, 20)
+    paginator = Paginator(recetas, 50)
     page = paginator.get_page(request.GET.get("page"))
     page_receta_ids = [receta.id for receta in page.object_list]
     equivalence_by_receta_id = {
@@ -5133,6 +5163,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         {
             "page": page,
             "vista": vista,
+            "vista_actual": vista,
             "q": q,
             "estado": estado,
             "health_status": health_status,
@@ -5155,6 +5186,8 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             "total_insumos": total_insumos,
             "total_batidas_base": total_batidas_base,
             "total_subinsumos": total_subinsumos,
+            "recetas_activas_count": recetas_activas_count,
+            "recetas_archivadas_count": recetas_archivadas_count,
             "health_summary": health_summary,
             "chain_summary": chain_summary,
             "chain_focus": chain_focus,
