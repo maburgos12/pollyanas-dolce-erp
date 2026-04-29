@@ -10,6 +10,7 @@ urlpatterns = [
     path("", views.dashboard, name="home"),
     path("rutas/", views.rutas, name="rutas"),
     path("dashboard/", views.dashboard, name="dashboard"),
+    path("capturas/", views.capturas_pwa, name="capturas_pwa"),
     path("unidades/", views.unidades_list, name="unidades_list"),
     path("unidades/nueva/", views.unidad_create, name="unidad_create"),
     path("unidades/<int:pk>/editar/", views.unidad_edit, name="unidad_edit"),

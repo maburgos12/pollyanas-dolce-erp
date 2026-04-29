@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Logística · Capturas PWA{% endblock %}
+{% block page_title %}Logística · Capturas PWA{% endblock %}
+
+{% block extra_css %}
+<style>
+  .capture-shell { display: grid; gap: 18px; }
+  .capture-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  .capture-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .capture-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .capture-kpi { border: 1px solid #f0c9d9; border-radius: 14px; padding: 16px; background: #fff; }
+  .capture-kpi strong { display: block; color: #8B2252; font-family: "Playfair Display", serif; font-size: 32px; line-height: 1; }
+  .capture-kpi span { color: #6f5963; font-weight: 800; }
+  .capture-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+  .capture-section-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+  .capture-section-head h2 { margin: 0; font-family: "Playfair Display", serif; color: #3a2b30; }
+  .capture-table td, .capture-table th { vertical-align: top; }
+  .capture-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; }
+  .capture-badge.ok { background: #e5f5ee; color: #1f7554; }
+  .capture-badge.warn { background: #fff4d8; color: #9a6a00; }
+  .capture-badge.danger { background: #ffe8ec; color: #bc3b56; }
+  .capture-badge.info { background: #e9f0ff; color: #305caa; }
+  .capture-evidence { display: flex; flex-wrap: wrap; gap: 6px; }
+  .capture-evidence a { border: 1px solid #e8b7cb; border-radius: 10px; color: #8B2252; font-weight: 800; padding: 6px 9px; text-decoration: none; }
+  .capture-muted { color: #77656d; font-size: 13px; }
+  .capture-empty { padding: 18px; border: 1px dashed #e8b7cb; border-radius: 14px; color: #77656d; }
+  .capture-pager { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  @media (max-width: 900px) {
+    .capture-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .capture-kpis { grid-template-columns: 1fr; }
+    .capture-head, .capture-filter, .capture-pager { align-items: stretch; flex-direction: column; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="capture-shell">
+  <section class="module-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="capture-head">
+      <div>
+        <div class="card-header">Capturas desde la PWA</div>
+        <p class="muted">Bitácoras, inspecciones, reportes y evidencias generadas desde el celular.</p>
+      </div>
+      <a class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" href="{% url 'logistica:pwa_app' %}" target="_blank" rel="noopener">Abrir PWA</a>
+    </div>
+    <form class="capture-filter" method="get">
+      <input class="input-field" type="text" name="q" value="{{ query }}" placeholder="Buscar por unidad, placa, repartidor o descripción">
+      <button class="btn btn-primary" type="submit">Buscar</button>
+      <a class="btn btn-secondary" href="{% url 'logistica:capturas_pwa' %}">Limpiar</a>
+    </form>
+  </section>
+
+  <section class="capture-kpis">
+    <article class="capture-kpi"><strong>{{ bitacoras_hoy|intcomma }}</strong><span>Bitácoras hoy</span></article>
+    <article class="capture-kpi"><strong>{{ turnos_abiertos|intcomma }}</strong><span>Turnos abiertos</span></article>
+    <article class="capture-kpi"><strong>{{ inspecciones_hoy|intcomma }}</strong><span>Inspecciones hoy</span></article>
+    <article class="capture-kpi"><strong>{{ reportes_abiertos|intcomma }}</strong><span>Reportes abiertos</span></article>
+  </section>
+
+  <section class="card">
+    <div class="capture-section-head">
+      <div>
+        <h2>Bitácoras salida/llegada</h2>
+        <p class="capture-muted">Incluye folio, unidad, kilometraje, combustible y fotos de tablero/ticket.</p>
+      </div>
+      <span class="capture-badge info">Combustible: ${{ costo_combustible_total|floatformat:2|intcomma }}</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped capture-table">
+        <thead>
+          <tr>
+            <th>Folio</th>
+            <th>Repartidor</th>
+            <th>Unidad</th>
+            <th>Salida</th>
+            <th>Llegada</th>
+            <th>Combustible</th>
+            <th>Evidencia</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in bitacoras %}
+          <tr>
+            <td><strong>{{ row.folio }}</strong><br><span class="capture-badge {% if row.cerrada %}ok{% else %}warn{% endif %}">{% if row.cerrada %}Cerrada{% else %}Abierta{% endif %}</span></td>
+            <td>{{ row.repartidor }}</td>
+            <td>{{ row.unidad.codigo }}<br><span class="capture-muted">{{ row.unidad.placa|default:row.unidad.descripcion }}</span></td>
+            <td>{{ row.hora_salida|date:"d/m/Y H:i" }}<br>KM {{ row.km_salida|intcomma }} · Gas {{ row.nivel_gas_salida }}</td>
+            <td>{% if row.hora_llegada %}{{ row.hora_llegada|date:"d/m/Y H:i" }}<br>KM {{ row.km_llegada|intcomma }} · Gas {{ row.nivel_gas_llegada }}{% else %}<span class="capture-muted">Pendiente de cierre</span>{% endif %}</td>
+            <td>{% if row.litros_cargados or row.costo_combustible %}{{ row.litros_cargados|default:"0" }} L<br>${{ row.costo_combustible|default:"0"|floatformat:2 }}{% else %}<span class="capture-muted">Sin carga</span>{% endif %}</td>
+            <td>
+              <div class="capture-evidence">
+                {% if row.foto_tablero_salida %}<a href="{{ row.foto_tablero_salida.url }}" target="_blank" rel="noopener">Tablero salida</a>{% endif %}
+                {% if row.foto_tablero_llegada %}<a href="{{ row.foto_tablero_llegada.url }}" target="_blank" rel="noopener">Tablero llegada</a>{% endif %}
+                {% if row.foto_ticket_combustible %}<a href="{{ row.foto_ticket_combustible.url }}" target="_blank" rel="noopener">Ticket combustible</a>{% endif %}
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7"><div class="capture-empty">Todavía no hay bitácoras capturadas.</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if bitacoras.paginator.num_pages > 1 %}
+    <div class="capture-pager">
+      {% if bitacoras.has_previous %}<a class="btn btn-secondary btn-small" href="?q={{ query }}&bitacoras_page={{ bitacoras.previous_page_number }}">Anterior</a>{% endif %}
+      <span class="muted">Página {{ bitacoras.number }} de {{ bitacoras.paginator.num_pages }}</span>
+      {% if bitacoras.has_next %}<a class="btn btn-secondary btn-small" href="?q={{ query }}&bitacoras_page={{ bitacoras.next_page_number }}">Siguiente</a>{% endif %}
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="capture-section-head">
+      <div>
+        <h2>Inspecciones de unidad</h2>
+        <p class="capture-muted">Checklist de exterior, interior, niveles, estética, golpes y observaciones.</p>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped capture-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Repartidor</th>
+            <th>Unidad</th>
+            <th>KM / Gas</th>
+            <th>Resultado</th>
+            <th>Golpes</th>
+            <th>GPS / IP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in inspecciones %}
+          <tr>
+            <td>{{ row.fecha|date:"d/m/Y H:i" }}</td>
+            <td>{{ row.repartidor }}</td>
+            <td>{{ row.unidad.codigo }}<br><span class="capture-muted">{{ row.unidad.placa|default:row.unidad.descripcion }}</span></td>
+            <td>KM {{ row.km_entrada|intcomma }}<br>Gas {{ row.nivel_gas_entrada }}</td>
+            <td>
+              {% if row.faltantes_count %}
+              <span class="capture-badge danger">{{ row.faltantes_count }} faltantes</span>
+              {% else %}
+              <span class="capture-badge ok">Todo OK</span>
+              {% endif %}
+              {% if row.observaciones %}<br><span class="capture-muted">{{ row.observaciones|truncatechars:90 }}</span>{% endif %}
+            </td>
+            <td>
+              {% if row.tiene_golpes %}
+              <span class="capture-badge warn">Con golpes</span>
+              <div class="capture-muted">{{ row.descripcion_golpes|truncatechars:80 }}</div>
+              {% if row.foto_golpes %}<div class="capture-evidence"><a href="{{ row.foto_golpes.url }}" target="_blank" rel="noopener">Foto golpes</a></div>{% endif %}
+              {% else %}
+              <span class="capture-badge ok">Sin golpes</span>
+              {% endif %}
+            </td>
+            <td><span class="capture-muted">{{ row.latitud|default:"-" }}, {{ row.longitud|default:"-" }}<br>{{ row.ip_registro|default:"Sin IP" }}</span></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7"><div class="capture-empty">Todavía no hay inspecciones capturadas.</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if inspecciones_page.paginator.num_pages > 1 %}
+    <div class="capture-pager">
+      {% if inspecciones_page.has_previous %}<a class="btn btn-secondary btn-small" href="?q={{ query }}&inspecciones_page={{ inspecciones_page.previous_page_number }}">Anterior</a>{% endif %}
+      <span class="muted">Página {{ inspecciones_page.number }} de {{ inspecciones_page.paginator.num_pages }}</span>
+      {% if inspecciones_page.has_next %}<a class="btn btn-secondary btn-small" href="?q={{ query }}&inspecciones_page={{ inspecciones_page.next_page_number }}">Siguiente</a>{% endif %}
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="capture-section-head">
+      <div>
+        <h2>Reportes de unidad</h2>
+        <p class="capture-muted">Tickets levantados por repartidores desde la PWA.</p>
+      </div>
+      <div class="capture-evidence">
+        {% for row in reportes_por_estatus %}
+        <span class="capture-badge info">{{ row.estatus }}: {{ row.total }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped capture-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Unidad</th>
+            <th>Tipo</th>
+            <th>Severidad</th>
+            <th>Estatus</th>
+            <th>Descripción</th>
+            <th>Evidencia</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in reportes %}
+          <tr>
+            <td>{{ row.fecha_reporte|date:"d/m/Y H:i" }}<br><span class="capture-muted">{{ row.repartidor }}</span></td>
+            <td>{{ row.unidad.codigo }}<br><span class="capture-muted">KM {{ row.kilometraje|default:"-" }}</span></td>
+            <td>{{ row.get_tipo_display }}</td>
+            <td><span class="capture-badge {% if row.severidad == 'critico' %}danger{% elif row.severidad == 'urgente' %}warn{% else %}info{% endif %}">{{ row.get_severidad_display }}</span></td>
+            <td><span class="capture-badge {% if row.estatus == 'cerrado' %}ok{% elif row.estatus == 'abierto' %}danger{% else %}warn{% endif %}">{{ row.get_estatus_display }}</span></td>
+            <td>{{ row.descripcion|truncatechars:120 }}{% if row.notas_compras %}<br><span class="capture-muted">Compras: {{ row.notas_compras|truncatechars:90 }}</span>{% endif %}</td>
+            <td>
+              <div class="capture-evidence">
+                {% if row.foto %}<a href="{{ row.foto.url }}" target="_blank" rel="noopener">Foto</a>{% endif %}
+              </div>
+              <span class="capture-muted">{{ row.latitud|default:"-" }}, {{ row.longitud|default:"-" }}<br>{{ row.ip_reporte|default:"Sin IP" }}</span>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7"><div class="capture-empty">Todavía no hay reportes capturados.</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if reportes.paginator.num_pages > 1 %}
+    <div class="capture-pager">
+      {% if reportes.has_previous %}<a class="btn btn-secondary btn-small" href="?q={{ query }}&reportes_page={{ reportes.previous_page_number }}">Anterior</a>{% endif %}
+      <span class="muted">Página {{ reportes.number }} de {{ reportes.paginator.num_pages }}</span>
+      {% if reportes.has_next %}<a class="btn btn-secondary btn-small" href="?q={{ query }}&reportes_page={{ reportes.next_page_number }}">Siguiente</a>{% endif %}
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
