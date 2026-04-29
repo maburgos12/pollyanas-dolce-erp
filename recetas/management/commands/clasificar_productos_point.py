@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 from unidecode import unidecode
 
@@ -19,19 +19,19 @@ NORMALIZACION = {
     "GALLETAS": "Galletas",
     "PAN": "Pan",
     "MASAS": "Masas",
+    "PASTELES": "Pastel",
+    "Pasteles": "Pastel",
     "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)": "Betún y Rellenos",
 }
 
 FAMILY_RULES = [
-    ("Pastel", ["pastel"]),
-    ("Pay", ["pay", "sabor fresa", "sabor guayaba", "sabor galleta", "sabor brownie", "sabor oreo"]),
-    ("Galletas", ["galleta", "alfajor", "cookie"]),
-    ("Vasos Preparados", ["vaso"]),
-    ("Bollo", ["bollo"]),
-    ("Empanadas", ["empanada"]),
-    ("Pan", ["pan "]),
-    ("Bebidas", ["café", "cafe", "capuchino", "moka", "americano", "chocola", "agua ", "litro"]),
+    ("Pay", ["pay"]),
     ("Cheesecake", ["cheesecake"]),
+    ("Bollo", ["bollo"]),
+    ("Bebidas", ["latte", "cappuccino", "capuchino", "café", "cafe", "americano", "chocolate caliente", "chocola"]),
+    ("Vasos Preparados", ["frappe", "vaso"]),
+    ("Galletas", ["galleta"]),
+    ("Pastel", ["pastel"]),
     ("Otros postres", []),
 ]
 
@@ -145,8 +145,8 @@ class Command(BaseCommand):
                 Receta.objects.filter(
                     id__in=matched_recipe_ids,
                     tipo=Receta.TIPO_PRODUCTO_FINAL,
-                    familia="",
                 )
+                .filter(Q(familia="") | Q(familia__isnull=True))
                 .order_by("nombre", "id")
             )
             for receta in recipes_to_classify:
