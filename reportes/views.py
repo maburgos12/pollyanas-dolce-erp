@@ -3401,27 +3401,35 @@ def _weekly_visible_sales_cost(
     previous_start = latest_sales_date - timedelta(days=13)
     previous_end = latest_sales_date - timedelta(days=7)
 
-    def aggregate_period(start_date: date, end_date: date) -> tuple[Decimal, int]:
+    def aggregate_period(start_date: date, end_date: date) -> tuple[Decimal, int, int]:
         rows = (
             _active_sales_queryset(start_date=start_date, end_date=end_date)
             .filter(total_amount__gt=0, receta_id__in=list(cost_map.keys()))
             .values("receta_id")
-            .annotate(quantity=Sum("quantity"))
+            .annotate(quantity=Sum("quantity"), revenue=Sum("total_amount"))
         )
         total = Decimal("0")
         count = 0
+        skipped_anomalies = 0
         for row in rows:
             receta_id = int(row["receta_id"])
             qty = _to_decimal(row["quantity"], "0")
+            revenue = _to_decimal(row["revenue"], "0")
             unit_cost = cost_map.get(receta_id, Decimal("0"))
-            if qty <= 0 or unit_cost <= 0:
+            if qty <= 0 or unit_cost <= 0 or revenue <= 0:
+                continue
+            asp = revenue / qty
+            # El snapshot semanal de catálogo aún puede contener BOMs inflados.
+            # Para el KPI ejecutivo solo sumamos costos plausibles contra venta.
+            if unit_cost > Decimal("1000") or unit_cost > (asp * Decimal("1.20")):
+                skipped_anomalies += 1
                 continue
             total += qty * unit_cost
             count += 1
-        return total.quantize(Decimal("0.01")), count
+        return total.quantize(Decimal("0.01")), count, skipped_anomalies
 
-    current_total, current_count = aggregate_period(current_start, latest_sales_date)
-    previous_total, _previous_count = aggregate_period(previous_start, previous_end)
+    current_total, current_count, current_anomalies = aggregate_period(current_start, latest_sales_date)
+    previous_total, _previous_count, previous_anomalies = aggregate_period(previous_start, previous_end)
     delta_total = (current_total - previous_total).quantize(Decimal("0.01"))
     delta_pct = _safe_pct_local(delta_total, previous_total)
 
@@ -3435,6 +3443,8 @@ def _weekly_visible_sales_cost(
         "previous_start": previous_start,
         "previous_end": previous_end,
         "count": current_count,
+        "skipped_anomalies": current_anomalies,
+        "previous_skipped_anomalies": previous_anomalies,
     }
 
 
