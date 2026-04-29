@@ -12004,6 +12004,8 @@ def _export_plan_point_xlsx(plan: PlanProduccion) -> HttpResponse:
 
     items = plan.items.select_related("receta").order_by("id")
     for item in items:
+        if _to_decimal_safe(item.cantidad) <= 0:
+            continue
         receta = item.receta
         ws.append(
             [
@@ -20464,6 +20466,57 @@ def reabasto_cedis_consolidado_export(request: HttpRequest) -> HttpResponse:
     export_format = (request.GET.get("format") or "xlsx").strip().lower()
     rows = _consolidado_reabasto_por_fecha(fecha_operacion)
 
+    if export_format in {"solicitudes", "matriz", "matrix"}:
+        solicitudes = (
+            SolicitudReabastoCedis.objects.filter(fecha_operacion=fecha_operacion)
+            .exclude(estado=SolicitudReabastoCedis.ESTADO_CANCELADA)
+            .select_related("sucursal")
+            .order_by("sucursal__codigo", "sucursal__nombre")
+        )
+        sucursales = list({sol.sucursal_id: sol.sucursal for sol in solicitudes if sol.sucursal_id}.values())
+        sucursales.sort(key=lambda suc: ((suc.codigo or ""), suc.nombre or ""))
+        lineas = (
+            SolicitudReabastoCedisLinea.objects.filter(solicitud__in=solicitudes)
+            .select_related("solicitud__sucursal", "receta")
+            .order_by("receta__nombre", "solicitud__sucursal__codigo")
+        )
+        matrix: dict[int, dict] = {}
+        for linea in lineas:
+            receta_id = linea.receta_id
+            row = matrix.setdefault(
+                receta_id,
+                {
+                    "producto": linea.receta.nombre,
+                    "cantidades": {suc.id: Decimal("0") for suc in sucursales},
+                    "total": Decimal("0"),
+                },
+            )
+            cantidad = _to_decimal_safe(linea.solicitado)
+            row["cantidades"][linea.solicitud.sucursal_id] = cantidad
+            row["total"] += cantidad
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Solicitudes por sucursal"
+        ws.append(["Producto", *[suc.nombre for suc in sucursales], "Total"])
+        for row in matrix.values():
+            ws.append(
+                [
+                    row["producto"],
+                    *[float(row["cantidades"].get(suc.id, Decimal("0"))) for suc in sucursales],
+                    float(row["total"]),
+                ]
+            )
+        out = BytesIO()
+        wb.save(out)
+        out.seek(0)
+        response = HttpResponse(
+            out.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="cedis_solicitudes_sucursales_{fecha_operacion.isoformat()}.xlsx"'
+        return response
+
     if export_format == "csv":
         response = HttpResponse(content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="cedis_consolidado_{fecha_operacion.isoformat()}.csv"'
@@ -20585,8 +20638,7 @@ def reabasto_cedis_generar_plan(request: HttpRequest) -> HttpResponse:
 
 def _upsert_plan_reabasto_cedis(fecha_operacion: date, user) -> tuple[PlanProduccion | None, int, Decimal]:
     consolidado_rows = _consolidado_reabasto_por_fecha(fecha_operacion)
-    faltantes = [row for row in consolidado_rows if _to_decimal_safe(row.get("cedis_faltante_producir")) > 0]
-    if not faltantes:
+    if not consolidado_rows:
         return None, 0, Decimal("0")
 
     marker = f"[AUTO_REABASTO_CEDIS:{fecha_operacion.isoformat()}]"
@@ -20614,7 +20666,7 @@ def _upsert_plan_reabasto_cedis(fecha_operacion: date, user) -> tuple[PlanProduc
 
     plan.items.all().delete()
     created_items = 0
-    for row in faltantes:
+    for row in consolidado_rows:
         rid = _to_int_safe(row.get("receta_id"))
         if not rid:
             continue
@@ -20622,8 +20674,6 @@ def _upsert_plan_reabasto_cedis(fecha_operacion: date, user) -> tuple[PlanProduc
         if not receta:
             continue
         cantidad = _quantize_qty(_to_decimal_safe(row.get("cedis_faltante_producir")))
-        if cantidad <= 0:
-            continue
         PlanProduccionItem.objects.create(
             plan=plan,
             receta=receta,
@@ -20635,7 +20685,7 @@ def _upsert_plan_reabasto_cedis(fecha_operacion: date, user) -> tuple[PlanProduc
     if created_items <= 0:
         return None, 0, Decimal("0")
 
-    total_qty = sum((_to_decimal_safe(row.get("cedis_faltante_producir")) for row in faltantes), Decimal("0"))
+    total_qty = sum((_to_decimal_safe(row.get("cedis_faltante_producir")) for row in consolidado_rows), Decimal("0"))
     log_event(
         user,
         "CREATE",

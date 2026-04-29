@@ -164,6 +164,7 @@
       </button>
       <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan.id %}?format=point">Exportar PointMeUp</a>
       <a class="btn btn-secondary" href="{% url 'recetas:plan_produccion_export' plan.id %}?format=xlsx">Exportar detalle</a>
+      <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis_consolidado_export' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}&format=solicitudes">Exportar solicitudes por sucursal</a>
     </div>
     {% endif %}
   </form>
