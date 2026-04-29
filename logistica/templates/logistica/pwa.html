@@ -408,6 +408,20 @@
         text-align: center;
       }
 
+      .confirm-actions {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .confirm-actions .primary-btn,
+      .confirm-actions .secondary-btn {
+        width: 100%;
+        min-height: 58px;
+        justify-content: center;
+        text-align: center;
+      }
+
       .confirm-mark {
         font-size: 54px;
         margin-bottom: 8px;
@@ -963,8 +977,6 @@
           <div class="dash-grid">
             <button class="dash-btn" onclick="startNuevoReporte()">🚨<br>Nuevo Reporte</button>
             <button class="dash-btn" onclick="showScreen('mis_reportes')">📂<br>Mis Reportes ${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
-            <button class="dash-btn" onclick="showScreen('mi_unidad')">🛵<br>Mi Unidad</button>
-            <button class="dash-btn" onclick="showScreen('bitacora')">📝<br>Bitácora</button>
             <button class="dash-btn" onclick="showScreen('inspeccion_vehiculo')">📋<br>Inspección</button>
             <button class="dash-btn" onclick="showScreen('bitacora_salida')">🚗<br>Bitácora<br>${turnoBadge}</button>
           </div>
@@ -1706,8 +1718,10 @@
             <h1 class="screen-title">Inspección enviada</h1>
             ${faltantes.length ? `<p class="muted">Faltantes: ${escapeHtml(faltantes.join(", "))}</p>` : `<p class="success">Todos los puntos marcados OK.</p>`}
             <p class="unit-line">¿Hay otra revisión de unidad?</p>
-            <button class="primary-btn" onclick="showScreen('inspeccion_vehiculo')">Capturar otra inspección</button>
-            <button class="secondary-btn" onclick="showScreen('dashboard')">Volver al panel principal</button>
+            <div class="confirm-actions">
+              <button class="primary-btn" onclick="showScreen('inspeccion_vehiculo')">Capturar otra inspección</button>
+              <button class="secondary-btn" onclick="showScreen('dashboard')">Volver al panel principal</button>
+            </div>
           </section>
         `));
       }
