@@ -459,12 +459,68 @@
         border-radius: 10px;
         margin-top: 8px;
       }
+
+      .gps-locked {
+        pointer-events: none;
+        user-select: none;
+      }
+
+      .gps-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 15, 20, 0.82);
+        padding: 18px;
+        opacity: 1;
+        transition: opacity 0.2s ease;
+      }
+
+      .gps-card {
+        width: min(100%, 390px);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--surface);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+        padding: 22px;
+        text-align: center;
+      }
+
+      .gps-icon {
+        font-size: 42px;
+        margin-bottom: 8px;
+      }
+
+      .gps-title {
+        margin: 0 0 10px;
+        font-family: "Playfair Display", serif;
+        font-size: 26px;
+        line-height: 1.1;
+      }
+
+      .gps-message {
+        margin: 0 0 16px;
+        color: var(--text-muted);
+        font-size: 15px;
+        line-height: 1.45;
+        white-space: pre-line;
+      }
+
+      .gps-registered {
+        margin: 8px 0 12px;
+        color: var(--success);
+        font-size: 13px;
+        font-weight: 800;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <script>
       const API = "/api/logistica";
+      const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
       const app = document.getElementById("app");
       const state = {
         token: localStorage.getItem("pd_logistica_access") || "",
@@ -487,7 +543,8 @@
           latitud: "",
           longitud: "",
           geoStatus: "idle",
-          geoLabel: ""
+          geoLabel: "",
+          fotoError: ""
         }
       };
 
@@ -590,6 +647,84 @@
 
       function todayIso() {
         return new Date().toISOString().slice(0, 10);
+      }
+
+      function isGeoReady(draft) {
+        return draft.geoStatus === "ready" && Boolean(draft.latitud || draft.latitud_salida);
+      }
+
+      function geoOverlay(draft, actionName) {
+        if (isGeoReady(draft)) return "";
+        const denied = draft.geoStatus === "denied";
+        const loading = draft.geoStatus === "loading";
+        const unavailable = draft.geoStatus === "unavailable";
+        const message = denied
+          ? "Bloqueaste el acceso a tu ubicación. Para continuar:\n1. Toca el ícono 🔒 en la barra de tu navegador\n2. Activa el permiso de Ubicación\n3. Recarga la página"
+          : unavailable
+            ? "No pudimos obtener tu ubicación. Verifica que el GPS de tu teléfono esté activado y vuelve a intentar."
+            : "Esta acción requiere tu ubicación para continuar.\nPresiona \"Permitir\" cuando el navegador lo solicite.";
+        const buttonLabel = denied || unavailable ? "Reintentar" : "Activar ubicación";
+        return `
+          <div class="gps-overlay" role="dialog" aria-modal="true" aria-labelledby="gps-title">
+            <section class="gps-card">
+              <div class="gps-icon">📍</div>
+              <h2 class="gps-title" id="gps-title">Ubicación requerida</h2>
+              <p class="gps-message">${escapeHtml(message)}</p>
+              <button class="primary-btn" type="button" onclick="${actionName}()" ${loading ? "disabled" : ""}>
+                ${loading ? "Obteniendo ubicación..." : buttonLabel}
+              </button>
+            </section>
+          </div>
+        `;
+      }
+
+      function requestLocation(draft, renderFn, latField, lngField) {
+        if (!navigator.geolocation) {
+          draft.geoStatus = "unavailable";
+          draft.geoLabel = "GPS no disponible";
+          renderFn();
+          return;
+        }
+        draft.geoStatus = "loading";
+        draft.geoLabel = "Obteniendo ubicación...";
+        renderFn();
+        navigator.geolocation.getCurrentPosition((position) => {
+          draft[latField] = position.coords.latitude.toFixed(6);
+          draft[lngField] = position.coords.longitude.toFixed(6);
+          draft.geoStatus = "ready";
+          draft.geoLabel = "📍 Ubicación registrada";
+          renderFn();
+        }, (error) => {
+          draft[latField] = "";
+          draft[lngField] = "";
+          draft.geoStatus = error.code === 1 ? "denied" : "unavailable";
+          draft.geoLabel = "Se requiere ubicación para continuar";
+          renderFn();
+        }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+      }
+
+      function setLivePhoto(input, draft, fileField, previewField, renderFn, errorField = "fotoError") {
+        const file = input.files[0] || null;
+        if (!file) {
+          draft[fileField] = null;
+          if (previewField) draft[previewField] = "";
+          draft[errorField] = "";
+          renderFn();
+          return;
+        }
+        const difference = Date.now() - file.lastModified;
+        if (difference > PHOTO_MAX_AGE_MS) {
+          draft[fileField] = null;
+          if (previewField) draft[previewField] = "";
+          draft[errorField] = "La foto debe tomarse en este momento. No se permiten imágenes de la galería.";
+          input.value = "";
+          renderFn();
+          return;
+        }
+        draft[fileField] = file;
+        if (previewField) draft[previewField] = URL.createObjectURL(file);
+        draft[errorField] = "";
+        renderFn();
       }
 
       function normalizePerfil(raw) {
@@ -763,6 +898,7 @@
           longitud: "",
           geoStatus: "idle",
           geoLabel: "",
+          fotoError: "",
         };
         showScreen("nuevo_reporte");
       }
@@ -791,44 +927,39 @@
             </div>
           `;
         } else if (draft.step === 2) {
-          if (draft.geoStatus === "idle") {
-            setTimeout(capturarUbicacionReporte, 0);
-          }
-          const geoMessage = draft.geoStatus === "loading"
-            ? `<p class="muted">📍 Obteniendo ubicación...</p>`
-            : draft.geoStatus === "ready"
-              ? `<p class="success">📍 Ubicación registrada</p>`
-              : draft.geoStatus === "error"
-                ? `<p class="error">Se requiere ubicación para continuar</p>`
-                : "";
+          const ubicacionLista = isGeoReady(draft);
           body = `
-            <h1 class="screen-title">Detalles</h1>
-            ${progressDots(2)}
-            <div class="severity-row">
-              ${severidades.map((sev) => `
-                <button class="severity-card ${draft.severidad === sev.value ? "selected" : ""}" style="border-left:5px solid ${sev.color}" onclick="selectSeveridad('${sev.value}')">
-                  ${sev.icon} ${sev.label}
-                </button>
-              `).join("")}
+            <div class="${ubicacionLista ? "" : "gps-locked"}">
+              <h1 class="screen-title">Detalles</h1>
+              ${progressDots(2)}
+              <div class="severity-row">
+                ${severidades.map((sev) => `
+                  <button class="severity-card ${draft.severidad === sev.value ? "selected" : ""}" style="border-left:5px solid ${sev.color}" onclick="selectSeveridad('${sev.value}')">
+                    ${sev.icon} ${sev.label}
+                  </button>
+                `).join("")}
+              </div>
+              <div class="field">
+                <label for="descripcion">Descripción</label>
+                <textarea id="descripcion" required oninput="state.reporteDraft.descripcion = this.value">${escapeHtml(draft.descripcion)}</textarea>
+              </div>
+              <div class="field">
+                <label for="foto">Foto</label>
+                <input id="foto" type="file" accept="image/*" capture="environment" required onchange="setFotoReporte(this)">
+                ${draft.fotoError ? `<p class="error">${escapeHtml(draft.fotoError)}</p>` : ""}
+              </div>
+              <div class="field">
+                <label for="kilometraje">Kilometraje</label>
+                <input id="kilometraje" type="number" min="0" value="${escapeHtml(draft.kilometraje)}" oninput="state.reporteDraft.kilometraje = this.value">
+              </div>
+              <p class="gps-registered">📍 Ubicación registrada</p>
+              ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+              <div class="actions">
+                <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
+                <button class="primary-btn" onclick="nextReporteStep()" ${ubicacionLista && draft.foto ? "" : "disabled"}>Siguiente</button>
+              </div>
             </div>
-            <div class="field">
-              <label for="descripcion">Descripción</label>
-              <textarea id="descripcion" required oninput="state.reporteDraft.descripcion = this.value">${escapeHtml(draft.descripcion)}</textarea>
-            </div>
-            <div class="field">
-              <label for="foto">Foto</label>
-              <input id="foto" type="file" accept="image/*" capture="environment" onchange="state.reporteDraft.foto = this.files[0] || null">
-            </div>
-            <div class="field">
-              <label for="kilometraje">Kilometraje</label>
-              <input id="kilometraje" type="number" min="0" value="${escapeHtml(draft.kilometraje)}" oninput="state.reporteDraft.kilometraje = this.value">
-            </div>
-            ${geoMessage}
-            ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
-            <div class="actions">
-              <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
-              <button class="primary-btn" onclick="nextReporteStep()" ${draft.geoStatus === "ready" ? "" : "disabled"}>Siguiente</button>
-            </div>
+            ${geoOverlay(draft, "capturarUbicacionReporte")}
           `;
         } else {
           body = `
@@ -844,7 +975,7 @@
             ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
             <div class="actions">
               <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
-              <button class="primary-btn" onclick="enviarReporte()" ${draft.latitud ? "" : "disabled"}>Enviar reporte</button>
+              <button class="primary-btn" onclick="enviarReporte()" ${isGeoReady(draft) && draft.foto ? "" : "disabled"}>Enviar reporte</button>
             </div>
           `;
         }
@@ -868,9 +999,10 @@
         if (draft.step === 2 && (!draft.severidad || !draft.descripcion.trim())) {
           return renderNuevoReporte("Selecciona severidad y escribe una descripción.");
         }
-        if (draft.step === 2 && !draft.latitud) {
+        if (draft.step === 2 && !isGeoReady(draft)) {
           return renderNuevoReporte("Se requiere ubicación para continuar");
         }
+        if (draft.step === 2 && !draft.foto) return renderNuevoReporte("La foto debe tomarse en este momento.");
         draft.step = Math.min(3, draft.step + 1);
         renderNuevoReporte();
       }
@@ -881,30 +1013,16 @@
       }
 
       function capturarUbicacionReporte() {
-        if (!navigator.geolocation) {
-          state.reporteDraft.geoStatus = "error";
-          state.reporteDraft.geoLabel = "Se requiere ubicación para continuar";
-          return renderNuevoReporte();
-        }
-        state.reporteDraft.geoStatus = "loading";
-        renderNuevoReporte();
-        navigator.geolocation.getCurrentPosition((position) => {
-          state.reporteDraft.latitud = position.coords.latitude.toFixed(6);
-          state.reporteDraft.longitud = position.coords.longitude.toFixed(6);
-          state.reporteDraft.geoStatus = "ready";
-          state.reporteDraft.geoLabel = "📍 Ubicación registrada";
-          renderNuevoReporte();
-        }, () => {
-          state.reporteDraft.latitud = "";
-          state.reporteDraft.longitud = "";
-          state.reporteDraft.geoStatus = "error";
-          state.reporteDraft.geoLabel = "Se requiere ubicación para continuar";
-          renderNuevoReporte();
-        }, { enableHighAccuracy: true, timeout: 8000 });
+        requestLocation(state.reporteDraft, renderNuevoReporte, "latitud", "longitud");
+      }
+
+      function setFotoReporte(input) {
+        setLivePhoto(input, state.reporteDraft, "foto", null, renderNuevoReporte);
       }
 
       async function enviarReporte() {
         const draft = state.reporteDraft;
+        if (!isGeoReady(draft) || !draft.foto) return renderNuevoReporte("Se requiere ubicación y foto tomada en este momento.");
         const form = new FormData();
         form.append("tipo", draft.tipo);
         form.append("severidad", draft.severidad);
@@ -1060,13 +1178,15 @@
             nivel_gas_salida: "",
             foto_tablero_salida: null,
             fotoSalidaPreview: "",
+            fotoSalidaError: "",
             latitud_salida: "",
             longitud_salida: "",
             geoStatus: "idle",
             km_llegada: "",
             nivel_gas_llegada: "",
             foto_tablero_llegada: null,
-            fotoLlegadaPreview: ""
+            fotoLlegadaPreview: "",
+            fotoLlegadaError: ""
           };
         }
         return state.bitacoraSalidaDraft;
@@ -1074,31 +1194,13 @@
 
       function capturarUbicacionSalida() {
         const draft = ensureBitacoraSalidaDraft();
-        if (!navigator.geolocation) {
-          draft.geoStatus = "error";
-          return renderBitacoraSalida();
-        }
-        draft.geoStatus = "loading";
-        renderBitacoraSalida();
-        navigator.geolocation.getCurrentPosition((position) => {
-          draft.latitud_salida = position.coords.latitude.toFixed(6);
-          draft.longitud_salida = position.coords.longitude.toFixed(6);
-          draft.geoStatus = "ready";
-          renderBitacoraSalida();
-        }, () => {
-          draft.latitud_salida = "";
-          draft.longitud_salida = "";
-          draft.geoStatus = "error";
-          renderBitacoraSalida();
-        }, { enableHighAccuracy: true, timeout: 8000 });
+        requestLocation(draft, renderBitacoraSalida, "latitud_salida", "longitud_salida");
       }
 
       function setFotoBitacora(input, campo, previewCampo) {
         const draft = ensureBitacoraSalidaDraft();
-        const file = input.files[0] || null;
-        draft[campo] = file;
-        draft[previewCampo] = file ? URL.createObjectURL(file) : "";
-        renderBitacoraSalida();
+        const errorCampo = campo === "foto_tablero_llegada" ? "fotoLlegadaError" : "fotoSalidaError";
+        setLivePhoto(input, draft, campo, previewCampo, renderBitacoraSalida, errorCampo);
       }
 
       async function renderBitacoraSalida(message = "") {
@@ -1113,39 +1215,36 @@
         const tieneSalida = Boolean(actual?.id);
         let body = "";
         if (!tieneSalida) {
-          if (draft.geoStatus === "idle") setTimeout(capturarUbicacionSalida, 0);
-          const geo = draft.geoStatus === "loading"
-            ? `<p class="muted">📍 Obteniendo ubicación...</p>`
-            : draft.geoStatus === "ready"
-              ? `<p class="success">📍 Ubicación registrada</p>`
-              : draft.geoStatus === "error"
-                ? `<p class="error">Se requiere ubicación para continuar</p>`
-                : "";
+          const ubicacionLista = isGeoReady(draft);
           body = `
-            <form onsubmit="guardarSalida(event)">
-              <div class="field">
-                <label for="unidad_salida">Unidad</label>
-                <select id="unidad_salida" name="unidad" required onchange="state.bitacoraSalidaDraft.unidad = this.value">
-                  <option value="">Selecciona unidad</option>
-                  ${state.unidades.map((unidad) => `<option value="${unidad.id}" ${String(draft.unidad) === String(unidad.id) ? "selected" : ""}>${escapeHtml(unidad.codigo)} · ${escapeHtml(unidad.descripcion || "")}</option>`).join("")}
-                </select>
-              </div>
-              <div class="field">
-                <label for="km_salida">KM salida</label>
-                <input id="km_salida" name="km_salida" type="number" min="0" required value="${escapeHtml(draft.km_salida)}" oninput="state.bitacoraSalidaDraft.km_salida = this.value">
-              </div>
-              <div class="field">
-                <label>Nivel gas salida</label>
-                ${gasSelector(draft.nivel_gas_salida, "selectGasSalida")}
-              </div>
-              <div class="field">
-                <label for="foto_salida">Foto tablero</label>
-                <input id="foto_salida" type="file" accept="image/*" capture="environment" required onchange="setFotoBitacora(this, 'foto_tablero_salida', 'fotoSalidaPreview')">
-                ${draft.fotoSalidaPreview ? `<img class="thumb" src="${draft.fotoSalidaPreview}" alt="Vista previa tablero salida">` : ""}
-              </div>
-              ${geo}
-              <button class="primary-btn" type="submit" ${draft.geoStatus === "ready" ? "" : "disabled"}>Iniciar turno</button>
-            </form>
+            <div class="${ubicacionLista ? "" : "gps-locked"}">
+              <form onsubmit="guardarSalida(event)">
+                <div class="field">
+                  <label for="unidad_salida">Unidad</label>
+                  <select id="unidad_salida" name="unidad" required onchange="state.bitacoraSalidaDraft.unidad = this.value">
+                    <option value="">Selecciona unidad</option>
+                    ${state.unidades.map((unidad) => `<option value="${unidad.id}" ${String(draft.unidad) === String(unidad.id) ? "selected" : ""}>${escapeHtml(unidad.codigo)} · ${escapeHtml(unidad.descripcion || "")}</option>`).join("")}
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="km_salida">KM salida</label>
+                  <input id="km_salida" name="km_salida" type="number" min="0" required value="${escapeHtml(draft.km_salida)}" oninput="state.bitacoraSalidaDraft.km_salida = this.value">
+                </div>
+                <div class="field">
+                  <label>Nivel gas salida</label>
+                  ${gasSelector(draft.nivel_gas_salida, "selectGasSalida")}
+                </div>
+                <div class="field">
+                  <label for="foto_salida">Foto tablero</label>
+                  <input id="foto_salida" type="file" accept="image/*" capture="environment" required onchange="setFotoBitacora(this, 'foto_tablero_salida', 'fotoSalidaPreview')">
+                  ${draft.fotoSalidaPreview ? `<img class="thumb" src="${draft.fotoSalidaPreview}" alt="Vista previa tablero salida">` : ""}
+                  ${draft.fotoSalidaError ? `<p class="error">${escapeHtml(draft.fotoSalidaError)}</p>` : ""}
+                </div>
+                <p class="gps-registered">📍 Ubicación registrada</p>
+                <button class="primary-btn" type="submit" ${ubicacionLista && draft.foto_tablero_salida ? "" : "disabled"}>Iniciar turno</button>
+              </form>
+            </div>
+            ${geoOverlay(draft, "capturarUbicacionSalida")}
           `;
         } else {
           body = `
@@ -1177,8 +1276,9 @@
                 <label for="foto_llegada">Foto tablero llegada</label>
                 <input id="foto_llegada" type="file" accept="image/*" capture="environment" required onchange="setFotoBitacora(this, 'foto_tablero_llegada', 'fotoLlegadaPreview')">
                 ${draft.fotoLlegadaPreview ? `<img class="thumb" src="${draft.fotoLlegadaPreview}" alt="Vista previa tablero llegada">` : ""}
+                ${draft.fotoLlegadaError ? `<p class="error">${escapeHtml(draft.fotoLlegadaError)}</p>` : ""}
               </div>
-              <button class="primary-btn" type="submit" ${draft.nivel_gas_llegada ? "" : "disabled"}>Cerrar turno</button>
+              <button class="primary-btn" type="submit" ${draft.nivel_gas_llegada && draft.foto_tablero_llegada ? "" : "disabled"}>Cerrar turno</button>
             </form>
           `;
         }
@@ -1262,6 +1362,8 @@
             tiene_golpes: false,
             descripcion_golpes: "",
             foto_golpes: null,
+            fotoGolpesPreview: "",
+            fotoGolpesError: "",
             observaciones: "",
             latitud: "",
             longitud: "",
@@ -1275,23 +1377,7 @@
 
       function capturarUbicacionInspeccion() {
         const draft = ensureInspeccionDraft();
-        if (!navigator.geolocation) {
-          draft.geoStatus = "error";
-          return renderInspeccionVehiculo();
-        }
-        draft.geoStatus = "loading";
-        renderInspeccionVehiculo();
-        navigator.geolocation.getCurrentPosition((position) => {
-          draft.latitud = position.coords.latitude.toFixed(6);
-          draft.longitud = position.coords.longitude.toFixed(6);
-          draft.geoStatus = "ready";
-          renderInspeccionVehiculo();
-        }, () => {
-          draft.latitud = "";
-          draft.longitud = "";
-          draft.geoStatus = "error";
-          renderInspeccionVehiculo();
-        }, { enableHighAccuracy: true, timeout: 8000 });
+        requestLocation(draft, renderInspeccionVehiculo, "latitud", "longitud");
       }
 
       function renderChecklistSection(section) {
@@ -1320,57 +1406,61 @@
       async function renderInspeccionVehiculo(message = "") {
         const draft = ensureInspeccionDraft();
         const unidad = state.perfil?.unidad || {};
-        if (draft.geoStatus === "idle") setTimeout(capturarUbicacionInspeccion, 0);
-        const geo = draft.geoStatus === "loading"
-          ? `<p class="muted">📍 Obteniendo ubicación...</p>`
-          : draft.geoStatus === "ready"
-            ? `<p class="success">📍 Ubicación registrada</p>`
-            : draft.geoStatus === "error"
-              ? `<p class="error">Se requiere ubicación para continuar</p>`
-              : "";
+        const ubicacionLista = isGeoReady(draft);
+        const fotoGolpesLista = !draft.tiene_golpes || Boolean(draft.foto_golpes);
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Inspección de unidad</h1>
           <p class="unit-line">${escapeHtml(unidad.codigo || "-")} · ${escapeHtml(unidad.descripcion || "")}</p>
           ${message ? `<p class="success">${escapeHtml(message)}</p>` : ""}
-          <form onsubmit="enviarInspeccion(event)">
-            <section class="card report-card">
-              <div class="field">
-                <label for="km_entrada">KM entrada</label>
-                <input id="km_entrada" type="number" min="0" required value="${escapeHtml(draft.km_entrada)}" oninput="state.inspeccionDraft.km_entrada = this.value">
-              </div>
-              <div class="field">
-                <label>Nivel gas entrada</label>
-                ${gasSelector(draft.nivel_gas_entrada, "selectGasInspeccion")}
-              </div>
-            </section>
-            ${inspeccionSecciones.map(renderChecklistSection).join("")}
-            <section class="card report-card">
-              <div class="check-row">
-                <span>¿Presenta golpes o hendiduras?</span>
-                <button class="chip ${draft.tiene_golpes ? "fail" : "ok"}" type="button" onclick="toggleGolpes()">
-                  ${draft.tiene_golpes ? "Sí" : "No"}
-                </button>
-              </div>
-              ${draft.tiene_golpes ? `
+          <div class="${ubicacionLista ? "" : "gps-locked"}">
+            <form onsubmit="enviarInspeccion(event)">
+              <section class="card report-card">
                 <div class="field">
-                  <label for="descripcion_golpes">Descripción de golpes</label>
-                  <textarea id="descripcion_golpes" oninput="state.inspeccionDraft.descripcion_golpes = this.value">${escapeHtml(draft.descripcion_golpes)}</textarea>
+                  <label for="km_entrada">KM entrada</label>
+                  <input id="km_entrada" type="number" min="0" required value="${escapeHtml(draft.km_entrada)}" oninput="state.inspeccionDraft.km_entrada = this.value">
                 </div>
                 <div class="field">
-                  <label for="foto_golpes">Foto</label>
-                  <input id="foto_golpes" type="file" accept="image/*" capture="environment" onchange="state.inspeccionDraft.foto_golpes = this.files[0] || null">
+                  <label>Nivel gas entrada</label>
+                  ${gasSelector(draft.nivel_gas_entrada, "selectGasInspeccion")}
                 </div>
-              ` : ""}
-            </section>
-            <div class="field">
-              <label for="observaciones">Observaciones</label>
-              <textarea id="observaciones" oninput="state.inspeccionDraft.observaciones = this.value">${escapeHtml(draft.observaciones)}</textarea>
-            </div>
-            ${geo}
-            <button class="primary-btn" type="submit" ${draft.geoStatus === "ready" ? "" : "disabled"}>Enviar inspección</button>
-          </form>
+              </section>
+              ${inspeccionSecciones.map(renderChecklistSection).join("")}
+              <section class="card report-card">
+                <div class="check-row">
+                  <span>¿Presenta golpes o hendiduras?</span>
+                  <button class="chip ${draft.tiene_golpes ? "fail" : "ok"}" type="button" onclick="toggleGolpes()">
+                    ${draft.tiene_golpes ? "Sí" : "No"}
+                  </button>
+                </div>
+                ${draft.tiene_golpes ? `
+                  <div class="field">
+                    <label for="descripcion_golpes">Descripción de golpes</label>
+                    <textarea id="descripcion_golpes" oninput="state.inspeccionDraft.descripcion_golpes = this.value">${escapeHtml(draft.descripcion_golpes)}</textarea>
+                  </div>
+                  <div class="field">
+                    <label for="foto_golpes">Foto</label>
+                    <input id="foto_golpes" type="file" accept="image/*" capture="environment" required onchange="setFotoGolpes(this)">
+                    ${draft.fotoGolpesPreview ? `<img class="thumb" src="${draft.fotoGolpesPreview}" alt="Vista previa golpes">` : ""}
+                    ${draft.fotoGolpesError ? `<p class="error">${escapeHtml(draft.fotoGolpesError)}</p>` : ""}
+                  </div>
+                ` : ""}
+              </section>
+              <div class="field">
+                <label for="observaciones">Observaciones</label>
+                <textarea id="observaciones" oninput="state.inspeccionDraft.observaciones = this.value">${escapeHtml(draft.observaciones)}</textarea>
+              </div>
+              <p class="gps-registered">📍 Ubicación registrada</p>
+              <button class="primary-btn" type="submit" ${ubicacionLista && fotoGolpesLista ? "" : "disabled"}>Enviar inspección</button>
+            </form>
+          </div>
+          ${geoOverlay(draft, "capturarUbicacionInspeccion")}
         `));
+      }
+
+      function setFotoGolpes(input) {
+        const draft = ensureInspeccionDraft();
+        setLivePhoto(input, draft, "foto_golpes", "fotoGolpesPreview", renderInspeccionVehiculo, "fotoGolpesError");
       }
 
       function selectGasInspeccion(value) {
@@ -1400,15 +1490,21 @@
       function toggleGolpes() {
         const draft = ensureInspeccionDraft();
         draft.tiene_golpes = !draft.tiene_golpes;
+        if (!draft.tiene_golpes) {
+          draft.foto_golpes = null;
+          draft.fotoGolpesPreview = "";
+          draft.fotoGolpesError = "";
+        }
         renderInspeccionVehiculo();
       }
 
       async function enviarInspeccion(event) {
         event.preventDefault();
         const draft = ensureInspeccionDraft();
-        if (!draft.km_entrada || !draft.nivel_gas_entrada || !draft.latitud) {
+        if (!draft.km_entrada || !draft.nivel_gas_entrada || !isGeoReady(draft)) {
           return renderInspeccionVehiculo("Completa KM, gas y ubicación.");
         }
+        if (draft.tiene_golpes && !draft.foto_golpes) return renderInspeccionVehiculo("La foto de golpes debe tomarse en este momento.");
         const form = new FormData();
         form.append("km_entrada", draft.km_entrada);
         form.append("nivel_gas_entrada", draft.nivel_gas_entrada);
