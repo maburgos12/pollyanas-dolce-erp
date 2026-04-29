@@ -31,3 +31,25 @@ class PointProduct(models.Model):
 
     def __str__(self) -> str:
         return f"{self.external_id} - {self.name}"
+
+
+class PointProductCategory(models.Model):
+    CATEGORY_CHOICES = [
+        ("REVENTA", "Reventa"),
+        ("SERVICIO_ACCESORIO", "Servicio / Accesorio"),
+        ("TOPPING", "Topping"),
+    ]
+
+    codigo_point = models.CharField(max_length=50, unique=True)
+    nombre = models.CharField(max_length=200)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES)
+    notas = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Categoría producto Point"
+        verbose_name_plural = "Categorías productos Point"
+
+    def __str__(self):
+        return f"{self.codigo_point} | {self.nombre} | {self.category}"
