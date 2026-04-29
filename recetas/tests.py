@@ -720,8 +720,10 @@ class RecetasListCatalogFiltersTests(TestCase):
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             familia="Pay",
             categoria="Pay",
+            codigo_point="PAY-REB-QA",
             sheet_name="AUTO_POINT_SALES",
         )
+        PointProduct.objects.create(sku="PAY-REB-QA", external_id="PAY-REB-QA", name=child.nombre, active=True)
         insumo = Insumo.objects.create(
             nombre="Base Pay QA",
             tipo_item=Insumo.TIPO_INTERNO,
@@ -779,6 +781,7 @@ class RecetasListCatalogFiltersTests(TestCase):
             categoria="Pastel",
             codigo_point="DER-QA-1",
         )
+        PointProduct.objects.create(sku="DER-QA-1", external_id="DER-QA-1", name=child.nombre, active=True)
         RecetaPresentacionDerivada.objects.create(
             receta_padre=parent,
             receta_derivada=child,
@@ -796,6 +799,70 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertEqual(result.lineas_count, 0)
         self.assertNotIn("componentes", result.governance_issues)
         self.assertNotEqual(result.operational_health["code"], "danger")
+
+    def test_recetas_list_default_shows_active_point_products_only(self):
+        active = Receta.objects.create(
+            nombre="Producto Activo Point QA",
+            hash_contenido="hash-catalogo-active-point",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Pastel",
+            codigo_point="ACT-POINT-QA",
+        )
+        archived = Receta.objects.create(
+            nombre="Producto Archivado Point QA",
+            hash_contenido="hash-catalogo-archived-point",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Pastel",
+            codigo_point="ARCH-POINT-QA",
+        )
+        PointProduct.objects.create(sku="ACT-POINT-QA", external_id="ACT-POINT-QA", name=active.nombre, active=True)
+        PointProduct.objects.create(sku="ARCH-POINT-QA", external_id="ARCH-POINT-QA", name=archived.nombre, active=False)
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos"})
+
+        self.assertEqual(response.status_code, 200)
+        names = [r.nombre for r in response.context["page"].object_list]
+        self.assertIn(active.nombre, names)
+        self.assertNotIn(archived.nombre, names)
+        self.assertEqual(response.context["recetas_activas_count"], 1)
+        self.assertEqual(response.context["recetas_archivadas_count"], 2)
+
+    def test_recetas_list_archivados_tab_shows_without_active_point_product(self):
+        active = Receta.objects.create(
+            nombre="Producto Activo Tab QA",
+            hash_contenido="hash-catalogo-active-tab",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Pastel",
+            codigo_point="ACT-TAB-QA",
+        )
+        archived = Receta.objects.create(
+            nombre="Producto Archivado Tab QA",
+            hash_contenido="hash-catalogo-archived-tab",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Pastel",
+            codigo_point="ARCH-TAB-QA",
+        )
+        no_point = Receta.objects.create(
+            nombre="Producto Sin Point Tab QA",
+            hash_contenido="hash-catalogo-no-point-tab",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Pastel",
+        )
+        PointProduct.objects.create(sku="ACT-TAB-QA", external_id="ACT-TAB-QA", name=active.nombre, active=True)
+        PointProduct.objects.create(sku="ARCH-TAB-QA", external_id="ARCH-TAB-QA", name=archived.nombre, active=False)
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "archivados"})
+
+        self.assertEqual(response.status_code, 200)
+        names = [r.nombre for r in response.context["page"].object_list]
+        self.assertNotIn(active.nombre, names)
+        self.assertIn(archived.nombre, names)
+        self.assertIn(no_point.nombre, names)
 
     def test_recetas_list_ignores_products_without_point_signal_in_pending_summary(self):
         interno = Insumo.objects.create(
