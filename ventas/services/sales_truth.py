@@ -27,6 +27,12 @@ def _normalize_name(value: str) -> str:
     return ' '.join(raw.split())
 
 
+def _decimal(value: Any) -> Decimal:
+    if value is None:
+        return ZERO
+    return Decimal(str(value or 0))
+
+
 @lru_cache(maxsize=2048)
 def recipe_point_codes(recipe_id: int) -> tuple[str, ...]:
     recipe = Receta.objects.filter(pk=recipe_id).first()
