@@ -15,7 +15,7 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, connection, transaction
 from django.db.models.deletion import ProtectedError
-from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum, DecimalField, Max
+from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum, DecimalField, Max, Exists
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
@@ -57,9 +57,11 @@ from ..models import (
     RecetaAgrupacionAddon,
     RecetaCodigoPointAlias,
     RecetaCostoSemanal,
+    RecetaEquivalencia,
     normalizar_codigo_point,
     LineaReceta,
     RecetaPresentacion,
+    RecetaPresentacionDerivada,
     RecetaCostoVersion,
     CostoDriver,
     PlanProduccion,
@@ -1193,6 +1195,26 @@ def _recipe_operational_pending_count(receta: Receta) -> int:
     return sum(1 for linea in lineas_qs if _linea_counts_as_operational_pending(linea))
 
 
+def _recipe_has_effective_bom(receta: Receta) -> bool:
+    lineas_attr = getattr(receta, "lineas_count", None)
+    if lineas_attr is not None and int(lineas_attr or 0) > 0:
+        return True
+    if lineas_attr is None and receta.lineas.exists():
+        return True
+
+    equivalence_attr = getattr(receta, "has_equivalence_bom", None)
+    if equivalence_attr is not None:
+        if bool(equivalence_attr):
+            return True
+    elif RecetaEquivalencia.objects.filter(receta_porcion=receta, activo=True).exclude(receta_padre=receta).exists():
+        return True
+
+    derived_attr = getattr(receta, "has_derived_bom", None)
+    if derived_attr is not None:
+        return bool(derived_attr)
+    return RecetaPresentacionDerivada.objects.filter(receta_derivada=receta, activo=True).exists()
+
+
 def _recipe_master_blockers(
     lineas: list[LineaReceta],
     *,
@@ -1311,7 +1333,7 @@ def _recipe_operational_health(receta: Receta) -> dict[str, str]:
                 "label": "Por validar",
                 "description": "Tiene componentes por validar o artículos estándar todavía sin cerrar.",
             }
-        if lineas <= 0:
+        if not _recipe_has_effective_bom(receta):
             return {
                 "code": "danger",
                 "label": "Incompleta",
@@ -1628,9 +1650,9 @@ def _recipe_governance_issues(receta: Receta) -> list[str]:
             issues.append("sin_consumo_final")
     if receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
         lineas_count = int(getattr(receta, "lineas_count", 0) or 0)
-        if lineas_count <= 0:
+        if not _recipe_has_effective_bom(receta):
             issues.append("componentes")
-        else:
+        elif lineas_count > 0:
             lineas_qs = list(
                 receta.lineas.select_related("insumo").only(
                     "id",
@@ -2526,7 +2548,7 @@ def _recipe_document_status(receta: Receta) -> dict[str, str]:
             "tone": "danger",
             "detail": "Todavía no cumple las reglas mínimas para operar en el ERP.",
         }
-    if lineas_count <= 0:
+    if not _recipe_has_effective_bom(receta):
         return {
             "code": "draft",
             "label": "Borrador",
@@ -4598,8 +4620,20 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             "lineas",
             filter=Q(lineas__match_status=LineaReceta.STATUS_NEEDS_REVIEW),
         ),
-        lineas_count=Count("lineas"),
+        lineas_count=Count("lineas", distinct=True),
         presentaciones_activas_count=Count("presentaciones", filter=Q(presentaciones__activo=True)),
+        has_equivalence_bom=Exists(
+            RecetaEquivalencia.objects.filter(
+                receta_porcion=OuterRef("pk"),
+                activo=True,
+            ).exclude(receta_padre=OuterRef("pk"))
+        ),
+        has_derived_bom=Exists(
+            RecetaPresentacionDerivada.objects.filter(
+                receta_derivada=OuterRef("pk"),
+                activo=True,
+            )
+        ),
     )
     if vista == "productos":
         recetas = recetas.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
@@ -6135,7 +6169,7 @@ def receta_detail(request: HttpRequest, pk: int) -> HttpResponse:
             ),
         }
     if is_producto_final:
-        if total_internos == 0:
+        if total_internos == 0 and not _recipe_has_effective_bom(receta):
             bom_integrity_alerts.append(
                 {
                     "level": "danger",
@@ -8572,5 +8606,3 @@ def drivers_costeo_importar(request: HttpRequest) -> HttpResponse:
         f"Importación drivers completada. Creados: {created}. Actualizados: {updated}. Omitidos: {skipped}.",
     )
     return redirect("recetas:drivers_costeo")
-
-
