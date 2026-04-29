@@ -92,7 +92,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
     template_name = "reportes/producido_vs_vendido.html"
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not can_view_reportes(request.user):
+        if request.user.is_authenticated and not can_view_reportes(request.user):
             raise PermissionDenied("No tienes permisos para ver Reportes.")
         return super().dispatch(request, *args, **kwargs)
 
