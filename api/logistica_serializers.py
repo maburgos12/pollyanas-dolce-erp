@@ -279,6 +279,7 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
             "foto_tablero_llegada",
             "litros_cargados",
             "costo_combustible",
+            "foto_ticket_combustible",
             "cerrada",
             "ip_registro",
             "latitud_salida",
@@ -345,7 +346,14 @@ class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
 class LogisticaBitacoraLlegadaSerializer(serializers.ModelSerializer):
     class Meta:
         model = BitacoraSalidaLlegada
-        fields = ["km_llegada", "nivel_gas_llegada", "litros_cargados", "costo_combustible", "foto_tablero_llegada"]
+        fields = [
+            "km_llegada",
+            "nivel_gas_llegada",
+            "litros_cargados",
+            "costo_combustible",
+            "foto_tablero_llegada",
+            "foto_ticket_combustible",
+        ]
 
     def validate(self, attrs):
         km_llegada = attrs.get("km_llegada")
@@ -357,6 +365,17 @@ class LogisticaBitacoraLlegadaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("El kilometraje de llegada no puede ser menor al de salida.")
         if not attrs.get("foto_tablero_llegada") and self.instance and not self.instance.foto_tablero_llegada:
             raise serializers.ValidationError("La foto del tablero de llegada es obligatoria.")
+        carga_combustible = any(
+            attrs.get(field) not in (None, "")
+            for field in ["litros_cargados", "costo_combustible", "foto_ticket_combustible"]
+        )
+        if carga_combustible:
+            if attrs.get("litros_cargados") in (None, ""):
+                raise serializers.ValidationError("Captura los litros cargados.")
+            if attrs.get("costo_combustible") in (None, ""):
+                raise serializers.ValidationError("Captura el costo de combustible.")
+            if not attrs.get("foto_ticket_combustible") and self.instance and not self.instance.foto_ticket_combustible:
+                raise serializers.ValidationError("La foto del ticket de combustible es obligatoria.")
         return attrs
 
 

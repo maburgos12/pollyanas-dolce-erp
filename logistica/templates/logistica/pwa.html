@@ -1270,7 +1270,13 @@
             nivel_gas_llegada: "",
             foto_tablero_llegada: null,
             fotoLlegadaPreview: "",
-            fotoLlegadaError: ""
+            fotoLlegadaError: "",
+            combustible_cargado: false,
+            litros_cargados: "",
+            costo_combustible: "",
+            foto_ticket_combustible: null,
+            fotoTicketCombustiblePreview: "",
+            fotoTicketCombustibleError: ""
           };
         }
         return state.bitacoraSalidaDraft;
@@ -1283,8 +1289,33 @@
 
       function setFotoBitacora(input, campo, previewCampo) {
         const draft = ensureBitacoraSalidaDraft();
-        const errorCampo = campo === "foto_tablero_llegada" ? "fotoLlegadaError" : "fotoSalidaError";
+        const errores = {
+          foto_tablero_llegada: "fotoLlegadaError",
+          foto_ticket_combustible: "fotoTicketCombustibleError"
+        };
+        const errorCampo = errores[campo] || "fotoSalidaError";
         setLivePhoto(input, draft, campo, previewCampo, renderBitacoraSalida, errorCampo);
+      }
+
+      function toggleCombustibleCargado() {
+        const draft = ensureBitacoraSalidaDraft();
+        draft.combustible_cargado = !draft.combustible_cargado;
+        if (!draft.combustible_cargado) {
+          draft.litros_cargados = "";
+          draft.costo_combustible = "";
+          draft.foto_ticket_combustible = null;
+          draft.fotoTicketCombustiblePreview = "";
+          draft.fotoTicketCombustibleError = "";
+        }
+        renderBitacoraSalida();
+      }
+
+      function puedeCerrarTurno() {
+        const draft = ensureBitacoraSalidaDraft();
+        const baseLista = draft.nivel_gas_llegada && draft.foto_tablero_llegada;
+        if (!baseLista) return false;
+        if (!draft.combustible_cargado) return true;
+        return draft.litros_cargados && draft.costo_combustible && draft.foto_ticket_combustible;
       }
 
       async function renderBitacoraSalida(message = "") {
@@ -1348,21 +1379,34 @@
                 <label>Nivel gas llegada</label>
                 ${gasSelector(draft.nivel_gas_llegada || "", "selectGasLlegada")}
               </div>
-              <div class="field">
-                <label for="litros_cargados">Litros cargados</label>
-                <input id="litros_cargados" name="litros_cargados" type="number" min="0" step="0.01">
-              </div>
-              <div class="field">
-                <label for="costo_combustible">Costo combustible</label>
-                <input id="costo_combustible" name="costo_combustible" type="number" min="0" step="0.01">
-              </div>
+              <button class="secondary-btn" type="button" onclick="toggleCombustibleCargado()" aria-pressed="${draft.combustible_cargado ? "true" : "false"}">
+                ${draft.combustible_cargado ? "✅ Sí se cargó combustible" : "¿Se cargó combustible?"}
+              </button>
+              ${draft.combustible_cargado ? `
+                <section class="card report-card">
+                  <div class="field">
+                    <label for="litros_cargados">Litros cargados</label>
+                    <input id="litros_cargados" name="litros_cargados" type="number" min="0" step="0.01" required value="${escapeHtml(draft.litros_cargados)}" oninput="state.bitacoraSalidaDraft.litros_cargados = this.value">
+                  </div>
+                  <div class="field">
+                    <label for="costo_combustible">Costo combustible</label>
+                    <input id="costo_combustible" name="costo_combustible" type="number" min="0" step="0.01" required value="${escapeHtml(draft.costo_combustible)}" oninput="state.bitacoraSalidaDraft.costo_combustible = this.value">
+                  </div>
+                  <div class="field">
+                    <label for="foto_ticket_combustible">Foto ticket combustible</label>
+                    ${fotoInput("foto_ticket_combustible", Boolean(draft.foto_ticket_combustible), "setFotoBitacora(this, 'foto_ticket_combustible', 'fotoTicketCombustiblePreview')")}
+                    ${draft.fotoTicketCombustiblePreview ? `<img class="thumb" src="${draft.fotoTicketCombustiblePreview}" alt="Vista previa ticket combustible">` : ""}
+                    ${draft.fotoTicketCombustibleError ? `<p class="error">${escapeHtml(draft.fotoTicketCombustibleError)}</p>` : ""}
+                  </div>
+                </section>
+              ` : ""}
               <div class="field">
                 <label for="foto_llegada">Foto tablero llegada</label>
                 ${fotoInput("foto_llegada", Boolean(draft.foto_tablero_llegada), "setFotoBitacora(this, 'foto_tablero_llegada', 'fotoLlegadaPreview')")}
                 ${draft.fotoLlegadaPreview ? `<img class="thumb" src="${draft.fotoLlegadaPreview}" alt="Vista previa tablero llegada">` : ""}
                 ${draft.fotoLlegadaError ? `<p class="error">${escapeHtml(draft.fotoLlegadaError)}</p>` : ""}
               </div>
-              <button class="primary-btn" type="submit" ${draft.nivel_gas_llegada && draft.foto_tablero_llegada ? "" : "disabled"}>Cerrar turno</button>
+              <button class="primary-btn" type="submit" ${puedeCerrarTurno() ? "" : "disabled"}>Cerrar turno</button>
             </form>
           `;
         }
@@ -1419,11 +1463,17 @@
         const form = new FormData(event.currentTarget);
         const draft = ensureBitacoraSalidaDraft();
         if (!draft.foto_tablero_llegada) return renderBitacoraSalida("La foto del tablero de llegada es obligatoria.");
+        if (draft.combustible_cargado && (!draft.litros_cargados || !draft.costo_combustible || !draft.foto_ticket_combustible)) {
+          return renderBitacoraSalida("Captura litros, costo y foto del ticket de combustible.");
+        }
         const payload = new FormData();
         payload.append("km_llegada", form.get("km_llegada"));
         payload.append("nivel_gas_llegada", draft.nivel_gas_llegada);
-        if (form.get("litros_cargados")) payload.append("litros_cargados", form.get("litros_cargados"));
-        if (form.get("costo_combustible")) payload.append("costo_combustible", form.get("costo_combustible"));
+        if (draft.combustible_cargado) {
+          payload.append("litros_cargados", draft.litros_cargados);
+          payload.append("costo_combustible", draft.costo_combustible);
+          payload.append("foto_ticket_combustible", draft.foto_ticket_combustible);
+        }
         payload.append("foto_tablero_llegada", draft.foto_tablero_llegada);
         const response = await apiFetch(`/bitacora-salida/${state.bitacoraSalida.id}/`, {
           method: "PATCH",
