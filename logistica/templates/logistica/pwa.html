@@ -812,10 +812,23 @@
       }
 
       async function apiFetch(path, options = {}) {
-        const headers = options.headers || {};
+        const headers = { ...(options.headers || {}) };
         if (state.token) headers.Authorization = `Bearer ${state.token}`;
         const response = await fetch(`${API}${path}`, { ...options, headers });
         if (response.status === 401) {
+          if (state.refreshToken && !options._retry) {
+            const refreshed = await fetch(`${API}/auth/token/refresh/`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ refresh: state.refreshToken })
+            });
+            if (refreshed.ok) {
+              const data = await refreshed.json();
+              state.token = data.access;
+              localStorage.setItem("pd_logistica_access", data.access);
+              return apiFetch(path, { ...options, _retry: true });
+            }
+          }
           logout(false);
           throw new Error("Sesión expirada");
         }
@@ -1559,11 +1572,12 @@
         if (!state.unidades.length) await loadUnidades();
         const ubicacionLista = isGeoReady(draft);
         const fotoGolpesLista = !draft.tiene_golpes || Boolean(draft.foto_golpes);
+        const isError = message && !message.startsWith("✅");
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Inspección de unidad</h1>
           <p class="unit-line">Selecciona la unidad que vas a inspeccionar.</p>
-          ${message ? `<p class="success">${escapeHtml(message)}</p>` : ""}
+          ${message ? `<p class="${isError ? "error" : "success"}">${escapeHtml(message)}</p>` : ""}
           <div class="${ubicacionLista ? "" : "gps-locked"}">
             <form onsubmit="enviarInspeccion(event)" novalidate>
               <section class="card report-card">
@@ -1675,15 +1689,25 @@
         if (draft.foto_golpes) form.append("foto_golpes", draft.foto_golpes);
         Object.entries(draft.checks).forEach(([field, value]) => form.append(field, value ? "true" : "false"));
         const faltantes = inspeccionSecciones.flatMap((section) => section.items.filter(([field]) => !draft.checks[field]).map(([, label]) => label));
-        const response = await apiFetch("/inspeccion/", { method: "POST", body: form });
-        if (!response.ok) return renderInspeccionVehiculo("No se pudo enviar la inspección.");
+        let response;
+        try {
+          response = await apiFetch("/inspeccion/", { method: "POST", body: form });
+        } catch (error) {
+          return renderInspeccionVehiculo("Tu sesión expiró. Vuelve a iniciar sesión y envía la inspección de nuevo.");
+        }
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          return renderInspeccionVehiculo(apiErrorMessage(error, "No se pudo enviar la inspección."));
+        }
         state.inspeccionDraft = null;
         render(shell(`
           <section class="confirm">
             <div class="confirm-mark">✅</div>
             <h1 class="screen-title">Inspección enviada</h1>
             ${faltantes.length ? `<p class="muted">Faltantes: ${escapeHtml(faltantes.join(", "))}</p>` : `<p class="success">Todos los puntos marcados OK.</p>`}
-            <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+            <p class="unit-line">¿Hay otra revisión de unidad?</p>
+            <button class="primary-btn" onclick="showScreen('inspeccion_vehiculo')">Capturar otra inspección</button>
+            <button class="secondary-btn" onclick="showScreen('dashboard')">Volver al panel principal</button>
           </section>
         `));
       }
