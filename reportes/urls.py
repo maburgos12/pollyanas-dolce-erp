@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import views
 from . import investment_views
+from .views_produccion import ProducidoVsVendidoMermaView
 
 app_name = "reportes"
 
@@ -11,6 +12,8 @@ urlpatterns = [
     path("ventas/", views.ventas, name="ventas"),
     path("cierre-operativo/", views.cierre_operativo, name="cierre_operativo"),
     path("cierre-producto/", views.cierre_producto, name="cierre_producto"),
+    path("produccion/", ProducidoVsVendidoMermaView.as_view(), name="producido_vs_vendido"),
+    path("produccion/data/", ProducidoVsVendidoMermaView.as_view(), name="producido_vs_vendido_data"),
     path("financiero/", views.costo_receta, name="financiero"),
     path("presupuesto-maestro/", views.presupuesto_maestro, name="presupuesto_maestro"),
     path("mermas-devoluciones/", views.mermas_devoluciones, name="mermas_devoluciones"),

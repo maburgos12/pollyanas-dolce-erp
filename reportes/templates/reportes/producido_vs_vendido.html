@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Reportes - Producido vs Vendido{% endblock %}
+{% block page_title %}Reportes · Producido vs Vendido vs Merma{% endblock %}
+{% block body_class %}page-reportes-produccion{% endblock %}
+
+{% block extra_css %}
+<style>
+  .production-shell { display:grid; gap:1rem; }
+  .module-tabs {
+    display:flex;
+    gap:.5rem;
+    overflow-x:auto;
+    padding-bottom:.15rem;
+  }
+  .module-tab {
+    display:inline-flex;
+    align-items:center;
+    min-height:34px;
+    padding:.45rem .7rem;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:#44546a;
+    font-weight:700;
+    text-decoration:none;
+    white-space:nowrap;
+  }
+  .module-tab.active {
+    background:#17324d;
+    border-color:#17324d;
+    color:#fff;
+  }
+  .production-toolbar,
+  .production-banner,
+  .production-panel,
+  .production-kpi {
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+  }
+  .production-toolbar {
+    display:flex;
+    justify-content:space-between;
+    gap:.75rem;
+    flex-wrap:wrap;
+    padding:1rem;
+    align-items:end;
+  }
+  .production-controls { display:flex; gap:.7rem; flex-wrap:wrap; align-items:end; }
+  .production-field { display:grid; gap:.25rem; min-width:160px; }
+  .production-field label {
+    font-size:.78rem;
+    color:var(--muted);
+    font-weight:800;
+    text-transform:uppercase;
+  }
+  .production-field input,
+  .production-field select {
+    height:38px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:0 .65rem;
+    background:#fff;
+  }
+  .production-button {
+    height:38px;
+    border:0;
+    border-radius:6px;
+    padding:0 .9rem;
+    background:#17324d;
+    color:#fff;
+    font-weight:800;
+    cursor:pointer;
+  }
+  .production-button.is-ghost {
+    border:1px solid var(--line);
+    background:#fff;
+    color:#17324d;
+  }
+  .production-header {
+    display:flex;
+    justify-content:space-between;
+    gap:1rem;
+    flex-wrap:wrap;
+    align-items:flex-start;
+  }
+  .production-header h1 {
+    margin:0;
+    color:#17324d;
+    font-size:1.55rem;
+  }
+  .production-header p {
+    margin:.25rem 0 0;
+    color:var(--muted);
+  }
+  .production-source {
+    display:flex;
+    gap:.35rem;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
+  .production-pill {
+    display:inline-flex;
+    align-items:center;
+    min-height:26px;
+    padding:.15rem .5rem;
+    border:1px solid #d7dce4;
+    border-radius:999px;
+    background:#f8fafc;
+    color:#44546a;
+    font-size:.78rem;
+    font-weight:800;
+  }
+  .production-banners { display:grid; gap:.5rem; }
+  .production-banner {
+    padding:.75rem .9rem;
+    color:#44546a;
+    background:#fff8f5;
+  }
+  .production-kpis {
+    display:grid;
+    grid-template-columns:repeat(4, minmax(0, 1fr));
+    gap:.75rem;
+  }
+  .production-kpi { padding:.9rem; }
+  .production-kpi span {
+    display:block;
+    color:var(--muted);
+    font-size:.78rem;
+    font-weight:800;
+    text-transform:uppercase;
+  }
+  .production-kpi strong {
+    display:block;
+    margin-top:.25rem;
+    color:#17324d;
+    font-size:1.2rem;
+  }
+  .production-panel { overflow:auto; }
+  .production-table {
+    width:100%;
+    min-width:1080px;
+    border-collapse:separate;
+    border-spacing:0;
+  }
+  .production-table th,
+  .production-table td {
+    padding:.55rem .65rem;
+    border-top:1px solid var(--line);
+    white-space:nowrap;
+    text-align:right;
+  }
+  .production-table th {
+    position:sticky;
+    top:0;
+    z-index:1;
+    background:#f8fafc;
+    color:#44546a;
+    font-size:.74rem;
+    text-transform:uppercase;
+  }
+  .production-table th:first-child,
+  .production-table th:nth-child(2),
+  .production-table td:first-child,
+  .production-table td:nth-child(2) {
+    text-align:left;
+  }
+  .production-family-row td,
+  .production-total-row td {
+    background:#f4f6f8;
+    color:#17324d;
+    font-weight:900;
+  }
+  .production-total-row td { background:#fff8f5; }
+  .production-muted { color:#98a2b3; }
+  .production-diff.positive,
+  .production-risk.green { color:#16794a; font-weight:900; }
+  .production-diff.negative,
+  .production-risk.red { color:#b42318; font-weight:900; }
+  .production-risk.yellow { color:#b7791f; font-weight:900; }
+  @media (max-width: 900px) {
+    .production-kpis { grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width: 768px) {
+    .production-kpis { grid-template-columns:1fr; }
+    .production-field { min-width:100%; }
+    .production-button { width:100%; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="production-shell">
+  <nav class="module-tabs" aria-label="Reportes">
+    {% for tab in module_tabs %}
+    <a class="module-tab {% if tab.active %}active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="production-header">
+    <div>
+      <h1>Producido vs Vendido vs Merma — {{ selected_period_label }}</h1>
+      <p>Comparativo operativo por receta, familia y sucursal. Las columnas sin fuente disponible se muestran como “—”.</p>
+    </div>
+    <div class="production-source">
+      <span class="production-pill">Ventas: {{ fuentes.ventas }}</span>
+      <span class="production-pill">Producción: {{ fuentes.produccion }}</span>
+      <span class="production-pill">Merma: {{ fuentes.merma }}</span>
+    </div>
+  </section>
+
+  <form class="production-toolbar" method="get">
+    <div class="production-controls">
+      <div class="production-field">
+        <label for="periodo">Periodo</label>
+        <input id="periodo" name="periodo" type="month" value="{{ selected_period }}">
+      </div>
+      <div class="production-field">
+        <label for="sucursal">Sucursal</label>
+        <select id="sucursal" name="sucursal">
+          <option value="">Todas</option>
+          {% for sucursal in sucursales %}
+          <option value="{{ sucursal.id }}" {% if selected_sucursal == sucursal.id %}selected{% endif %}>{{ sucursal.codigo }} · {{ sucursal.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="production-field">
+        <label for="familia">Familia</label>
+        <select id="familia" name="familia">
+          <option value="">Todas</option>
+          {% for familia in familias %}
+          <option value="{{ familia }}" {% if selected_familia == familia %}selected{% endif %}>{{ familia }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="production-controls">
+      <button class="production-button" type="submit">Aplicar</button>
+      <button class="production-button is-ghost" type="button" id="export-production-csv">Exportar CSV</button>
+    </div>
+  </form>
+
+  {% if banners %}
+  <div class="production-banners">
+    {% for banner in banners %}
+    <div class="production-banner">{{ banner }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <section class="production-kpis">
+    <article class="production-kpi">
+      <span>Vendido</span>
+      <strong>{{ grand_total.vendido|floatformat:0|intcomma }}</strong>
+    </article>
+    <article class="production-kpi">
+      <span>Producido</span>
+      <strong>{{ grand_total.producido|floatformat:0|intcomma }}</strong>
+    </article>
+    <article class="production-kpi">
+      <span>Diferencia</span>
+      <strong class="production-diff {% if grand_total.dif < 0 %}negative{% else %}positive{% endif %}">{{ grand_total.dif|floatformat:0|intcomma }}</strong>
+    </article>
+    <article class="production-kpi">
+      <span>Costo merma</span>
+      <strong>${{ grand_total.costo_merma|floatformat:2|intcomma }}</strong>
+    </article>
+  </section>
+
+  <section class="production-panel">
+    <table class="production-table" id="production-table">
+      <thead>
+        <tr>
+          <th>Receta</th>
+          <th>Familia</th>
+          <th>Vendido</th>
+          <th>Producido</th>
+          <th>Dif (Prod-Vend)</th>
+          <th>Merma reportada</th>
+          <th>Merma calculada</th>
+          <th>Costo merma</th>
+          <th>% Merma</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for group in groups %}
+        <tr class="production-family-row">
+          <td colspan="2">{{ group.familia }}</td>
+          <td>{{ group.total.vendido|floatformat:3|intcomma }}</td>
+          <td>{{ group.total.producido|floatformat:3|intcomma }}</td>
+          <td class="production-diff {% if group.total.dif < 0 %}negative{% else %}positive{% endif %}">{{ group.total.dif|floatformat:3|intcomma }}</td>
+          <td>{{ group.total.merma_reportada|floatformat:3|intcomma }}</td>
+          <td>{{ group.total.merma_calculada|floatformat:3|intcomma }}</td>
+          <td>${{ group.total.costo_merma|floatformat:2|intcomma }}</td>
+          <td>
+            {% if group.total.pct_merma is None %}
+            <span class="production-muted">—</span>
+            {% else %}
+            <span class="production-risk {% if group.total.pct_merma > 10 %}red{% elif group.total.pct_merma >= 5 %}yellow{% else %}green{% endif %}">{{ group.total.pct_merma|floatformat:2 }}%</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% for row in group.rows %}
+        <tr>
+          <td>{{ row.receta }}</td>
+          <td>{{ row.familia }}</td>
+          <td>{% if row.vendido is None %}<span class="production-muted">—</span>{% else %}{{ row.vendido|floatformat:3|intcomma }}{% endif %}</td>
+          <td>{% if row.producido is None %}<span class="production-muted">—</span>{% else %}{{ row.producido|floatformat:3|intcomma }}{% endif %}</td>
+          <td>
+            {% if row.dif is None %}
+            <span class="production-muted">—</span>
+            {% else %}
+            <span class="production-diff {% if row.dif < 0 %}negative{% else %}positive{% endif %}">{{ row.dif|floatformat:3|intcomma }}</span>
+            {% endif %}
+          </td>
+          <td>{% if row.merma_reportada is None %}<span class="production-muted">—</span>{% else %}{{ row.merma_reportada|floatformat:3|intcomma }}{% endif %}</td>
+          <td>{% if row.merma_calculada is None %}<span class="production-muted">—</span>{% else %}{{ row.merma_calculada|floatformat:3|intcomma }}{% endif %}</td>
+          <td>{% if row.costo_merma is None %}<span class="production-muted">—</span>{% else %}${{ row.costo_merma|floatformat:2|intcomma }}{% endif %}</td>
+          <td>
+            {% if row.pct_merma is None %}
+            <span class="production-muted">—</span>
+            {% else %}
+            <span class="production-risk {% if row.pct_merma > 10 %}red{% elif row.pct_merma >= 5 %}yellow{% else %}green{% endif %}">{{ row.pct_merma|floatformat:2 }}%</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% empty %}
+        <tr><td colspan="9">Sin datos para el periodo y filtros seleccionados.</td></tr>
+        {% endfor %}
+        <tr class="production-total-row">
+          <td colspan="2">Gran total</td>
+          <td>{{ grand_total.vendido|floatformat:3|intcomma }}</td>
+          <td>{{ grand_total.producido|floatformat:3|intcomma }}</td>
+          <td class="production-diff {% if grand_total.dif < 0 %}negative{% else %}positive{% endif %}">{{ grand_total.dif|floatformat:3|intcomma }}</td>
+          <td>{{ grand_total.merma_reportada|floatformat:3|intcomma }}</td>
+          <td>{{ grand_total.merma_calculada|floatformat:3|intcomma }}</td>
+          <td>${{ grand_total.costo_merma|floatformat:2|intcomma }}</td>
+          <td>
+            {% if grand_total.pct_merma is None %}
+            <span class="production-muted">—</span>
+            {% else %}
+            <span class="production-risk {% if grand_total.pct_merma > 10 %}red{% elif grand_total.pct_merma >= 5 %}yellow{% else %}green{% endif %}">{{ grand_total.pct_merma|floatformat:2 }}%</span>
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<script>
+  (function () {
+    const button = document.getElementById('export-production-csv');
+    const table = document.getElementById('production-table');
+    if (!button || !table) return;
+    button.addEventListener('click', function () {
+      const rows = Array.from(table.querySelectorAll('tr')).map((tr) => {
+        return Array.from(tr.children).map((cell) => {
+          const value = cell.innerText.replace(/\s+/g, ' ').trim().replace(/"/g, '""');
+          return `"${value}"`;
+        }).join(',');
+      });
+      const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `producido_vs_vendido_{{ selected_period }}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    });
+  })();
+</script>
+{% endblock %}
