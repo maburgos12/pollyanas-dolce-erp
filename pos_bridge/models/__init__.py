@@ -1,6 +1,6 @@
 from pos_bridge.models.branch import PointBranch
 from pos_bridge.models.movements import PointProductionLine, PointTransferLine, PointWasteLine
-from pos_bridge.models.product import PointProduct
+from pos_bridge.models.product import PointProduct, PointProductCategory
 from pos_bridge.models.product_history import (
     PointProductCostReconciliation,
     PointProductHistoryImport,
@@ -37,6 +37,7 @@ __all__ = [
     "PointSalesDailyProductFact",
     "PointSalesQualityAlert",
     "PointProduct",
+    "PointProductCategory",
     "PointProductHistoryImport",
     "PointProductHistoryRow",
     "PointProductCostReconciliation",

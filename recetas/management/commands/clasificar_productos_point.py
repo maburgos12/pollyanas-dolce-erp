@@ -7,11 +7,11 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 from unidecode import unidecode
 
-from pos_bridge.models import PointDailySale, PointProduct
+from pos_bridge.models import PointDailySale, PointProduct, PointProductCategory
 from recetas.models import Receta
 
 
@@ -19,25 +19,28 @@ NORMALIZACION = {
     "GALLETAS": "Galletas",
     "PAN": "Pan",
     "MASAS": "Masas",
+    "PASTELES": "Pastel",
+    "Pasteles": "Pastel",
     "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)": "Betún y Rellenos",
 }
 
 FAMILY_RULES = [
-    ("Pastel", ["pastel"]),
-    ("Pay", ["pay", "sabor fresa", "sabor guayaba", "sabor galleta", "sabor brownie", "sabor oreo"]),
-    ("Galletas", ["galleta", "alfajor", "cookie"]),
-    ("Vasos Preparados", ["vaso"]),
-    ("Bollo", ["bollo"]),
-    ("Empanadas", ["empanada"]),
-    ("Pan", ["pan "]),
-    ("Bebidas", ["café", "cafe", "capuchino", "moka", "americano", "chocola", "agua ", "litro"]),
+    ("Pay", ["pay"]),
     ("Cheesecake", ["cheesecake"]),
+    ("Bollo", ["bollo"]),
+    ("Bebidas", ["latte", "cappuccino", "capuchino", "café", "cafe", "americano", "chocolate caliente", "chocola"]),
+    ("Vasos Preparados", ["frappe", "vaso"]),
+    ("Galletas", ["galleta"]),
+    ("Pastel", ["pastel"]),
     ("Otros postres", []),
 ]
 
 POINT_CLASS_RULES = [
     ("TOPPING", ["topping", "empaque pay"]),
-    ("SERVICIO_ACCESORIO", ["servicio domicilio", "letrero", "pirotecnia", "chispas", "encendedor", "vela", "tarjeta de regalo"]),
+    (
+        "SERVICIO_ACCESORIO",
+        ["servicio domicilio", "letrero", "pirotecnia", "chispas", "encendedor", "vela", "tarjeta de regalo", "extra 100"],
+    ),
     ("REVENTA", ["coca-cola", "coca cola", "espagueti", "aderezo"]),
 ]
 
@@ -86,6 +89,9 @@ class ClassificationSummary:
     point_ambiguous: list[tuple[PointProduct, list[Receta]]] = field(default_factory=list)
     point_resolved_ambiguous: list[tuple[PointProduct, Receta]] = field(default_factory=list)
     point_forced_unmatched: list[tuple[PointProduct, str]] = field(default_factory=list)
+    point_categories_created: Counter[str] = field(default_factory=Counter)
+    point_categories_existing: Counter[str] = field(default_factory=Counter)
+    point_categories_skipped: list[UnmatchedPointRow] = field(default_factory=list)
 
 
 class Command(BaseCommand):
@@ -93,7 +99,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--dry-run", action="store_true", help="Simula cambios sin escribir en BD.")
-        parser.add_argument("--ejecutar", action="store_true", help="Aplica solo normalización y familias ERP vendidas.")
+        parser.add_argument(
+            "--ejecutar",
+            action="store_true",
+            help="Aplica normalización, familias ERP vendidas y categorías Point sin receta.",
+        )
         parser.add_argument("--days", type=int, default=30, help="Ventana de ventas Point a considerar.")
 
     def handle(self, *args, **options):
@@ -142,8 +152,8 @@ class Command(BaseCommand):
                 Receta.objects.filter(
                     id__in=matched_recipe_ids,
                     tipo=Receta.TIPO_PRODUCTO_FINAL,
-                    familia="",
                 )
+                .filter(Q(familia="") | Q(familia__isnull=True))
                 .order_by("nombre", "id")
             )
             for receta in recipes_to_classify:
@@ -167,6 +177,8 @@ class Command(BaseCommand):
                         suggested_type=self._suggest_point_type(product),
                     )
                 )
+
+            self._persist_point_categories(summary=summary, dry_run=dry_run)
 
             if dry_run:
                 transaction.set_rollback(True)
@@ -216,6 +228,25 @@ class Command(BaseCommand):
                 f"{product.external_id} | {product.sku or ''} | {product.name} | "
                 f"cat={product.category} | qty={row.qty} | amount={row.amount} -> {row.suggested_type}"
             )
+        self.stdout.write("PointProductCategory:")
+        if dry_run:
+            creatable = Counter(
+                row.suggested_type
+                for row in summary.point_unmatched
+                if row.suggested_type in self._valid_point_category_values()
+            )
+            for suggested_type, count in sorted(creatable.items()):
+                self.stdout.write(f"  CREARIA {suggested_type}: {count}")
+        else:
+            for suggested_type, count in sorted(summary.point_categories_created.items()):
+                self.stdout.write(f"  CREADOS {suggested_type}: {count}")
+            for suggested_type, count in sorted(summary.point_categories_existing.items()):
+                self.stdout.write(f"  EXISTENTES {suggested_type}: {count}")
+        if summary.point_categories_skipped:
+            self.stdout.write("PointProductCategory omitidos:")
+            for row in summary.point_categories_skipped:
+                product = row.point_product
+                self.stdout.write(f"  {product.external_id} | {product.name} -> {row.suggested_type}")
 
         self.stdout.write("")
         self.stdout.write(f"Point vendidos con matching ambiguo: {len(summary.point_ambiguous)}")
@@ -297,6 +328,31 @@ class Command(BaseCommand):
         if product.category and self._normalize_name(product.category) in {"alegria", "pillines", "accesorios de reposteria"}:
             return "SERVICIO_ACCESORIO"
         return "REVISAR_MAURICIO"
+
+    def _persist_point_categories(self, *, summary: ClassificationSummary, dry_run: bool) -> None:
+        valid_categories = self._valid_point_category_values()
+        for row in summary.point_unmatched:
+            if row.suggested_type not in valid_categories:
+                summary.point_categories_skipped.append(row)
+                continue
+            if dry_run:
+                continue
+            product = row.point_product
+            _, created = PointProductCategory.objects.get_or_create(
+                codigo_point=(product.external_id or product.sku or "")[:50],
+                defaults={
+                    "nombre": (product.name or "")[:200],
+                    "category": row.suggested_type,
+                    "notas": "Clasificado automaticamente desde ventas Point sin receta ERP.",
+                },
+            )
+            if created:
+                summary.point_categories_created[row.suggested_type] += 1
+            else:
+                summary.point_categories_existing[row.suggested_type] += 1
+
+    def _valid_point_category_values(self) -> set[str]:
+        return {choice[0] for choice in PointProductCategory.CATEGORY_CHOICES}
 
     def _normalize_code(self, value: str | None) -> str:
         raw = str(value or "").strip()
