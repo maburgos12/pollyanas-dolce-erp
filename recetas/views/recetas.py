@@ -1215,6 +1215,64 @@ def _recipe_has_effective_bom(receta: Receta) -> bool:
     return RecetaPresentacionDerivada.objects.filter(receta_derivada=receta, activo=True).exists()
 
 
+def _recipe_effective_cost_display(receta: Receta) -> Decimal:
+    costo = receta.costo_total_estimado_decimal
+    if costo and costo > 0:
+        return costo
+
+    equivalence = _recipe_active_equivalence(receta)
+    if equivalence is not None:
+        parent_cost = equivalence.receta_padre.costo_total_estimado_decimal
+        if parent_cost and parent_cost > 0:
+            factor = Decimal(str(equivalence.factor_conversion or 1))
+            if factor > 0:
+                return parent_cost / factor
+    return Decimal("0")
+
+
+def _recipe_active_equivalence(receta: Receta) -> RecetaEquivalencia | None:
+    cached = getattr(receta, "_effective_equivalence_cache", None)
+    if cached is not None:
+        return cached
+    equivalence = (
+        RecetaEquivalencia.objects.select_related("receta_padre")
+        .filter(receta_porcion=receta, activo=True)
+        .exclude(receta_padre=receta)
+        .first()
+    )
+    setattr(receta, "_effective_equivalence_cache", equivalence)
+    return equivalence
+
+
+def _recipe_active_derived_relation(receta: Receta) -> RecetaPresentacionDerivada | None:
+    cached = getattr(receta, "_effective_derived_cache", None)
+    if cached is not None:
+        return cached
+    relation = (
+        RecetaPresentacionDerivada.objects.select_related("receta_padre")
+        .filter(receta_derivada=receta, activo=True)
+        .first()
+    )
+    setattr(receta, "_effective_derived_cache", relation)
+    return relation
+
+
+def _recipe_source_display(receta: Receta) -> str:
+    lineas_attr = getattr(receta, "lineas_count", None)
+    if (lineas_attr is not None and int(lineas_attr or 0) > 0) or (lineas_attr is None and receta.lineas.exists()):
+        return "BOM directo"
+
+    equivalence = _recipe_active_equivalence(receta)
+    if equivalence is not None:
+        return f"Equivalencia: {equivalence.receta_padre.nombre}"
+
+    relation = _recipe_active_derived_relation(receta)
+    if relation is not None:
+        return f"Derivada: {relation.receta_padre.nombre}"
+
+    return "Sin costeo"
+
+
 def _recipe_master_blockers(
     lineas: list[LineaReceta],
     *,
@@ -4770,7 +4828,27 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
 
     paginator = Paginator(recetas, 20)
     page = paginator.get_page(request.GET.get("page"))
+    page_receta_ids = [receta.id for receta in page.object_list]
+    equivalence_by_receta_id = {
+        equivalence.receta_porcion_id: equivalence
+        for equivalence in RecetaEquivalencia.objects.select_related("receta_padre").filter(
+            receta_porcion_id__in=page_receta_ids,
+            activo=True,
+        )
+        if equivalence.receta_padre_id != equivalence.receta_porcion_id
+    }
+    derived_by_receta_id = {
+        relation.receta_derivada_id: relation
+        for relation in RecetaPresentacionDerivada.objects.select_related("receta_padre").filter(
+            receta_derivada_id__in=page_receta_ids,
+            activo=True,
+        )
+    }
     for receta in page.object_list:
+        setattr(receta, "_effective_equivalence_cache", equivalence_by_receta_id.get(receta.id))
+        setattr(receta, "_effective_derived_cache", derived_by_receta_id.get(receta.id))
+        receta.costo_efectivo = _recipe_effective_cost_display(receta)
+        receta.fuente_display = _recipe_source_display(receta)
         receta.operational_health = _recipe_operational_health(receta)
         receta.derived_state = _recipe_derived_sync_state(receta) if receta.tipo == Receta.TIPO_PREPARACION else None
         receta.supply_chain_snapshot = _recipe_supply_chain_snapshot(receta)
