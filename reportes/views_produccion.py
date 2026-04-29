@@ -263,10 +263,9 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         costo_merma = merma_cost_map.get(recipe.id)
         if costo_merma is None and merma_reportada is not None and costo_unitario:
             costo_merma = merma_reportada * costo_unitario
-        merma_for_pct = merma_reportada if merma_reportada is not None else merma_calculada
         pct_merma = None
-        if merma_for_pct is not None and vendido and vendido > ZERO:
-            pct_merma = (merma_for_pct / vendido) * Decimal("100")
+        if merma_reportada is not None and vendido and vendido > ZERO:
+            pct_merma = (merma_reportada / vendido) * Decimal("100")
         familia = (recipe.familia or "").strip() or "Sin familia"
         row = {
             "receta_id": recipe.id,
