@@ -15,6 +15,10 @@ from recetas.models import PlanProduccionItem
 from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
 
 
+def _redirect_revision(fecha_operacion: date):
+    return redirect(f"/recetas/consolidado-cedis/?fecha={fecha_operacion.isoformat()}")
+
+
 def _parse_date(value: str | None):
     if not value:
         return timezone.localdate()
@@ -22,6 +26,31 @@ def _parse_date(value: str | None):
         return date.fromisoformat(value)
     except ValueError:
         return timezone.localdate()
+
+
+def _parse_decimal(value, default: Decimal) -> Decimal:
+    try:
+        return max(Decimal("0"), Decimal(str(value or "0")))
+    except Exception:
+        return default
+
+
+def _autorizar_item(item: PlanProduccionItem, *, usuario, now) -> None:
+    item_metadata = item.metadata if isinstance(item.metadata, dict) else {}
+    item.metadata = {
+        **item_metadata,
+        "autorizado": True,
+        "autorizado_en": now.isoformat(),
+        "autorizado_por_id": usuario.id if usuario and usuario.is_authenticated else None,
+    }
+    item.save(update_fields=["cantidad", "cantidad_autorizada", "metadata"])
+
+
+def _plan_completamente_autorizado(plan) -> bool:
+    for item in PlanProduccionItem.objects.filter(plan=plan).only("metadata"):
+        if not (isinstance(item.metadata, dict) and item.metadata.get("autorizado")):
+            return False
+    return True
 
 
 @login_required
@@ -69,22 +98,35 @@ def consolidado_cedis_autorizar_plan(request):
     plan = resumen.get("plan")
     if plan is None:
         messages.error(request, "No existe plan de producción para autorizar.")
-        return redirect(f"/recetas/consolidado-cedis/?fecha={fecha_operacion.isoformat()}")
+        return _redirect_revision(fecha_operacion)
 
-    for item in PlanProduccionItem.objects.filter(plan=plan):
+    autorizar_item_id = request.POST.get("autorizar_item_id")
+    autorizar_todo = request.POST.get("autorizar_todo") == "1"
+    now = timezone.now()
+    items = list(PlanProduccionItem.objects.filter(plan=plan))
+
+    if autorizar_item_id:
+        items = [item for item in items if str(item.id) == str(autorizar_item_id)]
+        if not items:
+            messages.error(request, "No se encontró el renglón del plan para autorizar.")
+            return _redirect_revision(fecha_operacion)
+
+    for item in items:
         raw_qty = request.POST.get(f"cantidad_autorizada_{item.id}")
         if raw_qty is None:
             continue
-        try:
-            qty = Decimal(str(raw_qty or "0"))
-        except Exception:
-            qty = item.cantidad_autorizada or item.cantidad
-        item.cantidad_autorizada = max(Decimal("0"), qty)
+        item.cantidad_autorizada = _parse_decimal(raw_qty, item.cantidad_autorizada or item.cantidad)
         item.cantidad = item.cantidad_autorizada
-        item.save(update_fields=["cantidad", "cantidad_autorizada"])
-    plan.autorizado = True
-    plan.autorizado_en = timezone.now()
-    plan.autorizado_por = request.user
-    plan.save(update_fields=["autorizado", "autorizado_en", "autorizado_por", "actualizado_en"])
-    messages.success(request, "Plan de producción autorizado.")
-    return redirect(f"/recetas/consolidado-cedis/?fecha={fecha_operacion.isoformat()}")
+        _autorizar_item(item, usuario=request.user, now=now)
+
+    if autorizar_todo or _plan_completamente_autorizado(plan):
+        plan.autorizado = True
+        plan.autorizado_en = now
+        plan.autorizado_por = request.user
+        plan.save(update_fields=["autorizado", "autorizado_en", "autorizado_por", "actualizado_en"])
+        messages.success(request, "Plan de producción autorizado completo.")
+    elif autorizar_item_id:
+        messages.success(request, "Renglón autorizado.")
+    else:
+        messages.success(request, "Cambios guardados.")
+    return _redirect_revision(fecha_operacion)

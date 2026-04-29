@@ -88,9 +88,11 @@ class ConsolidadoNocturnoCedisService:
             }
         for row in rows:
             item = plan_items.get(row.get("receta_id"))
+            item_metadata = item.metadata if item and isinstance(item.metadata, dict) else {}
             row["plan_item_id"] = item.id if item else None
             row["cantidad_autorizada"] = item.cantidad_autorizada if item else Decimal("0")
             row["cantidad_plan"] = item.cantidad if item else Decimal("0")
+            row["item_autorizado"] = bool((plan and plan.autorizado) or item_metadata.get("autorizado"))
         return {
             "fecha_operacion": fecha_operacion,
             "consolidado": consolidado,

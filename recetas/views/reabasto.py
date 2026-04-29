@@ -11999,7 +11999,7 @@ def _export_plan_xlsx(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpRe
 def _export_plan_point_xlsx(plan: PlanProduccion) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
-    ws.title = "Importacion Produccion"
+    ws.title = "Rpt_Formato_Produccion_add"
     ws.append(["Código", "Nombre", "Cantidad Solicitada", "Is Insumo"])
 
     items = plan.items.select_related("receta").order_by("id")
@@ -20686,6 +20686,5 @@ def reabasto_cedis_generar_compras(request: HttpRequest) -> HttpResponse:
         }
     )
     return redirect(f"{reverse('compras:solicitudes')}?{compras_query}")
-
 
 
