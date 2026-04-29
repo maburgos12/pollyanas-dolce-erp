@@ -86,6 +86,18 @@ def _get_repartidor_for_user(user) -> Repartidor | None:
         return None
 
 
+def _serializer_error_message(errors) -> str:
+    for field, messages in errors.items():
+        if isinstance(messages, (list, tuple)) and messages:
+            return f"{field}: {messages[0]}"
+        if isinstance(messages, dict):
+            nested = _serializer_error_message(messages)
+            if nested:
+                return f"{field}: {nested}"
+        return f"{field}: {messages}"
+    return "Datos inválidos."
+
+
 class LogisticaTokenView(TokenObtainPairView):
     parser_classes = [JSONParser, FormParser]
 
@@ -257,7 +269,15 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
             )
 
         serializer = LogisticaBitacoraSalidaCreateSerializer(data=request.data, context={"repartidor": repartidor})
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return Response(
+                {
+                    "error": "validacion",
+                    "mensaje": _serializer_error_message(serializer.errors),
+                    "detalles": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         bitacora = serializer.save(ip_registro=request.META.get("REMOTE_ADDR"))
         return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_201_CREATED)
 

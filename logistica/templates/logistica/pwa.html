@@ -741,6 +741,19 @@
         renderFn();
       }
 
+      function apiErrorMessage(error, fallback) {
+        if (!error) return fallback;
+        if (error.mensaje) return error.mensaje;
+        if (error.detail) return error.detail;
+        const detalles = error.detalles || error;
+        const firstKey = Object.keys(detalles || {})[0];
+        if (!firstKey) return fallback;
+        const value = detalles[firstKey];
+        if (Array.isArray(value)) return `${firstKey}: ${value[0]}`;
+        if (typeof value === "string") return `${firstKey}: ${value}`;
+        return fallback;
+      }
+
       function normalizePerfil(raw) {
         const repartidor = raw?.repartidor || {};
         const unidad = raw?.unidad || repartidor?.unidad_asignada || {};
@@ -1315,7 +1328,7 @@
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Bitácora del día</h1>
-          ${message ? `<p class="success">${escapeHtml(message)}</p>` : ""}
+          ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
           ${body}
         `));
       }
@@ -1353,7 +1366,7 @@
             state.bitacoraSalida = error.bitacora || state.bitacoraSalida;
             return renderBitacoraSalida(`⚠️ Tienes un turno abierto en ${error.bitacora?.unidad_codigo || "otra unidad"}.`);
           }
-          return renderBitacoraSalida("No se pudo iniciar el turno.");
+          return renderBitacoraSalida(apiErrorMessage(error, "No se pudo iniciar el turno."));
         }
         const creado = await response.json();
         state.bitacoraSalidaDraft = null;
