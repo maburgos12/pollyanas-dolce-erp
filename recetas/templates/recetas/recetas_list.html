@@ -96,7 +96,7 @@
           <th>Familia</th>
           <th>Categoría</th>
           <th>Rendimiento</th>
-          <th>Hoja</th>
+          <th>Fuente</th>
           <th>Pendientes</th>
           <th class="text-end">Líneas</th>
           <th class="text-end">Costo total (estimado)</th>
@@ -110,7 +110,7 @@
           <td>{{ r.familia|default:"-" }}</td>
           <td>{{ r.categoria|default:"-" }}</td>
           <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad|floatformat:2 }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
-          <td>{{ r.sheet_name }}</td>
+          <td>{{ r.fuente_display }}</td>
           <td>
             {% if r.pendientes_count > 0 %}
               <span class="badge bg-warning">{{ r.pendientes_count }}</span>
@@ -119,7 +119,7 @@
             {% endif %}
           </td>
           <td class="text-end">{{ r.lineas_count }}</td>
-          <td class="text-end">${{ r.costo_total_estimado|floatformat:2 }}</td>
+          <td class="text-end">{% if r.costo_efectivo %}${{ r.costo_efectivo|floatformat:2 }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
         {% empty %}
         <tr>

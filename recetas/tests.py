@@ -720,6 +720,7 @@ class RecetasListCatalogFiltersTests(TestCase):
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             familia="Pay",
             categoria="Pay",
+            sheet_name="AUTO_POINT_SALES",
         )
         insumo = Insumo.objects.create(
             nombre="Base Pay QA",
@@ -735,7 +736,7 @@ class RecetasListCatalogFiltersTests(TestCase):
             cantidad=Decimal("1.000000"),
             unidad=self.unidad_kg,
             unidad_texto="kg",
-            costo_unitario_snapshot=Decimal("10.000000"),
+            costo_unitario_snapshot=Decimal("80.000000"),
             match_status=LineaReceta.STATUS_AUTO,
             match_score=100,
             match_method=LineaReceta.MATCH_EXACT,
@@ -756,6 +757,11 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertEqual(result.lineas_count, 0)
         self.assertNotIn("componentes", result.governance_issues)
         self.assertNotEqual(result.operational_health["code"], "danger")
+        self.assertEqual(result.costo_efectivo, Decimal("10.000000"))
+        self.assertEqual(result.fuente_display, "Equivalencia: Pay Padre QA")
+        self.assertContains(response, "$10.00")
+        self.assertContains(response, "Equivalencia: Pay Padre QA")
+        self.assertNotContains(response, "AUTO_POINT_SALES")
 
     def test_recetas_list_treats_derived_presentation_as_effective_bom(self):
         parent = Receta.objects.create(
