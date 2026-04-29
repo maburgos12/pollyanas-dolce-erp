@@ -304,9 +304,31 @@ class LogisticaBitacoraSalidaLlegadaSerializer(serializers.ModelSerializer):
 
 
 class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
+    nivel_gas_salida = serializers.CharField()
+
     class Meta:
         model = BitacoraSalidaLlegada
         fields = ["unidad", "km_salida", "nivel_gas_salida", "foto_tablero_salida", "latitud_salida", "longitud_salida"]
+
+    def validate_nivel_gas_salida(self, value):
+        normalized = str(value or "").strip().lower()
+        aliases = {
+            "vacio": "vacio",
+            "vacío": "vacio",
+            "1/4": "1/4",
+            "¼": "1/4",
+            "1⁄4": "1/4",
+            "1/2": "1/2",
+            "½": "1/2",
+            "1⁄2": "1/2",
+            "3/4": "3/4",
+            "¾": "3/4",
+            "3⁄4": "3/4",
+            "lleno": "lleno",
+        }
+        if normalized not in aliases:
+            raise serializers.ValidationError("Selecciona un nivel de gas válido.")
+        return aliases[normalized]
 
     def create(self, validated_data):
         repartidor = self.context["repartidor"]
