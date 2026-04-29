@@ -65,4 +65,23 @@ class Command(BaseCommand):
             },
         )
 
+        authoritative_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="3",
+            day_of_week="*",
+            day_of_month="2",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="ventas: sync ventas autoritativas mensual",
+            defaults={
+                "task": "ventas.sync_ventas_autoritativas",
+                "crontab": authoritative_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         self.stdout.write(self.style.SUCCESS("Schedules de ventas estacionales registrados correctamente."))
