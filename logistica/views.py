@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
-from django.db.models import Q
+from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -18,7 +18,7 @@ from core.audit import log_event
 from core.models import Sucursal
 from crm.models import PedidoCliente
 
-from .models import EntregaRuta, RutaEntrega, Unidad
+from .models import BitacoraSalidaLlegada, EntregaRuta, InspeccionVehiculo, ReporteUnidad, RutaEntrega, Unidad
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -46,6 +46,7 @@ def _module_tabs(active: str) -> list[dict]:
         {"label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
         {"label": "Rutas", "url_name": "logistica:rutas", "active": active == "rutas"},
         {"label": "Unidades", "url_name": "logistica:unidades_list", "active": active == "unidades"},
+        {"label": "Capturas PWA", "url_name": "logistica:capturas_pwa", "active": active == "capturas"},
     ]
 
 
@@ -746,6 +747,82 @@ def unidades_list(request):
             "query": query,
         },
     )
+
+
+def _inspeccion_faltantes_count(inspeccion: InspeccionVehiculo) -> int:
+    check_fields = [
+        field.name
+        for field in InspeccionVehiculo._meta.fields
+        if field.name.startswith(("ext_", "int_", "niv_", "est_"))
+    ]
+    return sum(1 for field in check_fields if not getattr(inspeccion, field))
+
+
+@login_required
+def capturas_pwa(request):
+    if not can_view_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para ver capturas de Logística")
+
+    today = timezone.localdate()
+    query = (request.GET.get("q") or "").strip()
+    tipo = (request.GET.get("tipo") or "todas").strip().lower()
+
+    bitacoras_qs = BitacoraSalidaLlegada.objects.select_related("repartidor__user", "unidad").order_by("-hora_salida", "-id")
+    inspecciones_qs = InspeccionVehiculo.objects.select_related("repartidor__user", "unidad").order_by("-fecha", "-id")
+    reportes_qs = ReporteUnidad.objects.select_related("repartidor__user", "unidad", "asignado_a").order_by("-fecha_reporte", "-id")
+
+    if query:
+        bitacoras_qs = bitacoras_qs.filter(
+            Q(folio__icontains=query)
+            | Q(unidad__codigo__icontains=query)
+            | Q(unidad__placa__icontains=query)
+            | Q(repartidor__user__username__icontains=query)
+            | Q(repartidor__user__first_name__icontains=query)
+            | Q(repartidor__user__last_name__icontains=query)
+        )
+        inspecciones_qs = inspecciones_qs.filter(
+            Q(unidad__codigo__icontains=query)
+            | Q(unidad__placa__icontains=query)
+            | Q(repartidor__user__username__icontains=query)
+            | Q(repartidor__user__first_name__icontains=query)
+            | Q(repartidor__user__last_name__icontains=query)
+        )
+        reportes_qs = reportes_qs.filter(
+            Q(unidad__codigo__icontains=query)
+            | Q(unidad__placa__icontains=query)
+            | Q(repartidor__user__username__icontains=query)
+            | Q(repartidor__user__first_name__icontains=query)
+            | Q(repartidor__user__last_name__icontains=query)
+            | Q(descripcion__icontains=query)
+            | Q(proveedor_servicio__icontains=query)
+        )
+
+    bitacoras_page = Paginator(bitacoras_qs, 12).get_page(request.GET.get("bitacoras_page"))
+    inspecciones_page = Paginator(inspecciones_qs, 12).get_page(request.GET.get("inspecciones_page"))
+    reportes_page = Paginator(reportes_qs, 12).get_page(request.GET.get("reportes_page"))
+
+    inspecciones_rows = []
+    for inspeccion in inspecciones_page:
+        inspeccion.faltantes_count = _inspeccion_faltantes_count(inspeccion)
+        inspecciones_rows.append(inspeccion)
+
+    context = {
+        "module_tabs": _module_tabs("capturas"),
+        "query": query,
+        "tipo": tipo,
+        "today": today,
+        "bitacoras": bitacoras_page,
+        "inspecciones": inspecciones_rows,
+        "inspecciones_page": inspecciones_page,
+        "reportes": reportes_page,
+        "bitacoras_hoy": BitacoraSalidaLlegada.objects.filter(fecha=today).count(),
+        "turnos_abiertos": BitacoraSalidaLlegada.objects.filter(cerrada=False).count(),
+        "inspecciones_hoy": InspeccionVehiculo.objects.filter(fecha__date=today).count(),
+        "reportes_abiertos": ReporteUnidad.objects.exclude(estatus=ReporteUnidad.ESTATUS_CERRADO).count(),
+        "costo_combustible_total": BitacoraSalidaLlegada.objects.aggregate(total=Sum("costo_combustible")).get("total") or Decimal("0"),
+        "reportes_por_estatus": ReporteUnidad.objects.values("estatus").annotate(total=Count("id")).order_by("estatus"),
+    }
+    return render(request, "logistica/capturas_pwa.html", context)
 
 
 @login_required
