@@ -1,0 +1,11 @@
+{
+  "name": "Pollyana's Dolce - Fallas",
+  "short_name": "Fallas",
+  "description": "Reporta fallas en sucursal",
+  "start_url": "/fallas/reportar/",
+  "display": "standalone",
+  "background_color": "#8B2252",
+  "theme_color": "#8B2252",
+  "orientation": "portrait",
+  "icons": []
+}
