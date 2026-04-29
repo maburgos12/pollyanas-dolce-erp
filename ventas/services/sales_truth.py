@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 from functools import lru_cache
 import re
 from typing import Any
+import warnings
 
 import pandas as pd
 from django.db.models import Q, Sum
@@ -173,7 +175,140 @@ def _resolve_recipe_for_authoritative_row(product_code: str, point_name: str) ->
     return None
 
 
+def _period_bounds(periodo: str) -> tuple[date, date]:
+    try:
+        year_raw, month_raw = (periodo or "").split("-", 1)
+        year = int(year_raw)
+        month = int(month_raw)
+        start_date = date(year, month, 1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("periodo debe tener formato YYYY-MM") from exc
+    return start_date, date(year, month, monthrange(year, month)[1])
+
+
+def _authoritative_product_code(row: PointSalesDailyProductFact) -> str:
+    if row.point_product_id and row.point_product and (row.point_product.external_id or "").strip():
+        return (row.point_product.external_id or "").strip()
+    if row.receta_id and row.receta and (row.receta.codigo_point or "").strip():
+        return (row.receta.codigo_point or "").strip()
+    # Gap documentado: PointSalesDailyProductFact no tiene una columna
+    # `product_code` propia cuando no hay catálogo Point ligado. Se usa una
+    # clave estable por nombre/categoría solo para respetar la unicidad.
+    name_key = re.sub(r"[^A-Za-z0-9_-]+", "-", row.producto_nombre_historico or "").strip("-")
+    category_key = re.sub(r"[^A-Za-z0-9_-]+", "-", row.categoria or "").strip("-")
+    return f"FACT-{category_key[:24]}-{name_key[:40]}"[:80]
+
+
+def sync_authoritative_from_vps(periodo: str, sucursal_id: int | None = None, *, dry_run: bool = False) -> dict[str, Any]:
+    """
+    Puebla VentaAutoritativaPoint desde PointSalesDailyProductFact.
+
+    Gaps conocidos del mapeo:
+    - VentaAutoritativaPoint.gross_amount no tiene equivalente directo en
+      PointSalesDailyProductFact; queda en default 0.
+    - VentaAutoritativaPoint.source_sheet no aplica al sync VPS_DB; se marca
+      como `PointSalesDailyProductFact`.
+    """
+    start_date, end_date = _period_bounds(periodo)
+    rows = (
+        PointSalesDailyProductFact.objects.select_related("branch", "branch__erp_branch", "point_product", "receta")
+        .filter(sale_date__gte=start_date, sale_date__lte=end_date, branch__erp_branch_id__isnull=False)
+        .order_by("sale_date", "branch_id", "categoria", "producto_nombre_historico", "id")
+    )
+    if sucursal_id:
+        rows = rows.filter(branch__erp_branch_id=sucursal_id)
+
+    created = 0
+    updated = 0
+    errors: list[str] = []
+    examples: list[dict[str, Any]] = []
+
+    for row in rows:
+        branch = row.branch.erp_branch if row.branch_id and row.branch else None
+        if branch is None:
+            errors.append(f"{row.id}: sin sucursal ERP ligada")
+            continue
+        product_code = _authoritative_product_code(row)
+        defaults = {
+            "category": row.categoria or "",
+            "point_name": row.producto_nombre_historico or "",
+            "product_id": row.receta_id,
+            "quantity": _decimal(row.total_cantidad),
+            "gross_amount": ZERO,
+            "discount_amount": _decimal(row.total_descuento),
+            "total_amount": _decimal(row.total_venta),
+            "tax_amount": _decimal(row.total_impuestos),
+            "net_amount": _decimal(row.total_venta_neta),
+            "source_file": row.source_file or "VPS_DB:PointSalesDailyProductFact",
+            "source_sheet": "PointSalesDailyProductFact",
+            "raw_payload": {
+                "source_model": "pos_bridge.PointSalesDailyProductFact",
+                "source_id": row.id,
+                "source_hash": row.source_hash,
+                "categoria": row.categoria,
+                "producto_nombre_historico": row.producto_nombre_historico,
+                "point_product_id": row.point_product_id,
+                "receta_id": row.receta_id,
+                "source_granularity": row.source_granularity,
+            },
+        }
+        if len(examples) < 5:
+            examples.append(
+                {
+                    "branch": branch.codigo,
+                    "sale_date": row.sale_date.isoformat(),
+                    "product_code": product_code,
+                    "point_name": defaults["point_name"],
+                    "quantity": str(defaults["quantity"]),
+                    "total_amount": str(defaults["total_amount"]),
+                }
+            )
+        if dry_run:
+            exists = VentaAutoritativaPoint.objects.filter(
+                branch=branch,
+                sale_date=row.sale_date,
+                product_code=product_code,
+            ).exists()
+            updated += int(exists)
+            created += int(not exists)
+            continue
+        _obj, was_created = VentaAutoritativaPoint.objects.update_or_create(
+            branch=branch,
+            sale_date=row.sale_date,
+            product_code=product_code,
+            defaults=defaults,
+        )
+        created += int(was_created)
+        updated += int(not was_created)
+
+    if not dry_run:
+        authoritative_daily_total.cache_clear()
+        authoritative_day_loaded.cache_clear()
+        authoritative_sales_aggregate.cache_clear()
+    return {
+        "periodo": periodo,
+        "sucursal_id": sucursal_id,
+        "source_count": rows.count(),
+        "creados": created,
+        "actualizados": updated,
+        "errores": errors,
+        "examples": examples,
+        "dry_run": dry_run,
+    }
+
+
 def import_authoritative_point_category_report(path: str) -> dict[str, Any]:
+    """
+    DEPRECADO — usar sync_authoritative_from_vps() para flujo automático.
+    Esta función se mantiene como importador manual de respaldo para períodos
+    históricos o cuando el sync de Point no esté disponible.
+    """
+    warnings.warn(
+        "import_authoritative_point_category_report está deprecado. "
+        "Usar sync_ventas_autoritativas management command.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     raw = pd.read_excel(path, header=None, sheet_name=0)
     title = ""
     for row_idx in range(min(6, len(raw.index))):
