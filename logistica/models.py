@@ -300,6 +300,7 @@ class BitacoraSalidaLlegada(models.Model):
     foto_tablero_llegada = models.ImageField(upload_to="bitacora/", null=True, blank=True)
     litros_cargados = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     costo_combustible = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    foto_ticket_combustible = models.ImageField(upload_to="bitacora/combustible/", null=True, blank=True)
     cerrada = models.BooleanField(default=False)
     ip_registro = models.GenericIPAddressField(null=True)
     latitud_salida = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
