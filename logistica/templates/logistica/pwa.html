@@ -777,7 +777,13 @@
         if (!error) return fallback;
         if (error.mensaje) return error.mensaje;
         if (error.detail) return error.detail;
+        if (Array.isArray(error.non_field_errors) && error.non_field_errors.length) {
+          return error.non_field_errors[0];
+        }
         const detalles = error.detalles || error;
+        if (Array.isArray(detalles.non_field_errors) && detalles.non_field_errors.length) {
+          return detalles.non_field_errors[0];
+        }
         const firstKey = Object.keys(detalles || {})[0];
         if (!firstKey) return fallback;
         const value = detalles[firstKey];
@@ -1462,6 +1468,13 @@
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         const draft = ensureBitacoraSalidaDraft();
+        const kmLlegada = Number(form.get("km_llegada"));
+        const kmSalida = Number(state.bitacoraSalida?.km_salida || 0);
+        if (!draft.nivel_gas_llegada) return renderBitacoraSalida("Selecciona el nivel de gas de llegada.");
+        if (!kmLlegada) return renderBitacoraSalida("Captura el kilometraje de llegada.");
+        if (kmSalida && kmLlegada < kmSalida) {
+          return renderBitacoraSalida(`El KM de llegada no puede ser menor al KM de salida (${kmSalida}).`);
+        }
         if (!draft.foto_tablero_llegada) return renderBitacoraSalida("La foto del tablero de llegada es obligatoria.");
         if (draft.combustible_cargado && (!draft.litros_cargados || !draft.costo_combustible || !draft.foto_ticket_combustible)) {
           return renderBitacoraSalida("Captura litros, costo y foto del ticket de combustible.");
@@ -1479,7 +1492,10 @@
           method: "PATCH",
           body: payload
         });
-        if (!response.ok) return renderBitacoraSalida("No se pudo registrar la llegada.");
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          return renderBitacoraSalida(apiErrorMessage(error, "No se pudo registrar la llegada."));
+        }
         const cerrada = await response.json();
         state.bitacoraSalidaDraft = null;
         state.bitacoraSalida = null;
