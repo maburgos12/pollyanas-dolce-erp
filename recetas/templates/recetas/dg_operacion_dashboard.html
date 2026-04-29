@@ -611,6 +611,7 @@
     <div class="dg-topbar-meta">
       <div class="dg-action-row">
         <a class="btn btn-secondary" href="{% url 'recetas:produccion_cedis_weekly_dashboard' %}">Producción CEDIS semanal</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:consolidado_cedis_revision' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Consolidado CEDIS</a>
         <a class="btn btn-secondary" href="{% url 'recetas:dg_operacion_dashboard_export' %}?format=xlsx&dg_start_date={{ dg_start_date }}&dg_end_date={{ dg_end_date }}&dg_group_by={{ dg_group_by }}&fecha_operacion={{ fecha_operacion|date:'Y-m-d' }}">Exportar XLSX</a>
       </div>
       <form method="get" class="dg-filters dg-filters-compact">
@@ -810,6 +811,7 @@
         <div class="dg-panel-actions">
           <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}">Abrir control</a>
           <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Abrir reabasto</a>
+          <a class="btn btn-secondary" href="{% url 'recetas:consolidado_cedis_revision' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Abrir consolidado</a>
         </div>
       </div>
       <div class="dg-list is-scroll">

@@ -33,6 +33,9 @@
       <div class="form-group" style="align-self:end;">
         <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis_consolidado_export' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}&format=xlsx">Exportar consolidado XLSX</a>
       </div>
+      <div class="form-group" style="align-self:end;">
+        <a class="btn btn-primary" href="{% url 'recetas:consolidado_cedis_revision' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Abrir consolidado nocturno</a>
+      </div>
     </form>
     {% if can_manage_reabasto %}
     <div class="alert {% if reabasto_daily_control.generation_gate.overall_tone == 'success' %}alert-success{% elif reabasto_daily_control.generation_gate.overall_tone == 'primary' %}alert-soft{% else %}alert-danger{% endif %}" style="margin-top: 12px;">
