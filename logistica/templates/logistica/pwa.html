@@ -521,6 +521,7 @@
     <script>
       const API = "/api/logistica";
       const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
+      const PHOTO_CAPTURE_SESSION_MS = 10 * 60 * 1000;
       const app = document.getElementById("app");
       const state = {
         token: localStorage.getItem("pd_logistica_access") || "",
@@ -703,6 +704,20 @@
         }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
       }
 
+      function marcarInicioCapturaFoto(input) {
+        input.dataset.captureStartedAt = String(Date.now());
+      }
+
+      function isRecentCameraPhoto(input, file) {
+        const now = Date.now();
+        const modified = Number(file.lastModified || 0);
+        const captureStartedAt = Number(input.dataset.captureStartedAt || 0);
+        const modifiedLooksValid = modified > 0 && modified <= now + 60000;
+        const modifiedIsFresh = modifiedLooksValid && now - modified <= PHOTO_MAX_AGE_MS;
+        const selectedDuringCameraSession = captureStartedAt > 0 && now - captureStartedAt <= PHOTO_CAPTURE_SESSION_MS;
+        return modifiedIsFresh || selectedDuringCameraSession;
+      }
+
       function setLivePhoto(input, draft, fileField, previewField, renderFn, errorField = "fotoError") {
         const file = input.files[0] || null;
         if (!file) {
@@ -712,8 +727,7 @@
           renderFn();
           return;
         }
-        const difference = Date.now() - file.lastModified;
-        if (difference > PHOTO_MAX_AGE_MS) {
+        if (!isRecentCameraPhoto(input, file)) {
           draft[fileField] = null;
           if (previewField) draft[previewField] = "";
           draft[errorField] = "La foto debe tomarse en este momento. No se permiten imágenes de la galería.";
@@ -868,12 +882,11 @@
           turnoActivo = null;
         }
         const abiertos = state.reportes.filter((r) => r.estatus !== "cerrado").length;
-        const unidad = state.perfil?.unidad || {};
         const turnoBadge = turnoActivo?.id
           ? `<span class="badge turno abierto">ABIERTO</span>`
           : `<span class="badge turno">Sin turno</span>`;
         render(shell(`
-          <p class="unit-line">Unidad: ${escapeHtml(unidad.codigo || "Sin unidad asignada")}</p>
+          <p class="unit-line">Selecciona la unidad al iniciar cada captura.</p>
           <div class="dash-grid">
             <button class="dash-btn" onclick="startNuevoReporte()">🚨<br>Nuevo Reporte</button>
             <button class="dash-btn" onclick="showScreen('mis_reportes')">📂<br>Mis Reportes ${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
@@ -888,6 +901,7 @@
       function startNuevoReporte() {
         state.reporteDraft = {
           step: 1,
+          unidad: "",
           tipo: "",
           tipoLabel: "",
           severidad: "",
@@ -907,13 +921,26 @@
         return `<div class="progress">${[1, 2, 3].map((n) => `<span class="dot ${step === n ? "active" : ""}"></span>`).join("")}</div>`;
       }
 
-      function renderNuevoReporte(error = "") {
+      function getUnidadLabel(unidadId) {
+        const unidad = state.unidades.find((item) => String(item.id) === String(unidadId));
+        return unidad ? `${unidad.codigo} · ${unidad.descripcion || ""}` : "-";
+      }
+
+      async function renderNuevoReporte(error = "") {
         const draft = state.reporteDraft;
         let body = "";
         if (draft.step === 1) {
+          if (!state.unidades.length) await loadUnidades();
           body = `
             <h1 class="screen-title">Nuevo reporte</h1>
             ${progressDots(1)}
+            <div class="field">
+              <label for="unidad_reporte">Unidad que vas a usar</label>
+              <select id="unidad_reporte" required onchange="state.reporteDraft.unidad = this.value; renderNuevoReporte()">
+                <option value="">Selecciona unidad</option>
+                ${state.unidades.map((unidad) => `<option value="${unidad.id}" ${String(draft.unidad) === String(unidad.id) ? "selected" : ""}>${escapeHtml(unidad.codigo)} · ${escapeHtml(unidad.descripcion || "")}</option>`).join("")}
+              </select>
+            </div>
             <div class="card-grid">
               ${tipos.map((tipo) => `
                 <button class="option-card ${draft.tipoLabel === tipo.label ? "selected" : ""}" onclick="selectTipo('${tipo.value}', '${tipo.label}')">
@@ -923,7 +950,7 @@
             </div>
             <div class="actions">
               <button class="secondary-btn" onclick="showScreen('dashboard')">Cancelar</button>
-              <button class="primary-btn" onclick="nextReporteStep()" ${draft.tipo ? "" : "disabled"}>Siguiente</button>
+              <button class="primary-btn" onclick="nextReporteStep()" ${draft.unidad && draft.tipo ? "" : "disabled"}>Siguiente</button>
             </div>
           `;
         } else if (draft.step === 2) {
@@ -945,7 +972,7 @@
               </div>
               <div class="field">
                 <label for="foto">Foto</label>
-                <input id="foto" type="file" accept="image/*" capture="environment" required onchange="setFotoReporte(this)">
+                <input id="foto" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="setFotoReporte(this)">
                 ${draft.fotoError ? `<p class="error">${escapeHtml(draft.fotoError)}</p>` : ""}
               </div>
               <div class="field">
@@ -967,6 +994,7 @@
             ${progressDots(3)}
             <section class="card report-card">
               <div class="kv"><b>Tipo</b><span>${escapeHtml(draft.tipoLabel)}</span></div>
+              <div class="kv"><b>Unidad</b><span>${escapeHtml(getUnidadLabel(draft.unidad))}</span></div>
               <div class="kv"><b>Severidad</b><span>${escapeHtml(draft.severidad)}</span></div>
               <div class="kv"><b>Kilometraje</b><span>${escapeHtml(draft.kilometraje || "-")}</span></div>
               <div class="kv"><b>Ubicación</b><span>${draft.latitud ? "📍 Ubicación registrada" : "-"}</span></div>
@@ -996,6 +1024,7 @@
       function nextReporteStep() {
         const draft = state.reporteDraft;
         if (draft.step === 1 && !draft.tipo) return;
+        if (draft.step === 1 && !draft.unidad) return;
         if (draft.step === 2 && (!draft.severidad || !draft.descripcion.trim())) {
           return renderNuevoReporte("Selecciona severidad y escribe una descripción.");
         }
@@ -1024,6 +1053,7 @@
         const draft = state.reporteDraft;
         if (!isGeoReady(draft) || !draft.foto) return renderNuevoReporte("Se requiere ubicación y foto tomada en este momento.");
         const form = new FormData();
+        form.append("unidad", draft.unidad);
         form.append("tipo", draft.tipo);
         form.append("severidad", draft.severidad);
         form.append("descripcion", draft.descripcion);
@@ -1218,7 +1248,7 @@
           const ubicacionLista = isGeoReady(draft);
           body = `
             <div class="${ubicacionLista ? "" : "gps-locked"}">
-              <form onsubmit="guardarSalida(event)">
+              <form onsubmit="guardarSalida(event)" novalidate>
                 <div class="field">
                   <label for="unidad_salida">Unidad</label>
                   <select id="unidad_salida" name="unidad" required onchange="state.bitacoraSalidaDraft.unidad = this.value">
@@ -1236,7 +1266,7 @@
                 </div>
                 <div class="field">
                   <label for="foto_salida">Foto tablero</label>
-                  <input id="foto_salida" type="file" accept="image/*" capture="environment" required onchange="setFotoBitacora(this, 'foto_tablero_salida', 'fotoSalidaPreview')">
+                  <input id="foto_salida" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="setFotoBitacora(this, 'foto_tablero_salida', 'fotoSalidaPreview')">
                   ${draft.fotoSalidaPreview ? `<img class="thumb" src="${draft.fotoSalidaPreview}" alt="Vista previa tablero salida">` : ""}
                   ${draft.fotoSalidaError ? `<p class="error">${escapeHtml(draft.fotoSalidaError)}</p>` : ""}
                 </div>
@@ -1255,7 +1285,7 @@
               <div class="kv"><b>Gas salida</b><span>${escapeHtml(actual.nivel_gas_salida)}</span></div>
               ${actual.foto_tablero_salida ? `<img class="thumb" src="${escapeHtml(actual.foto_tablero_salida)}" alt="Tablero salida">` : ""}
             </section>
-            <form onsubmit="guardarLlegada(event)">
+            <form onsubmit="guardarLlegada(event)" novalidate>
               <div class="field">
                 <label for="km_llegada">KM llegada</label>
                 <input id="km_llegada" name="km_llegada" type="number" min="${escapeHtml(actual.km_salida)}" required value="${escapeHtml(draft.km_llegada)}" oninput="state.bitacoraSalidaDraft.km_llegada = this.value">
@@ -1274,7 +1304,7 @@
               </div>
               <div class="field">
                 <label for="foto_llegada">Foto tablero llegada</label>
-                <input id="foto_llegada" type="file" accept="image/*" capture="environment" required onchange="setFotoBitacora(this, 'foto_tablero_llegada', 'fotoLlegadaPreview')">
+                <input id="foto_llegada" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="setFotoBitacora(this, 'foto_tablero_llegada', 'fotoLlegadaPreview')">
                 ${draft.fotoLlegadaPreview ? `<img class="thumb" src="${draft.fotoLlegadaPreview}" alt="Vista previa tablero llegada">` : ""}
                 ${draft.fotoLlegadaError ? `<p class="error">${escapeHtml(draft.fotoLlegadaError)}</p>` : ""}
               </div>
@@ -1357,6 +1387,7 @@
           const checks = {};
           inspeccionSecciones.forEach((section) => section.items.forEach(([field]) => { checks[field] = false; }));
           state.inspeccionDraft = {
+            unidad: "",
             km_entrada: "",
             nivel_gas_entrada: "",
             tiene_golpes: false,
@@ -1405,17 +1436,24 @@
 
       async function renderInspeccionVehiculo(message = "") {
         const draft = ensureInspeccionDraft();
-        const unidad = state.perfil?.unidad || {};
+        if (!state.unidades.length) await loadUnidades();
         const ubicacionLista = isGeoReady(draft);
         const fotoGolpesLista = !draft.tiene_golpes || Boolean(draft.foto_golpes);
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Inspección de unidad</h1>
-          <p class="unit-line">${escapeHtml(unidad.codigo || "-")} · ${escapeHtml(unidad.descripcion || "")}</p>
+          <p class="unit-line">Selecciona la unidad que vas a inspeccionar.</p>
           ${message ? `<p class="success">${escapeHtml(message)}</p>` : ""}
           <div class="${ubicacionLista ? "" : "gps-locked"}">
-            <form onsubmit="enviarInspeccion(event)">
+            <form onsubmit="enviarInspeccion(event)" novalidate>
               <section class="card report-card">
+                <div class="field">
+                  <label for="unidad_inspeccion">Unidad que vas a usar</label>
+                  <select id="unidad_inspeccion" required onchange="state.inspeccionDraft.unidad = this.value; renderInspeccionVehiculo()">
+                    <option value="">Selecciona unidad</option>
+                    ${state.unidades.map((unidad) => `<option value="${unidad.id}" ${String(draft.unidad) === String(unidad.id) ? "selected" : ""}>${escapeHtml(unidad.codigo)} · ${escapeHtml(unidad.descripcion || "")}</option>`).join("")}
+                  </select>
+                </div>
                 <div class="field">
                   <label for="km_entrada">KM entrada</label>
                   <input id="km_entrada" type="number" min="0" required value="${escapeHtml(draft.km_entrada)}" oninput="state.inspeccionDraft.km_entrada = this.value">
@@ -1440,7 +1478,7 @@
                   </div>
                   <div class="field">
                     <label for="foto_golpes">Foto</label>
-                    <input id="foto_golpes" type="file" accept="image/*" capture="environment" required onchange="setFotoGolpes(this)">
+                    <input id="foto_golpes" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="setFotoGolpes(this)">
                     ${draft.fotoGolpesPreview ? `<img class="thumb" src="${draft.fotoGolpesPreview}" alt="Vista previa golpes">` : ""}
                     ${draft.fotoGolpesError ? `<p class="error">${escapeHtml(draft.fotoGolpesError)}</p>` : ""}
                   </div>
@@ -1501,11 +1539,12 @@
       async function enviarInspeccion(event) {
         event.preventDefault();
         const draft = ensureInspeccionDraft();
-        if (!draft.km_entrada || !draft.nivel_gas_entrada || !isGeoReady(draft)) {
-          return renderInspeccionVehiculo("Completa KM, gas y ubicación.");
+        if (!draft.unidad || !draft.km_entrada || !draft.nivel_gas_entrada || !isGeoReady(draft)) {
+          return renderInspeccionVehiculo("Completa unidad, KM, gas y ubicación.");
         }
         if (draft.tiene_golpes && !draft.foto_golpes) return renderInspeccionVehiculo("La foto de golpes debe tomarse en este momento.");
         const form = new FormData();
+        form.append("unidad", draft.unidad);
         form.append("km_entrada", draft.km_entrada);
         form.append("nivel_gas_entrada", draft.nivel_gas_entrada);
         form.append("tiene_golpes", draft.tiene_golpes ? "true" : "false");

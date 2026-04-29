@@ -191,13 +191,13 @@ class LogisticaReporteSerializer(serializers.ModelSerializer):
 class LogisticaReporteCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReporteUnidad
-        fields = ["tipo", "severidad", "descripcion", "foto", "kilometraje", "latitud", "longitud"]
+        fields = ["unidad", "tipo", "severidad", "descripcion", "foto", "kilometraje", "latitud", "longitud"]
 
     def create(self, validated_data):
         repartidor = self.context["repartidor"]
-        unidad = repartidor.unidad_asignada
-        if unidad is None:
-            raise serializers.ValidationError("No tienes una unidad asignada para levantar reportes.")
+        unidad = validated_data.pop("unidad", None)
+        if not unidad or not unidad.activa:
+            raise serializers.ValidationError("Selecciona una unidad activa para levantar reportes.")
         return ReporteUnidad.objects.create(repartidor=repartidor, unidad=unidad, **validated_data)
 
 
@@ -355,14 +355,15 @@ class LogisticaInspeccionVehiculoSerializer(serializers.ModelSerializer):
 class LogisticaInspeccionVehiculoCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = InspeccionVehiculo
-        exclude = ["repartidor", "unidad", "fecha", "ip_registro"]
+        exclude = ["repartidor", "fecha", "ip_registro"]
 
     def create(self, validated_data):
         repartidor = self.context["repartidor"]
-        if repartidor.unidad_asignada is None:
-            raise serializers.ValidationError("No tienes una unidad asignada para inspeccionar.")
+        unidad = validated_data.pop("unidad", None)
+        if not unidad or not unidad.activa:
+            raise serializers.ValidationError("Selecciona una unidad activa para inspeccionar.")
         return InspeccionVehiculo.objects.create(
             repartidor=repartidor,
-            unidad=repartidor.unidad_asignada,
+            unidad=unidad,
             **validated_data,
         )
