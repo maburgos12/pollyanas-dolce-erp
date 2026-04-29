@@ -31,7 +31,9 @@ from recetas.models import (
     PronosticoVenta,
     Receta,
     RecetaCostoVersion,
+    RecetaEquivalencia,
     RecetaPresentacion,
+    RecetaPresentacionDerivada,
     PoliticaStockSucursalProducto,
     SolicitudReabastoCedis,
     SolicitudReabastoCedisLinea,
@@ -703,6 +705,91 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertContains(response, "Listas para operar")
         self.assertContains(response, "Pendientes operativos")
         self.assertContains(response, "Incompletas")
+
+    def test_recetas_list_treats_equivalence_as_effective_bom(self):
+        parent = Receta.objects.create(
+            nombre="Pay Padre QA",
+            hash_contenido="hash-catalogo-equivalence-parent",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pay",
+            categoria="Pay",
+        )
+        child = Receta.objects.create(
+            nombre="Pay Rebanada QA",
+            hash_contenido="hash-catalogo-equivalence-child",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pay",
+            categoria="Pay",
+        )
+        insumo = Insumo.objects.create(
+            nombre="Base Pay QA",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad_kg,
+            activo=True,
+        )
+        LineaReceta.objects.create(
+            receta=parent,
+            posicion=1,
+            insumo=insumo,
+            insumo_texto=insumo.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=self.unidad_kg,
+            unidad_texto="kg",
+            costo_unitario_snapshot=Decimal("10.000000"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_score=100,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        RecetaEquivalencia.objects.create(
+            receta_porcion=child,
+            receta_padre=parent,
+            factor_conversion=Decimal("8.000000"),
+            activo=True,
+            fuente="TEST",
+        )
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": child.nombre})
+
+        self.assertEqual(response.status_code, 200)
+        result = next(r for r in response.context["page"].object_list if r.nombre == child.nombre)
+        self.assertTrue(result.has_equivalence_bom)
+        self.assertEqual(result.lineas_count, 0)
+        self.assertNotIn("componentes", result.governance_issues)
+        self.assertNotEqual(result.operational_health["code"], "danger")
+
+    def test_recetas_list_treats_derived_presentation_as_effective_bom(self):
+        parent = Receta.objects.create(
+            nombre="Pastel Padre QA",
+            hash_contenido="hash-catalogo-derived-parent",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Pastel",
+        )
+        child = Receta.objects.create(
+            nombre="Pastel Rebanada QA",
+            hash_contenido="hash-catalogo-derived-child",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Pastel",
+            codigo_point="DER-QA-1",
+        )
+        RecetaPresentacionDerivada.objects.create(
+            receta_padre=parent,
+            receta_derivada=child,
+            codigo_point_derivado="DER-QA-1",
+            nombre_derivado=child.nombre,
+            unidades_por_padre=Decimal("10.000000"),
+            activo=True,
+        )
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": child.nombre})
+
+        self.assertEqual(response.status_code, 200)
+        result = next(r for r in response.context["page"].object_list if r.nombre == child.nombre)
+        self.assertTrue(result.has_derived_bom)
+        self.assertEqual(result.lineas_count, 0)
+        self.assertNotIn("componentes", result.governance_issues)
+        self.assertNotEqual(result.operational_health["code"], "danger")
 
     def test_recetas_list_ignores_products_without_point_signal_in_pending_summary(self):
         interno = Insumo.objects.create(
