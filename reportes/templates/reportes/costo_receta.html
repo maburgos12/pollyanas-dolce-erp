@@ -102,7 +102,7 @@
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Costo semanal visible</div>
           <div class="bi-hero-highlight-value">${{ total_weekly_cost|floatformat:2|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">{{ costed_scope_count|intcomma }} productos finales con costo semanal</div>
+          <div class="bi-hero-highlight-meta">{{ costed_scope_count|intcomma }} productos vendidos con costo MP visible</div>
         </article>
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Costo MP / venta</div>
@@ -221,7 +221,7 @@
     <article class="bi-kpi-card">
       <div class="bi-kpi-value">${{ total_weekly_mp|floatformat:2|intcomma }}</div>
       <div class="bi-kpi-label">Materia prima visible</div>
-      <div class="bi-kpi-note">Costo MP agregado del corte semanal actual.</div>
+      <div class="bi-kpi-note">Costo MP de productos vendidos en los últimos 7 días visibles.</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if total_delta > 0 %}danger{% elif total_delta < 0 %}success{% else %}warning{% endif %}">
@@ -559,12 +559,12 @@
         <div class="bi-metric">
           <div class="bi-metric-label">Actual</div>
           <div class="bi-metric-value">${{ total_weekly_cost|floatformat:2|intcomma }}</div>
-          <div class="bi-subtle">Costo total visible</div>
+          <div class="bi-subtle">Últimos 7 días con venta visible</div>
         </div>
         <div class="bi-metric">
           <div class="bi-metric-label">Previo</div>
           <div class="bi-metric-value">${{ previous_total|floatformat:2|intcomma }}</div>
-          <div class="bi-subtle">Corte comparable</div>
+          <div class="bi-subtle">7 días previos comparables</div>
         </div>
         <div class="bi-metric">
           <div class="bi-metric-label">Cambio</div>

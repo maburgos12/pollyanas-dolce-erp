@@ -3350,6 +3350,94 @@ def _financial_week_values(limit: int = 8) -> list[date]:
     )
 
 
+def _weekly_visible_sales_cost(
+    *,
+    latest_week: date | None,
+    latest_sales_date: date | None,
+    familia: str | None = None,
+    categoria: str | None = None,
+    q: str = "",
+    allowed_recipe_ids: set[int] | None = None,
+) -> dict[str, object]:
+    if not latest_week or not latest_sales_date:
+        return {
+            "current_total": Decimal("0.00"),
+            "previous_total": Decimal("0.00"),
+            "delta_total": Decimal("0.00"),
+            "delta_pct": None,
+            "current_start": None,
+            "current_end": latest_sales_date,
+            "previous_start": None,
+            "previous_end": None,
+            "count": 0,
+        }
+
+    cost_map = _recipe_cost_map_for_sales_lens(
+        latest_week=latest_week,
+        familia=familia,
+        categoria=categoria,
+        q=q,
+    )
+    if allowed_recipe_ids is not None:
+        cost_map = {
+            receta_id: cost
+            for receta_id, cost in cost_map.items()
+            if receta_id in allowed_recipe_ids
+        }
+    if not cost_map:
+        return {
+            "current_total": Decimal("0.00"),
+            "previous_total": Decimal("0.00"),
+            "delta_total": Decimal("0.00"),
+            "delta_pct": None,
+            "current_start": latest_sales_date - timedelta(days=6),
+            "current_end": latest_sales_date,
+            "previous_start": latest_sales_date - timedelta(days=13),
+            "previous_end": latest_sales_date - timedelta(days=7),
+            "count": 0,
+        }
+
+    current_start = latest_sales_date - timedelta(days=6)
+    previous_start = latest_sales_date - timedelta(days=13)
+    previous_end = latest_sales_date - timedelta(days=7)
+
+    def aggregate_period(start_date: date, end_date: date) -> tuple[Decimal, int]:
+        rows = (
+            _active_sales_queryset(start_date=start_date, end_date=end_date)
+            .filter(total_amount__gt=0, receta_id__in=list(cost_map.keys()))
+            .values("receta_id")
+            .annotate(quantity=Sum("quantity"))
+        )
+        total = Decimal("0")
+        count = 0
+        for row in rows:
+            receta_id = int(row["receta_id"])
+            qty = _to_decimal(row["quantity"], "0")
+            unit_cost = cost_map.get(receta_id, Decimal("0"))
+            if qty <= 0 or unit_cost <= 0:
+                continue
+            total += qty * unit_cost
+            count += 1
+        return total.quantize(Decimal("0.01")), count
+
+    current_total, current_count = aggregate_period(current_start, latest_sales_date)
+    previous_total, _previous_count = aggregate_period(previous_start, previous_end)
+    delta_total = (current_total - previous_total).quantize(Decimal("0.01"))
+    delta_pct = _safe_pct_local(delta_total, previous_total)
+
+    return {
+        "current_total": current_total,
+        "previous_total": previous_total,
+        "delta_total": delta_total,
+        "delta_pct": delta_pct.quantize(Decimal("0.01")) if delta_pct is not None else None,
+        "current_start": current_start,
+        "current_end": latest_sales_date,
+        "previous_start": previous_start,
+        "previous_end": previous_end,
+        "count": current_count,
+    }
+
+
 def _build_financial_cost_context(
     *,
     margen_pct: Decimal,
@@ -3394,6 +3482,7 @@ def _build_financial_cost_context(
     family_options: list[str] = []
     category_options: list[str] = []
     bucket_options: list[str] = ["Defender", "Promocionar", "Ajustar margen", "Revisar portafolio"]
+    weekly_visible_cost: dict[str, object] = {}
     scope_options = [
         {"value": "final", "label": "Producto final"},
         {"value": "base", "label": "Base interna"},
@@ -3622,6 +3711,20 @@ def _build_financial_cost_context(
         )
         previous_total = total_weekly_cost - total_delta
         costed_scope_count = sum(1 for item in current_week_rows if _to_decimal(item.costo_total, "0") > 0)
+        weekly_visible_cost = _weekly_visible_sales_cost(
+            latest_week=latest_week,
+            latest_sales_date=latest_sales_date,
+            familia=familia,
+            categoria=categoria,
+            q=q,
+            allowed_recipe_ids=allowed_recipe_ids,
+        )
+        if supports_sales_lens:
+            total_weekly_cost = _to_decimal(weekly_visible_cost["current_total"], "0")
+            total_weekly_mp = total_weekly_cost
+            previous_total = _to_decimal(weekly_visible_cost["previous_total"], "0")
+            total_delta = _to_decimal(weekly_visible_cost["delta_total"], "0")
+            costed_scope_count = int(weekly_visible_cost["count"] or 0)
 
         family_map: dict[str, dict[str, Decimal | str | int]] = defaultdict(
             lambda: {"label": "Sin familia", "costo_total": Decimal("0"), "delta_total": Decimal("0"), "count": 0}
@@ -3857,6 +3960,7 @@ def _build_financial_cost_context(
         "total_delta": total_delta.quantize(Decimal("0.01")),
         "previous_total": previous_total.quantize(Decimal("0.01")) if previous_total else Decimal("0.00"),
         "costed_scope_count": costed_scope_count,
+        "weekly_cost_window": weekly_visible_cost,
         "avg_margin_pct": avg_margin_pct,
         "avg_cost_pct": avg_cost_pct.quantize(Decimal("0.01")) if isinstance(avg_cost_pct, Decimal) else avg_cost_pct,
         "avg_cost_signal": avg_cost_signal,
