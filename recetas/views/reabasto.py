@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, connection, transaction
 from django.db.models.deletion import ProtectedError
@@ -2933,11 +2934,18 @@ def _reabasto_enterprise_context(fecha_operacion: date) -> dict[str, Any]:
     )
     inventario_map = {inv.receta_id: inv for inv in inventario_cedis}
     productos_sin_inventario = [r for r in recetas_producto if r.id not in inventario_map]
-    reabasto_enterprise_board = _reabasto_enterprise_board(
-        recetas_producto=recetas_producto,
-        inventario_map=inventario_map,
-        fecha_operacion=fecha_operacion,
+    board_cache_key = (
+        f"reabasto:enterprise-board:{fecha_operacion.isoformat()}:"
+        f"{len(recetas_producto)}:{len(inventario_map)}"
     )
+    reabasto_enterprise_board = cache.get(board_cache_key)
+    if reabasto_enterprise_board is None:
+        reabasto_enterprise_board = _reabasto_enterprise_board(
+            recetas_producto=recetas_producto,
+            inventario_map=inventario_map,
+            fecha_operacion=fecha_operacion,
+        )
+        cache.set(board_cache_key, reabasto_enterprise_board, 300)
     return {
         "recetas_producto": recetas_producto,
         "inventario_cedis": inventario_cedis,
@@ -16641,6 +16649,15 @@ def _ventas_historicas_plan_summary() -> dict[str, Any]:
 
 
 def _reabasto_demand_history_summary(fecha_operacion: date) -> dict[str, Any]:
+    cache_key = f"reabasto:demand-history:{fecha_operacion.isoformat()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def store(summary: dict[str, Any]) -> dict[str, Any]:
+        cache.set(cache_key, summary, 300)
+        return summary
+
     weekday = fecha_operacion.weekday()
     base_qs = VentaHistorica.objects.select_related("sucursal", "receta").filter(
         fecha__lt=fecha_operacion,
@@ -16650,7 +16667,7 @@ def _reabasto_demand_history_summary(fecha_operacion: date) -> dict[str, Any]:
     if not rows_qs:
         rows_qs = VentaHistorica.objects.select_related("sucursal", "receta").filter(fecha__lt=fecha_operacion).order_by("-fecha")[:4000]
     if not rows_qs:
-        return {
+        return store({
             "available": False,
             "status": "Sin base comparable",
             "tone": "warning",
@@ -16664,7 +16681,7 @@ def _reabasto_demand_history_summary(fecha_operacion: date) -> dict[str, Any]:
             "top_recipes": [],
             "years_observed": 0,
             "comparable_years": 0,
-        }
+        })
 
     row_ids = [row.id for row in rows_qs]
     rows_agg = VentaHistorica.objects.filter(id__in=row_ids)
@@ -16691,7 +16708,7 @@ def _reabasto_demand_history_summary(fecha_operacion: date) -> dict[str, Any]:
         .annotate(total=Sum("cantidad"))
         .order_by("-total", "receta__nombre")[:5]
     )
-    return {
+    return store({
         "available": True,
         "status": "Base comparable multianual" if int(history_meta.get("comparable_years") or 0) >= 3 else "Base comparable lista",
         "tone": "success",
@@ -16713,7 +16730,7 @@ def _reabasto_demand_history_summary(fecha_operacion: date) -> dict[str, Any]:
         "top_recipes": top_recipes,
         "years_observed": int(history_meta.get("years_observed") or 0),
         "comparable_years": int(history_meta.get("comparable_years") or 0),
-    }
+    })
 
 
 @login_required
@@ -19989,11 +20006,18 @@ def reabasto_cedis(request: HttpRequest) -> HttpResponse:
     )
     inventario_map = {inv.receta_id: inv for inv in inventario_cedis}
     productos_sin_inventario = [r for r in recetas_producto if r.id not in inventario_map]
-    reabasto_enterprise_board = _reabasto_enterprise_board(
-        recetas_producto=recetas_producto,
-        inventario_map=inventario_map,
-        fecha_operacion=fecha_operacion,
+    board_cache_key = (
+        f"reabasto:enterprise-board:{fecha_operacion.isoformat()}:"
+        f"{len(recetas_producto)}:{len(inventario_map)}"
     )
+    reabasto_enterprise_board = cache.get(board_cache_key)
+    if reabasto_enterprise_board is None:
+        reabasto_enterprise_board = _reabasto_enterprise_board(
+            recetas_producto=recetas_producto,
+            inventario_map=inventario_map,
+            fecha_operacion=fecha_operacion,
+        )
+        cache.set(board_cache_key, reabasto_enterprise_board, 300)
 
     consolidado_rows = _consolidado_reabasto_por_fecha(fecha_operacion)
     total_solicitado = sum((row["total_solicitado"] for row in consolidado_rows), Decimal("0"))
