@@ -22,89 +22,153 @@
                 <div class="sidebar-tagline">Operación y control</div>
             </div>
 
-            <nav>
+            <nav id="sidebar-nav">
+
+                {# ── MODO CAPTURA DE SUCURSAL ──────────────────────── #}
                 {% if ui_access.branch_capture_only %}
                 <div class="sidebar-section-label">Sucursal</div>
                 <ul class="sidebar-nav sidebar-nav-group">
                     <li>
-                        <a href="{% url 'recetas:reabasto_cedis_captura' %}" class="{% if '/recetas/reabasto-cedis/' in request.path %}active{% endif %}">
+                        <a href="{% url 'recetas:reabasto_cedis_captura' %}"
+                           class="{% if '/recetas/reabasto-cedis/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/><path d="M7 12h6"/><path d="m10 9 3 3-3 3"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/>
+                                    <path d="M7 12h6"/><path d="m10 9 3 3-3 3"/>
+                                </svg>
                             </span>
                             <span>Cierre sucursal</span>
                         </a>
                     </li>
                 </ul>
+
                 {% else %}
-                <div class="sidebar-section-label">Dirección</div>
-                <ul class="sidebar-nav sidebar-nav-group">
+
+                {# ── GRUPO 1: DIRECCIÓN ────────────────────────────── #}
+                {% if ui_access.can_view_reportes %}
+                <button class="sidebar-group-toggle" data-group="direccion" aria-expanded="true">
+                    <span class="sidebar-section-label">Dirección</span>
+                    <span class="toggle-chevron" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                    </span>
+                </button>
+                <ul class="sidebar-nav sidebar-nav-group sidebar-collapsible" id="group-direccion">
                     <li>
-                        <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+                        <a href="{% url 'dashboard' %}"
+                           class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="3" width="8" height="8" rx="1.5"/>
+                                    <rect x="13" y="3" width="8" height="5" rx="1.5"/>
+                                    <rect x="13" y="10" width="8" height="11" rx="1.5"/>
+                                    <rect x="3" y="13" width="8" height="8" rx="1.5"/>
+                                </svg>
                             </span>
                             <span>Dashboard</span>
                         </a>
                     </li>
                     {% if ui_access.can_view_recetas %}
                     <li>
-                        <a href="{% url 'recetas:dg_operacion_dashboard' %}" class="{% if '/recetas/dg-operacion/' in request.path %}active{% endif %}">
+                        <a href="{% url 'recetas:dg_operacion_dashboard' %}"
+                           class="{% if '/recetas/dg-operacion/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="7" width="3" height="10" rx="1"/><rect x="16" y="4" width="3" height="13" rx="1"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 19h16"/><rect x="5" y="11" width="3" height="6" rx="1"/>
+                                    <rect x="10.5" y="7" width="3" height="10" rx="1"/>
+                                    <rect x="16" y="4" width="3" height="13" rx="1"/>
+                                </svg>
                             </span>
                             <span>Operación DG</span>
                         </a>
                     </li>
                     {% endif %}
-                    {% if ui_access.can_view_reportes %}
                     <li>
-                        <a href="{% url 'reportes:bi' %}" class="{% if request.path == '/reportes/bi/' %}active{% endif %}">
+                        <a href="{% url 'reportes:bi' %}"
+                           class="{% if request.path == '/reportes/bi/' %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 19h16"/>
+                                    <rect x="6" y="11" width="3" height="6" rx="1"/>
+                                    <rect x="11" y="8" width="3" height="9" rx="1"/>
+                                    <rect x="16" y="5" width="3" height="12" rx="1"/>
+                                </svg>
                             </span>
                             <span>BI ejecutivo</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{% url 'reportes:cierre_operativo' %}" class="{% if request.path == '/reportes/cierre-operativo/' %}active{% endif %}">
+                        <a href="{% url 'reportes:cierre_operativo' %}"
+                           class="{% if request.path == '/reportes/cierre-operativo/' %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><path d="m17 16 2 2 4-4"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>
+                                    <path d="m17 16 2 2 4-4"/>
+                                </svg>
                             </span>
                             <span>Cierre diario</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{% url 'reportes:producido_vs_vendido' %}" class="{% if request.path == '/reportes/produccion/' %}active{% endif %}">
+                        <a href="{% url 'reportes:producido_vs_vendido' %}"
+                           class="{% if request.path == '/reportes/produccion/' %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-4"/><path d="M5 5h4"/><path d="M15 7h4"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 19h16"/><path d="M7 16V9"/><path d="M12 16V5"/>
+                                    <path d="M17 16v-4"/><path d="M5 5h4"/><path d="M15 7h4"/>
+                                </svg>
                             </span>
                             <span>Producido vs Vendido</span>
                         </a>
                     </li>
-	                    <li>
-	                        <a href="{% url 'reportes:proyectos_inversion' %}" class="{% if '/reportes/proyectos-inversion/' in request.path %}active{% endif %}">
-	                            <span class="nav-icon" aria-hidden="true">
-	                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="M6 15 10 9l4 3 4-6"/><circle cx="6" cy="15" r="1"/><circle cx="10" cy="9" r="1"/><circle cx="14" cy="12" r="1"/><circle cx="18" cy="6" r="1"/></svg>
-	                            </span>
-	                            <span>Proyectos inversión</span>
-	                        </a>
-	                    </li>
-	                    <li class="nav-item">
-	                        <a href="{% url 'rentabilidad_dashboard' %}" class="{% if '/rentabilidad/' in request.path %}active{% endif %}">
-	                            <i class="fas fa-store"></i>
-	                            <span>Rentabilidad</span>
-	                        </a>
-	                    </li>
-	                    {% endif %}
+                    <li>
+                        <a href="{% url 'reportes:proyectos_inversion' %}"
+                           class="{% if '/reportes/proyectos-inversion/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 19h16"/><path d="M6 15 10 9l4 3 4-6"/>
+                                    <circle cx="6" cy="15" r="1"/><circle cx="10" cy="9" r="1"/>
+                                    <circle cx="14" cy="12" r="1"/><circle cx="18" cy="6" r="1"/>
+                                </svg>
+                            </span>
+                            <span>Proyectos inversión</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{% url 'rentabilidad_dashboard' %}"
+                           class="{% if '/rentabilidad/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                                    <path d="M9 22V12h6v10"/>
+                                </svg>
+                            </span>
+                            <span>Rentabilidad</span>
+                        </a>
+                    </li>
                 </ul>
+                {% endif %}
 
-                <div class="sidebar-section-label">Operación diaria</div>
-                <ul class="sidebar-nav sidebar-nav-group">
+                {# ── GRUPO 2: OPERACIÓN ────────────────────────────── #}
+                {% if ui_access.can_view_recetas or ui_access.can_view_maestros or ui_access.can_view_compras %}
+                <button class="sidebar-group-toggle" data-group="operacion" aria-expanded="true">
+                    <span class="sidebar-section-label">Operación diaria</span>
+                    <span class="toggle-chevron" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                    </span>
+                </button>
+                <ul class="sidebar-nav sidebar-nav-group sidebar-collapsible" id="group-operacion">
                     {% if ui_access.can_view_maestros %}
                     <li>
-                        <a href="{% url 'maestros:proveedor_list' %}" class="{% if '/maestros/' in request.path %}active{% endif %}">
+                        <a href="{% url 'maestros:proveedor_list' %}"
+                           class="{% if '/maestros/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4L11 7h7.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-10Z"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4L11 7h7.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-10Z"/>
+                                </svg>
                             </span>
                             <span>Maestros</span>
                         </a>
@@ -112,298 +176,461 @@
                     {% endif %}
                     {% if ui_access.can_view_recetas %}
                     <li>
-                        <a href="{% url 'recetas:recetas_list' %}" class="{% if '/recetas/' in request.path and '/recetas/plan-produccion/' not in request.path and '/recetas/reabasto-cedis/' not in request.path and '/recetas/consolidado-cedis/' not in request.path and '/recetas/dg-operacion/' not in request.path %}active{% endif %}">
+                        <a href="{% url 'recetas:recetas_list' %}"
+                           class="{% if '/recetas/' in request.path and not '/recetas/plan-produccion/' in request.path and not '/recetas/reabasto-cedis/' in request.path and not '/recetas/consolidado-cedis/' in request.path and not '/recetas/dg-operacion/' in request.path and not '/recetas/monitor-margenes/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/>
+                                    <path d="M8 9h8M8 13h8M8 17h5"/>
+                                </svg>
                             </span>
                             <span>Recetas</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{% url 'recetas:monitor_margenes' %}" class="{% if '/recetas/monitor-margenes/' in request.path %}active{% endif %}">
+                        <a href="{% url 'recetas:monitor_margenes' %}"
+                           class="{% if '/recetas/monitor-margenes/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-4"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 19h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-4"/>
+                                </svg>
                             </span>
                             <span>Monitor de márgenes</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{% url 'recetas:plan_produccion' %}" class="{% if '/recetas/plan-produccion/' in request.path %}active{% endif %}">
+                        <a href="{% url 'recetas:plan_produccion' %}"
+                           class="{% if '/recetas/plan-produccion/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="4" width="18" height="18" rx="2"/>
+                                    <path d="M16 2v4M8 2v4M3 10h18"/>
+                                    <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
+                                </svg>
                             </span>
                             <span>Plan de producción</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{% url 'recetas:reabasto_cedis' %}" class="{% if '/recetas/reabasto-cedis/' in request.path %}active{% endif %}">
+                        <a href="{% url 'recetas:reabasto_cedis' %}"
+                           class="{% if '/recetas/reabasto-cedis/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/><path d="M7 12h6"/><path d="m10 9 3 3-3 3"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 7h13v10H3z"/><path d="M16 10h3l2 2v5h-5z"/>
+                                    <path d="M7 12h6"/><path d="m10 9 3 3-3 3"/>
+                                </svg>
                             </span>
                             <span>Reabasto CEDIS</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{% url 'recetas:consolidado_cedis_revision' %}" class="{% if '/recetas/consolidado-cedis/' in request.path %}active{% endif %}">
+                        <a href="{% url 'recetas:consolidado_cedis_revision' %}"
+                           class="{% if '/recetas/consolidado-cedis/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/><path d="M8 4v16"/><path d="M16 4v16"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
+                                    <path d="m3.3 7 8.7 5 8.7-5M12 22V12"/>
+                                </svg>
                             </span>
                             <span>Consolidado CEDIS</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="{% url 'proyecciones:forecast_quincenal_revision' %}" class="{% if '/proyecciones/forecast-quincenal/' in request.path %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="m6 15 4-4 3 3 5-7"/><path d="M18 7h-4"/><path d="M18 7v4"/></svg>
-                            </span>
-                            <span>Forecast quincenal</span>
                         </a>
                     </li>
                     {% endif %}
                     {% if ui_access.can_view_compras %}
                     <li>
-                        <a href="{% url 'compras:home' %}" class="{% if '/compras/' in request.path %}active{% endif %}">
+                        <a href="{% url 'compras:ordenes' %}"
+                           class="{% if '/compras/' in request.path and '/compras/solicitudes/' not in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+                                    <path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>
+                                </svg>
                             </span>
                             <span>Compras</span>
                         </a>
                     </li>
-                    {% endif %}
-                    {% if ui_access.can_view_ventas_eventos %}
                     <li>
-                        <a href="{% url 'ventas:eventos' %}" class="{% if '/ventas/eventos/' in request.path %}active{% endif %}">
+                        <a href="{% url 'compras:solicitudes' %}"
+                           class="{% if '/compras/solicitudes/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                    <rect x="3" y="4" width="18" height="18" rx="2"/>
-                                    <path d="M16 2v4M8 2v4M3 10h18"/>
-                                    <path d="M7 14h4M7 18h6"/>
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9 15h6"/>
+                                </svg>
+                            </span>
+                            <span>Solicitudes</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+                {% endif %}
+
+                {# ── GRUPO 3: COMERCIAL ────────────────────────────── #}
+                {% if ui_access.can_view_ventas or ui_access.can_view_crm %}
+                <button class="sidebar-group-toggle" data-group="comercial" aria-expanded="false">
+                    <span class="sidebar-section-label">Comercial</span>
+                    <span class="toggle-chevron" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                    </span>
+                </button>
+                <ul class="sidebar-nav sidebar-nav-group sidebar-collapsible sidebar-collapsed" id="group-comercial">
+                    {% if ui_access.can_view_ventas %}
+                    <li>
+                        <a href="{% url 'ventas:eventos' %}"
+                           class="{% if '/ventas/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-1.4 5h12.8"/>
+                                    <circle cx="9" cy="21" r="1"/><circle cx="19" cy="21" r="1"/>
                                 </svg>
                             </span>
                             <span>Ventas · Eventos</span>
                         </a>
                     </li>
                     {% endif %}
-                    {% if ui_access.can_view_inventario %}
-                    <li>
-                        <a href="{% url 'inventario:home' %}" class="{% if '/inventario/' in request.path and '/inventario/importar/' not in request.path %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
-                            </span>
-                            <span>Inventario</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="{% url 'inventario:importar_archivos' %}" class="{% if '/inventario/importar/' in request.path %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M4 15.5A2.5 2.5 0 0 0 6.5 18h11A2.5 2.5 0 0 0 20 15.5"/></svg>
-                            </span>
-                            <span>Cortes de almacén</span>
-                        </a>
-                    </li>
-                    {% endif %}
-                    {% if ui_access.can_capture_piso %}
-                    <li>
-                        <a href="{% url 'control:captura_movil' %}" class="{% if '/control/captura-movil/' in request.path %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10 6.5h4"/><circle cx="12" cy="18" r="1"/></svg>
-                            </span>
-                            <span>Captura de piso</span>
-                        </a>
-                    </li>
-                    {% endif %}
-                </ul>
-
-                <div class="sidebar-section-label">Análisis y soporte</div>
-                <ul class="sidebar-nav sidebar-nav-group">
-                    {% if ui_access.can_view_reportes %}
-                    <li>
-                        <a href="{% url 'reportes:costo_receta' %}" class="{% if '/reportes/' in request.path and request.path != '/reportes/bi/' %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><rect x="6" y="11" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="9" rx="1"/><rect x="16" y="5" width="3" height="12" rx="1"/></svg>
-                            </span>
-                            <span>Reportes</span>
-                        </a>
-                    </li>
-                    {% endif %}
                     {% if ui_access.can_view_crm %}
                     <li>
-                        <a href="{% url 'crm:home' %}" class="{% if '/crm/' in request.path %}active{% endif %}">
+                        <a href="{% url 'crm:dashboard' %}"
+                           class="{% if '/crm/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="9" cy="7" r="4"/>
+                                    <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+                                </svg>
                             </span>
                             <span>CRM</span>
                         </a>
                     </li>
                     {% endif %}
-                    {% if ui_access.can_view_logistica %}
-                    <li>
-                        <a href="{% url 'logistica:home' %}" class="{% if '/logistica/' in request.path %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v8H3z"/><path d="M14 10h3l3 3v2h-6z"/><circle cx="7" cy="17.5" r="1.5"/><circle cx="18" cy="17.5" r="1.5"/></svg>
-                            </span>
-                            <span>Logística</span>
-                        </a>
-                    </li>
-                    {% endif %}
                     {% if ui_access.can_view_fallas %}
                     <li>
-                        <a href="{% url 'fallas:dashboard' %}" class="{% if '/fallas/' in request.path %}active{% endif %}">
+                        <a href="{% url 'fallas:dashboard' %}"
+                           class="{% if '/fallas/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.2 3.2 10.3a2.4 2.4 0 0 0 0 3.4l7.1 7.1a2.4 2.4 0 0 0 3.4 0l7.1-7.1a2.4 2.4 0 0 0 0-3.4l-7.1-7.1a2.4 2.4 0 0 0-3.4 0Z"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                    <path d="M12 9v4"/><path d="M12 17h.01"/>
+                                </svg>
                             </span>
                             <span>Fallas</span>
                         </a>
                     </li>
                     {% endif %}
-                    {% if ui_access.can_view_rrhh %}
+                </ul>
+                {% endif %}
+
+                {# ── GRUPO 4: ADMINISTRACIÓN ───────────────────────── #}
+                {% if ui_access.can_view_inventario or ui_access.can_view_activos or ui_access.can_view_control %}
+                <button class="sidebar-group-toggle" data-group="administracion" aria-expanded="false">
+                    <span class="sidebar-section-label">Administración</span>
+                    <span class="toggle-chevron" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                    </span>
+                </button>
+                <ul class="sidebar-nav sidebar-nav-group sidebar-collapsible sidebar-collapsed" id="group-administracion">
+                    {% if ui_access.can_view_inventario %}
                     <li>
-                        <a href="{% url 'rrhh:empleados' %}" class="{% if '/rrhh/' in request.path %}active{% endif %}">
+                        <a href="{% url 'inventario:home' %}"
+                           class="{% if '/inventario/' in request.path and '/inventario/alertas/' not in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8h3M21.5 6.5v3"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
+                                    <path d="m3.3 7 8.7 5 8.7-5M12 22V12"/>
+                                </svg>
                             </span>
-                            <span>RRHH</span>
+                            <span>Inventario</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{% url 'inventario:alertas' %}"
+                           class="{% if '/inventario/alertas/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                                </svg>
+                            </span>
+                            <span>Alertas inventario</span>
                         </a>
                     </li>
                     {% endif %}
-                    {% if ui_access.can_view_inventario %}
+                    {% if ui_access.can_view_activos %}
                     <li>
-                        <a href="{% url 'activos:dashboard' %}" class="{% if '/activos/' in request.path %}active{% endif %}">
+                        <a href="{% url 'activos:dashboard' %}"
+                           class="{% if '/activos/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16"/><path d="M8 14h3M13 14h3"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="2" y="7" width="20" height="14" rx="2"/>
+                                    <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+                                    <path d="M12 12v4"/><path d="M10 14h4"/>
+                                </svg>
                             </span>
                             <span>Activos</span>
                         </a>
                     </li>
                     {% endif %}
-                    {% if ui_access.can_view_reportes %}
+                    {% if ui_access.can_view_rrhh %}
                     <li>
-                        <a href="{% url 'control:discrepancias' %}" class="{% if '/control/' in request.path %}active{% endif %}">
+                        <a href="{% url 'rrhh:empleados' %}"
+                           class="{% if '/rrhh/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20V9"/><path d="M12 20V4"/><path d="M17 20v-7"/><path d="m6 11 5-5 6 3"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="9" cy="7" r="4"/>
+                                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                                </svg>
+                            </span>
+                            <span>RRHH</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    {% if ui_access.can_view_control %}
+                    <li>
+                        <a href="{% url 'control:discrepancias' %}"
+                           class="{% if '/control/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                </svg>
                             </span>
                             <span>Control operativo</span>
                         </a>
                     </li>
                     {% endif %}
-                </ul>
-
-                <div class="sidebar-section-label">Gobierno</div>
-                <ul class="sidebar-nav sidebar-nav-group">
-                    {% if ui_access.can_view_orquestacion %}
                     <li>
-                        <a href="{% url 'ai_private_hub' %}" class="{% if '/ia-privada/' in request.path %}active{% endif %}">
+                        <a href="{% url 'audit_log' %}"
+                           class="{% if '/auditoria/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M8.5 11.5 12 9l3.5 2.5L12 14l-3.5-2.5Z"/><path d="M8.5 15.5 12 18l3.5-2.5"/></svg>
-                            </span>
-                            <span>IA privada</span>
-                        </a>
-                    </li>
-                    {% endif %}
-                    {% if ui_access.can_view_audit %}
-                    <li>
-                        <a href="{% url 'audit_log' %}" class="{% if '/auditoria/' in request.path %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10l2 2v14H5V6l2-2Z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/>
+                                </svg>
                             </span>
                             <span>Bitácora</span>
                         </a>
                     </li>
-                    <li>
-                        <a href="{% url 'integraciones:panel' %}" class="{% if '/integraciones/' in request.path %}active{% endif %}">
-                            <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="7" height="12" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 12h4"/></svg>
-                            </span>
-                            <span>Integraciones</span>
-                        </a>
-                    </li>
-                    {% endif %}
+                </ul>
+                {% endif %}
+
+                {# ── GRUPO 5: SISTEMA (solo DG/ADMIN) ─────────────── #}
+                {% if ui_access.can_view_sistema %}
+                <button class="sidebar-group-toggle" data-group="sistema" aria-expanded="false">
+                    <span class="sidebar-section-label">Sistema</span>
+                    <span class="toggle-chevron" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                    </span>
+                </button>
+                <ul class="sidebar-nav sidebar-nav-group sidebar-collapsible sidebar-collapsed" id="group-sistema">
                     {% if ui_access.can_view_orquestacion %}
                     <li>
-                        <a href="{% url 'orquestacion:dashboard' %}" class="{% if '/orquestacion/' in request.path %}active{% endif %}">
+                        <a href="{% url 'orquestacion:dashboard' %}"
+                           class="{% if '/orquestacion/' in request.path and '/ia-privada/' not in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v5"/><path d="M6 10h12"/><path d="M6 21v-6"/><path d="M18 21v-6"/><rect x="9" y="8" width="6" height="4" rx="1"/><rect x="3" y="15" width="6" height="4" rx="1"/><rect x="15" y="15" width="6" height="4" rx="1"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="3"/>
+                                    <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+                                </svg>
                             </span>
                             <span>Orquestación</span>
                         </a>
                     </li>
                     {% endif %}
-                    {% if ui_access.can_manage_users %}
                     <li>
-                        <a href="{% url 'users_access' %}" class="{% if '/usuarios-accesos/' in request.path %}active{% endif %}">
+                        <a href="{% url 'ai_private_hub' %}"
+                           class="{% if '/ia-privada/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-1.5a3.5 3.5 0 0 0-3.5-3.5H6.5A3.5 3.5 0 0 0 3 19.5V21"/><circle cx="9.5" cy="8" r="3.5"/><path d="M18 8v6M15 11h6"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 2a10 10 0 1 0 10 10"/>
+                                    <path d="M12 6v6l4 2"/>
+                                    <circle cx="18" cy="5" r="3"/>
+                                    <path d="M18 2v2M18 6v2M15 5h2M19 5h2"/>
+                                </svg>
                             </span>
-                            <span>Accesos</span>
+                            <span>IA privada</span>
                         </a>
                     </li>
-                    {% endif %}
                     <li>
-                        <a href="{% url 'admin:index' %}">
+                        <a href="{% url 'integraciones:panel' %}"
+                           class="{% if '/integraciones/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.2 1.2 0 0 1-1.7 1.7l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V19a1.2 1.2 0 0 1-2.4 0v-.2a1 1 0 0 0-.7-1 1 1 0 0 0-1 .2l-.2.1a1.2 1.2 0 1 1-1.7-1.7l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H5a1.2 1.2 0 0 1 0-2.4h.2a1 1 0 0 0 1-.7 1 1 0 0 0-.2-1l-.1-.2a1.2 1.2 0 1 1 1.7-1.7l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V5a1.2 1.2 0 1 1 2.4 0v.2a1 1 0 0 0 .7 1 1 1 0 0 0 1-.2l.2-.1a1.2 1.2 0 0 1 1.7 1.7l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2a1.2 1.2 0 0 1 0 2.4h-.2a1 1 0 0 0-1 .7Z"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                </svg>
                             </span>
-                            <span>Administración</span>
+                            <span>Integraciones</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{% url 'users_access' %}"
+                           class="{% if '/usuarios-accesos/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="18" cy="15" r="3"/>
+                                    <circle cx="9" cy="7" r="4"/>
+                                    <path d="M10.67 20H4a2 2 0 0 1-2-2v-1a4 4 0 0 1 4-4h2.08"/>
+                                    <path d="M18 12v3M18 18v.01"/>
+                                </svg>
+                            </span>
+                            <span>Usuarios y accesos</span>
                         </a>
                     </li>
                 </ul>
                 {% endif %}
+
+                {% endif %}{# end branch_capture_only #}
             </nav>
 
             <div class="sidebar-footer">
-                <div class="sidebar-user">Sesión activa</div>
-                <div class="sidebar-user-name">{{ user.username }}</div>
-                <a href="{% url 'logout' %}" class="logout-link">Cerrar sesión</a>
+                <div class="sidebar-user">
+                    <div class="user-avatar">{{ request.user.first_name|first|upper }}{{ request.user.last_name|first|upper }}</div>
+                    <div class="user-info">
+                        <div class="user-name">{{ request.user.get_full_name|default:request.user.username }}</div>
+                        <div class="user-role">{{ ui_access.role_label|default:"Usuario" }}</div>
+                    </div>
+                </div>
+                <div class="sidebar-actions">
+                    <button id="density-toggle" class="icon-btn" title="Cambiar densidad" aria-label="Cambiar densidad de interfaz">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 12h18M3 6h18M3 18h18"/>
+                        </svg>
+                    </button>
+                    <a href="{% url 'logout' %}" class="icon-btn" title="Cerrar sesión" aria-label="Cerrar sesión">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                            <polyline points="16 17 21 12 16 7"/>
+                            <line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                    </a>
+                </div>
             </div>
         </aside>
 
         <main class="main-content">
-            <header class="header">
-                <h1 class="header-title">{% block page_title %}Dashboard{% endblock %}</h1>
-                <div class="header-meta">
-                    <span class="header-context-pill">Operación diaria</span>
-                    <button id="densityToggle" class="btn btn-secondary btn-sm density-toggle" type="button" aria-pressed="false">
-                        Modo compacto
+            {% if messages %}
+            <div class="messages-container">
+                {% for message in messages %}
+                <div class="alert alert-{{ message.tags }}">
+                    <span>{{ message }}</span>
+                    <button class="alert-close" onclick="this.parentElement.remove()" aria-label="Cerrar">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 6 6 18M6 6l12 12"/>
+                        </svg>
                     </button>
-                    <span>{% now "l, j \d\e F \d\e Y" %}</span>
                 </div>
-            </header>
-
-            <div class="container">
-                {% if messages %}
-                    {% for message in messages %}
-                        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-                {% block content %}{% endblock %}
+                {% endfor %}
             </div>
+            {% endif %}
+
+            {% block content %}{% endblock %}
         </main>
     </div>
-    <script>
-      (() => {
-        const key = "ui_density_mode";
-        const body = document.body;
-        const toggle = document.getElementById("densityToggle");
-        if (!toggle) return;
 
-        const applyMode = (mode) => {
-          const compact = mode === "compact";
-          body.classList.toggle("ui-compact", compact);
-          toggle.setAttribute("aria-pressed", compact ? "true" : "false");
-          toggle.textContent = compact ? "Modo normal" : "Modo compacto";
-        };
-
-        const saved = localStorage.getItem(key);
-        applyMode(saved || "normal");
-
-        toggle.addEventListener("click", () => {
-          const compact = !body.classList.contains("ui-compact");
-          const mode = compact ? "compact" : "normal";
-          localStorage.setItem(key, mode);
-          applyMode(mode);
-        });
-      })();
-    </script>
     {% block extra_js %}{% endblock %}
+
+    <script>
+    // ── Sidebar colapsable ─────────────────────────────────────────
+    (function () {
+        var STORAGE_KEY = 'erp_sidebar_groups';
+
+        function loadState() {
+            try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+            catch (e) { return {}; }
+        }
+
+        function saveState(state) {
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+            catch (e) {}
+        }
+
+        function setGroup(btn, expanded) {
+            var group = btn.dataset.group;
+            var list = document.getElementById('group-' + group);
+            if (!list) return;
+            btn.setAttribute('aria-expanded', expanded);
+            if (expanded) {
+                list.classList.remove('sidebar-collapsed');
+            } else {
+                list.classList.add('sidebar-collapsed');
+            }
+        }
+
+        // Auto-expand group that contains the active item
+        function autoExpandActive() {
+            var active = document.querySelector('#sidebar-nav .sidebar-collapsible a.active');
+            if (!active) return;
+            var list = active.closest('.sidebar-collapsible');
+            if (!list) return;
+            var id = list.id; // "group-operacion"
+            var group = id.replace('group-', '');
+            var btn = document.querySelector('[data-group="' + group + '"]');
+            if (btn) setGroup(btn, true);
+        }
+
+        var state = loadState();
+        var buttons = document.querySelectorAll('.sidebar-group-toggle');
+
+        buttons.forEach(function (btn) {
+            var group = btn.dataset.group;
+            // Restore saved state if exists, else use aria-expanded default
+            if (state.hasOwnProperty(group)) {
+                setGroup(btn, state[group]);
+            }
+
+            btn.addEventListener('click', function () {
+                var expanded = btn.getAttribute('aria-expanded') === 'true';
+                var newState = !expanded;
+                setGroup(btn, newState);
+                var s = loadState();
+                s[group] = newState;
+                saveState(s);
+            });
+        });
+
+        autoExpandActive();
+    })();
+
+    // ── Density toggle ─────────────────────────────────────────────
+    (function () {
+        var btn = document.getElementById('density-toggle');
+        if (!btn) return;
+        var DENSITY_KEY = 'erp_density';
+
+        function applyDensity(mode) {
+            var compact = mode === 'compact';
+            document.body.classList.toggle('ui-compact', compact);
+            btn.setAttribute('aria-pressed', compact ? 'true' : 'false');
+        }
+
+        var current = localStorage.getItem(DENSITY_KEY) || localStorage.getItem('ui_density_mode') || 'normal';
+        applyDensity(current);
+
+        btn.addEventListener('click', function () {
+            current = document.body.classList.contains('ui-compact') ? 'normal' : 'compact';
+            applyDensity(current);
+            try { localStorage.setItem(DENSITY_KEY, current); } catch (e) {}
+        });
+    })();
+
+    // ── Auto-close alerts ──────────────────────────────────────────
+    (function () {
+        var alerts = document.querySelectorAll('.alert');
+        alerts.forEach(function (a) {
+            setTimeout(function () {
+                a.style.opacity = '0';
+                a.style.transition = 'opacity 0.4s';
+                setTimeout(function () { a.remove(); }, 400);
+            }, 5000);
+        });
+    })();
+    </script>
 </body>
 </html>

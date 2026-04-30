@@ -199,6 +199,10 @@ def can_view_ventas_eventos(user: AbstractBaseUser) -> bool:
     ) and not _is_locked(user, "lock_crm")
 
 
+def can_view_ventas(user: AbstractBaseUser) -> bool:
+    return can_view_ventas_eventos(user)
+
+
 def can_manage_ventas_eventos(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_ADMIN, ROLE_VENTAS) and not _is_locked(user, "lock_crm")
 
@@ -219,6 +223,18 @@ def can_view_rrhh(user: AbstractBaseUser) -> bool:
 
 def can_manage_rrhh(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_ADMIN, ROLE_RRHH) and not _is_locked(user, "lock_rrhh")
+
+
+def can_view_activos(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_inventario")
+
+
+def can_view_control(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_reportes")
+
+
+def can_view_sistema(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN)
 
 
 def can_capture_piso(user: AbstractBaseUser) -> bool:
@@ -242,3 +258,28 @@ def is_branch_capture_only(user: AbstractBaseUser) -> bool:
     if not profile:
         return False
     return bool(getattr(profile, "modo_captura_sucursal", False))
+
+
+def _get_role_label(user: AbstractBaseUser) -> str:
+    if not user or not user.is_authenticated:
+        return ""
+    if user.is_superuser:
+        return "Superusuario"
+
+    role_map = {
+        ROLE_DG: "Director General",
+        ROLE_ADMIN: "Administrador",
+        ROLE_COMPRAS: "Compras",
+        ROLE_ALMACEN: "Almacen",
+        ROLE_PRODUCCION: "Produccion",
+        ROLE_VENTAS: "Ventas",
+        ROLE_LOGISTICA: "Logistica",
+        ROLE_RRHH: "RRHH",
+        ROLE_LECTURA: "Solo lectura",
+        ROLE_REPARTIDOR: "Repartidor",
+    }
+    groups = _group_names(user)
+    for role, label in role_map.items():
+        if role in groups:
+            return label
+    return "Usuario"
