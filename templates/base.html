@@ -135,6 +135,7 @@
                             <span>Proyectos inversión</span>
                         </a>
                     </li>
+                    {% if ui_access.can_view_rentabilidad %}
                     <li>
                         <a href="{% url 'rentabilidad_dashboard' %}"
                            class="{% if '/rentabilidad/' in request.path %}active{% endif %}">
@@ -147,6 +148,7 @@
                             <span>Rentabilidad</span>
                         </a>
                     </li>
+                    {% endif %}
                 </ul>
                 {% endif %}
 

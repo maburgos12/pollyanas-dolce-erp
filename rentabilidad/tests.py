@@ -3,13 +3,57 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+from django.contrib.auth.models import Group, User
 from django.test import TestCase
+from django.urls import reverse
 
+from core.access import ROLE_LECTURA, ROLE_VENTAS
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
 from reportes.models import ProductoReventaCostoHistoricoMensual
 from rentabilidad.models_rentabilidad import SucursalRentabilidad
 from rentabilidad.tasks_rentabilidad import recalcular_rentabilidad_mensual
+
+
+class RentabilidadPermissionTests(TestCase):
+    def setUp(self):
+        lectura_group, _ = Group.objects.get_or_create(name=ROLE_LECTURA)
+        ventas_group, _ = Group.objects.get_or_create(name=ROLE_VENTAS)
+        self.lectura_user = User.objects.create_user(username="lectura_rent", password="pass123")
+        self.lectura_user.groups.add(lectura_group)
+        self.ventas_user = User.objects.create_user(username="ventas_rent", password="pass123")
+        self.ventas_user.groups.add(ventas_group)
+        self.sucursal = Sucursal.objects.create(codigo="MAT", nombre="Matriz", activa=True)
+        self.rentabilidad = SucursalRentabilidad.objects.create(
+            sucursal=self.sucursal,
+            periodo=date(2026, 3, 1),
+            ventas_brutas=Decimal("1000.00"),
+            costo_materia_prima=Decimal("300.00"),
+            renta=Decimal("100.00"),
+        )
+
+    def test_lectura_can_view_dashboard_and_detail(self):
+        self.client.login(username="lectura_rent", password="pass123")
+
+        dashboard = self.client.get(reverse("rentabilidad_dashboard"))
+        detail = self.client.get(reverse("rentabilidad_detalle", kwargs={"pk": self.rentabilidad.pk}))
+
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(detail.status_code, 200)
+
+    def test_ventas_cannot_view_rentabilidad(self):
+        self.client.login(username="ventas_rent", password="pass123")
+
+        response = self.client.get(reverse("rentabilidad_dashboard"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_lectura_cannot_trigger_ai_analysis(self):
+        self.client.login(username="lectura_rent", password="pass123")
+
+        response = self.client.post(reverse("rentabilidad_analizar", kwargs={"pk": self.rentabilidad.pk}))
+
+        self.assertEqual(response.status_code, 403)
 
 
 class RentabilidadCostoReventaTests(TestCase):

@@ -9,6 +9,7 @@ URL API analizar: POST /sucursales/rentabilidad/<pk>/analizar/
 
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required, permission_required
+from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 from django.db.models import Sum, Avg, Count, Q
@@ -17,6 +18,17 @@ from datetime import date
 import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
+from core.access import can_manage_rentabilidad, can_view_rentabilidad
+
+
+def _require_view_rentabilidad(user):
+    if not can_view_rentabilidad(user):
+        raise PermissionDenied("No tienes permisos para ver rentabilidad")
+
+
+def _require_manage_rentabilidad(user):
+    if not can_manage_rentabilidad(user):
+        raise PermissionDenied("No tienes permisos para gestionar rentabilidad")
 
 
 def _get_periodo(request):
@@ -49,6 +61,7 @@ def _colores_estado(estado):
 
 @login_required
 def dashboard_rentabilidad(request):
+    _require_view_rentabilidad(request.user)
     periodo = _get_periodo(request)
 
     # Periodos disponibles para el selector
@@ -114,6 +127,7 @@ def dashboard_rentabilidad(request):
 
 @login_required
 def detalle_sucursal(request, pk):
+    _require_view_rentabilidad(request.user)
     rent = get_object_or_404(SucursalRentabilidad, pk=pk)
 
     # Historial de los últimos 12 meses para gráfica de tendencia
@@ -135,6 +149,7 @@ def detalle_sucursal(request, pk):
 @require_POST
 def analizar_con_ia(request, pk):
     """Endpoint AJAX: lanza el agente IA para una sucursal y devuelve el resultado."""
+    _require_manage_rentabilidad(request.user)
     from .agente_rentabilidad import analizar_sucursal
 
     rent = get_object_or_404(SucursalRentabilidad, pk=pk)
@@ -149,6 +164,7 @@ def analizar_con_ia(request, pk):
 @require_POST
 def analizar_todas(request):
     """Endpoint AJAX: lanza el agente IA para todas las sucursales del periodo."""
+    _require_manage_rentabilidad(request.user)
     from .agente_rentabilidad import analizar_todas_sucursales
     periodo = _get_periodo(request)
     resultados = analizar_todas_sucursales(periodo=periodo)

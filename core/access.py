@@ -126,6 +126,14 @@ def can_view_reportes(user: AbstractBaseUser) -> bool:
     ) and not _is_locked(user, "lock_reportes")
 
 
+def can_view_rentabilidad(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_LECTURA) and not _is_locked(user, "lock_reportes")
+
+
+def can_manage_rentabilidad(user: AbstractBaseUser) -> bool:
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_reportes")
+
+
 def can_view_product_closure(user: AbstractBaseUser) -> bool:
     return can_view_reportes(user)
 
