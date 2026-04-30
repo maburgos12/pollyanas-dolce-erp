@@ -61,6 +61,7 @@ from ..models import (
     normalizar_codigo_point,
     LineaReceta,
     RecetaPresentacion,
+    RecetaPresentacionDerivada,
     RecetaCostoVersion,
     CostoDriver,
     PlanProduccion,
