@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import os
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from urllib.parse import quote_plus, urlencode
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import PermissionDenied
@@ -4367,6 +4369,11 @@ def _inventory_sales_demand_signal(rows: list[SimpleNamespace], *, lookback_days
     insumo_ids = [int(row.insumo.id) for row in rows if getattr(row, "insumo", None)]
     if not insumo_ids:
         return None
+    signature = hashlib.sha1(",".join(str(insumo_id) for insumo_id in sorted(set(insumo_ids))).encode()).hexdigest()
+    cache_key = f"inventario:sales-demand:{timezone.localdate().isoformat()}:{lookback_days}:{signature}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     since = timezone.localdate() - timedelta(days=lookback_days)
     reference_date = timezone.localdate()
@@ -4379,7 +4386,7 @@ def _inventory_sales_demand_signal(rows: list[SimpleNamespace], *, lookback_days
         .distinct()
     )
     if not receta_ids:
-        return {
+        result = {
             "available": False,
             "status": "Sin vínculo comercial",
             "tone": "warning",
@@ -4392,6 +4399,8 @@ def _inventory_sales_demand_signal(rows: list[SimpleNamespace], *, lookback_days
             "comparable_years": 0,
             "top_products": [],
         }
+        cache.set(cache_key, result, 300)
+        return result
 
     historico_recent_qs = VentaHistorica.objects.filter(receta_id__in=receta_ids, fecha__gte=since)
     historico_all_qs = VentaHistorica.objects.filter(receta_id__in=receta_ids)
@@ -4400,7 +4409,7 @@ def _inventory_sales_demand_signal(rows: list[SimpleNamespace], *, lookback_days
         historico_all_qs.filter(fecha__month=reference_date.month).dates("fecha", "year").count()
     )
     if not historico_recent_qs.exists():
-        return {
+        result = {
             "available": False,
             "status": "Sin ventas recientes",
             "tone": "warning",
@@ -4413,6 +4422,8 @@ def _inventory_sales_demand_signal(rows: list[SimpleNamespace], *, lookback_days
             "comparable_years": comparable_years,
             "top_products": [],
         }
+        cache.set(cache_key, result, 300)
+        return result
 
     historico_days = historico_recent_qs.values("fecha").distinct().count()
     units_total = historico_recent_qs.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
@@ -4445,7 +4456,7 @@ def _inventory_sales_demand_signal(rows: list[SimpleNamespace], *, lookback_days
         tone = "danger"
         detail = "La cobertura histórica reciente es corta para tomar decisiones agresivas de reabasto."
 
-    return {
+    result = {
         "available": True,
         "status": status,
         "tone": tone,
@@ -4458,6 +4469,8 @@ def _inventory_sales_demand_signal(rows: list[SimpleNamespace], *, lookback_days
         "comparable_years": comparable_years,
         "top_products": top_products,
     }
+    cache.set(cache_key, result, 300)
+    return result
 
 
 def _inventory_sales_demand_gate(signal: dict[str, object] | None) -> dict[str, object]:
@@ -4504,6 +4517,21 @@ def _inventory_commercial_priority_rows(rows: list[SimpleNamespace], *, lookback
     insumo_ids = [int(row.insumo.id) for row in rows if getattr(row, "insumo", None)]
     if not insumo_ids:
         return []
+    signature_source = "|".join(
+        (
+            f"{int(row.insumo.id)}:"
+            f"{Decimal(str(getattr(row, 'stock_actual', 0) or 0))}:"
+            f"{Decimal(str(getattr(row, 'punto_reorden', 0) or 0))}:"
+            f"{str(getattr(row.insumo, 'actualizado_en', '') or '')}"
+        )
+        for row in rows
+        if getattr(row, "insumo", None)
+    )
+    signature = hashlib.sha1(signature_source.encode()).hexdigest()
+    cache_key = f"inventario:commercial-priority:{timezone.localdate().isoformat()}:{lookback_days}:{limit}:{signature}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     since = timezone.localdate() - timedelta(days=lookback_days)
     receta_map: dict[int, list[int]] = defaultdict(list)
@@ -4540,7 +4568,7 @@ def _inventory_commercial_priority_rows(rows: list[SimpleNamespace], *, lookback
         insumo = getattr(row, "insumo", None)
         if not insumo:
             continue
-        canonical = canonical_insumo_by_id(int(insumo.id)) or insumo
+        canonical = insumo
         readiness_profile = enterprise_readiness_profile(canonical)
         linked_receta_ids = receta_map.get(int(insumo.id), [])
         historico_units = sum((historico_map.get(receta_id, Decimal("0")) for receta_id in linked_receta_ids), Decimal("0"))
@@ -4608,7 +4636,9 @@ def _inventory_commercial_priority_rows(rows: list[SimpleNamespace], *, lookback
         ),
         reverse=True,
     )
-    return priority_rows[:limit]
+    result = priority_rows[:limit]
+    cache.set(cache_key, result, 300)
+    return result
 
 
 def _inventory_critical_master_demand_rows(rows: list[dict[str, object]] | None, *, limit: int = 3) -> list[dict[str, object]]:
