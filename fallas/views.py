@@ -68,6 +68,20 @@ class CategoriaFallaListView(generics.ListAPIView):
     permission_classes = [EsPersonalSucursal]
 
 
+class CategoriaFallaAdminView(generics.ListCreateAPIView):
+    authentication_classes = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
+    queryset = CategoriaFalla.objects.all().order_by("orden", "nombre")
+    serializer_class = CategoriaFallaSerializer
+    permission_classes = [EsComprasODG]
+
+
+class CategoriaFallaUpdateView(generics.RetrieveUpdateAPIView):
+    authentication_classes = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
+    queryset = CategoriaFalla.objects.all()
+    serializer_class = CategoriaFallaSerializer
+    permission_classes = [EsComprasODG]
+
+
 class ReporteFallaListCreateView(generics.ListCreateAPIView):
     authentication_classes = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
     permission_classes = [EsPersonalSucursal]
@@ -173,6 +187,23 @@ def cambiar_estatus(request, pk):
 
 @api_view(["GET"])
 @authentication_classes([JWTAuthentication, TokenAuthentication, SessionAuthentication])
+@permission_classes([EsPersonalSucursal])
+def perfil_actual(request):
+    """Perfil mínimo para la PWA de fallas."""
+
+    user = request.user
+    return Response(
+        {
+            "id": user.pk,
+            "username": user.username,
+            "nombre": user.get_full_name() or user.username,
+            "groups": list(user.groups.values_list("name", flat=True)),
+        }
+    )
+
+
+@api_view(["GET"])
+@authentication_classes([JWTAuthentication, TokenAuthentication, SessionAuthentication])
 @permission_classes([EsComprasODG])
 def dashboard_stats(request):
     """Estadísticas para el dashboard ejecutivo."""
@@ -219,7 +250,12 @@ def dashboard_stats(request):
 def dashboard_view(request):
     if not _puede_gestionar_fallas(request.user):
         raise PermissionDenied
-    return render(request, "fallas/dashboard.html")
+    es_dg = request.user.is_superuser or request.user.groups.filter(name__in=["compras_logistica", "dg"]).exists()
+    return render(
+        request,
+        "fallas/dashboard.html",
+        {"es_dg": es_dg, "tab": request.GET.get("tab") or "reportes"},
+    )
 
 
 @login_required
