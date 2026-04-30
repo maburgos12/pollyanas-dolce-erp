@@ -9078,18 +9078,21 @@ def _linea_unit_code(linea: LineaReceta) -> str:
     return "-"
 
 
-def _linea_unit_cost(linea: LineaReceta, unit_cost_cache: Dict[int, Decimal | None]) -> Decimal | None:
+def _linea_unit_cost(linea: LineaReceta, unit_cost_cache: Dict[tuple[int, str], Decimal | None]) -> Decimal | None:
     if not linea.insumo_id:
         return None
-    if linea.costo_unitario_snapshot is not None and linea.costo_unitario_snapshot > 0:
-        return Decimal(str(linea.costo_unitario_snapshot))
 
-    if linea.insumo_id in unit_cost_cache:
-        return unit_cost_cache[linea.insumo_id]
+    cache_key = (int(linea.insumo_id), str(linea.unidad_id or _linea_unit_code(linea)))
+    if cache_key in unit_cost_cache:
+        return unit_cost_cache[cache_key]
 
-    latest = _latest_cost_for_insumo(linea.insumo)
-    unit_cost_cache[linea.insumo_id] = latest
-    return latest
+    resolved_cost, _source = resolve_line_snapshot_cost(linea)
+    if resolved_cost is not None and resolved_cost > 0:
+        unit_cost_cache[cache_key] = Decimal(str(resolved_cost))
+        return unit_cost_cache[cache_key]
+
+    unit_cost_cache[cache_key] = None
+    return None
 
 
 def _build_derived_parent_requirement(receta: Receta, multiplicador: Decimal) -> Dict[str, Any] | None:
@@ -9379,7 +9382,7 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
         .order_by("id")
     )
 
-    unit_cost_cache: Dict[int, Decimal | None] = {}
+    unit_cost_cache: Dict[tuple[int, str], Decimal | None] = {}
     insumos_map: Dict[int, Dict[str, Any]] = {}
     derived_parent_map: Dict[int, Dict[str, Any]] = {}
     items_detalle: List[Dict[str, Any]] = []
