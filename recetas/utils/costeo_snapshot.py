@@ -8,7 +8,7 @@ from django.db.models import Q
 
 from maestros.models import Insumo, UnidadMedida
 from maestros.utils.canonical_catalog import latest_costo_canonico
-from recetas.models import LineaReceta, Receta
+from recetas.models import LineaReceta, Receta, RecetaCostoVersion
 from recetas.utils.normalizacion import normalizar_nombre
 
 
@@ -96,6 +96,19 @@ def resolve_preparation_recipe_for_insumo(insumo: Insumo | None) -> Receta | Non
 def resolve_preparation_recipe_unit_cost(prep_recipe: Receta | None) -> tuple[Decimal | None, UnidadMedida | None, str]:
     if prep_recipe is None:
         return None, None, "NO_PREPARACION"
+
+    production_report_cost = (
+        RecetaCostoVersion.objects.filter(
+            receta=prep_recipe,
+            fuente="POINT_PRODUCTION_REPORT",
+            costo_total__gt=0,
+        )
+        .order_by("-version_num", "-creado_en", "-id")
+        .values_list("costo_total", flat=True)
+        .first()
+    )
+    if production_report_cost is not None:
+        return _q6(production_report_cost), prep_recipe.rendimiento_unidad, "POINT_PRODUCTION_REPORT"
 
     recipe_id = int(prep_recipe.id or 0)
     active_recipe_ids = _ACTIVE_PREPARATION_RECIPE_IDS.get()

@@ -82,6 +82,7 @@ from ..utils.costeo_snapshot import resolve_insumo_unit_cost, resolve_line_snaps
 from ..utils.derived_product_presentations import (
     build_upstream_snapshot as build_derived_product_upstream_snapshot,
     get_active_derived_relation,
+    get_total_cost_map,
 )
 from ..utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 from ..utils.matching import match_insumo
@@ -4959,26 +4960,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         for equivalence in equivalence_by_receta_id.values()
         if equivalence.receta_padre_id
     )
-    latest_cost_week = (
-        RecetaCostoSemanal.objects.filter(
-            scope_type=RecetaCostoSemanal.SCOPE_RECIPE,
-            receta_id__in=page_cost_recipe_ids,
-        ).aggregate(value=Max("week_start"))["value"]
-        if page_cost_recipe_ids
-        else None
-    )
-    page_cost_map = {
-        int(row["receta_id"]): Decimal(str(row["costo_total"] or 0))
-        for row in (
-            RecetaCostoSemanal.objects.filter(
-                scope_type=RecetaCostoSemanal.SCOPE_RECIPE,
-                receta_id__in=page_cost_recipe_ids,
-                week_start=latest_cost_week,
-            ).values("receta_id", "costo_total")
-            if latest_cost_week
-            else []
-        )
-    }
+    page_cost_map = get_total_cost_map(page_cost_recipe_ids)
     for receta in page.object_list:
         setattr(receta, "_effective_equivalence_cache", equivalence_by_receta_id.get(receta.id))
         setattr(receta, "_effective_derived_cache", derived_by_receta_id.get(receta.id))
