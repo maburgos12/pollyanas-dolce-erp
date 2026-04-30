@@ -3,6 +3,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from core.models import Sucursal
+from activos.models import Activo
 
 from .models import BitacoraFalla, CategoriaFalla, ReporteFalla
 
@@ -11,6 +12,22 @@ class SucursalFallaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sucursal
         fields = ["id", "codigo", "nombre"]
+
+
+class ActivoFallaSerializer(serializers.ModelSerializer):
+    display = serializers.SerializerMethodField()
+
+    def get_display(self, obj):
+        parts = [obj.codigo, obj.nombre]
+        if obj.categoria:
+            parts.append(obj.categoria)
+        if obj.ubicacion:
+            parts.append(obj.ubicacion)
+        return " · ".join(part for part in parts if part)
+
+    class Meta:
+        model = Activo
+        fields = ["id", "codigo", "nombre", "categoria", "ubicacion", "display"]
 
 
 class CategoriaFallaSerializer(serializers.ModelSerializer):

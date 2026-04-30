@@ -247,7 +247,7 @@
                         </a>
                     </li>
                     {% endif %}
-                    {% if ui_access.can_view_logistica %}
+                    {% if ui_access.can_view_fallas %}
                     <li>
                         <a href="{% url 'fallas:dashboard' %}" class="{% if '/fallas/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">

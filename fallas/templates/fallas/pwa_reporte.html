@@ -505,6 +505,7 @@
         pantallaActual: "login",
         sucursales: [],
         categorias: [],
+        activos: [],
         misReportes: [],
         draft: emptyDraft()
       };
@@ -521,6 +522,7 @@
           step: 1,
           sucursal: "",
           categoria: "",
+          activo: "",
           prioridad: "media",
           titulo: "",
           descripcion: "",
@@ -687,6 +689,17 @@
         return state.categorias;
       }
 
+      async function loadActivos(sucursalId) {
+        if (!sucursalId) {
+          state.activos = [];
+          return state.activos;
+        }
+        const response = await apiFetch(`/activos/?sucursal=${encodeURIComponent(sucursalId)}`);
+        const data = response.ok ? await response.json() : [];
+        state.activos = data.results || data;
+        return state.activos;
+      }
+
       async function loadMisReportes() {
         const response = await apiFetch("/reportes/");
         const data = response.ok ? await response.json() : [];
@@ -717,12 +730,24 @@
 
       function getSucursalLabel(id) {
         const item = state.sucursales.find((s) => String(s.id) === String(id));
-        return item ? `${item.codigo || ""} ${item.nombre || ""}`.trim() : "-";
+        return item ? item.nombre : "-";
       }
 
       function getCategoriaLabel(id) {
         const item = state.categorias.find((c) => String(c.id) === String(id));
         return item ? item.nombre : "-";
+      }
+
+      function getActivoLabel(id) {
+        const item = state.activos.find((a) => String(a.id) === String(id));
+        return item ? item.display : "-";
+      }
+
+      async function selectSucursal(value) {
+        state.draft.sucursal = value;
+        state.draft.activo = "";
+        await loadActivos(value);
+        renderNuevoReporte();
       }
 
       function selectPrioridad(value) {
@@ -753,15 +778,24 @@
         if (d.step === 1) {
           if (!state.sucursales.length) await loadSucursales();
           if (!state.categorias.length) await loadCategorias();
+          if (d.sucursal && !state.activos.length) await loadActivos(d.sucursal);
           body = `
             <h1 class="screen-title">Nuevo reporte</h1>
             ${progressDots(1)}
             <div class="field">
               <label for="sucursal">Sucursal</label>
-              <select id="sucursal" onchange="state.draft.sucursal = this.value; renderNuevoReporte()">
+              <select id="sucursal" onchange="selectSucursal(this.value)">
                 <option value="">Selecciona sucursal</option>
-                ${state.sucursales.map((s) => `<option value="${s.id}" ${String(d.sucursal) === String(s.id) ? "selected" : ""}>${esc(`${s.codigo || ""} ${s.nombre || ""}`.trim())}</option>`).join("")}
+                ${state.sucursales.map((s) => `<option value="${s.id}" ${String(d.sucursal) === String(s.id) ? "selected" : ""}>${esc(s.nombre)}</option>`).join("")}
               </select>
+            </div>
+            <div class="field">
+              <label for="activo">Equipo o activo relacionado</label>
+              <select id="activo" onchange="state.draft.activo = this.value">
+                <option value="">Sin equipo específico</option>
+                ${state.activos.map((a) => `<option value="${a.id}" ${String(d.activo) === String(a.id) ? "selected" : ""}>${esc(a.display)}</option>`).join("")}
+              </select>
+              ${d.sucursal && !state.activos.length ? `<p class="muted">No hay activos cargados para esta sucursal.</p>` : ""}
             </div>
             <div class="field">
               <label for="categoria">Categoria</label>
@@ -817,6 +851,7 @@
             ${progressDots(3)}
             <section class="card report-card">
               <div class="kv"><b>Sucursal</b><span>${esc(getSucursalLabel(d.sucursal))}</span></div>
+              <div class="kv"><b>Equipo</b><span>${esc(getActivoLabel(d.activo))}</span></div>
               <div class="kv"><b>Categoria</b><span>${esc(getCategoriaLabel(d.categoria))}</span></div>
               <div class="kv"><b>Prioridad</b><span>${esc(d.prioridad)}</span></div>
               <div class="kv"><b>Ubicacion</b><span>${d.latitud ? "Registrada" : "-"}</span></div>
@@ -932,6 +967,7 @@
         const form = new FormData();
         form.append("sucursal", d.sucursal);
         form.append("categoria", d.categoria);
+        if (d.activo) form.append("activo_relacionado", d.activo);
         form.append("titulo", d.titulo.trim());
         form.append("descripcion", d.descripcion.trim());
         form.append("prioridad", d.prioridad);

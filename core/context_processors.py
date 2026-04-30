@@ -19,12 +19,19 @@ from core.access import (
     can_view_reportes,
     can_view_ventas_eventos,
     can_manage_ventas_eventos,
+    is_repartidor_only,
     is_branch_capture_only,
 )
 
 
 def ui_access(request):
     user = getattr(request, "user", None)
+    can_view_fallas = False
+    if user and user.is_authenticated:
+        if user.is_superuser or user.is_staff:
+            can_view_fallas = True
+        elif not is_repartidor_only(user):
+            can_view_fallas = user.groups.filter(name__in=["compras_logistica", "dg"]).exists()
     return {
         "ui_access": {
             "can_view_maestros": can_view_maestros(user),
@@ -47,6 +54,8 @@ def ui_access(request):
             "can_capture_piso": can_capture_piso(user),
             "can_view_ventas_eventos": can_view_ventas_eventos(user),
             "can_manage_ventas_eventos": can_manage_ventas_eventos(user),
+            "can_view_fallas": can_view_fallas,
             "branch_capture_only": is_branch_capture_only(user),
+            "repartidor_only": is_repartidor_only(user),
         }
     }

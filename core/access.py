@@ -9,6 +9,7 @@ ROLE_VENTAS = "VENTAS"
 ROLE_LOGISTICA = "LOGISTICA"
 ROLE_RRHH = "RRHH"
 ROLE_LECTURA = "LECTURA"
+ROLE_REPARTIDOR = "repartidor"
 
 ROLE_ORDER = [
     ROLE_DG,
@@ -57,6 +58,29 @@ def _is_locked(user: AbstractBaseUser, lock_field: str) -> bool:
     if not profile:
         return False
     return bool(getattr(profile, lock_field, False))
+
+
+def is_repartidor_only(user: AbstractBaseUser) -> bool:
+    if not user or not user.is_authenticated or user.is_superuser or user.is_staff:
+        return False
+    groups = _group_names(user)
+    if not (ROLE_REPARTIDOR in groups or hasattr(user, "repartidor_logistica")):
+        return False
+    elevated = {
+        ROLE_DG,
+        ROLE_ADMIN,
+        ROLE_COMPRAS,
+        ROLE_ALMACEN,
+        ROLE_PRODUCCION,
+        ROLE_VENTAS,
+        ROLE_LOGISTICA,
+        ROLE_RRHH,
+        ROLE_LECTURA,
+        "compras_logistica",
+        "supervisor_logistica",
+        "personal_sucursal",
+    }
+    return not bool(groups.intersection(elevated))
 
 
 def primary_role(user: AbstractBaseUser) -> str:
@@ -180,9 +204,9 @@ def can_manage_ventas_eventos(user: AbstractBaseUser) -> bool:
 
 
 def can_view_logistica(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_LOGISTICA, ROLE_LECTURA) and not _is_locked(
-        user, "lock_logistica"
-    )
+    if is_repartidor_only(user):
+        return False
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_LOGISTICA, ROLE_LECTURA) and not _is_locked(user, "lock_logistica")
 
 
 def can_manage_logistica(user: AbstractBaseUser) -> bool:
@@ -198,6 +222,8 @@ def can_manage_rrhh(user: AbstractBaseUser) -> bool:
 
 
 def can_capture_piso(user: AbstractBaseUser) -> bool:
+    if is_repartidor_only(user):
+        return False
     return has_any_role(
         user,
         ROLE_DG,

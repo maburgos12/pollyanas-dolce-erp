@@ -12,6 +12,7 @@ urlpatterns = [
     path("categorias/", views.CategoriaFallaListView.as_view(), name="categorias"),
     path("categorias/todas/", views.CategoriaFallaAdminView.as_view(), name="categorias-admin"),
     path("categorias/<int:pk>/", views.CategoriaFallaUpdateView.as_view(), name="categoria-detail"),
+    path("activos/", views.ActivoFallaListView.as_view(), name="activos"),
     path("me/", views.perfil_actual, name="perfil-actual"),
     path("reportes/", views.ReporteFallaListCreateView.as_view(), name="reportes-list"),
     path("reportes/<int:pk>/", views.ReporteFallaDetailView.as_view(), name="reporte-detail"),

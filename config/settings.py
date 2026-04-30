@@ -180,6 +180,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "core.middleware.BranchCaptureOnlyMiddleware",
+    "core.middleware.RepartidorOnlyMiddleware",
     "core.middleware.PerformanceLoggingMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
