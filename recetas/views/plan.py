@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, connection, transaction
 from django.db.models.deletion import ProtectedError
@@ -9363,6 +9364,11 @@ def _apply_plan_consumption(plan: PlanProduccion, acted_by) -> dict[str, int]:
 
 
 def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
+    cache_key = f"plan-produccion:explosion:{plan.id}:{plan.actualizado_en.isoformat() if plan.actualizado_en else ''}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     items = (
         plan.items.select_related("receta")
         .prefetch_related(
@@ -9581,7 +9587,7 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
             alertas_capacidad += 1
     costo_total = sum((row["costo_total"] for row in insumos), Decimal("0"))
 
-    return {
+    result = {
         "items_detalle": items_detalle,
         "insumos": insumos,
         "costo_total": costo_total,
@@ -9590,6 +9596,8 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
         "lineas_sin_match": lineas_sin_match,
         "alertas_capacidad": alertas_capacidad,
     }
+    cache.set(cache_key, result, 300)
+    return result
 
 
 def _plan_vs_pronostico(plan: PlanProduccion) -> Dict[str, Any]:
@@ -9683,6 +9691,11 @@ def _periodo_mrp_resumen(
     if focus_kind_norm not in {"quality", "master", "master_missing", "chain"}:
         focus_kind_norm = ""
         focus_key_norm = ""
+    cache_key = f"plan-produccion:mrp-periodo:{periodo}:{periodo_tipo}:{focus_kind_norm}:{focus_key_norm}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         year, month = periodo.split("-")
         year_i = int(year)
@@ -9708,7 +9721,7 @@ def _periodo_mrp_resumen(
 
     plans = list(plans_qs.only("id", "nombre", "fecha_produccion"))
     if not plans:
-        return {
+        result = {
             "periodo": periodo,
             "periodo_tipo": periodo_tipo_norm,
             "planes_count": 0,
@@ -9724,6 +9737,8 @@ def _periodo_mrp_resumen(
             "selected_focus_key": "",
             "focus_summary": None,
         }
+        cache.set(cache_key, result, 300)
+        return result
 
     plan_items_map = {
         row["plan_id"]: int(row["items_count"] or 0)
@@ -10178,7 +10193,7 @@ def _periodo_mrp_resumen(
     if selected_focus_kind == "master" and selected_focus_key:
         article_class_cards = [card for card in article_class_cards if str(card.get("key") or "") == selected_focus_key]
 
-    return {
+    result = {
         "periodo": periodo,
         "periodo_tipo": periodo_tipo_norm,
         "planes_count": len(plans),
@@ -10215,6 +10230,8 @@ def _periodo_mrp_resumen(
         "selected_focus_key": selected_focus_key,
         "focus_summary": focus_summary,
     }
+    cache.set(cache_key, result, 300)
+    return result
 
 
 def _plan_enterprise_board(
@@ -16536,10 +16553,15 @@ def _plan_trunk_handoff_rows(
 
 
 def _ventas_historicas_plan_summary() -> dict[str, Any]:
+    cache_key = f"plan-produccion:ventas-historicas-summary:{timezone.localdate().isoformat()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     rows_qs = VentaHistorica.objects.select_related("sucursal", "receta")
     total_rows = rows_qs.count()
     if total_rows == 0:
-        return {
+        result = {
             "available": False,
             "status": "Sin histórico",
             "tone": "warning",
@@ -16555,6 +16577,8 @@ def _ventas_historicas_plan_summary() -> dict[str, Any]:
             "top_branches": [],
             "top_recipes": [],
         }
+        cache.set(cache_key, result, 300)
+        return result
 
     first_date = rows_qs.order_by("fecha").values_list("fecha", flat=True).first()
     last_date = rows_qs.order_by("-fecha").values_list("fecha", flat=True).first()
@@ -16575,7 +16599,7 @@ def _ventas_historicas_plan_summary() -> dict[str, Any]:
         .annotate(total=Sum("cantidad"))
         .order_by("-total", "receta__nombre")[:5]
     )
-    return {
+    result = {
         "available": True,
         "status": "Cobertura cerrada" if missing_days == 0 else "Cobertura parcial",
         "tone": "success" if missing_days == 0 else "warning",
@@ -16599,6 +16623,8 @@ def _ventas_historicas_plan_summary() -> dict[str, Any]:
         "top_branches": top_branches,
         "top_recipes": top_recipes,
     }
+    cache.set(cache_key, result, 300)
+    return result
 
 
 def _reabasto_demand_history_summary(fecha_operacion: date) -> dict[str, Any]:
@@ -19315,5 +19341,3 @@ def _generar_solicitudes_compra_desde_plan(
         "oc_creadas": oc_creadas,
         "oc_actualizadas": oc_actualizadas,
     }
-
-
