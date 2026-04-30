@@ -49,6 +49,9 @@ class RRHHEmpleadosView(_RRHHBaseView):
             qs = qs.filter(
                 Q(nombre__icontains=q)
                 | Q(codigo__icontains=q)
+                | Q(rfc__icontains=q)
+                | Q(curp__icontains=q)
+                | Q(nss__icontains=q)
                 | Q(area__icontains=q)
                 | Q(puesto__icontains=q)
             )
@@ -167,6 +170,13 @@ class RRHHNominaLineasView(_RRHHBaseView):
         with transaction.atomic():
             linea, _ = NominaLinea.objects.get_or_create(periodo=periodo, empleado=empleado)
             linea.dias_trabajados = payload["dias_trabajados"]
+            linea.horas_trabajadas = payload.get("horas_trabajadas") or 0
+            linea.horas_dia = payload.get("horas_dia") or 0
+            linea.horas_extra = payload.get("horas_extra") or 0
+            linea.ausencias = payload.get("ausencias") or 0
+            linea.incapacidades = payload.get("incapacidades") or 0
+            linea.sdi = payload.get("sdi") or 0
+            linea.sbc = payload.get("sbc") or 0
             linea.salario_base = payload.get("salario_base") or 0
             linea.bonos = payload.get("bonos") or 0
             linea.descuentos = payload.get("descuentos") or 0

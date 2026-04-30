@@ -549,12 +549,49 @@ def empleados(request):
         if not can_manage_rrhh(request.user):
             raise PermissionDenied("No tienes permisos para gestionar RRHH")
 
+        action = (request.POST.get("action") or "create").strip()
         nombre = (request.POST.get("nombre") or "").strip()
         if not nombre:
             messages.error(request, "Nombre del empleado es obligatorio.")
+        elif action == "update":
+            empleado_id = (request.POST.get("empleado_id") or "").strip()
+            empleado = get_object_or_404(Empleado, pk=int(empleado_id)) if empleado_id.isdigit() else None
+            if not empleado:
+                messages.error(request, "Selecciona un empleado válido para editar.")
+            else:
+                empleado.nombre = nombre
+                empleado.rfc = (request.POST.get("rfc") or "").strip()
+                empleado.curp = (request.POST.get("curp") or "").strip()
+                empleado.nss = (request.POST.get("nss") or "").strip()
+                empleado.area = (request.POST.get("area") or "").strip()
+                empleado.puesto = (request.POST.get("puesto") or "").strip()
+                empleado.tipo_contrato = (request.POST.get("tipo_contrato") or Empleado.CONTRATO_FIJO).strip()
+                empleado.fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso")) or empleado.fecha_ingreso
+                empleado.salario_diario = _parse_decimal(request.POST.get("salario_diario"))
+                empleado.telefono = (request.POST.get("telefono") or "").strip()
+                empleado.email = (request.POST.get("email") or "").strip()
+                empleado.sucursal = (request.POST.get("sucursal") or "").strip()
+                empleado.activo = request.POST.get("activo") == "on"
+                empleado.save()
+                log_event(
+                    request.user,
+                    "UPDATE",
+                    "rrhh.Empleado",
+                    str(empleado.id),
+                    {
+                        "codigo": empleado.codigo,
+                        "nombre": empleado.nombre,
+                        "activo": empleado.activo,
+                    },
+                )
+                messages.success(request, f"Empleado {empleado.nombre} actualizado.")
+                return redirect("rrhh:empleados")
         else:
             empleado = Empleado.objects.create(
                 nombre=nombre,
+                rfc=(request.POST.get("rfc") or "").strip(),
+                curp=(request.POST.get("curp") or "").strip(),
+                nss=(request.POST.get("nss") or "").strip(),
                 area=(request.POST.get("area") or "").strip(),
                 puesto=(request.POST.get("puesto") or "").strip(),
                 tipo_contrato=(request.POST.get("tipo_contrato") or Empleado.CONTRATO_FIJO).strip(),
@@ -587,6 +624,9 @@ def empleados(request):
         qs = qs.filter(
             Q(nombre__icontains=q)
             | Q(codigo__icontains=q)
+            | Q(rfc__icontains=q)
+            | Q(curp__icontains=q)
+            | Q(nss__icontains=q)
             | Q(area__icontains=q)
             | Q(puesto__icontains=q)
         )
@@ -605,6 +645,7 @@ def empleados(request):
 
     empleados_total = Empleado.objects.count()
     empleados_activos = Empleado.objects.filter(activo=True).count()
+    empleados_inactivos = max(empleados_total - empleados_activos, 0)
     nominas_total = NominaPeriodo.objects.count()
     nominas_borrador = NominaPeriodo.objects.filter(estatus=NominaPeriodo.ESTATUS_BORRADOR).count()
     nominas_cerradas = NominaPeriodo.objects.filter(estatus=NominaPeriodo.ESTATUS_CERRADA).count()
@@ -653,6 +694,7 @@ def empleados(request):
         "enterprise_focus": enterprise_focus,
         "total_empleados": empleados_total,
         "total_activos": empleados_activos,
+        "total_inactivos": empleados_inactivos,
         "total_nominas": nominas_total,
         "contrato_choices": Empleado.CONTRATO_CHOICES,
         "enterprise_chain": enterprise_chain,

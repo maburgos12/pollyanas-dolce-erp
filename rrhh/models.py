@@ -23,6 +23,9 @@ class Empleado(models.Model):
     codigo = models.CharField(max_length=40, unique=True, blank=True)
     nombre = models.CharField(max_length=180)
     nombre_normalizado = models.CharField(max_length=180, db_index=True, editable=False)
+    rfc = models.CharField(max_length=20, blank=True, default="", db_index=True)
+    curp = models.CharField(max_length=24, blank=True, default="", db_index=True)
+    nss = models.CharField(max_length=30, blank=True, default="", db_index=True)
     area = models.CharField(max_length=120, blank=True, default="")
     puesto = models.CharField(max_length=120, blank=True, default="")
     tipo_contrato = models.CharField(max_length=20, choices=CONTRATO_CHOICES, default=CONTRATO_FIJO)
@@ -128,6 +131,13 @@ class NominaLinea(models.Model):
     periodo = models.ForeignKey(NominaPeriodo, on_delete=models.CASCADE, related_name="lineas")
     empleado = models.ForeignKey(Empleado, on_delete=models.PROTECT, related_name="lineas_nomina")
     dias_trabajados = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    horas_trabajadas = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"))
+    horas_dia = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    horas_extra = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"))
+    ausencias = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    incapacidades = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    sdi = models.DecimalField("Salario diario integrado", max_digits=12, decimal_places=2, default=Decimal("0"))
+    sbc = models.DecimalField("Salario base cotización", max_digits=12, decimal_places=2, default=Decimal("0"))
     salario_base = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     bonos = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     descuentos = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
@@ -152,3 +162,73 @@ class NominaLinea(models.Model):
         self.total_percepciones = (self.salario_base or Decimal("0")) + (self.bonos or Decimal("0"))
         self.neto_calculado = self.total_percepciones - (self.descuentos or Decimal("0"))
         super().save(*args, **kwargs)
+
+
+class NominaConceptoLinea(models.Model):
+    TIPO_PERCEPCION = "PERCEPCION"
+    TIPO_DEDUCCION = "DEDUCCION"
+    TIPO_OBLIGACION = "OBLIGACION"
+    TIPO_CHOICES = [
+        (TIPO_PERCEPCION, "Percepción"),
+        (TIPO_DEDUCCION, "Deducción"),
+        (TIPO_OBLIGACION, "Obligación"),
+    ]
+
+    linea = models.ForeignKey(NominaLinea, on_delete=models.CASCADE, related_name="conceptos")
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    codigo_concepto = models.CharField(max_length=20, blank=True, default="")
+    nombre = models.CharField(max_length=180)
+    valor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    importe = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["linea__empleado__nombre", "tipo", "codigo_concepto", "id"]
+        verbose_name = "Concepto de línea nómina"
+        verbose_name_plural = "Conceptos de líneas nómina"
+
+    def __str__(self) -> str:
+        return f"{self.linea} · {self.codigo_concepto} {self.nombre}"
+
+
+class NominaImportacion(models.Model):
+    ESTATUS_SIMULADA = "SIMULADA"
+    ESTATUS_IMPORTADA = "IMPORTADA"
+    ESTATUS_ERROR = "ERROR"
+    ESTATUS_CHOICES = [
+        (ESTATUS_SIMULADA, "Simulada"),
+        (ESTATUS_IMPORTADA, "Importada"),
+        (ESTATUS_ERROR, "Error"),
+    ]
+
+    archivo_nombre = models.CharField(max_length=255)
+    archivo_hash = models.CharField(max_length=64, db_index=True)
+    periodo = models.ForeignKey(
+        NominaPeriodo,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="importaciones",
+    )
+    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_SIMULADA)
+    empleados_detectados = models.PositiveIntegerField(default=0)
+    total_percepciones = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    total_deducciones = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    total_neto = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    resumen = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="nomina_importaciones",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Importación de nómina"
+        verbose_name_plural = "Importaciones de nómina"
+
+    def __str__(self) -> str:
+        return f"{self.archivo_nombre} · {self.estatus}"
