@@ -18,7 +18,7 @@ class CategoriaFallaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CategoriaFalla
-        fields = ["id", "nombre", "tipo", "tipo_display"]
+        fields = ["id", "nombre", "tipo", "tipo_display", "activo", "orden"]
 
 
 class BitacoraSerializer(serializers.ModelSerializer):

@@ -1,187 +1,1010 @@
 {% load static %}
 <!doctype html>
 <html lang="es-MX">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#8B2252">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Reportar Falla - Pollyana's Dolce</title>
-  <link rel="manifest" href="{% static 'fallas/manifest.json' %}">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-  <style>
-    :root { --wine:#8B2252; --gold:#C9A84C; --bg:#f6f1f4; --card:#fff; --text:#25141d; --muted:#70636a; --danger:#dc2626; --success:#16a34a; }
-    * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; background:var(--bg); color:var(--text); font-family:"Nunito", sans-serif; }
-    header { position:sticky; top:0; z-index:2; background:var(--wine); color:#fff; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.18); }
-    h1 { margin:0; font-family:"Playfair Display", serif; font-size:24px; letter-spacing:0; }
-    main { width:100%; max-width:480px; margin:0 auto; padding:16px 16px 32px; }
-    .card { background:var(--card); border:1px solid rgba(139,34,82,.12); border-radius:12px; padding:16px; margin-bottom:14px; box-shadow:0 2px 10px rgba(39,18,29,.06); }
-    h2 { margin:0 0 12px; color:var(--wine); font-size:13px; text-transform:uppercase; letter-spacing:.04em; }
-    label { display:block; margin:0 0 6px; color:var(--muted); font-size:14px; font-weight:800; }
-    input, select, textarea { width:100%; min-height:48px; border:1px solid #ddd3d8; border-radius:10px; background:#fff; padding:11px 12px; color:var(--text); font:inherit; }
-    textarea { min-height:112px; resize:vertical; }
-    .field { margin-bottom:12px; }
-    .priority-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-    .priority { min-height:48px; border:2px solid #ddd3d8; border-radius:10px; background:#fff; color:var(--text); font-weight:800; }
-    .priority.is-active { border-color:var(--wine); color:var(--wine); background:#fbf3f7; }
-    .photo-box { position:relative; display:grid; place-items:center; min-height:150px; border:2px dashed #cbbbc3; border-radius:12px; background:#fbf8fa; color:var(--muted); text-align:center; padding:20px; }
-    .photo-box input { position:absolute; inset:0; opacity:0; cursor:pointer; }
-    #preview { display:none; width:100%; max-height:260px; object-fit:cover; margin-top:12px; border-radius:10px; }
-    .gps { display:inline-flex; align-items:center; min-height:32px; padding:5px 10px; border-radius:999px; background:#ecfdf3; color:#166534; font-size:13px; font-weight:700; }
-    .gps.error { background:#fef2f2; color:#991b1b; }
-    .submit { width:100%; min-height:54px; border:0; border-radius:12px; background:var(--wine); color:#fff; font:inherit; font-size:16px; font-weight:900; }
-    .submit:disabled { background:#b8aeb3; }
-    .toast { position:fixed; left:16px; right:16px; bottom:18px; z-index:4; display:none; padding:13px 16px; border-radius:12px; background:#25141d; color:#fff; font-weight:800; text-align:center; }
-    .toast.show { display:block; }
-    .toast.success { background:var(--success); }
-    .toast.error { background:var(--danger); }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Reportar Falla</h1>
-    <div id="branch-label" style="font-size:13px; opacity:.85;">Pollyana's Dolce</div>
-  </header>
-  <main>
-    <section class="card">
-      <h2>Sucursal</h2>
-      <div class="field">
-        <label for="sucursal">Sucursal *</label>
-        <select id="sucursal"><option value="">Cargando sucursales...</option></select>
-      </div>
-      <div id="gps" class="gps">Obteniendo ubicación GPS...</div>
-    </section>
-    <section class="card">
-      <h2>Tipo de falla</h2>
-      <div class="field">
-        <label for="categoria">Categoría *</label>
-        <select id="categoria"><option value="">Cargando categorías...</option></select>
-      </div>
-      <div class="field">
-        <label for="titulo">Título *</label>
-        <input id="titulo" maxlength="200" placeholder="Ej. Vitrina no enfría">
-      </div>
-      <div class="field">
-        <label for="descripcion">Descripción *</label>
-        <textarea id="descripcion" placeholder="Describe qué pasó, cuándo inició y cómo afecta la operación."></textarea>
-      </div>
-    </section>
-    <section class="card">
-      <h2>Prioridad</h2>
-      <div class="priority-grid">
-        <button type="button" class="priority" data-priority="baja">Baja</button>
-        <button type="button" class="priority is-active" data-priority="media">Media</button>
-        <button type="button" class="priority" data-priority="alta">Alta</button>
-        <button type="button" class="priority" data-priority="critica">Crítica</button>
-      </div>
-    </section>
-    <section class="card">
-      <h2>Evidencia fotográfica</h2>
-      <div class="photo-box">
-        <div><strong>Toca para tomar foto</strong><br><span>o elige una imagen</span></div>
-        <input id="foto" type="file" accept="image/*" capture="environment">
-      </div>
-      <img id="preview" alt="Vista previa">
-    </section>
-    <button id="enviar" class="submit" disabled>Enviar reporte</button>
-  </main>
-  <div id="toast" class="toast"></div>
-  <script>
-    const API = "/api/fallas";
-    const token = localStorage.getItem("pd_logistica_access") || localStorage.getItem("fallas_jwt") || localStorage.getItem("access_token") || "";
-    const csrf = "{{ csrf_token }}";
-    let latitud = null;
-    let longitud = null;
-    let prioridad = "media";
-    let foto = null;
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#8B2252">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Pollyana's Fallas</title>
+    <link rel="manifest" href="{% static 'fallas/manifest.json' %}">
+    <link rel="icon" href="{% static 'fallas/icons/icon-192.png' %}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --bg: #0f0f14;
+        --surface: #1a1a24;
+        --border: #2a2a38;
+        --wine: #8B2252;
+        --gold: #C9A84C;
+        --text: #e8e0d5;
+        --text-muted: #9b9490;
+        --danger: #e64f64;
+        --warning: #e6b84f;
+        --success: #51b56f;
+        --info: #4f8ee6;
+      }
 
-    function authHeaders(json=false) {
-      const headers = {"X-CSRFToken": csrf};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      if (json) headers["Content-Type"] = "application/json";
-      return headers;
-    }
-    function toast(message, type="") {
-      const el = document.getElementById("toast");
-      el.textContent = message;
-      el.className = `toast show ${type}`;
-      setTimeout(() => el.classList.remove("show"), 3500);
-    }
-    async function loadSelect(url, id, label) {
-      const res = await fetch(url, {headers: authHeaders()});
-      const data = await res.json();
-      const items = data.results || data;
-      const sel = document.getElementById(id);
-      sel.innerHTML = `<option value="">Selecciona ${label}...</option>`;
-      items.forEach(item => sel.insertAdjacentHTML("beforeend", `<option value="${item.id}">${item.nombre}</option>`));
-    }
-    function validate() {
-      const ok = document.getElementById("sucursal").value && document.getElementById("categoria").value &&
-        document.getElementById("titulo").value.trim().length >= 5 &&
-        document.getElementById("descripcion").value.trim().length >= 10 && foto;
-      document.getElementById("enviar").disabled = !ok;
-    }
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(pos => {
-        latitud = pos.coords.latitude;
-        longitud = pos.coords.longitude;
-        document.getElementById("gps").textContent = `GPS capturado (+/- ${Math.round(pos.coords.accuracy)}m)`;
-      }, () => {
-        const el = document.getElementById("gps");
-        el.textContent = "GPS no disponible";
-        el.classList.add("error");
-      }, {timeout:10000, maximumAge:60000});
-    }
-    document.querySelectorAll(".priority").forEach(btn => btn.addEventListener("click", () => {
-      document.querySelectorAll(".priority").forEach(item => item.classList.remove("is-active"));
-      btn.classList.add("is-active");
-      prioridad = btn.dataset.priority;
-    }));
-    document.getElementById("foto").addEventListener("change", event => {
-      foto = event.target.files[0] || null;
-      if (foto) {
-        const preview = document.getElementById("preview");
-        preview.src = URL.createObjectURL(foto);
-        preview.style.display = "block";
+      * { box-sizing: border-box; }
+
+      html, body {
+        min-height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Nunito", sans-serif;
       }
-      validate();
-    });
-    ["sucursal", "categoria", "titulo", "descripcion"].forEach(id => {
-      document.getElementById(id).addEventListener("input", validate);
-      document.getElementById(id).addEventListener("change", validate);
-    });
-    document.getElementById("enviar").addEventListener("click", async () => {
-      const fd = new FormData();
-      fd.append("sucursal", document.getElementById("sucursal").value);
-      fd.append("categoria", document.getElementById("categoria").value);
-      fd.append("titulo", document.getElementById("titulo").value.trim());
-      fd.append("descripcion", document.getElementById("descripcion").value.trim());
-      fd.append("prioridad", prioridad);
-      fd.append("foto_evidencia", foto);
-      if (latitud !== null) fd.append("latitud", latitud);
-      if (longitud !== null) fd.append("longitud", longitud);
-      const res = await fetch(`${API}/reportes/`, {method:"POST", headers:authHeaders(), body:fd});
-      if (res.ok) {
-        const data = await res.json();
-        toast(`Reporte #${data.id} enviado correctamente`, "success");
-        document.getElementById("titulo").value = "";
-        document.getElementById("descripcion").value = "";
-        document.getElementById("preview").style.display = "none";
-        document.getElementById("foto").value = "";
-        foto = null;
-        validate();
-      } else {
-        const error = await res.json();
-        toast(Object.values(error).flat().join(" ") || "No se pudo enviar el reporte.", "error");
+
+      body {
+        display: flex;
+        justify-content: center;
+        padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
       }
-    });
-    loadSelect(`${API}/sucursales/`, "sucursal", "tu sucursal").catch(() => toast("No se pudieron cargar sucursales.", "error"));
-    loadSelect(`${API}/categorias/`, "categoria", "una categoría").catch(() => toast("No se pudieron cargar categorías.", "error"));
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("{% static 'fallas/sw.js' %}").catch(() => {});
-  </script>
-</body>
+
+      button, input, textarea, select { font: inherit; }
+
+      button {
+        min-height: 48px;
+        border: 0;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: .55;
+      }
+
+      #app {
+        width: 100%;
+        max-width: 430px;
+        min-height: 100vh;
+        padding: 18px 16px 74px;
+        opacity: 1;
+        transition: opacity .2s ease;
+      }
+
+      #app.is-changing { opacity: 0; }
+
+      .brand-title {
+        margin: 0;
+        color: var(--text);
+        font-family: "Playfair Display", serif;
+        font-size: 38px;
+        line-height: 1;
+      }
+
+      .brand-subtitle {
+        margin: 8px 0 0;
+        color: var(--gold);
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .login-wrap {
+        display: flex;
+        min-height: calc(100vh - 92px);
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      .panel, .card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+      }
+
+      .panel {
+        margin-top: 30px;
+        padding: 18px;
+      }
+
+      .field {
+        display: grid;
+        gap: 7px;
+        margin-bottom: 14px;
+      }
+
+      label {
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      input, textarea, select {
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #111118;
+        color: var(--text);
+        outline: none;
+        padding: 12px 13px;
+      }
+
+      textarea {
+        min-height: 112px;
+        resize: vertical;
+      }
+
+      input:focus, textarea:focus, select:focus { border-color: var(--gold); }
+
+      .primary-btn {
+        width: 100%;
+        border-radius: 10px;
+        background: var(--wine);
+        color: #fff;
+        font-weight: 800;
+        padding: 14px;
+      }
+
+      .secondary-btn {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: transparent;
+        color: var(--text);
+        font-weight: 800;
+        padding: 12px 14px;
+      }
+
+      .error {
+        margin: 10px 0 0;
+        color: var(--danger);
+        font-weight: 800;
+      }
+
+      .success {
+        margin: 10px 0 0;
+        color: var(--success);
+        font-weight: 800;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .mini-brand {
+        font-family: "Playfair Display", serif;
+        font-size: 22px;
+      }
+
+      .hello {
+        margin: 3px 0 0;
+        color: var(--text-muted);
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .logout {
+        min-height: 40px;
+        border-radius: 999px;
+        background: #261521;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 800;
+        padding: 8px 12px;
+      }
+
+      .unit-line {
+        margin: 0 0 20px;
+        color: var(--gold);
+        font-weight: 800;
+      }
+
+      .dash-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .dash-btn {
+        position: relative;
+        min-height: 90px;
+        border: 2px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 16px;
+        font-weight: 800;
+        padding: 14px 10px;
+      }
+
+      .dash-btn:hover, .dash-btn:focus { border-color: var(--wine); }
+
+      .badge {
+        display: inline-flex;
+        min-width: 24px;
+        height: 24px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background: var(--danger);
+        color: white;
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .dash-btn .badge {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+      }
+
+      .footer {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        max-width: 430px;
+        margin: 0 auto;
+        border-top: 1px solid var(--border);
+        background: rgba(15, 15, 20, .94);
+        color: var(--text-muted);
+        text-align: center;
+        font-size: 12px;
+        padding: 13px 16px calc(13px + env(safe-area-inset-bottom));
+      }
+
+      .screen-title {
+        margin: 0 0 14px;
+        font-family: "Playfair Display", serif;
+        font-size: 28px;
+        line-height: 1.08;
+      }
+
+      .progress {
+        display: flex;
+        gap: 9px;
+        margin: 0 0 18px;
+      }
+
+      .dot {
+        width: 34px;
+        height: 7px;
+        border-radius: 999px;
+        background: var(--border);
+      }
+
+      .dot.active { background: var(--gold); }
+
+      .card-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .option-card, .severity-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        color: var(--text);
+        font-weight: 800;
+        padding: 13px;
+      }
+
+      .option-card {
+        min-height: 74px;
+      }
+
+      .option-card.selected {
+        border-color: var(--wine);
+        background: #2a1423;
+      }
+
+      .severity-row {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .severity-card {
+        text-align: left;
+      }
+
+      .severity-card.selected { border-color: var(--gold); }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .report-card {
+        margin-bottom: 10px;
+        padding: 14px;
+      }
+
+      .report-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: flex-start;
+      }
+
+      .report-title {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 900;
+      }
+
+      .muted {
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+
+      .status {
+        border-radius: 999px;
+        color: white;
+        font-size: 12px;
+        font-weight: 900;
+        padding: 5px 9px;
+        white-space: nowrap;
+      }
+
+      .status.abierto { background: var(--danger); }
+      .status.en_revision { background: var(--gold); color: #17120a; }
+      .status.en_proceso { background: var(--warning); color: #17120a; }
+      .status.resuelto { background: var(--success); }
+      .status.cerrado { background: #676771; }
+      .status.cancelado { background: #676771; }
+
+      .detail {
+        display: none;
+        margin-top: 13px;
+        border-top: 1px solid var(--border);
+        padding-top: 13px;
+      }
+
+      .report-card.expanded .detail { display: block; }
+
+      .kv {
+        display: grid;
+        grid-template-columns: 116px 1fr;
+        gap: 8px;
+        margin: 7px 0;
+        font-size: 14px;
+      }
+
+      .kv b { color: var(--gold); }
+
+      .empty {
+        border: 1px dashed var(--border);
+        border-radius: 12px;
+        color: var(--text-muted);
+        padding: 22px;
+        text-align: center;
+      }
+
+      .confirm {
+        margin-top: 28px;
+        text-align: center;
+      }
+
+      .confirm-actions {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .confirm-mark {
+        font-size: 54px;
+        margin-bottom: 8px;
+      }
+
+      .gps-locked {
+        pointer-events: none;
+        user-select: none;
+      }
+
+      .gps-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 15, 20, .82);
+        padding: 18px;
+      }
+
+      .gps-card {
+        width: min(100%, 390px);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--surface);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, .45);
+        padding: 22px;
+        text-align: center;
+      }
+
+      .gps-icon {
+        font-size: 42px;
+        margin-bottom: 8px;
+      }
+
+      .gps-title {
+        margin: 0 0 10px;
+        font-family: "Playfair Display", serif;
+        font-size: 26px;
+        line-height: 1.1;
+      }
+
+      .gps-message {
+        margin: 0 0 16px;
+        color: var(--text-muted);
+        font-size: 15px;
+        line-height: 1.45;
+        white-space: pre-line;
+      }
+
+      .gps-registered {
+        margin: 8px 0 12px;
+        color: var(--success);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .file-picker { display: grid; gap: 8px; }
+
+      .file-input {
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        overflow: hidden;
+        position: absolute;
+        pointer-events: none;
+      }
+
+      .file-trigger {
+        display: flex;
+        min-height: 48px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #111118;
+        color: var(--text);
+        font-weight: 900;
+        padding: 12px 13px;
+      }
+
+      .file-trigger.loaded {
+        border-color: var(--success);
+        color: var(--success);
+      }
+
+      .thumb {
+        width: 100%;
+        max-height: 220px;
+        object-fit: cover;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      const API = "/api/fallas";
+      const AUTH_API = "/api/logistica";
+      const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
+      const PHOTO_CAPTURE_SESSION_MS = 10 * 60 * 1000;
+      const app = document.getElementById("app");
+      const state = {
+        token: localStorage.getItem("pd_logistica_access") || "",
+        refreshToken: localStorage.getItem("pd_logistica_refresh") || "",
+        perfil: null,
+        pantallaActual: "login",
+        sucursales: [],
+        categorias: [],
+        misReportes: [],
+        draft: emptyDraft()
+      };
+
+      const prioridades = [
+        {label: "Baja", value: "baja", color: "var(--info)"},
+        {label: "Media", value: "media", color: "var(--warning)"},
+        {label: "Alta", value: "alta", color: "#f97316"},
+        {label: "Critica", value: "critica", color: "var(--danger)"}
+      ];
+
+      function emptyDraft() {
+        return {
+          step: 1,
+          sucursal: "",
+          categoria: "",
+          prioridad: "media",
+          titulo: "",
+          descripcion: "",
+          foto: null,
+          fotoPreview: "",
+          fotoError: "",
+          latitud: "",
+          longitud: "",
+          geoStatus: "idle"
+        };
+      }
+
+      function esc(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      function fmt(value) {
+        if (!value) return "-";
+        return new Intl.DateTimeFormat("es-MX", {dateStyle: "medium", timeStyle: "short"}).format(new Date(value));
+      }
+
+      function apiErrorMessage(error, fallback) {
+        if (!error) return fallback;
+        if (error.mensaje) return error.mensaje;
+        if (error.detail) return error.detail;
+        if (Array.isArray(error.non_field_errors) && error.non_field_errors.length) return error.non_field_errors[0];
+        const firstKey = Object.keys(error || {})[0];
+        if (!firstKey) return fallback;
+        const value = error[firstKey];
+        if (Array.isArray(value)) return `${firstKey}: ${value[0]}`;
+        if (typeof value === "string") return `${firstKey}: ${value}`;
+        return fallback;
+      }
+
+      async function apiFetch(path, options = {}) {
+        const headers = {...(options.headers || {})};
+        if (state.token) headers.Authorization = `Bearer ${state.token}`;
+        const response = await fetch(`${API}${path}`, {...options, headers});
+        if (response.status === 401) {
+          if (state.refreshToken && !options._retry) {
+            const refreshed = await fetch(`${AUTH_API}/auth/token/refresh/`, {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({refresh: state.refreshToken})
+            });
+            if (refreshed.ok) {
+              const data = await refreshed.json();
+              state.token = data.access;
+              localStorage.setItem("pd_logistica_access", data.access);
+              return apiFetch(path, {...options, _retry: true});
+            }
+          }
+          logout(false);
+          throw new Error("Sesion expirada");
+        }
+        return response;
+      }
+
+      function setTokens(data) {
+        state.token = data.access;
+        state.refreshToken = data.refresh;
+        localStorage.setItem("pd_logistica_access", data.access);
+        localStorage.setItem("pd_logistica_refresh", data.refresh);
+      }
+
+      function logout(render = true) {
+        state.token = "";
+        state.refreshToken = "";
+        state.perfil = null;
+        localStorage.removeItem("pd_logistica_access");
+        localStorage.removeItem("pd_logistica_refresh");
+        if (render) showScreen("login");
+      }
+
+      function render(html) {
+        app.classList.add("is-changing");
+        window.setTimeout(() => {
+          app.innerHTML = html;
+          app.classList.remove("is-changing");
+        }, 120);
+      }
+
+      function shell(content) {
+        const nombre = esc(state.perfil?.nombre || "Sucursal");
+        return `
+          <div class="topbar">
+            <div>
+              <div class="mini-brand">Pollyana's</div>
+              <p class="hello">Hola, ${nombre}</p>
+            </div>
+            <button class="logout" onclick="logout()">Salir</button>
+          </div>
+          ${content}
+          <div class="footer">Pollyana's Dolce © 2026</div>
+        `;
+      }
+
+      async function showScreen(nombre) {
+        state.pantallaActual = nombre;
+        if (nombre === "login") return renderLogin();
+        if (!state.perfil) await loadPerfil();
+        if (nombre === "dashboard") return renderDashboard();
+        if (nombre === "nuevo_reporte") return renderNuevoReporte();
+        if (nombre === "mis_reportes") return renderMisReportes();
+      }
+
+      function renderLogin(error = "") {
+        render(`
+          <main class="login-wrap">
+            <section>
+              <h1 class="brand-title">Pollyana's</h1>
+              <p class="brand-subtitle">Fallas</p>
+            </section>
+            <form class="panel" onsubmit="login(event)">
+              <div class="field">
+                <label for="username">Usuario</label>
+                <input id="username" name="username" autocomplete="username" required>
+              </div>
+              <div class="field">
+                <label for="password">Contrasena</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required>
+              </div>
+              <button class="primary-btn" type="submit">Entrar</button>
+              ${error ? `<p class="error">${esc(error)}</p>` : ""}
+            </form>
+          </main>
+        `);
+      }
+
+      async function login(event) {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const response = await fetch(`${AUTH_API}/auth/token/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({username: form.get("username"), password: form.get("password")})
+        });
+        if (!response.ok) return renderLogin("Usuario o contrasena incorrectos");
+        setTokens(await response.json());
+        await showScreen("dashboard");
+      }
+
+      async function loadPerfil() {
+        const response = await apiFetch("/me/");
+        state.perfil = response.ok ? await response.json() : {nombre: "Sucursal"};
+      }
+
+      async function loadSucursales() {
+        const response = await apiFetch("/sucursales/");
+        const data = response.ok ? await response.json() : [];
+        state.sucursales = data.results || data;
+        return state.sucursales;
+      }
+
+      async function loadCategorias() {
+        const response = await apiFetch("/categorias/");
+        const data = response.ok ? await response.json() : [];
+        state.categorias = data.results || data;
+        return state.categorias;
+      }
+
+      async function loadMisReportes() {
+        const response = await apiFetch("/reportes/");
+        const data = response.ok ? await response.json() : [];
+        state.misReportes = data.results || data;
+        return state.misReportes;
+      }
+
+      async function renderDashboard() {
+        await loadMisReportes();
+        const abiertos = state.misReportes.filter((r) => !["cerrado", "cancelado"].includes(r.estatus)).length;
+        render(shell(`
+          <p class="unit-line">Reporta fallas de sucursal con foto y ubicacion.</p>
+          <div class="dash-grid">
+            <button class="dash-btn" onclick="startNuevoReporte()">Reportar<br>Falla</button>
+            <button class="dash-btn" onclick="showScreen('mis_reportes')">Mis<br>Reportes ${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
+          </div>
+        `));
+      }
+
+      function startNuevoReporte() {
+        state.draft = emptyDraft();
+        showScreen("nuevo_reporte");
+      }
+
+      function progressDots(step) {
+        return `<div class="progress">${[1, 2, 3].map((n) => `<span class="dot ${step === n ? "active" : ""}"></span>`).join("")}</div>`;
+      }
+
+      function getSucursalLabel(id) {
+        const item = state.sucursales.find((s) => String(s.id) === String(id));
+        return item ? `${item.codigo || ""} ${item.nombre || ""}`.trim() : "-";
+      }
+
+      function getCategoriaLabel(id) {
+        const item = state.categorias.find((c) => String(c.id) === String(id));
+        return item ? item.nombre : "-";
+      }
+
+      function selectPrioridad(value) {
+        state.draft.prioridad = value;
+        renderNuevoReporte();
+      }
+
+      function nextReporteStep() {
+        const d = state.draft;
+        if (d.step === 1 && (!d.sucursal || !d.categoria || !d.prioridad)) return;
+        if (d.step === 2 && (!d.titulo.trim() || !d.descripcion.trim())) {
+          return renderNuevoReporte("Captura titulo y descripcion.");
+        }
+        if (d.step === 2 && !isGeoReady(d)) return renderNuevoReporte("Se requiere ubicacion para continuar.");
+        if (d.step === 2 && !d.foto) return renderNuevoReporte("La foto debe tomarse en este momento.");
+        d.step = Math.min(3, d.step + 1);
+        renderNuevoReporte();
+      }
+
+      function prevReporteStep() {
+        state.draft.step = Math.max(1, state.draft.step - 1);
+        renderNuevoReporte();
+      }
+
+      async function renderNuevoReporte(error = "") {
+        const d = state.draft;
+        let body = "";
+        if (d.step === 1) {
+          if (!state.sucursales.length) await loadSucursales();
+          if (!state.categorias.length) await loadCategorias();
+          body = `
+            <h1 class="screen-title">Nuevo reporte</h1>
+            ${progressDots(1)}
+            <div class="field">
+              <label for="sucursal">Sucursal</label>
+              <select id="sucursal" onchange="state.draft.sucursal = this.value; renderNuevoReporte()">
+                <option value="">Selecciona sucursal</option>
+                ${state.sucursales.map((s) => `<option value="${s.id}" ${String(d.sucursal) === String(s.id) ? "selected" : ""}>${esc(`${s.codigo || ""} ${s.nombre || ""}`.trim())}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label for="categoria">Categoria</label>
+              <select id="categoria" onchange="state.draft.categoria = this.value; renderNuevoReporte()">
+                <option value="">Selecciona categoria</option>
+                ${state.categorias.map((c) => `<option value="${c.id}" ${String(d.categoria) === String(c.id) ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="severity-row">
+              ${prioridades.map((p) => `
+                <button class="severity-card ${d.prioridad === p.value ? "selected" : ""}" style="border-left:5px solid ${p.color}" onclick="selectPrioridad('${p.value}')">
+                  ${esc(p.label)}
+                </button>
+              `).join("")}
+            </div>
+            <div class="actions">
+              <button class="secondary-btn" onclick="showScreen('dashboard')">Cancelar</button>
+              <button class="primary-btn" onclick="nextReporteStep()" ${d.sucursal && d.categoria && d.prioridad ? "" : "disabled"}>Siguiente</button>
+            </div>
+          `;
+        } else if (d.step === 2) {
+          const ubicacionLista = isGeoReady(d);
+          body = `
+            <div class="${ubicacionLista ? "" : "gps-locked"}">
+              <h1 class="screen-title">Detalles</h1>
+              ${progressDots(2)}
+              <div class="field">
+                <label for="titulo">Titulo</label>
+                <input id="titulo" maxlength="200" value="${esc(d.titulo)}" oninput="state.draft.titulo = this.value">
+              </div>
+              <div class="field">
+                <label for="descripcion">Descripcion</label>
+                <textarea id="descripcion" oninput="state.draft.descripcion = this.value">${esc(d.descripcion)}</textarea>
+              </div>
+              <div class="field">
+                <label for="foto">Foto</label>
+                ${fotoInput("foto", Boolean(d.foto), "setFotoReporte(this)")}
+                ${d.fotoPreview ? `<img class="thumb" src="${d.fotoPreview}" alt="Vista previa">` : ""}
+                ${d.fotoError ? `<p class="error">${esc(d.fotoError)}</p>` : ""}
+              </div>
+              <p class="gps-registered">Ubicacion registrada</p>
+              ${error ? `<p class="error">${esc(error)}</p>` : ""}
+              <div class="actions">
+                <button class="secondary-btn" onclick="prevReporteStep()">Atras</button>
+                <button class="primary-btn" onclick="nextReporteStep()" ${ubicacionLista && d.foto ? "" : "disabled"}>Siguiente</button>
+              </div>
+            </div>
+            ${geoOverlay(d)}
+          `;
+        } else {
+          body = `
+            <h1 class="screen-title">Confirmar</h1>
+            ${progressDots(3)}
+            <section class="card report-card">
+              <div class="kv"><b>Sucursal</b><span>${esc(getSucursalLabel(d.sucursal))}</span></div>
+              <div class="kv"><b>Categoria</b><span>${esc(getCategoriaLabel(d.categoria))}</span></div>
+              <div class="kv"><b>Prioridad</b><span>${esc(d.prioridad)}</span></div>
+              <div class="kv"><b>Ubicacion</b><span>${d.latitud ? "Registrada" : "-"}</span></div>
+              <div class="kv"><b>Titulo</b><span>${esc(d.titulo)}</span></div>
+              <div class="kv"><b>Descripcion</b><span>${esc(d.descripcion)}</span></div>
+            </section>
+            ${error ? `<p class="error">${esc(error)}</p>` : ""}
+            <div class="actions">
+              <button class="secondary-btn" onclick="prevReporteStep()">Atras</button>
+              <button class="primary-btn" onclick="enviarReporte()" ${isGeoReady(d) && d.foto ? "" : "disabled"}>Enviar reporte</button>
+            </div>
+          `;
+        }
+        render(shell(body));
+      }
+
+      function marcarInicioCapturaFoto(input) {
+        input.dataset.captureStartedAt = String(Date.now());
+      }
+
+      function isRecentCameraPhoto(input, file) {
+        const now = Date.now();
+        const modified = Number(file.lastModified || 0);
+        const captureStartedAt = Number(input.dataset.captureStartedAt || 0);
+        const modifiedLooksValid = modified > 0 && modified <= now + 60000;
+        const modifiedIsFresh = modifiedLooksValid && now - modified <= PHOTO_MAX_AGE_MS;
+        const selectedDuringCameraSession = captureStartedAt > 0 && now - captureStartedAt <= PHOTO_CAPTURE_SESSION_MS;
+        return modifiedIsFresh || selectedDuringCameraSession;
+      }
+
+      function fotoInput(id, loaded, onChange) {
+        return `
+          <div class="file-picker">
+            <input id="${id}" class="file-input" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="${onChange}">
+            <label class="file-trigger ${loaded ? "loaded" : ""}" for="${id}">${loaded ? "Imagen cargada" : "Tomar foto"}</label>
+          </div>
+        `;
+      }
+
+      function setFotoReporte(input) {
+        const file = input.files[0] || null;
+        if (!file) {
+          state.draft.foto = null;
+          state.draft.fotoPreview = "";
+          state.draft.fotoError = "";
+          return renderNuevoReporte();
+        }
+        if (!isRecentCameraPhoto(input, file)) {
+          state.draft.foto = null;
+          state.draft.fotoPreview = "";
+          state.draft.fotoError = "La foto debe tomarse en este momento. No se permiten imagenes de la galeria.";
+          input.value = "";
+          return renderNuevoReporte();
+        }
+        state.draft.foto = file;
+        state.draft.fotoPreview = URL.createObjectURL(file);
+        state.draft.fotoError = "";
+        renderNuevoReporte();
+      }
+
+      function isGeoReady(d) {
+        return d.geoStatus === "ready" && Boolean(d.latitud);
+      }
+
+      function geoOverlay(d) {
+        if (isGeoReady(d)) return "";
+        const denied = d.geoStatus === "denied";
+        const loading = d.geoStatus === "loading";
+        const unavailable = d.geoStatus === "unavailable";
+        const message = denied
+          ? "Bloqueaste el acceso a tu ubicacion.\n1. Toca el icono de candado en tu navegador\n2. Activa el permiso de Ubicacion\n3. Recarga la pagina"
+          : unavailable
+            ? "No pudimos obtener tu ubicacion. Verifica que el GPS este activado e intenta de nuevo."
+            : "Esta accion requiere tu ubicacion.\nPresiona Permitir cuando el navegador lo solicite.";
+        return `
+          <div class="gps-overlay" role="dialog" aria-modal="true">
+            <section class="gps-card">
+              <div class="gps-icon">GPS</div>
+              <h2 class="gps-title">Ubicacion requerida</h2>
+              <p class="gps-message">${esc(message)}</p>
+              <button class="primary-btn" onclick="requestGeo()" ${loading ? "disabled" : ""}>
+                ${loading ? "Obteniendo ubicacion..." : denied || unavailable ? "Reintentar" : "Activar ubicacion"}
+              </button>
+            </section>
+          </div>
+        `;
+      }
+
+      function requestGeo() {
+        if (!navigator.geolocation) {
+          state.draft.geoStatus = "unavailable";
+          renderNuevoReporte();
+          return;
+        }
+        state.draft.geoStatus = "loading";
+        renderNuevoReporte();
+        navigator.geolocation.getCurrentPosition((position) => {
+          state.draft.latitud = position.coords.latitude.toFixed(6);
+          state.draft.longitud = position.coords.longitude.toFixed(6);
+          state.draft.geoStatus = "ready";
+          renderNuevoReporte();
+        }, (error) => {
+          state.draft.latitud = "";
+          state.draft.longitud = "";
+          state.draft.geoStatus = error.code === 1 ? "denied" : "unavailable";
+          renderNuevoReporte();
+        }, {enableHighAccuracy: true, timeout: 10000, maximumAge: 0});
+      }
+
+      async function enviarReporte() {
+        const d = state.draft;
+        if (!isGeoReady(d) || !d.foto) return renderNuevoReporte("Se requiere ubicacion y foto tomada en este momento.");
+        const form = new FormData();
+        form.append("sucursal", d.sucursal);
+        form.append("categoria", d.categoria);
+        form.append("titulo", d.titulo.trim());
+        form.append("descripcion", d.descripcion.trim());
+        form.append("prioridad", d.prioridad);
+        form.append("foto_evidencia", d.foto);
+        form.append("latitud", d.latitud);
+        form.append("longitud", d.longitud);
+        const response = await apiFetch("/reportes/", {method: "POST", body: form});
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          return renderNuevoReporte(apiErrorMessage(error, "No se pudo enviar el reporte."));
+        }
+        const data = await response.json();
+        render(shell(`
+          <section class="confirm">
+            <div class="confirm-mark">OK</div>
+            <h1 class="screen-title">Reporte enviado</h1>
+            <p class="muted">Folio #${esc(data.id)} registrado. Compras recibira notificacion y dara seguimiento.</p>
+            <div class="confirm-actions">
+              <button class="primary-btn" onclick="startNuevoReporte()">Reportar otra falla</button>
+              <button class="secondary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+            </div>
+          </section>
+        `));
+      }
+
+      async function renderMisReportes() {
+        await loadMisReportes();
+        const cards = state.misReportes.length
+          ? state.misReportes.map((r) => {
+              const desc = (r.descripcion || "").length > 80 ? `${r.descripcion.slice(0, 80)}...` : r.descripcion || "";
+              return `
+                <article class="card report-card" onclick="this.classList.toggle('expanded')">
+                  <div class="report-head">
+                    <div>
+                      <p class="report-title">${esc(r.titulo)}</p>
+                      <p class="muted">${esc(r.sucursal_nombre)} · ${fmt(r.fecha_reporte)}</p>
+                    </div>
+                    <span class="status ${esc(r.estatus)}">${esc(r.estatus_display || r.estatus)}</span>
+                  </div>
+                  <p class="muted" style="margin-top:8px">${esc(desc)}</p>
+                  <div class="detail">
+                    <div class="kv"><b>Categoria</b><span>${esc(r.categoria_nombre)}</span></div>
+                    <div class="kv"><b>Prioridad</b><span>${esc(r.prioridad_display || r.prioridad)}</span></div>
+                    <div class="kv"><b>GPS</b><span>${r.latitud ? "Registrado" : "-"}</span></div>
+                  </div>
+                </article>
+              `;
+            }).join("")
+          : `<div class="empty">Todavia no tienes reportes registrados.</div>`;
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px;">Mis reportes</h1>
+          ${cards}
+        `));
+      }
+
+      async function boot() {
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("{% static 'fallas/sw.js' %}").catch(() => {});
+        }
+        if (state.token) {
+          try {
+            await showScreen("dashboard");
+          } catch (error) {
+            logout(false);
+            renderLogin();
+          }
+        } else {
+          renderLogin();
+        }
+      }
+
+      boot();
+    </script>
+  </body>
 </html>

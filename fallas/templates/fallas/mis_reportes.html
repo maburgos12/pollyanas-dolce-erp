@@ -1,32 +1,10 @@
-{% extends "base.html" %}
-
-{% block title %}Mis Reportes de Fallas{% endblock %}
-{% block page_title %}Mis Reportes de Fallas{% endblock %}
-
-{% block content %}
-<div class="module-shell">
-  <section class="bi-panel">
-    <div class="bi-panel-head">
-      <div>
-        <div class="bi-kicker">Fallas</div>
-        <h2 class="bi-panel-title">Mis reportes</h2>
-      </div>
-      <a class="btn btn-primary" href="{% url 'fallas:pwa-reporte' %}">Nuevo reporte</a>
-    </div>
-    <div id="fallas-list" class="bi-list">Cargando...</div>
-  </section>
-</div>
-<script>
-  fetch("/api/fallas/reportes/", {headers: {"X-CSRFToken": "{{ csrf_token }}"}})
-    .then(r => r.json())
-    .then(data => {
-      const items = data.results || data;
-      document.getElementById("fallas-list").innerHTML = items.length ? items.map(item => `
-        <article class="bi-list-item">
-          <strong>#${item.id} · ${item.titulo}</strong>
-          <div>${item.sucursal_nombre} · ${item.categoria_nombre} · ${item.estatus_display}</div>
-        </article>
-      `).join("") : "<article class='bi-list-item'>Sin reportes todavía.</article>";
-    });
-</script>
-{% endblock %}
+{% load static %}
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0; url={% url 'fallas:pwa-reporte' %}">
+  <title>Redirigiendo...</title>
+</head>
+<body></body>
+</html>
