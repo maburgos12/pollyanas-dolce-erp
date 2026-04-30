@@ -15,7 +15,7 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, connection, transaction
 from django.db.models.deletion import ProtectedError
-from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum, DecimalField, Max
+from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum, DecimalField, Max, Prefetch
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
@@ -1082,17 +1082,20 @@ def _recipe_incomplete_erp_item_count(receta: Receta) -> int:
     if cached is not None:
         return cached
     count = 0
-    lineas_qs = receta.lineas.select_related("insumo").only(
-        "id",
-        "insumo_id",
-        "insumo__id",
-        "insumo__activo",
-        "insumo__tipo_item",
-        "insumo__codigo",
-        "insumo__categoria",
-        "insumo__proveedor_principal_id",
-        "insumo__unidad_base_id",
-    )
+    prefetched = getattr(receta, "_prefetched_objects_cache", {}).get("lineas")
+    lineas_qs = prefetched
+    if lineas_qs is None:
+        lineas_qs = receta.lineas.select_related("insumo").only(
+            "id",
+            "insumo_id",
+            "insumo__id",
+            "insumo__activo",
+            "insumo__tipo_item",
+            "insumo__codigo",
+            "insumo__categoria",
+            "insumo__proveedor_principal_id",
+            "insumo__unidad_base_id",
+        )
     for linea in lineas_qs:
         if not linea.insumo_id:
             continue
@@ -1118,18 +1121,21 @@ def _recipe_master_gap_summary(receta: Receta) -> dict[str, object]:
         "codigo_point": 0,
         "inactivo": 0,
     }
-    lineas_qs = receta.lineas.select_related("insumo").only(
-        "id",
-        "insumo_id",
-        "insumo__id",
-        "insumo__activo",
-        "insumo__tipo_item",
-        "insumo__codigo",
-        "insumo__codigo_point",
-        "insumo__categoria",
-        "insumo__proveedor_principal_id",
-        "insumo__unidad_base_id",
-    )
+    prefetched = getattr(receta, "_prefetched_objects_cache", {}).get("lineas")
+    lineas_qs = prefetched
+    if lineas_qs is None:
+        lineas_qs = receta.lineas.select_related("insumo").only(
+            "id",
+            "insumo_id",
+            "insumo__id",
+            "insumo__activo",
+            "insumo__tipo_item",
+            "insumo__codigo",
+            "insumo__codigo_point",
+            "insumo__categoria",
+            "insumo__proveedor_principal_id",
+            "insumo__unidad_base_id",
+        )
     for linea in lineas_qs:
         if not linea.insumo_id:
             continue
@@ -1316,7 +1322,8 @@ def _recipe_operational_health(receta: Receta) -> dict[str, str]:
                 "label": "Incompleta",
                 "description": "Aún no tiene componentes de armado.",
             }
-        lineas_qs = list(
+        prefetched = getattr(receta, "_prefetched_objects_cache", {}).get("lineas")
+        lineas_qs = list(prefetched) if prefetched is not None else list(
             receta.lineas.select_related("insumo").only(
                 "id",
                 "insumo_id",
@@ -2862,6 +2869,34 @@ def _reabasto_enterprise_board(
     }
 
 
+def _reabasto_recipe_line_prefetch() -> Prefetch:
+    return Prefetch(
+        "lineas",
+        queryset=(
+            LineaReceta.objects.select_related("insumo")
+            .only(
+                "id",
+                "receta_id",
+                "tipo_linea",
+                "match_status",
+                "insumo_id",
+                "insumo_texto",
+                "cantidad",
+                "insumo__id",
+                "insumo__nombre",
+                "insumo__codigo",
+                "insumo__codigo_point",
+                "insumo__tipo_item",
+                "insumo__categoria",
+                "insumo__unidad_base_id",
+                "insumo__proveedor_principal_id",
+                "insumo__activo",
+            )
+            .order_by("receta_id", "posicion")
+        ),
+    )
+
+
 def _find_reabasto_plan(fecha_operacion: date) -> PlanProduccion | None:
     marker = f"[AUTO_REABASTO_CEDIS:{fecha_operacion.isoformat()}]"
     nombre_plan = f"CEDIS Reabasto {fecha_operacion.isoformat()}"
@@ -2878,11 +2913,18 @@ def _find_reabasto_plan(fecha_operacion: date) -> PlanProduccion | None:
 def _reabasto_enterprise_context(fecha_operacion: date) -> dict[str, Any]:
     recetas_producto = list(
         Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
+        .annotate(lineas_count=Count("lineas", distinct=True))
+        .prefetch_related(_reabasto_recipe_line_prefetch())
         .order_by("nombre")
-        .only("id", "nombre", "codigo_point")
+        .only("id", "nombre", "codigo_point", "familia", "categoria", "tipo")
     )
     if not recetas_producto:
-        recetas_producto = list(Receta.objects.order_by("nombre").only("id", "nombre", "codigo_point")[:400])
+        recetas_producto = list(
+            Receta.objects.annotate(lineas_count=Count("lineas", distinct=True))
+            .prefetch_related(_reabasto_recipe_line_prefetch())
+            .order_by("nombre")
+            .only("id", "nombre", "codigo_point", "familia", "categoria", "tipo")[:400]
+        )
 
     inventario_cedis = list(
         InventarioCedisProducto.objects.select_related("receta")
@@ -19927,11 +19969,18 @@ def reabasto_cedis(request: HttpRequest) -> HttpResponse:
 
     recetas_producto = list(
         Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
+        .annotate(lineas_count=Count("lineas", distinct=True))
+        .prefetch_related(_reabasto_recipe_line_prefetch())
         .order_by("nombre")
-        .only("id", "nombre", "codigo_point")
+        .only("id", "nombre", "codigo_point", "familia", "categoria", "tipo")
     )
     if not recetas_producto:
-        recetas_producto = list(Receta.objects.order_by("nombre").only("id", "nombre", "codigo_point")[:400])
+        recetas_producto = list(
+            Receta.objects.annotate(lineas_count=Count("lineas", distinct=True))
+            .prefetch_related(_reabasto_recipe_line_prefetch())
+            .order_by("nombre")
+            .only("id", "nombre", "codigo_point", "familia", "categoria", "tipo")[:400]
+        )
 
     inventario_cedis = list(
         InventarioCedisProducto.objects.select_related("receta")
