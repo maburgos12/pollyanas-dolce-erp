@@ -2689,6 +2689,15 @@ def _build_dashboard_daily_decisions(
 
 
 def login_view(request: HttpRequest) -> HttpResponse:
+    next_url = (request.POST.get("next") or request.GET.get("next") or "").strip()
+    redirect_url = "dashboard"
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host(), *settings.ALLOWED_HOSTS},
+        require_https=request.is_secure(),
+    ):
+        redirect_url = next_url
+
     if request.method == "POST":
         username = request.POST.get("username", "")
         password = request.POST.get("password", "")
@@ -2703,15 +2712,15 @@ def login_view(request: HttpRequest) -> HttpResponse:
                 logger.info(f"Login successful for user={username}")
                 if is_branch_capture_only(user):
                     return _redirect_capture_module()
-                return redirect("dashboard")
+                return redirect(redirect_url)
             else:
                 logger.warning(f"Authentication failed for username={username}")
         else:
             logger.warning(f"Missing username or password")
         
-        return render(request, "core/login.html", {"error": "Credenciales inválidas"})
+        return render(request, "core/login.html", {"error": "Credenciales inválidas", "next": next_url})
     
-    return render(request, "core/login.html")
+    return render(request, "core/login.html", {"next": next_url})
 
 def logout_view(request: HttpRequest) -> HttpResponse:
     logout(request)
@@ -4683,12 +4692,3 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
     }
     return render(request, "core/usuarios_accesos.html", context)
 
-
-def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
-    """Vista personalizada para errores CSRF."""
-    from django.http import HttpResponseForbidden
-    return HttpResponseForbidden(
-        "<h1>Error 403 — Token CSRF inválido</h1>"
-        "<p>Por favor recarga la página e intenta de nuevo.</p>",
-        content_type="text/html",
-    )

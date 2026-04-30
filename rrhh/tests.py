@@ -1,6 +1,15 @@
 from django.contrib.auth.models import Group, User
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from pathlib import Path
+from unittest import SkipTest
+
+from rrhh.models import Empleado, NominaConceptoLinea, NominaImportacion, NominaPeriodo
+from rrhh.services.lista_raya import parse_lista_raya_xls
+
+
+LISTA_RAYA_SAMPLE = Path("/Users/mauricioburgos/Downloads/Lista de raya del 16 al 31 de abril 2026.xls")
 
 
 class RRHHViewsTests(TestCase):
@@ -14,24 +23,10 @@ class RRHHViewsTests(TestCase):
         resp = self.client.get(reverse("rrhh:empleados"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "RRHH · Empleados")
-        self.assertContains(resp, "Cockpit operativo de RRHH")
-        self.assertContains(resp, "Cadena documental ERP")
-        self.assertContains(resp, "Cadena troncal de RRHH")
-        self.assertContains(resp, "Ruta crítica ERP")
-        self.assertContains(resp, "Radar ejecutivo ERP")
-        self.assertContains(resp, "Depende de")
-        self.assertContains(resp, "Dependencia")
-        self.assertContains(resp, "Madurez ERP de RRHH")
-        self.assertContains(resp, "Criterios de cierre ERP")
-        self.assertContains(resp, "Cierre global")
-        self.assertContains(resp, "Cadena de control de RRHH")
-        self.assertContains(resp, "Entrega de RRHH a downstream")
-        self.assertContains(resp, "Cierre por etapa documental")
-        self.assertContains(resp, "Mesa de gobierno ERP")
-        self.assertContains(resp, "Centro de mando ERP")
-        self.assertContains(resp, "Responsable")
-        self.assertContains(resp, "Cierre")
-        self.assertContains(resp, "Salud operativa ERP")
+        self.assertContains(resp, "Alta de empleado")
+        self.assertContains(resp, "Vista rápida")
+        self.assertContains(resp, "Catálogo de empleados")
+        self.assertContains(resp, "Modificar")
         self.assertTrue(resp.context["focus_cards"])
         self.assertTrue(resp.context["enterprise_chain"])
         self.assertIn("dependency_status", resp.context["enterprise_chain"][0])
@@ -65,6 +60,34 @@ class RRHHViewsTests(TestCase):
         )
         self.assertEqual(resp_post.status_code, 200)
         self.assertContains(resp_post, "Empleado Demo")
+
+        empleado = Empleado.objects.get(nombre="Empleado Demo")
+        resp_update = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "update",
+                "empleado_id": str(empleado.id),
+                "nombre": "Empleado Demo Editado",
+                "rfc": "DEMO-010101-AA1",
+                "curp": "DEMO010101HSLAAA01",
+                "nss": "11-22-33-4444-5",
+                "area": "Administración",
+                "puesto": "Coordinador",
+                "tipo_contrato": "FIJO",
+                "fecha_ingreso": "2026-04-30",
+                "salario_diario": "500.00",
+                "telefono": "6870000000",
+                "email": "demo@example.com",
+                "sucursal": "Matriz",
+                "activo": "on",
+            },
+            follow=True,
+        )
+        self.assertEqual(resp_update.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.nombre, "Empleado Demo Editado")
+        self.assertEqual(empleado.rfc, "DEMO-010101-AA1")
+        self.assertEqual(empleado.area, "Administración")
 
     def test_empleados_can_focus_operational_subset(self):
         self.client.post(
@@ -240,3 +263,42 @@ class RRHHViewsTests(TestCase):
         resp = self.client.get(reverse("rrhh:empleados"))
         self.assertEqual(resp.status_code, 302)
         self.assertIn("/login/", resp.url)
+
+
+class ListaRayaImportTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if not LISTA_RAYA_SAMPLE.exists():
+            raise SkipTest("No está disponible el archivo real de lista de raya.")
+
+    def test_parser_cuadra_con_totales_generales(self):
+        result = parse_lista_raya_xls(LISTA_RAYA_SAMPLE)
+
+        self.assertEqual(result.fecha_inicio.isoformat(), "2026-04-16")
+        self.assertEqual(result.fecha_fin.isoformat(), "2026-04-30")
+        self.assertEqual(len(result.empleados), 67)
+        self.assertEqual(result.total_percepciones_calculado, result.total_percepciones_reportado)
+        self.assertEqual(result.total_deducciones_calculado, result.total_deducciones_reportado)
+        self.assertEqual(result.total_neto_calculado, result.total_neto_reportado)
+        self.assertEqual(result.empleados[0].codigo, "2")
+        self.assertEqual(result.empleados[0].rfc, "LOMM-750126-DB4")
+        self.assertEqual(result.empleados[0].curp, "LOMM-750126-MSLPDR06")
+
+    def test_command_dry_run_no_toca_base(self):
+        call_command("importar_lista_raya", str(LISTA_RAYA_SAMPLE))
+
+        self.assertEqual(Empleado.objects.count(), 0)
+        self.assertEqual(NominaPeriodo.objects.count(), 0)
+        self.assertEqual(NominaImportacion.objects.count(), 0)
+
+    def test_command_commit_importa_periodo_y_conceptos(self):
+        call_command("importar_lista_raya", str(LISTA_RAYA_SAMPLE), "--commit")
+
+        periodo = NominaPeriodo.objects.get(fecha_inicio="2026-04-16", fecha_fin="2026-04-30")
+        self.assertEqual(Empleado.objects.count(), 67)
+        self.assertEqual(periodo.lineas.count(), 67)
+        self.assertEqual(NominaConceptoLinea.objects.count(), 336)
+        self.assertEqual(periodo.total_bruto, periodo.importaciones.first().total_percepciones)
+        self.assertEqual(periodo.total_descuentos, periodo.importaciones.first().total_deducciones)
+        self.assertEqual(periodo.total_neto, periodo.importaciones.first().total_neto)

@@ -19,6 +19,9 @@
 
             <form method="post">
                 {% csrf_token %}
+                {% if next %}
+                    <input type="hidden" name="next" value="{{ next }}">
+                {% endif %}
 
                 {% if error %}
                     <div class="alert alert-danger">{{ error }}</div>
