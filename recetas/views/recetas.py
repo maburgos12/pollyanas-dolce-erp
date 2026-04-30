@@ -82,6 +82,7 @@ from ..utils.costeo_snapshot import resolve_insumo_unit_cost, resolve_line_snaps
 from ..utils.derived_product_presentations import (
     build_upstream_snapshot as build_derived_product_upstream_snapshot,
     get_active_derived_relation,
+    get_total_cost_map,
 )
 from ..utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 from ..utils.matching import match_insumo
@@ -4946,10 +4947,23 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             activo=True,
         )
     }
+    page_cost_recipe_ids = set(page_receta_ids)
+    page_cost_recipe_ids.update(
+        equivalence.receta_padre_id
+        for equivalence in equivalence_by_receta_id.values()
+        if equivalence.receta_padre_id
+    )
+    page_cost_map = get_total_cost_map(page_cost_recipe_ids)
     for receta in page.object_list:
         setattr(receta, "_effective_equivalence_cache", equivalence_by_receta_id.get(receta.id))
         setattr(receta, "_effective_derived_cache", derived_by_receta_id.get(receta.id))
-        receta.costo_efectivo = _recipe_effective_cost_display(receta)
+        receta.costo_efectivo = page_cost_map.get(int(receta.id), Decimal("0"))
+        equivalence = equivalence_by_receta_id.get(receta.id)
+        if receta.costo_efectivo <= 0 and equivalence is not None:
+            parent_cost = page_cost_map.get(int(equivalence.receta_padre_id), Decimal("0"))
+            factor = Decimal(str(equivalence.factor_conversion or 1))
+            if parent_cost > 0 and factor > 0:
+                receta.costo_efectivo = parent_cost / factor
         receta.fuente_display = _recipe_source_display(receta)
         receta.bom_pending = _recipe_counts_as_bom_pending(receta, excluded_point_category_codes)
         if advanced_catalog_metrics_requested:
