@@ -28,6 +28,7 @@ else
     exit 1
 fi
 
+# Rotación: mantener solo los últimos KEEP_LAST backups
 BACKUP_COUNT=$(ls -1 "$BACKUP_DIR"/backup_*.sql.gz 2>/dev/null | wc -l)
 if [ "$BACKUP_COUNT" -gt "$KEEP_LAST" ]; then
     DELETE_COUNT=$(( BACKUP_COUNT - KEEP_LAST ))
@@ -37,4 +38,4 @@ if [ "$BACKUP_COUNT" -gt "$KEEP_LAST" ]; then
     done
 fi
 
-log "Backup finalizado. Archivos en $BACKUP_DIR: $(ls -1 "$BACKUP_DIR"/backup_*.sql.gz 2>/dev/null | wc -l)"
+log "Backup finalizado. Archivos en $BACKUP_DIR: $(ls -1 $BACKUP_DIR/backup_*.sql.gz 2>/dev/null | wc -l)"
