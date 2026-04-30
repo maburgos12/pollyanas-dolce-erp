@@ -4951,6 +4951,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         setattr(receta, "_effective_derived_cache", derived_by_receta_id.get(receta.id))
         receta.costo_efectivo = _recipe_effective_cost_display(receta)
         receta.fuente_display = _recipe_source_display(receta)
+        receta.bom_pending = _recipe_counts_as_bom_pending(receta, excluded_point_category_codes)
         if advanced_catalog_metrics_requested:
             receta.operational_health = _recipe_operational_health(receta)
             receta.derived_state = _recipe_derived_sync_state(receta) if receta.tipo == Receta.TIPO_PREPARACION else None

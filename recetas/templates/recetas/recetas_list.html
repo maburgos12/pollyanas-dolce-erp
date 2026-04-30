@@ -113,7 +113,9 @@
           <td>{% if r.rendimiento_cantidad %}{{ r.rendimiento_cantidad|floatformat:2 }} {{ r.rendimiento_unidad.codigo|default:"" }}{% else %}-{% endif %}</td>
           <td>{{ r.fuente_display }}</td>
           <td>
-            {% if r.pendientes_count > 0 %}
+            {% if r.bom_pending %}
+              <span class="badge bg-warning">Sin BOM</span>
+            {% elif r.pendientes_count > 0 %}
               <span class="badge bg-warning">{{ r.pendientes_count }}</span>
             {% else %}
               <span class="badge bg-success">0</span>
