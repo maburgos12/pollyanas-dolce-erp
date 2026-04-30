@@ -16703,6 +16703,103 @@ def _reabasto_demand_history_summary(fecha_operacion: date) -> dict[str, Any]:
     }
 
 
+def _resumen_cierre_sucursales_reabasto(fecha_operacion: date, sucursales: list[Sucursal]) -> Dict[str, Any]:
+    fecha_corte = fecha_operacion - timedelta(days=1)
+    solicitudes = (
+        SolicitudReabastoCedis.objects.filter(fecha_operacion=fecha_operacion, sucursal__in=sucursales)
+        .select_related("sucursal")
+        .order_by("sucursal__codigo")
+    )
+    by_sucursal = {solicitud.sucursal_id: solicitud for solicitud in solicitudes}
+
+    detalle: list[dict] = []
+    enviadas_en_tiempo = 0
+    enviadas_tardias = 0
+    borrador = 0
+    pendientes = 0
+    for sucursal in sucursales:
+        solicitud = by_sucursal.get(sucursal.id)
+        if not solicitud:
+            pendientes += 1
+            detalle.append(
+                {
+                    "sucursal": sucursal,
+                    "estado": "PENDIENTE",
+                    "estado_label": "Por validar (sin captura)",
+                    "actualizado_en": None,
+                    "semaforo": "rojo",
+                }
+            )
+            continue
+
+        actualizado_local = timezone.localtime(solicitud.actualizado_en) if solicitud.actualizado_en else None
+        actualizado_date = actualizado_local.date() if actualizado_local else None
+        estado = (solicitud.estado or "").upper()
+
+        if estado in {SolicitudReabastoCedis.ESTADO_ENVIADA, SolicitudReabastoCedis.ESTADO_ATENDIDA}:
+            if actualizado_date and actualizado_date <= fecha_corte:
+                enviadas_en_tiempo += 1
+                detalle.append(
+                    {
+                        "sucursal": sucursal,
+                        "estado": estado,
+                        "estado_label": f"{solicitud.get_estado_display()} (en tiempo)",
+                        "actualizado_en": actualizado_local,
+                        "semaforo": "verde",
+                    }
+                )
+            else:
+                enviadas_tardias += 1
+                detalle.append(
+                    {
+                        "sucursal": sucursal,
+                        "estado": estado,
+                        "estado_label": f"{solicitud.get_estado_display()} (tardía)",
+                        "actualizado_en": actualizado_local,
+                        "semaforo": "amarillo",
+                    }
+                )
+            continue
+
+        if estado == SolicitudReabastoCedis.ESTADO_BORRADOR:
+            borrador += 1
+            detalle.append(
+                {
+                    "sucursal": sucursal,
+                    "estado": estado,
+                    "estado_label": "Borrador (no enviada)",
+                    "actualizado_en": actualizado_local,
+                    "semaforo": "amarillo",
+                }
+            )
+        else:
+            pendientes += 1
+            detalle.append(
+                {
+                    "sucursal": sucursal,
+                    "estado": estado or "PENDIENTE",
+                    "estado_label": "Por validar (sin envío válido)",
+                    "actualizado_en": actualizado_local,
+                    "semaforo": "rojo",
+                }
+            )
+
+    total = len(sucursales)
+    listo_8am = total > 0 and enviadas_en_tiempo == total
+    pendientes_codigos = [row["sucursal"].codigo for row in detalle if row["semaforo"] in {"rojo", "amarillo"}]
+    return {
+        "fecha_corte": fecha_corte,
+        "total": total,
+        "en_tiempo": enviadas_en_tiempo,
+        "tardias": enviadas_tardias,
+        "borrador": borrador,
+        "pendientes": pendientes,
+        "listo_8am": listo_8am,
+        "detalle": detalle,
+        "pendientes_codigos": pendientes_codigos,
+    }
+
+
 @login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def plan_produccion(request: HttpRequest) -> HttpResponse:
