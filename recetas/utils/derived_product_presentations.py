@@ -5,7 +5,6 @@ from decimal import Decimal
 from django.db.models import Q
 from django.db.models import DecimalField
 
-from maestros.utils.canonical_catalog import latest_costo_canonico
 from recetas.models import LineaReceta, Receta, RecetaCostoVersion, RecetaPresentacionDerivada
 from recetas.utils.costeo_snapshot import (
     convert_unit_cost,
@@ -213,14 +212,6 @@ def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> di
                     Decimal(str(prep_cost)),
                     prep_unit,
                     prep_label,
-                )
-                continue
-            latest_cost = latest_costo_canonico(insumo)
-            if latest_cost is not None and latest_cost > 0:
-                insumo_cost_cache[insumo_id] = (
-                    Decimal(str(latest_cost)),
-                    insumo.unidad_base,
-                    "COSTO_CANONICO",
                 )
                 continue
             insumo_cost_cache[insumo_id] = resolve_insumo_unit_cost(insumo)

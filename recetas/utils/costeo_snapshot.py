@@ -6,13 +6,36 @@ import re
 
 from django.db.models import Q
 
-from maestros.models import Insumo, UnidadMedida
-from maestros.utils.canonical_catalog import latest_costo_canonico
+from maestros.models import CostoInsumo, Insumo, UnidadMedida
+from maestros.utils.canonical_catalog import canonical_member_ids
 from recetas.models import LineaReceta, Receta, RecetaCostoVersion
 from recetas.utils.normalizacion import normalizar_nombre
 
 
 Q6 = Decimal("0.000001")
+POINT_UNIT_ALIASES = {
+    "g": "g",
+    "gr": "g",
+    "gramo": "g",
+    "gramos": "g",
+    "kg": "kg",
+    "kilogramo": "kg",
+    "kilogramos": "kg",
+    "ml": "ml",
+    "mililitro": "ml",
+    "mililitros": "ml",
+    "l": "lt",
+    "lt": "lt",
+    "lts": "lt",
+    "litro": "lt",
+    "litros": "lt",
+    "pza": "pza",
+    "pz": "pza",
+    "pieza": "pza",
+    "piezas": "pza",
+    "unidad": "unidad",
+    "unidades": "unidad",
+}
 _ACTIVE_PREPARATION_RECIPE_IDS: ContextVar[tuple[int, ...]] = ContextVar(
     "_ACTIVE_PREPARATION_RECIPE_IDS",
     default=(),
@@ -39,6 +62,40 @@ def _compatible_units(source_unit: UnidadMedida | None, target_unit: UnidadMedid
     if source_unit is None or target_unit is None:
         return False
     return (source_unit.tipo or "").strip().upper() == (target_unit.tipo or "").strip().upper()
+
+
+def _normalize_point_unit(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _unit_from_point_raw(raw: dict | None, fallback_unit: UnidadMedida | None) -> UnidadMedida | None:
+    if not isinstance(raw, dict):
+        return fallback_unit
+    raw_unit = _normalize_point_unit(raw.get("unit") or raw.get("unidad") or raw.get("rendimiento_unidad"))
+    code = POINT_UNIT_ALIASES.get(raw_unit)
+    if not code:
+        return fallback_unit
+    unit = UnidadMedida.objects.filter(codigo__iexact=code).first()
+    if unit is None:
+        return fallback_unit
+    if fallback_unit is not None and not _compatible_units(unit, fallback_unit):
+        return fallback_unit
+    return unit
+
+
+def _latest_canonical_cost_with_unit(insumo: Insumo) -> tuple[Decimal | None, UnidadMedida | None]:
+    member_ids = canonical_member_ids(insumo)
+    if not member_ids:
+        return None, insumo.unidad_base
+    latest = (
+        CostoInsumo.objects.filter(insumo_id__in=member_ids)
+        .order_by("-fecha", "-id")
+        .first()
+    )
+    if latest is None or latest.costo_unitario is None:
+        return None, insumo.unidad_base
+    source_unit = _unit_from_point_raw(latest.raw, insumo.unidad_base)
+    return _q6(latest.costo_unitario), source_unit
 
 
 def convert_unit_cost(
@@ -140,9 +197,9 @@ def resolve_insumo_unit_cost(insumo: Insumo | None) -> tuple[Decimal | None, Uni
     if prep_cost is not None and prep_cost > 0:
         return prep_cost, prep_unit, prep_label
 
-    latest = latest_costo_canonico(insumo)
+    latest, source_unit = _latest_canonical_cost_with_unit(insumo)
     if latest is not None and latest > 0:
-        return _q6(latest), insumo.unidad_base, "COSTO_CANONICO"
+        return _q6(latest), source_unit, "COSTO_CANONICO"
 
     return None, None, "SIN_COSTO"
 
