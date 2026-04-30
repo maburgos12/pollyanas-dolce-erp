@@ -1299,17 +1299,20 @@ def _recent_point_product_activity_snapshot() -> dict[str, object]:
     sales_qs = PointDailySale.objects.filter(sale_date__gte=sale_cutoff)
     code_norms = {
         normalizar_codigo_point(code)
-        for code in sales_qs.exclude(product__sku="").values_list("product__sku", flat=True).distinct()
+        for code in sales_qs.exclude(product__sku="").order_by().values_list("product__sku", flat=True).distinct()
         if normalizar_codigo_point(code)
     }
     name_norms = {
         name
-        for name in sales_qs.exclude(product__normalized_name="").values_list("product__normalized_name", flat=True).distinct()
+        for name in sales_qs.exclude(product__normalized_name="")
+        .order_by()
+        .values_list("product__normalized_name", flat=True)
+        .distinct()
         if name
     }
     receta_ids = {
         receta_id
-        for receta_id in sales_qs.exclude(receta_id__isnull=True).values_list("receta_id", flat=True).distinct()
+        for receta_id in sales_qs.exclude(receta_id__isnull=True).order_by().values_list("receta_id", flat=True).distinct()
         if receta_id
     }
     return {
@@ -1592,6 +1595,7 @@ def _build_recipe_point_validation_snapshot(recetas: list[Receta]) -> dict[int, 
             normalizar_codigo_point(code)
             for code in PointDailySale.objects.filter(sale_date__gte=sale_cutoff)
             .exclude(product__sku="")
+            .order_by()
             .values_list("product__sku", flat=True)
             .distinct()
             if normalizar_codigo_point(code)
@@ -1604,6 +1608,7 @@ def _build_recipe_point_validation_snapshot(recetas: list[Receta]) -> dict[int, 
             name
             for name in PointDailySale.objects.filter(sale_date__gte=sale_cutoff)
             .exclude(product__normalized_name="")
+            .order_by()
             .values_list("product__normalized_name", flat=True)
             .distinct()
             if name
@@ -1616,6 +1621,7 @@ def _build_recipe_point_validation_snapshot(recetas: list[Receta]) -> dict[int, 
             normalizar_codigo_point(code)
             for code in PointProductionLine.objects.filter(production_date__gte=production_cutoff)
             .exclude(item_code="")
+            .order_by()
             .values_list("item_code", flat=True)
             .distinct()
             if normalizar_codigo_point(code)
@@ -1628,6 +1634,7 @@ def _build_recipe_point_validation_snapshot(recetas: list[Receta]) -> dict[int, 
             normalizar_nombre(name)
             for name in PointProductionLine.objects.filter(production_date__gte=production_cutoff)
             .exclude(item_name="")
+            .order_by()
             .values_list("item_name", flat=True)
             .distinct()
             if normalizar_nombre(name)
