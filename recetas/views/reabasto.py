@@ -19515,9 +19515,17 @@ def _resolve_receta_reabasto(receta_txt: str, codigo_point: str) -> Receta | Non
 
 
 def _point_cedis_stock_por_receta(receta_ids: list[int]) -> dict[int, Decimal]:
+    normalized_ids = sorted({int(receta_id) for receta_id in receta_ids if receta_id})
+    if not normalized_ids:
+        return {}
+    cache_key = f"reabasto:point-cedis-stock:{':'.join(str(receta_id) for receta_id in normalized_ids)}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     recetas = {
         row["id"]: (row["codigo_point"] or "").strip()
-        for row in Receta.objects.filter(id__in=receta_ids).values("id", "codigo_point")
+        for row in Receta.objects.filter(id__in=normalized_ids).values("id", "codigo_point")
     }
     code_to_receta = {
         code: receta_id
@@ -19527,36 +19535,38 @@ def _point_cedis_stock_por_receta(receta_ids: list[int]) -> dict[int, Decimal]:
     if not code_to_receta:
         return {}
 
-    product_by_id = {
-        product.id: product.sku
+    product_to_receta = {
+        product.id: code_to_receta[product.sku]
         for product in PointProduct.objects.filter(sku__in=code_to_receta.keys()).only("id", "sku")
+        if product.sku in code_to_receta
     }
-    if not product_by_id:
+    if not product_to_receta:
         return {}
 
-    latest_by_product: dict[int, PointInventorySnapshot] = {}
-    snapshots = (
+    stock_by_receta: dict[int, Decimal] = {}
+    latest_rows = (
         PointInventorySnapshot.objects.filter(
             branch__name__iexact="CEDIS",
-            product_id__in=product_by_id.keys(),
+            product_id__in=product_to_receta.keys(),
         )
-        .select_related("product")
         .order_by("product_id", "-captured_at", "-id")
+        .distinct("product_id")
+        .values_list("product_id", "stock")
     )
-    for snapshot in snapshots:
-        if snapshot.product_id in latest_by_product:
-            continue
-        latest_by_product[snapshot.product_id] = snapshot
-
-    stock_by_receta: dict[int, Decimal] = {}
-    for product_id, snapshot in latest_by_product.items():
-        receta_id = code_to_receta.get(product_by_id.get(product_id))
+    for product_id, stock in latest_rows:
+        receta_id = product_to_receta.get(product_id)
         if receta_id:
-            stock_by_receta[receta_id] = _to_decimal_safe(snapshot.stock)
+            stock_by_receta[receta_id] = _to_decimal_safe(stock)
+    cache.set(cache_key, stock_by_receta, 300)
     return stock_by_receta
 
 
 def _consolidado_reabasto_por_fecha(fecha_operacion: date) -> list[dict]:
+    cache_key = f"reabasto:consolidado:{fecha_operacion.isoformat()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     totals = (
         SolicitudReabastoCedisLinea.objects.filter(solicitud__fecha_operacion=fecha_operacion)
         .exclude(solicitud__estado=SolicitudReabastoCedis.ESTADO_CANCELADA)
@@ -19594,6 +19604,7 @@ def _consolidado_reabasto_por_fecha(fecha_operacion: date) -> list[dict]:
                 "cedis_faltante_producir": _quantize_qty(faltante),
             }
         )
+    cache.set(cache_key, rows, 300)
     return rows
 
 
