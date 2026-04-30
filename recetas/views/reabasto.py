@@ -750,7 +750,10 @@ def _product_upstream_snapshot(lineas: list[LineaReceta], *, receta: Receta | No
             if recipe.id in source_map:
                 source_map[recipe.id]["nombre"] = recipe.nombre
 
-    derived_parent_snapshot = build_derived_product_upstream_snapshot(receta) if receta is not None else None
+    if receta is not None and getattr(receta, "_reabasto_has_active_derived_relation_cache", None) is False:
+        derived_parent_snapshot = None
+    else:
+        derived_parent_snapshot = build_derived_product_upstream_snapshot(receta) if receta is not None else None
     if derived_parent_snapshot:
         source_map.setdefault(
             int(derived_parent_snapshot["parent_recipe_id"]),
@@ -2931,7 +2934,9 @@ def _attach_reabasto_recipe_runtime_caches(recetas_producto: list[Receta]) -> No
 
     source_recipe_ids: set[int] = set()
     for receta in recetas_producto:
-        setattr(receta, "_active_derived_relation_cache", relation_by_derivada.get(int(receta.id)))
+        relation = relation_by_derivada.get(int(receta.id))
+        setattr(receta, "_active_derived_relation_cache", relation)
+        setattr(receta, "_reabasto_has_active_derived_relation_cache", relation is not None)
         prefetched = getattr(receta, "_prefetched_objects_cache", {}).get("lineas") or []
         for linea in prefetched:
             insumo = getattr(linea, "insumo", None)
