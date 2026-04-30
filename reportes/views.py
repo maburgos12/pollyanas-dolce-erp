@@ -5724,11 +5724,22 @@ def bi(request: HttpRequest) -> HttpResponse:
         builder=lambda: compute_bi_snapshot(period_days=period_days, months_window=months_window),
         parts=(period_days, months_window),
     )
-    executive_panels = build_executive_bi_panels(
-        months=months_window,
-        branch_id=branch_id,
-        action_filter=action_filter,
-        budget_month=budget_month,
+    executive_panels = _bi_cached_value(
+        runtime_cache=bi_runtime_cache,
+        section="executive-panels",
+        builder=lambda: build_executive_bi_panels(
+            months=months_window,
+            branch_id=branch_id,
+            action_filter=action_filter,
+            budget_month=budget_month,
+        ),
+        parts=(
+            months_window,
+            branch_id or 0,
+            action_filter or "all",
+            budget_month or 0,
+            timezone.localdate().isoformat(),
+        ),
     )
 
     export_format = (request.GET.get("export") or "").lower()
