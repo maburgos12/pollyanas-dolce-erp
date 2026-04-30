@@ -1,4 +1,5 @@
 import csv
+import hashlib
 from collections import defaultdict
 from io import BytesIO
 from urllib.parse import urlencode
@@ -6,6 +7,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib import messages
+from django.core.cache import cache
 from django.http import HttpResponse
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import render, redirect, get_object_or_404
@@ -102,6 +104,20 @@ def _insumo_usage_maps(insumo_ids: list[int]) -> dict[str, object]:
         "adjustment_counts": adjustment_counts,
         "existence_ids": existence_ids,
     }
+
+
+def _insumo_usage_maps_cached(insumo_ids: list[int], *, timeout: int = 300) -> dict[str, object]:
+    normalized_ids = sorted({int(insumo_id) for insumo_id in insumo_ids if insumo_id})
+    if not normalized_ids:
+        return _insumo_usage_maps([])
+    signature = hashlib.sha1(",".join(str(insumo_id) for insumo_id in normalized_ids).encode("utf-8")).hexdigest()
+    cache_key = f"maestros:insumo-usage:{len(normalized_ids)}:{signature}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    usage_maps = _insumo_usage_maps(normalized_ids)
+    cache.set(cache_key, usage_maps, timeout)
+    return usage_maps
 
 
 def _insumo_type_cards():
@@ -445,8 +461,13 @@ def _maestro_demand_priority_rows(
             "is_critical": False,
         }
 
+    active_items = (
+        active_qs.select_related("unidad_base", "proveedor_principal")
+        if hasattr(active_qs, "select_related")
+        else active_qs
+    )
     candidates: list[dict[str, object]] = []
-    for insumo in active_qs.select_related("unidad_base", "proveedor_principal"):
+    for insumo in active_items:
         operational_profile = _insumo_operational_profile(insumo)
         final_recipe_count = int(active_usage_maps["final_recipe_counts"].get(insumo.id, 0))
         if operational_profile["readiness_label"] != "Incompleto" or final_recipe_count <= 0:
@@ -1092,7 +1113,11 @@ def _missing_impact_navigation(active_qs, active_usage_maps, active_profiles):
     ]
 
     cards = []
-    items = list(active_qs.select_related("unidad_base", "proveedor_principal"))
+    items = list(
+        active_qs.select_related("unidad_base", "proveedor_principal")
+        if hasattr(active_qs, "select_related")
+        else active_qs
+    )
     for missing_key, missing_label in missing_definitions:
         filtered_items = [
             item
@@ -1591,7 +1616,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
             elif canonical_status == "variantes":
                 queryset = queryset.filter(id__in=variant_ids)
         if usage_scope in {"recipes", "purchases", "inventory", "unused"}:
-            usage_maps = _insumo_usage_maps(list(queryset.values_list("id", flat=True)))
+            usage_maps = _insumo_usage_maps_cached(list(queryset.values_list("id", flat=True)))
             recipe_ids = set(usage_maps["recipe_counts"].keys())
             final_recipe_ids = set(usage_maps["final_recipe_counts"].keys())
             base_recipe_ids = set(usage_maps["base_recipe_counts"].keys())
@@ -1615,7 +1640,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
             elif usage_scope == "unused":
                 queryset = queryset.exclude(id__in=(recipe_ids | purchase_ids | inventory_ids))
         if impact_scope in {"critical", "high", "multimodule", "finales", "compras", "inventario", "bloquea_compras", "bloquea_inventario", "bloquea_costeo"}:
-            usage_maps = _insumo_usage_maps(list(queryset.values_list("id", flat=True)))
+            usage_maps = _insumo_usage_maps_cached(list(queryset.values_list("id", flat=True)))
             matching_ids = []
             for item in queryset.select_related("unidad_base", "proveedor_principal"):
                 impact_profile = _insumo_impact_profile(
@@ -1645,6 +1670,8 @@ class InsumoListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         qs = self.get_queryset()
         active_qs = Insumo.objects.filter(activo=True)
+        active_items = list(active_qs.select_related("unidad_base", "proveedor_principal"))
+        active_item_ids = [item.id for item in active_items]
         pending_point_qs = active_qs.filter(Q(codigo_point="") | Q(codigo_point__isnull=True))
         total_active = active_qs.count()
         total_pending_point = pending_point_qs.count()
@@ -1708,8 +1735,8 @@ class InsumoListView(LoginRequiredMixin, ListView):
         page_items = list(context["insumos"])
         page_item_ids = [item.id for item in page_items]
         page_duplicate_ids = duplicate_ids.intersection({item.id for item in page_items})
-        usage_maps = _insumo_usage_maps([item.id for item in page_items])
-        active_usage_maps = _insumo_usage_maps(list(active_qs.values_list("id", flat=True)))
+        usage_maps = _insumo_usage_maps_cached(page_item_ids)
+        active_usage_maps = _insumo_usage_maps_cached(active_item_ids)
         final_recipe_examples_map: dict[int, list[str]] = defaultdict(list)
         if page_item_ids:
             final_recipe_pairs = (
@@ -1876,10 +1903,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
         ]
         context["page_usage_summary"] = page_usage_summary
         context["page_impact_summary"] = page_impact_summary
-        active_profiles = {
-            item.id: _insumo_operational_profile(item)
-            for item in active_qs.select_related("unidad_base", "proveedor_principal")
-        }
+        active_profiles = {item.id: _insumo_operational_profile(item) for item in active_items}
         incomplete_active_ids = {
             insumo_id for insumo_id, profile in active_profiles.items() if profile["readiness_label"] == "Incompleto"
         }
@@ -1918,9 +1942,9 @@ class InsumoListView(LoginRequiredMixin, ListView):
         ]:
             blocker_count = sum(
                 1
-                for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                for item in active_items
                 if int(active_usage_maps["final_recipe_counts"].get(item.id, 0)) > 0
-                and _insumo_operational_profile(item)["readiness_label"] == "Incompleto"
+                and active_profiles[item.id]["readiness_label"] == "Incompleto"
                 and _match_missing_field(item, missing_key)
             )
             final_product_blockers_by_missing.append(
@@ -1933,12 +1957,12 @@ class InsumoListView(LoginRequiredMixin, ListView):
             )
         context["final_product_blockers_by_missing"] = final_product_blockers_by_missing
         context["total_enterprise_ready"] = sum(
-            1 for item in active_qs.select_related("unidad_base", "proveedor_principal")
-            if _insumo_operational_profile(item)["readiness_label"] == "Lista para operar"
+            1 for profile in active_profiles.values()
+            if profile["readiness_label"] == "Lista para operar"
         )
         context["total_enterprise_incomplete"] = sum(
-            1 for item in active_qs.select_related("unidad_base", "proveedor_principal")
-            if _insumo_operational_profile(item)["readiness_label"] == "Incompleto"
+            1 for profile in active_profiles.values()
+            if profile["readiness_label"] == "Incompleto"
         )
         context["enterprise_progress_pct"] = round(
             (context["total_enterprise_ready"] * 100.0 / total_active),
@@ -2219,7 +2243,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Críticos",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _insumo_impact_profile(
                         recipe_count=int(active_usage_maps["recipe_counts"].get(item.id, 0)),
                         final_recipe_count=int(active_usage_maps["final_recipe_counts"].get(item.id, 0)),
@@ -2246,7 +2270,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Bloquea costeo/MRP",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _insumo_impact_profile(
                         recipe_count=int(active_usage_maps["recipe_counts"].get(item.id, 0)),
                         final_recipe_count=int(active_usage_maps["final_recipe_counts"].get(item.id, 0)),
@@ -2266,7 +2290,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Multimódulo",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _insumo_impact_profile(
                         recipe_count=int(active_usage_maps["recipe_counts"].get(item.id, 0)),
                         final_recipe_count=int(active_usage_maps["final_recipe_counts"].get(item.id, 0)),
@@ -2293,7 +2317,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Bloquea compras",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _insumo_impact_profile(
                         recipe_count=int(active_usage_maps["recipe_counts"].get(item.id, 0)),
                         final_recipe_count=int(active_usage_maps["final_recipe_counts"].get(item.id, 0)),
@@ -2320,7 +2344,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Bloquea inventario",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _insumo_impact_profile(
                         recipe_count=int(active_usage_maps["recipe_counts"].get(item.id, 0)),
                         final_recipe_count=int(active_usage_maps["final_recipe_counts"].get(item.id, 0)),
@@ -2342,7 +2366,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Bloquea producto final",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _insumo_impact_profile(
                         recipe_count=int(active_usage_maps["recipe_counts"].get(item.id, 0)),
                         final_recipe_count=int(active_usage_maps["final_recipe_counts"].get(item.id, 0)),
@@ -2362,7 +2386,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Bloquea costeo/MRP",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _insumo_impact_profile(
                         recipe_count=int(active_usage_maps["recipe_counts"].get(item.id, 0)),
                         final_recipe_count=int(active_usage_maps["final_recipe_counts"].get(item.id, 0)),
@@ -2382,7 +2406,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Bloquea compras",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _insumo_impact_profile(
                         recipe_count=int(active_usage_maps["recipe_counts"].get(item.id, 0)),
                         final_recipe_count=int(active_usage_maps["final_recipe_counts"].get(item.id, 0)),
@@ -2402,7 +2426,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Bloquea inventario",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _insumo_impact_profile(
                         recipe_count=int(active_usage_maps["recipe_counts"].get(item.id, 0)),
                         final_recipe_count=int(active_usage_maps["final_recipe_counts"].get(item.id, 0)),
@@ -2451,19 +2475,17 @@ class InsumoListView(LoginRequiredMixin, ListView):
             context["daily_critical_close_focus"] = None
         type_navigation = []
         for item_type in _insumo_type_cards():
-            type_qs = active_qs.filter(tipo_item=item_type["code"]).select_related("unidad_base", "proveedor_principal")
-            ready_count = 0
-            incomplete_count = 0
-            for insumo in type_qs:
-                readiness = _insumo_operational_profile(insumo)["readiness_label"]
-                if readiness == "Lista para operar":
-                    ready_count += 1
-                elif readiness == "Incompleto":
-                    incomplete_count += 1
+            type_items = [item for item in active_items if item.tipo_item == item_type["code"]]
+            ready_count = sum(
+                1 for item in type_items if active_profiles[item.id]["readiness_label"] == "Lista para operar"
+            )
+            incomplete_count = sum(
+                1 for item in type_items if active_profiles[item.id]["readiness_label"] == "Incompleto"
+            )
             type_navigation.append(
                 {
                     **item_type,
-                    "total": type_qs.count(),
+                    "total": len(type_items),
                     "ready": ready_count,
                     "incomplete": incomplete_count,
                 }
@@ -2475,7 +2497,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Sin unidad base",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _match_missing_field(item, "unidad")
                 ),
                 "description": "No puede costear ni moverse correctamente en ERP.",
@@ -2485,7 +2507,8 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Sin proveedor principal",
                 "count": sum(
                     1
-                    for item in active_qs.filter(tipo_item=Insumo.TIPO_MATERIA_PRIMA).select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
+                    if item.tipo_item == Insumo.TIPO_MATERIA_PRIMA
                     if _match_missing_field(item, "proveedor")
                 ),
                 "description": "Materia prima activa sin abastecimiento principal definido.",
@@ -2495,7 +2518,8 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Sin categoría",
                 "count": sum(
                     1
-                    for item in active_qs.filter(tipo_item__in=[Insumo.TIPO_INTERNO, Insumo.TIPO_EMPAQUE]).select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
+                    if item.tipo_item in [Insumo.TIPO_INTERNO, Insumo.TIPO_EMPAQUE]
                     if _match_missing_field(item, "categoria")
                 ),
                 "description": "Artículo interno o empaque sin orden operativo.",
@@ -2505,7 +2529,7 @@ class InsumoListView(LoginRequiredMixin, ListView):
                 "title": "Sin código comercial",
                 "count": sum(
                     1
-                    for item in active_qs.select_related("unidad_base", "proveedor_principal")
+                    for item in active_items
                     if _match_missing_field(item, "codigo_point")
                 ),
                 "description": "Queda fuera de conciliación y gobierno del catálogo comercial.",
@@ -2520,18 +2544,17 @@ class InsumoListView(LoginRequiredMixin, ListView):
             .order_by("tipo_item", "-total", "categoria")
         )
         for row in grouped_categories:
-            category_qs = active_qs.filter(tipo_item=row["tipo_item"], categoria=row["categoria"]).select_related(
-                "unidad_base",
-                "proveedor_principal",
+            category_items = [
+                item
+                for item in active_items
+                if item.tipo_item == row["tipo_item"] and item.categoria == row["categoria"]
+            ]
+            ready_count = sum(
+                1 for item in category_items if active_profiles[item.id]["readiness_label"] == "Lista para operar"
             )
-            ready_count = 0
-            incomplete_count = 0
-            for insumo in category_qs:
-                readiness = _insumo_operational_profile(insumo)["readiness_label"]
-                if readiness == "Lista para operar":
-                    ready_count += 1
-                elif readiness == "Incompleto":
-                    incomplete_count += 1
+            incomplete_count = sum(
+                1 for item in category_items if active_profiles[item.id]["readiness_label"] == "Incompleto"
+            )
             category_navigation.append(
                 {
                     "tipo_item": row["tipo_item"],
