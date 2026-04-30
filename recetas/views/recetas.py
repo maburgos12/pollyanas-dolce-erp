@@ -1229,6 +1229,14 @@ def _recipe_effective_cost_display(receta: Receta) -> Decimal:
             factor = Decimal(str(equivalence.factor_conversion or 1))
             if factor > 0:
                 return parent_cost / factor
+
+    relation = _recipe_active_derived_relation(receta)
+    if relation is not None:
+        parent_cost = relation.receta_padre.costo_total_estimado_decimal
+        if parent_cost and parent_cost > 0:
+            units = Decimal(str(relation.unidades_por_padre or 0))
+            if units > 0:
+                return parent_cost / units
     return Decimal("0")
 
 
@@ -4951,42 +4959,10 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             activo=True,
         )
     }
-    page_cost_recipe_ids = set(page_receta_ids)
-    page_cost_recipe_ids.update(
-        equivalence.receta_padre_id
-        for equivalence in equivalence_by_receta_id.values()
-        if equivalence.receta_padre_id
-    )
-    latest_cost_week = (
-        RecetaCostoSemanal.objects.filter(
-            scope_type=RecetaCostoSemanal.SCOPE_RECIPE,
-            receta_id__in=page_cost_recipe_ids,
-        ).aggregate(value=Max("week_start"))["value"]
-        if page_cost_recipe_ids
-        else None
-    )
-    page_cost_map = {
-        int(row["receta_id"]): Decimal(str(row["costo_total"] or 0))
-        for row in (
-            RecetaCostoSemanal.objects.filter(
-                scope_type=RecetaCostoSemanal.SCOPE_RECIPE,
-                receta_id__in=page_cost_recipe_ids,
-                week_start=latest_cost_week,
-            ).values("receta_id", "costo_total")
-            if latest_cost_week
-            else []
-        )
-    }
     for receta in page.object_list:
         setattr(receta, "_effective_equivalence_cache", equivalence_by_receta_id.get(receta.id))
         setattr(receta, "_effective_derived_cache", derived_by_receta_id.get(receta.id))
-        receta.costo_efectivo = page_cost_map.get(int(receta.id), Decimal("0"))
-        equivalence = equivalence_by_receta_id.get(receta.id)
-        if receta.costo_efectivo <= 0 and equivalence is not None:
-            parent_cost = page_cost_map.get(int(equivalence.receta_padre_id), Decimal("0"))
-            factor = Decimal(str(equivalence.factor_conversion or 1))
-            if parent_cost > 0 and factor > 0:
-                receta.costo_efectivo = parent_cost / factor
+        receta.costo_efectivo = _recipe_effective_cost_display(receta)
         receta.fuente_display = _recipe_source_display(receta)
         receta.bom_pending = _recipe_counts_as_bom_pending(receta, excluded_point_category_codes)
         if advanced_catalog_metrics_requested:
