@@ -804,7 +804,12 @@ def _recipe_packaging_missing(receta: Receta, upstream_snapshot: dict[str, objec
     return _recipe_requires_fixed_packaging(receta) and int(upstream_snapshot.get("empaque_count") or 0) <= 0
 
 
-def _direct_base_usage_snapshot(lineas: list[LineaReceta]) -> dict[str, object]:
+def _direct_base_usage_snapshot(
+    lineas: list[LineaReceta],
+    *,
+    receta: Receta | None = None,
+    replacement_cache: dict[int, list[dict[str, object]]] | None = None,
+) -> dict[str, object]:
     source_recipe_ids = {
         recipe_id
         for linea in lineas
@@ -815,22 +820,28 @@ def _direct_base_usage_snapshot(lineas: list[LineaReceta]) -> dict[str, object]:
     if not source_recipe_ids:
         return {"count": 0, "base_names": []}
 
-    source_recipe_map = {
-        item.id: item
-        for item in Receta.objects.filter(id__in=source_recipe_ids).only("id", "nombre", "usa_presentaciones")
-    }
-    source_recipe_presentaciones = {
-        row["receta_id"]: int(row["total"])
-        for row in (
-            RecetaPresentacion.objects.filter(receta_id__in=source_recipe_ids, activo=True)
-            .values("receta_id")
-            .annotate(total=Count("id"))
-        )
-    }
+    source_recipe_map = getattr(receta, "_reabasto_source_recipe_map_cache", None) if receta is not None else None
+    if source_recipe_map is None:
+        source_recipe_map = {
+            item.id: item
+            for item in Receta.objects.filter(id__in=source_recipe_ids).only("id", "nombre", "usa_presentaciones")
+        }
+    source_recipe_presentaciones = (
+        getattr(receta, "_reabasto_source_presentaciones_cache", None) if receta is not None else None
+    )
+    if source_recipe_presentaciones is None:
+        source_recipe_presentaciones = {
+            row["receta_id"]: int(row["total"])
+            for row in (
+                RecetaPresentacion.objects.filter(receta_id__in=source_recipe_ids, activo=True)
+                .values("receta_id")
+                .annotate(total=Count("id"))
+            )
+        }
 
     direct_base_names: list[str] = []
     count = 0
-    replacement_cache: dict[int, list[dict[str, object]]] = {}
+    replacement_cache = replacement_cache if replacement_cache is not None else {}
     for linea in lineas:
         insumo = getattr(linea, "insumo", None)
         if not getattr(linea, "insumo_id", None) or not insumo or insumo.tipo_item != Insumo.TIPO_INTERNO:
@@ -967,7 +978,9 @@ def _active_presentation_derived_candidates(
         return cache[receta_base_id]
 
     presentaciones = list(
-        RecetaPresentacion.objects.filter(receta_id=receta_base_id, activo=True).order_by("nombre")
+        RecetaPresentacion.objects.filter(receta_id=receta_base_id, activo=True)
+        .select_related("receta")
+        .order_by("nombre")
     )
     if not presentaciones:
         if cache is not None:
@@ -1337,7 +1350,11 @@ def _recipe_operational_health(receta: Receta) -> dict[str, str]:
         if upstream_snapshot is None:
             upstream_snapshot = _product_upstream_snapshot(lineas_qs, receta=receta)
             setattr(receta, "_product_upstream_snapshot_cache", upstream_snapshot)
-        direct_base_snapshot = _direct_base_usage_snapshot(lineas_qs)
+        direct_base_snapshot = _direct_base_usage_snapshot(
+            lineas_qs,
+            receta=receta,
+            replacement_cache=getattr(receta, "_reabasto_presentation_candidate_cache", None),
+        )
         if direct_base_snapshot["count"] > 0:
             return {
                 "code": "warning",
@@ -2898,6 +2915,54 @@ def _reabasto_recipe_line_prefetch() -> Prefetch:
     )
 
 
+def _attach_reabasto_recipe_runtime_caches(recetas_producto: list[Receta]) -> None:
+    receta_ids = [int(receta.id) for receta in recetas_producto if int(getattr(receta, "id", 0) or 0) > 0]
+    if not receta_ids:
+        return
+
+    relation_by_derivada: dict[int, RecetaPresentacionDerivada] = {}
+    for relation in (
+        RecetaPresentacionDerivada.objects.filter(receta_derivada_id__in=receta_ids, activo=True)
+        .select_related("receta_padre", "receta_derivada")
+        .order_by("id")
+    ):
+        relation_by_derivada.setdefault(int(relation.receta_derivada_id), relation)
+
+    source_recipe_ids: set[int] = set()
+    for receta in recetas_producto:
+        setattr(receta, "_active_derived_relation_cache", relation_by_derivada.get(int(receta.id)))
+        prefetched = getattr(receta, "_prefetched_objects_cache", {}).get("lineas") or []
+        for linea in prefetched:
+            insumo = getattr(linea, "insumo", None)
+            if not getattr(linea, "insumo_id", None) or not insumo:
+                continue
+            if getattr(insumo, "tipo_item", "") != Insumo.TIPO_INTERNO:
+                continue
+            if _derived_code_kind(insumo.codigo or "") != "PREPARACION":
+                continue
+            source_recipe_id = _recipe_id_from_derived_code(insumo.codigo or "")
+            if source_recipe_id:
+                source_recipe_ids.add(source_recipe_id)
+
+    source_recipe_map = {
+        item.id: item
+        for item in Receta.objects.filter(id__in=source_recipe_ids).only("id", "nombre", "usa_presentaciones")
+    }
+    source_presentaciones = {
+        row["receta_id"]: int(row["total"])
+        for row in (
+            RecetaPresentacion.objects.filter(receta_id__in=source_recipe_ids, activo=True)
+            .values("receta_id")
+            .annotate(total=Count("id"))
+        )
+    }
+    presentation_candidate_cache: dict[int, list[dict[str, object]]] = {}
+    for receta in recetas_producto:
+        setattr(receta, "_reabasto_source_recipe_map_cache", source_recipe_map)
+        setattr(receta, "_reabasto_source_presentaciones_cache", source_presentaciones)
+        setattr(receta, "_reabasto_presentation_candidate_cache", presentation_candidate_cache)
+
+
 def _find_reabasto_plan(fecha_operacion: date) -> PlanProduccion | None:
     marker = f"[AUTO_REABASTO_CEDIS:{fecha_operacion.isoformat()}]"
     nombre_plan = f"CEDIS Reabasto {fecha_operacion.isoformat()}"
@@ -2926,6 +2991,7 @@ def _reabasto_enterprise_context(fecha_operacion: date) -> dict[str, Any]:
             .order_by("nombre")
             .only("id", "nombre", "codigo_point", "familia", "categoria", "tipo")[:400]
         )
+    _attach_reabasto_recipe_runtime_caches(recetas_producto)
 
     inventario_cedis = list(
         InventarioCedisProducto.objects.select_related("receta")
@@ -20009,6 +20075,7 @@ def reabasto_cedis(request: HttpRequest) -> HttpResponse:
             .order_by("nombre")
             .only("id", "nombre", "codigo_point", "familia", "categoria", "tipo")[:400]
         )
+    _attach_reabasto_recipe_runtime_caches(recetas_producto)
 
     inventario_cedis = list(
         InventarioCedisProducto.objects.select_related("receta")
