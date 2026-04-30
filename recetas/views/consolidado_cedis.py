@@ -11,8 +11,9 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from core.access import can_view_recetas
-from recetas.models import PlanProduccionItem
+from recetas.models import ConsolidadoNocturnoCEDIS, PlanProduccionItem
 from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
+from recetas.tasks.consolidado_nocturno import consolidado_nocturno_cedis
 
 
 def _redirect_revision(fecha_operacion: date):
@@ -76,15 +77,23 @@ def consolidado_cedis_generar(request):
     if not can_view_recetas(request.user):
         raise PermissionDenied
     fecha_operacion = _parse_date(request.POST.get("fecha_operacion"))
-    consolidado = ConsolidadoNocturnoCedisService().consolidar(
-        fecha_operacion=fecha_operacion,
-        usuario=request.user,
-        sincronizar_point=request.POST.get("sincronizar_point", "1") == "1",
-    )
-    messages.success(
-        request,
-        f"Consolidado CEDIS generado para {fecha_operacion:%Y-%m-%d}. Plan #{consolidado.plan_produccion_id or '-'} listo.",
-    )
+    consolidado = ConsolidadoNocturnoCEDIS.objects.filter(fecha_operacion=fecha_operacion).first()
+    if consolidado:
+        messages.info(
+            request,
+            f"Ya existe consolidado CEDIS para {fecha_operacion:%Y-%m-%d}. No se recalculó desde la pantalla.",
+        )
+    else:
+        consolidado_nocturno_cedis.delay(
+            fecha_operacion=fecha_operacion.isoformat(),
+            sincronizar_point=request.POST.get("sincronizar_point", "1") == "1",
+            sincronizar_inventario_cedis=True,
+            forzar_recalculo=False,
+        )
+        messages.success(
+            request,
+            f"Consolidado CEDIS para {fecha_operacion:%Y-%m-%d} encolado. Actualiza la pantalla en unos minutos.",
+        )
     return redirect(f"{request.POST.get('next') or '/recetas/consolidado-cedis/'}?fecha={fecha_operacion.isoformat()}")
 
 

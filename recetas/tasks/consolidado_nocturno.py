@@ -13,12 +13,14 @@ def consolidado_nocturno_cedis(
     fecha_operacion: str | None = None,
     sincronizar_point: bool = True,
     sincronizar_inventario_cedis: bool = True,
+    forzar_recalculo: bool = True,
 ) -> dict:
     target_date = date.fromisoformat(fecha_operacion) if fecha_operacion else timezone.localdate()
     consolidado = ConsolidadoNocturnoCedisService().consolidar(
         fecha_operacion=target_date,
         sincronizar_point=sincronizar_point,
         sincronizar_inventario_cedis=sincronizar_inventario_cedis,
+        forzar_recalculo=forzar_recalculo,
     )
     return {
         "consolidado_id": consolidado.id,
