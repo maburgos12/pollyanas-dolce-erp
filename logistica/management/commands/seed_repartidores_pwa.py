@@ -32,7 +32,9 @@ class Command(BaseCommand):
             "last_name": "Peraza Montoya",
         },
         {
-            "username": "rep.jorge.perez",
+            "username": "compras.jorge@pollyanasdolce.com",
+            "legacy_username": "rep.jorge.perez",
+            "email": "compras.jorge@pollyanasdolce.com",
             "first_name": "Jorge Isaac",
             "last_name": "Pérez Valenzuela",
         },
@@ -52,7 +54,9 @@ class Command(BaseCommand):
             "last_name": "Rodríguez Lizárraga",
         },
         {
-            "username": "rep.carolina.cayetano",
+            "username": "produccion.carolina@pollyanasdolce.com",
+            "legacy_username": "rep.carolina.cayetano",
+            "email": "produccion.carolina@pollyanasdolce.com",
             "first_name": "Carolina",
             "last_name": "Cayetano Valenzuela",
         },
@@ -107,25 +111,25 @@ class Command(BaseCommand):
         passwords_emitidos = []
 
         for row in self.REPARTIDORES:
-            user, created = User.objects.get_or_create(
-                username=row["username"],
-                defaults={
-                    "first_name": row["first_name"],
-                    "last_name": row["last_name"],
-                    "is_active": True,
-                    "is_staff": False,
-                    "is_superuser": False,
-                },
-            )
+            user = User.objects.filter(username=row["username"]).first()
+            created = False
+            legacy_username = row.get("legacy_username")
+            if not user and legacy_username:
+                user = User.objects.filter(username=legacy_username).first()
+            if not user:
+                user = User(username=row["username"])
+                created = True
             if created:
                 creados += 1
             else:
                 actualizados += 1
-                user.first_name = row["first_name"]
-                user.last_name = row["last_name"]
-                user.is_active = True
-                user.is_staff = False
-                user.is_superuser = False
+            user.username = row["username"]
+            user.email = row.get("email", "")
+            user.first_name = row["first_name"]
+            user.last_name = row["last_name"]
+            user.is_active = True
+            user.is_staff = False
+            user.is_superuser = False
 
             if created or reset_passwords:
                 password = self._password()
