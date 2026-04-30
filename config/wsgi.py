@@ -1,8 +1,14 @@
 import os
 from django.core.wsgi import get_wsgi_application
+from django.urls import reverse
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django_app = get_wsgi_application()
+
+try:
+    reverse("recetas:recetas_list")
+except Exception:
+    pass
 
 def application(environ, start_response):
     # Simple ping endpoint that doesn't require Django
