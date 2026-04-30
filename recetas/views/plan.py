@@ -12285,6 +12285,10 @@ def _to_decimal_safe(value: object) -> Decimal:
         return Decimal("0")
 
 
+def _quantize_qty(value: object) -> Decimal:
+    return _to_decimal_safe(value).quantize(Decimal("0.001"))
+
+
 def _map_pronostico_header(header: str) -> str:
     key = normalizar_nombre(header).replace("_", " ")
     if key in {"receta", "producto", "nombre", "nombre receta"}:
@@ -19311,6 +19315,5 @@ def _generar_solicitudes_compra_desde_plan(
         "oc_creadas": oc_creadas,
         "oc_actualizadas": oc_actualizadas,
     }
-
 
 
