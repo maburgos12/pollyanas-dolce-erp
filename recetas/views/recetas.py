@@ -5060,6 +5060,8 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             health_summary["pendientes"] += 1
         else:
             health_summary["incompletas"] += 1
+        if not advanced_catalog_metrics_requested:
+            continue
         issues = getattr(receta, "governance_issues", None) or _recipe_governance_issues(receta)
         chain = getattr(receta, "chain_status_info", None) or _recipe_chain_status(receta)
         if chain["code"] == "success":
@@ -5073,8 +5075,6 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
                 checkpoint_summary[checkpoint_code] += 1
         for issue in issues:
             governance_summary[issue] += 1
-        if not advanced_catalog_metrics_requested:
-            continue
         gap_summary = getattr(receta, "master_gap_summary", None) or _recipe_master_gap_summary(receta)
         for gap_key, gap_count in gap_summary["counts"].items():
             if gap_key in master_gap_totals:
