@@ -196,6 +196,25 @@
         font-weight: 800;
       }
 
+      .dashboard-help {
+        display: inline-flex;
+        min-height: 34px;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 800;
+        margin: -8px 0 16px;
+        padding: 7px 11px;
+      }
+
+      .dashboard-help:hover, .dashboard-help:focus {
+        border-color: var(--gold);
+        color: var(--gold);
+      }
+
       .dash-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -401,6 +420,33 @@
         color: var(--text-muted);
         padding: 22px;
         text-align: center;
+      }
+
+      .help-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .help-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        padding: 14px;
+      }
+
+      .help-card h2 {
+        color: var(--gold);
+        font-size: 18px;
+        margin: 0 0 8px;
+      }
+
+      .help-card ul, .help-card ol {
+        margin: 0;
+        padding-left: 19px;
+      }
+
+      .help-card li {
+        margin: 7px 0;
       }
 
       .confirm {
@@ -899,6 +945,7 @@
         if (nombre === "bitacora") return renderBitacora();
         if (nombre === "bitacora_salida") return renderBitacoraSalida();
         if (nombre === "inspeccion_vehiculo") return renderInspeccionVehiculo();
+        if (nombre === "ayuda") return renderAyuda();
       }
 
       function renderLogin(error = "") {
@@ -974,11 +1021,64 @@
           : `<span class="badge turno">Sin turno</span>`;
         render(shell(`
           <p class="unit-line">Selecciona la unidad al iniciar cada captura.</p>
+          <button class="dashboard-help" onclick="showScreen('ayuda')" type="button">? Ayuda rapida</button>
           <div class="dash-grid">
             <button class="dash-btn" onclick="startNuevoReporte()">🚨<br>Nuevo Reporte</button>
             <button class="dash-btn" onclick="showScreen('mis_reportes')">📂<br>Mis Reportes ${abiertos ? `<span class="badge">${abiertos}</span>` : ""}</button>
             <button class="dash-btn" onclick="showScreen('inspeccion_vehiculo')">📋<br>Inspección</button>
             <button class="dash-btn" onclick="showScreen('bitacora_salida')">🚗<br>Bitácora<br>${turnoBadge}</button>
+          </div>
+        `));
+      }
+
+      function renderAyuda() {
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <h1 class="screen-title" style="margin-top:16px;">Ayuda rápida</h1>
+          <p class="unit-line">Guía corta para capturar correctamente en la app.</p>
+          <div class="help-list">
+            <section class="help-card">
+              <h2>Todos los días</h2>
+              <ol>
+                <li>Antes de usar una unidad, inicia turno en Bitácora.</li>
+                <li>Selecciona la unidad real que vas a usar.</li>
+                <li>Haz inspección si vas a revisar el estado de la unidad.</li>
+                <li>Al terminar, vuelve a Bitácora y cierra el turno.</li>
+              </ol>
+            </section>
+            <section class="help-card">
+              <h2>Bitácora</h2>
+              <ul>
+                <li>KM llegada debe ser igual o mayor al KM salida.</li>
+                <li>Se requiere foto del tablero al iniciar y al cerrar.</li>
+                <li>Si cargaste combustible, captura litros, costo y foto del ticket.</li>
+                <li>Si queda "ABIERTO", falta cerrar el turno.</li>
+              </ul>
+            </section>
+            <section class="help-card">
+              <h2>Inspección</h2>
+              <ul>
+                <li>Marca OK solo si el accesorio está presente y funciona.</li>
+                <li>Deja Falta si no está, está dañado o no funciona.</li>
+                <li>Si hay golpes, describe dónde están y toma foto.</li>
+              </ul>
+            </section>
+            <section class="help-card">
+              <h2>Reportes</h2>
+              <ul>
+                <li>Usa Nuevo Reporte para fallas, llantas, accidentes, combustible u otros eventos.</li>
+                <li>Describe el problema con claridad y agrega foto cuando aplique.</li>
+                <li>Revisa el seguimiento en Mis Reportes.</li>
+              </ul>
+            </section>
+            <section class="help-card">
+              <h2>Ubicación y fotos</h2>
+              <ul>
+                <li>Permite ubicación cuando la app lo pida.</li>
+                <li>Las fotos deben tomarse en el momento con la cámara.</li>
+                <li>No uses fotos viejas de galería.</li>
+              </ul>
+            </section>
           </div>
         `));
       }
