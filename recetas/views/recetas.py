@@ -44,6 +44,7 @@ from pos_bridge.models import (
     PointProductionLine,
     PointTransferLine,
     PointWasteLine,
+    PointProductCategory,
 )
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
 from maestros.utils.canonical_catalog import (
@@ -110,6 +111,7 @@ MIX_MIN_RECENT_SALES_QTY = Decimal("12")
 MIX_MIN_EFFECTIVE_RECENT_SAMPLES = Decimal("4")
 MIX_MAX_CHANGE_PCT = Decimal("0.20")
 MIX_ALPHA_MAX = Decimal("0.35")
+RECENT_PRODUCT_ACTIVITY_DAYS = 90
 
 
 def _presentacion_sort_key(nombre: str) -> tuple[int, str]:
@@ -1248,9 +1250,12 @@ def _recipe_active_derived_relation(receta: Receta) -> RecetaPresentacionDerivad
     cached = getattr(receta, "_effective_derived_cache", None)
     if cached is not None:
         return cached
+    filters = Q(receta_derivada=receta)
+    if receta.codigo_point:
+        filters |= Q(codigo_point_derivado=receta.codigo_point)
     relation = (
         RecetaPresentacionDerivada.objects.select_related("receta_padre")
-        .filter(receta_derivada=receta, activo=True)
+        .filter(filters, activo=True)
         .first()
     )
     setattr(receta, "_effective_derived_cache", relation)
@@ -1273,12 +1278,95 @@ def _recipe_source_display(receta: Receta) -> str:
     return "Sin costeo"
 
 
-def _active_point_product_codes() -> set[str]:
-    return {
+def _recent_point_sale_window() -> tuple[date | None, date | None]:
+    latest_sale = PointDailySale.objects.aggregate(max_date=Max("sale_date")).get("max_date")
+    if not latest_sale:
+        return None, None
+    return latest_sale, latest_sale - timedelta(days=RECENT_PRODUCT_ACTIVITY_DAYS)
+
+
+def _recent_point_product_activity_snapshot() -> dict[str, object]:
+    latest_sale, sale_cutoff = _recent_point_sale_window()
+    if not sale_cutoff:
+        return {
+            "latest_sale": latest_sale,
+            "sale_cutoff": sale_cutoff,
+            "code_norms": set(),
+            "name_norms": set(),
+            "receta_ids": set(),
+        }
+
+    sales_qs = PointDailySale.objects.filter(sale_date__gte=sale_cutoff)
+    code_norms = {
         normalizar_codigo_point(code)
-        for code in PointProduct.objects.filter(active=True).exclude(sku="").values_list("sku", flat=True)
+        for code in sales_qs.exclude(product__sku="").values_list("product__sku", flat=True).distinct()
         if normalizar_codigo_point(code)
     }
+    name_norms = {
+        name
+        for name in sales_qs.exclude(product__normalized_name="").values_list("product__normalized_name", flat=True).distinct()
+        if name
+    }
+    receta_ids = {
+        receta_id
+        for receta_id in sales_qs.exclude(receta_id__isnull=True).values_list("receta_id", flat=True).distinct()
+        if receta_id
+    }
+    return {
+        "latest_sale": latest_sale,
+        "sale_cutoff": sale_cutoff,
+        "code_norms": code_norms,
+        "name_norms": name_norms,
+        "receta_ids": receta_ids,
+    }
+
+
+def _recipe_has_recent_point_sale(receta: Receta, activity_snapshot: dict[str, object]) -> bool:
+    receta_ids = activity_snapshot.get("receta_ids") or set()
+    if receta.id in receta_ids:
+        return True
+    code_norm = normalizar_codigo_point(receta.codigo_point or "")
+    if code_norm and code_norm in (activity_snapshot.get("code_norms") or set()):
+        return True
+    name_norm = normalizar_nombre(receta.nombre or "")
+    return bool(name_norm and name_norm in (activity_snapshot.get("name_norms") or set()))
+
+
+def _excluded_point_category_codes() -> set[str]:
+    raw_codes = {
+        str(code or "").strip()
+        for code in PointProductCategory.objects.filter(
+            category__in={
+                "SERVICIO_ACCESORIO",
+                "REVENTA",
+                "TOPPING",
+            }
+        ).values_list("codigo_point", flat=True)
+        if str(code or "").strip()
+    }
+    excluded_codes = {normalizar_codigo_point(code) for code in raw_codes if normalizar_codigo_point(code)}
+    if raw_codes:
+        for sku, external_id in PointProduct.objects.filter(
+            Q(sku__in=raw_codes) | Q(external_id__in=raw_codes)
+        ).values_list("sku", "external_id"):
+            for code in (sku, external_id):
+                code_norm = normalizar_codigo_point(code or "")
+                if code_norm:
+                    excluded_codes.add(code_norm)
+    return excluded_codes
+
+
+def _recipe_is_excluded_point_category(receta: Receta, excluded_codes: set[str]) -> bool:
+    code_norm = normalizar_codigo_point(receta.codigo_point or "")
+    return bool(code_norm and code_norm in excluded_codes)
+
+
+def _recipe_counts_as_bom_pending(receta: Receta, excluded_point_category_codes: set[str]) -> bool:
+    if receta.tipo != Receta.TIPO_PRODUCTO_FINAL:
+        return False
+    if _recipe_is_excluded_point_category(receta, excluded_point_category_codes):
+        return False
+    return not _recipe_has_effective_bom(receta)
 
 
 def _recipe_has_active_point_product(receta: Receta, active_point_codes: set[str]) -> bool:
@@ -1499,16 +1587,6 @@ def _build_recipe_point_validation_snapshot(recetas: list[Receta]) -> dict[int, 
     sale_cutoff = latest_sale - timedelta(days=90) if latest_sale else None
     production_cutoff = latest_production - timedelta(days=90) if latest_production else None
 
-    active_code_norms = {
-        normalizar_codigo_point(code)
-        for code in PointProduct.objects.filter(active=True).exclude(sku="").values_list("sku", flat=True)
-        if normalizar_codigo_point(code)
-    }
-    active_name_norms = {
-        name
-        for name in PointProduct.objects.filter(active=True).exclude(normalized_name="").values_list("normalized_name", flat=True)
-        if name
-    }
     sale_code_norms = (
         {
             normalizar_codigo_point(code)
@@ -1565,20 +1643,18 @@ def _build_recipe_point_validation_snapshot(recetas: list[Receta]) -> dict[int, 
         code_norm = normalizar_codigo_point(receta.codigo_point or "")
         name_norm = normalizar_nombre(receta.nombre or "")
         is_candidate = bool(
-            (code_norm and code_norm in active_code_norms)
-            or (code_norm and code_norm in sale_code_norms)
+            (code_norm and code_norm in sale_code_norms)
             or (code_norm and code_norm in production_code_norms)
-            or (name_norm and name_norm in active_name_norms)
             or (name_norm and name_norm in sale_name_norms)
             or (name_norm and name_norm in production_name_norms)
         )
         snapshot[receta.id] = {
             "is_candidate": is_candidate,
-            "label": "Vigente en Point" if is_candidate else "Fuera de Point",
+            "label": "Vigente operativo" if is_candidate else "Archivado operativo",
             "description": (
-                "El producto sigue activo o con movimiento reciente en Point."
+                "El producto tiene venta o producción reciente en Point."
                 if is_candidate
-                else "No tiene producto activo, venta reciente ni producción reciente en Point; no entra al conteo operativo."
+                else "No tiene venta ni producción reciente en Point; no entra al conteo operativo."
             ),
         }
     return snapshot
@@ -4633,6 +4709,16 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
     modo_operativo = request.GET.get("modo_operativo", "").strip().upper()
     familia = request.GET.get("familia", "").strip()
     categoria = request.GET.get("categoria", "").strip()
+    advanced_catalog_metrics_requested = any(
+        [
+            health_status,
+            chain_status,
+            chain_checkpoint,
+            governance_issue,
+            enterprise_stage_filter,
+            estado in {"pendientes", "ok"},
+        ]
+    )
 
     familias_db = list(
         Receta.objects.exclude(familia__exact="")
@@ -4641,12 +4727,6 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         .order_by("familia")
     )
     familias_catalogo = familias_producto_catalogo(familias_db)
-    categorias_catalogo = list(
-        Receta.objects.exclude(categoria__exact="")
-        .values_list("categoria", flat=True)
-        .distinct()
-        .order_by("categoria")
-    )
     categorias_catalogo = list(
         Receta.objects.exclude(categoria__exact="")
         .values_list("categoria", flat=True)
@@ -4675,12 +4755,13 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         usa_presentaciones=True,
     ).count()
     total_batidas_base = max(total_insumos - total_subinsumos, 0)
-    active_point_codes = _active_point_product_codes()
+    point_activity_snapshot = _recent_point_product_activity_snapshot()
+    excluded_point_category_codes = _excluded_point_category_codes()
     product_status_rows = list(
-        recetas_base.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).only("id", "codigo_point")
+        recetas_base.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).only("id", "codigo_point", "nombre")
     )
     recetas_activas_count = sum(
-        1 for receta in product_status_rows if _recipe_has_active_point_product(receta, active_point_codes)
+        1 for receta in product_status_rows if _recipe_has_recent_point_sale(receta, point_activity_snapshot)
     )
     recetas_archivadas_count = max(total_productos - recetas_activas_count, 0)
 
@@ -4707,9 +4788,8 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             ).exclude(receta_padre=OuterRef("pk"))
         ),
         has_derived_bom=Exists(
-            RecetaPresentacionDerivada.objects.filter(
-                receta_derivada=OuterRef("pk"),
-                activo=True,
+            RecetaPresentacionDerivada.objects.filter(activo=True).filter(
+                Q(receta_derivada=OuterRef("pk")) | Q(codigo_point_derivado=OuterRef("codigo_point"))
             )
         ),
     )
@@ -4763,31 +4843,22 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         else:
             recetas = recetas.filter(categoria=categoria)
     if not isinstance(recetas, list):
-        recetas = list(
-            recetas.prefetch_related("lineas", "lineas__insumo").order_by("familia", "nombre")
-        )
+        if advanced_catalog_metrics_requested:
+            recetas = list(
+                recetas.prefetch_related("lineas", "lineas__insumo").order_by("familia", "nombre")
+            )
+        else:
+            recetas = list(recetas.order_by("familia", "nombre"))
     for receta in recetas:
-        receta.point_active = _recipe_has_active_point_product(receta, active_point_codes)
+        receta.point_active = _recipe_has_recent_point_sale(receta, point_activity_snapshot)
     if vista == "archivados":
         recetas = [r for r in recetas if r.tipo == Receta.TIPO_PRODUCTO_FINAL and not r.point_active]
     elif vista == "productos":
         recetas = [r for r in recetas if r.tipo == Receta.TIPO_PRODUCTO_FINAL and r.point_active]
     if estado == "pendientes":
-        recetas = [r for r in recetas if _recipe_operational_pending_count(r) > 0]
+        recetas = [r for r in recetas if _recipe_counts_as_bom_pending(r, excluded_point_category_codes)]
     elif estado == "ok":
-        recetas = [r for r in recetas if _recipe_operational_pending_count(r) == 0]
-
-    point_validation_snapshot = _build_recipe_point_validation_snapshot(recetas)
-    for receta in recetas:
-        if receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
-            receta.point_validation_status = point_validation_snapshot.get(
-                receta.id,
-                {
-                    "is_candidate": True,
-                    "label": "Vigente en Point",
-                    "description": "El producto sigue activo dentro del catálogo operativo.",
-                },
-            )
+        recetas = [r for r in recetas if not _recipe_counts_as_bom_pending(r, excluded_point_category_codes)]
 
     if health_status in {"listas", "pendientes", "incompletas"}:
         recetas = [
@@ -4833,11 +4904,7 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         recetas = [r for r in recetas if _matches_recipe_enterprise_stage(r, enterprise_stage_filter)]
 
     total_recetas = len(recetas)
-    total_pendientes = sum(
-        1
-        for r in recetas
-        if _recipe_counts_in_operational_catalog(r) and _recipe_operational_health(r)["code"] == "warning"
-    )
+    total_pendientes = sum(1 for r in recetas if _recipe_counts_as_bom_pending(r, excluded_point_category_codes))
     total_lineas = sum((r.lineas_count or 0) for r in recetas)
 
     qs_filters = {
@@ -4859,6 +4926,11 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
     paginator = Paginator(recetas, 50)
     page = paginator.get_page(request.GET.get("page"))
     page_receta_ids = [receta.id for receta in page.object_list]
+    page_point_validation_snapshot = (
+        _build_recipe_point_validation_snapshot(list(page.object_list))
+        if advanced_catalog_metrics_requested
+        else {}
+    )
     equivalence_by_receta_id = {
         equivalence.receta_porcion_id: equivalence
         for equivalence in RecetaEquivalencia.objects.select_related("receta_padre").filter(
@@ -4879,9 +4951,18 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         setattr(receta, "_effective_derived_cache", derived_by_receta_id.get(receta.id))
         receta.costo_efectivo = _recipe_effective_cost_display(receta)
         receta.fuente_display = _recipe_source_display(receta)
-        receta.operational_health = _recipe_operational_health(receta)
-        receta.derived_state = _recipe_derived_sync_state(receta) if receta.tipo == Receta.TIPO_PREPARACION else None
-        receta.supply_chain_snapshot = _recipe_supply_chain_snapshot(receta)
+        if advanced_catalog_metrics_requested:
+            receta.operational_health = _recipe_operational_health(receta)
+            receta.derived_state = _recipe_derived_sync_state(receta) if receta.tipo == Receta.TIPO_PREPARACION else None
+        else:
+            has_pending = int(getattr(receta, "pendientes_count", 0) or 0) > 0
+            receta.operational_health = {
+                "code": "warning" if has_pending else "success",
+                "label": "Por validar" if has_pending else "Lista para operar",
+                "description": "Resumen ligero para listado.",
+            }
+            receta.derived_state = None
+        receta.supply_chain_snapshot = None
         receta.product_upstream_snapshot = None
         receta.direct_base_snapshot = {
             "count": 0,
@@ -4890,7 +4971,8 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             "exact_count": 0,
             "sample_suggestions": [],
         }
-        if receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
+        if advanced_catalog_metrics_requested and receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
+            receta.supply_chain_snapshot = _recipe_supply_chain_snapshot(receta)
             receta.product_upstream_snapshot = getattr(receta, "_product_upstream_snapshot_cache", None)
             if receta.product_upstream_snapshot is None:
                 lineas_qs = list(
@@ -4906,9 +4988,22 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
                 receta.product_upstream_snapshot = _product_upstream_snapshot(lineas_qs, receta=receta)
                 setattr(receta, "_product_upstream_snapshot_cache", receta.product_upstream_snapshot)
             receta.direct_base_snapshot = _recipe_direct_base_snapshot(receta)
-        receta.governance_issues = _recipe_governance_issues(receta)
-        receta.master_gap_summary = _recipe_master_gap_summary(receta)
-        receta.primary_action = _recipe_primary_action(receta)
+        receta.governance_issues = _recipe_governance_issues(receta) if advanced_catalog_metrics_requested else []
+        receta.master_gap_summary = (
+            _recipe_master_gap_summary(receta)
+            if advanced_catalog_metrics_requested
+            else {"counts": {"unidad": 0, "proveedor": 0, "categoria": 0, "codigo_point": 0, "inactivo": 0}, "total": 0}
+        )
+        receta.primary_action = _recipe_primary_action(receta) if advanced_catalog_metrics_requested else None
+        if receta.tipo == Receta.TIPO_PRODUCTO_FINAL:
+            receta.point_validation_status = page_point_validation_snapshot.get(
+                receta.id,
+                {
+                    "is_candidate": True,
+                    "label": "Vigente operativo",
+                    "description": "El producto tiene actividad reciente dentro del catálogo operativo.",
+                },
+            )
     health_summary = {"listas": 0, "pendientes": 0, "incompletas": 0}
     chain_summary = {"listas": 0, "pendientes": 0, "incompletas": 0}
     checkpoint_summary = {
@@ -4919,7 +5014,10 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         "packaging_ready": 0,
         "internal_components": 0,
     }
-    source_for_health = [receta for receta in recetas if _recipe_counts_in_operational_catalog(receta)]
+    source_for_health = [
+        receta for receta in (recetas if advanced_catalog_metrics_requested else page.object_list)
+        if _recipe_counts_in_operational_catalog(receta)
+    ]
     governance_summary = {
         "familia": 0,
         "categoria": 0,
@@ -4974,6 +5072,8 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
                 checkpoint_summary[checkpoint_code] += 1
         for issue in issues:
             governance_summary[issue] += 1
+        if not advanced_catalog_metrics_requested:
+            continue
         gap_summary = getattr(receta, "master_gap_summary", None) or _recipe_master_gap_summary(receta)
         for gap_key, gap_count in gap_summary["counts"].items():
             if gap_key in master_gap_totals:
@@ -5147,15 +5247,16 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
             "cta": "Abrir inventario" if catalog_master_blockers == 0 and checkpoint_summary["packaging_ready"] == 0 else "Abrir maestro",
         },
     ]
-    for receta in page.object_list:
-        receta.chain_status_info = _recipe_chain_status(receta)
-        receta.chain_checkpoints = _recipe_chain_checkpoints(receta)
-        receta.chain_action_links = _recipe_chain_actions_catalog(receta)
-        receta.chain_focus_summary = _recipe_chain_focus_summary(receta)
-        receta.enterprise_stage = _recipe_enterprise_stage(receta)
-        receta.enterprise_stage_playbook = _recipe_enterprise_stage_playbook(receta)
-        receta.enterprise_stage_progress = _recipe_stage_progress(receta.enterprise_stage_playbook)
-        receta.document_status = _recipe_document_status(receta)
+    if advanced_catalog_metrics_requested:
+        for receta in page.object_list:
+            receta.chain_status_info = _recipe_chain_status(receta)
+            receta.chain_checkpoints = _recipe_chain_checkpoints(receta)
+            receta.chain_action_links = _recipe_chain_actions_catalog(receta)
+            receta.chain_focus_summary = _recipe_chain_focus_summary(receta)
+            receta.enterprise_stage = _recipe_enterprise_stage(receta)
+            receta.enterprise_stage_playbook = _recipe_enterprise_stage_playbook(receta)
+            receta.enterprise_stage_progress = _recipe_stage_progress(receta.enterprise_stage_playbook)
+            receta.document_status = _recipe_document_status(receta)
     point_recipe_sync_panel = _point_recipe_sync_job_panel(request)
     return render(
         request,
