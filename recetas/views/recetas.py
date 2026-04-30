@@ -5696,7 +5696,9 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
             if branch_prices
             else Decimal("0")
         )
-        cost = Decimal(version.costo_total or 0).quantize(Decimal("0.01"))
+        cost = _recipe_effective_cost_display(version.receta).quantize(Decimal("0.01"))
+        if cost <= 0:
+            continue
         margin_pct = None
         status = "SIN_PRECIO"
         status_label = "Sin precio"
@@ -5732,6 +5734,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
                 "status_label": status_label,
                 "price_points": len(branch_prices),
                 "sort_margin": sort_margin,
+                "cost_source_label": "Costo actual",
             }
         )
 

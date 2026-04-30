@@ -37,7 +37,7 @@
       <div class="eyebrow text-uppercase text-muted" style="letter-spacing:.12em;">Recetas · rentabilidad comercial</div>
       <h2 style="margin:0 0 8px;">Monitor de márgenes por receta</h2>
       <p class="text-muted mb-0">
-        Cruza el último costeo positivo de cada receta con el precio de venta resuelto desde ventas Point del periodo
+        Cruza el costo operativo actual de cada receta con el precio de venta resuelto desde ventas Point del periodo
         {{ reference_start|date:"Y-m-d" }} al {{ reference_end|date:"Y-m-d" }}. Las filas sin precio quedan arriba para revisión.
       </p>
     </div>
@@ -62,7 +62,7 @@
     <article class="margin-kpi">
       <div class="eyebrow">Recetas visibles</div>
       <div class="value">{{ rows|length|intcomma }}</div>
-      <div class="note">Última versión con costo mayor a cero.</div>
+      <div class="note">Costo operativo actual mayor a cero.</div>
     </article>
     <article class="margin-kpi">
       <div class="eyebrow">Alerta roja</div>
@@ -98,7 +98,7 @@
             <th>Costo</th>
             <th>Margen</th>
             <th>Alerta</th>
-            <th>Versión</th>
+            <th>Fuente costo</th>
           </tr>
         </thead>
         <tbody>
@@ -134,7 +134,7 @@
                 {{ row.status_label }}
               </span>
             </td>
-            <td>v{{ row.version.version_num }}</td>
+            <td>{{ row.cost_source_label }}</td>
           </tr>
           {% empty %}
           <tr>
