@@ -221,6 +221,7 @@ h4 {
 }
 
 .sidebar-group-toggle {
+  appearance: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -228,7 +229,11 @@ h4 {
   padding: 0 1rem;
   background: none;
   border: none;
+  border-radius: 0;
+  color: inherit;
   cursor: pointer;
+  font: inherit;
+  line-height: 1;
   margin-top: 1.25rem;
   margin-bottom: 0.25rem;
 }
@@ -239,12 +244,17 @@ h4 {
 }
 
 .sidebar-group-toggle .toggle-chevron {
+  display: inline-grid;
+  place-items: center;
   width: 14px;
   height: 14px;
+  background: transparent;
+  border: 0;
   opacity: 0.45;
   transition: transform 0.2s ease;
   flex-shrink: 0;
   color: rgba(255, 255, 255, 0.8);
+  line-height: 0;
 }
 
 .sidebar-group-toggle .toggle-chevron svg {
