@@ -1,5 +1,6 @@
 import csv
 import calendar
+import hashlib
 import re
 from collections import defaultdict
 from io import BytesIO
@@ -11,6 +12,7 @@ from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q, Sum
 from django.urls import reverse
@@ -47,6 +49,21 @@ from .models import (
 )
 
 IMPORT_PREVIEW_SESSION_KEY = "compras_solicitudes_import_preview"
+
+
+def _dashboard_rows_signature(rows: list[dict]) -> str:
+    source = "|".join(
+        ":".join(
+            [
+                str(row.get("proveedor") or row.get("categoria") or row.get("label") or row.get("nombre") or ""),
+                str(row.get("estimado") or row.get("presupuesto_estimado") or 0),
+                str(row.get("ejecutado") or row.get("presupuesto_ejecutado") or 0),
+                str(row.get("variacion") or 0),
+            ]
+        )
+        for row in rows
+    )
+    return hashlib.sha1(source.encode()).hexdigest()
 
 
 def _insumo_display_name(insumo: Insumo | None) -> str:
@@ -4356,6 +4373,14 @@ def _build_provider_dashboard(
     categoria_filter: str,
     current_rows: list[dict],
 ) -> dict:
+    cache_key = (
+        "compras:provider-dashboard:"
+        f"{periodo_mes}:{source_filter}:{plan_filter}:{categoria_filter}:{_dashboard_rows_signature(current_rows)}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     months_desc = [_shift_month(periodo_mes, d) for d in range(0, 6)]
     months_asc = list(reversed(months_desc))
 
@@ -4438,12 +4463,14 @@ def _build_provider_dashboard(
         reverse=True,
     )[:12]
 
-    return {
+    result = {
         "top_desviaciones": top_desviaciones,
         "trend_rows": trend_rows,
         "trend_months": months_asc,
         "trend_providers": top_providers,
     }
+    cache.set(cache_key, result, 300)
+    return result
 
 
 def _build_category_dashboard(
@@ -4453,6 +4480,14 @@ def _build_category_dashboard(
     categoria_filter: str,
     current_rows: list[dict],
 ) -> dict:
+    cache_key = (
+        "compras:category-dashboard:"
+        f"{periodo_mes}:{source_filter}:{plan_filter}:{categoria_filter}:{_dashboard_rows_signature(current_rows)}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     months_desc = [_shift_month(periodo_mes, d) for d in range(0, 6)]
     months_asc = list(reversed(months_desc))
 
@@ -4539,12 +4574,14 @@ def _build_category_dashboard(
         reverse=True,
     )[:12]
 
-    return {
+    result = {
         "top_desviaciones": top_desviaciones,
         "trend_rows": trend_rows,
         "trend_months": months_asc,
         "trend_categories": top_categorias,
     }
+    cache.set(cache_key, result, 300)
+    return result
 
 
 def _build_consumo_vs_plan_dashboard(
@@ -4560,6 +4597,15 @@ def _build_consumo_vs_plan_dashboard(
     sort_by: str = "variacion_cost_abs",
     sort_dir: str = "desc",
 ) -> dict:
+    cache_key = (
+        "compras:consumo-vs-plan:"
+        f"{periodo_tipo}:{periodo_mes}:{source_filter}:{plan_filter}:{categoria_filter}:"
+        f"{consumo_ref_filter}:{limit}:{offset}:{sort_by}:{sort_dir}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     start_date, end_date = _periodo_bounds(periodo_tipo, periodo_mes)
     consumo_ref_filter = _sanitize_consumo_ref_filter(consumo_ref_filter)
     if not start_date or not end_date:
@@ -4800,7 +4846,7 @@ def _build_consumo_vs_plan_dashboard(
         if totals["plan_qty_total"] > 0
         else None
     )
-    return {
+    result = {
         "rows": rows_paginated,
         "totals": totals,
         "period_start": start_date,
@@ -4814,6 +4860,8 @@ def _build_consumo_vs_plan_dashboard(
             "sort_dir": sort_dir,
         },
     }
+    cache.set(cache_key, result, 300)
+    return result
 
 
 def _build_budget_context(
