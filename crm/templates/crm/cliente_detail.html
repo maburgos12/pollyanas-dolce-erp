@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Cliente {{ cliente.nombre }} · CRM{% endblock %}
+{% block page_title %}CRM · Cliente{% endblock %}
+{% block body_class %}page-crm-cliente-detail{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260321-05">
+<style>
+  .crm-detail-grid{display:grid;grid-template-columns:minmax(280px,1fr) minmax(0,2fr);gap:18px;align-items:start}
+  .crm-card{background:#fff;border:1px solid rgba(139,34,82,.10);border-radius:12px;overflow:hidden}
+  .crm-card-head{background:#8b2252;color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .crm-card-head h2{font-size:15px;font-weight:600;margin:0}
+  .crm-card-body{padding:16px}
+  .crm-field-row{display:flex;flex-direction:column;gap:3px;margin-bottom:12px}
+  .crm-field-row:last-child{margin-bottom:0}
+  .crm-field-label{font-size:11px;font-weight:600;color:#8b2252;text-transform:uppercase;letter-spacing:.04em}
+  .crm-field-value{font-size:14px;color:#222}
+  .crm-field-value.muted{color:#888}
+  .crm-badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+  .badge-activo{background:#f0fdf4;color:#166534;border:1px solid #86efac}
+  .badge-inactivo{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
+  .crm-kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:16px}
+  .crm-kpi{background:rgba(139,34,82,.05);border-radius:8px;padding:10px 12px;text-align:center;min-height:78px}
+  .crm-kpi-label{font-size:10px;color:#8b2252;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+  .crm-kpi-val{font-size:20px;font-weight:700;color:#8b2252}
+  .crm-pedidos-table{width:100%;border-collapse:collapse}
+  .crm-pedidos-table th,.crm-pedidos-table td{padding:9px 10px;border-bottom:1px solid rgba(139,34,82,.08);text-align:left;vertical-align:middle;font-size:13px}
+  .crm-pedidos-table th{font-size:11px;color:#8b2252;text-transform:uppercase;letter-spacing:.04em}
+  .crm-pedidos-table tr:hover td{background:rgba(139,34,82,.02)}
+  .estatus-nuevo{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+  .estatus-cotizado{background:#faf5ff;color:#6b21a8;border:1px solid #d8b4fe}
+  .estatus-confirmado{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+  .estatus-en_produccion{background:#fff7ed;color:#c2410c;border:1px solid #fdba74}
+  .estatus-listo{background:#ecfdf5;color:#065f46;border:1px solid #6ee7b7}
+  .estatus-entregado{background:#f0fdf4;color:#166534;border:1px solid #86efac}
+  .estatus-cancelado{background:#f9fafb;color:#6b7280;border:1px solid #e5e7eb}
+  .edit-form{display:none}
+  .edit-form.visible{display:block}
+  .form-group{margin-bottom:12px}
+  .form-group label{display:block;font-size:12px;font-weight:600;color:#6f3150;margin-bottom:4px}
+  .form-group input,.form-group textarea{width:100%;padding:8px 10px;border:1px solid #e5dce1;border-radius:8px;font:inherit;font-size:13px}
+  .form-group textarea{resize:vertical;min-height:80px}
+  .form-actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+  @media(max-width:820px){.crm-detail-grid{grid-template-columns:1fr}.crm-kpi-grid{grid-template-columns:1fr 1fr}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell">
+  <section class="module-tabs" aria-label="Submodulos CRM">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="bi-panel" style="margin-bottom:16px">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker"><a href="{% url 'crm:clientes' %}" style="color:inherit;text-decoration:none">Clientes</a></div>
+        <h2 class="bi-panel-title">{{ cliente.nombre }}</h2>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="crm-badge {% if cliente.activo %}badge-activo{% else %}badge-inactivo{% endif %}">
+          {% if cliente.activo %}Activo{% else %}Inactivo{% endif %}
+        </span>
+        <span class="crm-badge" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db">{{ cliente.codigo }}</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="crm-kpi-grid">
+    <article class="crm-kpi">
+      <div class="crm-kpi-label">Pedidos totales</div>
+      <div class="crm-kpi-val">{{ total_pedidos|intcomma }}</div>
+    </article>
+    <article class="crm-kpi">
+      <div class="crm-kpi-label">Pedidos abiertos</div>
+      <div class="crm-kpi-val">{{ pedidos_abiertos|intcomma }}</div>
+    </article>
+    <article class="crm-kpi">
+      <div class="crm-kpi-label">Monto total</div>
+      <div class="crm-kpi-val" style="font-size:15px">${{ monto_total|floatformat:0|intcomma }}</div>
+    </article>
+  </section>
+
+  <section class="crm-detail-grid">
+    <article class="crm-card">
+      <div class="crm-card-head">
+        <h2>Datos del cliente</h2>
+        {% if can_manage_crm %}
+        <button type="button" class="btn btn-secondary btn-small" onclick="toggleEditForm()">Editar</button>
+        {% endif %}
+      </div>
+      <div class="crm-card-body" id="vista-datos">
+        <div class="crm-field-row"><span class="crm-field-label">Nombre</span><span class="crm-field-value">{{ cliente.nombre }}</span></div>
+        <div class="crm-field-row"><span class="crm-field-label">Telefono</span><span class="crm-field-value {% if not cliente.telefono %}muted{% endif %}">{{ cliente.telefono|default:"Sin telefono" }}</span></div>
+        <div class="crm-field-row"><span class="crm-field-label">Email</span><span class="crm-field-value {% if not cliente.email %}muted{% endif %}">{{ cliente.email|default:"Sin email" }}</span></div>
+        <div class="crm-field-row"><span class="crm-field-label">Tipo de cliente</span><span class="crm-field-value {% if not cliente.tipo_cliente %}muted{% endif %}">{{ cliente.tipo_cliente|default:"Sin clasificar" }}</span></div>
+        <div class="crm-field-row"><span class="crm-field-label">Sucursal referencia</span><span class="crm-field-value {% if not cliente.sucursal_referencia %}muted{% endif %}">{{ cliente.sucursal_referencia|default:"Sin sucursal" }}</span></div>
+        {% if cliente.notas %}
+        <div class="crm-field-row"><span class="crm-field-label">Notas</span><span class="crm-field-value" style="font-size:13px;white-space:pre-wrap">{{ cliente.notas }}</span></div>
+        {% endif %}
+        <div class="crm-field-row" style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(139,34,82,.08)">
+          <span class="crm-field-label">Alta en sistema</span>
+          <span class="crm-field-value muted" style="font-size:12px">{{ cliente.created_at|date:"d/m/Y H:i" }}</span>
+        </div>
+        {% if ultimo_pedido %}
+        <div class="crm-field-row">
+          <span class="crm-field-label">Ultimo pedido</span>
+          <span class="crm-field-value muted" style="font-size:12px">{{ ultimo_pedido.created_at|date:"d/m/Y" }} - {{ ultimo_pedido.folio }}</span>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if can_manage_crm %}
+      <div class="crm-card-body edit-form" id="form-editar" style="border-top:1px solid rgba(139,34,82,.1)">
+        <form method="post" action="{% url 'crm:editar_cliente' cliente_id=cliente.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="accion" value="editar">
+          <div class="form-group"><label>Nombre *</label><input type="text" name="nombre" value="{{ cliente.nombre }}" required maxlength="180"></div>
+          <div class="form-group"><label>Telefono</label><input type="text" name="telefono" value="{{ cliente.telefono }}" maxlength="40"></div>
+          <div class="form-group"><label>Email</label><input type="email" name="email" value="{{ cliente.email }}" maxlength="254"></div>
+          <div class="form-group"><label>Tipo de cliente</label><input type="text" name="tipo_cliente" value="{{ cliente.tipo_cliente }}" maxlength="40" placeholder="Ej. Mayoreo, Evento, Regular"></div>
+          <div class="form-group"><label>Sucursal referencia</label><input type="text" name="sucursal_referencia" value="{{ cliente.sucursal_referencia }}" maxlength="120"></div>
+          <div class="form-group"><label>Notas</label><textarea name="notas">{{ cliente.notas }}</textarea></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Guardar cambios</button>
+            <button type="button" class="btn btn-secondary" onclick="toggleEditForm()">Cancelar</button>
+          </div>
+        </form>
+        <hr style="margin:16px 0;border:none;border-top:1px solid rgba(139,34,82,.08)">
+        <form method="post" action="{% url 'crm:editar_cliente' cliente_id=cliente.id %}" onsubmit="return confirm('Confirmar cambio de estado del cliente')">
+          {% csrf_token %}
+          <input type="hidden" name="accion" value="{% if cliente.activo %}desactivar{% else %}activar{% endif %}">
+          <button type="submit" class="btn {% if cliente.activo %}btn-danger{% else %}btn-primary{% endif %} btn-small">
+            {% if cliente.activo %}Desactivar cliente{% else %}Reactivar cliente{% endif %}
+          </button>
+        </form>
+      </div>
+      {% endif %}
+    </article>
+
+    <article class="crm-card">
+      <div class="crm-card-head">
+        <h2>Historial de pedidos</h2>
+        <span style="font-size:12px;opacity:.75">{{ total_pedidos|intcomma }} pedido{{ total_pedidos|pluralize }}</span>
+      </div>
+      <div style="overflow:auto">
+        {% if pedidos %}
+        <table class="crm-pedidos-table">
+          <thead><tr><th>Folio</th><th>Descripcion</th><th>Sucursal</th><th>Estatus</th><th>Fecha</th><th>Monto</th><th></th></tr></thead>
+          <tbody>
+            {% for pedido in pedidos %}
+            <tr>
+              <td><strong style="color:#8b2252">{{ pedido.folio }}</strong></td>
+              <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ pedido.descripcion }}</td>
+              <td style="font-size:12px">{{ pedido.sucursal|default:"-" }}</td>
+              <td><span class="crm-badge estatus-{{ pedido.estatus|lower }}">{{ pedido.get_estatus_display }}</span></td>
+              <td style="font-size:12px;white-space:nowrap">{{ pedido.created_at|date:"d/m/y" }}</td>
+              <td style="font-size:12px;text-align:right">{% if pedido.monto_estimado %}${{ pedido.monto_estimado|floatformat:0|intcomma }}{% else %}-{% endif %}</td>
+              <td><a href="{% url 'crm:pedido_detail' pedido_id=pedido.id %}" class="btn btn-secondary btn-small">Ver</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div style="padding:32px;text-align:center;color:#888">
+          <div style="font-weight:600;color:#6f3150;margin-bottom:4px">Sin pedidos registrados</div>
+          <div style="font-size:13px">Este cliente aun no tiene pedidos en el sistema.</div>
+          {% if can_manage_crm %}
+          <a href="{% url 'crm:pedidos' %}?q={{ cliente.nombre }}" class="btn btn-primary" style="margin-top:12px">Crear pedido</a>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </article>
+  </section>
+</div>
+
+<script>
+function toggleEditForm() {
+  var form = document.getElementById("form-editar");
+  var vista = document.getElementById("vista-datos");
+  if (!form || !vista) return;
+  form.classList.toggle("visible");
+  vista.style.display = form.classList.contains("visible") ? "none" : "block";
+}
+</script>
+{% endblock %}

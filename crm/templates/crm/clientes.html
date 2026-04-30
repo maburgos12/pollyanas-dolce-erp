@@ -125,7 +125,7 @@
           {% for c in clientes %}
           <tr>
             <td>{{ c.codigo }}</td>
-            <td>{{ c.nombre }}</td>
+            <td><a class="bi-inline-link" href="{% url 'crm:cliente_detail' c.id %}">{{ c.nombre }}</a></td>
             <td>{{ c.tipo_cliente|default:"-" }}</td>
             <td>
               {{ c.telefono|default:"-" }}<br>

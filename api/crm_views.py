@@ -247,3 +247,45 @@ class CRMDashboardView(_CRMBaseView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CRMClienteDetailView(_CRMBaseView):
+    def get(self, request, pk: int):
+        if not can_view_crm(request.user):
+            return Response({"detail": "No tienes permisos para consultar CRM."}, status=status.HTTP_403_FORBIDDEN)
+
+        cliente = get_object_or_404(Cliente, pk=pk)
+        pedidos = list(
+            PedidoCliente.objects.filter(cliente=cliente)
+            .select_related("cliente")
+            .order_by("-created_at", "-id")[:50]
+        )
+        return Response(
+            {
+                "cliente": CRMClienteSerializer(cliente).data,
+                "pedidos": CRMPedidoSerializer(pedidos, many=True).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def patch(self, request, pk: int):
+        if not can_manage_crm(request.user):
+            return Response({"detail": "No tienes permisos para editar clientes CRM."}, status=status.HTTP_403_FORBIDDEN)
+
+        cliente = get_object_or_404(Cliente, pk=pk)
+        serializer = CRMClienteSerializer(cliente, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        cliente = serializer.save()
+        log_event(
+            request.user,
+            "UPDATE",
+            "crm.Cliente",
+            str(cliente.id),
+            {
+                "codigo": cliente.codigo,
+                "nombre": cliente.nombre,
+                "activo": cliente.activo,
+                "campos_modificados": list(request.data.keys()),
+            },
+        )
+        return Response(CRMClienteSerializer(cliente).data, status=status.HTTP_200_OK)

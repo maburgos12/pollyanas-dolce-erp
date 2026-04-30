@@ -86,6 +86,7 @@ from .views import (
     VentaHistoricaImportConfirmView,
 )
 from .crm_views import (
+    CRMClienteDetailView,
     CRMClientesView,
     CRMDashboardView,
     CRMPedidoSeguimientoView,
@@ -333,6 +334,7 @@ urlpatterns = [
     path("control/mermas-pos/bulk/", ControlMermasPosBulkUpsertView.as_view(), name="api_control_mermas_pos_bulk"),
     path("crm/dashboard/", CRMDashboardView.as_view(), name="api_crm_dashboard"),
     path("crm/clientes/", CRMClientesView.as_view(), name="api_crm_clientes"),
+    path("crm/clientes/<int:pk>/", CRMClienteDetailView.as_view(), name="api_crm_cliente_detail"),
     path("crm/pedidos/", CRMPedidosView.as_view(), name="api_crm_pedidos"),
     path("crm/pedidos/<int:pedido_id>/seguimiento/", CRMPedidoSeguimientoView.as_view(), name="api_crm_pedido_seguimiento"),
     path("rrhh/dashboard/", RRHHDashboardView.as_view(), name="api_rrhh_dashboard"),

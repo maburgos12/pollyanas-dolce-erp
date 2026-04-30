@@ -47,6 +47,33 @@ class CRMApiTests(APITestCase):
         self.assertEqual(resp_list.status_code, status.HTTP_200_OK)
         self.assertGreaterEqual(resp_list.data["count"], 1)
 
+    def test_cliente_detail_get_and_patch(self):
+        self.client.force_authenticate(self.user_ventas)
+        cliente = Cliente.objects.create(nombre="Cliente Detalle API", telefono="6670000000")
+        PedidoCliente.objects.create(
+            cliente=cliente,
+            descripcion="Pedido visible API",
+            sucursal_ref=self.sucursal,
+            monto_estimado="350.00",
+        )
+
+        detail_url = reverse("api_crm_cliente_detail", kwargs={"pk": cliente.id})
+        resp_detail = self.client.get(detail_url)
+        self.assertEqual(resp_detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp_detail.data["cliente"]["nombre"], "Cliente Detalle API")
+        self.assertEqual(len(resp_detail.data["pedidos"]), 1)
+
+        resp_patch = self.client.patch(
+            detail_url,
+            {"nombre": "Cliente API Editado", "activo": False, "notas": "Actualizado por API"},
+            format="json",
+        )
+        self.assertEqual(resp_patch.status_code, status.HTTP_200_OK)
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.nombre, "Cliente API Editado")
+        self.assertFalse(cliente.activo)
+        self.assertEqual(cliente.notas, "Actualizado por API")
+
     def test_pedidos_create_followup_and_dashboard(self):
         self.client.force_authenticate(self.user_ventas)
         cliente = Cliente.objects.create(nombre="Cliente Pedido API")
@@ -97,3 +124,8 @@ class CRMApiTests(APITestCase):
 
         resp_create = self.client.post(list_url, {"nombre": "No permitido"}, format="json")
         self.assertEqual(resp_create.status_code, status.HTTP_403_FORBIDDEN)
+
+        cliente = Cliente.objects.create(nombre="Solo Lectura")
+        detail_url = reverse("api_crm_cliente_detail", kwargs={"pk": cliente.id})
+        resp_patch = self.client.patch(detail_url, {"nombre": "No permitido"}, format="json")
+        self.assertEqual(resp_patch.status_code, status.HTTP_403_FORBIDDEN)

@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -1294,3 +1294,98 @@ def pedido_detail(request: HttpRequest, pedido_id: int) -> HttpResponse:
         ),
     }
     return render(request, "crm/pedido_detail.html", ctx)
+
+
+@login_required
+def cliente_detail(request: HttpRequest, cliente_id: int) -> HttpResponse:
+    if not can_view_crm(request.user):
+        raise PermissionDenied("No tienes permisos para ver CRM")
+
+    cliente = get_object_or_404(Cliente, pk=cliente_id)
+    pedidos_qs = (
+        PedidoCliente.objects.filter(cliente=cliente)
+        .select_related("sucursal_ref")
+        .order_by("-created_at", "-id")
+    )
+    pedidos = list(pedidos_qs[:100])
+    pedidos_abiertos = pedidos_qs.exclude(
+        estatus__in=[PedidoCliente.ESTATUS_ENTREGADO, PedidoCliente.ESTATUS_CANCELADO]
+    ).count()
+    monto_total = pedidos_qs.aggregate(total=Sum("monto_estimado")).get("total") or Decimal("0")
+
+    ctx = {
+        "module_tabs": _module_tabs("clientes"),
+        "cliente": cliente,
+        "pedidos": pedidos,
+        "total_pedidos": pedidos_qs.count(),
+        "pedidos_abiertos": pedidos_abiertos,
+        "monto_total": monto_total,
+        "ultimo_pedido": pedidos[0] if pedidos else None,
+        "can_manage_crm": can_manage_crm(request.user),
+    }
+    return render(request, "crm/cliente_detail.html", ctx)
+
+
+@login_required
+def editar_cliente(request: HttpRequest, cliente_id: int) -> HttpResponse:
+    if not can_manage_crm(request.user):
+        raise PermissionDenied("No tienes permisos para gestionar CRM")
+
+    cliente = get_object_or_404(Cliente, pk=cliente_id)
+    if request.method != "POST":
+        return redirect("crm:cliente_detail", cliente_id=cliente.id)
+
+    accion = (request.POST.get("accion") or "editar").strip()
+    if accion == "desactivar":
+        cliente.activo = False
+        cliente.save(update_fields=["activo", "updated_at"])
+        log_event(
+            request.user,
+            "UPDATE",
+            "crm.Cliente",
+            str(cliente.id),
+            {"codigo": cliente.codigo, "nombre": cliente.nombre, "activo": False},
+        )
+        messages.success(request, f"Cliente {cliente.nombre} desactivado.")
+        return redirect("crm:clientes")
+
+    if accion == "activar":
+        cliente.activo = True
+        cliente.save(update_fields=["activo", "updated_at"])
+        log_event(
+            request.user,
+            "UPDATE",
+            "crm.Cliente",
+            str(cliente.id),
+            {"codigo": cliente.codigo, "nombre": cliente.nombre, "activo": True},
+        )
+        messages.success(request, f"Cliente {cliente.nombre} reactivado.")
+        return redirect("crm:cliente_detail", cliente_id=cliente.id)
+
+    nombre = (request.POST.get("nombre") or "").strip()
+    if not nombre:
+        messages.error(request, "El nombre del cliente es obligatorio.")
+        return redirect("crm:cliente_detail", cliente_id=cliente.id)
+
+    cliente.nombre = nombre
+    cliente.telefono = (request.POST.get("telefono") or "").strip()
+    cliente.email = (request.POST.get("email") or "").strip()
+    cliente.tipo_cliente = (request.POST.get("tipo_cliente") or "").strip()
+    cliente.sucursal_referencia = (request.POST.get("sucursal_referencia") or "").strip()
+    cliente.notas = (request.POST.get("notas") or "").strip()
+    cliente.save()
+
+    log_event(
+        request.user,
+        "UPDATE",
+        "crm.Cliente",
+        str(cliente.id),
+        {
+            "codigo": cliente.codigo,
+            "nombre": cliente.nombre,
+            "telefono": cliente.telefono,
+            "email": cliente.email,
+        },
+    )
+    messages.success(request, f"Cliente {cliente.nombre} actualizado.")
+    return redirect("crm:cliente_detail", cliente_id=cliente.id)

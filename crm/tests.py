@@ -127,6 +127,57 @@ class CRMViewsTests(TestCase):
         self.assertEqual(resp_post.status_code, 200)
         self.assertTrue(Cliente.objects.filter(nombre="Cliente Demo").exists())
 
+    def test_cliente_detail_edit_deactivate_and_reactivate(self):
+        cliente = Cliente.objects.create(
+            nombre="Cliente Editable",
+            telefono="6670000000",
+            email="viejo@example.com",
+            tipo_cliente="Mostrador",
+        )
+        PedidoCliente.objects.create(
+            cliente=cliente,
+            descripcion="Pedido cliente editable",
+            sucursal_ref=self.sucursal,
+            monto_estimado=500,
+        )
+
+        detail_url = reverse("crm:cliente_detail", kwargs={"cliente_id": cliente.id})
+        resp_detail = self.client.get(detail_url)
+        self.assertEqual(resp_detail.status_code, 200)
+        self.assertContains(resp_detail, "Cliente Editable")
+        self.assertContains(resp_detail, "Historial de pedidos")
+        self.assertContains(resp_detail, "Pedido cliente editable")
+
+        edit_url = reverse("crm:editar_cliente", kwargs={"cliente_id": cliente.id})
+        resp_edit = self.client.post(
+            edit_url,
+            {
+                "accion": "editar",
+                "nombre": "Cliente Editado",
+                "telefono": "6671111111",
+                "email": "nuevo@example.com",
+                "tipo_cliente": "Evento",
+                "sucursal_referencia": "Matriz",
+                "notas": "Cliente actualizado desde test",
+            },
+            follow=True,
+        )
+        self.assertEqual(resp_edit.status_code, 200)
+        cliente.refresh_from_db()
+        self.assertEqual(cliente.nombre, "Cliente Editado")
+        self.assertEqual(cliente.nombre_normalizado, "cliente editado")
+        self.assertEqual(cliente.email, "nuevo@example.com")
+
+        resp_deactivate = self.client.post(edit_url, {"accion": "desactivar"}, follow=True)
+        self.assertEqual(resp_deactivate.status_code, 200)
+        cliente.refresh_from_db()
+        self.assertFalse(cliente.activo)
+
+        resp_activate = self.client.post(edit_url, {"accion": "activar"}, follow=True)
+        self.assertEqual(resp_activate.status_code, 200)
+        cliente.refresh_from_db()
+        self.assertTrue(cliente.activo)
+
     def test_pedidos_create_and_tracking(self):
         cliente = Cliente.objects.create(nombre="Cliente Pedido")
         resp_index = self.client.get(reverse("crm:pedidos"))
