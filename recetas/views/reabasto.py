@@ -24,7 +24,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 from rapidfuzz import fuzz
 
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
@@ -90,6 +91,50 @@ from reportes.executive_panels import _partial_month_amount_quantity
 from ventas.models import VentaAutoritativaPoint
 
 OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
+
+ERP_EXPORT_TITLE_FILL = PatternFill("solid", fgColor="7A2048")
+ERP_EXPORT_HEADER_FILL = PatternFill("solid", fgColor="F7D7E5")
+ERP_EXPORT_HEADER_FONT = Font(bold=True, color="2F1727")
+ERP_EXPORT_TITLE_FONT = Font(bold=True, color="FFFFFF", size=14)
+ERP_EXPORT_LABEL_FONT = Font(bold=True, color="2F1727")
+ERP_EXPORT_BORDER = Border(
+    left=Side(style="thin", color="E9B8CB"),
+    right=Side(style="thin", color="E9B8CB"),
+    top=Side(style="thin", color="E9B8CB"),
+    bottom=Side(style="thin", color="E9B8CB"),
+)
+
+
+def _style_export_title(ws, title: str, *, max_col: int, row: int = 1) -> None:
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=max_col)
+    cell = ws.cell(row=row, column=1)
+    cell.value = title
+    cell.fill = ERP_EXPORT_TITLE_FILL
+    cell.font = ERP_EXPORT_TITLE_FONT
+    cell.alignment = Alignment(horizontal="center")
+
+
+def _style_export_table(ws, *, header_row: int, max_col: int | None = None, max_row: int | None = None) -> None:
+    max_col = max_col or ws.max_column
+    max_row = max_row or ws.max_row
+    for cell in ws[header_row]:
+        if cell.column > max_col:
+            continue
+        cell.fill = ERP_EXPORT_HEADER_FILL
+        cell.font = ERP_EXPORT_HEADER_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = ERP_EXPORT_BORDER
+    for row in ws.iter_rows(min_row=header_row + 1, max_row=max_row, max_col=max_col):
+        for cell in row:
+            cell.border = ERP_EXPORT_BORDER
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+    ws.freeze_panes = f"A{header_row + 1}"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(max_col)}{max_row}"
+
+
+def _apply_column_widths(ws, widths: dict[str, int]) -> None:
+    for column, width in widths.items():
+        ws.column_dimensions[column].width = width
 RECENT_POINT_SOURCE = "/Report/VentasCategorias"
 NONBLOCKING_PRODUCT_PLACEHOLDER_LABELS = {
     "armado",
@@ -12066,8 +12111,10 @@ def _export_plan_xlsx(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpRe
     wb = Workbook()
     ws_resumen = wb.active
     ws_resumen.title = "Resumen"
+    _style_export_title(ws_resumen, "Exportación de detalle", max_col=2)
+    ws_resumen.append(["Fecha de solicitud", plan.fecha_produccion.isoformat()])
+    ws_resumen.append(["Fecha de aplicación del plan", plan.fecha_produccion.isoformat()])
     ws_resumen.append(["Plan", plan.nombre])
-    ws_resumen.append(["Fecha", plan.fecha_produccion.isoformat()])
     ws_resumen.append(["Estado", plan.get_estado_display()])
     ws_resumen.append(["Consumo aplicado", "SI" if plan.consumo_aplicado else "NO"])
     ws_resumen.append(["Consumo aplicado en", timezone.localtime(plan.consumo_aplicado_en).isoformat() if plan.consumo_aplicado_en else ""])
@@ -12075,11 +12122,19 @@ def _export_plan_xlsx(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpRe
     ws_resumen.append(["Cerrado en", timezone.localtime(plan.cerrado_en).isoformat() if plan.cerrado_en else ""])
     ws_resumen.append(["Cerrado por", str(plan.cerrado_por or "")])
     ws_resumen.append(["Costo total estimado", float(explosion["costo_total"] or 0)])
-    ws_resumen.append([])
     ws_resumen.append(["Productos", len(explosion["items_detalle"])])
     ws_resumen.append(["Insumos", len(explosion["insumos"])])
+    for row in ws_resumen.iter_rows(min_row=2, max_row=ws_resumen.max_row, max_col=2):
+        row[0].font = ERP_EXPORT_LABEL_FONT
+        for cell in row:
+            cell.border = ERP_EXPORT_BORDER
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+    _apply_column_widths(ws_resumen, {"A": 28, "B": 44})
 
     ws_productos = wb.create_sheet("Productos")
+    _style_export_title(ws_productos, "Exportación de detalle - Productos", max_col=4)
+    ws_productos.append(["Fecha de solicitud", plan.fecha_produccion.isoformat(), "Fecha aplicación plan", plan.fecha_produccion.isoformat()])
+    ws_productos.append([])
     ws_productos.append(["Receta", "Cantidad", "Notas", "Costo estimado"])
     for row in explosion["items_detalle"]:
         ws_productos.append(
@@ -12090,8 +12145,13 @@ def _export_plan_xlsx(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpRe
                 float(row["costo_estimado"] or 0),
             ]
         )
+    _style_export_table(ws_productos, header_row=4, max_col=4)
+    _apply_column_widths(ws_productos, {"A": 42, "B": 14, "C": 32, "D": 16})
 
     ws_insumos = wb.create_sheet("Insumos")
+    _style_export_title(ws_insumos, "Exportación de detalle - Insumos consolidados", max_col=7)
+    ws_insumos.append(["Fecha de solicitud", plan.fecha_produccion.isoformat(), "Fecha aplicación plan", plan.fecha_produccion.isoformat()])
+    ws_insumos.append([])
     ws_insumos.append(["Insumo", "Origen", "Proveedor sugerido", "Cantidad requerida", "Unidad", "Costo unitario", "Costo total"])
     for row in explosion["insumos"]:
         ws_insumos.append(
@@ -12105,6 +12165,8 @@ def _export_plan_xlsx(plan: PlanProduccion, explosion: Dict[str, Any]) -> HttpRe
                 float(row["costo_total"] or 0),
             ]
         )
+    _style_export_table(ws_insumos, header_row=4, max_col=7)
+    _apply_column_widths(ws_insumos, {"A": 38, "B": 18, "C": 28, "D": 18, "E": 12, "F": 16, "G": 16})
 
     out = BytesIO()
     wb.save(out)
@@ -12137,6 +12199,8 @@ def _export_plan_point_xlsx(plan: PlanProduccion) -> HttpResponse:
                 "true" if receta.tipo == Receta.TIPO_PREPARACION else "false",
             ]
         )
+    _style_export_table(ws, header_row=1, max_col=4)
+    _apply_column_widths(ws, {"A": 18, "B": 46, "C": 20, "D": 14})
 
     out = BytesIO()
     wb.save(out)
@@ -20655,6 +20719,10 @@ def reabasto_cedis_consolidado_export(request: HttpRequest) -> HttpResponse:
         wb = Workbook()
         ws = wb.active
         ws.title = "Solicitudes por sucursal"
+        _style_export_title(ws, "Solicitudes por sucursal", max_col=max(len(sucursales) + 2, 2))
+        ws.append(["Fecha de solicitud", fecha_operacion.isoformat()])
+        ws.append(["Fecha de aplicación del plan", fecha_operacion.isoformat()])
+        ws.append([])
         ws.append(["Producto", *[suc.nombre for suc in sucursales], "Total"])
         for row in matrix.values():
             ws.append(
@@ -20664,6 +20732,8 @@ def reabasto_cedis_consolidado_export(request: HttpRequest) -> HttpResponse:
                     float(row["total"]),
                 ]
             )
+        _style_export_table(ws, header_row=5, max_col=len(sucursales) + 2)
+        _apply_column_widths(ws, {"A": 42, **{get_column_letter(idx + 2): 14 for idx in range(len(sucursales))}, get_column_letter(len(sucursales) + 2): 14})
         out = BytesIO()
         wb.save(out)
         out.seek(0)
@@ -20704,6 +20774,10 @@ def reabasto_cedis_consolidado_export(request: HttpRequest) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
     ws.title = "Consolidado CEDIS"
+    _style_export_title(ws, "Consolidado CEDIS", max_col=6)
+    ws.append(["Fecha de solicitud", fecha_operacion.isoformat()])
+    ws.append(["Fecha de aplicación del plan", fecha_operacion.isoformat()])
+    ws.append([])
     ws.append(
         [
             "Receta",
@@ -20725,6 +20799,8 @@ def reabasto_cedis_consolidado_export(request: HttpRequest) -> HttpResponse:
                 float(row["cedis_faltante_producir"]),
             ]
         )
+    _style_export_table(ws, header_row=5, max_col=6)
+    _apply_column_widths(ws, {"A": 42, "B": 14, "C": 16, "D": 16, "E": 18, "F": 22})
     out = BytesIO()
     wb.save(out)
     out.seek(0)
