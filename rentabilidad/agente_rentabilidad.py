@@ -15,7 +15,6 @@ Se ejecuta desde:
 import json
 import logging
 from decimal import Decimal
-from openai import OpenAI
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -133,6 +132,8 @@ def analizar_sucursal(rent, guardar=True) -> dict:
     Returns:
         dict con diagnostico, recomendaciones, alerta_nivel, resumen_ejecutivo
     """
+    from openai import OpenAI
+
     client = OpenAI(api_key=settings.OPENAI_API_KEY)
     contexto = _construir_contexto(rent)
 

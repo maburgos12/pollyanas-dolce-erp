@@ -17,7 +17,6 @@ from datetime import date
 import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
-from .agente_rentabilidad import analizar_sucursal
 
 
 def _get_periodo(request):
@@ -136,6 +135,8 @@ def detalle_sucursal(request, pk):
 @require_POST
 def analizar_con_ia(request, pk):
     """Endpoint AJAX: lanza el agente IA para una sucursal y devuelve el resultado."""
+    from .agente_rentabilidad import analizar_sucursal
+
     rent = get_object_or_404(SucursalRentabilidad, pk=pk)
     try:
         resultado = analizar_sucursal(rent, guardar=True)
