@@ -63,23 +63,36 @@
   }
 
   .cedis-add-row {
-    align-items: end;
     display: grid;
-    gap: 12px;
+    column-gap: 12px;
+    row-gap: 6px;
+    grid-template-areas:
+      "product-label qty-label ."
+      "product qty submit";
     grid-template-columns: minmax(260px, 1fr) 120px 96px;
     margin-top: 12px;
   }
 
-  .cedis-add-row .form-group {
+  .cedis-add-row .form-label {
     margin: 0;
   }
 
-  .cedis-add-row .form-control,
-  .cedis-add-row .btn {
+  .cedis-add-product-label { grid-area: product-label; }
+  .cedis-add-qty-label { grid-area: qty-label; }
+  .cedis-add-product { grid-area: product; }
+  .cedis-add-qty { grid-area: qty; }
+  .cedis-add-submit { grid-area: submit; }
+
+  .cedis-add-row .form-control {
+    height: 42px;
     min-height: 42px;
   }
 
-  .cedis-add-row .btn {
+  .cedis-add-submit {
+    align-self: end;
+    height: 42px;
+    min-height: 42px;
+    padding: 0 12px;
     width: 100%;
   }
 
@@ -99,6 +112,12 @@
     }
 
     .cedis-add-row {
+      grid-template-areas:
+        "product-label"
+        "product"
+        "qty-label"
+        "qty"
+        "submit";
       grid-template-columns: 1fr;
     }
   }
@@ -202,23 +221,16 @@
       </div>
       {% if plan %}
       <div class="cedis-add-row">
-        <div class="form-group">
-          <label class="form-label">Agregar producto</label>
-          <select class="form-control" name="agregar_receta_id" {% if plan.autorizado %}disabled{% endif %}>
-            <option value="">Selecciona producto</option>
-            {% for receta in recetas_disponibles %}
-            <option value="{{ receta.id }}">{{ receta.nombre }}{% if receta.codigo_point %} · {{ receta.codigo_point }}{% endif %}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Cantidad</label>
-          <input class="form-control text-end" type="number" step="0.001" min="0" name="agregar_cantidad" value="0" {% if plan.autorizado %}disabled{% endif %}>
-        </div>
-        <div class="form-group">
-          <label class="form-label">&nbsp;</label>
-          <button class="btn btn-secondary" type="submit" {% if plan.autorizado %}disabled{% endif %}>Agregar</button>
-        </div>
+        <label class="form-label cedis-add-product-label" for="agregar_receta_id">Agregar producto</label>
+        <label class="form-label cedis-add-qty-label" for="agregar_cantidad">Cantidad</label>
+        <select id="agregar_receta_id" class="form-control cedis-add-product" name="agregar_receta_id" {% if plan.autorizado %}disabled{% endif %}>
+          <option value="">Selecciona producto</option>
+          {% for receta in recetas_disponibles %}
+          <option value="{{ receta.id }}">{{ receta.nombre }}{% if receta.codigo_point %} · {{ receta.codigo_point }}{% endif %}</option>
+          {% endfor %}
+        </select>
+        <input id="agregar_cantidad" class="form-control text-end cedis-add-qty" type="number" step="0.001" min="0" name="agregar_cantidad" value="0" {% if plan.autorizado %}disabled{% endif %}>
+        <button class="btn btn-secondary cedis-add-submit" type="submit" {% if plan.autorizado %}disabled{% endif %}>Agregar</button>
       </div>
       {% endif %}
     </div>
