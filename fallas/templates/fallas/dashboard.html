@@ -6,32 +6,63 @@
 {% block body_class %}page-fallas-dashboard{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260321-05">
 <style>
-  .fallas-toolbar { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
-  .fallas-toolbar select, .fallas-toolbar button, .fallas-modal select, .fallas-modal input, .fallas-modal textarea { min-height:42px; border:1px solid var(--border-soft, #e5dce1); border-radius:10px; padding:8px 10px; font:inherit; }
-  .fallas-table { width:100%; border-collapse:collapse; }
-  .fallas-table th, .fallas-table td { padding:12px 10px; border-bottom:1px solid rgba(139,34,82,.12); text-align:left; vertical-align:top; }
-  .fallas-table th { color:#6f3150; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
-  .fallas-badge { display:inline-flex; align-items:center; min-height:26px; border-radius:999px; padding:3px 9px; font-size:12px; font-weight:800; }
-  .fallas-category-layout { display:grid; grid-template-columns:minmax(260px, .8fr) minmax(0, 1.4fr); gap:18px; align-items:start; }
-  .fallas-category-form { display:grid; gap:10px; }
-  .fallas-check { display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:800; }
-  .fallas-check input { width:auto; min-height:0; }
-  .p-critica { background:#fef2f2; color:#991b1b; border:1px solid #fca5a5; }
-  .p-alta { background:#fff7ed; color:#c2410c; border:1px solid #fdba74; }
-  .p-media { background:#fffbeb; color:#92400e; border:1px solid #fde68a; }
-  .p-baja { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; }
-  .fallas-modal-backdrop { position:fixed; inset:0; z-index:20; display:none; background:rgba(24,12,18,.54); padding:24px; overflow:auto; }
-  .fallas-modal-backdrop.is-open { display:block; }
-  .fallas-modal { width:min(860px, 100%); margin:40px auto; background:#fff; border-radius:14px; box-shadow:0 18px 60px rgba(0,0,0,.28); overflow:hidden; }
-  .fallas-modal-head { display:flex; justify-content:space-between; gap:12px; align-items:center; background:#8B2252; color:#fff; padding:16px 18px; }
-  .fallas-modal-body { padding:18px; }
-  .fallas-detail-grid { display:grid; grid-template-columns:1.2fr .8fr; gap:18px; }
-  .fallas-modal-actions { display:flex; justify-content:flex-end; gap:10px; padding:14px 18px; border-top:1px solid #eee; }
-  @media (max-width: 820px) {
-    .fallas-toolbar, .fallas-detail-grid, .fallas-category-layout { grid-template-columns:1fr; }
-    .fallas-table { min-width:760px; }
+  .fallas-toolbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .fallas-toolbar select,.fallas-toolbar button,.fallas-modal select,.fallas-modal input,.fallas-modal textarea{min-height:42px;border:1px solid var(--border-soft,#e5dce1);border-radius:10px;padding:8px 10px;font:inherit}
+  .fallas-table{width:100%;border-collapse:collapse}
+  .fallas-table th,.fallas-table td{padding:10px 10px;border-bottom:1px solid rgba(139,34,82,.10);text-align:left;vertical-align:middle}
+  .fallas-table th{color:#6f3150;font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+  .fallas-table tr:hover td{background:rgba(139,34,82,.03)}
+  .fallas-badge{display:inline-flex;align-items:center;min-height:24px;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700}
+  .fallas-category-layout{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(0,1.4fr);gap:18px;align-items:start}
+  .fallas-category-form{display:grid;gap:10px}
+  .fallas-check{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700}
+  .fallas-check input{width:auto;min-height:0}
+  .p-critica{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
+  .p-alta{background:#fff7ed;color:#c2410c;border:1px solid #fdba74}
+  .p-media{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+  .p-baja{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+  .p-verde{background:#f0fdf4;color:#166534;border:1px solid #86efac}
+  .fallas-modal-backdrop{position:fixed;inset:0;z-index:20;display:none;background:rgba(24,12,18,.56);padding:24px;overflow:auto}
+  .fallas-modal-backdrop.is-open{display:flex;align-items:flex-start;justify-content:center}
+  .fallas-modal{width:min(900px,100%);margin:40px 0;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.28);overflow:hidden}
+  .fallas-modal-head{display:flex;justify-content:space-between;gap:12px;align-items:center;background:#8B2252;color:#fff;padding:16px 20px}
+  .fallas-modal-body{padding:20px}
+  .fallas-detail-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}
+  .fallas-modal-actions{display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;border-top:1px solid #eee;background:#fafafa}
+  /* Thumbnail en tabla */
+  .thumb-cell{width:48px}
+  .thumb-img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid rgba(139,34,82,.15);cursor:pointer;transition:transform .15s}
+  .thumb-img:hover{transform:scale(1.08)}
+  .thumb-none{width:44px;height:44px;background:rgba(139,34,82,.06);border-radius:6px;display:flex;align-items:center;justify-content:center;color:rgba(139,34,82,.3);font-size:18px}
+  /* Asignación */
+  .asign-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .asign-row select{flex:1;min-height:38px;border:1px solid var(--border-soft,#e5dce1);border-radius:8px;padding:6px 10px;font:inherit}
+  /* KPI charts mini */
+  .kpi-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+  .kpi-chart-card{background:#fff;border:1px solid rgba(139,34,82,.10);border-radius:10px;padding:14px}
+  .kpi-chart-title{font-size:11px;font-weight:600;color:#6f3150;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px}
+  .bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .bar-label{font-size:12px;color:#444;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar-track{flex:1;height:8px;background:rgba(139,34,82,.08);border-radius:4px;overflow:hidden}
+  .bar-fill{height:100%;background:linear-gradient(90deg,#8B2252,#c0607e);border-radius:4px;transition:width .5s ease}
+  .bar-count{font-size:11px;font-weight:600;color:#8B2252;min-width:20px;text-align:right}
+  /* Estado vacío */
+  .fallas-empty{padding:48px 24px;text-align:center}
+  .fallas-empty-icon{font-size:40px;margin-bottom:12px;opacity:.35}
+  .fallas-empty-title{font-size:16px;font-weight:600;color:#6f3150;margin-bottom:6px}
+  .fallas-empty-sub{font-size:13px;color:#888;margin-bottom:18px}
+  /* Estatus badges */
+  .e-abierto{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
+  .e-revision{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+  .e-proceso{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+  .e-resuelto{background:#f0fdf4;color:#166534;border:1px solid #86efac}
+  .e-cerrado{background:#f3f4f6;color:#374151;border:1px solid #d1d5db}
+  .e-cancelado{background:#f9fafb;color:#9ca3af;border:1px solid #e5e7eb}
+  @media(max-width:820px){
+    .fallas-toolbar,.fallas-detail-grid,.fallas-category-layout,.kpi-charts{grid-template-columns:1fr}
+    .fallas-table{min-width:700px}
   }
 </style>
 {% endblock %}
@@ -43,72 +74,96 @@
     <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab">PWA reporte</a>
     <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab">Mis reportes</a>
     {% if es_dg %}
-    <a href="{% url 'fallas:dashboard' %}?tab=categorias" class="module-tab {% if tab == 'categorias' %}active{% endif %}">Categorias</a>
+    <a href="{% url 'fallas:dashboard' %}?tab=categorias" class="module-tab {% if tab == 'categorias' %}active{% endif %}">Categorías</a>
     {% endif %}
   </nav>
 
+  {# ── PANEL REPORTES ───────────────────────────────────── #}
   <div id="panel-reportes">
-  <section class="bi-hero">
-    <div class="bi-hero-main">
-      <div class="bi-kicker">Mantenimiento correctivo</div>
-      <h1 class="bi-hero-title">Fallas en sucursal</h1>
-      <p class="bi-copy">Reportes móviles con evidencia, prioridad, bitácora y seguimiento para Compras y DG.</p>
-    </div>
-    <div class="bi-hero-side">
-      <div class="bi-hero-status-grid">
-        <article class="bi-status-card"><span class="bi-status-label">Abiertos</span><strong id="kpi-abiertos">-</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">Críticos</span><strong id="kpi-criticos">-</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">Resueltos 30d</span><strong id="kpi-resueltos">-</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">Respuesta prom.</span><strong id="kpi-tiempo">-</strong></article>
+    <section class="bi-hero">
+      <div class="bi-hero-main">
+        <div class="bi-kicker">Mantenimiento correctivo</div>
+        <h1 class="bi-hero-title">Fallas en sucursal</h1>
+        <p class="bi-copy">Reportes móviles con evidencia, prioridad, bitácora y seguimiento para Compras y DG.</p>
+      </div>
+      <div class="bi-hero-side">
+        <div class="bi-hero-status-grid">
+          <article class="bi-status-card"><span class="bi-status-label">Abiertos</span><strong id="kpi-abiertos">-</strong></article>
+          <article class="bi-status-card"><span class="bi-status-label">Críticos</span><strong id="kpi-criticos">-</strong></article>
+          <article class="bi-status-card"><span class="bi-status-label">Resueltos 30d</span><strong id="kpi-resueltos">-</strong></article>
+          <article class="bi-status-card"><span class="bi-status-label">Respuesta prom.</span><strong id="kpi-tiempo">-</strong></article>
+        </div>
+      </div>
+    </section>
+
+    {# Mini gráficas por sucursal y categoría #}
+    <div class="kpi-charts" id="kpi-charts" style="display:none">
+      <div class="kpi-chart-card">
+        <div class="kpi-chart-title">Abiertos por sucursal</div>
+        <div id="chart-sucursal"></div>
+      </div>
+      <div class="kpi-chart-card">
+        <div class="kpi-chart-title">Abiertos por categoría</div>
+        <div id="chart-categoria"></div>
       </div>
     </div>
-  </section>
 
-  <section class="bi-panel">
-    <div class="bi-panel-head">
-      <div><div class="bi-kicker">Filtros</div><h2 class="bi-panel-title">Bandeja de reportes</h2></div>
-      <div class="bi-panel-actions"><span class="fallas-badge p-media" id="total-badge">0 registros</span></div>
-    </div>
-    <div class="fallas-toolbar">
-      <select id="f-estatus">
-        <option value="">Todos los estatus</option>
-        <option value="abierto">Abierto</option>
-        <option value="en_revision">En revisión</option>
-        <option value="en_proceso">En proceso</option>
-        <option value="resuelto">Resuelto</option>
-        <option value="cerrado">Cerrado</option>
-        <option value="cancelado">Cancelado</option>
-      </select>
-      <select id="f-prioridad">
-        <option value="">Todas las prioridades</option>
-        <option value="critica">Crítica</option>
-        <option value="alta">Alta</option>
-        <option value="media">Media</option>
-        <option value="baja">Baja</option>
-      </select>
-      <select id="f-sucursal"><option value="">Todas las sucursales</option></select>
-      <button class="btn btn-primary" type="button" id="btn-filtrar">Filtrar</button>
-    </div>
-    <div style="overflow:auto; margin-top:14px;">
-      <table class="fallas-table">
-        <thead>
-          <tr><th>#</th><th>Sucursal</th><th>Falla</th><th>Categoría</th><th>Prioridad</th><th>Estatus</th><th>Fecha</th><th>Acciones</th></tr>
-        </thead>
-        <tbody id="tabla-body"><tr><td colspan="8">Cargando...</td></tr></tbody>
-      </table>
-    </div>
-  </section>
+    <section class="bi-panel">
+      <div class="bi-panel-head">
+        <div><div class="bi-kicker">Filtros</div><h2 class="bi-panel-title">Bandeja de reportes</h2></div>
+        <div class="bi-panel-actions"><span class="fallas-badge p-media" id="total-badge">0 registros</span></div>
+      </div>
+      <div class="fallas-toolbar">
+        <select id="f-estatus">
+          <option value="">Todos los estatus</option>
+          <option value="abierto">Abierto</option>
+          <option value="en_revision">En revisión</option>
+          <option value="en_proceso">En proceso</option>
+          <option value="resuelto">Resuelto</option>
+          <option value="cerrado">Cerrado</option>
+          <option value="cancelado">Cancelado</option>
+        </select>
+        <select id="f-prioridad">
+          <option value="">Todas las prioridades</option>
+          <option value="critica">Crítica</option>
+          <option value="alta">Alta</option>
+          <option value="media">Media</option>
+          <option value="baja">Baja</option>
+        </select>
+        <select id="f-sucursal"><option value="">Todas las sucursales</option></select>
+        <button class="btn btn-primary" type="button" id="btn-filtrar">Filtrar</button>
+      </div>
+      <div style="overflow:auto;margin-top:14px">
+        <table class="fallas-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th class="thumb-cell"></th>
+              <th>Sucursal</th>
+              <th>Falla</th>
+              <th>Categoría</th>
+              <th>Prioridad</th>
+              <th>Estatus</th>
+              <th>Fecha</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-body"><tr><td colspan="9" style="padding:20px;color:#aaa;text-align:center">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
   </div>
 
+  {# ── PANEL CATEGORÍAS (solo DG) ───────────────────────── #}
   {% if es_dg %}
   <section class="bi-panel" id="panel-categorias" style="display:none">
     <div class="bi-panel-head">
-      <div><div class="bi-kicker">Catalogo</div><h2 class="bi-panel-title">Gestion de categorias</h2></div>
-      <div class="bi-panel-actions"><span class="fallas-badge p-baja" id="cat-total">0 categorias</span></div>
+      <div><div class="bi-kicker">Catálogo</div><h2 class="bi-panel-title">Gestión de categorías</h2></div>
+      <div class="bi-panel-actions"><span class="fallas-badge p-baja" id="cat-total">0 categorías</span></div>
     </div>
     <div class="fallas-category-layout">
       <section class="bi-panel" style="margin:0">
-        <p style="font-weight:800; color:#6f3150; margin:0 0 12px">Nueva categoria</p>
+        <p style="font-weight:700;color:#6f3150;margin:0 0 12px">Nueva categoría</p>
         <div class="fallas-category-form">
           <label for="cat-nombre">Nombre</label>
           <input id="cat-nombre" type="text" maxlength="100" placeholder="Ej. Vitrina refrigerada">
@@ -117,15 +172,15 @@
             <option value="">Selecciona...</option>
             <option value="equipo">Equipo y Maquinaria</option>
             <option value="instalacion">Instalaciones</option>
-            <option value="mobiliario">Mobiliario y Decoracion</option>
+            <option value="mobiliario">Mobiliario y Decoración</option>
             <option value="otro">Otro</option>
           </select>
           <label for="cat-orden">Orden</label>
           <input id="cat-orden" type="number" value="0" min="0">
-          <button class="btn btn-primary" type="button" id="btn-crear-cat">Crear categoria</button>
+          <button class="btn btn-primary" type="button" id="btn-crear-cat">Crear categoría</button>
         </div>
       </section>
-      <div style="overflow:auto;">
+      <div style="overflow:auto">
         <table class="fallas-table">
           <thead><tr><th>Nombre</th><th>Tipo</th><th>Orden</th><th>Activa</th><th></th></tr></thead>
           <tbody id="cat-tbody"><tr><td colspan="5">Cargando...</td></tr></tbody>
@@ -134,10 +189,11 @@
     </div>
   </section>
 
+  {# Modal editar categoría #}
   <div class="fallas-modal-backdrop" id="modal-cat">
     <div class="fallas-modal" style="max-width:460px">
       <div class="fallas-modal-head">
-        <strong>Editar categoria</strong>
+        <strong>Editar categoría</strong>
         <button type="button" class="btn btn-secondary btn-small" onclick="cerrarModalCat()">Cerrar</button>
       </div>
       <div class="fallas-modal-body">
@@ -149,13 +205,13 @@
           <select id="edit-cat-tipo">
             <option value="equipo">Equipo y Maquinaria</option>
             <option value="instalacion">Instalaciones</option>
-            <option value="mobiliario">Mobiliario y Decoracion</option>
+            <option value="mobiliario">Mobiliario y Decoración</option>
             <option value="otro">Otro</option>
           </select>
           <label for="edit-cat-orden">Orden</label>
           <input id="edit-cat-orden" type="number" min="0">
           <label class="fallas-check" for="edit-cat-activo">
-            <input type="checkbox" id="edit-cat-activo"> Categoria activa
+            <input type="checkbox" id="edit-cat-activo"> Categoría activa
           </label>
         </div>
       </div>
@@ -168,16 +224,17 @@
   {% endif %}
 </div>
 
+{# ── MODAL DETALLE REPORTE ────────────────────────────────── #}
 <div class="fallas-modal-backdrop" id="modal">
   <div class="fallas-modal">
     <div class="fallas-modal-head">
-      <strong>Detalle de falla</strong>
+      <strong id="modal-title">Detalle de falla</strong>
       <button type="button" class="btn btn-secondary btn-small" id="modal-close">Cerrar</button>
     </div>
     <div class="fallas-modal-body" id="modal-body">Cargando...</div>
     <div class="fallas-modal-actions">
-      <button type="button" class="btn btn-secondary" id="modal-cancel">Cerrar</button>
-      <button type="button" class="btn btn-primary" id="btn-actualizar">Actualizar estatus</button>
+      <button type="button" class="btn btn-secondary" id="modal-cancel">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btn-actualizar">Guardar cambios</button>
     </div>
   </div>
 </div>
@@ -186,195 +243,278 @@
 const API = "/api/fallas";
 const token = localStorage.getItem("pd_logistica_access") || localStorage.getItem("fallas_jwt") || localStorage.getItem("access_token") || "";
 const csrf = "{{ csrf_token }}";
-const esc = (value) => String(value ?? "")
-  .replace(/&/g, "&amp;")
-  .replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;")
-  .replace(/"/g, "&quot;")
-  .replace(/'/g, "&#039;");
+const esc = (v) => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 const h = (json=false) => {
-  const headers = {"X-CSRFToken": csrf};
-  if (token) headers.Authorization = `Bearer ${token}`;
-  if (json) headers["Content-Type"] = "application/json";
-  return headers;
+  const hdr = {"X-CSRFToken": csrf};
+  if (token) hdr.Authorization = `Bearer ${token}`;
+  if (json) hdr["Content-Type"] = "application/json";
+  return hdr;
 };
-const prioridad = {
+
+const PRIORIDAD_BADGE = {
   critica: '<span class="fallas-badge p-critica">Crítica</span>',
-  alta: '<span class="fallas-badge p-alta">Alta</span>',
-  media: '<span class="fallas-badge p-media">Media</span>',
-  baja: '<span class="fallas-badge p-baja">Baja</span>',
+  alta:    '<span class="fallas-badge p-alta">Alta</span>',
+  media:   '<span class="fallas-badge p-media">Media</span>',
+  baja:    '<span class="fallas-badge p-baja">Baja</span>',
 };
+const ESTATUS_BADGE = {
+  abierto:    '<span class="fallas-badge e-abierto">Abierto</span>',
+  en_revision:'<span class="fallas-badge e-revision">En revisión</span>',
+  en_proceso: '<span class="fallas-badge e-proceso">En proceso</span>',
+  resuelto:   '<span class="fallas-badge e-resuelto">Resuelto</span>',
+  cerrado:    '<span class="fallas-badge e-cerrado">Cerrado</span>',
+  cancelado:  '<span class="fallas-badge e-cancelado">Cancelado</span>',
+};
+
 let reporteActual = null;
 let categoriasAdmin = [];
+let usuariosGestion = [];
 
+// ── Cargar usuarios para asignación ──────────────────────
+async function cargarUsuariosGestion() {
+  try {
+    const res = await fetch("/api/fallas/usuarios-gestion/", {headers: h()});
+    if (res.ok) {
+      const data = await res.json();
+      usuariosGestion = data.results || data;
+    }
+  } catch(e) {}
+}
+
+// ── KPIs ─────────────────────────────────────────────────
 async function cargarKPIs() {
-  const res = await fetch(`${API}/dashboard/stats/`, {headers:h()});
+  const res = await fetch(`${API}/dashboard/stats/`, {headers: h()});
   if (!res.ok) return;
   const data = await res.json();
   document.getElementById("kpi-abiertos").textContent = data.total_abiertos ?? "-";
   document.getElementById("kpi-criticos").textContent = data.criticos_activos ?? "-";
   document.getElementById("kpi-resueltos").textContent = data.resueltos_mes ?? "-";
-  document.getElementById("kpi-tiempo").textContent = data.tiempo_respuesta_promedio_horas != null ? `${data.tiempo_respuesta_promedio_horas}h` : "-";
+  document.getElementById("kpi-tiempo").textContent = data.tiempo_respuesta_promedio_horas != null
+    ? `${data.tiempo_respuesta_promedio_horas}h` : "-";
+
+  // Mini gráficas
+  const charts = document.getElementById("kpi-charts");
+  const sucData = data.por_sucursal || [];
+  const catData = data.por_categoria || [];
+  if (sucData.length || catData.length) {
+    charts.style.display = "grid";
+    renderBarChart("chart-sucursal", sucData, "sucursal__nombre");
+    renderBarChart("chart-categoria", catData, "categoria__nombre");
+  }
 }
+
+function renderBarChart(containerId, items, labelKey) {
+  if (!items.length) return;
+  const max = Math.max(...items.map(i => i.total));
+  const container = document.getElementById(containerId);
+  container.innerHTML = items.slice(0, 6).map(item => `
+    <div class="bar-row">
+      <div class="bar-label" title="${esc(item[labelKey])}">${esc(item[labelKey])}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.round((item.total / max) * 100)}%"></div></div>
+      <div class="bar-count">${item.total}</div>
+    </div>`).join("");
+}
+
+// ── Sucursales ───────────────────────────────────────────
 async function cargarSucursales() {
-  const res = await fetch(`${API}/sucursales/`, {headers:h()});
+  const res = await fetch(`${API}/sucursales/`, {headers: h()});
+  if (!res.ok) return;
   const data = await res.json();
   const sel = document.getElementById("f-sucursal");
-  (data.results || data).forEach(s => sel.insertAdjacentHTML("beforeend", `<option value="${s.id}">${s.nombre}</option>`));
+  (data.results || data).forEach(s =>
+    sel.insertAdjacentHTML("beforeend", `<option value="${s.id}">${esc(s.nombre)}</option>`));
 }
+
+// ── Tabla de reportes ────────────────────────────────────
 async function cargarReportes() {
+  document.getElementById("tabla-body").innerHTML = `<tr><td colspan="9" style="padding:20px;color:#aaa;text-align:center">Cargando...</td></tr>`;
   const params = new URLSearchParams();
-  ["estatus", "prioridad", "sucursal"].forEach((key, index) => {
-    const ids = ["f-estatus", "f-prioridad", "f-sucursal"];
-    const value = document.getElementById(ids[index]).value;
-    if (value) params.set(key, value);
+  [["f-estatus","estatus"],["f-prioridad","prioridad"],["f-sucursal","sucursal"]].forEach(([id, key]) => {
+    const v = document.getElementById(id).value;
+    if (v) params.set(key, v);
   });
-  const res = await fetch(`${API}/reportes/?${params.toString()}`, {headers:h()});
+  const res = await fetch(`${API}/reportes/?${params.toString()}`, {headers: h()});
+  if (!res.ok) return;
   const data = await res.json();
   const items = data.results || data;
   document.getElementById("total-badge").textContent = `${items.length} registros`;
-  document.getElementById("tabla-body").innerHTML = items.length ? items.map(rep => {
-    const fecha = new Date(rep.fecha_reporte).toLocaleString("es-MX", {day:"2-digit", month:"2-digit", year:"2-digit", hour:"2-digit", minute:"2-digit"});
+
+  if (!items.length) {
+    document.getElementById("tabla-body").innerHTML = `
+      <tr><td colspan="9">
+        <div class="fallas-empty">
+          <div class="fallas-empty-icon">🔧</div>
+          <div class="fallas-empty-title">Sin reportes de fallas</div>
+          <div class="fallas-empty-sub">No hay registros con los filtros seleccionados.</div>
+          <a href="{% url 'fallas:pwa-reporte' %}" class="btn btn-primary">Registrar falla desde PWA</a>
+        </div>
+      </td></tr>`;
+    return;
+  }
+
+  document.getElementById("tabla-body").innerHTML = items.map(rep => {
+    const fecha = new Date(rep.fecha_reporte).toLocaleString("es-MX", {day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
+    const thumb = rep.foto_evidencia
+      ? `<img src="${rep.foto_evidencia}" class="thumb-img" onclick="abrirDetalle(${rep.id})" alt="Evidencia" loading="lazy">`
+      : `<div class="thumb-none">📷</div>`;
     return `<tr>
-      <td><strong>#${rep.id}</strong></td>
-      <td>${esc(rep.sucursal_nombre)}</td>
-      <td><strong>${esc(rep.titulo)}</strong><br><span class="bi-subtle">${esc(rep.reportado_por_nombre || "")}</span></td>
-      <td>${esc(rep.categoria_nombre)}</td>
-      <td>${prioridad[rep.prioridad] || rep.prioridad}</td>
-      <td>${esc(rep.estatus_display)}</td>
-      <td>${fecha}</td>
+      <td><strong style="color:#8B2252">#${rep.id}</strong></td>
+      <td class="thumb-cell">${thumb}</td>
+      <td style="font-size:13px">${esc(rep.sucursal_nombre)}</td>
+      <td><strong style="font-size:13px">${esc(rep.titulo)}</strong><br><span class="bi-subtle" style="font-size:11px">${esc(rep.reportado_por_nombre || "")}</span></td>
+      <td style="font-size:12px">${esc(rep.categoria_nombre)}</td>
+      <td>${PRIORIDAD_BADGE[rep.prioridad] || rep.prioridad}</td>
+      <td>${ESTATUS_BADGE[rep.estatus] || esc(rep.estatus_display)}</td>
+      <td style="font-size:12px;white-space:nowrap">${fecha}</td>
       <td><button type="button" class="btn btn-secondary btn-small" onclick="abrirDetalle(${rep.id})">Ver</button></td>
     </tr>`;
-  }).join("") : '<tr><td colspan="8">Sin resultados</td></tr>';
+  }).join("");
 }
+
+// ── Modal detalle ────────────────────────────────────────
 async function abrirDetalle(id) {
   reporteActual = id;
   document.getElementById("modal").classList.add("is-open");
-  document.getElementById("modal-body").textContent = "Cargando...";
-  const res = await fetch(`${API}/reportes/${id}/`, {headers:h()});
+  document.getElementById("modal-body").innerHTML = `<div style="padding:20px;text-align:center;color:#aaa">Cargando...</div>`;
+
+  const res = await fetch(`${API}/reportes/${id}/`, {headers: h()});
+  if (!res.ok) { document.getElementById("modal-body").textContent = "Error al cargar el reporte."; return; }
   const rep = await res.json();
-  const bitacora = (rep.bitacora || []).map(row => `<article class="bi-list-item is-tight"><strong>${row.usuario_nombre}</strong><div>${row.estatus_nuevo_display || ""} · ${row.comentario || ""}</div></article>`).join("");
+
+  document.getElementById("modal-title").textContent = `#${rep.id} · ${rep.sucursal_nombre}`;
+
+  // Bitácora
+  const bitacora = (rep.bitacora || []).map(row => `
+    <article class="bi-list-item is-tight">
+      <strong>${esc(row.usuario_nombre)}</strong>
+      <span style="color:#aaa;font-size:11px;margin-left:6px">${new Date(row.timestamp).toLocaleString("es-MX",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>
+      <div style="font-size:12px;margin-top:2px">${row.estatus_nuevo_display ? `<span class="fallas-badge e-${row.estatus_nuevo}" style="font-size:10px">${esc(row.estatus_nuevo_display)}</span> ` : ""}${esc(row.comentario || "")}</div>
+    </article>`).join("");
+
+  // Selector de asignación
+  const opcionesUsuarios = usuariosGestion.length
+    ? `<select id="asignado-a" style="min-height:36px;border:1px solid #e5dce1;border-radius:8px;padding:6px 10px;font:inherit;width:100%">
+        <option value="">Sin asignar</option>
+        ${usuariosGestion.map(u => `<option value="${u.id}" ${rep.asignado_a === u.id ? "selected" : ""}>${esc(u.nombre || u.username)}</option>`).join("")}
+      </select>`
+    : `<input id="asignado-a" type="number" placeholder="ID de usuario" style="min-height:36px;border:1px solid #e5dce1;border-radius:8px;padding:6px 10px;font:inherit;width:100%" value="${rep.asignado_a || ""}">`;
+
   document.getElementById("modal-body").innerHTML = `
     <div class="fallas-detail-grid">
       <div>
-        <p><strong>Sucursal:</strong> ${esc(rep.sucursal_nombre)}</p>
-        <p><strong>Categoría:</strong> ${esc(rep.categoria_nombre)}</p>
-        <p><strong>Título:</strong> ${esc(rep.titulo)}</p>
-        <p><strong>Descripción:</strong><br>${esc(rep.descripcion)}</p>
-        ${rep.activo_nombre ? `<p><strong>Activo:</strong> ${esc(rep.activo_nombre)}</p>` : ""}
-        ${rep.latitud ? `<p><strong>GPS:</strong> ${esc(rep.latitud)}, ${esc(rep.longitud)}</p>` : ""}
+        <p style="margin:0 0 6px"><strong>Sucursal:</strong> ${esc(rep.sucursal_nombre)}</p>
+        <p style="margin:0 0 6px"><strong>Categoría:</strong> ${esc(rep.categoria_nombre)}</p>
+        <p style="margin:0 0 6px"><strong>Título:</strong> ${esc(rep.titulo)}</p>
+        <p style="margin:0 0 6px"><strong>Descripción:</strong><br><span style="font-size:13px;color:#555">${esc(rep.descripcion)}</span></p>
+        ${rep.activo_nombre ? `<p style="margin:0 0 6px"><strong>Activo:</strong> ${esc(rep.activo_nombre)}</p>` : ""}
+        ${rep.proveedor_servicio ? `<p style="margin:0 0 6px"><strong>Proveedor:</strong> ${esc(rep.proveedor_servicio)}</p>` : ""}
+        <div style="display:flex;gap:16px;margin-top:8px">
+          <span>${PRIORIDAD_BADGE[rep.prioridad]}</span>
+          <span>${ESTATUS_BADGE[rep.estatus] || ""}</span>
+        </div>
       </div>
       <div>
-        ${rep.foto_evidencia ? `<img src="${rep.foto_evidencia}" alt="Evidencia" style="width:100%; max-height:260px; object-fit:cover; border-radius:12px;">` : ""}
-        <p><strong>Respuesta:</strong> ${rep.tiempo_respuesta_horas != null ? rep.tiempo_respuesta_horas + "h" : "-"}</p>
-        <p><strong>Resolución:</strong> ${rep.tiempo_resolucion_horas != null ? rep.tiempo_resolucion_horas + "h" : "-"}</p>
+        ${rep.foto_evidencia
+          ? `<a href="${rep.foto_evidencia}" target="_blank" rel="noopener"><img src="${rep.foto_evidencia}" alt="Evidencia" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;border:1px solid rgba(139,34,82,.15)"></a>`
+          : `<div style="height:120px;background:rgba(139,34,82,.05);border-radius:10px;display:flex;align-items:center;justify-content:center;color:#ccc;font-size:32px">📷</div>`}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+          <div style="background:rgba(139,34,82,.05);border-radius:8px;padding:8px 10px;text-align:center">
+            <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.04em">Respuesta</div>
+            <div style="font-size:18px;font-weight:700;color:#8B2252">${rep.tiempo_respuesta_horas != null ? rep.tiempo_respuesta_horas+"h" : "—"}</div>
+          </div>
+          <div style="background:rgba(139,34,82,.05);border-radius:8px;padding:8px 10px;text-align:center">
+            <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.04em">Resolución</div>
+            <div style="font-size:18px;font-weight:700;color:#8B2252">${rep.tiempo_resolucion_horas != null ? rep.tiempo_resolucion_horas+"h" : "—"}</div>
+          </div>
+        </div>
+        ${rep.latitud ? `<p style="font-size:11px;color:#aaa;margin-top:8px">📍 ${rep.latitud}, ${rep.longitud}</p>` : ""}
       </div>
     </div>
-    <hr>
+    <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
+
     <div class="fallas-detail-grid">
       <div>
-        <label for="nuevo-estatus">Cambiar estatus</label>
-        <select id="nuevo-estatus">
-          <option value="">Seleccionar</option>
+        <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin-bottom:4px">Cambiar estatus</label>
+        <select id="nuevo-estatus" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+          <option value="">Sin cambio</option>
           <option value="en_revision">En revisión</option>
           <option value="en_proceso">En proceso</option>
           <option value="resuelto">Resuelto</option>
           <option value="cerrado">Cerrado</option>
           <option value="cancelado">Cancelado</option>
         </select>
+        <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Asignar a</label>
+        ${opcionesUsuarios}
       </div>
       <div>
-        <label for="costo-est">Costo estimado</label>
-        <input id="costo-est" type="number" step="0.01" placeholder="0.00">
+        <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin-bottom:4px">Costo estimado ($)</label>
+        <input id="costo-est" type="number" step="0.01" placeholder="0.00" value="${rep.costo_estimado || ""}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+        <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Costo real ($)</label>
+        <input id="costo-real" type="number" step="0.01" placeholder="0.00" value="${rep.costo_real || ""}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
       </div>
     </div>
-    <label for="comentario-estatus" style="display:block; margin-top:12px;">Comentario</label>
-    <textarea id="comentario-estatus" rows="3"></textarea>
-    <hr>
-    <h3 class="bi-panel-title" style="font-size:18px;">Bitácora</h3>
-    <div class="bi-list bi-list-dense">${bitacora || '<article class="bi-list-item">Sin historial.</article>'}</div>`;
+    <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:12px 0 4px">Comentario</label>
+    <textarea id="comentario-estatus" rows="3" style="width:100%;min-height:80px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;resize:vertical"></textarea>
+    <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Proveedor de servicio</label>
+    <input id="proveedor-servicio" type="text" placeholder="Nombre del proveedor o técnico" value="${esc(rep.proveedor_servicio || "")}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+
+    <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
+    <h3 style="font-size:15px;font-weight:600;color:#6f3150;margin:0 0 10px">Bitácora</h3>
+    <div class="bi-list bi-list-dense">${bitacora || '<article class="bi-list-item" style="color:#aaa">Sin historial aún.</article>'}</div>`;
 }
+
 async function actualizarEstatus() {
+  if (!reporteActual) return;
   const estatus = document.getElementById("nuevo-estatus")?.value;
-  if (!estatus || !reporteActual) return;
+  const asignadoEl = document.getElementById("asignado-a");
   const body = {
-    estatus,
     comentario: document.getElementById("comentario-estatus")?.value || "",
     costo_estimado: document.getElementById("costo-est")?.value || null,
+    costo_real: document.getElementById("costo-real")?.value || null,
+    proveedor_servicio: document.getElementById("proveedor-servicio")?.value || "",
   };
-  const res = await fetch(`${API}/reportes/${reporteActual}/estatus/`, {method:"POST", headers:h(true), body:JSON.stringify(body)});
+  if (estatus) body.estatus = estatus;
+  if (asignadoEl?.value) body.asignado_a = Number(asignadoEl.value);
+
+  const res = await fetch(`${API}/reportes/${reporteActual}/estatus/`, {
+    method: "POST",
+    headers: h(true),
+    body: JSON.stringify(body)
+  });
   if (res.ok) {
     cerrarModal();
     cargarKPIs();
     cargarReportes();
   } else {
-    alert("Error al actualizar. Verifica los datos.");
-  }
-}
-function cerrarModal() {
-  document.getElementById("modal").classList.remove("is-open");
-}
-document.getElementById("btn-filtrar").addEventListener("click", cargarReportes);
-document.getElementById("modal-close").addEventListener("click", cerrarModal);
-document.getElementById("modal-cancel").addEventListener("click", cerrarModal);
-document.getElementById("btn-actualizar").addEventListener("click", actualizarEstatus);
-cargarKPIs();
-cargarSucursales();
-cargarReportes();
-
-const tabParam = new URLSearchParams(window.location.search).get("tab");
-if (tabParam === "categorias") {
-  document.getElementById("panel-reportes")?.setAttribute("style", "display:none");
-  const panelCat = document.getElementById("panel-categorias");
-  if (panelCat) {
-    panelCat.style.display = "block";
-    cargarCatalogoAdmin();
+    const err = await res.json().catch(() => ({}));
+    alert("Error al actualizar: " + (JSON.stringify(err) || "verifica los datos."));
   }
 }
 
+function cerrarModal() { document.getElementById("modal").classList.remove("is-open"); }
+
+// ── Catálogo de categorías (DG) ──────────────────────────
 async function cargarCatalogoAdmin() {
-  const res = await fetch(`${API}/categorias/todas/`, {headers:h()});
+  const res = await fetch(`${API}/categorias/todas/`, {headers: h()});
   if (!res.ok) return;
   const data = await res.json();
   const items = data.results || data;
   categoriasAdmin = items;
-  const tipos = {
-    equipo: "Equipo",
-    instalacion: "Instalacion",
-    mobiliario: "Mobiliario",
-    otro: "Otro"
-  };
-  document.getElementById("cat-total").textContent = `${items.length} categorias`;
+  const tipos = {equipo:"Equipo",instalacion:"Instalación",mobiliario:"Mobiliario",otro:"Otro"};
+  document.getElementById("cat-total").textContent = `${items.length} categorías`;
   document.getElementById("cat-tbody").innerHTML = items.length
-    ? items.map((cat) => `<tr class="${cat.activo ? "" : "bi-subtle"}">
+    ? items.map(cat => `<tr class="${cat.activo ? "" : "bi-subtle"}">
         <td><strong>${esc(cat.nombre)}</strong></td>
-        <td>${esc(tipos[cat.tipo] || cat.tipo)}</td>
-        <td>${esc(cat.orden)}</td>
-        <td><span class="fallas-badge ${cat.activo ? "p-baja" : ""}">${cat.activo ? "Si" : "No"}</span></td>
-        <td><button class="btn btn-secondary btn-small" type="button" onclick="abrirEditCat(${cat.id})">Editar</button></td>
+        <td style="font-size:12px">${esc(tipos[cat.tipo] || cat.tipo)}</td>
+        <td style="font-size:12px">${cat.orden}</td>
+        <td><span class="fallas-badge ${cat.activo ? "p-verde" : ""}">${cat.activo ? "Activa" : "Inactiva"}</span></td>
+        <td><button class="btn btn-secondary btn-small" onclick="abrirEditCat(${cat.id})">Editar</button></td>
       </tr>`).join("")
-    : '<tr><td colspan="5" class="bi-subtle">Sin categorias.</td></tr>';
+    : `<tr><td colspan="5" class="bi-subtle" style="padding:16px;text-align:center">Sin categorías.</td></tr>`;
 }
 
-document.getElementById("btn-crear-cat")?.addEventListener("click", async () => {
-  const nombre = document.getElementById("cat-nombre").value.trim();
-  const tipo = document.getElementById("cat-tipo").value;
-  const orden = Number.parseInt(document.getElementById("cat-orden").value, 10) || 0;
-  if (!nombre || !tipo) return alert("Completa nombre y tipo.");
-  const res = await fetch(`${API}/categorias/todas/`, {
-    method: "POST",
-    headers: h(true),
-    body: JSON.stringify({nombre, tipo, orden, activo: true})
-  });
-  if (!res.ok) return alert("Error al crear la categoria.");
-  document.getElementById("cat-nombre").value = "";
-  document.getElementById("cat-tipo").value = "";
-  document.getElementById("cat-orden").value = "0";
-  cargarCatalogoAdmin();
-});
-
 function abrirEditCat(id) {
-  const cat = categoriasAdmin.find((item) => Number(item.id) === Number(id));
+  const cat = categoriasAdmin.find(c => Number(c.id) === Number(id));
   if (!cat) return;
   document.getElementById("edit-cat-id").value = cat.id;
   document.getElementById("edit-cat-nombre").value = cat.nombre;
@@ -383,27 +523,56 @@ function abrirEditCat(id) {
   document.getElementById("edit-cat-activo").checked = Boolean(cat.activo);
   document.getElementById("modal-cat").classList.add("is-open");
 }
+function cerrarModalCat() { document.getElementById("modal-cat").classList.remove("is-open"); }
 
-function cerrarModalCat() {
-  document.getElementById("modal-cat").classList.remove("is-open");
-}
+// ── Event listeners ──────────────────────────────────────
+document.getElementById("btn-filtrar").addEventListener("click", cargarReportes);
+document.getElementById("modal-close").addEventListener("click", cerrarModal);
+document.getElementById("modal-cancel").addEventListener("click", cerrarModal);
+document.getElementById("btn-actualizar").addEventListener("click", actualizarEstatus);
+
+document.getElementById("btn-crear-cat")?.addEventListener("click", async () => {
+  const nombre = document.getElementById("cat-nombre").value.trim();
+  const tipo = document.getElementById("cat-tipo").value;
+  const orden = parseInt(document.getElementById("cat-orden").value, 10) || 0;
+  if (!nombre || !tipo) return alert("Completa nombre y tipo.");
+  const res = await fetch(`${API}/categorias/todas/`, {
+    method: "POST", headers: h(true),
+    body: JSON.stringify({nombre, tipo, orden, activo: true})
+  });
+  if (!res.ok) return alert("Error al crear la categoría.");
+  document.getElementById("cat-nombre").value = "";
+  document.getElementById("cat-tipo").value = "";
+  document.getElementById("cat-orden").value = "0";
+  cargarCatalogoAdmin();
+});
 
 document.getElementById("btn-guardar-cat")?.addEventListener("click", async () => {
   const id = document.getElementById("edit-cat-id").value;
   const body = {
     nombre: document.getElementById("edit-cat-nombre").value.trim(),
     tipo: document.getElementById("edit-cat-tipo").value,
-    orden: Number.parseInt(document.getElementById("edit-cat-orden").value, 10) || 0,
+    orden: parseInt(document.getElementById("edit-cat-orden").value, 10) || 0,
     activo: document.getElementById("edit-cat-activo").checked
   };
-  const res = await fetch(`${API}/categorias/${id}/`, {
-    method: "PATCH",
-    headers: h(true),
-    body: JSON.stringify(body)
-  });
+  const res = await fetch(`${API}/categorias/${id}/`, {method:"PATCH", headers:h(true), body:JSON.stringify(body)});
   if (!res.ok) return alert("Error al guardar.");
   cerrarModalCat();
   cargarCatalogoAdmin();
 });
+
+// ── Tab param ────────────────────────────────────────────
+const tabParam = new URLSearchParams(window.location.search).get("tab");
+if (tabParam === "categorias") {
+  document.getElementById("panel-reportes").style.display = "none";
+  const panelCat = document.getElementById("panel-categorias");
+  if (panelCat) { panelCat.style.display = "block"; cargarCatalogoAdmin(); }
+}
+
+// ── Init ─────────────────────────────────────────────────
+cargarKPIs();
+cargarSucursales();
+cargarReportes();
+cargarUsuariosGestion();
 </script>
 {% endblock %}

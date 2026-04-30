@@ -183,7 +183,7 @@ class ReporteFallaDetailView(generics.RetrieveUpdateAPIView):
 @authentication_classes([JWTAuthentication, TokenAuthentication, SessionAuthentication])
 @permission_classes([EsComprasODG])
 def cambiar_estatus(request, pk):
-    """Transición de estatus con bitácora automática."""
+    """Transición de estatus y actualización de seguimiento con bitácora automática."""
 
     try:
         reporte = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").get(pk=pk)
@@ -196,10 +196,12 @@ def cambiar_estatus(request, pk):
 
     data = serializer.validated_data
     estatus_anterior = reporte.estatus
-    nuevo_estatus = data["estatus"]
+    nuevo_estatus = data.get("estatus") or estatus_anterior
+    estatus_cambio = nuevo_estatus != estatus_anterior
     now = timezone.now()
 
-    reporte.estatus = nuevo_estatus
+    if estatus_cambio:
+        reporte.estatus = nuevo_estatus
     if nuevo_estatus == ReporteFalla.ESTATUS_REVISION and not reporte.fecha_asignacion:
         reporte.fecha_asignacion = now
     if data.get("asignado_a"):
@@ -219,20 +221,23 @@ def cambiar_estatus(request, pk):
         reporte.proveedor_servicio = data["proveedor_servicio"]
     reporte.save()
 
-    BitacoraFalla.objects.create(
-        reporte=reporte,
-        usuario=request.user,
-        estatus_anterior=estatus_anterior,
-        estatus_nuevo=nuevo_estatus,
-        comentario=data.get("comentario", ""),
-    )
+    comentario = data.get("comentario", "")
+    if estatus_cambio or comentario or data.get("asignado_a") or data.get("costo_estimado") is not None or data.get("costo_real") is not None or data.get("proveedor_servicio"):
+        BitacoraFalla.objects.create(
+            reporte=reporte,
+            usuario=request.user,
+            estatus_anterior=estatus_anterior if estatus_cambio else "",
+            estatus_nuevo=nuevo_estatus if estatus_cambio else "",
+            comentario=comentario or "Seguimiento actualizado.",
+        )
 
-    try:
-        from .tasks import notificar_cambio_estatus
+    if estatus_cambio:
+        try:
+            from .tasks import notificar_cambio_estatus
 
-        notificar_cambio_estatus.delay(reporte.pk, nuevo_estatus, request.user.pk)
-    except Exception:
-        pass
+            notificar_cambio_estatus.delay(reporte.pk, nuevo_estatus, request.user.pk)
+        except Exception:
+            pass
 
     return Response(ReporteFallaDetailSerializer(reporte, context={"request": request}).data)
 
@@ -322,3 +327,26 @@ def pwa_mis_reportes(request):
     if not _puede_reportar_fallas(request.user):
         raise PermissionDenied
     return render(request, "fallas/pwa_mis_reportes.html")
+
+
+@api_view(["GET"])
+@authentication_classes([JWTAuthentication, TokenAuthentication, SessionAuthentication])
+@permission_classes([EsComprasODG])
+def usuarios_gestion(request):
+    """Lista usuarios activos que pueden gestionar fallas."""
+
+    User = get_user_model()
+    qs = (
+        User.objects.filter(groups__name__in=["compras_logistica", "dg"], is_active=True)
+        .distinct()
+        .order_by("first_name", "last_name", "username")
+    )
+    data = [
+        {
+            "id": user.pk,
+            "username": user.username,
+            "nombre": user.get_full_name() or user.username,
+        }
+        for user in qs
+    ]
+    return Response(data)

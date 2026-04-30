@@ -158,7 +158,7 @@ class ReporteFallaDetailSerializer(ReporteFallaListSerializer):
 
 
 class CambioEstatusSerializer(serializers.Serializer):
-    estatus = serializers.ChoiceField(choices=ReporteFalla.ESTATUS)
+    estatus = serializers.ChoiceField(choices=ReporteFalla.ESTATUS, required=False)
     comentario = serializers.CharField(required=False, allow_blank=True)
     asignado_a = serializers.IntegerField(required=False, allow_null=True)
     costo_estimado = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
