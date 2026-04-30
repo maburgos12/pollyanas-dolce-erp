@@ -18,7 +18,7 @@ from control.models import MermaPOS
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from inventario.stock_trace import TRACE_RECONSTRUCTED_MOVEMENT
 from maestros.models import Insumo, UnidadMedida
-from pos_bridge.models import PointBranch, PointDailySale, PointProduct, PointProductionLine, PointSalesDailyProductFact, PointWasteLine
+from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointProductionLine, PointSalesDailyProductFact, PointWasteLine
 from reportes.analytics_service import full_rebuild, rebuild_sales_facts, mark_analytics_dirty
 from reportes.analytics_service import refresh_dashboard_daily_ops_materialized_view, refresh_dashboard_full_materialized_view
 from reportes.models import AnalyticRefreshWindow, FactInventarioDiario, FactProduccionDiaria, FactVentaDiaria
@@ -514,3 +514,18 @@ class DailyOperationalClosureViewTests(TestCase):
         self.assertContains(response, "Insumos sin traza")
         self.assertContains(response, "Movimiento reconstruido")
         self.assertEqual(self.existencia.trazabilidad_stock.get("source"), TRACE_RECONSTRUCTED_MOVEMENT)
+
+    def test_cierre_operativo_uses_branch_indicator_tickets_when_sales_facts_have_zero(self):
+        FactVentaDiaria.objects.filter(fecha=self.target_date).update(tickets=0)
+        PointDailyBranchIndicator.objects.create(
+            branch=self.point_branch,
+            indicator_date=self.target_date,
+            total_tickets=5,
+            total_amount=Decimal("100"),
+        )
+
+        response = self.client.get(reverse("reportes:cierre_operativo"), {"fecha": self.target_date.isoformat()})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["closure"]["sales"]["fact_tickets"], 5)
+        self.assertContains(response, "8 piezas · 5 tickets")

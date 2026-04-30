@@ -8,7 +8,7 @@ from django.db.models import Sum
 from control.models import MermaPOS
 from core.models import AuditLog, sucursales_operativas
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
-from pos_bridge.models import PointDailySale, PointProductionLine, PointSyncJob, PointWasteLine
+from pos_bridge.models import PointDailyBranchIndicator, PointDailySale, PointProductionLine, PointSyncJob, PointWasteLine
 from recetas.models import PlanProduccion, PlanProduccionItem
 from reportes.models import FactInventarioDiario, FactProduccionDiaria, FactVentaDiaria
 
@@ -55,6 +55,7 @@ def _status_row(*, label: str, tone: str, detail: str) -> dict[str, str]:
 def _sales_domain(target_date: date) -> dict[str, object]:
     raw_qs = PointDailySale.objects.filter(sale_date=target_date)
     fact_qs = FactVentaDiaria.objects.filter(fecha=target_date)
+    indicator_qs = PointDailyBranchIndicator.objects.filter(indicator_date=target_date)
     raw_max = PointDailySale.objects.order_by("-sale_date").values_list("sale_date", flat=True).first()
     fact_max = FactVentaDiaria.objects.order_by("-fecha").values_list("fecha", flat=True).first()
 
@@ -62,7 +63,9 @@ def _sales_domain(target_date: date) -> dict[str, object]:
     raw_amount = _to_decimal(raw_qs.aggregate(total=Sum("total_amount")).get("total"))
     fact_units = _to_decimal(fact_qs.aggregate(total=Sum("cantidad")).get("total"))
     fact_amount = _to_decimal(fact_qs.aggregate(total=Sum("venta_total")).get("total"))
-    fact_tickets = int(fact_qs.aggregate(total=Sum("tickets")).get("total") or 0)
+    fact_tickets_raw = int(fact_qs.aggregate(total=Sum("tickets")).get("total") or 0)
+    indicator_tickets = int(indicator_qs.aggregate(total=Sum("total_tickets")).get("total") or 0)
+    fact_tickets = fact_tickets_raw if fact_tickets_raw > 0 else indicator_tickets
 
     latest_job = _latest_sync_job(PointSyncJob.JOB_TYPE_SALES)
     latest_audit = _latest_audit_for_trigger("point_daily_sales_sync")
@@ -103,6 +106,8 @@ def _sales_domain(target_date: date) -> dict[str, object]:
         "fact_units": fact_units,
         "fact_amount": fact_amount,
         "fact_tickets": fact_tickets,
+        "fact_tickets_raw": fact_tickets_raw,
+        "indicator_tickets": indicator_tickets,
         "publication": publication,
         "latest_job": latest_job,
         "latest_audit": latest_audit,
@@ -406,10 +411,20 @@ def _branch_rows(target_date: date) -> list[dict[str, object]]:
         .values("sucursal_id")
         .annotate(visible_waste=Sum("cantidad"))
     }
+    indicator_map = {
+        int(row["branch__erp_branch_id"]): row
+        for row in PointDailyBranchIndicator.objects.filter(
+            indicator_date=target_date,
+            branch__erp_branch_id__isnull=False,
+        )
+        .values("branch__erp_branch_id")
+        .annotate(tickets=Sum("total_tickets"))
+    }
 
     rows: list[dict[str, object]] = []
     for branch in sucursales_operativas(reference_date=target_date):
         sales_row = sales_map.get(int(branch.id), {})
+        indicator_row = indicator_map.get(int(branch.id), {})
         prod_row = prod_map.get(int(branch.id), {})
         point_waste_row = waste_point_map.get(int(branch.id), {})
         visible_waste_row = waste_visible_map.get(int(branch.id), {})
@@ -440,7 +455,7 @@ def _branch_rows(target_date: date) -> list[dict[str, object]]:
                 "branch_name": branch.nombre,
                 "sales_units": sales_units,
                 "sales_amount": sales_amount,
-                "tickets": int(sales_row.get("tickets") or 0),
+                "tickets": int(sales_row.get("tickets") or indicator_row.get("tickets") or 0),
                 "produced_units": produced,
                 "sold_units_fact": sold,
                 "waste_units_fact": fact_waste,
