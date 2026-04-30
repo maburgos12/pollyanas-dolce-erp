@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from core.access import can_view_recetas
-from recetas.models import ConsolidadoNocturnoCEDIS, PlanProduccionItem
+from recetas.models import ConsolidadoNocturnoCEDIS, PlanProduccionItem, Receta
 from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
 from recetas.tasks.consolidado_nocturno import consolidado_nocturno_cedis
 
@@ -67,6 +67,7 @@ def consolidado_cedis_revision(request):
             **resumen,
             "fecha_prev": fecha_operacion - timedelta(days=1),
             "fecha_next": fecha_operacion + timedelta(days=1),
+            "recetas_disponibles": Receta.objects.order_by("nombre").only("id", "nombre", "codigo_point")[:700],
         },
     )
 
@@ -110,9 +111,66 @@ def consolidado_cedis_autorizar_plan(request):
         return _redirect_revision(fecha_operacion)
 
     autorizar_item_id = request.POST.get("autorizar_item_id")
+    eliminar_item_id = request.POST.get("eliminar_item_id")
+    agregar_receta_id = request.POST.get("agregar_receta_id")
     autorizar_todo = request.POST.get("autorizar_todo") == "1"
     now = timezone.now()
     items = list(PlanProduccionItem.objects.filter(plan=plan))
+
+    if agregar_receta_id:
+        receta = Receta.objects.filter(pk=agregar_receta_id).first()
+        if not receta:
+            messages.error(request, "No se encontró el producto para agregar.")
+            return _redirect_revision(fecha_operacion)
+        qty = _parse_decimal(request.POST.get("agregar_cantidad"), Decimal("0"))
+        item, created = PlanProduccionItem.objects.get_or_create(
+            plan=plan,
+            receta=receta,
+            defaults={
+                "cantidad": qty,
+                "cantidad_autorizada": qty,
+                "cantidad_sugerida": qty,
+                "notas": "AGREGADO_MANUAL_CONSOLIDADO_CEDIS",
+                "metadata": {
+                    "agregado_manual": True,
+                    "agregado_en": now.isoformat(),
+                    "agregado_por_id": request.user.id if request.user.is_authenticated else None,
+                },
+            },
+        )
+        if not created:
+            item.cantidad = qty
+            item.cantidad_autorizada = qty
+            item.cantidad_sugerida = qty
+            item_metadata = item.metadata if isinstance(item.metadata, dict) else {}
+            item.metadata = {
+                **item_metadata,
+                "agregado_manual": True,
+                "eliminado": False,
+                "actualizado_en": now.isoformat(),
+                "actualizado_por_id": request.user.id if request.user.is_authenticated else None,
+            }
+            item.save(update_fields=["cantidad", "cantidad_autorizada", "cantidad_sugerida", "metadata"])
+        messages.success(request, "Producto agregado al plan.")
+        return _redirect_revision(fecha_operacion)
+
+    if eliminar_item_id:
+        item = PlanProduccionItem.objects.filter(plan=plan, pk=eliminar_item_id).first()
+        if not item:
+            messages.error(request, "No se encontró el renglón para eliminar.")
+            return _redirect_revision(fecha_operacion)
+        item_metadata = item.metadata if isinstance(item.metadata, dict) else {}
+        item.cantidad = Decimal("0")
+        item.cantidad_autorizada = Decimal("0")
+        item.metadata = {
+            **item_metadata,
+            "eliminado": True,
+            "eliminado_en": now.isoformat(),
+            "eliminado_por_id": request.user.id if request.user.is_authenticated else None,
+        }
+        item.save(update_fields=["cantidad", "cantidad_autorizada", "metadata"])
+        messages.success(request, "Producto eliminado del plan.")
+        return _redirect_revision(fecha_operacion)
 
     if autorizar_item_id:
         items = [item for item in items if str(item.id) == str(autorizar_item_id)]

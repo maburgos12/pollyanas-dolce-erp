@@ -40,8 +40,10 @@ class ConsolidadoNocturnoCedisService:
     ) -> ConsolidadoNocturnoCEDIS:
         fecha_operacion = fecha_operacion or timezone.localdate()
         consolidado_existente = ConsolidadoNocturnoCEDIS.objects.filter(fecha_operacion=fecha_operacion).first()
-        if consolidado_existente and not forzar_recalculo:
+        if consolidado_existente and consolidado_existente.plan_produccion_id and not forzar_recalculo:
             return consolidado_existente
+        if consolidado_existente and not consolidado_existente.plan_produccion_id and not forzar_recalculo:
+            sincronizar_point = False
 
         inventory_sync_job = None
         sync_job = None
