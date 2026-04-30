@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.db import connection
 from django.db.models import F, OuterRef, Q, Subquery
 from django_filters import rest_framework as filters
 from rest_framework import filters as drf_filters
@@ -66,6 +67,21 @@ class InventoryViewSet(ReadOnlyModelViewSet):
         return PointInventorySnapshot.objects.select_related("branch", "branch__erp_branch", "product")
 
     def _latest_snapshot_qs(self, branch_filter: str | None = None):
+        if connection.vendor == "postgresql":
+            latest_snapshot_ids = (
+                PointInventorySnapshot.objects.order_by("branch_id", "product_id", "-captured_at", "-id")
+                .distinct("branch_id", "product_id")
+                .values("id")
+            )
+            qs = self.get_queryset().filter(id__in=Subquery(latest_snapshot_ids))
+            if branch_filter:
+                qs = qs.filter(
+                    Q(branch__name__icontains=branch_filter)
+                    | Q(branch__external_id__iexact=branch_filter)
+                    | Q(branch__erp_branch__codigo__iexact=branch_filter)
+                )
+            return qs
+
         latest_snapshot_id = (
             PointInventorySnapshot.objects.filter(
                 branch_id=OuterRef("branch_id"),

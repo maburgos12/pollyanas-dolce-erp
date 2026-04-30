@@ -22,6 +22,7 @@ class PointInventorySnapshot(models.Model):
         indexes = [
             models.Index(fields=["branch", "captured_at"]),
             models.Index(fields=["product", "captured_at"]),
+            models.Index(fields=["branch", "product", "-captured_at", "-id"], name="pb_inv_latest_idx"),
         ]
 
     def __str__(self) -> str:

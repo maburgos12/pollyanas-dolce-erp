@@ -37,7 +37,13 @@ services:
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
       REDIS_URL: redis://redis:6379/0
-    command: /opt/venv/bin/python manage.py runserver 0.0.0.0:8000
+    command: >
+      /bin/sh -lc "exec /opt/venv/bin/gunicorn config.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers $${WEB_CONCURRENCY:-3}
+      --timeout $${GUNICORN_TIMEOUT:-120}
+      --access-logfile -
+      --error-logfile -"
     volumes:
       - .:/app
     ports:

@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import connection
 from django.db.models import Count, F, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
@@ -242,6 +243,18 @@ def _extract_limit(query: str, default: int = 10) -> int:
 
 
 def _latest_inventory_queryset():
+    if connection.vendor == "postgresql":
+        latest_snapshot_ids = (
+            PointInventorySnapshot.objects.order_by("branch_id", "product_id", "-captured_at", "-id")
+            .distinct("branch_id", "product_id")
+            .values("id")
+        )
+        return (
+            PointInventorySnapshot.objects.filter(id__in=Subquery(latest_snapshot_ids))
+            .select_related("branch", "branch__erp_branch", "product")
+            .order_by("product__name", "branch__name")
+        )
+
     latest_snapshot = (
         PointInventorySnapshot.objects.filter(branch=OuterRef("branch"), product=OuterRef("product"))
         .order_by("-captured_at")
