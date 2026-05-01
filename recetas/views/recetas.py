@@ -5753,6 +5753,36 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
         reference_end,
         branch_ids,
     )
+    missing_price_versions = [
+        version
+        for version in latest_versions
+        if version.receta.tipo == Receta.TIPO_PRODUCTO_FINAL
+        and version.receta_id not in price_stats_by_recipe
+    ]
+    sku_to_receta_id = {
+        (version.receta.codigo_point or "").strip(): version.receta_id
+        for version in missing_price_versions
+        if (version.receta.codigo_point or "").strip()
+    }
+    if sku_to_receta_id:
+        catalog_products = PointProduct.objects.filter(
+            sku__in=sorted(sku_to_receta_id.keys()),
+            precio__isnull=False,
+            precio_activo=True,
+        ).values("sku", "precio")
+        for product in catalog_products:
+            receta_id = sku_to_receta_id.get((product["sku"] or "").strip())
+            if receta_id:
+                price_stats_by_recipe[receta_id] = (
+                    Decimal(str(product["precio"])).quantize(Decimal("0.01")),
+                    0,
+                )
+    latest_versions = [
+        version
+        for version in latest_versions
+        if version.receta.tipo != Receta.TIPO_PRODUCTO_FINAL
+        or version.receta_id in price_stats_by_recipe
+    ]
     all_recipe_ids = {version.receta_id for version in latest_versions}
     cost_map_signature = hashlib.sha256(
         ",".join(str(recipe_id) for recipe_id in sorted(all_recipe_ids)).encode("utf-8")

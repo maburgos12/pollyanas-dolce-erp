@@ -246,6 +246,19 @@ def task_retry_failed_jobs(*, limit: int = 3):
 
 
 @shared_task(
+    name="pos_bridge.sync_product_prices_task",
+    bind=True,
+    max_retries=1,
+    default_retry_delay=600,
+    acks_late=True,
+    time_limit=1800,
+)
+def task_sync_product_prices(self):
+    call_command("sync_product_prices")
+    return {"status": "ok"}
+
+
+@shared_task(
     name="pos_bridge.recipe_gap_audit",
     bind=True,
     max_retries=1,

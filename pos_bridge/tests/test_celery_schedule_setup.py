@@ -37,6 +37,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "pos_bridge: retry jobs fallidos",
                 "pos_bridge: auditoria recetas semanal",
                 "pos_bridge: snapshot semanal costeo",
+                "pos_bridge: sync precios catalogo semanal",
                 "proyecciones: producción día siguiente",
                 "proyecciones: producción semana siguiente",
                 "inventario: consumos BOM día anterior",
@@ -49,12 +50,17 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "orquestacion: guardia ajustes inventario",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 21)
+        self.assertEqual(PeriodicTask.objects.count(), 22)
         realtime = PeriodicTask.objects.get(name="pos_bridge: inventario realtime")
         self.assertEqual(realtime.interval.every, 5)
         monthly = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
         self.assertEqual(monthly.crontab.day_of_month, "2")
         self.assertEqual(monthly.crontab.hour, "5")
+        product_prices = PeriodicTask.objects.get(name="pos_bridge: sync precios catalogo semanal")
+        self.assertEqual(product_prices.task, "pos_bridge.sync_product_prices_task")
+        self.assertEqual(product_prices.crontab.day_of_week, "1")
+        self.assertEqual(product_prices.crontab.hour, "2")
+        self.assertEqual(product_prices.crontab.minute, "0")
         analytics_refresh = PeriodicTask.objects.get(name="reportes: refresh analytics operativo")
         self.assertEqual(analytics_refresh.crontab.hour, "3")
         self.assertEqual(analytics_refresh.crontab.minute, "35")

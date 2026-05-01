@@ -294,6 +294,25 @@ class Command(BaseCommand):
             },
         )
 
+        product_prices_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="2",
+            day_of_week="1",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="pos_bridge: sync precios catalogo semanal",
+            defaults={
+                "task": "pos_bridge.sync_product_prices_task",
+                "crontab": product_prices_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         projection_daily_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="0",
             hour="20",

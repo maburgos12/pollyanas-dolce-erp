@@ -23,10 +23,10 @@ class PointBranchAdmin(admin.ModelAdmin):
 
 @admin.register(PointProduct)
 class PointProductAdmin(admin.ModelAdmin):
-    list_display = ("external_id", "sku", "name", "category", "active", "updated_at")
+    list_display = ("external_id", "sku", "name", "category", "active", "precio", "precio_temporada", "precio_activo", "updated_at")
     search_fields = ("external_id", "sku", "name", "normalized_name")
-    list_filter = ("active", "category")
-    readonly_fields = ("created_at", "updated_at", "normalized_name")
+    list_filter = ("active", "precio_activo", "precio_temporada", "category")
+    readonly_fields = ("created_at", "updated_at", "normalized_name", "precio_actualizado_en")
 
 
 @admin.register(PointSyncJob)
