@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, connection, transaction
 from django.db.models.deletion import ProtectedError
@@ -87,6 +88,7 @@ from ..utils.derived_insumos import sync_presentacion_insumo, sync_receta_deriva
 from ..utils.matching import match_insumo
 from ..utils.normalizacion import normalizar_nombre
 from ..catalogs import familia_categoria_catalogo_json, familias_producto_catalogo
+from ..utils.commercial_composition import build_commercial_recipe_lookup_context
 from reportes.executive_panels import _partial_month_amount_quantity
 from ventas.models import VentaAutoritativaPoint
 from ventas.services.financials import resolve_unit_prices_bulk
@@ -5636,28 +5638,43 @@ def costeo_dashboard_snapshot(request: HttpRequest) -> HttpResponse:
     return redirect(next_url)
 
 
+def _latest_cost_versions_qs():
+    latest_version_id = (
+        RecetaCostoVersion.objects.filter(
+            receta_id=OuterRef("receta_id"),
+            costo_total__gt=0,
+        )
+        .order_by("-version_num", "-id")
+        .values("id")[:1]
+    )
+    return (
+        RecetaCostoVersion.objects.filter(
+            costo_total__gt=0,
+            id=Subquery(latest_version_id),
+        )
+        .select_related("receta")
+        .order_by("receta__nombre", "id")
+    )
+
+
 @login_required
 def monitor_margenes(request: HttpRequest) -> HttpResponse:
     if not can_view_recetas(request.user):
         raise PermissionDenied
 
     q = (request.GET.get("q") or "").strip()
+    tipo_filtro = (request.GET.get("tipo") or Receta.TIPO_PRODUCTO_FINAL).strip()
+    if tipo_filtro not in {Receta.TIPO_PRODUCTO_FINAL, Receta.TIPO_PREPARACION, "todos"}:
+        tipo_filtro = Receta.TIPO_PRODUCTO_FINAL
+    export_csv = request.GET.get("export") == "csv"
+
     reference_end = timezone.localdate()
     reference_start = reference_end - timedelta(days=90)
     branch_ids = set(sucursales_operativas(reference_end).values_list("id", flat=True))
 
-    latest_versions: list[RecetaCostoVersion] = []
-    seen_recipe_ids: set[int] = set()
-    version_qs = (
-        RecetaCostoVersion.objects.filter(costo_total__gt=0)
-        .select_related("receta")
-        .order_by("receta_id", "-version_num", "-id")
-    )
-    for version in version_qs:
-        if version.receta_id in seen_recipe_ids:
-            continue
-        seen_recipe_ids.add(version.receta_id)
-        latest_versions.append(version)
+    latest_versions = list(_latest_cost_versions_qs())
+    if tipo_filtro != "todos":
+        latest_versions = [version for version in latest_versions if version.receta.tipo == tipo_filtro]
 
     if q:
         normalized_q = normalizar_nombre(q)
@@ -5669,13 +5686,42 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
             or normalized_q in normalizar_nombre(version.receta.familia or "")
         ]
 
-    recipe_ids = {version.receta_id for version in latest_versions}
-    price_map = resolve_unit_prices_bulk(
-        recipe_ids,
-        reference_start,
-        reference_end,
-        branch_ids=branch_ids,
+    price_recipe_ids = {
+        version.receta_id
+        for version in latest_versions
+        if version.receta.tipo == Receta.TIPO_PRODUCTO_FINAL
+    }
+    point_price_recipe_ids = set(
+        PointDailySale.objects.filter(
+            receta_id__in=price_recipe_ids,
+            quantity__gt=0,
+            total_amount__gt=0,
+            source_endpoint=OFFICIAL_POINT_SOURCE,
+        ).values_list("receta_id", flat=True)
     )
+    price_map: dict[tuple[int, int], Decimal] = {}
+    if point_price_recipe_ids and branch_ids:
+        branch_key = ",".join(str(branch_id) for branch_id in sorted(branch_ids))
+        recipe_key = hashlib.sha1(",".join(str(recipe_id) for recipe_id in sorted(point_price_recipe_ids)).encode()).hexdigest()
+        cache_key = f"monitor_margenes:price_map:{reference_end.isoformat()}:{branch_key}:{recipe_key}"
+        cached_price_map = cache.get(cache_key)
+        if cached_price_map is not None:
+            price_map = cached_price_map
+        else:
+            price_map = resolve_unit_prices_bulk(
+                point_price_recipe_ids,
+                reference_start,
+                reference_end,
+                branch_ids=branch_ids,
+                commercial_context=build_commercial_recipe_lookup_context(point_price_recipe_ids),
+            )
+            cache.set(cache_key, price_map, timeout=3600)
+
+    prices_by_recipe: dict[int, list[Decimal]] = defaultdict(list)
+    for (recipe_id, _branch_id), price in price_map.items():
+        price_decimal = Decimal(price or 0)
+        if price_decimal > 0:
+            prices_by_recipe[int(recipe_id)].append(price_decimal)
 
     rows: list[dict[str, Any]] = []
     red_count = 0
@@ -5686,17 +5732,15 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
     total_price = Decimal("0")
 
     for version in latest_versions:
-        branch_prices = [
-            Decimal(price)
-            for (recipe_id, _branch_id), price in price_map.items()
-            if recipe_id == version.receta_id and Decimal(price or 0) > 0
-        ]
+        branch_prices = prices_by_recipe.get(version.receta_id, [])
         avg_price = (
             (sum(branch_prices, Decimal("0")) / Decimal(len(branch_prices))).quantize(Decimal("0.01"))
             if branch_prices
             else Decimal("0")
         )
-        cost = _recipe_effective_cost_display(version.receta).quantize(Decimal("0.01"))
+        cost = Decimal(version.costo_total or 0).quantize(Decimal("0.01"))
+        if cost <= 0:
+            cost = _recipe_effective_cost_display(version.receta).quantize(Decimal("0.01"))
         if cost <= 0:
             continue
         margin_pct = None
@@ -5722,6 +5766,9 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
         else:
             missing_price_count += 1
         total_cost += cost
+        margin_bar_width = Decimal("0")
+        if margin_pct is not None:
+            margin_bar_width = max(Decimal("0"), min(margin_pct, Decimal("100"))).quantize(Decimal("1"))
 
         rows.append(
             {
@@ -5730,15 +5777,55 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
                 "price": avg_price,
                 "cost": cost,
                 "margin_pct": margin_pct,
+                "margin_bar_width": margin_bar_width,
                 "status": status,
                 "status_label": status_label,
                 "price_points": len(branch_prices),
                 "sort_margin": sort_margin,
+                "tipo": version.receta.tipo,
+                "tipo_label": version.receta.get_tipo_display(),
                 "cost_source_label": "Costo actual",
             }
         )
 
     rows.sort(key=lambda item: (item["sort_margin"], item["receta"].nombre.lower()))
+
+    if export_csv:
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="monitor_margenes_{reference_end.isoformat()}.csv"'
+        response.write("\ufeff")
+        writer = csv.writer(response)
+        writer.writerow(
+            [
+                "Receta",
+                "Codigo Point",
+                "Familia",
+                "Tipo",
+                "Precio venta",
+                "Costo",
+                "Margen %",
+                "Estatus",
+                "Sucursales con precio",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    row["receta"].nombre,
+                    row["receta"].codigo_point or "",
+                    row["receta"].familia or "",
+                    row["tipo_label"],
+                    row["price"] if row["price"] > 0 else "",
+                    row["cost"],
+                    row["margin_pct"] if row["margin_pct"] is not None else "",
+                    row["status_label"],
+                    row["price_points"],
+                ]
+            )
+        return response
+
+    export_params = request.GET.copy()
+    export_params["export"] = "csv"
 
     return render(
         request,
@@ -5746,6 +5833,8 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
         {
             "rows": rows,
             "q": q,
+            "tipo_filtro": tipo_filtro,
+            "export_query": export_params.urlencode(),
             "reference_start": reference_start,
             "reference_end": reference_end,
             "red_count": red_count,

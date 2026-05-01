@@ -3,147 +3,515 @@
 {% block title %}Monitor de márgenes{% endblock %}
 {% block page_title %}Monitor de márgenes{% endblock %}
 {% block body_class %}page-monitor-margenes{% endblock %}
-{% block content %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/bi_dashboard.css?v=20260321-05">
 <style>
-  .margin-shell { display:grid; gap:18px; }
-  .margin-hero, .margin-panel { padding:20px; border-radius:20px; background:#fff; border:1px solid rgba(131,24,67,.08); }
-  .margin-hero { display:grid; gap:14px; grid-template-columns:1.4fr .9fr; align-items:start; }
-  .margin-kpis { display:grid; gap:12px; grid-template-columns:repeat(5, minmax(0,1fr)); }
-  .margin-kpi { padding:18px; border:1px solid rgba(131,24,67,.08); border-radius:18px; background:#fff; }
-  .margin-kpi .eyebrow { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:#7b6871; margin-bottom:10px; }
-  .margin-kpi .value { font-size:1.9rem; font-weight:700; color:#5a2132; line-height:1.05; }
-  .margin-kpi .note { color:#73656d; margin-top:8px; }
-  .margin-table { width:100%; border-collapse:collapse; margin-top:16px; }
-  .margin-table th, .margin-table td { padding:11px 12px; border-bottom:1px solid rgba(131,24,67,.08); vertical-align:top; }
-  .margin-table th { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:#7b6871; }
-  .status-chip { display:inline-flex; align-items:center; gap:8px; border-radius:999px; padding:6px 10px; font-weight:700; font-size:.9rem; }
-  .status-chip.is-red { background:rgba(180,51,76,.12); color:#a1223b; }
-  .status-chip.is-yellow { background:rgba(211,161,58,.16); color:#8b5d00; }
-  .status-chip.is-green { background:rgba(46,139,87,.12); color:#226748; }
-  .status-chip.is-muted { background:rgba(123,104,113,.12); color:#6e6067; }
-  .margin-negative { color:#a1223b; font-weight:700; }
-  .margin-warning { color:#8b5d00; font-weight:700; }
-  .margin-good { color:#226748; font-weight:700; }
-  .margin-muted { color:#6e6067; font-weight:700; }
-  .margin-filters { display:grid; gap:12px; grid-template-columns:minmax(0,1fr) auto auto; align-items:end; }
-  @media (max-width: 1200px) {
-    .margin-hero, .margin-kpis { grid-template-columns:1fr; }
+  :root {
+    --mm-ink: #22141a;
+    --mm-muted: #75606a;
+    --mm-wine: #8b2252;
+    --mm-wine-dark: #5e1237;
+    --mm-border: rgba(139, 34, 82, .14);
+    --mm-soft: rgba(139, 34, 82, .06);
+    --mm-red-bg: #fef2f2;
+    --mm-red: #991b1b;
+    --mm-red-border: #fca5a5;
+    --mm-yellow-bg: #fffbeb;
+    --mm-yellow: #92400e;
+    --mm-yellow-border: #fde68a;
+    --mm-green-bg: #f0fdf4;
+    --mm-green: #166534;
+    --mm-green-border: #86efac;
+    --mm-gray-bg: #f3f4f6;
+    --mm-gray: #6b7280;
+    --mm-gray-border: #d1d5db;
+  }
+  .mm-shell { display: grid; gap: 16px; }
+  .mm-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    padding: 22px 26px;
+    border-radius: 14px;
+    color: #fff;
+    background: linear-gradient(135deg, var(--mm-wine-dark), var(--mm-wine));
+  }
+  .mm-eyebrow {
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    opacity: .7;
+    text-transform: uppercase;
+  }
+  .mm-title { margin: 0 0 4px; font-size: 22px; font-weight: 750; }
+  .mm-subtitle { margin: 0; font-size: 13px; opacity: .76; }
+  .mm-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .mm-actions .btn-export {
+    color: #fff;
+    border-color: rgba(255, 255, 255, .32);
+    background: rgba(255, 255, 255, .14);
+  }
+  .mm-kpis {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .mm-kpi {
+    padding: 14px 16px;
+    border: 1px solid var(--mm-border);
+    border-radius: 10px;
+    background: #fff;
+  }
+  .mm-kpi-label {
+    margin-bottom: 6px;
+    color: #6f3150;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .mm-kpi-value { color: var(--mm-wine); font-size: 24px; font-weight: 750; line-height: 1; }
+  .mm-kpi-note { margin-top: 5px; color: #927c87; font-size: 11px; }
+  .mm-kpi.is-red .mm-kpi-value { color: var(--mm-red); }
+  .mm-kpi.is-yellow .mm-kpi-value { color: var(--mm-yellow); }
+  .mm-kpi.is-green .mm-kpi-value { color: var(--mm-green); }
+  .mm-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+    padding: 16px 18px;
+    border: 1px solid var(--mm-border);
+    border-radius: 10px;
+    background: #fff;
+  }
+  .mm-filter-group { display: flex; flex-direction: column; gap: 4px; min-width: 170px; }
+  .mm-filter-group.is-search { flex: 1; min-width: 240px; }
+  .mm-filter-group label {
+    color: #6f3150;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  .mm-filter-group input,
+  .mm-filter-group select {
+    height: 38px;
+    padding: 0 10px;
+    border: 1px solid var(--mm-border);
+    border-radius: 8px;
+    background: #fdf9fb;
+    color: #2c2026;
+    font: inherit;
+    font-size: 13px;
+  }
+  .mm-filter-group input:focus,
+  .mm-filter-group select:focus { outline: none; border-color: var(--mm-wine); }
+  .mm-filter-actions { display: flex; gap: 8px; margin-left: auto; }
+  .mm-panel {
+    overflow: hidden;
+    border: 1px solid var(--mm-border);
+    border-radius: 10px;
+    background: #fff;
+  }
+  .mm-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--mm-border);
+    background: rgba(139, 34, 82, .03);
+  }
+  .mm-panel-title { margin: 0; color: var(--mm-wine); font-size: 14px; font-weight: 700; }
+  .mm-table-wrap { overflow: auto; }
+  .mm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .mm-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--mm-border);
+    background: #fdf9fb;
+    color: #6f3150;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-align: left;
+    text-transform: uppercase;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .mm-table th:hover { color: var(--mm-wine); }
+  .mm-table th.is-right,
+  .mm-table td.is-right { text-align: right; }
+  .mm-table th.is-center,
+  .mm-table td.is-center { text-align: center; }
+  .mm-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--mm-soft);
+    color: var(--mm-ink);
+    vertical-align: middle;
+  }
+  .mm-table tr:hover td { background: rgba(139, 34, 82, .025); }
+  .mm-recipe-name { font-weight: 700; }
+  .mm-family, .mm-code { color: var(--mm-muted); font-size: 12px; }
+  .mm-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  .mm-type-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 1px 7px;
+    border: 1px solid #c3d0f0;
+    border-radius: 5px;
+    background: #f0f4ff;
+    color: #2c4a8a;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .mm-type-chip.is-prep { border-color: #d4c3f0; background: #f5f0ff; color: #5b2d8a; }
+  .mm-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+  .mm-badge.is-red { border: 1px solid var(--mm-red-border); background: var(--mm-red-bg); color: var(--mm-red); }
+  .mm-badge.is-yellow { border: 1px solid var(--mm-yellow-border); background: var(--mm-yellow-bg); color: var(--mm-yellow); }
+  .mm-badge.is-green { border: 1px solid var(--mm-green-border); background: var(--mm-green-bg); color: var(--mm-green); }
+  .mm-badge.is-muted { border: 1px solid var(--mm-gray-border); background: var(--mm-gray-bg); color: var(--mm-gray); }
+  .mm-margin-value { font-size: 14px; font-weight: 750; }
+  .mm-margin-value.is-red { color: var(--mm-red); }
+  .mm-margin-value.is-yellow { color: var(--mm-yellow); }
+  .mm-margin-value.is-green { color: var(--mm-green); }
+  .mm-margin-value.is-muted { color: var(--mm-gray); }
+  .mm-bar { min-width: 80px; height: 6px; margin-top: 4px; overflow: hidden; border-radius: 4px; background: #f0e8ec; }
+  .mm-bar-fill { height: 100%; border-radius: 4px; }
+  .mm-bar-fill.is-red { background: var(--mm-red); }
+  .mm-bar-fill.is-yellow { background: var(--mm-yellow); }
+  .mm-bar-fill.is-green { background: var(--mm-green); }
+  .mm-empty { padding: 44px 20px; color: #927c87; text-align: center; }
+  .mm-empty-title { margin-bottom: 4px; color: #6f3150; font-weight: 700; }
+  .mm-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--mm-border);
+    color: #927c87;
+    font-size: 12px;
+  }
+  .mm-page-buttons { display: flex; gap: 6px; }
+  .mm-page-btn {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--mm-border);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--mm-wine);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .mm-page-btn:hover,
+  .mm-page-btn.active { border-color: var(--mm-wine); background: var(--mm-wine); color: #fff; }
+  .mm-page-btn:disabled { cursor: default; opacity: .35; }
+  @media (max-width: 980px) {
+    .mm-hero { grid-template-columns: 1fr; }
+    .mm-actions { justify-content: flex-start; }
+    .mm-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .mm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mm-filters { flex-direction: column; align-items: stretch; }
+    .mm-filter-actions { margin-left: 0; }
   }
 </style>
+{% endblock %}
 
-<div class="module-shell margin-shell">
-  <section class="margin-hero">
+{% block content %}
+<div class="module-shell mm-shell">
+  <header class="mm-hero">
     <div>
-      <div class="eyebrow text-uppercase text-muted" style="letter-spacing:.12em;">Recetas · rentabilidad comercial</div>
-      <h2 style="margin:0 0 8px;">Monitor de márgenes por receta</h2>
-      <p class="text-muted mb-0">
-        Cruza el costo operativo actual de cada receta con el precio de venta resuelto desde ventas Point del periodo
-        {{ reference_start|date:"Y-m-d" }} al {{ reference_end|date:"Y-m-d" }}. Las filas sin precio quedan arriba para revisión.
+      <div class="mm-eyebrow">Recetas · Rentabilidad comercial</div>
+      <h1 class="mm-title">Monitor de márgenes</h1>
+      <p class="mm-subtitle">
+        Costo operativo vs precio de venta · Periodo {{ reference_start|date:"d/m/Y" }} a {{ reference_end|date:"d/m/Y" }}
       </p>
     </div>
-    <div class="d-flex gap-2 flex-wrap justify-content-end">
-      <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Abrir costeo semanal</a>
-      <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Abrir recetas</a>
+    <div class="mm-actions">
+      <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Costeo semanal</a>
+      <a class="btn btn-secondary" href="{% url 'recetas:recetas_list' %}">Recetas</a>
+      <a class="btn btn-secondary btn-export" href="?{{ export_query }}">Exportar CSV</a>
     </div>
+  </header>
+
+  <section class="mm-kpis">
+    <article class="mm-kpi">
+      <div class="mm-kpi-label">Recetas analizadas</div>
+      <div class="mm-kpi-value">{{ rows|length|intcomma }}</div>
+      <div class="mm-kpi-note">Con costo operativo mayor a cero</div>
+    </article>
+    <article class="mm-kpi is-red">
+      <div class="mm-kpi-label">Alerta roja</div>
+      <div class="mm-kpi-value">{{ red_count|intcomma }}</div>
+      <div class="mm-kpi-note">Margen menor a 40%</div>
+    </article>
+    <article class="mm-kpi is-yellow">
+      <div class="mm-kpi-label">Revisión</div>
+      <div class="mm-kpi-value">{{ yellow_count|intcomma }}</div>
+      <div class="mm-kpi-note">Margen entre 40% y 55%</div>
+    </article>
+    <article class="mm-kpi is-green">
+      <div class="mm-kpi-label">Saludable</div>
+      <div class="mm-kpi-value">{{ green_count|intcomma }}</div>
+      <div class="mm-kpi-note">Margen de 55% o más</div>
+    </article>
+    <article class="mm-kpi">
+      <div class="mm-kpi-label">Sin precio</div>
+      <div class="mm-kpi-value">{{ missing_price_count|intcomma }}</div>
+      <div class="mm-kpi-note">Sin venta resoluble en Point</div>
+    </article>
   </section>
 
-  <section class="margin-panel">
-    <form method="get" class="margin-filters">
-      <div>
-        <label class="form-label">Buscar receta</label>
-        <input class="form-control" name="q" value="{{ q }}" placeholder="Nombre, código Point o familia">
-      </div>
+  <form method="get" class="mm-filters">
+    <div class="mm-filter-group is-search">
+      <label for="input-q">Buscar receta</label>
+      <input id="input-q" type="text" name="q" value="{{ q }}" placeholder="Nombre, código Point o familia">
+    </div>
+    <div class="mm-filter-group">
+      <label for="select-tipo">Tipo de receta</label>
+      <select id="select-tipo" name="tipo">
+        <option value="PRODUCTO_FINAL" {% if tipo_filtro == "PRODUCTO_FINAL" %}selected{% endif %}>Productos de venta</option>
+        <option value="PREPARACION" {% if tipo_filtro == "PREPARACION" %}selected{% endif %}>Insumos internos</option>
+        <option value="todos" {% if tipo_filtro == "todos" %}selected{% endif %}>Todos</option>
+      </select>
+    </div>
+    <div class="mm-filter-group">
+      <label for="filter-status">Estatus margen</label>
+      <select id="filter-status">
+        <option value="">Todos</option>
+        <option value="ALERTA">Alerta roja</option>
+        <option value="REVISION">Revisión</option>
+        <option value="SALUDABLE">Saludable</option>
+        <option value="SIN_PRECIO">Sin precio</option>
+      </select>
+    </div>
+    <div class="mm-filter-actions">
       <button class="btn btn-primary" type="submit">Aplicar</button>
       <a class="btn btn-secondary" href="{% url 'recetas:monitor_margenes' %}">Limpiar</a>
-    </form>
-  </section>
+    </div>
+  </form>
 
-  <section class="margin-kpis">
-    <article class="margin-kpi">
-      <div class="eyebrow">Recetas visibles</div>
-      <div class="value">{{ rows|length|intcomma }}</div>
-      <div class="note">Costo operativo actual mayor a cero.</div>
-    </article>
-    <article class="margin-kpi">
-      <div class="eyebrow">Alerta roja</div>
-      <div class="value">{{ red_count|intcomma }}</div>
-      <div class="note">Margen menor a 40%.</div>
-    </article>
-    <article class="margin-kpi">
-      <div class="eyebrow">Revisión</div>
-      <div class="value">{{ yellow_count|intcomma }}</div>
-      <div class="note">Margen entre 40% y 55%.</div>
-    </article>
-    <article class="margin-kpi">
-      <div class="eyebrow">Saludable</div>
-      <div class="value">{{ green_count|intcomma }}</div>
-      <div class="note">Margen de 55% o más.</div>
-    </article>
-    <article class="margin-kpi">
-      <div class="eyebrow">Sin precio</div>
-      <div class="value">{{ missing_price_count|intcomma }}</div>
-      <div class="note">No hubo precio resoluble en ventas Point.</div>
-    </article>
-  </section>
-
-  <section class="margin-panel">
-    <div class="table-responsive">
-      <table class="margin-table">
+  <section class="mm-panel">
+    <div class="mm-panel-head">
+      <h2 class="mm-panel-title" id="table-count">{{ rows|length }} receta{{ rows|length|pluralize }}</h2>
+    </div>
+    <div class="mm-table-wrap">
+      <table class="mm-table" id="margin-table">
         <thead>
           <tr>
-            <th>Receta</th>
-            <th>Familia</th>
-            <th>Código Point</th>
-            <th>Precio</th>
-            <th>Costo</th>
-            <th>Margen</th>
-            <th>Alerta</th>
-            <th>Fuente costo</th>
+            <th data-col="name" data-type="str">Receta <span class="sort-icon">↕</span></th>
+            <th data-col="type" data-type="str">Tipo <span class="sort-icon">↕</span></th>
+            <th data-col="family" data-type="str">Familia <span class="sort-icon">↕</span></th>
+            <th data-col="code" data-type="str">Código Point <span class="sort-icon">↕</span></th>
+            <th data-col="price" data-type="num" class="is-right">Precio <span class="sort-icon">↕</span></th>
+            <th data-col="cost" data-type="num" class="is-right">Costo <span class="sort-icon">↕</span></th>
+            <th data-col="margin" data-type="num" class="is-right">Margen <span class="sort-icon">↕</span></th>
+            <th data-col="status" data-type="str">Estatus <span class="sort-icon">↕</span></th>
+            <th data-col="points" data-type="num" class="is-center">Sucursales <span class="sort-icon">↕</span></th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="table-body">
           {% for row in rows %}
-          <tr>
+          <tr data-name="{{ row.receta.nombre }}"
+              data-type="{{ row.tipo }}"
+              data-family="{{ row.receta.familia|default:'' }}"
+              data-code="{{ row.receta.codigo_point|default:'' }}"
+              data-price="{{ row.price }}"
+              data-cost="{{ row.cost }}"
+              data-margin="{{ row.margin_pct|default:'-999' }}"
+              data-status="{{ row.status }}"
+              data-points="{{ row.price_points }}">
+            <td><span class="mm-recipe-name">{{ row.receta.nombre }}</span></td>
             <td>
-              <strong>{{ row.receta.nombre }}</strong>
-              <div class="text-muted">{{ row.price_points }} sucursal(es) con precio resuelto</div>
+              <span class="mm-type-chip {% if row.tipo == 'PREPARACION' %}is-prep{% endif %}">
+                {% if row.tipo == "PRODUCTO_FINAL" %}Venta{% else %}Insumo{% endif %}
+              </span>
             </td>
-            <td>{{ row.receta.familia|default:"Sin familia" }}</td>
-            <td>{{ row.receta.codigo_point|default:"Sin código" }}</td>
-            <td>
+            <td><span class="mm-family">{{ row.receta.familia|default:"-" }}</span></td>
+            <td><span class="mm-code">{{ row.receta.codigo_point|default:"-" }}</span></td>
+            <td class="is-right">
               {% if row.price > 0 %}
-              ${{ row.price|floatformat:2|intcomma }}
+                ${{ row.price|floatformat:2|intcomma }}
               {% else %}
-              <span class="text-muted">Sin precio</span>
+                <span class="mm-family">Sin precio</span>
               {% endif %}
             </td>
-            <td>${{ row.cost|floatformat:2|intcomma }}</td>
-            <td>
+            <td class="is-right">${{ row.cost|floatformat:2|intcomma }}</td>
+            <td class="is-right">
               {% if row.margin_pct is None %}
-              <span class="margin-muted">N/D</span>
+                <span class="mm-margin-value is-muted">N/D</span>
               {% elif row.margin_pct < 40 %}
-              <span class="margin-negative">{{ row.margin_pct|floatformat:2 }}%</span>
+                <span class="mm-margin-value is-red">{{ row.margin_pct|floatformat:1 }}%</span>
+                <div class="mm-bar"><div class="mm-bar-fill is-red" style="width: {{ row.margin_bar_width }}%"></div></div>
               {% elif row.margin_pct < 55 %}
-              <span class="margin-warning">{{ row.margin_pct|floatformat:2 }}%</span>
+                <span class="mm-margin-value is-yellow">{{ row.margin_pct|floatformat:1 }}%</span>
+                <div class="mm-bar"><div class="mm-bar-fill is-yellow" style="width: {{ row.margin_bar_width }}%"></div></div>
               {% else %}
-              <span class="margin-good">{{ row.margin_pct|floatformat:2 }}%</span>
+                <span class="mm-margin-value is-green">{{ row.margin_pct|floatformat:1 }}%</span>
+                <div class="mm-bar"><div class="mm-bar-fill is-green" style="width: {{ row.margin_bar_width }}%"></div></div>
               {% endif %}
             </td>
             <td>
-              <span class="status-chip {% if row.status == 'ALERTA' %}is-red{% elif row.status == 'REVISION' %}is-yellow{% elif row.status == 'SALUDABLE' %}is-green{% else %}is-muted{% endif %}">
+              <span class="mm-badge {% if row.status == 'ALERTA' %}is-red{% elif row.status == 'REVISION' %}is-yellow{% elif row.status == 'SALUDABLE' %}is-green{% else %}is-muted{% endif %}">
                 {{ row.status_label }}
               </span>
             </td>
-            <td>{{ row.cost_source_label }}</td>
+            <td class="is-center">{{ row.price_points }}</td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="8" class="text-muted">No hay recetas con costo visible para el criterio actual.</td>
+            <td colspan="9">
+              <div class="mm-empty">
+                <div class="mm-empty-title">Sin recetas para los filtros actuales</div>
+                <div>Prueba cambiando el tipo de receta o limpiando la búsqueda.</div>
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    <div class="mm-pagination">
+      <span id="page-info">0 de 0 recetas</span>
+      <div class="mm-page-buttons" id="page-buttons"></div>
+    </div>
   </section>
 </div>
+
+<script>
+(function () {
+  var pageSize = 50;
+  var currentPage = 1;
+  var sortCol = "margin";
+  var sortAsc = true;
+  var statusFilter = "";
+  var rows = Array.prototype.slice.call(document.querySelectorAll("#table-body tr[data-name]"));
+  var visibleRows = rows.slice();
+  var body = document.getElementById("table-body");
+  var statusSelect = document.getElementById("filter-status");
+  var tableCount = document.getElementById("table-count");
+  var pageInfo = document.getElementById("page-info");
+  var pageButtons = document.getElementById("page-buttons");
+
+  function valueFor(row, col) {
+    return row.dataset[col] || "";
+  }
+
+  function applyFilters() {
+    visibleRows = rows.filter(function (row) {
+      return !statusFilter || row.dataset.status === statusFilter;
+    });
+    currentPage = 1;
+    applySort();
+  }
+
+  function applySort() {
+    var header = document.querySelector("[data-col='" + sortCol + "']");
+    var type = header ? header.dataset.type : "str";
+    visibleRows.sort(function (a, b) {
+      var av = valueFor(a, sortCol);
+      var bv = valueFor(b, sortCol);
+      if (type === "num") {
+        av = parseFloat(av) || -999;
+        bv = parseFloat(bv) || -999;
+        return sortAsc ? av - bv : bv - av;
+      }
+      return sortAsc ? av.localeCompare(bv, "es") : bv.localeCompare(av, "es");
+    });
+    renderPage();
+  }
+
+  function renderPage() {
+    var total = visibleRows.length;
+    var pages = Math.ceil(total / pageSize) || 1;
+    if (currentPage > pages) currentPage = pages;
+    var start = (currentPage - 1) * pageSize;
+    var end = Math.min(start + pageSize, total);
+
+    rows.forEach(function (row) { row.style.display = "none"; });
+    visibleRows.slice(start, end).forEach(function (row) {
+      row.style.display = "";
+      body.appendChild(row);
+    });
+
+    tableCount.textContent = total + " receta" + (total === 1 ? "" : "s");
+    pageInfo.textContent = "Mostrando " + (total ? start + 1 : 0) + "-" + end + " de " + total + " recetas";
+    pageButtons.innerHTML = "";
+
+    var prev = document.createElement("button");
+    prev.className = "mm-page-btn";
+    prev.textContent = "‹";
+    prev.disabled = currentPage === 1;
+    prev.onclick = function () { currentPage -= 1; renderPage(); };
+    pageButtons.appendChild(prev);
+
+    var firstPage = Math.max(1, currentPage - 3);
+    var lastPage = Math.min(pages, firstPage + 6);
+    for (var i = firstPage; i <= lastPage; i += 1) {
+      (function (page) {
+        var button = document.createElement("button");
+        button.className = "mm-page-btn" + (page === currentPage ? " active" : "");
+        button.textContent = page;
+        button.onclick = function () { currentPage = page; renderPage(); };
+        pageButtons.appendChild(button);
+      })(i);
+    }
+
+    var next = document.createElement("button");
+    next.className = "mm-page-btn";
+    next.textContent = "›";
+    next.disabled = currentPage === pages;
+    next.onclick = function () { currentPage += 1; renderPage(); };
+    pageButtons.appendChild(next);
+  }
+
+  if (statusSelect) {
+    statusSelect.addEventListener("change", function () {
+      statusFilter = this.value;
+      applyFilters();
+    });
+  }
+
+  document.querySelectorAll(".mm-table th[data-col]").forEach(function (header) {
+    header.addEventListener("click", function () {
+      if (sortCol === header.dataset.col) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = header.dataset.col;
+        sortAsc = sortCol !== "margin";
+      }
+      document.querySelectorAll(".mm-table th[data-col]").forEach(function (item) {
+        item.classList.remove("sorted");
+        item.querySelector(".sort-icon").textContent = "↕";
+      });
+      header.classList.add("sorted");
+      header.querySelector(".sort-icon").textContent = sortAsc ? "↑" : "↓";
+      currentPage = 1;
+      applySort();
+    });
+  });
+
+  applySort();
+})();
+</script>
 {% endblock %}
