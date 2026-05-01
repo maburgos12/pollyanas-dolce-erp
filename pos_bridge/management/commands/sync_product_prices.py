@@ -104,6 +104,65 @@ def _extract_visible_table_rows(page, *, temporada: bool) -> list[CatalogPriceRo
     return parsed
 
 
+def _extract_datatables_rows(page) -> list[CatalogPriceRow]:
+    raw_rows = page.evaluate(
+        """() => {
+            if (!(window.jQuery && window.jQuery.fn && window.jQuery.fn.dataTable)) {
+                return [];
+            }
+            const tables = Array.from(window.jQuery.fn.dataTable.tables());
+            const rows = [];
+            for (const table of tables) {
+                const tableId = table.id || '';
+                if (tableId && !String(tableId).toLowerCase().includes('producto')) {
+                    continue;
+                }
+                const dt = window.jQuery(table).DataTable();
+                const data = dt.rows().data();
+                const items = data.toArray ? data.toArray() : Array.from(data);
+                for (const item of items) {
+                    rows.push(item);
+                }
+            }
+            return rows;
+        }"""
+    )
+    parsed: list[CatalogPriceRow] = []
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            continue
+        sku = str(
+            raw.get("Codigo")
+            or raw.get("Código")
+            or raw.get("codigo")
+            or raw.get("sku")
+            or raw.get("SKU")
+            or ""
+        ).strip()
+        precio = _parse_price(
+            str(
+                raw.get("Precio_default")
+                or raw.get("Precio")
+                or raw.get("precio")
+                or raw.get("PrecioVenta")
+                or ""
+            )
+        )
+        if not sku or precio is None or precio <= 0:
+            continue
+        active = raw.get("Activo")
+        temporada = raw.get("Temporada")
+        parsed.append(
+            CatalogPriceRow(
+                sku=sku,
+                precio=precio,
+                active=True if active is None else bool(active),
+                temporada=bool(temporada),
+            )
+        )
+    return parsed
+
+
 def _select_largest_page_size(page) -> None:
     selects = page.locator("select")
     for index in range(selects.count()):
@@ -206,10 +265,18 @@ def scrape_catalog_prices(*, branch_hint: str = "") -> tuple[list[CatalogPriceRo
         catalog_url = urljoin(settings.base_url.rstrip("/") + "/", CATALOG_PATH.lstrip("/"))
         page.goto(catalog_url, wait_until="domcontentloaded")
         try:
+            page.wait_for_selector("table", timeout=settings.timeout_ms)
+        except Exception:
+            pass
+        try:
             page.wait_for_load_state("networkidle", timeout=settings.timeout_ms)
         except Exception:
             pass
         page.wait_for_timeout(750)
+
+        datatable_rows = _extract_datatables_rows(page)
+        if datatable_rows:
+            return datatable_rows, any(row.temporada for row in datatable_rows)
 
         rows = _extract_paginated_rows(page, temporada=False)
         temporada_tab_found = _click_temporada_tab(page, settings.timeout_ms)
