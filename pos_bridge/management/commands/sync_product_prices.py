@@ -50,41 +50,26 @@ def _parse_active(value: str) -> bool:
 
 
 def _extract_visible_table_rows(page, *, temporada: bool) -> list[CatalogPriceRow]:
-    raw_rows = page.evaluate(
+    table_texts = page.evaluate(
         """() => {
-            const normalize = (value) => (value || '').toString().trim();
             const visible = (node) => {
                 if (!node) return false;
                 const style = window.getComputedStyle(node);
                 const rect = node.getBoundingClientRect();
                 return style && style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
             };
-            const tables = Array.from(document.querySelectorAll('table')).filter(visible);
-            const output = [];
-            for (const table of tables) {
-                const headerCells = Array.from(table.querySelectorAll('thead th, thead td'));
-                const headers = headerCells.map((cell) => normalize(cell.innerText).toLowerCase());
-                const bodyRows = Array.from(table.querySelectorAll('tbody tr')).filter(visible);
-                for (const row of bodyRows) {
-                    const cells = Array.from(row.querySelectorAll('td')).map((cell) => {
-                        const input = cell.querySelector('input, select, textarea');
-                        const value = input ? (input.value || input.checked || '') : '';
-                        return normalize(value || cell.innerText);
-                    });
-                    if (cells.some(Boolean)) {
-                        output.push({headers, cells});
-                    }
-                }
-            }
-            return output;
+            return Array.from(document.querySelectorAll('table'))
+                .filter(visible)
+                .map((table) => (table.innerText || '').trim())
+                .filter(Boolean);
         }"""
     )
     parsed: list[CatalogPriceRow] = []
-    for raw in raw_rows:
-        headers = [str(item or "").lower() for item in raw.get("headers") or []]
-        cells = [str(item or "").strip() for item in raw.get("cells") or []]
-        if not cells:
+    for table_text in table_texts:
+        lines = [line.strip() for line in str(table_text or "").splitlines() if line.strip()]
+        if len(lines) < 2:
             continue
+        headers = [cell.strip().lower() for cell in lines[0].split("\t")]
 
         def header_index(candidates: tuple[str, ...]) -> int | None:
             for index, header in enumerate(headers):
@@ -99,26 +84,90 @@ def _extract_visible_table_rows(page, *, temporada: bool) -> list[CatalogPriceRo
         if sku_index is None:
             sku_index = 0
         if price_index is None:
-            for index, cell in enumerate(cells):
-                if index == sku_index:
-                    continue
-                if _parse_price(cell) is not None:
-                    price_index = index
-                    break
-        if price_index is None or sku_index >= len(cells) or price_index >= len(cells):
             continue
 
-        sku = cells[sku_index].strip()
-        precio = _parse_price(cells[price_index])
-        if not sku or precio is None or precio <= 0:
-            continue
+        for line in lines[1:]:
+            cells = [cell.strip() for cell in line.split("\t")]
+            if sku_index >= len(cells) or price_index >= len(cells):
+                continue
 
-        active = True
-        if active_index is not None and active_index < len(cells):
-            active = _parse_active(cells[active_index])
+            sku = cells[sku_index].strip()
+            precio = _parse_price(cells[price_index])
+            if not sku or precio is None or precio <= 0:
+                continue
 
-        parsed.append(CatalogPriceRow(sku=sku, precio=precio, active=active, temporada=temporada))
+            active = True
+            if active_index is not None and active_index < len(cells):
+                active = _parse_active(cells[active_index])
+
+            parsed.append(CatalogPriceRow(sku=sku, precio=precio, active=active, temporada=temporada))
     return parsed
+
+
+def _select_largest_page_size(page) -> None:
+    selects = page.locator("select")
+    for index in range(selects.count()):
+        select = selects.nth(index)
+        try:
+            values = select.evaluate(
+                """(node) => Array.from(node.options || []).map((option) => option.value || option.textContent || '')"""
+            )
+            numeric_values = [int(str(value).strip()) for value in values if str(value).strip().isdigit()]
+            if not numeric_values:
+                continue
+            select.select_option(str(max(numeric_values)))
+            try:
+                page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
+            page.wait_for_timeout(500)
+            return
+        except Exception:
+            continue
+
+
+def _click_next_page(page) -> bool:
+    return bool(
+        page.evaluate(
+            """() => {
+                const visible = (node) => {
+                    const style = window.getComputedStyle(node);
+                    const rect = node.getBoundingClientRect();
+                    return style && style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+                };
+                const candidates = Array.from(document.querySelectorAll('a, button'))
+                    .filter((node) => visible(node))
+                    .filter((node) => (node.innerText || node.textContent || '').trim().toLowerCase() === 'siguiente')
+                    .filter((node) => !String(node.className || '').toLowerCase().includes('disabled'))
+                    .filter((node) => node.getAttribute('aria-disabled') !== 'true');
+                const target = candidates[candidates.length - 1];
+                if (!target) return false;
+                target.click();
+                return true;
+            }"""
+        )
+    )
+
+
+def _extract_paginated_rows(page, *, temporada: bool) -> list[CatalogPriceRow]:
+    _select_largest_page_size(page)
+    rows: list[CatalogPriceRow] = []
+    seen_pages: set[tuple[str, ...]] = set()
+    for _page_num in range(50):
+        page_rows = _extract_visible_table_rows(page, temporada=temporada)
+        signature = tuple(row.sku for row in page_rows[:5])
+        if signature in seen_pages:
+            break
+        seen_pages.add(signature)
+        rows.extend(page_rows)
+        if not _click_next_page(page):
+            break
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        page.wait_for_timeout(750)
+    return rows
 
 
 def _click_temporada_tab(page, timeout_ms: int) -> bool:
@@ -167,10 +216,10 @@ def scrape_catalog_prices(*, branch_hint: str = "") -> tuple[list[CatalogPriceRo
             pass
         page.wait_for_timeout(750)
 
-        rows = _extract_visible_table_rows(page, temporada=False)
+        rows = _extract_paginated_rows(page, temporada=False)
         temporada_tab_found = _click_temporada_tab(page, settings.timeout_ms)
         if temporada_tab_found:
-            rows.extend(_extract_visible_table_rows(page, temporada=True))
+            rows.extend(_extract_paginated_rows(page, temporada=True))
         return rows, temporada_tab_found
     finally:
         if context is not None:
