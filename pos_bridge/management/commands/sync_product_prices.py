@@ -116,11 +116,7 @@ def _select_largest_page_size(page) -> None:
             if not numeric_values:
                 continue
             select.select_option(str(max(numeric_values)))
-            try:
-                page.wait_for_load_state("networkidle", timeout=5000)
-            except Exception:
-                pass
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(1000)
             return
         except Exception:
             continue
@@ -139,6 +135,7 @@ def _click_next_page(page) -> bool:
                     .filter((node) => visible(node))
                     .filter((node) => (node.innerText || node.textContent || '').trim().toLowerCase() === 'siguiente')
                     .filter((node) => !String(node.className || '').toLowerCase().includes('disabled'))
+                    .filter((node) => !String(node.parentElement?.className || '').toLowerCase().includes('disabled'))
                     .filter((node) => node.getAttribute('aria-disabled') !== 'true');
                 const target = candidates[candidates.length - 1];
                 if (!target) return false;
@@ -153,8 +150,10 @@ def _extract_paginated_rows(page, *, temporada: bool) -> list[CatalogPriceRow]:
     _select_largest_page_size(page)
     rows: list[CatalogPriceRow] = []
     seen_pages: set[tuple[str, ...]] = set()
-    for _page_num in range(50):
+    for _page_num in range(25):
         page_rows = _extract_visible_table_rows(page, temporada=temporada)
+        if not page_rows:
+            break
         signature = tuple(row.sku for row in page_rows[:5])
         if signature in seen_pages:
             break
@@ -162,11 +161,7 @@ def _extract_paginated_rows(page, *, temporada: bool) -> list[CatalogPriceRow]:
         rows.extend(page_rows)
         if not _click_next_page(page):
             break
-        try:
-            page.wait_for_load_state("networkidle", timeout=5000)
-        except Exception:
-            pass
-        page.wait_for_timeout(750)
+        page.wait_for_timeout(500)
     return rows
 
 
