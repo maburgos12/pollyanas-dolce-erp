@@ -1,4 +1,3 @@
-import hashlib
 import csv
 from io import BytesIO
 from math import exp, sqrt
@@ -12,7 +11,6 @@ from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, connection, transaction
 from django.db.models.deletion import ProtectedError
@@ -88,10 +86,8 @@ from ..utils.derived_insumos import sync_presentacion_insumo, sync_receta_deriva
 from ..utils.matching import match_insumo
 from ..utils.normalizacion import normalizar_nombre
 from ..catalogs import familia_categoria_catalogo_json, familias_producto_catalogo
-from ..utils.commercial_composition import build_commercial_recipe_lookup_context
 from reportes.executive_panels import _partial_month_amount_quantity
 from ventas.models import VentaAutoritativaPoint
-from ventas.services.financials import resolve_unit_prices_bulk
 
 OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
 RECENT_POINT_SOURCE = "/Report/VentasCategorias"
@@ -5657,6 +5653,63 @@ def _latest_cost_versions_qs():
     )
 
 
+def _median_point_prices_bulk(
+    recipe_ids: set[int],
+    reference_start: date,
+    reference_end: date,
+    branch_ids: set[int],
+) -> dict[int, tuple[Decimal, int]]:
+    if not recipe_ids or not branch_ids:
+        return {}
+
+    sql = """
+        WITH precios AS (
+            SELECT
+                ds.receta_id,
+                ds.total_amount / NULLIF(ds.quantity, 0) AS precio_unitario,
+                MAX(ds.total_amount / NULLIF(ds.quantity, 0)) OVER (PARTITION BY ds.receta_id) AS precio_max
+            FROM pos_bridge_daily_sales ds
+            JOIN pos_bridge_branches pb ON pb.id = ds.branch_id
+            WHERE ds.receta_id = ANY(%s)
+              AND pb.erp_branch_id = ANY(%s)
+              AND ds.quantity > 0
+              AND ds.total_amount > 0
+              AND ds.sale_date BETWEEN %s AND %s
+              AND ds.source_endpoint = %s
+        ),
+        precios_limpios AS (
+            SELECT receta_id, precio_unitario
+            FROM precios
+            WHERE precio_unitario >= precio_max * 0.5
+        )
+        SELECT
+            receta_id,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY precio_unitario) AS precio_mediana,
+            COUNT(*) AS n_ventas
+        FROM precios_limpios
+        GROUP BY receta_id
+        HAVING COUNT(*) >= 1
+    """
+    result: dict[int, tuple[Decimal, int]] = {}
+    with connection.cursor() as cursor:
+        cursor.execute(
+            sql,
+            [
+                list(sorted(recipe_ids)),
+                list(sorted(branch_ids)),
+                reference_start,
+                reference_end,
+                OFFICIAL_POINT_SOURCE,
+            ],
+        )
+        for recipe_id, median_price, sale_count in cursor.fetchall():
+            result[int(recipe_id)] = (
+                Decimal(str(median_price or 0)).quantize(Decimal("0.01")),
+                int(sale_count or 0),
+            )
+    return result
+
+
 @login_required
 def monitor_margenes(request: HttpRequest) -> HttpResponse:
     if not can_view_recetas(request.user):
@@ -5691,37 +5744,12 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
         for version in latest_versions
         if version.receta.tipo == Receta.TIPO_PRODUCTO_FINAL
     }
-    point_price_recipe_ids = set(
-        PointDailySale.objects.filter(
-            receta_id__in=price_recipe_ids,
-            quantity__gt=0,
-            total_amount__gt=0,
-            source_endpoint=OFFICIAL_POINT_SOURCE,
-        ).values_list("receta_id", flat=True)
+    price_stats_by_recipe = _median_point_prices_bulk(
+        price_recipe_ids,
+        reference_start,
+        reference_end,
+        branch_ids,
     )
-    price_map: dict[tuple[int, int], Decimal] = {}
-    if point_price_recipe_ids and branch_ids:
-        branch_key = ",".join(str(branch_id) for branch_id in sorted(branch_ids))
-        recipe_key = hashlib.sha1(",".join(str(recipe_id) for recipe_id in sorted(point_price_recipe_ids)).encode()).hexdigest()
-        cache_key = f"monitor_margenes:price_map:{reference_end.isoformat()}:{branch_key}:{recipe_key}"
-        cached_price_map = cache.get(cache_key)
-        if cached_price_map is not None:
-            price_map = cached_price_map
-        else:
-            price_map = resolve_unit_prices_bulk(
-                point_price_recipe_ids,
-                reference_start,
-                reference_end,
-                branch_ids=branch_ids,
-                commercial_context=build_commercial_recipe_lookup_context(point_price_recipe_ids),
-            )
-            cache.set(cache_key, price_map, timeout=3600)
-
-    prices_by_recipe: dict[int, list[Decimal]] = defaultdict(list)
-    for (recipe_id, _branch_id), price in price_map.items():
-        price_decimal = Decimal(price or 0)
-        if price_decimal > 0:
-            prices_by_recipe[int(recipe_id)].append(price_decimal)
 
     rows: list[dict[str, Any]] = []
     red_count = 0
@@ -5732,12 +5760,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
     total_price = Decimal("0")
 
     for version in latest_versions:
-        branch_prices = prices_by_recipe.get(version.receta_id, [])
-        avg_price = (
-            (sum(branch_prices, Decimal("0")) / Decimal(len(branch_prices))).quantize(Decimal("0.01"))
-            if branch_prices
-            else Decimal("0")
-        )
+        avg_price, price_points = price_stats_by_recipe.get(version.receta_id, (Decimal("0"), 0))
         cost = (version.receta.costo_total_estimado_decimal or Decimal("0")).quantize(Decimal("0.01"))
         if cost <= 0:
             cost = _recipe_effective_cost_display(version.receta).quantize(Decimal("0.01"))
@@ -5780,7 +5803,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
                 "margin_bar_width": margin_bar_width,
                 "status": status,
                 "status_label": status_label,
-                "price_points": len(branch_prices),
+                "price_points": price_points,
                 "sort_margin": sort_margin,
                 "tipo": version.receta.tipo,
                 "tipo_label": version.receta.get_tipo_display(),
@@ -5805,7 +5828,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
                 "Costo",
                 "Margen %",
                 "Estatus",
-                "Sucursales con precio",
+                "Ventas usadas para precio",
             ]
         )
         for row in rows:
