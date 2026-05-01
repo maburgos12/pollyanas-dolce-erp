@@ -81,6 +81,7 @@ from ..utils.costeo_snapshot import resolve_insumo_unit_cost, resolve_line_snaps
 from ..utils.derived_product_presentations import (
     build_upstream_snapshot as build_derived_product_upstream_snapshot,
     get_active_derived_relation,
+    get_total_cost_map,
 )
 from ..utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 from ..utils.matching import match_insumo
@@ -5750,6 +5751,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
         reference_end,
         branch_ids,
     )
+    cost_map = get_total_cost_map({version.receta_id for version in latest_versions})
 
     rows: list[dict[str, Any]] = []
     red_count = 0
@@ -5761,9 +5763,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
 
     for version in latest_versions:
         avg_price, price_points = price_stats_by_recipe.get(version.receta_id, (Decimal("0"), 0))
-        cost = (version.receta.costo_total_estimado_decimal or Decimal("0")).quantize(Decimal("0.01"))
-        if cost <= 0:
-            cost = _recipe_effective_cost_display(version.receta).quantize(Decimal("0.01"))
+        cost = cost_map.get(version.receta_id, Decimal("0")).quantize(Decimal("0.01"))
         if cost <= 0:
             continue
         margin_pct = None
