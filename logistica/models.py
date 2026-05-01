@@ -383,3 +383,167 @@ class InspeccionVehiculo(models.Model):
 
     def __str__(self) -> str:
         return f"{self.unidad.codigo} · {self.repartidor} · {self.fecha:%Y-%m-%d %H:%M}"
+
+
+class DocumentoUnidad(models.Model):
+    TIPO_TARJETA_CIRCULACION = "tarjeta_circulacion"
+    TIPO_SEGURO = "seguro"
+    TIPO_OTRO = "otro"
+    TIPO_CHOICES = [
+        (TIPO_TARJETA_CIRCULACION, "Tarjeta de circulación"),
+        (TIPO_SEGURO, "Seguro vehicular"),
+        (TIPO_OTRO, "Otro"),
+    ]
+
+    unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="documentos")
+    tipo = models.CharField(max_length=30, choices=TIPO_CHOICES)
+    descripcion = models.CharField(max_length=100, blank=True)
+    aseguradora = models.CharField(max_length=100, blank=True)
+    archivo = models.FileField(upload_to="documentos_unidad/")
+    fecha_emision = models.DateField(null=True, blank=True)
+    fecha_vencimiento = models.DateField()
+    vigente = models.BooleanField(default=True)
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True)
+    fecha_registro = models.DateTimeField(auto_now_add=True)
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-fecha_vencimiento"]
+        verbose_name = "Documento de unidad"
+        verbose_name_plural = "Documentos de unidades"
+
+    def __str__(self) -> str:
+        return f"{self.unidad.codigo} · {self.get_tipo_display()} · {self.fecha_vencimiento:%Y-%m-%d}"
+
+
+class TipoServicioUnidad(models.Model):
+    INTERVALO_KM = "km"
+    INTERVALO_TIEMPO = "tiempo"
+    INTERVALO_AMBOS = "ambos"
+    INTERVALO_CHOICES = [
+        (INTERVALO_KM, "Por kilómetros"),
+        (INTERVALO_TIEMPO, "Por tiempo"),
+        (INTERVALO_AMBOS, "Kilómetros o tiempo (lo que ocurra primero)"),
+    ]
+
+    nombre = models.CharField(max_length=100)
+    tipo_intervalo = models.CharField(max_length=10, choices=INTERVALO_CHOICES)
+    intervalo_km = models.PositiveIntegerField(null=True, blank=True)
+    intervalo_meses = models.PositiveIntegerField(null=True, blank=True)
+    aplica_todas_unidades = models.BooleanField(default=True)
+    activo = models.BooleanField(default=True)
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["nombre"]
+        verbose_name = "Tipo de servicio"
+        verbose_name_plural = "Tipos de servicio"
+
+    def __str__(self) -> str:
+        return self.nombre
+
+
+class ServicioRealizadoUnidad(models.Model):
+    unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="servicios")
+    tipo_servicio = models.ForeignKey(TipoServicioUnidad, on_delete=models.PROTECT)
+    fecha_servicio = models.DateField()
+    km_al_servicio = models.PositiveIntegerField(null=True, blank=True)
+    proveedor = models.CharField(max_length=100, blank=True)
+    costo = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    archivo_factura = models.FileField(upload_to="servicios_unidad/", null=True, blank=True)
+    notas = models.TextField(blank=True)
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True)
+    fecha_registro = models.DateTimeField(auto_now_add=True)
+    proxima_fecha = models.DateField(null=True, blank=True)
+    proximos_km = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-fecha_servicio"]
+        verbose_name = "Servicio realizado"
+        verbose_name_plural = "Servicios realizados"
+
+    def __str__(self) -> str:
+        return f"{self.unidad.codigo} · {self.tipo_servicio} · {self.fecha_servicio:%Y-%m-%d}"
+
+    def save(self, *args, **kwargs):
+        if self.tipo_servicio_id:
+            if self.tipo_servicio.intervalo_meses and self.fecha_servicio:
+                from dateutil.relativedelta import relativedelta
+
+                self.proxima_fecha = self.fecha_servicio + relativedelta(months=self.tipo_servicio.intervalo_meses)
+            if self.tipo_servicio.intervalo_km and self.km_al_servicio:
+                self.proximos_km = self.km_al_servicio + self.tipo_servicio.intervalo_km
+        super().save(*args, **kwargs)
+
+
+class LavadoUnidad(models.Model):
+    unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="lavados")
+    fecha = models.DateField()
+    costo = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True)
+    fecha_registro = models.DateTimeField(auto_now_add=True)
+    notas = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-fecha"]
+        verbose_name = "Lavado de unidad"
+        verbose_name_plural = "Lavados de unidades"
+
+    def __str__(self) -> str:
+        return f"{self.unidad.codigo} · {self.fecha:%Y-%m-%d}"
+
+
+class ReparacionUnidad(models.Model):
+    unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="reparaciones")
+    reporte_origen = models.ForeignKey(
+        "ReporteUnidad",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reparaciones",
+    )
+    fecha_ingreso = models.DateField()
+    fecha_entrega = models.DateField(null=True, blank=True)
+    descripcion_falla = models.TextField()
+    descripcion_reparacion = models.TextField(blank=True)
+    proveedor = models.CharField(max_length=100, blank=True)
+    costo_total = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    archivo_factura = models.FileField(upload_to="reparaciones_unidad/", null=True, blank=True)
+    foto_nota = models.ImageField(upload_to="reparaciones_unidad/", null=True, blank=True)
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True)
+    fecha_registro = models.DateTimeField(auto_now_add=True)
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-fecha_ingreso"]
+        verbose_name = "Reparación de unidad"
+        verbose_name_plural = "Reparaciones de unidades"
+
+    def __str__(self) -> str:
+        return f"{self.unidad.codigo} · {self.fecha_ingreso:%Y-%m-%d}"
+
+
+class ConfigAlertaFlota(models.Model):
+    TIPO_DOCUMENTO_VENCIMIENTO = "documento_vencimiento"
+    TIPO_SERVICIO_PROXIMO = "servicio_proximo"
+    TIPO_LAVADO_PENDIENTE = "lavado_pendiente"
+    TIPO_ALERTA = [
+        (TIPO_DOCUMENTO_VENCIMIENTO, "Vencimiento de documento"),
+        (TIPO_SERVICIO_PROXIMO, "Servicio próximo"),
+        (TIPO_LAVADO_PENDIENTE, "Lavado pendiente"),
+    ]
+
+    tipo = models.CharField(max_length=30, choices=TIPO_ALERTA, unique=True)
+    destinatarios = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="alertas_flota")
+    activa = models.BooleanField(default=True)
+    dias_anticipacion_1 = models.PositiveIntegerField(default=30)
+    dias_anticipacion_2 = models.PositiveIntegerField(default=15)
+    dias_anticipacion_3 = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["tipo"]
+        verbose_name = "Configuración de alerta de flota"
+        verbose_name_plural = "Configuraciones de alertas de flota"
+
+    def __str__(self) -> str:
+        return self.get_tipo_display()
