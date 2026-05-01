@@ -3,11 +3,17 @@ from django.contrib import admin
 from .models import (
     BitacoraRepartidor,
     BitacoraSalidaLlegada,
+    ConfigAlertaFlota,
+    DocumentoUnidad,
     EntregaRuta,
     InspeccionVehiculo,
+    LavadoUnidad,
+    ReparacionUnidad,
     Repartidor,
     ReporteUnidad,
     RutaEntrega,
+    ServicioRealizadoUnidad,
+    TipoServicioUnidad,
     Unidad,
 )
 
@@ -145,3 +151,61 @@ class InspeccionVehiculoAdmin(admin.ModelAdmin):
     search_fields = ("repartidor__user__username", "unidad__codigo", "descripcion_golpes", "observaciones", "ip_registro")
     readonly_fields = ("fecha", "ip_registro")
     autocomplete_fields = ("repartidor", "unidad")
+
+
+@admin.register(DocumentoUnidad)
+class DocumentoUnidadAdmin(admin.ModelAdmin):
+    list_display = ("unidad", "tipo", "fecha_vencimiento", "vigente", "registrado_por")
+    list_filter = ("tipo", "vigente", "unidad")
+    search_fields = ("unidad__codigo", "tipo")
+    autocomplete_fields = ("unidad", "registrado_por")
+    readonly_fields = ("fecha_registro",)
+
+
+@admin.register(TipoServicioUnidad)
+class TipoServicioUnidadAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "tipo_intervalo", "intervalo_km", "intervalo_meses", "activo")
+    list_filter = ("tipo_intervalo", "activo", "aplica_todas_unidades")
+    search_fields = ("nombre", "notas")
+
+
+@admin.register(ServicioRealizadoUnidad)
+class ServicioRealizadoUnidadAdmin(admin.ModelAdmin):
+    list_display = (
+        "unidad",
+        "tipo_servicio",
+        "fecha_servicio",
+        "km_al_servicio",
+        "costo",
+        "proxima_fecha",
+        "proximos_km",
+    )
+    list_filter = ("tipo_servicio", "unidad")
+    search_fields = ("unidad__codigo", "tipo_servicio__nombre", "proveedor", "notas")
+    autocomplete_fields = ("unidad", "tipo_servicio", "registrado_por")
+    readonly_fields = ("fecha_registro", "proxima_fecha", "proximos_km")
+
+
+@admin.register(LavadoUnidad)
+class LavadoUnidadAdmin(admin.ModelAdmin):
+    list_display = ("unidad", "fecha", "costo", "registrado_por")
+    list_filter = ("unidad",)
+    search_fields = ("unidad__codigo", "notas")
+    autocomplete_fields = ("unidad", "registrado_por")
+    readonly_fields = ("fecha_registro",)
+
+
+@admin.register(ReparacionUnidad)
+class ReparacionUnidadAdmin(admin.ModelAdmin):
+    list_display = ("unidad", "fecha_ingreso", "fecha_entrega", "costo_total", "proveedor", "reporte_origen")
+    list_filter = ("unidad",)
+    search_fields = ("unidad__codigo", "descripcion_falla", "descripcion_reparacion", "proveedor", "notas")
+    autocomplete_fields = ("unidad", "reporte_origen", "registrado_por")
+    readonly_fields = ("fecha_registro",)
+
+
+@admin.register(ConfigAlertaFlota)
+class ConfigAlertaFlotaAdmin(admin.ModelAdmin):
+    list_display = ("tipo", "activa", "dias_anticipacion_1", "dias_anticipacion_2", "dias_anticipacion_3")
+    list_filter = ("activa", "tipo")
+    filter_horizontal = ("destinatarios",)
