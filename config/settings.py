@@ -5,6 +5,7 @@ import sys
 from urllib.parse import urlparse
 
 import dj_database_url
+from celery.schedules import crontab
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -346,6 +347,24 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BEAT_SCHEDULE = {
+    "logistica-alertar-documentos-por-vencer": {
+        "task": "logistica.tasks.alertar_documentos_por_vencer",
+        "schedule": crontab(hour=8, minute=0),
+    },
+    "logistica-alertar-servicios-proximos": {
+        "task": "logistica.tasks.alertar_servicios_proximos",
+        "schedule": crontab(hour=8, minute=5),
+    },
+    "logistica-alertar-lavados-pendientes": {
+        "task": "logistica.tasks.alertar_lavados_pendientes",
+        "schedule": crontab(hour=8, minute=10),
+    },
+    "logistica-escalar-tickets-sin-respuesta-cada-60-min": {
+        "task": "logistica.tasks.escalar_tickets_sin_respuesta",
+        "schedule": 60 * 60,
+    },
+}
 
 EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
