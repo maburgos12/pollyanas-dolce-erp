@@ -5738,7 +5738,7 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
             if branch_prices
             else Decimal("0")
         )
-        cost = Decimal(version.costo_total or 0).quantize(Decimal("0.01"))
+        cost = (version.receta.costo_total_estimado_decimal or Decimal("0")).quantize(Decimal("0.01"))
         if cost <= 0:
             cost = _recipe_effective_cost_display(version.receta).quantize(Decimal("0.01"))
         if cost <= 0:
