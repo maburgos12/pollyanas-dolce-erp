@@ -1,4 +1,5 @@
 import csv
+import hashlib
 from io import BytesIO
 from math import exp, sqrt
 from datetime import date, datetime, timedelta
@@ -11,6 +12,7 @@ from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, connection, transaction
 from django.db.models.deletion import ProtectedError
@@ -5751,7 +5753,15 @@ def monitor_margenes(request: HttpRequest) -> HttpResponse:
         reference_end,
         branch_ids,
     )
-    cost_map = get_total_cost_map({version.receta_id for version in latest_versions})
+    all_recipe_ids = {version.receta_id for version in latest_versions}
+    cost_map_signature = hashlib.sha256(
+        ",".join(str(recipe_id) for recipe_id in sorted(all_recipe_ids)).encode("utf-8")
+    ).hexdigest()[:16]
+    cost_map_cache_key = f"monitor_margenes:cost_map:{reference_end.isoformat()}:{cost_map_signature}"
+    cost_map = cache.get(cost_map_cache_key)
+    if cost_map is None:
+        cost_map = get_total_cost_map(all_recipe_ids)
+        cache.set(cost_map_cache_key, cost_map, timeout=3600)
 
     rows: list[dict[str, Any]] = []
     red_count = 0
