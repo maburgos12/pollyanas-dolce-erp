@@ -69,6 +69,14 @@
         </select>
       </label>
 
+      <label class="fallas-field">Área
+        <select class="fallas-input" name="area" required>
+          {% for value,label in areas %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
       <label class="fallas-field">Activo relacionado
         <select class="fallas-input" name="activo_relacionado">
           <option value="">Sin activo relacionado</option>

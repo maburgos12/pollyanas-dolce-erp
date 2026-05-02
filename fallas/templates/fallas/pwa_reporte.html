@@ -517,11 +517,18 @@
         {label: "Critica", value: "critica", color: "var(--danger)"}
       ];
 
+      const AREAS = [
+        {label: "Ventas", value: "ventas", color: "var(--gold)"},
+        {label: "Produccion", value: "produccion", color: "var(--info)"},
+        {label: "General", value: "general", color: "var(--success)"}
+      ];
+
       function emptyDraft() {
         return {
           step: 1,
           sucursal: "",
           categoria: "",
+          area: "ventas",
           activo: "",
           prioridad: "media",
           titulo: "",
@@ -738,6 +745,11 @@
         return item ? item.nombre : "-";
       }
 
+      function getAreaLabel(value) {
+        const item = AREAS.find((a) => a.value === value);
+        return item ? item.label : "-";
+      }
+
       function getActivoLabel(id) {
         const item = state.activos.find((a) => String(a.id) === String(id));
         return item ? item.display : "-";
@@ -755,9 +767,14 @@
         renderNuevoReporte();
       }
 
+      function selectArea(value) {
+        state.draft.area = value;
+        renderNuevoReporte();
+      }
+
       function nextReporteStep() {
         const d = state.draft;
-        if (d.step === 1 && (!d.sucursal || !d.categoria || !d.prioridad)) return;
+        if (d.step === 1 && (!d.sucursal || !d.categoria || !d.area || !d.prioridad)) return;
         if (d.step === 2 && (!d.titulo.trim() || !d.descripcion.trim())) {
           return renderNuevoReporte("Captura titulo y descripcion.");
         }
@@ -804,6 +821,16 @@
                 ${state.categorias.map((c) => `<option value="${c.id}" ${String(d.categoria) === String(c.id) ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}
               </select>
             </div>
+            <div class="field">
+              <label>Area</label>
+              <div class="severity-row">
+                ${AREAS.map((a) => `
+                  <button class="severity-card ${d.area === a.value ? "selected" : ""}" style="border-left:5px solid ${a.color}" onclick="selectArea('${a.value}')">
+                    ${esc(a.label)}
+                  </button>
+                `).join("")}
+              </div>
+            </div>
             <div class="severity-row">
               ${prioridades.map((p) => `
                 <button class="severity-card ${d.prioridad === p.value ? "selected" : ""}" style="border-left:5px solid ${p.color}" onclick="selectPrioridad('${p.value}')">
@@ -813,7 +840,7 @@
             </div>
             <div class="actions">
               <button class="secondary-btn" onclick="showScreen('dashboard')">Cancelar</button>
-              <button class="primary-btn" onclick="nextReporteStep()" ${d.sucursal && d.categoria && d.prioridad ? "" : "disabled"}>Siguiente</button>
+              <button class="primary-btn" onclick="nextReporteStep()" ${d.sucursal && d.categoria && d.area && d.prioridad ? "" : "disabled"}>Siguiente</button>
             </div>
           `;
         } else if (d.step === 2) {
@@ -853,6 +880,7 @@
               <div class="kv"><b>Sucursal</b><span>${esc(getSucursalLabel(d.sucursal))}</span></div>
               <div class="kv"><b>Equipo</b><span>${esc(getActivoLabel(d.activo))}</span></div>
               <div class="kv"><b>Categoria</b><span>${esc(getCategoriaLabel(d.categoria))}</span></div>
+              <div class="kv"><b>Area</b><span>${esc(getAreaLabel(d.area))}</span></div>
               <div class="kv"><b>Prioridad</b><span>${esc(d.prioridad)}</span></div>
               <div class="kv"><b>Ubicacion</b><span>${d.latitud ? "Registrada" : "-"}</span></div>
               <div class="kv"><b>Titulo</b><span>${esc(d.titulo)}</span></div>
@@ -967,6 +995,7 @@
         const form = new FormData();
         form.append("sucursal", d.sucursal);
         form.append("categoria", d.categoria);
+        form.append("area", d.area);
         if (d.activo) form.append("activo_relacionado", d.activo);
         form.append("titulo", d.titulo.trim());
         form.append("descripcion", d.descripcion.trim());
@@ -1010,6 +1039,7 @@
                   <p class="muted" style="margin-top:8px">${esc(desc)}</p>
                   <div class="detail">
                     <div class="kv"><b>Categoria</b><span>${esc(r.categoria_nombre)}</span></div>
+                    <div class="kv"><b>Area</b><span>${esc(r.area_display || r.area || "-")}</span></div>
                     <div class="kv"><b>Prioridad</b><span>${esc(r.prioridad_display || r.prioridad)}</span></div>
                     <div class="kv"><b>GPS</b><span>${r.latitud ? "Registrado" : "-"}</span></div>
                   </div>

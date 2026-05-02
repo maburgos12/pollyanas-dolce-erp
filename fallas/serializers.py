@@ -67,6 +67,7 @@ class ReporteFallaListSerializer(serializers.ModelSerializer):
     categoria_nombre = serializers.CharField(source="categoria.nombre", read_only=True)
     estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
     prioridad_display = serializers.CharField(source="get_prioridad_display", read_only=True)
+    area_display = serializers.CharField(source="get_area_display", read_only=True)
     reportado_por_nombre = serializers.SerializerMethodField()
 
     def get_reportado_por_nombre(self, obj):
@@ -83,6 +84,8 @@ class ReporteFallaListSerializer(serializers.ModelSerializer):
             "prioridad_display",
             "estatus",
             "estatus_display",
+            "area",
+            "area_display",
             "fecha_reporte",
             "reportado_por_nombre",
             "foto_evidencia",
@@ -104,6 +107,7 @@ class ReporteFallaCreateSerializer(serializers.ModelSerializer):
             "foto_evidencia",
             "latitud",
             "longitud",
+            "area",
         ]
 
     def validate_foto_evidencia(self, value):

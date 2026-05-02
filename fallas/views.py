@@ -30,8 +30,10 @@ from .serializers import (
 )
 
 
-GRUPOS_REPORTE_FALLAS = {"personal_sucursal", "compras_logistica", "dg"}
+GRUPOS_AREA_FALLAS = {"ventas", "produccion"}
+GRUPOS_REPORTE_FALLAS = {"personal_sucursal", "compras_logistica", "dg", *GRUPOS_AREA_FALLAS}
 GRUPOS_GESTION_FALLAS = {"compras_logistica", "dg"}
+GRUPOS_VER_TODO_FALLAS = {"compras_logistica", "dg", "supervisor_logistica"}
 
 
 def _group_names(user) -> set[str]:
@@ -70,9 +72,7 @@ class EsComprasODG(permissions.BasePermission):
     GRUPOS = GRUPOS_GESTION_FALLAS
 
     def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
-            return False
-        return bool(_group_names(request.user) & self.GRUPOS) or request.user.is_superuser
+        return _puede_cambiar_estatus_fallas(request.user)
 
 
 def _puede_gestionar_fallas(user) -> bool:
@@ -80,7 +80,26 @@ def _puede_gestionar_fallas(user) -> bool:
         return False
     if user.is_staff or user.is_superuser:
         return True
-    return user.groups.filter(name__in=GRUPOS_GESTION_FALLAS).exists()
+    return user.groups.filter(name__in=GRUPOS_GESTION_FALLAS | GRUPOS_AREA_FALLAS).exists()
+
+
+def _puede_cambiar_estatus_fallas(user) -> bool:
+    if not user.is_authenticated:
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+    return bool(_group_names(user) & GRUPOS_GESTION_FALLAS)
+
+
+def _filtrar_reportes_por_usuario(qs, user):
+    grupos = _group_names(user)
+    if user.is_superuser or grupos & GRUPOS_VER_TODO_FALLAS:
+        return qs
+    if "ventas" in grupos:
+        return qs.filter(area=ReporteFalla.AREA_VENTAS)
+    if "produccion" in grupos:
+        return qs.filter(area=ReporteFalla.AREA_PRODUCCION)
+    return qs.filter(reportado_por=user)
 
 
 class SucursalFallaListView(generics.ListAPIView):
@@ -90,7 +109,7 @@ class SucursalFallaListView(generics.ListAPIView):
 
     def get_queryset(self):
         qs = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
-        if _puede_gestionar_fallas(self.request.user):
+        if _puede_cambiar_estatus_fallas(self.request.user):
             return qs
         sucursal = _sucursal_usuario(self.request.user)
         if sucursal:
@@ -133,7 +152,9 @@ class ActivoFallaListView(generics.ListAPIView):
             sucursal = Sucursal.objects.get(pk=sucursal_id)
         except (Sucursal.DoesNotExist, ValueError):
             return qs.none()
-        return qs.filter(Q(ubicacion__icontains=sucursal.nombre) | Q(ubicacion__icontains=sucursal.codigo))[:50]
+        return qs.filter(
+            Q(sucursal_id=sucursal.pk) | Q(ubicacion__icontains=sucursal.nombre) | Q(ubicacion__icontains=sucursal.codigo)
+        )[:50]
 
 
 class ReporteFallaListCreateView(generics.ListCreateAPIView):
@@ -145,18 +166,17 @@ class ReporteFallaListCreateView(generics.ListCreateAPIView):
         estatus = self.request.query_params.get("estatus")
         sucursal = self.request.query_params.get("sucursal")
         prioridad = self.request.query_params.get("prioridad")
+        area = self.request.query_params.get("area")
         if estatus:
             qs = qs.filter(estatus=estatus)
         if sucursal:
             qs = qs.filter(sucursal_id=sucursal)
         if prioridad:
             qs = qs.filter(prioridad=prioridad)
+        if area:
+            qs = qs.filter(area=area)
 
-        user = self.request.user
-        grupos = _group_names(user)
-        if not ({"compras_logistica", "dg", "supervisor_logistica"} & grupos) and not user.is_superuser:
-            qs = qs.filter(reportado_por=user)
-        return qs
+        return _filtrar_reportes_por_usuario(qs, self.request.user)
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -166,6 +186,7 @@ class ReporteFallaListCreateView(generics.ListCreateAPIView):
 
 class ReporteFallaDetailView(generics.RetrieveUpdateAPIView):
     authentication_classes = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
+    http_method_names = ["get", "head", "options"]
     queryset = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").prefetch_related(
         "bitacora__usuario"
     )
@@ -174,11 +195,7 @@ class ReporteFallaDetailView(generics.RetrieveUpdateAPIView):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        user = self.request.user
-        grupos = _group_names(user)
-        if not ({"compras_logistica", "dg", "supervisor_logistica"} & grupos) and not user.is_superuser:
-            qs = qs.filter(reportado_por=user)
-        return qs
+        return _filtrar_reportes_por_usuario(qs, self.request.user)
 
 
 @api_view(["POST"])
@@ -263,15 +280,19 @@ def perfil_actual(request):
 
 @api_view(["GET"])
 @authentication_classes([JWTAuthentication, TokenAuthentication, SessionAuthentication])
-@permission_classes([EsComprasODG])
+@permission_classes([EsPersonalSucursal])
 def dashboard_stats(request):
     """Estadísticas para el dashboard ejecutivo."""
 
     hoy = timezone.now()
     hace_30 = hoy - timedelta(days=30)
     activos = [ReporteFalla.ESTATUS_ABIERTO, ReporteFalla.ESTATUS_REVISION, ReporteFalla.ESTATUS_PROCESO]
+    qs_base = _filtrar_reportes_por_usuario(ReporteFalla.objects.all(), request.user)
+    area_param = request.query_params.get("area")
+    if area_param:
+        qs_base = qs_base.filter(area=area_param)
     tiempos = (
-        ReporteFalla.objects.filter(fecha_asignacion__isnull=False, fecha_reporte__gte=hace_30)
+        qs_base.filter(fecha_asignacion__isnull=False, fecha_reporte__gte=hace_30)
         .annotate(
             duracion=ExpressionWrapper(F("fecha_asignacion") - F("fecha_reporte"), output_field=DurationField())
         )
@@ -281,21 +302,19 @@ def dashboard_stats(request):
     promedio = tiempos["promedio"]
     return Response(
         {
-            "total_abiertos": ReporteFalla.objects.filter(estatus__in=activos).count(),
-            "criticos_activos": ReporteFalla.objects.filter(
-                estatus__in=activos, prioridad=ReporteFalla.PRIORIDAD_CRITICA
-            ).count(),
-            "resueltos_mes": ReporteFalla.objects.filter(
+            "total_abiertos": qs_base.filter(estatus__in=activos).count(),
+            "criticos_activos": qs_base.filter(estatus__in=activos, prioridad=ReporteFalla.PRIORIDAD_CRITICA).count(),
+            "resueltos_mes": qs_base.filter(
                 estatus=ReporteFalla.ESTATUS_RESUELTO, fecha_resolucion__gte=hace_30
             ).count(),
             "por_sucursal": list(
-                ReporteFalla.objects.filter(estatus__in=activos)
+                qs_base.filter(estatus__in=activos)
                 .values("sucursal__nombre")
                 .annotate(total=Count("id"))
                 .order_by("-total")
             ),
             "por_categoria": list(
-                ReporteFalla.objects.filter(estatus__in=activos)
+                qs_base.filter(estatus__in=activos)
                 .values("categoria__nombre")
                 .annotate(total=Count("id"))
                 .order_by("-total")
@@ -309,11 +328,22 @@ def dashboard_stats(request):
 def dashboard_view(request):
     if not _puede_gestionar_fallas(request.user):
         raise PermissionDenied
-    es_dg = request.user.is_superuser or request.user.groups.filter(name__in=["compras_logistica", "dg"]).exists()
+    grupos = _group_names(request.user)
+    es_dg = request.user.is_superuser or bool(grupos & GRUPOS_GESTION_FALLAS)
+    area_usuario = ""
+    if "ventas" in grupos and not (grupos & GRUPOS_VER_TODO_FALLAS) and not request.user.is_superuser:
+        area_usuario = ReporteFalla.AREA_VENTAS
+    elif "produccion" in grupos and not (grupos & GRUPOS_VER_TODO_FALLAS) and not request.user.is_superuser:
+        area_usuario = ReporteFalla.AREA_PRODUCCION
     return render(
         request,
         "fallas/dashboard.html",
-        {"es_dg": es_dg, "tab": request.GET.get("tab") or "reportes"},
+        {
+            "area_usuario": area_usuario,
+            "es_dg": es_dg,
+            "puede_gestionar": _puede_cambiar_estatus_fallas(request.user),
+            "tab": request.GET.get("tab") or "reportes",
+        },
     )
 
 
@@ -323,7 +353,7 @@ def pwa_reporte(request):
         raise PermissionDenied
 
     sucursales = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
-    if not _puede_gestionar_fallas(request.user):
+    if not _puede_cambiar_estatus_fallas(request.user):
         sucursal_usuario = _sucursal_usuario(request.user)
         sucursales = sucursales.filter(pk=sucursal_usuario.pk) if sucursal_usuario else sucursales.none()
 
@@ -346,6 +376,7 @@ def pwa_reporte(request):
                 sucursal_id=sucursal_id,
                 categoria_id=categoria_id,
                 activo_relacionado_id=request.POST.get("activo_relacionado") or None,
+                area=request.POST.get("area") or ReporteFalla.AREA_GENERAL,
                 titulo=titulo,
                 descripcion=descripcion,
                 prioridad=request.POST.get("prioridad") or ReporteFalla.PRIORIDAD_MEDIA,
@@ -371,6 +402,7 @@ def pwa_reporte(request):
             "sucursales": sucursales,
             "categorias": categorias,
             "activos": activos,
+            "areas": ReporteFalla.AREAS,
             "prioridades": ReporteFalla.PRIORIDAD,
         },
     )
@@ -382,8 +414,7 @@ def pwa_mis_reportes(request):
         raise PermissionDenied
 
     qs = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").order_by("-fecha_reporte")
-    if not _puede_gestionar_fallas(request.user):
-        qs = qs.filter(reportado_por=request.user)
+    qs = _filtrar_reportes_por_usuario(qs, request.user)
 
     estatus = request.GET.get("estatus")
     prioridad = request.GET.get("prioridad")
