@@ -367,6 +367,7 @@ def pwa_reporte(request):
         request,
         "fallas/reporte_form.html",
         {
+            "es_dg": request.user.is_superuser or request.user.groups.filter(name__in=["compras_logistica", "dg"]).exists(),
             "sucursales": sucursales,
             "categorias": categorias,
             "activos": activos,
@@ -396,6 +397,7 @@ def pwa_mis_reportes(request):
         request,
         "fallas/mis_reportes.html",
         {
+            "es_dg": request.user.is_superuser or request.user.groups.filter(name__in=["compras_logistica", "dg"]).exists(),
             "reportes": reportes,
             "estatus_choices": ReporteFalla.ESTATUS,
             "prioridad_choices": ReporteFalla.PRIORIDAD,

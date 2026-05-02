@@ -1,20 +1,18 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Reportar falla{% endblock %}
 {% block page_title %}Fallas · Reportar{% endblock %}
 {% block body_class %}page-fallas-reportar{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260321-05">
 <style>
-  .fallas-shell{display:grid;gap:18px}
   .fallas-card{background:#fff;border:1px solid rgba(139,34,82,.16);border-radius:18px;padding:24px;box-shadow:0 18px 42px rgba(139,34,82,.08)}
   .fallas-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}
   .fallas-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:#8B2252}
   .fallas-title{font-family:"Playfair Display",serif;font-size:34px;margin:4px 0;color:#3f2633}
   .fallas-muted{color:#7a6871;margin:0}
-  .fallas-tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
-  .fallas-tab{display:inline-flex;align-items:center;min-height:40px;padding:8px 14px;border-radius:999px;border:1px solid rgba(139,34,82,.18);text-decoration:none;color:#8B2252;font-weight:800;background:#fff}
-  .fallas-tab.active{background:#8B2252;color:#fff}
   .fallas-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
   .fallas-field{display:grid;gap:7px;font-weight:800;color:#6f3150}
   .fallas-field.full{grid-column:1/-1}
@@ -29,11 +27,14 @@
 {% endblock %}
 
 {% block content %}
-<div class="fallas-shell">
-  <nav class="fallas-tabs">
-    <a class="fallas-tab" href="{% url 'fallas:dashboard' %}">Dashboard</a>
-    <a class="fallas-tab active" href="{% url 'fallas:pwa-reporte' %}">Reportar falla</a>
-    <a class="fallas-tab" href="{% url 'fallas:pwa-mis-reportes' %}">Mis reportes</a>
+<div class="module-shell bi-shell" id="fallas-app">
+  <nav class="module-tabs">
+    <a href="{% url 'fallas:dashboard' %}" class="module-tab">Dashboard</a>
+    <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab active">Reportar falla</a>
+    <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab">Mis reportes</a>
+    {% if es_dg %}
+    <a href="{% url 'fallas:dashboard' %}?tab=categorias" class="module-tab">Categorías</a>
+    {% endif %}
   </nav>
 
   <section class="fallas-card">
