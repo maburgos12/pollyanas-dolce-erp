@@ -7,7 +7,18 @@
 {% block extra_css %}
 <style>
   .logs-shell { display: grid; gap: 18px; }
-  .logs-filter { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 10px; align-items: end; }
+  .logi-box { background: #fff; border: 1px solid rgba(139,34,82,.16); border-radius: 18px; padding: 24px; box-shadow: 0 18px 42px rgba(139,34,82,.08); }
+  .logi-box-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+  .logi-box-title { margin: 0; font-family: "Playfair Display", serif; font-size: 30px; line-height: 1.08; color: #3f2633; }
+  .logi-box-copy { margin: 6px 0 0; color: #77656d; line-height: 1.45; }
+  .logs-filter { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)) minmax(190px, .8fr); gap: 14px; align-items: end; }
+  .logs-filter label { display: grid; gap: 7px; min-width: 0; color: #6f3150; font-weight: 800; }
+  .logi-filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: stretch; }
+  .logi-filter-actions .btn { width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+  .logi-table-box { padding: 0; overflow: hidden; }
+  .logi-table-head { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 18px 24px; border-bottom: 1px solid rgba(139,34,82,.10); }
+  .logi-table-title { margin: 0; color: #6f3150; font-size: 16px; font-weight: 900; }
+  .logi-table-wrap { overflow: auto; }
   .log-badge { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; }
   .log-badge.ok { background: #e5f5ee; color: #1f7554; }
   .log-badge.warn { background: #fff4d8; color: #9a6a00; }
@@ -16,8 +27,9 @@
   tr.log-overdue td { background: #fff8e6; }
   .log-muted { color: #77656d; font-size: 13px; }
   .log-pager { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  @media (max-width: 1180px) { .logs-filter { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 980px) { .logs-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 620px) { .logs-filter, .log-pager { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } }
+  @media (max-width: 620px) { .logi-box { padding: 18px; } .logi-box-head, .logi-table-head { display: grid; } .logs-filter, .logi-filter-actions, .log-pager { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } }
 </style>
 {% endblock %}
 
@@ -29,21 +41,29 @@
     {% endfor %}
   </section>
 
-  <section class="card">
-    <div class="card-header">Bitácoras salida/llegada</div>
-    <p class="muted">Registros de turno capturados desde celular, consultables dentro del ERP.</p>
+  <section class="logi-box">
+    <div class="logi-box-head">
+      <div>
+        <h1 class="logi-box-title">Bitácoras salida/llegada</h1>
+        <p class="logi-box-copy">Registros de turno capturados desde celular, consultables dentro del ERP.</p>
+      </div>
+    </div>
     <form class="logs-filter" method="get">
       <label>Unidad<select class="input-field" name="unidad"><option value="">Todas</option>{% for unidad in unidades %}<option value="{{ unidad.id }}" {% if filters.unidad == unidad.id|stringformat:"s" %}selected{% endif %}>{{ unidad.codigo }}</option>{% endfor %}</select></label>
       <label>Repartidor<select class="input-field" name="repartidor"><option value="">Todos</option>{% for repartidor in repartidores %}<option value="{{ repartidor.id }}" {% if filters.repartidor == repartidor.id|stringformat:"s" %}selected{% endif %}>{{ repartidor }}</option>{% endfor %}</select></label>
       <label>Estatus<select class="input-field" name="cerrada"><option value="">Todos</option><option value="0" {% if filters.cerrada == "0" %}selected{% endif %}>Abierta</option><option value="1" {% if filters.cerrada == "1" %}selected{% endif %}>Cerrada</option></select></label>
       <label>Desde<input class="input-field" type="date" name="fecha_desde" value="{{ filters.fecha_desde }}"></label>
       <label>Hasta<input class="input-field" type="date" name="fecha_hasta" value="{{ filters.fecha_hasta }}"></label>
-      <div><button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Filtrar</button><a class="btn btn-secondary" href="{% url 'logistica:bitacoras_lista' %}">Limpiar</a></div>
+      <div class="logi-filter-actions"><button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Filtrar</button><a class="btn btn-secondary" href="{% url 'logistica:bitacoras_lista' %}">Limpiar</a></div>
     </form>
   </section>
 
-  <section class="card">
-    <div class="table-responsive">
+  <section class="logi-box logi-table-box">
+    <div class="logi-table-head">
+      <h2 class="logi-table-title">Resultados</h2>
+      <span class="muted">{{ bitacoras_page.paginator.count|intcomma }} bitácoras</span>
+    </div>
+    <div class="logi-table-wrap">
       <table class="table table-striped">
         <thead><tr><th>Folio</th><th>Unidad</th><th>Repartidor</th><th>Hora salida</th><th>Hora llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Nivel gas</th><th>Estatus</th><th>Fotos</th></tr></thead>
         <tbody>
