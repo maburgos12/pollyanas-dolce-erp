@@ -90,6 +90,22 @@
     <article class="bi-kpi-card"><div class="bi-kpi-value {% if incidencias %}danger{% else %}success{% endif %}">{{ incidencias|intcomma }}</div><div class="bi-kpi-label">Incidencias abiertas</div><div class="bi-kpi-note">Casos que todavía frenan el cierre total.</div></article>
   </section>
 
+  {% if show_logistica_management_links %}
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div>
+        <div class="bi-kicker">Gestión</div>
+        <h2 class="bi-panel-title">Accesos rápidos</h2>
+      </div>
+    </div>
+    <div class="bi-summary-band">
+      <a class="bi-summary-chip" href="{% url 'logistica:dashboard_ejecutivo' %}" style="text-decoration:none;"><span>Dirección</span><strong>Dashboard ejecutivo</strong></a>
+      <a class="bi-summary-chip" href="{% url 'logistica:tickets_kanban' %}" style="text-decoration:none;"><span>Operación</span><strong>Tickets</strong></a>
+      <a class="bi-summary-chip" href="{% url 'logistica:flota_resumen' %}" style="text-decoration:none;"><span>Flota</span><strong>Resumen de flota</strong></a>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="bi-panel">
     <div class="bi-panel-head">
       <div>
