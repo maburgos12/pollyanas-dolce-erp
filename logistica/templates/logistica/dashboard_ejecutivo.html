@@ -51,7 +51,7 @@
 
   <section class="exec-grid">
     <article class="card">
-      <div class="exec-card-head"><h2>Tickets recientes</h2><a class="btn btn-secondary btn-small" href="{% url 'logistica:tickets_kanban' %}">Abrir Kanban</a></div>
+      <div class="exec-card-head"><h2>Tickets recientes</h2><div><a class="btn btn-secondary btn-small" href="{% url 'logistica:reportes_lista' %}">Ver reportes</a> <a class="btn btn-secondary btn-small" href="{% url 'logistica:tickets_kanban' %}">Abrir Kanban</a></div></div>
       <div class="table-responsive">
         <table class="table table-striped">
           <thead><tr><th>Fecha</th><th>Unidad</th><th>Tipo</th><th>Severidad</th><th>Estatus</th></tr></thead>
@@ -73,7 +73,7 @@
     </article>
 
     <article class="card">
-      <div class="exec-card-head"><h2>Turnos sin cerrar</h2><span class="exec-badge {% if turnos_abiertos %}warn{% else %}ok{% endif %}">{{ turnos_abiertos|intcomma }}</span></div>
+      <div class="exec-card-head"><h2>Turnos sin cerrar</h2><div><a class="btn btn-secondary btn-small" href="{% url 'logistica:bitacoras_lista' %}">Ver bitácoras</a> <span class="exec-badge {% if turnos_abiertos %}warn{% else %}ok{% endif %}">{{ turnos_abiertos|intcomma }}</span></div></div>
       <div class="table-responsive">
         <table class="table table-striped">
           <thead><tr><th>Unidad</th><th>Inicio</th><th>Tiempo</th></tr></thead>
