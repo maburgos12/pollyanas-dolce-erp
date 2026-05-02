@@ -64,6 +64,57 @@ class UserProfile(models.Model):
     def __str__(self) -> str:
         return f"Perfil: {self.user.username}"
 
+
+class UserModuleAccess(models.Model):
+    ACCESS_NONE = "none"
+    ACCESS_VIEW = "view"
+    ACCESS_MANAGE = "manage"
+
+    MODULOS = [
+        ("logistica", "Logística"),
+        ("fallas", "Fallas / Mantenimiento"),
+        ("compras", "Compras"),
+        ("ventas", "Ventas"),
+        ("reportes", "Reportes"),
+        ("produccion", "Producción"),
+        ("rrhh", "RRHH"),
+        ("inventario", "Inventario"),
+        ("recetas", "Recetas"),
+        ("crm", "CRM"),
+        ("auditoria", "Auditoría"),
+        ("maestros", "Maestros"),
+    ]
+
+    ACCESS_CHOICES = [
+        (ACCESS_NONE, "Sin acceso"),
+        (ACCESS_VIEW, "Solo ver"),
+        (ACCESS_MANAGE, "Ver y editar"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="module_access",
+    )
+    module = models.CharField(max_length=40, choices=MODULOS)
+    access = models.CharField(max_length=10, choices=ACCESS_CHOICES, default=ACCESS_NONE)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="module_access_updated",
+    )
+
+    class Meta:
+        unique_together = [("user", "module")]
+        verbose_name = "Acceso por módulo"
+        verbose_name_plural = "Accesos por módulo"
+
+    def __str__(self) -> str:
+        return f"{self.user} · {self.get_module_display()} · {self.get_access_display()}"
+
+
 class AuditLog(models.Model):
     timestamp = models.DateTimeField(default=timezone.now)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)

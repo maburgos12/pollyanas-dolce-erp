@@ -20,6 +20,17 @@
   .module-chip { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: var(--gris-suave); color: var(--texto); font-size: 12px; font-weight: 700; }
   .module-chip.manage { background: #e8f5e9; color: #2e7d32; }
   .module-chip.blocked { background: #ffebee; color: #c62828; }
+  .module-chip.view { background: #e3f2fd; color: #1565c0; }
+  .module-chip.none { background: #f2f2f2; color: #666; }
+  .permissions-row[hidden] { display: none; }
+  .permissions-panel { border: 1px solid var(--rosa-deep); border-radius: 14px; background: #fffafc; padding: 16px; }
+  .permissions-panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 12px; }
+  .permissions-panel-header strong { display: block; color: var(--vino); font-size: 18px; }
+  .permissions-table th { background: var(--vino); color: #fff; }
+  .permissions-table td, .permissions-table th { vertical-align: middle; }
+  .permissions-radio { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 48px; cursor: pointer; }
+  .permissions-radio input { width: 20px; height: 20px; accent-color: var(--vino); }
+  .permissions-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
   .governance-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
   .governance-card { border: 1px solid var(--rosa-deep); border-radius: 12px; background: #fff; padding: 14px 16px; }
   .governance-card strong { display: block; font-size: 24px; color: var(--vino); }
@@ -46,6 +57,8 @@
     .filters-inline input { max-width: none; }
     .users-kpi-grid, .role-grid, .governance-grid, .coverage-grid, .focus-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .blocker-row, .coverage-row, .stage-row, .focus-summary { grid-template-columns: 1fr; display:grid; }
+    .permissions-panel-header, .permissions-actions { flex-direction: column; align-items: stretch; }
+    .permissions-table { min-width: 720px; }
   }
 </style>
 {% endblock %}
@@ -911,6 +924,75 @@
         </td>
         <td>
           <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}?edit={{ row.id }}">Editar</a>
+          <button class="btn btn-secondary btn-small" type="button" data-permissions-toggle="permissions-{{ row.id }}">
+            Permisos
+          </button>
+        </td>
+      </tr>
+      <tr id="permissions-{{ row.id }}" class="permissions-row" hidden>
+        <td colspan="11">
+          <section class="permissions-panel">
+            <div class="permissions-panel-header">
+              <div>
+                <strong>Matriz de permisos · {{ row.username }}</strong>
+                <span class="muted">Define si el usuario no entra, solo consulta, o puede editar por módulo.</span>
+              </div>
+              <button class="btn btn-secondary btn-small" type="button" data-permissions-toggle="permissions-{{ row.id }}">
+                Cerrar
+              </button>
+            </div>
+            <form method="post" action="{% url 'usuario_permisos_update' row.id %}">
+              {% csrf_token %}
+              <div class="table-responsive">
+                <table class="permissions-table">
+                  <thead>
+                    <tr>
+                      <th>Módulo</th>
+                      <th>Acceso actual</th>
+                      <th>Sin acceso</th>
+                      <th>Solo ver</th>
+                      <th>Ver y editar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for access_row in row.module_access_rows %}
+                    <tr>
+                      <td>
+                        <strong>{{ access_row.label }}</strong>
+                        {% if access_row.is_explicit %}
+                          <div class="muted">Permiso personalizado</div>
+                        {% else %}
+                          <div class="muted">Derivado del rol</div>
+                        {% endif %}
+                      </td>
+                      <td>
+                        <span class="module-chip {{ access_row.badge_tone }}">{{ access_row.badge_label }}</span>
+                      </td>
+                      <td>
+                        <label class="permissions-radio" aria-label="{{ access_row.label }} sin acceso">
+                          <input type="radio" name="access_{{ access_row.module }}" value="none" {% if access_row.access == 'none' %}checked{% endif %}>
+                        </label>
+                      </td>
+                      <td>
+                        <label class="permissions-radio" aria-label="{{ access_row.label }} solo ver">
+                          <input type="radio" name="access_{{ access_row.module }}" value="view" {% if access_row.access == 'view' %}checked{% endif %}>
+                        </label>
+                      </td>
+                      <td>
+                        <label class="permissions-radio" aria-label="{{ access_row.label }} ver y editar">
+                          <input type="radio" name="access_{{ access_row.module }}" value="manage" {% if access_row.access == 'manage' %}checked{% endif %}>
+                        </label>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              <div class="permissions-actions">
+                <button class="btn btn-primary" type="submit">Guardar permisos</button>
+              </div>
+            </form>
+          </section>
         </td>
       </tr>
       {% empty %}
@@ -1049,4 +1131,20 @@
   </form>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.querySelectorAll("[data-permissions-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const targetId = button.getAttribute("data-permissions-toggle");
+      const panel = document.getElementById(targetId);
+      if (!panel) return;
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) {
+        panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
+  });
+</script>
 {% endblock %}

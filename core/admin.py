@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Sucursal, Departamento, UserProfile, AuditLog
+from .models import Sucursal, Departamento, UserProfile, UserModuleAccess, AuditLog
 from rentabilidad.admin_rentabilidad import SucursalRentabilidadAdmin
 from rentabilidad.models import SucursalRentabilidad
 
@@ -25,6 +25,14 @@ class UserProfileAdmin(admin.ModelAdmin):
     list_display = ("user", "departamento", "sucursal", "modo_captura_sucursal", "telefono")
     search_fields = ("user__username", "user__email")
     list_filter = ("departamento", "sucursal", "modo_captura_sucursal")
+
+
+@admin.register(UserModuleAccess)
+class UserModuleAccessAdmin(admin.ModelAdmin):
+    list_display = ("user", "module", "access", "updated_at", "updated_by")
+    list_filter = ("module", "access")
+    search_fields = ("user__username", "user__email")
+
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
