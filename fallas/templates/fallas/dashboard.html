@@ -71,7 +71,7 @@
 <div class="module-shell bi-shell" id="fallas-app">
   <nav class="module-tabs">
     <a href="{% url 'fallas:dashboard' %}" class="module-tab {% if not tab or tab == 'reportes' %}active{% endif %}">Dashboard</a>
-    <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab">PWA reporte</a>
+    <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab">Reportar falla</a>
     <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab">Mis reportes</a>
     {% if es_dg %}
     <a href="{% url 'fallas:dashboard' %}?tab=categorias" class="module-tab {% if tab == 'categorias' %}active{% endif %}">Categorías</a>
@@ -346,7 +346,7 @@ async function cargarReportes() {
           <div class="fallas-empty-icon">🔧</div>
           <div class="fallas-empty-title">Sin reportes de fallas</div>
           <div class="fallas-empty-sub">No hay registros con los filtros seleccionados.</div>
-          <a href="{% url 'fallas:pwa-reporte' %}" class="btn btn-primary">Registrar falla desde PWA</a>
+          <a href="{% url 'fallas:pwa-reporte' %}" class="btn btn-primary">Registrar falla</a>
         </div>
       </td></tr>`;
     return;

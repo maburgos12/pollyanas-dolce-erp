@@ -1,10 +1,107 @@
-{% load static %}
-<!doctype html>
-<html lang="es-MX">
-<head>
-  <meta charset="utf-8">
-  <meta http-equiv="refresh" content="0; url={% url 'fallas:pwa-reporte' %}">
-  <title>Redirigiendo...</title>
-</head>
-<body></body>
-</html>
+{% extends "base.html" %}
+
+{% block title %}Mis reportes de fallas{% endblock %}
+{% block page_title %}Fallas · Mis reportes{% endblock %}
+{% block body_class %}page-fallas-mis-reportes{% endblock %}
+
+{% block extra_css %}
+<style>
+  .fallas-shell{display:grid;gap:18px}
+  .fallas-card{background:#fff;border:1px solid rgba(139,34,82,.16);border-radius:18px;padding:24px;box-shadow:0 18px 42px rgba(139,34,82,.08)}
+  .fallas-tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .fallas-tab{display:inline-flex;align-items:center;min-height:40px;padding:8px 14px;border-radius:999px;border:1px solid rgba(139,34,82,.18);text-decoration:none;color:#8B2252;font-weight:800;background:#fff}
+  .fallas-tab.active{background:#8B2252;color:#fff}
+  .fallas-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}
+  .fallas-title{font-family:"Playfair Display",serif;font-size:34px;margin:4px 0;color:#3f2633}
+  .fallas-muted{color:#7a6871;margin:0}
+  .fallas-filter{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
+  .fallas-input{width:100%;min-height:42px;border:1px solid rgba(139,34,82,.22);border-radius:12px;padding:8px 10px;font:inherit;background:#fff}
+  .fallas-table-wrap{overflow:auto;border:1px solid rgba(139,34,82,.10);border-radius:14px}
+  .fallas-table{width:100%;border-collapse:collapse;min-width:900px}
+  .fallas-table th,.fallas-table td{padding:12px;border-bottom:1px solid rgba(139,34,82,.10);text-align:left;vertical-align:top}
+  .fallas-table th{background:#f7e7ee;color:#8B2252;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  .fallas-badge{display:inline-flex;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:900}
+  .p-critica,.e-abierto{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
+  .p-alta,.e-en_revision,.e-en_proceso{background:#fff7ed;color:#c2410c;border:1px solid #fdba74}
+  .p-media{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+  .p-baja,.e-resuelto{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+  .e-cerrado{background:#f0fdf4;color:#166534;border:1px solid #86efac}
+  .e-cancelado{background:#f3f4f6;color:#374151;border:1px solid #d1d5db}
+  .btn-wine{background:#8B2252;border:1px solid #8B2252;color:#fff;border-radius:12px;padding:10px 14px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}
+  .btn-soft{background:#fff;border:1px solid rgba(139,34,82,.22);color:#8B2252;border-radius:12px;padding:10px 14px;font-weight:900;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}
+  .fallas-thumb{width:58px;height:44px;object-fit:cover;border-radius:8px;border:1px solid rgba(139,34,82,.18)}
+  .fallas-empty{padding:36px;text-align:center;color:#7a6871}
+  .pagination{display:flex;gap:10px;justify-content:center;align-items:center;margin-top:16px}
+  @media(max-width:760px){.fallas-head,.fallas-filter{grid-template-columns:1fr;display:grid}.fallas-head .btn-wine{width:100%}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fallas-shell">
+  <nav class="fallas-tabs">
+    <a class="fallas-tab" href="{% url 'fallas:dashboard' %}">Dashboard</a>
+    <a class="fallas-tab" href="{% url 'fallas:pwa-reporte' %}">Reportar falla</a>
+    <a class="fallas-tab active" href="{% url 'fallas:pwa-mis-reportes' %}">Mis reportes</a>
+  </nav>
+
+  <section class="fallas-card">
+    <div class="fallas-head">
+      <div>
+        <h1 class="fallas-title">Mis reportes</h1>
+        <p class="fallas-muted">Consulta reportes de fallas dentro del ERP, sin abrir la app móvil.</p>
+      </div>
+      <a class="btn-wine" href="{% url 'fallas:pwa-reporte' %}">Nuevo reporte</a>
+    </div>
+
+    <form class="fallas-filter" method="get">
+      <select class="fallas-input" name="estatus">
+        <option value="">Todos los estatus</option>
+        {% for value,label in estatus_choices %}
+        <option value="{{ value }}" {% if estatus_actual == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <select class="fallas-input" name="prioridad">
+        <option value="">Todas las prioridades</option>
+        {% for value,label in prioridad_choices %}
+        <option value="{{ value }}" {% if prioridad_actual == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn-soft" type="submit">Filtrar</button>
+    </form>
+
+    <div class="fallas-table-wrap">
+      <table class="fallas-table">
+        <thead>
+          <tr>
+            <th>ID</th><th>Evidencia</th><th>Sucursal</th><th>Reporte</th><th>Categoría</th><th>Prioridad</th><th>Estatus</th><th>Fecha</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for reporte in reportes %}
+          <tr>
+            <td><strong>#{{ reporte.id }}</strong></td>
+            <td>{% if reporte.foto_evidencia %}<a href="{{ reporte.foto_evidencia.url }}" target="_blank" rel="noopener"><img class="fallas-thumb" src="{{ reporte.foto_evidencia.url }}" alt="Evidencia"></a>{% else %}-{% endif %}</td>
+            <td>{{ reporte.sucursal.nombre }}</td>
+            <td><strong>{{ reporte.titulo }}</strong><br><span class="fallas-muted">{{ reporte.descripcion|truncatechars:90 }}</span></td>
+            <td>{{ reporte.categoria.nombre }}</td>
+            <td><span class="fallas-badge p-{{ reporte.prioridad }}">{{ reporte.get_prioridad_display }}</span></td>
+            <td><span class="fallas-badge e-{{ reporte.estatus }}">{{ reporte.get_estatus_display }}</span></td>
+            <td>{{ reporte.fecha_reporte|date:"d/m/Y H:i" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="8"><div class="fallas-empty">No hay reportes registrados con estos filtros.</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if reportes.paginator.num_pages > 1 %}
+    <div class="pagination">
+      {% if reportes.has_previous %}<a class="btn-soft" href="?page={{ reportes.previous_page_number }}&estatus={{ estatus_actual }}&prioridad={{ prioridad_actual }}">Anterior</a>{% endif %}
+      <span class="fallas-muted">Página {{ reportes.number }} de {{ reportes.paginator.num_pages }}</span>
+      {% if reportes.has_next %}<a class="btn-soft" href="?page={{ reportes.next_page_number }}&estatus={{ estatus_actual }}&prioridad={{ prioridad_actual }}">Siguiente</a>{% endif %}
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

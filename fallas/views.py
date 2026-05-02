@@ -1,10 +1,12 @@
 from datetime import timedelta
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils import timezone
 from rest_framework import generics, permissions
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
@@ -319,14 +321,88 @@ def dashboard_view(request):
 def pwa_reporte(request):
     if not _puede_reportar_fallas(request.user):
         raise PermissionDenied
-    return render(request, "fallas/pwa_reporte.html")
+
+    sucursales = Sucursal.objects.filter(sucursales_operativas_q()).order_by("nombre")
+    if not _puede_gestionar_fallas(request.user):
+        sucursal_usuario = _sucursal_usuario(request.user)
+        sucursales = sucursales.filter(pk=sucursal_usuario.pk) if sucursal_usuario else sucursales.none()
+
+    categorias = CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
+    activos = Activo.objects.filter(activo=True).order_by("nombre", "codigo")[:150]
+
+    if request.method == "POST":
+        sucursal_id = request.POST.get("sucursal")
+        categoria_id = request.POST.get("categoria")
+        foto = request.FILES.get("foto_evidencia")
+        titulo = (request.POST.get("titulo") or "").strip()
+        descripcion = (request.POST.get("descripcion") or "").strip()
+
+        if not all([sucursal_id, categoria_id, titulo, descripcion, foto]):
+            messages.error(request, "Completa sucursal, categoría, título, descripción y foto de evidencia.")
+        elif not sucursales.filter(pk=sucursal_id).exists():
+            messages.error(request, "No tienes permiso para reportar fallas en esa sucursal.")
+        else:
+            reporte = ReporteFalla.objects.create(
+                sucursal_id=sucursal_id,
+                categoria_id=categoria_id,
+                activo_relacionado_id=request.POST.get("activo_relacionado") or None,
+                titulo=titulo,
+                descripcion=descripcion,
+                prioridad=request.POST.get("prioridad") or ReporteFalla.PRIORIDAD_MEDIA,
+                foto_evidencia=foto,
+                latitud=request.POST.get("latitud") or None,
+                longitud=request.POST.get("longitud") or None,
+                reportado_por=request.user,
+            )
+            BitacoraFalla.objects.create(
+                reporte=reporte,
+                usuario=request.user,
+                estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
+                comentario="Reporte creado desde el ERP.",
+            )
+            messages.success(request, f"Reporte de falla #{reporte.id} registrado correctamente.")
+            return redirect("fallas:pwa-mis-reportes")
+
+    return render(
+        request,
+        "fallas/reporte_form.html",
+        {
+            "sucursales": sucursales,
+            "categorias": categorias,
+            "activos": activos,
+            "prioridades": ReporteFalla.PRIORIDAD,
+        },
+    )
 
 
 @login_required
 def pwa_mis_reportes(request):
     if not _puede_reportar_fallas(request.user):
         raise PermissionDenied
-    return render(request, "fallas/pwa_mis_reportes.html")
+
+    qs = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").order_by("-fecha_reporte")
+    if not _puede_gestionar_fallas(request.user):
+        qs = qs.filter(reportado_por=request.user)
+
+    estatus = request.GET.get("estatus")
+    prioridad = request.GET.get("prioridad")
+    if estatus:
+        qs = qs.filter(estatus=estatus)
+    if prioridad:
+        qs = qs.filter(prioridad=prioridad)
+
+    reportes = Paginator(qs, 20).get_page(request.GET.get("page"))
+    return render(
+        request,
+        "fallas/mis_reportes.html",
+        {
+            "reportes": reportes,
+            "estatus_choices": ReporteFalla.ESTATUS,
+            "prioridad_choices": ReporteFalla.PRIORIDAD,
+            "estatus_actual": estatus or "",
+            "prioridad_actual": prioridad or "",
+        },
+    )
 
 
 @api_view(["GET"])
