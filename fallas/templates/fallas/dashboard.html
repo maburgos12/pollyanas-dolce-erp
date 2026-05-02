@@ -8,7 +8,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260321-05">
 <style>
-  .fallas-toolbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .fallas-toolbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
   .fallas-toolbar select,.fallas-toolbar button,.fallas-modal select,.fallas-modal input,.fallas-modal textarea{min-height:42px;border:1px solid var(--border-soft,#e5dce1);border-radius:10px;padding:8px 10px;font:inherit}
   .fallas-table{width:100%;border-collapse:collapse}
   .fallas-table th,.fallas-table td{padding:10px 10px;border-bottom:1px solid rgba(139,34,82,.10);text-align:left;vertical-align:middle}
@@ -130,6 +130,12 @@
           <option value="media">Media</option>
           <option value="baja">Baja</option>
         </select>
+        <select id="f-area">
+          <option value="">Todas las áreas</option>
+          <option value="ventas">Ventas</option>
+          <option value="produccion">Producción</option>
+          <option value="general">General</option>
+        </select>
         <select id="f-sucursal"><option value="">Todas las sucursales</option></select>
         <button class="btn btn-primary" type="button" id="btn-filtrar">Filtrar</button>
       </div>
@@ -141,6 +147,7 @@
               <th class="thumb-cell"></th>
               <th>Sucursal</th>
               <th>Falla</th>
+              <th>Área</th>
               <th>Categoría</th>
               <th>Prioridad</th>
               <th>Estatus</th>
@@ -148,7 +155,7 @@
               <th>Acciones</th>
             </tr>
           </thead>
-          <tbody id="tabla-body"><tr><td colspan="9" style="padding:20px;color:#aaa;text-align:center">Cargando...</td></tr></tbody>
+          <tbody id="tabla-body"><tr><td colspan="10" style="padding:20px;color:#aaa;text-align:center">Cargando...</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -234,7 +241,9 @@
     <div class="fallas-modal-body" id="modal-body">Cargando...</div>
     <div class="fallas-modal-actions">
       <button type="button" class="btn btn-secondary" id="modal-cancel">Cancelar</button>
+      {% if puede_gestionar %}
       <button type="button" class="btn btn-primary" id="btn-actualizar">Guardar cambios</button>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -243,6 +252,8 @@
 const API = "/api/fallas";
 const token = localStorage.getItem("pd_logistica_access") || localStorage.getItem("fallas_jwt") || localStorage.getItem("access_token") || "";
 const csrf = "{{ csrf_token }}";
+const AREA_USUARIO = "{{ area_usuario|default:'' }}";
+const PUEDE_GESTIONAR = {{ puede_gestionar|yesno:"true,false" }};
 const esc = (v) => String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 const h = (json=false) => {
   const hdr = {"X-CSRFToken": csrf};
@@ -283,7 +294,11 @@ async function cargarUsuariosGestion() {
 
 // ── KPIs ─────────────────────────────────────────────────
 async function cargarKPIs() {
-  const res = await fetch(`${API}/dashboard/stats/`, {headers: h()});
+  const params = new URLSearchParams();
+  const filtroArea = document.getElementById("f-area")?.value || AREA_USUARIO;
+  if (filtroArea) params.set("area", filtroArea);
+  const url = params.toString() ? `${API}/dashboard/stats/?${params.toString()}` : `${API}/dashboard/stats/`;
+  const res = await fetch(url, {headers: h()});
   if (!res.ok) return;
   const data = await res.json();
   document.getElementById("kpi-abiertos").textContent = data.total_abiertos ?? "-";
@@ -327,9 +342,9 @@ async function cargarSucursales() {
 
 // ── Tabla de reportes ────────────────────────────────────
 async function cargarReportes() {
-  document.getElementById("tabla-body").innerHTML = `<tr><td colspan="9" style="padding:20px;color:#aaa;text-align:center">Cargando...</td></tr>`;
+  document.getElementById("tabla-body").innerHTML = `<tr><td colspan="10" style="padding:20px;color:#aaa;text-align:center">Cargando...</td></tr>`;
   const params = new URLSearchParams();
-  [["f-estatus","estatus"],["f-prioridad","prioridad"],["f-sucursal","sucursal"]].forEach(([id, key]) => {
+  [["f-estatus","estatus"],["f-prioridad","prioridad"],["f-area","area"],["f-sucursal","sucursal"]].forEach(([id, key]) => {
     const v = document.getElementById(id).value;
     if (v) params.set(key, v);
   });
@@ -341,7 +356,7 @@ async function cargarReportes() {
 
   if (!items.length) {
     document.getElementById("tabla-body").innerHTML = `
-      <tr><td colspan="9">
+      <tr><td colspan="10">
         <div class="fallas-empty">
           <div class="fallas-empty-icon">🔧</div>
           <div class="fallas-empty-title">Sin reportes de fallas</div>
@@ -362,6 +377,7 @@ async function cargarReportes() {
       <td class="thumb-cell">${thumb}</td>
       <td style="font-size:13px">${esc(rep.sucursal_nombre)}</td>
       <td><strong style="font-size:13px">${esc(rep.titulo)}</strong><br><span class="bi-subtle" style="font-size:11px">${esc(rep.reportado_por_nombre || "")}</span></td>
+      <td style="font-size:12px">${esc(rep.area_display || rep.area || "-")}</td>
       <td style="font-size:12px">${esc(rep.categoria_nombre)}</td>
       <td>${PRIORIDAD_BADGE[rep.prioridad] || rep.prioridad}</td>
       <td>${ESTATUS_BADGE[rep.estatus] || esc(rep.estatus_display)}</td>
@@ -403,6 +419,7 @@ async function abrirDetalle(id) {
     <div class="fallas-detail-grid">
       <div>
         <p style="margin:0 0 6px"><strong>Sucursal:</strong> ${esc(rep.sucursal_nombre)}</p>
+        <p style="margin:0 0 6px"><strong>Área:</strong> ${esc(rep.area_display || rep.area || "-")}</p>
         <p style="margin:0 0 6px"><strong>Categoría:</strong> ${esc(rep.categoria_nombre)}</p>
         <p style="margin:0 0 6px"><strong>Título:</strong> ${esc(rep.titulo)}</p>
         <p style="margin:0 0 6px"><strong>Descripción:</strong><br><span style="font-size:13px;color:#555">${esc(rep.descripcion)}</span></p>
@@ -430,40 +447,41 @@ async function abrirDetalle(id) {
         ${rep.latitud ? `<p style="font-size:11px;color:#aaa;margin-top:8px">📍 ${rep.latitud}, ${rep.longitud}</p>` : ""}
       </div>
     </div>
-    <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
-
-    <div class="fallas-detail-grid">
-      <div>
-        <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin-bottom:4px">Cambiar estatus</label>
-        <select id="nuevo-estatus" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
-          <option value="">Sin cambio</option>
-          <option value="en_revision">En revisión</option>
-          <option value="en_proceso">En proceso</option>
-          <option value="resuelto">Resuelto</option>
-          <option value="cerrado">Cerrado</option>
-          <option value="cancelado">Cancelado</option>
-        </select>
-        <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Asignar a</label>
-        ${opcionesUsuarios}
+    ${PUEDE_GESTIONAR ? `
+      <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
+      <div class="fallas-detail-grid">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin-bottom:4px">Cambiar estatus</label>
+          <select id="nuevo-estatus" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+            <option value="">Sin cambio</option>
+            <option value="en_revision">En revisión</option>
+            <option value="en_proceso">En proceso</option>
+            <option value="resuelto">Resuelto</option>
+            <option value="cerrado">Cerrado</option>
+            <option value="cancelado">Cancelado</option>
+          </select>
+          <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Asignar a</label>
+          ${opcionesUsuarios}
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin-bottom:4px">Costo estimado ($)</label>
+          <input id="costo-est" type="number" step="0.01" placeholder="0.00" value="${rep.costo_estimado || ""}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+          <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Costo real ($)</label>
+          <input id="costo-real" type="number" step="0.01" placeholder="0.00" value="${rep.costo_real || ""}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+        </div>
       </div>
-      <div>
-        <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin-bottom:4px">Costo estimado ($)</label>
-        <input id="costo-est" type="number" step="0.01" placeholder="0.00" value="${rep.costo_estimado || ""}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
-        <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Costo real ($)</label>
-        <input id="costo-real" type="number" step="0.01" placeholder="0.00" value="${rep.costo_real || ""}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
-      </div>
-    </div>
-    <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:12px 0 4px">Comentario</label>
-    <textarea id="comentario-estatus" rows="3" style="width:100%;min-height:80px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;resize:vertical"></textarea>
-    <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Proveedor de servicio</label>
-    <input id="proveedor-servicio" type="text" placeholder="Nombre del proveedor o técnico" value="${esc(rep.proveedor_servicio || "")}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
-
+      <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:12px 0 4px">Comentario</label>
+      <textarea id="comentario-estatus" rows="3" style="width:100%;min-height:80px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;resize:vertical"></textarea>
+      <label style="font-size:12px;font-weight:600;color:#6f3150;display:block;margin:10px 0 4px">Proveedor de servicio</label>
+      <input id="proveedor-servicio" type="text" placeholder="Nombre del proveedor o técnico" value="${esc(rep.proveedor_servicio || "")}" style="min-height:40px;border:1px solid #e5dce1;border-radius:8px;padding:8px 10px;font:inherit;width:100%">
+    ` : ""}
     <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
     <h3 style="font-size:15px;font-weight:600;color:#6f3150;margin:0 0 10px">Bitácora</h3>
     <div class="bi-list bi-list-dense">${bitacora || '<article class="bi-list-item" style="color:#aaa">Sin historial aún.</article>'}</div>`;
 }
 
 async function actualizarEstatus() {
+  if (!PUEDE_GESTIONAR) return;
   if (!reporteActual) return;
   const estatus = document.getElementById("nuevo-estatus")?.value;
   const asignadoEl = document.getElementById("asignado-a");
@@ -526,10 +544,10 @@ function abrirEditCat(id) {
 function cerrarModalCat() { document.getElementById("modal-cat").classList.remove("is-open"); }
 
 // ── Event listeners ──────────────────────────────────────
-document.getElementById("btn-filtrar").addEventListener("click", cargarReportes);
+document.getElementById("btn-filtrar").addEventListener("click", () => { cargarKPIs(); cargarReportes(); });
 document.getElementById("modal-close").addEventListener("click", cerrarModal);
 document.getElementById("modal-cancel").addEventListener("click", cerrarModal);
-document.getElementById("btn-actualizar").addEventListener("click", actualizarEstatus);
+document.getElementById("btn-actualizar")?.addEventListener("click", actualizarEstatus);
 
 document.getElementById("btn-crear-cat")?.addEventListener("click", async () => {
   const nombre = document.getElementById("cat-nombre").value.trim();
@@ -570,6 +588,11 @@ if (tabParam === "categorias") {
 }
 
 // ── Init ─────────────────────────────────────────────────
+if (AREA_USUARIO) {
+  const areaSelect = document.getElementById("f-area");
+  areaSelect.value = AREA_USUARIO;
+  areaSelect.disabled = true;
+}
 cargarKPIs();
 cargarSucursales();
 cargarReportes();

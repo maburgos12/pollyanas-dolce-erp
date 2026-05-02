@@ -20,8 +20,8 @@ class CategoriaFallaAdmin(admin.ModelAdmin):
 
 @admin.register(ReporteFalla)
 class ReporteFallaAdmin(admin.ModelAdmin):
-    list_display = ["id", "sucursal", "titulo", "categoria", "prioridad", "estatus", "reportado_por", "fecha_reporte"]
-    list_filter = ["estatus", "prioridad", "sucursal", "categoria"]
+    list_display = ["id", "sucursal", "titulo", "categoria", "area", "prioridad", "estatus", "reportado_por", "fecha_reporte"]
+    list_filter = ["estatus", "prioridad", "area", "sucursal", "categoria"]
     search_fields = ["titulo", "descripcion", "sucursal__nombre"]
     readonly_fields = [
         "fecha_reporte",

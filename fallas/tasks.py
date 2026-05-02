@@ -53,7 +53,7 @@ def _enviar_whatsapp_maya(telefono: str, mensaje: str):
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def notificar_nuevo_reporte(self, reporte_pk: int):
-    """Notifica a compras cuando llega un nuevo reporte de falla."""
+    """Notifica a compras y al área responsable cuando llega un nuevo reporte."""
 
     from .models import ReporteFalla
 
@@ -64,10 +64,23 @@ def notificar_nuevo_reporte(self, reporte_pk: int):
         return {"enviado": False, "motivo": "reporte_no_encontrado", "reporte_id": reporte_pk}
 
     etiqueta = EMOJI_PRIORIDAD.get(reporte.prioridad, "[Falla]")
-    asunto = f"{etiqueta} Nueva falla reportada - {reporte.sucursal.nombre} [{reporte.get_prioridad_display()}]"
+    area_label = reporte.get_area_display()
+    grupos_destino = {"compras_logistica"}
+    if reporte.area == ReporteFalla.AREA_VENTAS:
+        grupos_destino.add("ventas")
+    elif reporte.area == ReporteFalla.AREA_PRODUCCION:
+        grupos_destino.add("produccion")
+    if reporte.prioridad == ReporteFalla.PRIORIDAD_CRITICA:
+        grupos_destino.add("dg")
+
+    asunto = (
+        f"{etiqueta} Nueva falla [{area_label}] - "
+        f"{reporte.sucursal.nombre} [{reporte.get_prioridad_display()}]"
+    )
     cuerpo = (
-        "Se ha registrado una nueva falla:\n\n"
+        f"Se ha registrado una nueva falla en el área de {area_label}:\n\n"
         f"Sucursal: {reporte.sucursal.nombre}\n"
+        f"Área: {area_label}\n"
         f"Categoria: {reporte.categoria}\n"
         f"Titulo: {reporte.titulo}\n"
         f"Prioridad: {reporte.get_prioridad_display()}\n"
@@ -76,9 +89,9 @@ def notificar_nuevo_reporte(self, reporte_pk: int):
         f"Descripcion:\n{reporte.descripcion}\n\n"
         f"Ver reporte: https://erp.pollyanasdolce.com/fallas/reportes/{reporte.pk}/"
     )
-    destinatarios = _emails_de_grupo("compras_logistica")
-    if reporte.prioridad == ReporteFalla.PRIORIDAD_CRITICA:
-        destinatarios += _emails_de_grupo("dg")
+    destinatarios = []
+    for grupo in grupos_destino:
+        destinatarios += _emails_de_grupo(grupo)
     destinatarios = sorted(set(destinatarios))
 
     if destinatarios:
@@ -93,6 +106,12 @@ def notificar_nuevo_reporte(self, reporte_pk: int):
         except Exception as exc:
             logger.error("[fallas] Error enviando email: %s", exc)
             raise self.retry(exc=exc)
+        logger.info(
+            "[fallas] Email enviado a %s destinatarios para area %s (%s).",
+            len(destinatarios),
+            reporte.area,
+            ", ".join(sorted(grupos_destino)),
+        )
 
     try:
         encargados = get_user_model().objects.filter(groups__name="compras_logistica", is_active=True).distinct()
@@ -102,6 +121,7 @@ def notificar_nuevo_reporte(self, reporte_pk: int):
                 msg = (
                     f"{etiqueta} *Nueva falla - {reporte.sucursal.nombre}*\n"
                     f"{reporte.titulo}\n"
+                    f"Area: {area_label}\n"
                     f"Prioridad: {reporte.get_prioridad_display()}\n"
                     f"Por: {reporte.reportado_por.get_full_name() or reporte.reportado_por.username}"
                 )

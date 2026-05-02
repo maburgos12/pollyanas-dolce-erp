@@ -61,6 +61,15 @@ class ReporteFalla(models.Model):
         (ESTATUS_CANCELADO, "Cancelado"),
     ]
 
+    AREA_VENTAS = "ventas"
+    AREA_PRODUCCION = "produccion"
+    AREA_GENERAL = "general"
+    AREAS = [
+        (AREA_VENTAS, "Ventas"),
+        (AREA_PRODUCCION, "Producción"),
+        (AREA_GENERAL, "General"),
+    ]
+
     sucursal = models.ForeignKey("core.Sucursal", on_delete=models.PROTECT, related_name="fallas")
     activo_relacionado = models.ForeignKey(
         "activos.Activo",
@@ -71,6 +80,13 @@ class ReporteFalla(models.Model):
         verbose_name="Activo relacionado (opcional)",
     )
     categoria = models.ForeignKey(CategoriaFalla, on_delete=models.PROTECT, related_name="reportes")
+    area = models.CharField(
+        max_length=15,
+        choices=AREAS,
+        default=AREA_GENERAL,
+        verbose_name="Área",
+        help_text="Área responsable de dar seguimiento al reporte",
+    )
     titulo = models.CharField(max_length=200)
     descripcion = models.TextField()
     prioridad = models.CharField(max_length=10, choices=PRIORIDAD, default=PRIORIDAD_MEDIA)
