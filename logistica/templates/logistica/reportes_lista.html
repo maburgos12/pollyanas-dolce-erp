@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Logística · Reportes{% endblock %}
+{% block page_title %}Logística · Reportes ERP{% endblock %}
+
+{% block extra_css %}
+<style>
+  .reports-shell { display: grid; gap: 18px; }
+  .reports-filter { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 10px; align-items: end; }
+  .report-badge { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; }
+  .report-badge.ok { background: #e5f5ee; color: #1f7554; }
+  .report-badge.warn { background: #fff4d8; color: #9a6a00; }
+  .report-badge.danger { background: #ffe8ec; color: #bc3b56; }
+  .report-badge.info { background: #e9f0ff; color: #305caa; }
+  .report-row { cursor: pointer; }
+  .report-detail { display: none; background: #fffafc; }
+  .report-detail.open { display: table-row; }
+  .report-detail-grid { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 14px; }
+  .report-photo { width: 100%; max-height: 150px; object-fit: cover; border-radius: 12px; border: 1px solid #efc7d8; }
+  .report-muted { color: #77656d; font-size: 13px; line-height: 1.45; }
+  .report-pager { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  @media (max-width: 980px) { .reports-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-detail-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 620px) { .reports-filter, .report-pager { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="reports-shell">
+  <section class="module-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">Reportes de unidad</div>
+    <p class="muted">Tickets capturados desde la app móvil, visibles y consultables dentro del ERP.</p>
+    <form class="reports-filter" method="get">
+      <label>Estatus
+        <select class="input-field" name="estatus">
+          <option value="">Todos</option>
+          {% for value,label in estatus_choices %}<option value="{{ value }}" {% if filters.estatus == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Severidad
+        <select class="input-field" name="severidad">
+          <option value="">Todas</option>
+          {% for value,label in severidad_choices %}<option value="{{ value }}" {% if filters.severidad == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Unidad
+        <select class="input-field" name="unidad">
+          <option value="">Todas</option>
+          {% for unidad in unidades %}<option value="{{ unidad.id }}" {% if filters.unidad == unidad.id|stringformat:"s" %}selected{% endif %}>{{ unidad.codigo }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Desde<input class="input-field" type="date" name="fecha_desde" value="{{ filters.fecha_desde }}"></label>
+      <label>Hasta<input class="input-field" type="date" name="fecha_hasta" value="{{ filters.fecha_hasta }}"></label>
+      <div>
+        <button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Filtrar</button>
+        <a class="btn btn-secondary" href="{% url 'logistica:reportes_lista' %}">Limpiar</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead><tr><th>Folio/ID</th><th>Unidad</th><th>Repartidor</th><th>Tipo</th><th>Severidad</th><th>Estatus</th><th>Fecha</th><th>Acciones</th></tr></thead>
+        <tbody>
+          {% for reporte in reportes %}
+          <tr class="report-row" data-detail-row="reporte-{{ reporte.id }}">
+            <td>#{{ reporte.id }}</td>
+            <td><strong>{{ reporte.unidad.codigo }}</strong><br><span class="report-muted">{{ reporte.unidad.placa|default:reporte.unidad.descripcion }}</span></td>
+            <td>{{ reporte.repartidor }}</td>
+            <td>{{ reporte.get_tipo_display }}</td>
+            <td><span class="report-badge {% if reporte.severidad == 'critico' %}danger{% elif reporte.severidad == 'urgente' %}warn{% else %}ok{% endif %}">{{ reporte.get_severidad_display }}</span></td>
+            <td><span class="report-badge {% if reporte.estatus == 'abierto' %}danger{% elif reporte.estatus == 'cerrado' %}ok{% else %}info{% endif %}">{{ reporte.get_estatus_display }}</span></td>
+            <td>{{ reporte.fecha_reporte|date:"d/m/Y H:i" }}</td>
+            <td><span class="btn btn-secondary btn-small">Detalle</span></td>
+          </tr>
+          <tr class="report-detail" id="reporte-{{ reporte.id }}">
+            <td colspan="8">
+              <div class="report-detail-grid">
+                <div>{% if reporte.foto %}<img class="report-photo" src="{{ reporte.foto.url }}" alt="Foto reporte {{ reporte.id }}">{% else %}<div class="report-muted">Sin foto</div>{% endif %}</div>
+                <div>
+                  <strong>Descripción</strong>
+                  <p>{{ reporte.descripcion }}</p>
+                  <div class="report-muted">KM: {{ reporte.kilometraje|default:"-"|intcomma }} · IP: {{ reporte.ip_reporte|default:"-" }}</div>
+                  {% if reporte.latitud and reporte.longitud %}<a href="https://maps.google.com/?q={{ reporte.latitud }},{{ reporte.longitud }}" target="_blank" rel="noopener">Abrir ubicación en Google Maps</a>{% endif %}
+                  {% if reporte.notas_compras %}<p><strong>Notas compras:</strong> {{ reporte.notas_compras }}</p>{% endif %}
+                  <div class="report-muted">Proveedor: {{ reporte.proveedor_servicio|default:"-" }} · Costo: ${{ reporte.costo_servicio|default:"0"|floatformat:2|intcomma }}</div>
+                </div>
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="8" class="muted">No hay reportes con esos filtros.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if reportes.paginator.num_pages > 1 %}
+    <nav class="report-pager">
+      {% if reportes.has_previous %}<a class="btn btn-secondary btn-small" href="?page={{ reportes.previous_page_number }}">Anterior</a>{% endif %}
+      <span class="muted">Página {{ reportes.number }} de {{ reportes.paginator.num_pages }}</span>
+      {% if reportes.has_next %}<a class="btn btn-secondary btn-small" href="?page={{ reportes.next_page_number }}">Siguiente</a>{% endif %}
+    </nav>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  document.querySelectorAll("[data-detail-row]").forEach((row) => {
+    row.addEventListener("click", () => document.getElementById(row.dataset.detailRow).classList.toggle("open"));
+  });
+})();
+</script>
+{% endblock %}

@@ -77,6 +77,7 @@
             </td>
             <td>
               <div class="unit-actions">
+                <a class="btn btn-secondary btn-small" href="{% url 'logistica:unidad_detalle' unidad.id %}">Ficha</a>
                 <a class="btn btn-secondary btn-small" href="{% url 'logistica:unidad_edit' unidad.id %}">Editar</a>
                 <form method="post" action="{% url 'logistica:unidad_toggle' unidad.id %}">
                   {% csrf_token %}

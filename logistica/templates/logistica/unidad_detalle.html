@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Logística · {{ unidad.codigo }}{% endblock %}
+{% block page_title %}Logística · Ficha de unidad{% endblock %}
+
+{% block extra_css %}
+<style>
+  .unit-detail-shell { display: grid; gap: 18px; }
+  .unit-hero { display: grid; gap: 14px; }
+  .unit-hero-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; justify-content: space-between; }
+  .unit-title h1 { margin: 0; color: #8B2252; font-family: "Playfair Display", serif; font-size: clamp(32px, 4vw, 48px); }
+  .unit-title p { margin: 4px 0 0; color: #6f5963; font-weight: 800; }
+  .unit-badges, .unit-kpis, .unit-tabs, .unit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .unit-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 6px 11px; font-size: 12px; font-weight: 900; background: #f8eaf0; color: #8B2252; }
+  .unit-badge.ok { background: #e5f5ee; color: #1f7554; }
+  .unit-badge.warn { background: #fff4d8; color: #9a6a00; }
+  .unit-badge.danger { background: #ffe8ec; color: #bc3b56; }
+  .unit-kpi { border: 1px solid #efc7d8; border-radius: 14px; padding: 12px 14px; background: #fffafc; min-width: 170px; }
+  .unit-kpi span { display: block; color: #77656d; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+  .unit-kpi strong { display: block; margin-top: 4px; color: #8B2252; font-family: "Playfair Display", serif; font-size: 24px; }
+  .unit-tabs { border-bottom: 1px solid #efc7d8; padding-bottom: 10px; }
+  .unit-tab { border: 1px solid #efc7d8; background: #fff; color: #8B2252; border-radius: 999px; cursor: pointer; font-weight: 900; padding: 10px 14px; }
+  .unit-tab.active { background: #8B2252; color: #fff; }
+  .unit-pane { display: none; }
+  .unit-pane.active { display: grid; gap: 14px; }
+  .unit-pane-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+  .unit-pane-head h2 { margin: 0; color: #3a2b30; font-family: "Playfair Display", serif; }
+  .unit-muted { color: #77656d; font-size: 13px; line-height: 1.45; }
+  .unit-alert { border: 1px solid #f1d28a; border-radius: 12px; background: #fff8e6; color: #8a6100; font-weight: 900; padding: 12px 14px; }
+  .unit-evidence { display: flex; flex-wrap: wrap; gap: 6px; }
+  .unit-evidence a { border: 1px solid #e8b7cb; border-radius: 10px; color: #8B2252; font-weight: 800; padding: 6px 9px; text-decoration: none; }
+  .unit-detail-row { display: none; }
+  .unit-detail-row.open { display: table-row; }
+  .unit-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .unit-check-card { border: 1px solid #f2d4e1; border-radius: 12px; padding: 12px; background: #fffafc; }
+  .unit-check-card strong { color: #8B2252; }
+  .unit-modal { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(15,10,12,.55); align-items: center; justify-content: center; padding: 18px; }
+  .unit-modal.open { display: flex; }
+  .unit-modal-panel { width: min(720px, 100%); max-height: 90vh; overflow: auto; background: #fff; border: 1px solid #efc7d8; border-radius: 16px; padding: 20px; box-shadow: 0 24px 70px rgba(0,0,0,.22); }
+  .unit-modal-panel h2 { margin: 0 0 12px; color: #8B2252; font-family: "Playfair Display", serif; }
+  .unit-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .unit-form-grid .full { grid-column: 1 / -1; }
+  .clickable-row { cursor: pointer; }
+  @media (max-width: 760px) { .unit-form-grid, .unit-check-grid { grid-template-columns: 1fr; } .unit-pane-head { align-items: stretch; flex-direction: column; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="unit-detail-shell">
+  <section class="module-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card unit-hero">
+    <div class="unit-hero-head">
+      <div class="unit-title">
+        <h1>{{ unidad.codigo }}</h1>
+        <p>{{ unidad.descripcion }}</p>
+      </div>
+      {% if turno_activo %}<span class="unit-badge ok">TURNO ACTIVO · {{ turno_activo.repartidor }}</span>{% else %}<span class="unit-badge">Sin turno activo</span>{% endif %}
+    </div>
+    <div class="unit-badges">
+      <span class="unit-badge">Marca: {{ unidad.marca|default:"-" }}</span>
+      <span class="unit-badge">Modelo: {{ unidad.modelo|default:"-" }}</span>
+      <span class="unit-badge">Placa: {{ unidad.placa|default:"-" }}</span>
+      <span class="unit-badge">Color: {{ unidad.color|default:"-" }}</span>
+    </div>
+    <div class="unit-kpis">
+      <div class="unit-kpi"><span>Gasto año</span><strong>${{ gasto_total_anio|floatformat:2|intcomma }}</strong></div>
+      <div class="unit-kpi"><span>Días sin lavar</span><strong>{% if dias_sin_lavar != None %}{{ dias_sin_lavar }}{% else %}Sin registro{% endif %}</strong></div>
+      <div class="unit-kpi"><span>Seguro</span><strong>{% if documento_seguro %}{{ documento_seguro.dias_restantes }} días{% else %}Sin registro{% endif %}</strong></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <nav class="unit-tabs" aria-label="Pestañas de unidad">
+      <button class="unit-tab active" type="button" data-tab-target="documentos">📄 Documentos</button>
+      <button class="unit-tab" type="button" data-tab-target="servicios">🔧 Servicios</button>
+      <button class="unit-tab" type="button" data-tab-target="lavados">🚿 Lavados</button>
+      <button class="unit-tab" type="button" data-tab-target="reparaciones">🔨 Reparaciones</button>
+      <button class="unit-tab" type="button" data-tab-target="bitacoras">📋 Bitácoras</button>
+      <button class="unit-tab" type="button" data-tab-target="inspecciones">🔍 Inspecciones</button>
+    </nav>
+
+    <section class="unit-pane active" id="documentos">
+      <div class="unit-pane-head"><h2>Documentos</h2><button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="button" data-modal-open="modal-documento">Agregar documento</button></div>
+      <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Tipo</th><th>Descripción</th><th>Vencimiento</th><th>Días</th><th>Vigente</th><th>Archivo</th></tr></thead><tbody>
+        {% for doc in documentos %}<tr><td>{{ doc.get_tipo_display }}</td><td>{{ doc.descripcion|default:"-" }}{% if doc.aseguradora %}<br><span class="unit-muted">{{ doc.aseguradora }}</span>{% endif %}</td><td>{{ doc.fecha_vencimiento|date:"d/m/Y" }}</td><td><span class="unit-badge {% if doc.dias_restantes < 15 %}danger{% elif doc.dias_restantes < 30 %}warn{% else %}ok{% endif %}">{{ doc.dias_restantes }} días</span></td><td>{% if doc.vigente %}<span class="unit-badge ok">Vigente</span>{% else %}<span class="unit-badge danger">Vencido</span>{% endif %}</td><td>{% if doc.archivo %}<a href="{{ doc.archivo.url }}" target="_blank" rel="noopener">Abrir</a>{% else %}-{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="unit-muted">Sin documentos registrados.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+
+    <section class="unit-pane" id="servicios">
+      <div class="unit-pane-head"><h2>Servicios</h2><button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="button" data-modal-open="modal-servicio">Registrar servicio</button></div>
+      <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Servicio</th><th>Fecha</th><th>KM</th><th>Proveedor</th><th>Costo</th><th>Próximo</th><th>Factura</th></tr></thead><tbody>
+        {% for servicio in servicios %}<tr><td>{{ servicio.tipo_servicio.nombre }}</td><td>{{ servicio.fecha_servicio|date:"d/m/Y" }}</td><td>{{ servicio.km_al_servicio|default:"-"|intcomma }}</td><td>{{ servicio.proveedor|default:"-" }}</td><td>${{ servicio.costo|default:"0"|floatformat:2|intcomma }}</td><td>{% if servicio.proxima_fecha %}{{ servicio.proxima_fecha|date:"d/m/Y" }}{% if servicio.dias_restantes < 0 %}<span class="unit-badge danger">VENCIDO</span>{% elif servicio.dias_restantes <= 30 %}<span class="unit-badge warn">PRÓXIMO</span>{% endif %}<br><span class="unit-muted">KM {{ servicio.proximos_km|default:"-"|intcomma }}</span>{% else %}-{% endif %}</td><td>{% if servicio.archivo_factura %}<a href="{{ servicio.archivo_factura.url }}" target="_blank" rel="noopener">Abrir</a>{% else %}-{% endif %}</td></tr>{% empty %}<tr><td colspan="7" class="unit-muted">Sin servicios registrados.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+
+    <section class="unit-pane" id="lavados">
+      <div class="unit-pane-head"><h2>Lavados</h2><button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="button" data-modal-open="modal-lavado">Registrar lavado</button></div>
+      {% if dias_sin_lavar and dias_sin_lavar > 15 %}<div class="unit-alert">Han pasado {{ dias_sin_lavar }} días sin lavado.</div>{% endif %}
+      <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Fecha</th><th>Costo</th><th>Registrado por</th><th>Notas</th></tr></thead><tbody>
+        {% for lavado in lavados %}<tr><td>{{ lavado.fecha|date:"d/m/Y" }}</td><td>${{ lavado.costo|default:"0"|floatformat:2|intcomma }}</td><td>{{ lavado.registrado_por|default:"-" }}</td><td>{{ lavado.notas|default:"-" }}</td></tr>{% empty %}<tr><td colspan="4" class="unit-muted">Sin lavados registrados.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+
+    <section class="unit-pane" id="reparaciones">
+      <div class="unit-pane-head"><h2>Reparaciones</h2><div class="unit-actions"><span class="unit-badge warn">Año: ${{ gasto_total_anio|floatformat:2|intcomma }}</span><button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="button" data-modal-open="modal-reparacion">Registrar reparación</button></div></div>
+      <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Ingreso</th><th>Entrega</th><th>Falla</th><th>Proveedor</th><th>Costo</th><th>Soporte</th><th>Reporte</th></tr></thead><tbody>
+        {% for rep in reparaciones %}<tr><td>{{ rep.fecha_ingreso|date:"d/m/Y" }}</td><td>{{ rep.fecha_entrega|date:"d/m/Y"|default:"-" }}</td><td>{{ rep.descripcion_falla|truncatechars:90 }}{% if rep.descripcion_reparacion %}<br><span class="unit-muted">{{ rep.descripcion_reparacion|truncatechars:90 }}</span>{% endif %}</td><td>{{ rep.proveedor|default:"-" }}</td><td>${{ rep.costo_total|default:"0"|floatformat:2|intcomma }}</td><td><div class="unit-evidence">{% if rep.archivo_factura %}<a href="{{ rep.archivo_factura.url }}" target="_blank" rel="noopener">Factura</a>{% endif %}{% if rep.foto_nota %}<a href="{{ rep.foto_nota.url }}" target="_blank" rel="noopener">Foto</a>{% endif %}</div></td><td>{% if rep.reporte_origen %}#{{ rep.reporte_origen.id }}{% else %}-{% endif %}</td></tr>{% empty %}<tr><td colspan="7" class="unit-muted">Sin reparaciones registradas.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+
+    <section class="unit-pane" id="bitacoras">
+      <div class="unit-pane-head"><h2>Bitácoras</h2><span class="unit-muted">Últimos 30 registros desde la app móvil.</span></div>
+      <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Folio</th><th>Fecha</th><th>Salida</th><th>Llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Gas</th><th>Litros</th><th>Estatus</th></tr></thead><tbody>
+        {% for bitacora in bitacoras %}<tr><td>{{ bitacora.folio }}</td><td>{{ bitacora.fecha|date:"d/m/Y" }}</td><td>{{ bitacora.hora_salida|date:"H:i" }}</td><td>{{ bitacora.hora_llegada|date:"H:i"|default:"-" }}</td><td>{{ bitacora.km_salida|intcomma }}</td><td>{{ bitacora.km_llegada|default:"-"|intcomma }}</td><td>{{ bitacora.km_recorridos|default:"-"|intcomma }}</td><td>{{ bitacora.nivel_gas_salida }} → {{ bitacora.nivel_gas_llegada|default:"-" }}</td><td>{{ bitacora.litros_cargados|default:"-" }}</td><td>{% if bitacora.cerrada %}<span class="unit-badge ok">Cerrada</span>{% else %}<span class="unit-badge danger">ABIERTO</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="10" class="unit-muted">Sin bitácoras registradas.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+
+    <section class="unit-pane" id="inspecciones">
+      <div class="unit-pane-head"><h2>Inspecciones</h2><span class="unit-muted">Últimas 20 inspecciones desde la app móvil.</span></div>
+      <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Fecha</th><th>Repartidor</th><th>KM entrada</th><th>Golpes</th><th>Observaciones</th></tr></thead><tbody>
+        {% for ins in inspecciones %}<tr class="clickable-row {% if ins.tiene_golpes %}row-danger{% endif %}" data-detail-row="ins-{{ ins.id }}"><td>{{ ins.fecha|date:"d/m/Y H:i" }}</td><td>{{ ins.repartidor }}</td><td>{{ ins.km_entrada|intcomma }}</td><td>{% if ins.tiene_golpes %}<span class="unit-badge danger">Sí</span>{% else %}<span class="unit-badge ok">No</span>{% endif %}</td><td>{{ ins.observaciones|default:"-"|truncatechars:90 }}</td></tr><tr class="unit-detail-row" id="ins-{{ ins.id }}"><td colspan="5"><div class="unit-check-grid">{% for grupo in ins.checklist_detalle %}<div class="unit-check-card"><strong>{{ grupo.titulo }}</strong><div class="unit-muted">{% for item in grupo.items %}<span class="unit-badge {% if item.ok %}ok{% else %}danger{% endif %}">{{ item.label }}</span> {% endfor %}</div></div>{% endfor %}</div>{% if ins.descripcion_golpes %}<p><strong>Golpes:</strong> {{ ins.descripcion_golpes }}</p>{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="unit-muted">Sin inspecciones registradas.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+  </section>
+</div>
+
+<div class="unit-modal" id="modal-documento"><div class="unit-modal-panel"><h2>Agregar documento</h2><form class="unit-form-grid" method="post" enctype="multipart/form-data" action="{% url 'logistica:unidad_documento_nuevo' unidad.id %}">{% csrf_token %}<label>Tipo<select class="input-field" name="tipo"><option value="tarjeta_circulacion">Tarjeta de circulación</option><option value="seguro">Seguro vehicular</option><option value="otro">Otro</option></select></label><label>Descripción<input class="input-field" name="descripcion"></label><label>Aseguradora<input class="input-field" name="aseguradora"></label><label>Archivo<input class="input-field" type="file" name="archivo"></label><label>Fecha emisión<input class="input-field" type="date" name="fecha_emision"></label><label>Fecha vencimiento<input class="input-field" type="date" name="fecha_vencimiento" required></label><label class="full">Notas<textarea class="input-field" name="notas" rows="3"></textarea></label><div class="unit-actions full"><button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="submit">Guardar</button><button class="btn btn-secondary" type="button" data-modal-close>Cancelar</button></div></form></div></div>
+<div class="unit-modal" id="modal-servicio"><div class="unit-modal-panel"><h2>Registrar servicio</h2><form class="unit-form-grid" method="post" enctype="multipart/form-data" action="{% url 'logistica:unidad_servicio_nuevo' unidad.id %}">{% csrf_token %}<label>Tipo servicio<select class="input-field" name="tipo_servicio" required>{% for tipo in tipos_servicio %}<option value="{{ tipo.id }}">{{ tipo.nombre }}</option>{% endfor %}</select></label><label>Fecha servicio<input class="input-field" type="date" name="fecha_servicio" value="{{ today|date:'Y-m-d' }}" required></label><label>KM al servicio<input class="input-field" type="number" name="km_al_servicio"></label><label>Proveedor<input class="input-field" name="proveedor"></label><label>Costo<input class="input-field" type="number" step="0.01" name="costo"></label><label>Factura<input class="input-field" type="file" name="archivo_factura"></label><label class="full">Notas<textarea class="input-field" name="notas" rows="3"></textarea></label><div class="unit-actions full"><button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="submit">Guardar</button><button class="btn btn-secondary" type="button" data-modal-close>Cancelar</button></div></form></div></div>
+<div class="unit-modal" id="modal-lavado"><div class="unit-modal-panel"><h2>Registrar lavado</h2><form class="unit-form-grid" method="post" action="{% url 'logistica:unidad_lavado_nuevo' unidad.id %}">{% csrf_token %}<label>Fecha<input class="input-field" type="date" name="fecha" value="{{ today|date:'Y-m-d' }}" required></label><label>Costo<input class="input-field" type="number" step="0.01" name="costo"></label><label class="full">Notas<input class="input-field" name="notas"></label><div class="unit-actions full"><button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="submit">Guardar</button><button class="btn btn-secondary" type="button" data-modal-close>Cancelar</button></div></form></div></div>
+<div class="unit-modal" id="modal-reparacion"><div class="unit-modal-panel"><h2>Registrar reparación</h2><form class="unit-form-grid" method="post" enctype="multipart/form-data" action="{% url 'logistica:unidad_reparacion_nueva' unidad.id %}">{% csrf_token %}<label>Fecha ingreso<input class="input-field" type="date" name="fecha_ingreso" value="{{ today|date:'Y-m-d' }}" required></label><label>Fecha entrega<input class="input-field" type="date" name="fecha_entrega"></label><label class="full">Descripción falla<textarea class="input-field" name="descripcion_falla" rows="3" required></textarea></label><label class="full">Descripción reparación<textarea class="input-field" name="descripcion_reparacion" rows="3"></textarea></label><label>Proveedor<input class="input-field" name="proveedor"></label><label>Costo total<input class="input-field" type="number" step="0.01" name="costo_total"></label><label>Factura<input class="input-field" type="file" name="archivo_factura"></label><label>Foto nota<input class="input-field" type="file" name="foto_nota" accept="image/*"></label><label class="full">Reporte origen<select class="input-field" name="reporte_origen"><option value="">Sin reporte origen</option>{% for reporte in reportes_unidad %}<option value="{{ reporte.id }}">#{{ reporte.id }} · {{ reporte.get_tipo_display }} · {{ reporte.fecha_reporte|date:"d/m/Y" }}</option>{% endfor %}</select></label><label class="full">Notas<textarea class="input-field" name="notas" rows="3"></textarea></label><div class="unit-actions full"><button class="btn btn-primary" style="background:#8B2252;border-color:#8B2252;" type="submit">Guardar</button><button class="btn btn-secondary" type="button" data-modal-close>Cancelar</button></div></form></div></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const activateTab = (name) => {
+    document.querySelectorAll(".unit-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tabTarget === name));
+    document.querySelectorAll(".unit-pane").forEach((pane) => pane.classList.toggle("active", pane.id === name));
+    if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+  };
+  document.querySelectorAll("[data-tab-target]").forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tabTarget)));
+  if (location.hash) {
+    const target = location.hash.replace("#", "");
+    if (document.getElementById(target)) activateTab(target);
+  }
+  document.querySelectorAll("[data-modal-open]").forEach((button) => button.addEventListener("click", () => document.getElementById(button.dataset.modalOpen).classList.add("open")));
+  document.querySelectorAll("[data-modal-close]").forEach((button) => button.addEventListener("click", () => button.closest(".unit-modal").classList.remove("open")));
+  document.querySelectorAll(".unit-modal").forEach((modal) => modal.addEventListener("click", (event) => { if (event.target === modal) modal.classList.remove("open"); }));
+  document.querySelectorAll("[data-detail-row]").forEach((row) => row.addEventListener("click", () => document.getElementById(row.dataset.detailRow).classList.toggle("open")));
+})();
+</script>
+{% endblock %}

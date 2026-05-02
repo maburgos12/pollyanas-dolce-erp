@@ -25,9 +25,11 @@ from .models import (
     InspeccionVehiculo,
     LavadoUnidad,
     ReparacionUnidad,
+    Repartidor,
     ReporteUnidad,
     RutaEntrega,
     ServicioRealizadoUnidad,
+    TipoServicioUnidad,
     Unidad,
 )
 
@@ -52,12 +54,24 @@ def _parse_datetime_local(raw: str | None):
     return dt
 
 
+def _parse_date(raw: str | None):
+    value = (raw or "").strip()
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
 def _module_tabs(active: str) -> list[dict]:
     return [
         {"label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
         {"label": "Ejecutivo", "url_name": "logistica:dashboard_ejecutivo", "active": active == "ejecutivo"},
         {"label": "Tickets", "url_name": "logistica:tickets_kanban", "active": active == "tickets"},
         {"label": "Flota", "url_name": "logistica:flota_resumen", "active": active == "flota"},
+        {"label": "Reportes", "url_name": "logistica:reportes_lista", "active": active == "reportes"},
+        {"label": "Bitácoras", "url_name": "logistica:bitacoras_lista", "active": active == "bitacoras"},
         {"label": "Rutas", "url_name": "logistica:rutas", "active": active == "rutas"},
         {"label": "Unidades", "url_name": "logistica:unidades_list", "active": active == "unidades"},
         {"label": "Capturas PWA", "url_name": "logistica:capturas_pwa", "active": active == "capturas"},
@@ -809,6 +823,49 @@ def _decorate_servicio(servicio):
     if servicio:
         servicio.dias_restantes = _dias_hasta(servicio.proxima_fecha)
     return servicio
+
+
+def _km_recorridos(bitacora: BitacoraSalidaLlegada):
+    if bitacora.km_llegada is None:
+        return None
+    return max(bitacora.km_llegada - bitacora.km_salida, 0)
+
+
+def _decorate_bitacora(bitacora: BitacoraSalidaLlegada):
+    bitacora.km_recorridos = _km_recorridos(bitacora)
+    if bitacora.hora_salida and not bitacora.cerrada:
+        bitacora.horas_abierta = int((timezone.now() - bitacora.hora_salida).total_seconds() // 3600)
+    else:
+        bitacora.horas_abierta = 0
+    return bitacora
+
+
+def _checklist_detalle_inspeccion(inspeccion: InspeccionVehiculo) -> list[dict[str, object]]:
+    grupos = [
+        ("Accesorios exterior", "ext_"),
+        ("Accesorios interior", "int_"),
+        ("Niveles", "niv_"),
+        ("Estética interior", "est_"),
+    ]
+    detalle = []
+    for titulo, prefix in grupos:
+        items = []
+        for field in InspeccionVehiculo._meta.fields:
+            if field.name.startswith(prefix):
+                items.append(
+                    {
+                        "label": field.verbose_name.replace("_", " ").title(),
+                        "ok": bool(getattr(inspeccion, field.name)),
+                    }
+                )
+        detalle.append({"titulo": titulo, "items": items})
+    return detalle
+
+
+def _decorate_inspeccion(inspeccion: InspeccionVehiculo):
+    inspeccion.faltantes_count = _inspeccion_faltantes_count(inspeccion)
+    inspeccion.checklist_detalle = _checklist_detalle_inspeccion(inspeccion)
+    return inspeccion
 
 
 @login_required
@@ -1613,3 +1670,241 @@ def flota_resumen(request):
         "today": today,
     }
     return render(request, "logistica/flota_resumen.html", context)
+
+
+@login_required
+def unidad_detalle(request, pk):
+    if not _can_manage_tickets_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para ver la ficha de unidad")
+
+    today = timezone.localdate()
+    unidad = get_object_or_404(Unidad.objects.select_related("sucursal"), pk=pk)
+    documentos_qs = DocumentoUnidad.objects.filter(unidad=unidad).order_by("-fecha_vencimiento")
+    documentos = [_decorate_documento(documento) for documento in documentos_qs]
+    lavados = list(LavadoUnidad.objects.select_related("registrado_por").filter(unidad=unidad).order_by("-fecha"))
+    reparaciones = ReparacionUnidad.objects.select_related("reporte_origen", "registrado_por").filter(unidad=unidad).order_by(
+        "-fecha_ingreso"
+    )
+    bitacoras = [
+        _decorate_bitacora(bitacora)
+        for bitacora in BitacoraSalidaLlegada.objects.select_related("repartidor__user", "unidad")
+        .filter(unidad=unidad)
+        .order_by("-hora_salida")[:30]
+    ]
+    inspecciones = [
+        _decorate_inspeccion(inspeccion)
+        for inspeccion in InspeccionVehiculo.objects.select_related("repartidor__user", "unidad")
+        .filter(unidad=unidad)
+        .order_by("-fecha")[:20]
+    ]
+    ultimo_lavado = lavados[0] if lavados else None
+    documento_seguro = _decorate_documento(documentos_qs.filter(tipo=DocumentoUnidad.TIPO_SEGURO).first())
+    documento_tarjeta = _decorate_documento(documentos_qs.filter(tipo=DocumentoUnidad.TIPO_TARJETA_CIRCULACION).first())
+
+    context = {
+        "module_tabs": _module_tabs("unidades"),
+        "unidad": unidad,
+        "documentos": documentos,
+        "tipos_servicio": TipoServicioUnidad.objects.filter(activo=True).order_by("nombre"),
+        "servicios": [
+            _decorate_servicio(servicio)
+            for servicio in ServicioRealizadoUnidad.objects.select_related("tipo_servicio", "registrado_por")
+            .filter(unidad=unidad)
+            .order_by("-fecha_servicio")
+        ],
+        "lavados": lavados,
+        "reparaciones": reparaciones,
+        "bitacoras": bitacoras,
+        "inspecciones": inspecciones,
+        "reportes_unidad": ReporteUnidad.objects.filter(unidad=unidad).order_by("-fecha_reporte")[:100],
+        "today": today,
+        "limite_30": today + timedelta(days=30),
+        "gasto_total_anio": reparaciones.filter(fecha_ingreso__year=today.year).aggregate(total=Sum("costo_total")).get("total")
+        or Decimal("0"),
+        "dias_sin_lavar": (today - ultimo_lavado.fecha).days if ultimo_lavado else None,
+        "documento_seguro": documento_seguro,
+        "documento_tarjeta": documento_tarjeta,
+        "turno_activo": BitacoraSalidaLlegada.objects.select_related("repartidor__user")
+        .filter(unidad=unidad, cerrada=False)
+        .order_by("hora_salida")
+        .first(),
+    }
+    return render(request, "logistica/unidad_detalle.html", context)
+
+
+def _redirect_unidad_tab(pk: int, anchor: str):
+    return redirect(f"{reverse('logistica:unidad_detalle', kwargs={'pk': pk})}#{anchor}")
+
+
+@login_required
+def unidad_documento_nuevo(request, pk):
+    if not _can_manage_tickets_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para agregar documentos de unidad")
+    unidad = get_object_or_404(Unidad, pk=pk)
+    if request.method == "POST":
+        DocumentoUnidad.objects.create(
+            unidad=unidad,
+            tipo=request.POST.get("tipo") or DocumentoUnidad.TIPO_OTRO,
+            descripcion=(request.POST.get("descripcion") or "").strip(),
+            aseguradora=(request.POST.get("aseguradora") or "").strip(),
+            archivo=request.FILES.get("archivo"),
+            fecha_emision=_parse_date(request.POST.get("fecha_emision")),
+            fecha_vencimiento=_parse_date(request.POST.get("fecha_vencimiento")) or timezone.localdate(),
+            notas=(request.POST.get("notas") or "").strip(),
+            registrado_por=request.user,
+        )
+        messages.success(request, "Documento agregado correctamente.")
+    return _redirect_unidad_tab(pk, "documentos")
+
+
+@login_required
+def unidad_servicio_nuevo(request, pk):
+    if not _can_manage_tickets_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para registrar servicios de unidad")
+    unidad = get_object_or_404(Unidad, pk=pk)
+    if request.method == "POST":
+        tipo_servicio = get_object_or_404(TipoServicioUnidad, pk=request.POST.get("tipo_servicio"), activo=True)
+        ServicioRealizadoUnidad.objects.create(
+            unidad=unidad,
+            tipo_servicio=tipo_servicio,
+            fecha_servicio=_parse_date(request.POST.get("fecha_servicio")) or timezone.localdate(),
+            km_al_servicio=int(request.POST.get("km_al_servicio") or 0) or None,
+            proveedor=(request.POST.get("proveedor") or "").strip(),
+            costo=_parse_decimal(request.POST.get("costo")) if request.POST.get("costo") else None,
+            archivo_factura=request.FILES.get("archivo_factura"),
+            notas=(request.POST.get("notas") or "").strip(),
+            registrado_por=request.user,
+        )
+        messages.success(request, "Servicio registrado correctamente.")
+    return _redirect_unidad_tab(pk, "servicios")
+
+
+@login_required
+def unidad_lavado_nuevo(request, pk):
+    if not _can_manage_tickets_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para registrar lavados de unidad")
+    unidad = get_object_or_404(Unidad, pk=pk)
+    if request.method == "POST":
+        LavadoUnidad.objects.create(
+            unidad=unidad,
+            fecha=_parse_date(request.POST.get("fecha")) or timezone.localdate(),
+            costo=_parse_decimal(request.POST.get("costo")) if request.POST.get("costo") else None,
+            notas=(request.POST.get("notas") or "").strip(),
+            registrado_por=request.user,
+        )
+        messages.success(request, "Lavado registrado correctamente.")
+    return _redirect_unidad_tab(pk, "lavados")
+
+
+@login_required
+def unidad_reparacion_nueva(request, pk):
+    if not _can_manage_tickets_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para registrar reparaciones de unidad")
+    unidad = get_object_or_404(Unidad, pk=pk)
+    if request.method == "POST":
+        reporte_id = request.POST.get("reporte_origen") or None
+        ReparacionUnidad.objects.create(
+            unidad=unidad,
+            reporte_origen=ReporteUnidad.objects.filter(pk=reporte_id, unidad=unidad).first() if reporte_id else None,
+            fecha_ingreso=_parse_date(request.POST.get("fecha_ingreso")) or timezone.localdate(),
+            fecha_entrega=_parse_date(request.POST.get("fecha_entrega")),
+            descripcion_falla=(request.POST.get("descripcion_falla") or "").strip(),
+            descripcion_reparacion=(request.POST.get("descripcion_reparacion") or "").strip(),
+            proveedor=(request.POST.get("proveedor") or "").strip(),
+            costo_total=_parse_decimal(request.POST.get("costo_total")) if request.POST.get("costo_total") else None,
+            archivo_factura=request.FILES.get("archivo_factura"),
+            foto_nota=request.FILES.get("foto_nota"),
+            notas=(request.POST.get("notas") or "").strip(),
+            registrado_por=request.user,
+        )
+        messages.success(request, "Reparación registrada correctamente.")
+    return _redirect_unidad_tab(pk, "reparaciones")
+
+
+@login_required
+def reportes_lista(request):
+    if not _can_manage_tickets_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para ver reportes de Logística")
+
+    qs = ReporteUnidad.objects.select_related("unidad", "repartidor__user").order_by("-fecha_reporte")
+    estatus = (request.GET.get("estatus") or "").strip()
+    severidad = (request.GET.get("severidad") or "").strip()
+    unidad_id = (request.GET.get("unidad") or "").strip()
+    fecha_desde = _parse_date(request.GET.get("fecha_desde"))
+    fecha_hasta = _parse_date(request.GET.get("fecha_hasta"))
+    if estatus:
+        qs = qs.filter(estatus=estatus)
+    if severidad:
+        qs = qs.filter(severidad=severidad)
+    if unidad_id:
+        qs = qs.filter(unidad_id=unidad_id)
+    if fecha_desde:
+        qs = qs.filter(fecha_reporte__date__gte=fecha_desde)
+    if fecha_hasta:
+        qs = qs.filter(fecha_reporte__date__lte=fecha_hasta)
+
+    reportes = Paginator(qs, 20).get_page(request.GET.get("page"))
+    return render(
+        request,
+        "logistica/reportes_lista.html",
+        {
+            "module_tabs": _module_tabs("reportes"),
+            "reportes": reportes,
+            "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
+            "estatus_choices": ReporteUnidad.ESTATUS_CHOICES,
+            "severidad_choices": ReporteUnidad.SEVERIDAD_CHOICES,
+            "filters": {
+                "estatus": estatus,
+                "severidad": severidad,
+                "unidad": unidad_id,
+                "fecha_desde": fecha_desde.isoformat() if fecha_desde else "",
+                "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else "",
+            },
+        },
+    )
+
+
+@login_required
+def bitacoras_lista(request):
+    if not _can_manage_tickets_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para ver bitácoras de Logística")
+
+    qs = BitacoraSalidaLlegada.objects.select_related("unidad", "repartidor__user").order_by("-hora_salida")
+    unidad_id = (request.GET.get("unidad") or "").strip()
+    repartidor_id = (request.GET.get("repartidor") or "").strip()
+    cerrada = (request.GET.get("cerrada") or "").strip()
+    fecha_desde = _parse_date(request.GET.get("fecha_desde"))
+    fecha_hasta = _parse_date(request.GET.get("fecha_hasta"))
+    if unidad_id:
+        qs = qs.filter(unidad_id=unidad_id)
+    if repartidor_id:
+        qs = qs.filter(repartidor_id=repartidor_id)
+    if cerrada == "1":
+        qs = qs.filter(cerrada=True)
+    elif cerrada == "0":
+        qs = qs.filter(cerrada=False)
+    if fecha_desde:
+        qs = qs.filter(fecha__gte=fecha_desde)
+    if fecha_hasta:
+        qs = qs.filter(fecha__lte=fecha_hasta)
+
+    page = Paginator(qs, 20).get_page(request.GET.get("page"))
+    bitacoras = [_decorate_bitacora(bitacora) for bitacora in page]
+    return render(
+        request,
+        "logistica/bitacoras_lista.html",
+        {
+            "module_tabs": _module_tabs("bitacoras"),
+            "bitacoras": bitacoras,
+            "bitacoras_page": page,
+            "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
+            "repartidores": Repartidor.objects.select_related("user").order_by("user__first_name", "user__username"),
+            "filters": {
+                "unidad": unidad_id,
+                "repartidor": repartidor_id,
+                "cerrada": cerrada,
+                "fecha_desde": fecha_desde.isoformat() if fecha_desde else "",
+                "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else "",
+            },
+        },
+    )

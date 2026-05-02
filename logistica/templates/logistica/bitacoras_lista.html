@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Logística · Bitácoras{% endblock %}
+{% block page_title %}Logística · Bitácoras ERP{% endblock %}
+
+{% block extra_css %}
+<style>
+  .logs-shell { display: grid; gap: 18px; }
+  .logs-filter { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 10px; align-items: end; }
+  .log-badge { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; }
+  .log-badge.ok { background: #e5f5ee; color: #1f7554; }
+  .log-badge.warn { background: #fff4d8; color: #9a6a00; }
+  .log-badge.danger { background: #ffe8ec; color: #bc3b56; }
+  .log-thumb { width: 64px; height: 46px; object-fit: cover; border-radius: 8px; border: 1px solid #efc7d8; }
+  tr.log-overdue td { background: #fff8e6; }
+  .log-muted { color: #77656d; font-size: 13px; }
+  .log-pager { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  @media (max-width: 980px) { .logs-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 620px) { .logs-filter, .log-pager { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="logs-shell">
+  <section class="module-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">Bitácoras salida/llegada</div>
+    <p class="muted">Registros de turno capturados desde celular, consultables dentro del ERP.</p>
+    <form class="logs-filter" method="get">
+      <label>Unidad<select class="input-field" name="unidad"><option value="">Todas</option>{% for unidad in unidades %}<option value="{{ unidad.id }}" {% if filters.unidad == unidad.id|stringformat:"s" %}selected{% endif %}>{{ unidad.codigo }}</option>{% endfor %}</select></label>
+      <label>Repartidor<select class="input-field" name="repartidor"><option value="">Todos</option>{% for repartidor in repartidores %}<option value="{{ repartidor.id }}" {% if filters.repartidor == repartidor.id|stringformat:"s" %}selected{% endif %}>{{ repartidor }}</option>{% endfor %}</select></label>
+      <label>Estatus<select class="input-field" name="cerrada"><option value="">Todos</option><option value="0" {% if filters.cerrada == "0" %}selected{% endif %}>Abierta</option><option value="1" {% if filters.cerrada == "1" %}selected{% endif %}>Cerrada</option></select></label>
+      <label>Desde<input class="input-field" type="date" name="fecha_desde" value="{{ filters.fecha_desde }}"></label>
+      <label>Hasta<input class="input-field" type="date" name="fecha_hasta" value="{{ filters.fecha_hasta }}"></label>
+      <div><button class="btn btn-primary" type="submit" style="background:#8B2252;border-color:#8B2252;">Filtrar</button><a class="btn btn-secondary" href="{% url 'logistica:bitacoras_lista' %}">Limpiar</a></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead><tr><th>Folio</th><th>Unidad</th><th>Repartidor</th><th>Hora salida</th><th>Hora llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Nivel gas</th><th>Estatus</th><th>Fotos</th></tr></thead>
+        <tbody>
+          {% for bitacora in bitacoras %}
+          <tr class="{% if not bitacora.cerrada and bitacora.horas_abierta > 8 %}log-overdue{% endif %}">
+            <td><strong>{{ bitacora.folio }}</strong></td>
+            <td>{{ bitacora.unidad.codigo }}</td>
+            <td>{{ bitacora.repartidor }}</td>
+            <td>{{ bitacora.hora_salida|date:"d/m/Y H:i" }}</td>
+            <td>{{ bitacora.hora_llegada|date:"d/m/Y H:i"|default:"-" }}</td>
+            <td>{{ bitacora.km_salida|intcomma }}</td>
+            <td>{{ bitacora.km_llegada|default:"-"|intcomma }}</td>
+            <td>{{ bitacora.km_recorridos|default:"-"|intcomma }}</td>
+            <td>{{ bitacora.nivel_gas_salida }} → {{ bitacora.nivel_gas_llegada|default:"-" }}</td>
+            <td>{% if bitacora.cerrada %}<span class="log-badge ok">Cerrada</span>{% else %}<span class="log-badge danger">ABIERTO</span>{% if bitacora.horas_abierta > 8 %}<br><span class="log-badge warn">{{ bitacora.horas_abierta }} h</span>{% endif %}{% endif %}</td>
+            <td>
+              {% if bitacora.foto_tablero_salida %}<a href="{{ bitacora.foto_tablero_salida.url }}" target="_blank" rel="noopener"><img class="log-thumb" src="{{ bitacora.foto_tablero_salida.url }}" alt="Tablero salida"></a>{% endif %}
+              {% if bitacora.foto_tablero_llegada %}<a href="{{ bitacora.foto_tablero_llegada.url }}" target="_blank" rel="noopener"><img class="log-thumb" src="{{ bitacora.foto_tablero_llegada.url }}" alt="Tablero llegada"></a>{% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="11" class="muted">No hay bitácoras con esos filtros.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if bitacoras_page.paginator.num_pages > 1 %}
+    <nav class="log-pager">
+      {% if bitacoras_page.has_previous %}<a class="btn btn-secondary btn-small" href="?page={{ bitacoras_page.previous_page_number }}">Anterior</a>{% endif %}
+      <span class="muted">Página {{ bitacoras_page.number }} de {{ bitacoras_page.paginator.num_pages }}</span>
+      {% if bitacoras_page.has_next %}<a class="btn btn-secondary btn-small" href="?page={{ bitacoras_page.next_page_number }}">Siguiente</a>{% endif %}
+    </nav>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
