@@ -13,8 +13,8 @@ from django.db.models import Count, Q
 from django.db.models import Sum
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
-from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render, redirect
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
+from django.shortcuts import get_object_or_404, render, redirect
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout, get_user_model
 from django.contrib.auth.models import Group
@@ -43,6 +43,7 @@ from core.access import (
     can_view_rrhh,
     can_view_reportes,
     can_view_orquestacion,
+    get_module_access,
     is_branch_capture_only,
 )
 from core.cache_versions import get_or_set_versioned_cache
@@ -57,7 +58,7 @@ from maestros.utils.canonical_catalog import (
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra, OrdenCompra, RecepcionCompra
 from recetas.models import PlanProduccion, PlanProduccionItem, PronosticoVenta, Receta, LineaReceta, VentaHistorica, SolicitudVenta
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
-from core.models import AuditLog, Departamento, Sucursal, UserProfile, sucursales_operativas
+from core.models import AuditLog, Departamento, Sucursal, UserModuleAccess, UserProfile, sucursales_operativas
 from core.audit import log_event
 from activos.models import Activo, OrdenMantenimiento, PlanMantenimiento
 from crm.models import PedidoCliente
@@ -250,6 +251,36 @@ def _user_access_scope(user, profile) -> dict:
         "readiness_label": readiness_label,
         "readiness_tone": readiness_tone,
     }
+
+
+def _module_access_rows(user) -> list[dict]:
+    explicit_access = {
+        item.module: item.access
+        for item in getattr(user, "module_access", []).all()
+    }
+    rows = []
+    for module, label in UserModuleAccess.MODULOS:
+        access = explicit_access.get(module) or get_module_access(user, module)
+        if access == UserModuleAccess.ACCESS_MANAGE:
+            badge_label = "Gestiona"
+            badge_tone = "manage"
+        elif access == UserModuleAccess.ACCESS_VIEW:
+            badge_label = "Solo ve"
+            badge_tone = "view"
+        else:
+            badge_label = "Sin acceso"
+            badge_tone = "none"
+        rows.append(
+            {
+                "module": module,
+                "label": label,
+                "access": access,
+                "badge_label": badge_label,
+                "badge_tone": badge_tone,
+                "is_explicit": module in explicit_access,
+            }
+        )
+    return rows
 
 
 def _role_capability_matrix() -> list[dict]:
@@ -4121,6 +4152,52 @@ def ai_private_hub_view(request: HttpRequest) -> HttpResponse:
     return render(request, "orquestacion/chat.html", context)
 
 
+def usuario_permisos_update(request: HttpRequest, user_id: int) -> HttpResponse:
+    if not request.user.is_authenticated:
+        return redirect("/login/")
+    if not (request.user.is_superuser or request.user.groups.filter(name__in=["DG", "dg"]).exists()):
+        return HttpResponseForbidden()
+    if request.method != "POST":
+        return redirect("users_access")
+
+    user_model = get_user_model()
+    target_user = get_object_or_404(user_model, pk=user_id)
+    modulos = [module for module, _label in UserModuleAccess.MODULOS]
+
+    for module in modulos:
+        access_value = request.POST.get(f"access_{module}", UserModuleAccess.ACCESS_NONE)
+        if access_value not in {
+            UserModuleAccess.ACCESS_NONE,
+            UserModuleAccess.ACCESS_VIEW,
+            UserModuleAccess.ACCESS_MANAGE,
+        }:
+            access_value = UserModuleAccess.ACCESS_NONE
+        UserModuleAccess.objects.update_or_create(
+            user=target_user,
+            module=module,
+            defaults={
+                "access": access_value,
+                "updated_by": request.user,
+            },
+        )
+
+    log_event(
+        request.user,
+        "UPDATE",
+        "core.UserModuleAccess",
+        target_user.id,
+        {
+            "username": target_user.username,
+            "modules": modulos,
+        },
+    )
+    messages.success(
+        request,
+        f"Permisos de {target_user.get_full_name() or target_user.username} actualizados.",
+    )
+    return redirect("users_access")
+
+
 def users_access_view(request: HttpRequest) -> HttpResponse:
     if not request.user.is_authenticated:
         return redirect("/login/")
@@ -4243,7 +4320,7 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
     edit_user_id = _safe_int(request.GET.get("edit") or "")
     users_qs = (
         user_model.objects.select_related("userprofile__departamento", "userprofile__sucursal")
-        .prefetch_related("groups")
+        .prefetch_related("groups", "module_access")
         .order_by("username")
     )
     if search_query:
@@ -4259,6 +4336,7 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
     for u in users_qs[:300]:
         profile = getattr(u, "userprofile", None)
         access_scope = _user_access_scope(u, profile)
+        module_access_rows = _module_access_rows(u)
         row = {
             "id": u.id,
             "username": u.username,
@@ -4289,6 +4367,7 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
                 }
                 for key, label in LOCK_FIELDS
             ],
+            "module_access_rows": module_access_rows,
         }
         row.update(_user_enterprise_profile(u, profile, row))
         if role_filter and row["role"] != role_filter:
@@ -4687,8 +4766,8 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
         "users_workflow_stage_rows": users_workflow_stage_rows,
         "users_focus_summary": users_focus_summary,
         "role_capability_matrix": _role_capability_matrix(),
+        "module_access_choices": UserModuleAccess.ACCESS_CHOICES,
         "role_operational_requirements": _role_operational_requirements(),
         "erp_command_center": _users_command_center(enterprise_ready_summary, users_maturity_summary),
     }
     return render(request, "core/usuarios_accesos.html", context)
-

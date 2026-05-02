@@ -91,6 +91,53 @@ def primary_role(user: AbstractBaseUser) -> str:
     return ""
 
 
+def get_module_access(user: AbstractBaseUser, module: str) -> str:
+    """
+    Retorna 'none', 'view' o 'manage' para un usuario y módulo.
+
+    Prioridad:
+    1. Superuser: manage
+    2. Permiso explícito en UserModuleAccess
+    3. Fallback derivado del rol actual
+    """
+    if not user or not user.is_authenticated:
+        return "none"
+    if user.is_superuser:
+        return "manage"
+
+    module = (module or "").strip().lower()
+    try:
+        from core.models import UserModuleAccess
+
+        explicit = UserModuleAccess.objects.get(user=user, module=module)
+        return explicit.access
+    except UserModuleAccess.DoesNotExist:
+        pass
+
+    groups = {name.upper() for name in _group_names(user)}
+    role_module_map = {
+        ROLE_DG: "manage",
+        ROLE_ADMIN: "manage",
+        ROLE_COMPRAS: "manage" if module == "compras" else "view",
+        ROLE_VENTAS: "manage" if module == "ventas" else "none",
+        ROLE_PRODUCCION: "manage" if module == "produccion" else "none",
+        ROLE_RRHH: "manage" if module == "rrhh" else "none",
+        ROLE_LOGISTICA: "manage" if module == "logistica" else "none",
+    }
+    for group in groups:
+        if group in role_module_map:
+            return role_module_map[group]
+    return "none"
+
+
+def can_view(user: AbstractBaseUser, module: str) -> bool:
+    return get_module_access(user, module) in ("view", "manage")
+
+
+def can_manage(user: AbstractBaseUser, module: str) -> bool:
+    return get_module_access(user, module) == "manage"
+
+
 def can_view_compras(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_COMPRAS, ROLE_ALMACEN, ROLE_LECTURA) and not _is_locked(
         user, "lock_compras"

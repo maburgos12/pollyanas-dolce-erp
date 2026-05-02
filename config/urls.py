@@ -35,6 +35,11 @@ urlpatterns = [
         name="ai_private_message_stream_api",
     ),
     path("usuarios-accesos/", core_views.users_access_view, name="users_access"),
+    path(
+        "usuarios-accesos/<int:user_id>/permisos/",
+        core_views.usuario_permisos_update,
+        name="usuario_permisos_update",
+    ),
 
     path("", core_views.home_redirect, name="home"),
     path("dashboard/", core_views.dashboard, name="dashboard"),
