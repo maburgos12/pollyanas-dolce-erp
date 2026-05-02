@@ -78,32 +78,40 @@ def _module_tabs(active: str) -> list[dict]:
     ]
 
 
-def _user_in_groups(user, groups: list[str]) -> bool:
+def tiene_acceso_logistica(user, roles: list[str] | None = None) -> bool:
     if not user.is_authenticated:
         return False
     if user.is_staff or user.is_superuser:
         return True
-    return user.groups.filter(name__in=groups).exists()
+    grupos_usuario = set(user.groups.values_list("name", flat=True))
+    grupos_permitidos = {
+        "dg": {"dg", "DG"},
+        "compras_logistica": {"compras_logistica", "COMPRAS"},
+        "supervisor_logistica": {"supervisor_logistica"},
+        "repartidor": {"repartidor"},
+    }
+    if roles is None:
+        roles = ["dg", "compras_logistica", "supervisor_logistica"]
+    for rol in roles:
+        if grupos_usuario & grupos_permitidos.get(rol, set()):
+            return True
+    return False
 
 
 def _can_view_logistica_ejecutivo(user) -> bool:
-    return _user_in_groups(user, ["dg"])
+    return tiene_acceso_logistica(user, ["dg"])
 
 
 def _can_manage_tickets_logistica(user) -> bool:
-    return _user_in_groups(user, ["compras_logistica", "supervisor_logistica", "dg"])
+    return tiene_acceso_logistica(user, ["compras_logistica", "supervisor_logistica", "dg"])
 
 
 def _can_view_flota_resumen(user) -> bool:
-    return _user_in_groups(user, ["dg", "supervisor_logistica"])
+    return tiene_acceso_logistica(user, ["dg", "supervisor_logistica"])
 
 
 def _can_manage_unidades(user) -> bool:
-    if not user.is_authenticated:
-        return False
-    if user.is_staff or user.is_superuser:
-        return True
-    return user.groups.filter(name__in=["supervisor_logistica", "dg"]).exists()
+    return tiene_acceso_logistica(user, ["supervisor_logistica", "dg"])
 
 
 def _logistica_enterprise_chain(
