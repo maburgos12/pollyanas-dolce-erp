@@ -9,14 +9,17 @@ class ActivoAdmin(admin.ModelAdmin):
         "codigo",
         "nombre",
         "categoria",
+        "sucursal",
         "ubicacion",
         "estado",
         "criticidad",
         "activo",
         "actualizado_en",
     )
-    list_filter = ("estado", "criticidad", "activo", "categoria")
+    list_filter = ("estado", "criticidad", "activo", "categoria", "sucursal")
+    list_editable = ("sucursal",)
     search_fields = ("codigo", "nombre", "categoria", "ubicacion")
+    autocomplete_fields = ("sucursal", "proveedor_mantenimiento")
     ordering = ("nombre",)
 
 

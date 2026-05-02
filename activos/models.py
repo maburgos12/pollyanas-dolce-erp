@@ -31,6 +31,15 @@ class Activo(models.Model):
     nombre = models.CharField(max_length=180)
     categoria = models.CharField(max_length=120, blank=True, default="")
     ubicacion = models.CharField(max_length=160, blank=True, default="")
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activos",
+        verbose_name="Sucursal",
+        help_text="Sucursal donde está físicamente el activo",
+    )
     proveedor_mantenimiento = models.ForeignKey(
         Proveedor,
         on_delete=models.SET_NULL,
