@@ -153,7 +153,7 @@
                 {% endif %}
 
                 {# ── GRUPO 2: OPERACIÓN ────────────────────────────── #}
-                {% if ui_access.can_view_recetas or ui_access.can_view_maestros or ui_access.can_view_compras %}
+                {% if ui_access.can_view_recetas or ui_access.can_view_maestros or ui_access.can_view_compras or ui_access.can_view_logistica %}
                 <button class="sidebar-group-toggle" data-group="operacion" aria-expanded="true">
                     <span class="sidebar-section-label">Operación diaria</span>
                     <span class="toggle-chevron" aria-hidden="true">
@@ -261,6 +261,23 @@
                                 </svg>
                             </span>
                             <span>Solicitudes</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    {% if ui_access.can_view_logistica %}
+                    <li>
+                        <a href="{% url 'logistica:dashboard' %}"
+                           class="{% if '/logistica/' in request.path %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 7h11v8H3z"/>
+                                    <path d="M14 10h3l3 3v2h-6z"/>
+                                    <circle cx="7" cy="18" r="2"/>
+                                    <circle cx="17" cy="18" r="2"/>
+                                    <path d="M5 7V5h7v2"/>
+                                </svg>
+                            </span>
+                            <span>Logística</span>
                         </a>
                     </li>
                     {% endif %}
