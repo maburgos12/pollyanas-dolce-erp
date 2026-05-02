@@ -1,16 +1,14 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Mis reportes de fallas{% endblock %}
 {% block page_title %}Fallas · Mis reportes{% endblock %}
 {% block body_class %}page-fallas-mis-reportes{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260321-05">
 <style>
-  .fallas-shell{display:grid;gap:18px}
   .fallas-card{background:#fff;border:1px solid rgba(139,34,82,.16);border-radius:18px;padding:24px;box-shadow:0 18px 42px rgba(139,34,82,.08)}
-  .fallas-tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
-  .fallas-tab{display:inline-flex;align-items:center;min-height:40px;padding:8px 14px;border-radius:999px;border:1px solid rgba(139,34,82,.18);text-decoration:none;color:#8B2252;font-weight:800;background:#fff}
-  .fallas-tab.active{background:#8B2252;color:#fff}
   .fallas-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}
   .fallas-title{font-family:"Playfair Display",serif;font-size:34px;margin:4px 0;color:#3f2633}
   .fallas-muted{color:#7a6871;margin:0}
@@ -37,11 +35,14 @@
 {% endblock %}
 
 {% block content %}
-<div class="fallas-shell">
-  <nav class="fallas-tabs">
-    <a class="fallas-tab" href="{% url 'fallas:dashboard' %}">Dashboard</a>
-    <a class="fallas-tab" href="{% url 'fallas:pwa-reporte' %}">Reportar falla</a>
-    <a class="fallas-tab active" href="{% url 'fallas:pwa-mis-reportes' %}">Mis reportes</a>
+<div class="module-shell bi-shell" id="fallas-app">
+  <nav class="module-tabs">
+    <a href="{% url 'fallas:dashboard' %}" class="module-tab">Dashboard</a>
+    <a href="{% url 'fallas:pwa-reporte' %}" class="module-tab">Reportar falla</a>
+    <a href="{% url 'fallas:pwa-mis-reportes' %}" class="module-tab active">Mis reportes</a>
+    {% if es_dg %}
+    <a href="{% url 'fallas:dashboard' %}?tab=categorias" class="module-tab">Categorías</a>
+    {% endif %}
   </nav>
 
   <section class="fallas-card">
