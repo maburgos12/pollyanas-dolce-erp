@@ -18,7 +18,18 @@ from core.audit import log_event
 from core.models import Sucursal
 from crm.models import PedidoCliente
 
-from .models import BitacoraSalidaLlegada, EntregaRuta, InspeccionVehiculo, ReporteUnidad, RutaEntrega, Unidad
+from .models import (
+    BitacoraSalidaLlegada,
+    DocumentoUnidad,
+    EntregaRuta,
+    InspeccionVehiculo,
+    LavadoUnidad,
+    ReparacionUnidad,
+    ReporteUnidad,
+    RutaEntrega,
+    ServicioRealizadoUnidad,
+    Unidad,
+)
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -44,10 +55,33 @@ def _parse_datetime_local(raw: str | None):
 def _module_tabs(active: str) -> list[dict]:
     return [
         {"label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
+        {"label": "Ejecutivo", "url_name": "logistica:dashboard_ejecutivo", "active": active == "ejecutivo"},
+        {"label": "Tickets", "url_name": "logistica:tickets_kanban", "active": active == "tickets"},
+        {"label": "Flota", "url_name": "logistica:flota_resumen", "active": active == "flota"},
         {"label": "Rutas", "url_name": "logistica:rutas", "active": active == "rutas"},
         {"label": "Unidades", "url_name": "logistica:unidades_list", "active": active == "unidades"},
         {"label": "Capturas PWA", "url_name": "logistica:capturas_pwa", "active": active == "capturas"},
     ]
+
+
+def _user_in_groups(user, groups: list[str]) -> bool:
+    if not user.is_authenticated:
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+    return user.groups.filter(name__in=groups).exists()
+
+
+def _can_view_logistica_ejecutivo(user) -> bool:
+    return _user_in_groups(user, ["dg"])
+
+
+def _can_manage_tickets_logistica(user) -> bool:
+    return _user_in_groups(user, ["compras_logistica", "supervisor_logistica", "dg"])
+
+
+def _can_view_flota_resumen(user) -> bool:
+    return _user_in_groups(user, ["dg", "supervisor_logistica"])
 
 
 def _can_manage_unidades(user) -> bool:
@@ -697,6 +731,7 @@ def dashboard(request):
         "rutas_hoy_url": reverse("logistica:rutas") + f"?{urlencode({**dashboard_query, 'enterprise_focus': 'HOY'})}",
         "rutas_en_ruta_url": reverse("logistica:rutas") + f"?{urlencode({**dashboard_query, 'enterprise_focus': 'EN_RUTA'})}",
         "rutas_incidencias_url": reverse("logistica:rutas") + f"?{urlencode({**dashboard_query, 'enterprise_focus': 'INCIDENCIAS'})}",
+        "show_logistica_management_links": _can_manage_tickets_logistica(request.user),
     }
     return render(request, "logistica/dashboard.html", context)
 
@@ -756,6 +791,24 @@ def _inspeccion_faltantes_count(inspeccion: InspeccionVehiculo) -> int:
         if field.name.startswith(("ext_", "int_", "niv_", "est_"))
     ]
     return sum(1 for field in check_fields if not getattr(inspeccion, field))
+
+
+def _dias_hasta(fecha):
+    if not fecha:
+        return None
+    return (fecha - timezone.localdate()).days
+
+
+def _decorate_documento(documento):
+    if documento:
+        documento.dias_restantes = _dias_hasta(documento.fecha_vencimiento)
+    return documento
+
+
+def _decorate_servicio(servicio):
+    if servicio:
+        servicio.dias_restantes = _dias_hasta(servicio.proxima_fecha)
+    return servicio
 
 
 @login_required
@@ -1379,3 +1432,184 @@ def ruta_detail(request, pk: int):
         ),
     }
     return render(request, "logistica/ruta_detail.html", context)
+
+
+@login_required
+def dashboard_ejecutivo(request):
+    if not _can_view_logistica_ejecutivo(request.user):
+        raise PermissionDenied("No tienes permisos para ver el dashboard ejecutivo de Logística")
+
+    today = timezone.localdate()
+    limite_30 = today + timedelta(days=30)
+    checklist_fields = [
+        field.name
+        for field in InspeccionVehiculo._meta.fields
+        if field.name.startswith(("ext_", "int_", "niv_", "est_"))
+    ]
+    inspecciones_recientes = []
+    for inspeccion in InspeccionVehiculo.objects.select_related("unidad", "repartidor__user").order_by("-fecha")[:50]:
+        faltantes = _inspeccion_faltantes_count(inspeccion)
+        if inspeccion.tiene_golpes or faltantes:
+            inspeccion.faltantes_count = faltantes
+            inspeccion.faltantes_labels = [
+                field.replace("_", " ").title()
+                for field in checklist_fields
+                if not getattr(inspeccion, field)
+            ][:6]
+            inspecciones_recientes.append(inspeccion)
+        if len(inspecciones_recientes) >= 5:
+            break
+
+    documentos_criticos = []
+    for documento in DocumentoUnidad.objects.select_related("unidad").filter(
+        vigente=True,
+        fecha_vencimiento__lte=limite_30,
+    ).order_by("fecha_vencimiento", "unidad__codigo"):
+        documentos_criticos.append(_decorate_documento(documento))
+    turnos_sin_cerrar = list(
+        BitacoraSalidaLlegada.objects.select_related("unidad", "repartidor__user")
+        .filter(cerrada=False)
+        .order_by("hora_salida", "id")
+    )
+    now = timezone.now()
+    for turno in turnos_sin_cerrar:
+        turno.horas_abierto = int(((now - turno.hora_salida).total_seconds() // 3600)) if turno.hora_salida else 0
+
+    context = {
+        "module_tabs": _module_tabs("ejecutivo"),
+        "today": today,
+        "tickets_abiertos": ReporteUnidad.objects.filter(estatus=ReporteUnidad.ESTATUS_ABIERTO).count(),
+        "tickets_criticos": ReporteUnidad.objects.filter(
+            estatus__in=[ReporteUnidad.ESTATUS_ABIERTO, ReporteUnidad.ESTATUS_EN_PROCESO],
+            severidad=ReporteUnidad.SEVERIDAD_CRITICO,
+        ).count(),
+        "turnos_abiertos": BitacoraSalidaLlegada.objects.filter(cerrada=False).count(),
+        "unidades_activas": Unidad.objects.filter(activa=True).count(),
+        "documentos_por_vencer": DocumentoUnidad.objects.filter(vigente=True, fecha_vencimiento__lte=limite_30).count(),
+        "servicios_proximos": ServicioRealizadoUnidad.objects.filter(proxima_fecha__lte=limite_30).count(),
+        "gasto_mes": ReparacionUnidad.objects.filter(
+            fecha_ingreso__month=today.month,
+            fecha_ingreso__year=today.year,
+        ).aggregate(total=Sum("costo_total")).get("total")
+        or Decimal("0"),
+        "tickets_recientes": ReporteUnidad.objects.select_related("unidad", "repartidor__user").order_by(
+            "-fecha_reporte"
+        )[:10],
+        "turnos_sin_cerrar": turnos_sin_cerrar,
+        "documentos_criticos": documentos_criticos,
+        "inspecciones_recientes": inspecciones_recientes,
+    }
+    return render(request, "logistica/dashboard_ejecutivo.html", context)
+
+
+@login_required
+def tickets_kanban(request):
+    if not _can_manage_tickets_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para gestionar tickets de Logística")
+
+    base_qs = ReporteUnidad.objects.select_related("unidad", "repartidor__user").order_by("-fecha_reporte")
+    today = timezone.localdate()
+    context = {
+        "module_tabs": _module_tabs("tickets"),
+        "tickets_abiertos": base_qs.filter(estatus=ReporteUnidad.ESTATUS_ABIERTO),
+        "tickets_en_proceso": base_qs.filter(estatus=ReporteUnidad.ESTATUS_EN_PROCESO),
+        "tickets_programados": base_qs.filter(estatus=ReporteUnidad.ESTATUS_PROGRAMADO),
+        "tickets_cerrados_hoy": base_qs.filter(estatus=ReporteUnidad.ESTATUS_CERRADO, actualizado_en__date=today),
+    }
+    return render(request, "logistica/tickets_kanban.html", context)
+
+
+@login_required
+def ticket_actualizar(request, pk):
+    if not _can_manage_tickets_logistica(request.user):
+        raise PermissionDenied("No tienes permisos para actualizar tickets de Logística")
+    if request.method != "POST":
+        return redirect("logistica:tickets_kanban")
+
+    ticket = get_object_or_404(ReporteUnidad, pk=pk)
+    estatus = (request.POST.get("estatus") or "").strip()
+    estatus_validos = {
+        ReporteUnidad.ESTATUS_EN_PROCESO,
+        ReporteUnidad.ESTATUS_PROGRAMADO,
+        ReporteUnidad.ESTATUS_CERRADO,
+    }
+    if estatus not in estatus_validos:
+        messages.error(request, "Estatus no válido para el ticket.")
+        return redirect("logistica:tickets_kanban")
+
+    ticket.estatus = estatus
+    update_fields = ["estatus", "actualizado_en"]
+    if estatus == ReporteUnidad.ESTATUS_EN_PROCESO and not ticket.asignado_a_id:
+        ticket.asignado_a = request.user
+        update_fields.append("asignado_a")
+    if "proveedor_servicio" in request.POST:
+        ticket.proveedor_servicio = (request.POST.get("proveedor_servicio") or "").strip()
+        update_fields.append("proveedor_servicio")
+    if "notas_compras" in request.POST:
+        ticket.notas_compras = (request.POST.get("notas_compras") or "").strip()
+        update_fields.append("notas_compras")
+    costo_raw = (request.POST.get("costo_servicio") or "").strip()
+    if costo_raw:
+        ticket.costo_servicio = _parse_decimal(costo_raw)
+        update_fields.append("costo_servicio")
+    ticket.save(update_fields=update_fields)
+    messages.success(request, "Ticket actualizado correctamente.")
+    return redirect("logistica:tickets_kanban")
+
+
+@login_required
+def flota_resumen(request):
+    if not _can_view_flota_resumen(request.user):
+        raise PermissionDenied("No tienes permisos para ver el resumen de flota")
+
+    today = timezone.localdate()
+    year = today.year
+    unidades = Unidad.objects.select_related("sucursal").filter(activa=True).order_by("codigo")
+    unidades_resumen = []
+    for unidad in unidades:
+        ultimo_lavado = LavadoUnidad.objects.filter(unidad=unidad).order_by("-fecha").first()
+        documento_seguro = _decorate_documento(
+            DocumentoUnidad.objects.filter(unidad=unidad, tipo=DocumentoUnidad.TIPO_SEGURO).order_by("-fecha_vencimiento").first()
+        )
+        documento_tarjeta = _decorate_documento(
+            DocumentoUnidad.objects.filter(unidad=unidad, tipo=DocumentoUnidad.TIPO_TARJETA_CIRCULACION)
+            .order_by("-fecha_vencimiento")
+            .first()
+        )
+        ultimo_servicio = ServicioRealizadoUnidad.objects.select_related("tipo_servicio").filter(unidad=unidad).order_by(
+            "-fecha_servicio"
+        ).first()
+        proximo_servicio = _decorate_servicio(
+            ServicioRealizadoUnidad.objects.select_related("tipo_servicio")
+            .filter(unidad=unidad, proxima_fecha__isnull=False)
+            .order_by("proxima_fecha")
+            .first()
+        )
+        reparaciones_year = ReparacionUnidad.objects.filter(unidad=unidad, fecha_ingreso__year=year)
+        turno_activo = (
+            BitacoraSalidaLlegada.objects.select_related("repartidor__user")
+            .filter(unidad=unidad, cerrada=False)
+            .order_by("hora_salida")
+            .first()
+        )
+        unidades_resumen.append(
+            {
+                "unidad": unidad,
+                "ultimo_lavado": ultimo_lavado,
+                "dias_sin_lavar": (today - ultimo_lavado.fecha).days if ultimo_lavado else None,
+                "documento_seguro": documento_seguro,
+                "documento_tarjeta": documento_tarjeta,
+                "ultimo_servicio": ultimo_servicio,
+                "proximo_servicio": proximo_servicio,
+                "reparaciones_anio": reparaciones_year.count(),
+                "gasto_anio": reparaciones_year.aggregate(total=Sum("costo_total")).get("total") or Decimal("0"),
+                "turno_activo": turno_activo,
+            }
+        )
+
+    context = {
+        "module_tabs": _module_tabs("flota"),
+        "unidades_resumen": unidades_resumen,
+        "today": today,
+    }
+    return render(request, "logistica/flota_resumen.html", context)

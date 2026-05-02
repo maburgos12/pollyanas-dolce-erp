@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Logística · Ejecutivo{% endblock %}
+{% block page_title %}Logística · Dashboard ejecutivo{% endblock %}
+
+{% block extra_css %}
+<style>
+  .exec-shell { display: grid; gap: 18px; }
+  .exec-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .exec-kpis.secondary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .exec-kpi { background: #fff; border: 1px solid #efc7d8; border-radius: 14px; padding: 16px; box-shadow: 0 12px 28px rgba(139,34,82,.07); }
+  .exec-kpi span { color: #725d66; font-weight: 900; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .exec-kpi strong { display: block; margin-top: 8px; color: #8B2252; font-family: "Playfair Display", serif; font-size: 34px; line-height: 1; }
+  .exec-kpi small { display: block; margin-top: 8px; color: #77656d; font-weight: 700; }
+  .exec-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(340px, .8fr); gap: 18px; align-items: start; }
+  .exec-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+  .exec-card-head h2 { margin: 0; color: #3a2b30; font-family: "Playfair Display", serif; }
+  .exec-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; }
+  .exec-badge.ok { background: #e5f5ee; color: #1f7554; }
+  .exec-badge.warn { background: #fff4d8; color: #9a6a00; }
+  .exec-badge.danger { background: #ffe8ec; color: #bc3b56; }
+  .exec-badge.info { background: #e9f0ff; color: #305caa; }
+  .exec-muted { color: #77656d; font-size: 13px; }
+  .exec-empty { padding: 16px; border: 1px dashed #e8b7cb; border-radius: 14px; color: #77656d; }
+  @media (max-width: 1100px) { .exec-kpis, .exec-kpis.secondary, .exec-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 680px) { .exec-kpis, .exec-kpis.secondary, .exec-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="exec-shell">
+  <section class="module-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="exec-kpis">
+    <article class="exec-kpi"><span>Tickets abiertos</span><strong>{{ tickets_abiertos|intcomma }}</strong><small>Casos pendientes de atención.</small></article>
+    <article class="exec-kpi"><span>Críticos activos</span><strong>{{ tickets_criticos|intcomma }}</strong><small>Abiertos o en proceso.</small></article>
+    <article class="exec-kpi"><span>Turnos sin cerrar</span><strong>{{ turnos_abiertos|intcomma }}</strong><small>Bitácoras abiertas.</small></article>
+    <article class="exec-kpi"><span>Gasto del mes</span><strong>${{ gasto_mes|floatformat:2|intcomma }}</strong><small>Reparaciones registradas.</small></article>
+  </section>
+
+  <section class="exec-kpis secondary">
+    <article class="exec-kpi"><span>Documentos por vencer</span><strong>{{ documentos_por_vencer|intcomma }}</strong><small>Próximos 30 días.</small></article>
+    <article class="exec-kpi"><span>Servicios próximos</span><strong>{{ servicios_proximos|intcomma }}</strong><small>Próximos 30 días.</small></article>
+    <article class="exec-kpi"><span>Unidades activas</span><strong>{{ unidades_activas|intcomma }}</strong><small>Flota operativa.</small></article>
+  </section>
+
+  <section class="exec-grid">
+    <article class="card">
+      <div class="exec-card-head"><h2>Tickets recientes</h2><a class="btn btn-secondary btn-small" href="{% url 'logistica:tickets_kanban' %}">Abrir Kanban</a></div>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead><tr><th>Fecha</th><th>Unidad</th><th>Tipo</th><th>Severidad</th><th>Estatus</th></tr></thead>
+          <tbody>
+            {% for ticket in tickets_recientes %}
+            <tr>
+              <td>{{ ticket.fecha_reporte|date:"d/m/Y H:i" }}<br><span class="exec-muted">{{ ticket.repartidor }}</span></td>
+              <td><strong>{{ ticket.unidad.codigo }}</strong></td>
+              <td>{{ ticket.get_tipo_display }}</td>
+              <td><span class="exec-badge {% if ticket.severidad == 'critico' %}danger{% elif ticket.severidad == 'urgente' %}warn{% else %}ok{% endif %}">{{ ticket.get_severidad_display }}</span></td>
+              <td><span class="exec-badge {% if ticket.estatus == 'abierto' %}danger{% elif ticket.estatus == 'cerrado' %}ok{% else %}info{% endif %}">{{ ticket.get_estatus_display }}</span></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5"><div class="exec-empty">No hay tickets registrados.</div></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="exec-card-head"><h2>Turnos sin cerrar</h2><span class="exec-badge {% if turnos_abiertos %}warn{% else %}ok{% endif %}">{{ turnos_abiertos|intcomma }}</span></div>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead><tr><th>Unidad</th><th>Inicio</th><th>Tiempo</th></tr></thead>
+          <tbody>
+            {% for turno in turnos_sin_cerrar %}
+            <tr>
+              <td><strong>{{ turno.unidad.codigo }}</strong><br><span class="exec-muted">{{ turno.repartidor }}</span></td>
+              <td>{{ turno.hora_salida|date:"d/m/Y H:i" }}</td>
+              <td><span class="exec-badge {% if turno.horas_abierto > 8 %}danger{% else %}warn{% endif %}">{{ turno.hora_salida|timesince }}</span></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3"><div class="exec-empty">No hay turnos abiertos.</div></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="exec-grid">
+    <article class="card">
+      <div class="exec-card-head"><h2>Documentos por vencer</h2><a class="btn btn-secondary btn-small" href="{% url 'logistica:flota_resumen' %}">Ver flota</a></div>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead><tr><th>Unidad</th><th>Documento</th><th>Vence</th><th>Días</th></tr></thead>
+          <tbody>
+            {% for documento in documentos_criticos %}
+            <tr>
+              <td><strong>{{ documento.unidad.codigo }}</strong></td>
+              <td>{{ documento.get_tipo_display }}</td>
+              <td>{{ documento.fecha_vencimiento|date:"d/m/Y" }}</td>
+              <td><span class="exec-badge {% if documento.dias_restantes <= 15 %}danger{% else %}warn{% endif %}">{{ documento.dias_restantes }} días</span></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4"><div class="exec-empty">No hay documentos por vencer en los próximos 30 días.</div></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="exec-card-head"><h2>Inspecciones con hallazgos</h2><a class="btn btn-secondary btn-small" href="{% url 'logistica:capturas_pwa' %}">Ver capturas</a></div>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead><tr><th>Fecha</th><th>Unidad</th><th>Resultado</th></tr></thead>
+          <tbody>
+            {% for inspeccion in inspecciones_recientes %}
+            <tr>
+              <td>{{ inspeccion.fecha|date:"d/m/Y H:i" }}<br><span class="exec-muted">{{ inspeccion.repartidor }}</span></td>
+              <td><strong>{{ inspeccion.unidad.codigo }}</strong></td>
+              <td>
+                {% if inspeccion.tiene_golpes %}<span class="exec-badge danger">Golpes</span>{% endif %}
+                {% if inspeccion.faltantes_count %}<span class="exec-badge warn">{{ inspeccion.faltantes_count }} faltantes</span>{% endif %}
+                {% if inspeccion.faltantes_labels %}<div class="exec-muted">{{ inspeccion.faltantes_labels|join:", " }}</div>{% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3"><div class="exec-empty">No hay inspecciones recientes con hallazgos.</div></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+</div>
+{% endblock %}

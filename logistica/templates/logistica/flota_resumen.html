@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Logística · Flota{% endblock %}
+{% block page_title %}Logística · Resumen de flota{% endblock %}
+
+{% block extra_css %}
+<style>
+  .fleet-shell { display: grid; gap: 18px; }
+  .fleet-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .fleet-card { background: #fff; border: 1px solid #efc7d8; border-radius: 16px; padding: 16px; box-shadow: 0 12px 28px rgba(139,34,82,.07); }
+  .fleet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .fleet-head h2 { margin: 0; color: #8B2252; font-family: "Playfair Display", serif; }
+  .fleet-head p { margin: 3px 0 0; color: #77656d; }
+  .fleet-badge { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 900; white-space: nowrap; }
+  .fleet-badge.ok { background: #e5f5ee; color: #1f7554; }
+  .fleet-badge.warn { background: #fff4d8; color: #9a6a00; }
+  .fleet-badge.danger { background: #ffe8ec; color: #bc3b56; }
+  .fleet-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .fleet-detail { border: 1px solid #f2d4e1; border-radius: 12px; padding: 12px; background: #fffafc; }
+  .fleet-detail strong { display: block; color: #3a2b30; margin-bottom: 6px; }
+  .fleet-muted { color: #77656d; font-size: 13px; line-height: 1.45; }
+  @media (max-width: 980px) { .fleet-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 620px) { .fleet-detail-grid { grid-template-columns: 1fr; } .fleet-head { flex-direction: column; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fleet-shell">
+  <section class="module-tabs" aria-label="Submódulos Logística">
+    {% for tab in module_tabs %}
+      <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">Resumen operativo de flota</div>
+    <p class="muted">Lavados, documentos, servicios, reparaciones y turnos activos por unidad.</p>
+  </section>
+
+  <section class="fleet-grid">
+    {% for row in unidades_resumen %}
+    <article class="fleet-card">
+      <div class="fleet-head">
+        <div>
+          <h2>{{ row.unidad.codigo }}</h2>
+          <p>{{ row.unidad.descripcion }}{% if row.unidad.placa %} · {{ row.unidad.placa }}{% endif %}</p>
+        </div>
+        {% if row.turno_activo %}
+          <span class="fleet-badge warn">Turno activo</span>
+        {% else %}
+          <span class="fleet-badge ok">Sin turno</span>
+        {% endif %}
+      </div>
+
+      <div class="fleet-detail-grid">
+        <div class="fleet-detail">
+          <strong>🚿 Lavado</strong>
+          {% if row.ultimo_lavado %}
+            <div class="fleet-muted">Último: {{ row.ultimo_lavado.fecha|date:"d/m/Y" }}</div>
+            <span class="fleet-badge {% if row.dias_sin_lavar > 15 %}danger{% else %}ok{% endif %}">{{ row.dias_sin_lavar }} días</span>
+          {% else %}
+            <span class="fleet-badge danger">Sin registro</span>
+          {% endif %}
+        </div>
+
+        <div class="fleet-detail">
+          <strong>📄 Documentos</strong>
+          <div class="fleet-muted">
+            Seguro:
+            {% if row.documento_seguro %}
+              {{ row.documento_seguro.fecha_vencimiento|date:"d/m/Y" }} · {{ row.documento_seguro.dias_restantes }} días
+            {% else %}
+              sin registro
+            {% endif %}
+          </div>
+          <div class="fleet-muted">
+            Tarjeta:
+            {% if row.documento_tarjeta %}
+              {{ row.documento_tarjeta.fecha_vencimiento|date:"d/m/Y" }} · {{ row.documento_tarjeta.dias_restantes }} días
+            {% else %}
+              sin registro
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="fleet-detail">
+          <strong>🔧 Servicios</strong>
+          <div class="fleet-muted">
+            Último:
+            {% if row.ultimo_servicio %}
+              {{ row.ultimo_servicio.tipo_servicio.nombre }} · {{ row.ultimo_servicio.fecha_servicio|date:"d/m/Y" }}
+            {% else %}
+              sin registro
+            {% endif %}
+          </div>
+          <div class="fleet-muted">
+            Próximo:
+            {% if row.proximo_servicio %}
+              {{ row.proximo_servicio.tipo_servicio.nombre }} · {{ row.proximo_servicio.proxima_fecha|date:"d/m/Y" }}
+            {% else %}
+              sin programación
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="fleet-detail">
+          <strong>💰 Gastos año</strong>
+          <div class="fleet-muted">{{ row.reparaciones_anio|intcomma }} reparaciones</div>
+          <span class="fleet-badge {% if row.gasto_anio %}warn{% else %}ok{% endif %}">${{ row.gasto_anio|floatformat:2|intcomma }}</span>
+          {% if row.turno_activo %}
+            <div class="fleet-muted">Activo: {{ row.turno_activo.repartidor }} desde {{ row.turno_activo.hora_salida|date:"H:i" }}</div>
+          {% endif %}
+        </div>
+      </div>
+    </article>
+    {% empty %}
+    <article class="card">No hay unidades activas registradas.</article>
+    {% endfor %}
+  </section>
+</div>
+{% endblock %}
