@@ -4579,3 +4579,34 @@ body.ui-compact .kpi-icon { width: 36px; height: 36px; }
 body.ui-compact .kpi-icon svg { width: 18px; height: 18px; }
 body.ui-compact .hero-stat-number { font-size: 18px; }
 body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
+
+/* === Producido vs Vendido === */
+.production-report .card-header { margin-bottom: 0; }
+.production-page-header { align-items: flex-start; }
+.production-source-list,
+.production-banner-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.production-filter-action {
+  align-self: end;
+}
+.production-table-wrap {
+  --table-min-width: 1120px;
+}
+.production-table-wrap .table td,
+.production-table-wrap .table th {
+  white-space: nowrap;
+}
+.production-subtotal-row td {
+  background: var(--gris-suave);
+  color: var(--vino);
+  font-weight: 800;
+}
+.production-grand-total-row td {
+  background: #fff7fa;
+  border-top: 2px solid var(--rosa-deep);
+  color: var(--vino);
+  font-weight: 900;
+}
