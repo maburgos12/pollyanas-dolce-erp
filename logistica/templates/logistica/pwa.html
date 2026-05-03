@@ -282,6 +282,7 @@
         text-align: center;
         font-size: 12px;
         padding: 13px 16px calc(13px + env(safe-area-inset-bottom));
+        pointer-events: none;
       }
 
       .screen-title {
@@ -479,54 +480,131 @@
         justify-content: space-between;
         align-items: center;
         border: 1px solid var(--border);
-        border-radius: 12px;
-        background: var(--surface);
-        color: var(--text);
+        border-left: 3px solid var(--gold);
+        border-radius: 16px;
+        background: #1e1e2e;
+        color: var(--gold);
         text-align: left;
         font-weight: 900;
-        margin: 10px 0;
-        padding: 12px 14px;
+        margin: 12px 0 0;
+        padding: 14px 16px;
+        transition: border-color 0.15s ease, background 0.15s ease;
       }
 
       .check-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 10px;
-        border-bottom: 1px solid var(--border);
-        padding: 10px 0;
+        gap: 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #1a1a24;
+        color: var(--text);
+        font-size: 13px;
+        padding: 14px 16px;
+        margin: 8px 0;
       }
 
       .check-row:last-child { border-bottom: 0; }
 
       .chip {
         min-width: 72px;
-        border-radius: 999px;
-        color: white;
+        min-height: 44px;
+        border: 1px solid #2a2a38;
+        border-radius: 10px;
+        background: #22222e;
+        color: #888;
         font-size: 12px;
         font-weight: 900;
-        padding: 7px 10px;
+        padding: 9px 11px;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
       }
 
-      .chip.ok { background: var(--success); }
-      .chip.fail { background: var(--danger); }
-      .chip.pending { background: var(--text-muted); }
-      .check-row.ok { border: 1px solid rgba(78, 196, 122, 0.55); border-radius: 10px; padding: 10px; margin: 8px 0; }
-      .check-row.fail { border: 1px solid rgba(255, 92, 124, 0.6); border-radius: 10px; padding: 10px; margin: 8px 0; }
-      .check-row.pending { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin: 8px 0; }
+      .chip.ok { background: #1a3a1a; border-color: #33aa55; color: #55cc77; }
+      .chip.fail { background: #3a1a1a; border-color: #aa3333; color: #cc5555; }
+      .chip.pending { background: #22222e; border-color: #2a2a38; color: #888; }
+      .check-row.ok { border-color: rgba(51, 170, 85, 0.65); }
+      .check-row.fail { border-color: rgba(170, 51, 51, 0.72); }
+      .check-row.pending { border-color: var(--border); }
       .daily-banner {
-        border: 1px solid rgba(78, 196, 122, 0.55);
-        border-radius: 12px;
-        background: rgba(78, 196, 122, 0.12);
-        color: var(--text);
-        padding: 13px 14px;
+        border: 1px solid #33aa55;
+        border-radius: 14px;
+        background: #1a3a1a;
+        color: #55cc77;
+        padding: 16px;
         margin: 12px 0;
-        font-weight: 800;
+        font-weight: 900;
       }
+      .daily-banner strong { color: var(--text); }
+      .daily-banner time { color: var(--gold); }
       .daily-banner.warning {
         border-color: rgba(201, 168, 76, 0.7);
-        background: rgba(201, 168, 76, 0.12);
+        background: #1e1a10;
         color: var(--gold);
+      }
+      .daily-counter {
+        display: inline-flex;
+        justify-content: center;
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 50px;
+        background: #1a1a24;
+        color: var(--gold);
+        font-weight: 900;
+        margin: 8px 0 12px;
+        padding: 10px 14px;
+      }
+      .daily-counter.complete { color: #55cc77; }
+      .daily-checklist-card {
+        border-radius: 16px;
+        background: var(--surface);
+      }
+      .daily-section-card {
+        border-radius: 16px;
+        background: var(--surface);
+        padding: 12px;
+        margin: 0 0 12px;
+      }
+      .daily-mark-all {
+        width: 100%;
+        border: 1px solid #33aa55;
+        border-radius: 10px;
+        background: transparent;
+        color: #55cc77;
+        font-weight: 900;
+        padding: 12px;
+      }
+      .daily-mark-all:active { background: #1a3a1a; }
+      .daily-fail-field label {
+        color: var(--gold);
+        font-weight: 900;
+      }
+      .daily-fail-field textarea {
+        border: 1px solid #C9A84C44;
+        border-radius: 12px;
+        background: #1e1a10;
+        color: var(--text);
+        padding: 14px;
+      }
+      .daily-fail-field textarea::placeholder { color: #888; }
+      .daily-continue {
+        width: 100%;
+        border-radius: 14px;
+        background: var(--wine);
+        box-shadow: 0 4px 20px #8B225240;
+        color: white;
+        font-family: "Nunito", sans-serif;
+        font-size: 16px;
+        font-weight: 700;
+        padding: 16px;
+      }
+      .daily-continue:disabled {
+        cursor: not-allowed;
+        opacity: 0.4;
+      }
+      .daily-section-highlight {
+        border-color: #C8506A !important;
+        box-shadow: 0 0 0 2px rgba(200, 80, 106, 0.35);
       }
 
       .thumb {
@@ -1480,6 +1558,7 @@
             inspeccionDiariaAviso: "",
             inspeccionDiariaObservaciones: "",
             inspeccionDiariaExpanded: { fluidos: true },
+            inspeccionDiariaHighlight: "",
             inspeccionDiariaChecks
           };
         }
@@ -1508,6 +1587,7 @@
         draft.inspeccionDiariaCompletada = false;
         draft.inspeccionDiariaAviso = "";
         draft.inspeccionDiariaObservaciones = "";
+        draft.inspeccionDiariaHighlight = "";
         Object.keys(draft.inspeccionDiariaChecks).forEach((field) => { draft.inspeccionDiariaChecks[field] = null; });
         if (!value) return renderBitacoraSalida();
         draft.inspeccionDiariaLoading = true;
@@ -1525,7 +1605,12 @@
       }
 
       function setInspeccionDiariaItem(field, value) {
-        ensureBitacoraSalidaDraft().inspeccionDiariaChecks[field] = value;
+        const draft = ensureBitacoraSalidaDraft();
+        draft.inspeccionDiariaChecks[field] = value;
+        const highlighted = inspeccionDiariaSecciones.find((section) => section.key === draft.inspeccionDiariaHighlight);
+        if (highlighted && highlighted.items.every(([itemField]) => draft.inspeccionDiariaChecks[itemField] !== null)) {
+          draft.inspeccionDiariaHighlight = "";
+        }
         renderBitacoraSalida();
       }
 
@@ -1533,6 +1618,7 @@
         const draft = ensureBitacoraSalidaDraft();
         const section = inspeccionDiariaSecciones.find((item) => item.key === key);
         section.items.forEach(([field]) => { draft.inspeccionDiariaChecks[field] = true; });
+        if (draft.inspeccionDiariaHighlight === key) draft.inspeccionDiariaHighlight = "";
         renderBitacoraSalida();
       }
 
@@ -1540,20 +1626,37 @@
         return Object.values(draft.inspeccionDiariaChecks).every((value) => value !== null);
       }
 
+      function inspeccionDiariaPendientes(draft) {
+        return Object.values(draft.inspeccionDiariaChecks).filter((value) => value === null).length;
+      }
+
+      function primeraSeccionInspeccionDiariaPendiente(draft) {
+        return inspeccionDiariaSecciones.find((section) =>
+          section.items.some(([field]) => draft.inspeccionDiariaChecks[field] === null)
+        );
+      }
+
       function inspeccionDiariaTieneFallas(draft) {
         return Object.values(draft.inspeccionDiariaChecks).some((value) => value === false);
+      }
+
+      function marcarInspeccionDiariaTodosOk() {
+        const draft = ensureBitacoraSalidaDraft();
+        Object.keys(draft.inspeccionDiariaChecks).forEach((field) => { draft.inspeccionDiariaChecks[field] = true; });
+        draft.inspeccionDiariaHighlight = "";
+        renderBitacoraSalida();
       }
 
       function renderInspeccionDiariaSection(section) {
         const draft = ensureBitacoraSalidaDraft();
         const open = Boolean(draft.inspeccionDiariaExpanded[section.key]);
         return `
-          <button class="section-toggle" type="button" onclick="toggleInspeccionDiariaSection('${section.key}')">
-            <span>${section.title}</span><span>${open ? "−" : "+"}</span>
+          <button id="inspeccion-diaria-toggle-${section.key}" class="section-toggle ${draft.inspeccionDiariaHighlight === section.key ? "daily-section-highlight" : ""}" type="button" onclick="toggleInspeccionDiariaSection('${section.key}')">
+            <span>${section.title}</span><span>${open ? "Ocultar" : "Ver"}</span>
           </button>
           ${open ? `
-            <section class="card report-card">
-              <button class="secondary-btn" type="button" onclick="marcarInspeccionDiariaSeccionOk('${section.key}')">Marcar todos OK</button>
+            <section class="daily-section-card ${draft.inspeccionDiariaHighlight === section.key ? "daily-section-highlight" : ""}">
+              <button class="daily-mark-all" type="button" onclick="marcarInspeccionDiariaSeccionOk('${section.key}')">✓ Marcar sección OK</button>
               ${section.items.map(([field, label]) => {
                 const value = draft.inspeccionDiariaChecks[field];
                 const tone = value === true ? "ok" : value === false ? "fail" : "pending";
@@ -1561,8 +1664,8 @@
                   <div class="check-row ${tone}">
                     <span>${escapeHtml(label)}</span>
                     <div style="display:flex; gap:8px;">
-                      <button class="chip ${value === true ? "ok" : "pending"}" type="button" onclick="setInspeccionDiariaItem('${field}', true)">OK ✅</button>
-                      <button class="chip ${value === false ? "fail" : "pending"}" type="button" onclick="setInspeccionDiariaItem('${field}', false)">FALLA ❌</button>
+                      <button class="chip ${value === true ? "ok" : "pending"}" type="button" onclick="setInspeccionDiariaItem('${field}', true)">${value === true ? "✓ " : ""}OK</button>
+                      <button class="chip ${value === false ? "fail" : "pending"}" type="button" onclick="setInspeccionDiariaItem('${field}', false)">${value === false ? "✗ " : ""}FALLA</button>
                     </div>
                   </div>
                 `;
@@ -1574,7 +1677,23 @@
 
       async function continuarInspeccionDiaria() {
         const draft = ensureBitacoraSalidaDraft();
-        if (!inspeccionDiariaCompleta(draft)) return renderBitacoraSalida("Marca todos los puntos como OK o FALLA.");
+        if (!inspeccionDiariaCompleta(draft)) {
+          const section = primeraSeccionInspeccionDiariaPendiente(draft);
+          if (section) {
+            draft.inspeccionDiariaExpanded[section.key] = true;
+            draft.inspeccionDiariaHighlight = section.key;
+          }
+          await renderBitacoraSalida("Completa todos los puntos para continuar. Revisa la sección resaltada.");
+          if (section) {
+            setTimeout(() => {
+              document.getElementById(`inspeccion-diaria-toggle-${section.key}`)?.scrollIntoView({
+                behavior: "smooth",
+                block: "center"
+              });
+            }, 80);
+          }
+          return;
+        }
         const tieneFallas = inspeccionDiariaTieneFallas(draft);
         if (tieneFallas && !draft.inspeccionDiariaObservaciones.trim()) {
           return renderBitacoraSalida("Describe las fallas encontradas para continuar.");
@@ -1641,6 +1760,9 @@
           const puedeCapturarSalida = Boolean(draft.unidad) && (yaInspeccionada || draft.inspeccionDiariaCompletada);
           const mostrarChecklist = Boolean(draft.unidad) && !draft.inspeccionDiariaLoading && !yaInspeccionada && !draft.inspeccionDiariaCompletada;
           const tieneFallasDiarias = inspeccionDiariaTieneFallas(draft);
+          const pendientesDiarios = inspeccionDiariaPendientes(draft);
+          const totalPuntosDiarios = Object.keys(draft.inspeccionDiariaChecks).length;
+          const marcadosDiarios = totalPuntosDiarios - pendientesDiarios;
           body = `
             <div class="${ubicacionLista ? "" : "gps-locked"}">
               <div class="field">
@@ -1653,23 +1775,25 @@
               ${draft.inspeccionDiariaLoading ? `<p class="unit-line">Revisando inspección diaria...</p>` : ""}
               ${yaInspeccionada ? `
                 <div class="daily-banner">
-                  ✅ Unidad ya inspeccionada hoy por ${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")} a las ${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}. Puedes proceder directamente al inicio de turno.
+                  <span style="font-size:22px;">✅</span> Unidad ya inspeccionada hoy por <strong>${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")}</strong> a las <time>${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}</time>. Puedes proceder directamente al inicio de turno.
                 </div>
               ` : ""}
               ${draft.inspeccionDiariaAviso ? `<div class="daily-banner warning">${escapeHtml(draft.inspeccionDiariaAviso)}</div>` : ""}
               ${mostrarChecklist ? `
-                <section class="card report-card">
+                <section class="card report-card daily-checklist-card">
                   <h2 style="color:var(--gold); margin-top:0;">Checklist pre-turno</h2>
+                  <p class="daily-counter ${pendientesDiarios ? "" : "complete"}">${marcadosDiarios} de ${totalPuntosDiarios} puntos marcados</p>
                   <p class="muted">Marca cada punto como OK o FALLA antes de capturar kilometraje y tablero.</p>
+                  <button class="daily-mark-all" type="button" onclick="marcarInspeccionDiariaTodosOk()">✅ Marcar todos los puntos como OK</button>
                 </section>
                 ${inspeccionDiariaSecciones.map(renderInspeccionDiariaSection).join("")}
                 ${tieneFallasDiarias ? `
-                  <div class="field">
-                    <label for="inspeccion_diaria_observaciones">Describe las fallas encontradas</label>
-                    <textarea id="inspeccion_diaria_observaciones" required oninput="state.bitacoraSalidaDraft.inspeccionDiariaObservaciones = this.value">${escapeHtml(draft.inspeccionDiariaObservaciones)}</textarea>
+                  <div class="field daily-fail-field">
+                    <label for="inspeccion_diaria_observaciones">⚠️ Describe las fallas encontradas</label>
+                    <textarea id="inspeccion_diaria_observaciones" required placeholder="Anota qué falla viste y si la unidad puede salir o debe detenerse." oninput="state.bitacoraSalidaDraft.inspeccionDiariaObservaciones = this.value">${escapeHtml(draft.inspeccionDiariaObservaciones)}</textarea>
                   </div>
                 ` : ""}
-                <button class="primary-btn" type="button" onclick="continuarInspeccionDiaria()" ${inspeccionDiariaCompleta(draft) && (!tieneFallasDiarias || draft.inspeccionDiariaObservaciones.trim()) ? "" : "disabled"}>Continuar</button>
+                <button class="primary-btn daily-continue" type="button" onclick="continuarInspeccionDiaria()">Continuar</button>
               ` : ""}
               ${puedeCapturarSalida ? `
                 <form onsubmit="guardarSalida(event)" novalidate>
