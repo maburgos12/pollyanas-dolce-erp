@@ -6,21 +6,31 @@ from io import BytesIO
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count, Q, Sum
+from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.db.models.functions import Lower
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
 from core.models import AuditLog
+from fallas.models import ReporteFalla
+from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, Unidad
 from maestros.models import Proveedor
 
 from .models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 from .utils.bitacora_import import import_bitacora
+
+
+AUTH_CLASSES = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
 
 
 def _safe_decimal(value) -> Decimal:
@@ -45,6 +55,18 @@ def _parse_date(value):
         return timezone.datetime.fromisoformat(raw).date()
     except Exception:
         return None
+
+
+def _es_dg_o_compras(user) -> bool:
+    if not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    return user.groups.filter(name__in=["dg", "compras_logistica"]).exists()
+
+
+def _money(value) -> float:
+    return float(value or Decimal("0"))
 
 
 def _module_tabs(active: str) -> list[dict]:
@@ -1194,6 +1216,7 @@ def _export_reportes_servicio_xlsx(rows: list[dict]) -> HttpResponse:
 def dashboard(request):
     if not can_view_inventario(request.user):
         raise PermissionDenied("No tienes permisos para ver Activos.")
+    return render(request, "activos/dashboard.html")
 
     today = timezone.localdate()
     week_limit = today + timedelta(days=7)
@@ -2988,3 +3011,189 @@ def calendario(request):
         context["enterprise_chain"],
     )
     return render(request, "activos/calendario.html", context)
+
+
+@login_required
+def seguimiento_compras_view(request):
+    if not _es_dg_o_compras(request.user):
+        raise PermissionDenied
+    grupos = set(request.user.groups.values_list("name", flat=True))
+    return render(
+        request,
+        "activos/seguimiento_compras.html",
+        {
+            "es_dg": request.user.is_superuser or "dg" in grupos,
+        },
+    )
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH_CLASSES)
+@permission_classes([IsAuthenticated])
+def api_dashboard_ejecutivo(request):
+    if not _es_dg_o_compras(request.user):
+        return Response({"error": "Sin permiso."}, status=403)
+
+    hoy = timezone.now()
+    hace_30 = hoy - timedelta(days=30)
+    hace_7 = hoy - timedelta(days=7)
+    estatus_fallas_activas = [
+        ReporteFalla.ESTATUS_ABIERTO,
+        ReporteFalla.ESTATUS_REVISION,
+        ReporteFalla.ESTATUS_PROCESO,
+    ]
+    estatus_ordenes_cerradas = [
+        OrdenMantenimiento.ESTATUS_CERRADA,
+        OrdenMantenimiento.ESTATUS_CANCELADA,
+    ]
+
+    fallas_activas = ReporteFalla.objects.filter(estatus__in=estatus_fallas_activas)
+    fallas_por_area = list(
+        fallas_activas.values("area")
+        .annotate(total=Count("id"))
+        .order_by("-total")
+    )
+    fallas_por_sucursal = list(
+        fallas_activas.values("sucursal__nombre")
+        .annotate(total=Count("id"))
+        .order_by("-total")[:8]
+    )
+
+    ordenes_qs = OrdenMantenimiento.objects.all()
+    ordenes_mes = ordenes_qs.filter(creado_en__gte=hace_30)
+    costos_ordenes_mes = ordenes_mes.aggregate(
+        repuestos=Sum("costo_repuestos"),
+        mano_obra=Sum("costo_mano_obra"),
+        otros=Sum("costo_otros"),
+    )
+    costo_mantenimiento_mes = sum(_money(value) for value in costos_ordenes_mes.values())
+    ordenes_abiertas_qs = ordenes_qs.exclude(estatus__in=estatus_ordenes_cerradas)
+    ordenes_por_tipo = list(
+        ordenes_abiertas_qs.values("tipo")
+        .annotate(total=Count("id"))
+        .order_by("-total")
+    )
+
+    reparaciones_mes_qs = ReparacionUnidad.objects.filter(fecha_ingreso__gte=hace_30.date())
+    servicios_mes_qs = ServicioRealizadoUnidad.objects.filter(fecha_servicio__gte=hace_30.date())
+    costo_flota_mes = _money(reparaciones_mes_qs.aggregate(total=Sum("costo_total"))["total"]) + _money(
+        servicios_mes_qs.aggregate(total=Sum("costo"))["total"]
+    )
+
+    return Response(
+        {
+            "fallas": {
+                "activas": fallas_activas.count(),
+                "criticas": fallas_activas.filter(prioridad=ReporteFalla.PRIORIDAD_CRITICA).count(),
+                "esta_semana": ReporteFalla.objects.filter(fecha_reporte__gte=hace_7).count(),
+                "por_area": fallas_por_area,
+                "por_sucursal": fallas_por_sucursal,
+            },
+            "mantenimiento": {
+                "ordenes_abiertas": ordenes_abiertas_qs.count(),
+                "ordenes_mes": ordenes_mes.count(),
+                "costo_mes": costo_mantenimiento_mes,
+                "por_tipo": ordenes_por_tipo,
+            },
+            "flota": {
+                "unidades_activas": Unidad.objects.filter(activa=True).count(),
+                "reparaciones_mes": reparaciones_mes_qs.count(),
+                "servicios_mes": servicios_mes_qs.count(),
+                "costo_mes": costo_flota_mes,
+            },
+            "alertas": {
+                "activos_sin_sucursal": Activo.objects.filter(activo=True, sucursal__isnull=True).count(),
+            },
+            "generado_en": hoy.isoformat(),
+        }
+    )
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH_CLASSES)
+@permission_classes([IsAuthenticated])
+def api_bandeja_compras(request):
+    if not _es_dg_o_compras(request.user):
+        return Response({"error": "Sin permiso."}, status=403)
+
+    estatus_fallas_activas = [
+        ReporteFalla.ESTATUS_ABIERTO,
+        ReporteFalla.ESTATUS_REVISION,
+        ReporteFalla.ESTATUS_PROCESO,
+    ]
+    prioridad_rank = Case(
+        When(prioridad=ReporteFalla.PRIORIDAD_CRITICA, then=0),
+        When(prioridad=ReporteFalla.PRIORIDAD_ALTA, then=1),
+        When(prioridad=ReporteFalla.PRIORIDAD_MEDIA, then=2),
+        When(prioridad=ReporteFalla.PRIORIDAD_BAJA, then=3),
+        default=4,
+        output_field=IntegerField(),
+    )
+    fallas = list(
+        ReporteFalla.objects.filter(estatus__in=estatus_fallas_activas)
+        .select_related("sucursal", "categoria", "reportado_por", "asignado_a")
+        .annotate(prioridad_rank=prioridad_rank)
+        .order_by("prioridad_rank", "fecha_reporte")
+        .values(
+            "id",
+            "titulo",
+            "sucursal__nombre",
+            "categoria__nombre",
+            "prioridad",
+            "estatus",
+            "area",
+            "fecha_reporte",
+            "reportado_por__first_name",
+            "reportado_por__last_name",
+            "asignado_a__first_name",
+        )[:50]
+    )
+
+    ordenes = []
+    for orden in (
+        OrdenMantenimiento.objects.exclude(
+            estatus__in=[OrdenMantenimiento.ESTATUS_CERRADA, OrdenMantenimiento.ESTATUS_CANCELADA]
+        )
+        .select_related("activo_ref", "activo_ref__sucursal", "creado_por")
+        .order_by("-id")[:50]
+    ):
+        ordenes.append(
+            {
+                "id": orden.id,
+                "folio": orden.folio,
+                "activo_nombre": orden.activo_ref.nombre,
+                "activo_codigo": orden.activo_ref.codigo,
+                "sucursal_nombre": orden.activo_ref.sucursal.nombre if orden.activo_ref.sucursal else "",
+                "tipo": orden.tipo,
+                "estatus": orden.estatus,
+                "prioridad": orden.prioridad,
+                "descripcion": orden.descripcion,
+                "responsable": orden.responsable,
+                "costo_total": _money(orden.costo_total),
+                "fecha_programada": orden.fecha_programada,
+            }
+        )
+
+    hace_30 = timezone.now() - timedelta(days=30)
+    reparaciones = list(
+        ReparacionUnidad.objects.filter(fecha_ingreso__gte=hace_30.date())
+        .select_related("unidad")
+        .order_by("-fecha_ingreso")
+        .values(
+            "id",
+            "unidad__descripcion",
+            "unidad__codigo",
+            "fecha_ingreso",
+            "descripcion_falla",
+            "proveedor",
+            "costo_total",
+        )[:20]
+    )
+
+    return Response(
+        {
+            "fallas_pendientes": fallas,
+            "ordenes_abiertas": ordenes,
+            "reparaciones_recientes": reparaciones,
+        }
+    )
