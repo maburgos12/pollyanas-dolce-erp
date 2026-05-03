@@ -282,6 +282,7 @@
         text-align: center;
         font-size: 12px;
         padding: 13px 16px calc(13px + env(safe-area-inset-bottom));
+        pointer-events: none;
       }
 
       .screen-title {
@@ -1540,8 +1541,18 @@
         return Object.values(draft.inspeccionDiariaChecks).every((value) => value !== null);
       }
 
+      function inspeccionDiariaPendientes(draft) {
+        return Object.values(draft.inspeccionDiariaChecks).filter((value) => value === null).length;
+      }
+
       function inspeccionDiariaTieneFallas(draft) {
         return Object.values(draft.inspeccionDiariaChecks).some((value) => value === false);
+      }
+
+      function marcarInspeccionDiariaTodosOk() {
+        const draft = ensureBitacoraSalidaDraft();
+        Object.keys(draft.inspeccionDiariaChecks).forEach((field) => { draft.inspeccionDiariaChecks[field] = true; });
+        renderBitacoraSalida();
       }
 
       function renderInspeccionDiariaSection(section) {
@@ -1641,6 +1652,7 @@
           const puedeCapturarSalida = Boolean(draft.unidad) && (yaInspeccionada || draft.inspeccionDiariaCompletada);
           const mostrarChecklist = Boolean(draft.unidad) && !draft.inspeccionDiariaLoading && !yaInspeccionada && !draft.inspeccionDiariaCompletada;
           const tieneFallasDiarias = inspeccionDiariaTieneFallas(draft);
+          const pendientesDiarios = inspeccionDiariaPendientes(draft);
           body = `
             <div class="${ubicacionLista ? "" : "gps-locked"}">
               <div class="field">
@@ -1661,6 +1673,8 @@
                 <section class="card report-card">
                   <h2 style="color:var(--gold); margin-top:0;">Checklist pre-turno</h2>
                   <p class="muted">Marca cada punto como OK o FALLA antes de capturar kilometraje y tablero.</p>
+                  <div class="daily-banner warning">Pendientes por marcar: ${pendientesDiarios}</div>
+                  <button class="secondary-btn" type="button" onclick="marcarInspeccionDiariaTodosOk()">Marcar todos OK</button>
                 </section>
                 ${inspeccionDiariaSecciones.map(renderInspeccionDiariaSection).join("")}
                 ${tieneFallasDiarias ? `
