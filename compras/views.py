@@ -6347,6 +6347,299 @@ def _filtered_solicitudes(
     )
 
 
+def _solicitudes_filter_state(request: HttpRequest) -> dict[str, object]:
+    source_filter = (request.GET.get("source") or "all").lower()
+    if source_filter not in {"all", "manual", "plan"}:
+        source_filter = "all"
+    plan_filter = (request.GET.get("plan_id") or "").strip()
+    categoria_filter = _sanitize_categoria_filter(request.GET.get("categoria"))
+    estatus_filter = (request.GET.get("estatus") or "all").strip().upper() or "ALL"
+    q_filter = (request.GET.get("q") or "").strip()
+    periodo_tipo, periodo_mes, periodo_label = _parse_period_filters(
+        request.GET.get("periodo_tipo"),
+        request.GET.get("periodo_mes"),
+    )
+    reabasto_filter = (request.GET.get("reabasto") or "all").lower()
+    if reabasto_filter not in {"critico", "bajo", "ok"}:
+        reabasto_filter = "all"
+    workflow_action_filter = (request.GET.get("workflow_action") or "all").strip().lower()
+    valid_workflow_actions = {
+        "all",
+        "corregir_maestro",
+        "enviar_revision",
+        "aprobar_rechazar",
+        "crear_oc",
+        "seguimiento_oc",
+    }
+    if workflow_action_filter not in valid_workflow_actions:
+        workflow_action_filter = "all"
+    blocker_key_filter = (request.GET.get("blocker_key") or "all").strip().lower()
+    valid_blocker_keys = {
+        "all",
+        "sin_costo",
+        "sin_proveedor",
+        "maestro_incompleto",
+        "articulo_inactivo",
+        "sin_catalogo",
+        "no_canonico",
+    }
+    if blocker_key_filter not in valid_blocker_keys:
+        blocker_key_filter = "all"
+    closure_key_filter = (request.GET.get("closure_key") or "all").strip().lower()
+    if closure_key_filter not in {"all", "solicitudes_liberadas"}:
+        closure_key_filter = "all"
+    handoff_key_filter = (request.GET.get("handoff_key") or "all").strip().lower()
+    if handoff_key_filter not in {"all", "solicitud_orden"}:
+        handoff_key_filter = "all"
+    return {
+        "source_filter": source_filter,
+        "plan_filter": plan_filter,
+        "categoria_filter": categoria_filter,
+        "estatus_filter": estatus_filter,
+        "q_filter": q_filter,
+        "periodo_tipo": periodo_tipo,
+        "periodo_mes": periodo_mes,
+        "periodo_label": periodo_label,
+        "reabasto_filter": reabasto_filter,
+        "workflow_action_filter": workflow_action_filter,
+        "blocker_key_filter": blocker_key_filter,
+        "closure_key_filter": closure_key_filter,
+        "handoff_key_filter": handoff_key_filter,
+        "master_class_filter": (request.GET.get("master_class") or "all").strip(),
+        "master_missing_filter": (request.GET.get("master_missing") or "all").strip(),
+        "consumo_ref_filter": _sanitize_consumo_ref_filter(request.GET.get("consumo_ref")),
+    }
+
+
+def _solicitudes_document_queryset(filters: dict[str, object]):
+    qs = SolicitudCompra.objects.select_related("insumo", "insumo__unidad_base", "proveedor_sugerido")
+    source_filter = filters["source_filter"]
+    if source_filter == "plan":
+        qs = qs.filter(area__startswith="PLAN_PRODUCCION:")
+    elif source_filter == "manual":
+        qs = qs.exclude(area__startswith="PLAN_PRODUCCION:")
+
+    plan_filter = filters["plan_filter"]
+    if plan_filter:
+        qs = qs.filter(area=f"PLAN_PRODUCCION:{plan_filter}")
+    qs = _filter_solicitudes_by_categoria(qs, filters["categoria_filter"])
+
+    periodo_tipo = filters["periodo_tipo"]
+    if periodo_tipo != "all":
+        year, month = str(filters["periodo_mes"]).split("-")
+        qs = qs.filter(fecha_requerida__year=int(year), fecha_requerida__month=int(month))
+        if periodo_tipo == "q1":
+            qs = qs.filter(fecha_requerida__day__lte=15)
+        elif periodo_tipo == "q2":
+            qs = qs.filter(fecha_requerida__day__gte=16)
+
+    q_filter = filters["q_filter"]
+    if q_filter:
+        qs = qs.filter(
+            Q(folio__icontains=q_filter)
+            | Q(area__icontains=q_filter)
+            | Q(solicitante__icontains=q_filter)
+            | Q(insumo__nombre__icontains=q_filter)
+            | Q(insumo__nombre_point__icontains=q_filter)
+            | Q(insumo__codigo_point__icontains=q_filter)
+            | Q(proveedor_sugerido__nombre__icontains=q_filter)
+        )
+
+    valid_statuses = {choice[0] for choice in SolicitudCompra.STATUS_CHOICES}
+    if filters["estatus_filter"] in valid_statuses:
+        qs = qs.filter(estatus=filters["estatus_filter"])
+    return qs
+
+
+def _solicitudes_plan_options(limit: int = 100) -> list[PlanProduccion]:
+    plan_ids = set()
+    for area_val in (
+        SolicitudCompra.objects.filter(area__startswith="PLAN_PRODUCCION:")
+        .values_list("area", flat=True)
+        .distinct()[:limit]
+    ):
+        _, _, maybe_id = (area_val or "").partition(":")
+        if maybe_id.isdigit():
+            plan_ids.add(int(maybe_id))
+    return list(PlanProduccion.objects.filter(id__in=plan_ids).order_by("-fecha_produccion", "-id")[:limit])
+
+
+def _advanced_solicitudes_filters_active(filters: dict[str, object]) -> bool:
+    return any(
+        [
+            filters["estatus_filter"] in {"BLOCKED_ERP", "APPROVED_READY", "APPROVED_WITH_OC"},
+            filters["reabasto_filter"] != "all",
+            filters["workflow_action_filter"] != "all",
+            filters["blocker_key_filter"] != "all",
+            filters["closure_key_filter"] != "all",
+            filters["handoff_key_filter"] != "all",
+            filters["master_class_filter"] != "all",
+            filters["master_missing_filter"] != "all",
+        ]
+    )
+
+
+def _enrich_visible_solicitudes(solicitudes: list[SolicitudCompra]) -> None:
+    if not solicitudes:
+        return
+    plan_ids = set()
+    for solicitud in solicitudes:
+        if (solicitud.area or "").startswith("PLAN_PRODUCCION:"):
+            _, _, maybe_id = solicitud.area.partition(":")
+            if maybe_id.isdigit():
+                plan_ids.add(int(maybe_id))
+    planes_map = {p.id: p for p in PlanProduccion.objects.filter(id__in=plan_ids)}
+
+    canonical_by_id = {}
+    if solicitudes:
+        _, canonical_by_id = _canonical_catalog_maps()
+    canonical_ids = set()
+    canonical_by_solicitud_id = {}
+    for solicitud in solicitudes:
+        canonical = canonical_insumo_by_id(solicitud.insumo_id)
+        canonical_by_solicitud_id[solicitud.id] = canonical
+        if canonical:
+            canonical_ids.add(canonical.id)
+    latest_cost_by_insumo = _latest_cost_by_canonical_ids(canonical_ids, canonical_by_id) if canonical_ids else {}
+
+    open_orders_by_solicitud = {}
+    solicitud_ids = [s.id for s in solicitudes]
+    for orden in (
+        OrdenCompra.objects.filter(solicitud_id__in=solicitud_ids)
+        .exclude(estatus=OrdenCompra.STATUS_CERRADA)
+        .only("id", "folio", "solicitud_id", "estatus", "creado_en")
+        .order_by("-creado_en")
+    ):
+        open_orders_by_solicitud.setdefault(orden.solicitud_id, orden)
+
+    for solicitud in solicitudes:
+        canonical = canonical_by_solicitud_id.get(solicitud.id)
+        solicitud.__dict__.update(_source_context_from_scope(area=solicitud.area, planes_map=planes_map))
+        solicitud.costo_unitario = latest_cost_by_insumo.get(canonical.id, Decimal("0")) if canonical else Decimal("0")
+        solicitud.presupuesto_estimado = (solicitud.cantidad or Decimal("0")) * (solicitud.costo_unitario or Decimal("0"))
+        open_order = open_orders_by_solicitud.get(solicitud.id)
+        solicitud.has_open_order = bool(open_order)
+        solicitud.open_order_id = open_order.id if open_order else None
+        solicitud.open_order_folio = open_order.folio if open_order else ""
+        _enrich_solicitud_workflow(solicitud)
+        solicitud.is_enterprise_blocked = bool(getattr(solicitud, "has_workflow_blockers", False))
+        solicitud.enterprise_master_blocker_details = _enterprise_blocker_details_for_solicitud(solicitud)
+
+
+def _light_workflow_summary(status_counts: dict[str, int], total: int) -> dict[str, object]:
+    cards = [
+        {
+            "code": SolicitudCompra.STATUS_BORRADOR,
+            "label": "Borrador",
+            "tone": "warning",
+            "count": status_counts.get(SolicitudCompra.STATUS_BORRADOR, 0),
+            "query": f"?estatus={SolicitudCompra.STATUS_BORRADOR}",
+        },
+        {
+            "code": SolicitudCompra.STATUS_EN_REVISION,
+            "label": "En revisión",
+            "tone": "warning",
+            "count": status_counts.get(SolicitudCompra.STATUS_EN_REVISION, 0),
+            "query": f"?estatus={SolicitudCompra.STATUS_EN_REVISION}",
+        },
+        {
+            "code": SolicitudCompra.STATUS_APROBADA,
+            "label": "Aprobadas",
+            "tone": "success",
+            "count": status_counts.get(SolicitudCompra.STATUS_APROBADA, 0),
+            "query": f"?estatus={SolicitudCompra.STATUS_APROBADA}",
+        },
+        {
+            "code": SolicitudCompra.STATUS_RECHAZADA,
+            "label": "Rechazadas",
+            "tone": "danger",
+            "count": status_counts.get(SolicitudCompra.STATUS_RECHAZADA, 0),
+            "query": f"?estatus={SolicitudCompra.STATUS_RECHAZADA}",
+        },
+    ]
+    return {"cards": cards, "total": total, "gate_cards": []}
+
+
+def _empty_document_board() -> dict[str, object]:
+    return {
+        "blocker_detail_rows": [],
+        "master_blocker_class_cards": [],
+        "master_blocker_missing_cards": [],
+        "master_blocker_detail_rows": [],
+        "blocked_total": 0,
+    }
+
+
+def _empty_supply_rows(total: int) -> list[dict[str, object]]:
+    return [
+        {
+            "step": "01",
+            "title": "Maestro listo",
+            "closed": total,
+            "pending": 0,
+            "completion": 100 if total else 0,
+            "detail": "Carga inicial sin validación pesada.",
+            "url": "?estatus=BLOCKED_ERP",
+            "cta": "Resolver bloqueos",
+        },
+        {
+            "step": "02",
+            "title": "Validación resuelta",
+            "closed": 0,
+            "pending": total,
+            "completion": 0,
+            "detail": "Documentos pendientes de flujo operativo.",
+            "url": "?workflow_action=aprobar_rechazar",
+            "cta": "Abrir validación",
+        },
+        {
+            "step": "03",
+            "title": "Recepción cerrada",
+            "closed": 0,
+            "pending": total,
+            "completion": 0,
+            "detail": "Recepciones documentales por cerrar.",
+            "url": reverse("compras:recepciones"),
+            "cta": "Abrir recepciones",
+        },
+    ]
+
+
+@login_required
+def solicitudes_insumos_api(request: HttpRequest) -> JsonResponse:
+    if not can_view_compras(request.user):
+        raise PermissionDenied("No tienes permisos para ver Compras.")
+    q = " ".join((request.GET.get("q") or "").strip().lower().split())
+    limit = min(max(_to_non_negative_int(request.GET.get("limit"), default=20), 1), 50)
+    rows = []
+    for row in canonicalized_active_insumos(limit=5000):
+        insumo = row["canonical"]
+        nombre = _insumo_display_name(insumo)
+        searchable = " ".join(
+            [
+                nombre.lower(),
+                (insumo.nombre or "").lower(),
+                (insumo.nombre_point or "").lower(),
+                (insumo.codigo_point or "").lower(),
+                (insumo.categoria or "").lower(),
+            ]
+        )
+        if q and q not in searchable:
+            continue
+        rows.append(
+            {
+                "id": insumo.id,
+                "nombre": nombre,
+                "unidad": insumo.unidad_base.nombre if insumo.unidad_base else "",
+                "proveedor_sugerido_id": insumo.proveedor_principal_id or "",
+                "proveedor": insumo.proveedor_principal.nombre if insumo.proveedor_principal else "",
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return JsonResponse({"results": rows})
+
+
 def _document_release_gate_completion(rows: list[dict[str, object]]) -> int:
     total = sum(int(row.get("total") or 0) for row in rows)
     if total <= 0:
@@ -7093,82 +7386,53 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             )
         return _redirect_scoped_list("compras:solicitudes", request)
 
-    q_filter = (request.GET.get("q") or "").strip()
-    (
-        solicitudes,
-        source_filter,
-        plan_filter,
-        categoria_filter,
-        reabasto_filter,
-        estatus_filter,
-        workflow_action_filter,
-        blocker_key_filter,
-        plan_options,
-        periodo_tipo,
-        periodo_mes,
-        periodo_label,
-    ) = _filtered_solicitudes(
-        request.GET.get("source"),
-        request.GET.get("plan_id"),
-        request.GET.get("categoria"),
-        request.GET.get("reabasto"),
-        request.GET.get("estatus"),
-        request.GET.get("workflow_action"),
-        request.GET.get("blocker_key"),
-        request.GET.get("periodo_tipo"),
-        request.GET.get("periodo_mes"),
-        q_filter,
-    )
-    closure_key_raw = (request.GET.get("closure_key") or "all").strip().lower()
-    handoff_key_raw = (request.GET.get("handoff_key") or "all").strip().lower()
-    closure_key_filter = closure_key_raw
-    handoff_key_filter = handoff_key_raw
-    master_class_filter = (request.GET.get("master_class") or "all").strip()
-    master_missing_filter = (request.GET.get("master_missing") or "all").strip()
-    for solicitud in solicitudes:
-        solicitud.enterprise_master_blocker_details = _enterprise_blocker_details_for_solicitud(solicitud)
-    valid_closure_keys = {"all", "solicitudes_liberadas"}
-    if closure_key_filter in valid_closure_keys and closure_key_filter != "all":
-        solicitudes = [
-            solicitud
-            for solicitud in solicitudes
-            if getattr(solicitud, "has_workflow_blockers", False)
-            or solicitud.estatus in {SolicitudCompra.STATUS_BORRADOR, SolicitudCompra.STATUS_EN_REVISION}
-        ]
-    else:
-        closure_key_filter = "all"
-    valid_handoff_keys = {"all", "solicitud_orden"}
-    if handoff_key_filter in valid_handoff_keys and handoff_key_filter != "all":
-        solicitudes = [
-            solicitud
-            for solicitud in solicitudes
-            if getattr(solicitud, "has_workflow_blockers", False)
-            or (
-                solicitud.estatus == SolicitudCompra.STATUS_APROBADA
-                and not getattr(solicitud, "has_open_order", False)
-            )
-        ]
-    else:
-        handoff_key_filter = "all"
-    solicitudes = _filter_documents_by_master_blockers(
-        solicitudes,
-        master_class_filter,
-        master_missing_filter,
-    )
-    consumo_ref_filter = _sanitize_consumo_ref_filter(request.GET.get("consumo_ref"))
-    budget_ctx = _build_budget_context(
-        solicitudes,
-        source_filter,
-        plan_filter,
-        categoria_filter,
-        periodo_tipo,
-        periodo_mes,
-    )
-    total_presupuesto = budget_ctx["presupuesto_estimado_total"]
     import_preview = _build_import_preview_context(request.session.get(IMPORT_PREVIEW_SESSION_KEY))
+
+    filters = _solicitudes_filter_state(request)
+    source_filter = filters["source_filter"]
+    plan_filter = filters["plan_filter"]
+    categoria_filter = filters["categoria_filter"]
+    reabasto_filter = filters["reabasto_filter"]
+    estatus_filter = filters["estatus_filter"]
+    workflow_action_filter = filters["workflow_action_filter"]
+    blocker_key_filter = filters["blocker_key_filter"]
+    closure_key_filter = filters["closure_key_filter"]
+    handoff_key_filter = filters["handoff_key_filter"]
+    master_class_filter = filters["master_class_filter"]
+    master_missing_filter = filters["master_missing_filter"]
+    periodo_tipo = filters["periodo_tipo"]
+    periodo_mes = filters["periodo_mes"]
+    periodo_label = filters["periodo_label"]
+    consumo_ref_filter = filters["consumo_ref_filter"]
+    q_filter = filters["q_filter"]
 
     export_format = (request.GET.get("export") or "").lower()
     if export_format == "csv":
+        (
+            solicitudes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            reabasto_filter,
+            estatus_filter,
+            workflow_action_filter,
+            blocker_key_filter,
+            plan_options,
+            periodo_tipo,
+            periodo_mes,
+            periodo_label,
+        ) = _filtered_solicitudes(
+            request.GET.get("source"),
+            request.GET.get("plan_id"),
+            request.GET.get("categoria"),
+            request.GET.get("reabasto"),
+            request.GET.get("estatus"),
+            request.GET.get("workflow_action"),
+            request.GET.get("blocker_key"),
+            request.GET.get("periodo_tipo"),
+            request.GET.get("periodo_mes"),
+            q_filter,
+        )
         return _export_solicitudes_csv(
             solicitudes,
             source_filter,
@@ -7178,6 +7442,49 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_tipo,
             periodo_mes,
             periodo_label,
+        )
+    if export_format in {
+        "consolidado_csv",
+        "consolidado_xlsx",
+        "proveedor_csv",
+        "proveedor_xlsx",
+        "categoria_csv",
+        "categoria_xlsx",
+        "consumo_plan_csv",
+        "consumo_plan_xlsx",
+    }:
+        (
+            solicitudes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            reabasto_filter,
+            estatus_filter,
+            workflow_action_filter,
+            blocker_key_filter,
+            plan_options,
+            periodo_tipo,
+            periodo_mes,
+            periodo_label,
+        ) = _filtered_solicitudes(
+            request.GET.get("source"),
+            request.GET.get("plan_id"),
+            request.GET.get("categoria"),
+            request.GET.get("reabasto"),
+            request.GET.get("estatus"),
+            request.GET.get("workflow_action"),
+            request.GET.get("blocker_key"),
+            request.GET.get("periodo_tipo"),
+            request.GET.get("periodo_mes"),
+            q_filter,
+        )
+        budget_ctx = _build_budget_context(
+            solicitudes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            periodo_tipo,
+            periodo_mes,
         )
     if export_format == "consolidado_csv":
         return _export_consolidado_csv(
@@ -7304,6 +7611,31 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             return redirect("compras:solicitudes")
         return _export_import_preview_xlsx(import_preview)
     if export_format == "xlsx":
+        (
+            solicitudes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            reabasto_filter,
+            estatus_filter,
+            workflow_action_filter,
+            blocker_key_filter,
+            plan_options,
+            periodo_tipo,
+            periodo_mes,
+            periodo_label,
+        ) = _filtered_solicitudes(
+            request.GET.get("source"),
+            request.GET.get("plan_id"),
+            request.GET.get("categoria"),
+            request.GET.get("reabasto"),
+            request.GET.get("estatus"),
+            request.GET.get("workflow_action"),
+            request.GET.get("blocker_key"),
+            request.GET.get("periodo_tipo"),
+            request.GET.get("periodo_mes"),
+            q_filter,
+        )
         return _export_solicitudes_xlsx(
             solicitudes,
             source_filter,
@@ -7314,6 +7646,85 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_mes,
             periodo_label,
         )
+
+    advanced_filters_active = _advanced_solicitudes_filters_active(filters)
+    if advanced_filters_active:
+        (
+            solicitudes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            reabasto_filter,
+            estatus_filter,
+            workflow_action_filter,
+            blocker_key_filter,
+            plan_options,
+            periodo_tipo,
+            periodo_mes,
+            periodo_label,
+        ) = _filtered_solicitudes(
+            request.GET.get("source"),
+            request.GET.get("plan_id"),
+            request.GET.get("categoria"),
+            request.GET.get("reabasto"),
+            request.GET.get("estatus"),
+            request.GET.get("workflow_action"),
+            request.GET.get("blocker_key"),
+            request.GET.get("periodo_tipo"),
+            request.GET.get("periodo_mes"),
+            q_filter,
+        )
+        for solicitud in solicitudes:
+            solicitud.enterprise_master_blocker_details = _enterprise_blocker_details_for_solicitud(solicitud)
+        if closure_key_filter != "all":
+            solicitudes = [
+                solicitud
+                for solicitud in solicitudes
+                if getattr(solicitud, "has_workflow_blockers", False)
+                or solicitud.estatus in {SolicitudCompra.STATUS_BORRADOR, SolicitudCompra.STATUS_EN_REVISION}
+            ]
+        if handoff_key_filter != "all":
+            solicitudes = [
+                solicitud
+                for solicitud in solicitudes
+                if getattr(solicitud, "has_workflow_blockers", False)
+                or (
+                    solicitud.estatus == SolicitudCompra.STATUS_APROBADA
+                    and not getattr(solicitud, "has_open_order", False)
+                )
+            ]
+        solicitudes = _filter_documents_by_master_blockers(
+            solicitudes,
+            master_class_filter,
+            master_missing_filter,
+        )
+        workflow_summary = _solicitudes_workflow_summary(solicitudes)
+        enterprise_board = _solicitudes_enterprise_board(solicitudes)
+        supply_model_rows = _solicitudes_supply_model_rows(solicitudes)
+        solicitudes_total_count = len(solicitudes)
+        solicitudes_visible = solicitudes[:300]
+        total_presupuesto = sum((s.presupuesto_estimado for s in solicitudes_visible), Decimal("0"))
+        presupuesto_ejecutado_total = Decimal("0")
+    else:
+        solicitudes_qs = _solicitudes_document_queryset(filters)
+        visible_probe = list(solicitudes_qs.order_by("-id")[:101])
+        solicitudes_has_more = len(visible_probe) > 100
+        solicitudes_visible = visible_probe[:100]
+        solicitudes_total_count = len(solicitudes_visible)
+        status_counts = defaultdict(int)
+        for solicitud in solicitudes_visible:
+            status_counts[solicitud.estatus] += 1
+        _enrich_visible_solicitudes(solicitudes_visible)
+        plan_options = _solicitudes_plan_options() if source_filter == "plan" or plan_filter else []
+        workflow_summary = _light_workflow_summary(status_counts, solicitudes_total_count)
+        enterprise_board = (
+            _solicitudes_enterprise_board(solicitudes_visible)
+            if any(getattr(s, "has_workflow_blockers", False) for s in solicitudes_visible)
+            else _empty_document_board()
+        )
+        supply_model_rows = _empty_supply_rows(solicitudes_total_count)
+        total_presupuesto = sum((s.presupuesto_estimado for s in solicitudes_visible), Decimal("0"))
+        presupuesto_ejecutado_total = Decimal("0")
 
     query_without_export = request.GET.copy()
     query_without_export.pop("export", None)
@@ -7327,33 +7738,29 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
     query_without_closure.pop("closure_key", None)
     query_without_handoff = query_without_export.copy()
     query_without_handoff.pop("handoff_key", None)
-    plan_scope_context = _build_plan_scope_context(
-        source_filter=source_filter,
-        plan_filter=plan_filter,
-        q_filter=q_filter,
-        current_view="solicitudes",
-        closure_key_filter=closure_key_raw,
-        handoff_key_filter=handoff_key_raw,
-        master_class_filter=master_class_filter,
-        master_missing_filter=master_missing_filter,
-        session=request.session,
-    )
-
-    workflow_summary = _solicitudes_workflow_summary(solicitudes)
-    enterprise_board = _solicitudes_enterprise_board(solicitudes)
-    supply_model_rows = _solicitudes_supply_model_rows(solicitudes)
-    solicitudes_total_count = len(solicitudes)
-    solicitudes_visible = solicitudes[:300]
+    plan_scope_context = None
+    if source_filter == "plan" and plan_filter:
+        plan_scope_context = _build_plan_scope_context(
+            source_filter=source_filter,
+            plan_filter=plan_filter,
+            q_filter=q_filter,
+            current_view="solicitudes",
+            closure_key_filter=closure_key_filter,
+            handoff_key_filter=handoff_key_filter,
+            master_class_filter=master_class_filter,
+            master_missing_filter=master_missing_filter,
+            session=request.session,
+        )
     release_gate_rows = [
         {
             "step": "01",
             "title": "Artículo liberado",
             "detail": "El artículo ya tiene maestro, costo y referencia válidos para entrar al flujo documental.",
-            "completed": sum(1 for s in solicitudes if not getattr(s, "has_workflow_blockers", False)),
-            "open_count": sum(1 for s in solicitudes if getattr(s, "has_workflow_blockers", False)),
+            "completed": sum(1 for s in solicitudes_visible if not getattr(s, "has_workflow_blockers", False)),
+            "open_count": sum(1 for s in solicitudes_visible if getattr(s, "has_workflow_blockers", False)),
             "total": max(solicitudes_total_count, 1),
             "tone": "success"
-            if not any(getattr(s, "has_workflow_blockers", False) for s in solicitudes)
+            if not any(getattr(s, "has_workflow_blockers", False) for s in solicitudes_visible)
             else "warning",
             "url": reverse("compras:solicitudes"),
             "cta": "Abrir solicitudes",
@@ -7402,9 +7809,9 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
     context = {
         "solicitudes": solicitudes_visible,
         "solicitudes_total_count": solicitudes_total_count,
+        "solicitudes_total_label": f"{solicitudes_total_count}+" if locals().get("solicitudes_has_more") else solicitudes_total_count,
         "solicitudes_visible_count": len(solicitudes_visible),
-        "insumo_options": _build_basic_insumo_options(),
-        "proveedor_options": list(Proveedor.objects.filter(activo=True).only("id", "nombre").order_by("nombre")),
+        "proveedor_options": [],
         "categoria_options": [
             c
             for c in sorted(
@@ -7466,6 +7873,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "plan_scope_context": plan_scope_context,
         "import_preview": import_preview,
         "analytics_url": f"{reverse('compras:solicitudes_resumen_api')}?{query_without_export.urlencode()}",
+        "insumos_url": reverse("compras:solicitudes_insumos_api"),
         "workflow_summary": workflow_summary,
         "enterprise_board": enterprise_board,
         "supply_model_rows": supply_model_rows,
@@ -7512,7 +7920,11 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             if release_gate_rows and sum(row["total"] for row in release_gate_rows)
             else 0
         ),
-        **budget_ctx,
+        "presupuesto_ejecutado_total": presupuesto_ejecutado_total,
+        "presupuesto_rows": [],
+        "presupuesto_rows_proveedor": [],
+        "presupuesto_rows_categoria": [],
+        "presupuesto_historial": [],
     }
     return render(request, "compras/solicitudes.html", context)
 

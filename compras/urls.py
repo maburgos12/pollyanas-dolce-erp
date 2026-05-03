@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.dashboard, name="home"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("solicitudes/", views.solicitudes, name="solicitudes"),
+    path("solicitudes/insumos.json", views.solicitudes_insumos_api, name="solicitudes_insumos_api"),
     path("solicitudes/resumen.json", views.solicitudes_resumen_api, name="solicitudes_resumen_api"),
     path("solicitudes/consumo-vs-plan.json", views.solicitudes_consumo_vs_plan_api, name="solicitudes_consumo_vs_plan_api"),
     path("solicitudes/presupuesto/", views.guardar_presupuesto_periodo, name="solicitudes_presupuesto"),

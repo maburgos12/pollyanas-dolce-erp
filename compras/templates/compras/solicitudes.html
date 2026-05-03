@@ -23,22 +23,22 @@
     </div>
     <div class="kpi-mini compras-command__metrics">
       <article class="kpi-card">
-        <div class="kpi-number">{{ solicitudes_total_count }}</div>
+        <div class="kpi-number">{{ solicitudes_total_label|default:solicitudes_total_count }}</div>
         <div class="kpi-label">Solicitudes del filtro</div>
       </article>
       <article class="kpi-card">
-        <div class="kpi-number {% if workflow_summary.cards.2.count > 0 %}is-danger{% else %}is-success{% endif %}">
-          {{ workflow_summary.cards.2.count|default:0 }}
+        <div class="kpi-number is-warning">
+          {{ workflow_summary.cards.0.count|default:0 }}
         </div>
-        <div class="kpi-label">Bloqueadas ERP</div>
+        <div class="kpi-label">Borrador</div>
       </article>
       <article class="kpi-card">
-        <div class="kpi-number is-warning">{{ total_presupuesto|floatformat:2 }}</div>
-        <div class="kpi-label">Estimado filtro</div>
+        <div class="kpi-number is-warning">{{ workflow_summary.cards.1.count|default:0 }}</div>
+        <div class="kpi-label">En revisión</div>
       </article>
       <article class="kpi-card">
-        <div class="kpi-number is-success">{{ presupuesto_ejecutado_total|floatformat:2 }}</div>
-        <div class="kpi-label">Ejecutado OC</div>
+        <div class="kpi-number is-success">{{ workflow_summary.cards.2.count|default:0 }}</div>
+        <div class="kpi-label">Aprobadas</div>
       </article>
     </div>
   </section>
@@ -142,14 +142,11 @@
       <input type="hidden" name="plan_id" value="{{ plan_filter }}">
       <input class="input-field" name="area" placeholder="Área" required>
       <input class="input-field" name="solicitante" placeholder="Solicitante" value="{{ request.user.username }}" required>
-      <select class="input-field" id="insumo_id" name="insumo_id" required>
-        <option value="">Insumo</option>
-        {% for i in insumo_options %}
-        <option value="{{ i.id }}" data-unidad="{{ i.unidad }}" data-proveedor-id="{{ i.proveedor_sugerido_id }}">
-          {{ i.nombre }}
-        </option>
-        {% endfor %}
-      </select>
+      <div class="field-stack" data-insumos-url="{{ insumos_url }}">
+        <input class="input-field" id="insumo_search" list="insumo_suggestions" autocomplete="off" placeholder="Buscar insumo" required>
+        <input type="hidden" id="insumo_id" name="insumo_id">
+        <datalist id="insumo_suggestions"></datalist>
+      </div>
       <input class="input-field" id="cantidad" type="number" step="0.001" min="0" name="cantidad" placeholder="Cantidad" required>
       <select class="input-field" id="proveedor_sugerido_id" name="proveedor_sugerido_id">
         <option value="">Proveedor sugerido</option>
@@ -328,7 +325,7 @@
       </table>
     </div>
     <p class="muted mb-0">
-      Presupuesto estimado del filtro: <strong>${{ total_presupuesto|floatformat:2 }}</strong>
+      Presupuesto estimado visible: <strong>${{ total_presupuesto|floatformat:2 }}</strong>
       {% if solicitudes_total_count > solicitudes_visible_count %}
       · Mostrando {{ solicitudes_visible_count }} de {{ solicitudes_total_count }} solicitudes.
       {% endif %}
@@ -346,14 +343,66 @@
 {% block extra_js %}
 <script>
 (() => {
-  const insumoSelect = document.getElementById("insumo_id");
+  const insumoSearch = document.getElementById("insumo_search");
+  const insumoInput = document.getElementById("insumo_id");
+  const insumoList = document.getElementById("insumo_suggestions");
+  const insumoWrapper = insumoSearch ? insumoSearch.closest("[data-insumos-url]") : null;
   const proveedorSelect = document.getElementById("proveedor_sugerido_id");
-  if (insumoSelect && proveedorSelect) {
-    insumoSelect.addEventListener("change", () => {
-      const option = insumoSelect.selectedOptions[0];
-      const proveedorId = option ? option.dataset.proveedorId : "";
-      if (proveedorId) proveedorSelect.value = proveedorId;
+  const insumoCache = new Map();
+  if (insumoSearch && insumoInput && insumoList && insumoWrapper) {
+    let controller = null;
+    const fillOptions = (items) => {
+      insumoList.innerHTML = "";
+      insumoCache.clear();
+      items.forEach((item) => {
+        const label = item.unidad ? `${item.nombre} · ${item.unidad}` : item.nombre;
+        insumoCache.set(label, item);
+        const option = document.createElement("option");
+        option.value = label;
+        insumoList.appendChild(option);
+      });
+    };
+    const searchInsumos = async () => {
+      const query = insumoSearch.value.trim();
+      insumoInput.value = "";
+      if (query.length < 2) {
+        fillOptions([]);
+        return;
+      }
+      if (controller) controller.abort();
+      controller = new AbortController();
+      const url = `${insumoWrapper.dataset.insumosUrl}?q=${encodeURIComponent(query)}&limit=20`;
+      try {
+        const response = await fetch(url, {
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          signal: controller.signal,
+        });
+        const data = await response.json();
+        fillOptions(data.results || []);
+      } catch (error) {
+        if (error.name !== "AbortError") fillOptions([]);
+      }
+    };
+    const applySelection = () => {
+      const item = insumoCache.get(insumoSearch.value);
+      insumoInput.value = item ? item.id : "";
+      if (item && proveedorSelect && item.proveedor_sugerido_id) {
+        if (!proveedorSelect.querySelector(`option[value="${item.proveedor_sugerido_id}"]`)) {
+          const option = document.createElement("option");
+          option.value = item.proveedor_sugerido_id;
+          option.textContent = item.proveedor || "Proveedor sugerido";
+          proveedorSelect.appendChild(option);
+        }
+        proveedorSelect.value = item.proveedor_sugerido_id;
+      }
+    };
+    let timer = null;
+    insumoSearch.addEventListener("input", () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(searchInsumos, 180);
+      applySelection();
     });
+    insumoSearch.addEventListener("change", applySelection);
   }
 
   const button = document.querySelector("[data-load-analytics]");
