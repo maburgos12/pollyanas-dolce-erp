@@ -4,6 +4,7 @@ from django.urls import path, include, re_path
 from django.views.static import serve as static_serve
 from django.views.generic import RedirectView
 from core import views as core_views
+from mantenimiento.views import pwa_mantenimiento
 from orquestacion import chat_views as ai_chat_views
 from rentabilidad import views_rentabilidad
 
@@ -56,6 +57,7 @@ urlpatterns = [
     path("rrhh/", include(("rrhh.urls", "rrhh"), namespace="rrhh")),
     path("logistica/", include(("logistica.urls", "logistica"), namespace="logistica")),
     path("fallas/", include(("fallas.urls", "fallas"), namespace="fallas")),
+    path("mantenimiento/app/", pwa_mantenimiento, name="pwa-mantenimiento"),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
     path("orquestacion/", include(("orquestacion.urls", "orquestacion"), namespace="orquestacion")),
@@ -69,6 +71,7 @@ urlpatterns = [
     path("rentabilidad/analizar-todas/", views_rentabilidad.analizar_todas, name="rentabilidad_analizar_todas"),
     path("api/", include("api.urls")),
     path("api/fallas/", include(("fallas.urls", "fallas_api"), namespace="fallas_api")),
+    path("api/mantenimiento/", include("mantenimiento.urls")),
     path("api/pos-bridge/", include(("pos_bridge.api.urls", "pos_bridge_api"), namespace="pos_bridge_api")),
 ]
 

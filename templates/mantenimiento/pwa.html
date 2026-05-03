@@ -1,0 +1,985 @@
+{% load static %}
+<!doctype html>
+<html lang="es-MX">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#8B2252">
+    <title>Pollyana's Mantenimiento</title>
+    <link rel="manifest" href="{% static 'mantenimiento/manifest.json' %}">
+    <link rel="icon" href="{% static 'mantenimiento/icons/icon-192.png' %}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --bg: #0f0f14;
+        --surface: #1a1a24;
+        --border: #2a2a38;
+        --wine: #8B2252;
+        --gold: #C9A84C;
+        --text: #e8e0d5;
+        --text-muted: #888888;
+        --danger: #e64f64;
+        --warning: #e6b84f;
+        --success: #51b56f;
+        --info: #4f8ee6;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        min-height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Nunito", sans-serif;
+      }
+      body {
+        display: flex;
+        justify-content: center;
+        padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+      }
+      button, input, textarea, select { font: inherit; }
+      button {
+        min-height: 48px;
+        border: 0;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: .55;
+      }
+      #app {
+        width: 100%;
+        max-width: 430px;
+        min-height: 100vh;
+        padding: 18px 16px 74px;
+        opacity: 1;
+        transition: opacity .2s ease;
+      }
+      #app.is-changing { opacity: 0; }
+      .brand-title {
+        margin: 0;
+        font-family: "Playfair Display", serif;
+        font-size: 38px;
+        line-height: 1;
+      }
+      .brand-subtitle {
+        margin: 8px 0 0;
+        color: var(--gold);
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+      .login-wrap {
+        display: flex;
+        min-height: calc(100vh - 92px);
+        flex-direction: column;
+        justify-content: center;
+      }
+      .panel, .card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+      }
+      .panel {
+        margin-top: 30px;
+        padding: 18px;
+      }
+      .field {
+        display: grid;
+        gap: 7px;
+        margin-bottom: 14px;
+      }
+      label {
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 800;
+      }
+      input, textarea, select {
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #111118;
+        color: var(--text);
+        outline: none;
+        padding: 12px 13px;
+      }
+      textarea {
+        min-height: 112px;
+        resize: vertical;
+      }
+      input:focus, textarea:focus, select:focus { border-color: var(--gold); }
+      .primary-btn {
+        width: 100%;
+        border-radius: 10px;
+        background: var(--wine);
+        color: white;
+        font-weight: 800;
+        padding: 14px;
+      }
+      .secondary-btn {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: transparent;
+        color: var(--text);
+        font-weight: 800;
+        padding: 12px 14px;
+      }
+      .topbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .mini-brand {
+        font-family: "Playfair Display", serif;
+        font-size: 22px;
+      }
+      .hello {
+        margin: 3px 0 0;
+        color: var(--text-muted);
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .logout {
+        min-height: 40px;
+        border-radius: 999px;
+        background: #261521;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 800;
+        padding: 8px 12px;
+      }
+      .dash-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .dash-btn {
+        min-height: 100px;
+        border: 2px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 800;
+        padding: 14px 10px;
+      }
+      .dash-btn:hover, .dash-btn:focus { border-color: var(--wine); }
+      .card-list {
+        display: grid;
+        gap: 10px;
+      }
+      .select-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        color: var(--text);
+        font-weight: 800;
+        padding: 14px;
+        text-align: left;
+      }
+      .select-card:hover, .select-card.selected {
+        border-color: var(--wine);
+        background: #2a1423;
+      }
+      .card-label {
+        margin: 0 0 4px;
+        font-size: 15px;
+        font-weight: 900;
+      }
+      .card-sub {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+      .tipo-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .tipo-btn {
+        min-height: 70px;
+        border: 2px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        color: var(--text);
+        font-weight: 800;
+        padding: 12px;
+      }
+      .tipo-btn.selected {
+        border-color: var(--gold);
+        background: #1f1a10;
+      }
+      .progress {
+        display: flex;
+        gap: 9px;
+        margin: 0 0 18px;
+      }
+      .dot {
+        width: 34px;
+        height: 7px;
+        border-radius: 999px;
+        background: var(--border);
+      }
+      .dot.active { background: var(--gold); }
+      .screen-title {
+        margin: 0 0 14px;
+        font-family: "Playfair Display", serif;
+        font-size: 28px;
+        line-height: 1.08;
+      }
+      .file-input {
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        overflow: hidden;
+        position: absolute;
+        pointer-events: none;
+      }
+      .file-trigger {
+        display: flex;
+        min-height: 48px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #111118;
+        color: var(--text);
+        font-weight: 900;
+        padding: 12px 13px;
+      }
+      .file-trigger.loaded {
+        border-color: var(--success);
+        color: var(--success);
+      }
+      .thumb {
+        width: 100%;
+        max-height: 180px;
+        object-fit: cover;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-top: 8px;
+      }
+      .kv {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: 8px;
+        margin: 7px 0;
+        font-size: 14px;
+      }
+      .kv b { color: var(--gold); }
+      .report-card {
+        margin-bottom: 10px;
+        padding: 14px;
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 16px;
+      }
+      .confirm {
+        margin-top: 28px;
+        text-align: center;
+      }
+      .confirm-mark {
+        font-size: 54px;
+        margin-bottom: 8px;
+      }
+      .confirm-actions {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+      }
+      .error-msg {
+        margin: 10px 0 0;
+        color: var(--danger);
+        font-weight: 800;
+      }
+      .success-msg {
+        margin: 10px 0 0;
+        color: var(--success);
+        font-weight: 800;
+      }
+      .muted {
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+      .footer {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        max-width: 430px;
+        margin: 0 auto;
+        border-top: 1px solid var(--border);
+        background: rgba(15,15,20,.94);
+        color: var(--text-muted);
+        text-align: center;
+        font-size: 12px;
+        padding: 13px 16px calc(13px + env(safe-area-inset-bottom));
+      }
+      .empty {
+        border: 1px dashed var(--border);
+        border-radius: 12px;
+        color: var(--text-muted);
+        padding: 22px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      const API = "/api/mantenimiento";
+      const AUTH_API = "/api/logistica";
+      const app = document.getElementById("app");
+      const state = {
+        token: localStorage.getItem("pd_logistica_access") || "",
+        refreshToken: localStorage.getItem("pd_logistica_refresh") || "",
+        perfil: null,
+        pantalla: "login",
+        activos: [],
+        unidades: [],
+        tiposServicio: [],
+        equipoDraft: emptyEquipoDraft(),
+        vehiculoDraft: emptyVehiculoDraft(),
+      };
+
+      function emptyEquipoDraft() {
+        return {
+          step: 1,
+          activo: null,
+          activoLabel: "",
+          tipo: "",
+          descripcion: "",
+          proveedor: "",
+          costoReal: "",
+          foto: null,
+          fotoPreview: "",
+        };
+      }
+
+      function emptyVehiculoDraft() {
+        return {
+          step: 1,
+          unidad: null,
+          unidadLabel: "",
+          modo: "",
+          tipoServicio: null,
+          tipoServicioLabel: "",
+          descripcionFalla: "",
+          descripcionReparacion: "",
+          proveedor: "",
+          costo: "",
+          km: "",
+          proximaFecha: "",
+          proximosKm: "",
+          foto: null,
+          fotoPreview: "",
+        };
+      }
+
+      function setTokens(data) {
+        state.token = data.access;
+        state.refreshToken = data.refresh;
+        localStorage.setItem("pd_logistica_access", data.access);
+        localStorage.setItem("pd_logistica_refresh", data.refresh);
+      }
+
+      function logout(doRender = true) {
+        state.token = "";
+        state.refreshToken = "";
+        state.perfil = null;
+        localStorage.removeItem("pd_logistica_access");
+        localStorage.removeItem("pd_logistica_refresh");
+        if (doRender) showScreen("login");
+      }
+
+      async function parseListResponse(res) {
+        const data = await res.json();
+        return data.results || data;
+      }
+
+      async function apiFetch(path, options = {}) {
+        const headers = {...(options.headers || {})};
+        if (state.token) headers.Authorization = `Bearer ${state.token}`;
+        const res = await fetch(path.startsWith("http") ? path : `${API}${path}`, {...options, headers});
+        if (res.status === 401 && state.refreshToken && !options._retry) {
+          const refreshed = await fetch(`${AUTH_API}/auth/token/refresh/`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({refresh: state.refreshToken})
+          });
+          if (refreshed.ok) {
+            const data = await refreshed.json();
+            state.token = data.access;
+            localStorage.setItem("pd_logistica_access", data.access);
+            return apiFetch(path, {...options, _retry: true});
+          }
+          logout(false);
+          throw new Error("Sesion expirada");
+        }
+        return res;
+      }
+
+      function esc(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      function render(html) {
+        app.classList.add("is-changing");
+        window.setTimeout(() => {
+          app.innerHTML = html;
+          app.classList.remove("is-changing");
+        }, 120);
+      }
+
+      function shell(content) {
+        const nombre = esc(state.perfil?.nombre || "");
+        return `
+          <div class="topbar">
+            <div>
+              <div class="mini-brand">Pollyana's</div>
+              <p class="hello">Hola, ${nombre}</p>
+            </div>
+            <button class="logout" onclick="logout()">Salir</button>
+          </div>
+          ${content}
+          <div class="footer">Pollyana's Dolce · Mantenimiento</div>
+        `;
+      }
+
+      function progressDots(step, total = 3) {
+        return `<div class="progress">${Array.from({length: total}, (_, index) =>
+          `<span class="dot ${index + 1 === step ? "active" : ""}"></span>`
+        ).join("")}</div>`;
+      }
+
+      async function showScreen(name) {
+        state.pantalla = name;
+        if (name === "login") return renderLogin();
+        if (!state.perfil) await loadPerfil();
+        if (name === "dashboard") return renderDashboard();
+        if (name === "equipo") return renderEquipoDraft();
+        if (name === "vehiculo") return renderVehiculoDraft();
+        if (name === "historial") return renderHistorial();
+      }
+
+      function renderLogin(error = "") {
+        render(`
+          <main class="login-wrap">
+            <section>
+              <h1 class="brand-title">Pollyana's</h1>
+              <p class="brand-subtitle">Mantenimiento</p>
+            </section>
+            <form class="panel" onsubmit="login(event)">
+              <div class="field">
+                <label for="username">Usuario</label>
+                <input id="username" name="username" autocomplete="username" required>
+              </div>
+              <div class="field">
+                <label for="password">Contraseña</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required>
+              </div>
+              <button class="primary-btn" type="submit">Entrar</button>
+              ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            </form>
+          </main>
+        `);
+      }
+
+      async function login(event) {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const res = await fetch(`${AUTH_API}/auth/token/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({username: form.get("username"), password: form.get("password")})
+        });
+        if (!res.ok) return renderLogin("Usuario o contraseña incorrectos");
+        setTokens(await res.json());
+        await showScreen("dashboard");
+      }
+
+      async function loadPerfil() {
+        const res = await apiFetch("/me/");
+        state.perfil = res.ok ? await res.json() : {nombre: "Compras"};
+      }
+
+      function renderDashboard() {
+        render(shell(`
+          <p style="margin:0 0 20px;color:var(--gold);font-weight:800;">¿Qué vas a registrar?</p>
+          <div class="dash-grid">
+            <button class="dash-btn" onclick="startEquipo()">Equipo /<br>Maquinaria</button>
+            <button class="dash-btn" onclick="startVehiculo()">Vehículo<br>de flota</button>
+          </div>
+          <div style="margin-top:14px">
+            <button class="secondary-btn" style="width:100%" onclick="showScreen('historial')">Ver historial reciente</button>
+          </div>
+        `));
+      }
+
+      function startEquipo() {
+        state.equipoDraft = emptyEquipoDraft();
+        showScreen("equipo");
+      }
+
+      async function ensureActivos() {
+        if (state.activos.length) return;
+        const res = await apiFetch("/activos/");
+        state.activos = res.ok ? await parseListResponse(res) : [];
+      }
+
+      function activoCard(activo) {
+        const selected = state.equipoDraft.activo === activo.id ? "selected" : "";
+        return `
+          <button class="select-card ${selected}" onclick="seleccionarActivo(${activo.id})">
+            <p class="card-label">${esc(activo.nombre)}</p>
+            <p class="card-sub">${esc(activo.codigo)} · ${esc(activo.sucursal_nombre || activo.ubicacion || "Sin sucursal")}</p>
+          </button>
+        `;
+      }
+
+      async function renderEquipoDraft(error = "") {
+        const d = state.equipoDraft;
+        let body = "";
+        if (d.step === 1) {
+          await ensureActivos();
+          const lista = state.activos.map(activoCard).join("") || `<div class="empty">No hay equipos registrados.</div>`;
+          body = `
+            <h1 class="screen-title">Seleccionar equipo</h1>
+            ${progressDots(1)}
+            <div class="field">
+              <input type="search" placeholder="Buscar por nombre, código o sucursal" oninput="filtrarActivos(this.value)">
+            </div>
+            <div class="card-list" id="lista-activos">${lista}</div>
+            <div class="actions">
+              <button class="secondary-btn" onclick="showScreen('dashboard')">Cancelar</button>
+              <button class="primary-btn" onclick="nextEquipoStep()" ${d.activo ? "" : "disabled"}>Siguiente</button>
+            </div>
+          `;
+        } else if (d.step === 2) {
+          body = `
+            <h1 class="screen-title">Tipo de servicio</h1>
+            ${progressDots(2)}
+            <div class="field">
+              <label>Equipo seleccionado</label>
+              <p style="color:var(--gold);font-weight:800;margin:0">${esc(d.activoLabel)}</p>
+            </div>
+            <div class="field">
+              <label>Tipo de mantenimiento</label>
+              <div class="tipo-grid">
+                <button class="tipo-btn ${d.tipo === "PREVENTIVO" ? "selected" : ""}" onclick="state.equipoDraft.tipo='PREVENTIVO'; renderEquipoDraft()">Preventivo</button>
+                <button class="tipo-btn ${d.tipo === "CORRECTIVO" ? "selected" : ""}" onclick="state.equipoDraft.tipo='CORRECTIVO'; renderEquipoDraft()">Correctivo</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="desc-eq">Descripción / acción realizada</label>
+              <textarea id="desc-eq" placeholder="Describe el trabajo realizado" oninput="state.equipoDraft.descripcion=this.value">${esc(d.descripcion)}</textarea>
+            </div>
+            <div class="field">
+              <label for="prov-eq">Proveedor</label>
+              <input id="prov-eq" placeholder="Nombre del taller o técnico" value="${esc(d.proveedor)}" oninput="state.equipoDraft.proveedor=this.value">
+            </div>
+            <div class="field">
+              <label for="costo-eq">Costo real (MXN)</label>
+              <input id="costo-eq" type="number" step="0.01" min="0" placeholder="0.00" value="${esc(d.costoReal)}" oninput="state.equipoDraft.costoReal=this.value">
+            </div>
+            <div class="field">
+              <label>Foto opcional</label>
+              <input id="foto-eq" class="file-input" type="file" accept="image/*" capture="environment" onchange="setFotoEquipo(this)">
+              <label class="file-trigger ${d.foto ? "loaded" : ""}" for="foto-eq">${d.foto ? "Foto cargada" : "Tomar foto"}</label>
+              ${d.fotoPreview ? `<img class="thumb" src="${d.fotoPreview}" alt="Vista previa">` : ""}
+            </div>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <div class="actions">
+              <button class="secondary-btn" onclick="prevEquipoStep()">Atrás</button>
+              <button class="primary-btn" onclick="nextEquipoStep()" ${d.tipo && d.descripcion.trim() ? "" : "disabled"}>Revisar</button>
+            </div>
+          `;
+        } else {
+          body = `
+            <h1 class="screen-title">Confirmar</h1>
+            ${progressDots(3)}
+            <section class="card report-card">
+              <div class="kv"><b>Equipo</b><span>${esc(d.activoLabel)}</span></div>
+              <div class="kv"><b>Tipo</b><span>${esc(d.tipo)}</span></div>
+              <div class="kv"><b>Proveedor</b><span>${esc(d.proveedor || "-")}</span></div>
+              <div class="kv"><b>Costo</b><span>${d.costoReal ? "$" + Number(d.costoReal).toLocaleString("es-MX") : "-"}</span></div>
+              <div class="kv"><b>Descripción</b><span>${esc(d.descripcion)}</span></div>
+              <div class="kv"><b>Foto</b><span>${d.foto ? "Adjunta" : "Sin foto"}</span></div>
+            </section>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <div class="actions">
+              <button class="secondary-btn" onclick="prevEquipoStep()">Atrás</button>
+              <button class="primary-btn" onclick="enviarEquipo()">Guardar</button>
+            </div>
+          `;
+        }
+        render(shell(body));
+      }
+
+      function seleccionarActivo(id) {
+        const activo = state.activos.find((item) => item.id === id);
+        if (!activo) return;
+        state.equipoDraft.activo = activo.id;
+        state.equipoDraft.activoLabel = `${activo.nombre} (${activo.codigo})`;
+        renderEquipoDraft();
+      }
+
+      function filtrarActivos(q) {
+        const lista = document.getElementById("lista-activos");
+        if (!lista) return;
+        const value = q.toLowerCase();
+        const filtrados = state.activos.filter((activo) =>
+          activo.nombre.toLowerCase().includes(value) ||
+          activo.codigo.toLowerCase().includes(value) ||
+          (activo.sucursal_nombre || "").toLowerCase().includes(value) ||
+          (activo.ubicacion || "").toLowerCase().includes(value)
+        );
+        lista.innerHTML = filtrados.map(activoCard).join("") || `<div class="empty">Sin resultados.</div>`;
+      }
+
+      function setFotoEquipo(input) {
+        const file = input.files[0];
+        if (!file) return;
+        state.equipoDraft.foto = file;
+        state.equipoDraft.fotoPreview = URL.createObjectURL(file);
+        renderEquipoDraft();
+      }
+
+      function nextEquipoStep() {
+        const d = state.equipoDraft;
+        if (d.step === 1 && !d.activo) return;
+        if (d.step === 2 && !d.tipo) return renderEquipoDraft("Selecciona el tipo de mantenimiento.");
+        if (d.step === 2 && !d.descripcion.trim()) return renderEquipoDraft("La descripción es obligatoria.");
+        d.step = Math.min(3, d.step + 1);
+        renderEquipoDraft();
+      }
+
+      function prevEquipoStep() {
+        state.equipoDraft.step = Math.max(1, state.equipoDraft.step - 1);
+        renderEquipoDraft();
+      }
+
+      async function enviarEquipo() {
+        const d = state.equipoDraft;
+        const fd = new FormData();
+        fd.append("activo_ref", d.activo);
+        fd.append("tipo", d.tipo);
+        fd.append("descripcion", d.descripcion.trim());
+        if (d.proveedor) fd.append("proveedor_servicio", d.proveedor.trim());
+        if (d.costoReal) fd.append("costo_real", d.costoReal);
+        if (d.foto) fd.append("foto", d.foto);
+        const res = await apiFetch("/ordenes/", {method: "POST", body: fd});
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          return renderEquipoDraft(Object.values(err).flat().join(" ") || "Error al guardar.");
+        }
+        const data = await res.json();
+        render(shell(`
+          <section class="confirm">
+            <div class="confirm-mark">OK</div>
+            <h1 class="screen-title">Guardado</h1>
+            <p class="muted">Orden ${esc(data.folio || data.id)} registrada correctamente.</p>
+            <div class="confirm-actions">
+              <button class="primary-btn" onclick="startEquipo()">Registrar otro equipo</button>
+              <button class="secondary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+            </div>
+          </section>
+        `));
+      }
+
+      function startVehiculo() {
+        state.vehiculoDraft = emptyVehiculoDraft();
+        showScreen("vehiculo");
+      }
+
+      async function ensureVehiculoCatalogos() {
+        if (!state.unidades.length) {
+          const res = await apiFetch("/unidades/");
+          state.unidades = res.ok ? await parseListResponse(res) : [];
+        }
+        if (!state.tiposServicio.length) {
+          const res = await apiFetch("/tipos-servicio/");
+          state.tiposServicio = res.ok ? await parseListResponse(res) : [];
+        }
+      }
+
+      function unidadCard(unidad) {
+        const selected = state.vehiculoDraft.unidad === unidad.id ? "selected" : "";
+        return `
+          <button class="select-card ${selected}" onclick="seleccionarUnidad(${unidad.id})">
+            <p class="card-label">${esc(unidad.descripcion)}</p>
+            <p class="card-sub">${esc(unidad.codigo)} · ${esc(unidad.placa || "Sin placa")} · ${esc(unidad.sucursal_nombre || "")}</p>
+          </button>
+        `;
+      }
+
+      async function renderVehiculoDraft(error = "") {
+        const d = state.vehiculoDraft;
+        let body = "";
+        if (d.step === 1) {
+          await ensureVehiculoCatalogos();
+          const lista = state.unidades.map(unidadCard).join("") || `<div class="empty">No hay unidades registradas.</div>`;
+          body = `
+            <h1 class="screen-title">Seleccionar vehículo</h1>
+            ${progressDots(1)}
+            <div class="card-list">${lista}</div>
+            <div class="actions">
+              <button class="secondary-btn" onclick="showScreen('dashboard')">Cancelar</button>
+              <button class="primary-btn" onclick="nextVehiculoStep()" ${d.unidad ? "" : "disabled"}>Siguiente</button>
+            </div>
+          `;
+        } else if (d.step === 2) {
+          const tipoServicioSelect = d.modo === "servicio" ? `
+            <div class="field">
+              <label>Tipo de servicio</label>
+              <select onchange="selectTipoServicio(this.value)">
+                <option value="">Selecciona</option>
+                ${state.tiposServicio.map((tipo) =>
+                  `<option value="${tipo.id}" ${String(d.tipoServicio) === String(tipo.id) ? "selected" : ""}>${esc(tipo.nombre)}</option>`
+                ).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label for="km-v">Kilometraje actual</label>
+              <input id="km-v" type="number" min="0" placeholder="km" value="${esc(d.km)}" oninput="state.vehiculoDraft.km=this.value">
+            </div>
+            <div class="field">
+              <label for="prox-fecha">Próxima fecha servicio</label>
+              <input id="prox-fecha" type="date" value="${esc(d.proximaFecha)}" oninput="state.vehiculoDraft.proximaFecha=this.value">
+            </div>
+            <div class="field">
+              <label for="prox-km">Próximos km para servicio</label>
+              <input id="prox-km" type="number" min="0" placeholder="km" value="${esc(d.proximosKm)}" oninput="state.vehiculoDraft.proximosKm=this.value">
+            </div>
+          ` : d.modo === "reparacion" ? `
+            <div class="field">
+              <label for="falla-v">Descripción de la falla</label>
+              <textarea id="falla-v" placeholder="Qué falló y cómo se detectó" oninput="state.vehiculoDraft.descripcionFalla=this.value">${esc(d.descripcionFalla)}</textarea>
+            </div>
+            <div class="field">
+              <label for="rep-v">Descripción de la reparación</label>
+              <textarea id="rep-v" placeholder="Qué se hizo para resolverlo" oninput="state.vehiculoDraft.descripcionReparacion=this.value">${esc(d.descripcionReparacion)}</textarea>
+            </div>
+          ` : "";
+          body = `
+            <h1 class="screen-title">Detalles</h1>
+            ${progressDots(2)}
+            <div class="field">
+              <label>Vehículo</label>
+              <p style="color:var(--gold);font-weight:800;margin:0">${esc(d.unidadLabel)}</p>
+            </div>
+            <div class="field">
+              <label>Tipo de registro</label>
+              <div class="tipo-grid">
+                <button class="tipo-btn ${d.modo === "servicio" ? "selected" : ""}" onclick="state.vehiculoDraft.modo='servicio'; renderVehiculoDraft()">Servicio preventivo</button>
+                <button class="tipo-btn ${d.modo === "reparacion" ? "selected" : ""}" onclick="state.vehiculoDraft.modo='reparacion'; renderVehiculoDraft()">Reparación correctiva</button>
+              </div>
+            </div>
+            ${tipoServicioSelect}
+            ${d.modo ? `
+              <div class="field">
+                <label for="prov-v">Proveedor / taller</label>
+                <input id="prov-v" placeholder="Nombre del taller" value="${esc(d.proveedor)}" oninput="state.vehiculoDraft.proveedor=this.value">
+              </div>
+              <div class="field">
+                <label for="costo-v">Costo (MXN)</label>
+                <input id="costo-v" type="number" step="0.01" min="0" placeholder="0.00" value="${esc(d.costo)}" oninput="state.vehiculoDraft.costo=this.value">
+              </div>
+              <div class="field">
+                <label>Foto opcional</label>
+                <input id="foto-v" class="file-input" type="file" accept="image/*" capture="environment" onchange="setFotoVehiculo(this)">
+                <label class="file-trigger ${d.foto ? "loaded" : ""}" for="foto-v">${d.foto ? "Foto cargada" : "Tomar foto / factura"}</label>
+                ${d.fotoPreview ? `<img class="thumb" src="${d.fotoPreview}" alt="Vista previa">` : ""}
+              </div>
+            ` : ""}
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <div class="actions">
+              <button class="secondary-btn" onclick="prevVehiculoStep()">Atrás</button>
+              <button class="primary-btn" onclick="nextVehiculoStep()" ${puedeAvanzarVehiculo() ? "" : "disabled"}>Revisar</button>
+            </div>
+          `;
+        } else {
+          const esServicio = d.modo === "servicio";
+          body = `
+            <h1 class="screen-title">Confirmar</h1>
+            ${progressDots(3)}
+            <section class="card report-card">
+              <div class="kv"><b>Vehículo</b><span>${esc(d.unidadLabel)}</span></div>
+              <div class="kv"><b>Tipo</b><span>${esServicio ? "Servicio preventivo" : "Reparación correctiva"}</span></div>
+              ${esServicio ? `<div class="kv"><b>Servicio</b><span>${esc(d.tipoServicioLabel)}</span></div>` : ""}
+              ${!esServicio ? `<div class="kv"><b>Falla</b><span>${esc(d.descripcionFalla)}</span></div>` : ""}
+              <div class="kv"><b>Proveedor</b><span>${esc(d.proveedor || "-")}</span></div>
+              <div class="kv"><b>Costo</b><span>${d.costo ? "$" + Number(d.costo).toLocaleString("es-MX") : "-"}</span></div>
+              ${d.km ? `<div class="kv"><b>Km</b><span>${esc(d.km)}</span></div>` : ""}
+              <div class="kv"><b>Foto</b><span>${d.foto ? "Adjunta" : "Sin foto"}</span></div>
+            </section>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <div class="actions">
+              <button class="secondary-btn" onclick="prevVehiculoStep()">Atrás</button>
+              <button class="primary-btn" onclick="enviarVehiculo()">Guardar</button>
+            </div>
+          `;
+        }
+        render(shell(body));
+      }
+
+      function seleccionarUnidad(id) {
+        const unidad = state.unidades.find((item) => item.id === id);
+        if (!unidad) return;
+        state.vehiculoDraft.unidad = unidad.id;
+        state.vehiculoDraft.unidadLabel = `${unidad.descripcion} (${unidad.codigo})`;
+        renderVehiculoDraft();
+      }
+
+      function selectTipoServicio(value) {
+        const tipo = state.tiposServicio.find((item) => String(item.id) === String(value));
+        state.vehiculoDraft.tipoServicio = value || null;
+        state.vehiculoDraft.tipoServicioLabel = tipo ? tipo.nombre : "";
+        renderVehiculoDraft();
+      }
+
+      function setFotoVehiculo(input) {
+        const file = input.files[0];
+        if (!file) return;
+        state.vehiculoDraft.foto = file;
+        state.vehiculoDraft.fotoPreview = URL.createObjectURL(file);
+        renderVehiculoDraft();
+      }
+
+      function puedeAvanzarVehiculo() {
+        const d = state.vehiculoDraft;
+        if (d.step === 1) return Boolean(d.unidad);
+        if (!d.modo) return false;
+        if (d.modo === "servicio") return Boolean(d.tipoServicio);
+        if (d.modo === "reparacion") return Boolean(d.descripcionFalla.trim());
+        return false;
+      }
+
+      function nextVehiculoStep() {
+        if (!puedeAvanzarVehiculo()) {
+          const msg = state.vehiculoDraft.modo === "servicio"
+            ? "Selecciona el tipo de servicio."
+            : "La descripción de la falla es obligatoria.";
+          return renderVehiculoDraft(msg);
+        }
+        state.vehiculoDraft.step = Math.min(3, state.vehiculoDraft.step + 1);
+        renderVehiculoDraft();
+      }
+
+      function prevVehiculoStep() {
+        state.vehiculoDraft.step = Math.max(1, state.vehiculoDraft.step - 1);
+        renderVehiculoDraft();
+      }
+
+      async function enviarVehiculo() {
+        const d = state.vehiculoDraft;
+        let res;
+        if (d.modo === "servicio") {
+          const fd = new FormData();
+          fd.append("unidad", d.unidad);
+          fd.append("tipo_servicio", d.tipoServicio);
+          fd.append("fecha", new Date().toISOString().slice(0, 10));
+          if (d.km) fd.append("km_servicio", d.km);
+          if (d.proveedor) fd.append("proveedor", d.proveedor);
+          if (d.costo) fd.append("costo", d.costo);
+          if (d.proximaFecha) fd.append("proxima_fecha", d.proximaFecha);
+          if (d.proximosKm) fd.append("proximos_km", d.proximosKm);
+          if (d.foto) fd.append("archivo_factura", d.foto);
+          res = await apiFetch("/servicios/", {method: "POST", body: fd});
+        } else {
+          const fd = new FormData();
+          fd.append("unidad", d.unidad);
+          fd.append("fecha_ingreso", new Date().toISOString().slice(0, 10));
+          fd.append("descripcion_falla", d.descripcionFalla);
+          if (d.descripcionReparacion) fd.append("descripcion_reparacion", d.descripcionReparacion);
+          if (d.proveedor) fd.append("proveedor", d.proveedor);
+          if (d.costo) fd.append("costo", d.costo);
+          if (d.foto) fd.append("foto", d.foto);
+          res = await apiFetch("/reparaciones/", {method: "POST", body: fd});
+        }
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          return renderVehiculoDraft(Object.values(err).flat().join(" ") || "Error al guardar.");
+        }
+        render(shell(`
+          <section class="confirm">
+            <div class="confirm-mark">OK</div>
+            <h1 class="screen-title">Guardado</h1>
+            <p class="muted">${d.modo === "servicio" ? "Servicio" : "Reparación"} registrado correctamente.</p>
+            <div class="confirm-actions">
+              <button class="primary-btn" onclick="startVehiculo()">Registrar otro</button>
+              <button class="secondary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+            </div>
+          </section>
+        `));
+      }
+
+      async function renderHistorial() {
+        const [resOrdenes, resRep, resSvc] = await Promise.all([
+          apiFetch("/ordenes/"),
+          apiFetch("/reparaciones/"),
+          apiFetch("/servicios/"),
+        ]);
+        const ordenes = resOrdenes.ok ? await parseListResponse(resOrdenes) : [];
+        const reparaciones = resRep.ok ? await parseListResponse(resRep) : [];
+        const servicios = resSvc.ok ? await parseListResponse(resSvc) : [];
+        const cardOrdenes = ordenes.slice(0, 5).map((orden) => `
+          <article class="card report-card">
+            <p style="margin:0;font-weight:900">${esc(orden.activo_nombre)}</p>
+            <p class="muted">${esc(orden.tipo_display)} · ${esc(orden.estatus_display)}</p>
+            ${orden.costo_total ? `<p class="muted">$${Number(orden.costo_total).toLocaleString("es-MX")}</p>` : ""}
+          </article>
+        `).join("") || `<div class="empty">Sin órdenes recientes.</div>`;
+        const vehiculos = [
+          ...reparaciones.slice(0, 3).map((item) => ({...item, kind: "Reparación"})),
+          ...servicios.slice(0, 3).map((item) => ({...item, kind: item.tipo_nombre || "Servicio"})),
+        ];
+        const cardVehiculos = vehiculos.map((item) => `
+          <article class="card report-card">
+            <p style="margin:0;font-weight:900">${esc(item.unidad_descripcion)}</p>
+            <p class="muted">${esc(item.kind)}</p>
+            ${item.costo ? `<p class="muted">$${Number(item.costo).toLocaleString("es-MX")}</p>` : ""}
+          </article>
+        `).join("") || `<div class="empty">Sin registros de flota recientes.</div>`;
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title" style="margin-top:16px">Historial reciente</h1>
+          <p style="color:var(--gold);font-weight:800;margin:0 0 10px">Equipos</p>
+          ${cardOrdenes}
+          <p style="color:var(--gold);font-weight:800;margin:14px 0 10px">Vehículos</p>
+          ${cardVehiculos}
+        `));
+      }
+
+      async function boot() {
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("{% static 'mantenimiento/sw.js' %}").catch(() => {});
+        }
+        if (state.token) {
+          try {
+            await showScreen("dashboard");
+          } catch (error) {
+            logout(false);
+            renderLogin();
+          }
+        } else {
+          renderLogin();
+        }
+      }
+
+      boot();
+    </script>
+  </body>
+</html>
