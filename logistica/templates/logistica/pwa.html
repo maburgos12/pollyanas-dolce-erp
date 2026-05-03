@@ -1390,10 +1390,12 @@
         if (draft.longitud) form.append("longitud", draft.longitud);
         const response = await apiFetch("/reportes/", { method: "POST", body: form });
         if (!response.ok) return renderNuevoReporte("No se pudo enviar el reporte. Revisa los datos.");
+        const creado = await response.json();
         render(shell(`
           <section class="confirm">
             <div class="confirm-mark">✅</div>
             <h1 class="screen-title">Reporte enviado</h1>
+            <p class="unit-line">✅ Reporte enviado · ID: ${escapeHtml(creado.id || "-")}</p>
             <p class="muted">Compras recibió el ticket y dará seguimiento.</p>
             <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
           </section>
@@ -1796,7 +1798,7 @@
                 <button class="primary-btn daily-continue" type="button" onclick="continuarInspeccionDiaria()">Continuar</button>
               ` : ""}
               ${puedeCapturarSalida ? `
-                <form onsubmit="guardarSalida(event)" novalidate>
+                <div class="form-salida">
                   <div class="field">
                     <label for="km_salida">KM salida</label>
                     <input id="km_salida" name="km_salida" type="number" min="0" required value="${escapeHtml(draft.km_salida)}" oninput="state.bitacoraSalidaDraft.km_salida = this.value">
@@ -1812,8 +1814,8 @@
                     ${draft.fotoSalidaError ? `<p class="error">${escapeHtml(draft.fotoSalidaError)}</p>` : ""}
                   </div>
                   <p class="gps-registered">📍 Ubicación registrada</p>
-                  <button class="primary-btn" type="submit" ${ubicacionLista && draft.km_salida && draft.nivel_gas_salida && draft.foto_tablero_salida ? "" : "disabled"}>Iniciar turno</button>
-                </form>
+                  <button class="primary-btn" type="button" onclick="guardarSalida()" ${ubicacionLista && draft.km_salida && draft.nivel_gas_salida && draft.foto_tablero_salida ? "" : "disabled"}>Iniciar turno</button>
+                </div>
               ` : ""}
             </div>
             ${geoOverlay(draft, "capturarUbicacionSalida")}
@@ -1886,7 +1888,7 @@
       }
 
       async function guardarSalida(event) {
-        event.preventDefault();
+        if (event) event.preventDefault();
         const draft = ensureBitacoraSalidaDraft();
         if (!draft.unidad || !draft.nivel_gas_salida || !draft.foto_tablero_salida || !draft.latitud_salida) {
           return renderBitacoraSalida("Completa unidad, gas, foto y ubicación.");
