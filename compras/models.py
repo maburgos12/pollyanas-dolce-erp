@@ -44,6 +44,12 @@ class SolicitudCompra(models.Model):
 
     class Meta:
         ordering = ["-creado_en"]
+        indexes = [
+            models.Index(fields=["fecha_requerida"], name="compras_sol_fecha_req_idx"),
+            models.Index(fields=["estatus"], name="compras_sol_estatus_idx"),
+            models.Index(fields=["area"], name="compras_sol_area_idx"),
+            models.Index(fields=["insumo", "fecha_requerida"], name="compras_sol_ins_fecha_idx"),
+        ]
 
     def _next_folio(self) -> str:
         ymd = timezone.localdate().strftime("%y%m%d")
@@ -99,6 +105,10 @@ class OrdenCompra(models.Model):
 
     class Meta:
         ordering = ["-creado_en"]
+        indexes = [
+            models.Index(fields=["solicitud", "estatus"], name="compras_oc_sol_est_idx"),
+            models.Index(fields=["fecha_emision", "estatus"], name="compras_oc_fecha_est_idx"),
+        ]
 
     def _next_folio(self) -> str:
         ymd = timezone.localdate().strftime("%y%m%d")
@@ -147,6 +157,9 @@ class RecepcionCompra(models.Model):
 
     class Meta:
         ordering = ["-creado_en"]
+        indexes = [
+            models.Index(fields=["orden", "estatus"], name="compras_rec_ord_est_idx"),
+        ]
 
     def _next_folio(self) -> str:
         ymd = timezone.localdate().strftime("%y%m%d")

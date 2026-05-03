@@ -14,7 +14,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.urls import reverse
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -63,6 +63,15 @@ def _dashboard_rows_signature(rows: list[dict]) -> str:
         )
         for row in rows
     )
+    return hashlib.sha1(source.encode()).hexdigest()
+
+
+def _model_cache_signature(model, *fields: str) -> str:
+    aggregates = {"count": Count("id"), "max_id": Max("id")}
+    for field in fields:
+        aggregates[f"max_{field}"] = Max(field)
+    values = model.objects.aggregate(**aggregates)
+    source = "|".join(str(values.get(key) or "") for key in sorted(values))
     return hashlib.sha1(source.encode()).hexdigest()
 
 
@@ -3884,6 +3893,11 @@ def _apply_recepcion_to_inventario(recepcion: RecepcionCompra, acted_by=None) ->
 
 
 def _build_insumo_options(limit: int = 1200):
+    cache_key = f"compras:solicitudes:insumo-options:{int(limit or 1200)}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     canonical_rows = canonicalized_active_insumos(limit=limit)
     grouped_member_ids = [member_id for row in canonical_rows for member_id in row["member_ids"]]
     usage_maps = usage_maps_for_insumo_ids(grouped_member_ids)
@@ -3959,6 +3973,7 @@ def _build_insumo_options(limit: int = 1200):
                 "operational_blocker_label": "Bloquea compras" if is_operational_blocker else "",
             }
         )
+    cache.set(cache_key, options, 120)
     return options
 
 
@@ -3975,11 +3990,31 @@ def _canonical_catalog_maps(limit: int = 5000) -> tuple[dict[int, dict], dict[in
 
 
 def _latest_cost_by_canonical_ids(canonical_ids: set[int], canonical_by_id: dict[int, dict]) -> dict[int, Decimal]:
-    latest_cost_by_canonical: dict[int, Decimal] = {}
+    canonical_ids = {int(canonical_id) for canonical_id in canonical_ids if canonical_id}
+    if not canonical_ids:
+        return {}
+
+    member_to_canonical: dict[int, int] = {}
+    member_ids: set[int] = set()
     for canonical_id in canonical_ids:
-        latest = latest_costo_canonico(insumo_id=canonical_id)
-        if latest is not None:
-            latest_cost_by_canonical[canonical_id] = latest
+        row = canonical_by_id.get(canonical_id) or {}
+        row_member_ids = [int(member_id) for member_id in row.get("member_ids", []) if member_id]
+        if not row_member_ids:
+            row_member_ids = [canonical_id]
+        for member_id in row_member_ids:
+            member_to_canonical[member_id] = canonical_id
+            member_ids.add(member_id)
+
+    latest_cost_by_canonical: dict[int, Decimal] = {}
+    for insumo_id, costo_unitario in (
+        CostoInsumo.objects.filter(insumo_id__in=member_ids)
+        .order_by("-fecha", "-id")
+        .values_list("insumo_id", "costo_unitario")
+    ):
+        canonical_id = member_to_canonical.get(insumo_id)
+        if not canonical_id or canonical_id in latest_cost_by_canonical:
+            continue
+        latest_cost_by_canonical[canonical_id] = Decimal(str(costo_unitario))
     return latest_cost_by_canonical
 
 
@@ -4600,7 +4635,10 @@ def _build_consumo_vs_plan_dashboard(
     cache_key = (
         "compras:consumo-vs-plan:"
         f"{periodo_tipo}:{periodo_mes}:{source_filter}:{plan_filter}:{categoria_filter}:"
-        f"{consumo_ref_filter}:{limit}:{offset}:{sort_by}:{sort_dir}"
+        f"{consumo_ref_filter}:{limit}:{offset}:{sort_by}:{sort_dir}:"
+        f"planes:{_model_cache_signature(PlanProduccion, 'fecha_produccion')}:"
+        f"movs:{_model_cache_signature(MovimientoInventario, 'fecha')}:"
+        f"costos:{_model_cache_signature(CostoInsumo, 'fecha')}"
     )
     cached = cache.get(cache_key)
     if cached is not None:
@@ -4684,9 +4722,9 @@ def _build_consumo_vs_plan_dashboard(
     canonical_meta: dict[int, dict] = {}
     for insumo_id, qty in plan_qty_by_insumo.items():
         row = member_to_row.get(insumo_id)
-        if not row:
+        canonical = row["canonical"] if row else canonical_insumo_by_id(insumo_id)
+        if not canonical:
             continue
-        canonical = row["canonical"]
         plan_qty_by_canonical[canonical.id] = plan_qty_by_canonical.get(canonical.id, Decimal("0")) + qty
         canonical_meta.setdefault(canonical.id, insumo_meta.get(insumo_id, {
             "insumo": canonical.nombre,
@@ -4695,9 +4733,9 @@ def _build_consumo_vs_plan_dashboard(
         }))
     for insumo_id, qty in actual_qty_by_insumo.items():
         row = member_to_row.get(insumo_id)
-        if not row:
+        canonical = row["canonical"] if row else canonical_insumo_by_id(insumo_id)
+        if not canonical:
             continue
-        canonical = row["canonical"]
         actual_qty_by_canonical[canonical.id] = actual_qty_by_canonical.get(canonical.id, Decimal("0")) + qty
         canonical_meta.setdefault(canonical.id, insumo_meta.get(insumo_id, {
             "insumo": canonical.nombre,
@@ -6123,7 +6161,11 @@ def _filtered_solicitudes(
             | Q(proveedor_sugerido__nombre__icontains=q_filter)
         )
 
-    solicitudes = list(solicitudes_qs[:300])
+    valid_statuses = {choice[0] for choice in SolicitudCompra.STATUS_CHOICES}
+    if estatus_filter in valid_statuses:
+        solicitudes_qs = solicitudes_qs.filter(estatus=estatus_filter)
+
+    solicitudes = list(solicitudes_qs)
     member_to_row, canonical_by_id = _canonical_catalog_maps()
     canonical_ids = {
         canonical_insumo_by_id(s.insumo_id).id
@@ -6193,18 +6235,17 @@ def _filtered_solicitudes(
         s.open_order_id = open_order.id if open_order else None
         s.open_order_folio = open_order.folio if open_order else ""
         _enrich_solicitud_workflow(s)
+        s.is_enterprise_blocked = bool(getattr(s, "has_workflow_blockers", False))
 
-    valid_statuses = {choice[0] for choice in SolicitudCompra.STATUS_CHOICES}
     if estatus_filter == "BLOCKED_ERP":
         solicitudes = [s for s in solicitudes if getattr(s, "has_workflow_blockers", False)]
     elif estatus_filter == "APPROVED_READY":
         solicitudes = [s for s in solicitudes if s.estatus == SolicitudCompra.STATUS_APROBADA and not s.has_open_order]
     elif estatus_filter == "APPROVED_WITH_OC":
         solicitudes = [s for s in solicitudes if s.estatus == SolicitudCompra.STATUS_APROBADA and s.has_open_order]
-    elif estatus_filter in valid_statuses:
-        solicitudes = [s for s in solicitudes if s.estatus == estatus_filter]
     else:
-        estatus_filter = "ALL"
+        if estatus_filter not in valid_statuses:
+            estatus_filter = "ALL"
 
     reabasto_filter = (reabasto_filter_raw or "all").lower()
     if reabasto_filter in {"critico", "bajo", "ok"}:
@@ -6522,6 +6563,7 @@ def _dashboard_filtered_solicitudes(
         solicitud.open_order_id = open_order.id if open_order else None
         solicitud.open_order_folio = open_order.folio if open_order else ""
         _enrich_solicitud_workflow(solicitud)
+        solicitud.is_enterprise_blocked = bool(getattr(solicitud, "has_workflow_blockers", False))
 
     return solicitudes
 
@@ -7070,28 +7112,6 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         periodo_tipo,
         periodo_mes,
     )
-    provider_dashboard = _build_provider_dashboard(
-        periodo_mes,
-        source_filter,
-        plan_filter,
-        categoria_filter,
-        budget_ctx["presupuesto_rows_proveedor"],
-    )
-    category_dashboard = _build_category_dashboard(
-        periodo_mes,
-        source_filter,
-        plan_filter,
-        categoria_filter,
-        budget_ctx.get("presupuesto_rows_categoria", []),
-    )
-    consumo_dashboard = _build_consumo_vs_plan_dashboard(
-        periodo_tipo,
-        periodo_mes,
-        source_filter,
-        plan_filter,
-        categoria_filter,
-        consumo_ref_filter,
-    )
     total_presupuesto = budget_ctx["presupuesto_estimado_total"]
     import_preview = _build_import_preview_context(request.session.get(IMPORT_PREVIEW_SESSION_KEY))
 
@@ -7128,6 +7148,13 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             budget_ctx,
         )
     if export_format == "proveedor_csv":
+        provider_dashboard = _build_provider_dashboard(
+            periodo_mes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            budget_ctx["presupuesto_rows_proveedor"],
+        )
         return _export_tablero_proveedor_csv(
             provider_dashboard,
             periodo_label,
@@ -7136,6 +7163,13 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             categoria_filter,
         )
     if export_format == "proveedor_xlsx":
+        provider_dashboard = _build_provider_dashboard(
+            periodo_mes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            budget_ctx["presupuesto_rows_proveedor"],
+        )
         return _export_tablero_proveedor_xlsx(
             provider_dashboard,
             periodo_label,
@@ -7144,6 +7178,13 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             categoria_filter,
         )
     if export_format == "categoria_csv":
+        category_dashboard = _build_category_dashboard(
+            periodo_mes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            budget_ctx.get("presupuesto_rows_categoria", []),
+        )
         return _export_tablero_categoria_csv(
             category_dashboard,
             periodo_label,
@@ -7152,6 +7193,13 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             categoria_filter,
         )
     if export_format == "categoria_xlsx":
+        category_dashboard = _build_category_dashboard(
+            periodo_mes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            budget_ctx.get("presupuesto_rows_categoria", []),
+        )
         return _export_tablero_categoria_xlsx(
             category_dashboard,
             periodo_label,
@@ -7160,6 +7208,14 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             categoria_filter,
         )
     if export_format == "consumo_plan_csv":
+        consumo_dashboard = _build_consumo_vs_plan_dashboard(
+            periodo_tipo,
+            periodo_mes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            consumo_ref_filter,
+        )
         return _export_consumo_plan_csv(
             consumo_dashboard,
             periodo_label,
@@ -7169,6 +7225,14 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             consumo_ref_filter,
         )
     if export_format == "consumo_plan_xlsx":
+        consumo_dashboard = _build_consumo_vs_plan_dashboard(
+            periodo_tipo,
+            periodo_mes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            consumo_ref_filter,
+        )
         return _export_consumo_plan_xlsx(
             consumo_dashboard,
             periodo_label,
@@ -7199,6 +7263,29 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_label,
         )
 
+    provider_dashboard = _build_provider_dashboard(
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        budget_ctx["presupuesto_rows_proveedor"],
+    )
+    category_dashboard = _build_category_dashboard(
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        budget_ctx.get("presupuesto_rows_categoria", []),
+    )
+    consumo_dashboard = _build_consumo_vs_plan_dashboard(
+        periodo_tipo,
+        periodo_mes,
+        source_filter,
+        plan_filter,
+        categoria_filter,
+        consumo_ref_filter,
+    )
+
     query_without_export = request.GET.copy()
     query_without_export.pop("export", None)
     query_without_estatus = query_without_export.copy()
@@ -7226,16 +7313,18 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
     workflow_summary = _solicitudes_workflow_summary(solicitudes)
     enterprise_board = _solicitudes_enterprise_board(solicitudes)
     supply_model_rows = _solicitudes_supply_model_rows(solicitudes)
+    solicitudes_total_count = len(solicitudes)
+    solicitudes_visible = solicitudes[:300]
     release_gate_rows = [
         {
             "step": "01",
             "title": "Artículo liberado",
             "detail": "El artículo ya tiene maestro, costo y referencia válidos para entrar al flujo documental.",
-            "completed": sum(1 for s in solicitudes if not getattr(s, "is_enterprise_blocked", False)),
-            "open_count": sum(1 for s in solicitudes if getattr(s, "is_enterprise_blocked", False)),
-            "total": max(len(solicitudes), 1),
+            "completed": sum(1 for s in solicitudes if not getattr(s, "has_workflow_blockers", False)),
+            "open_count": sum(1 for s in solicitudes if getattr(s, "has_workflow_blockers", False)),
+            "total": max(solicitudes_total_count, 1),
             "tone": "success"
-            if not any(getattr(s, "is_enterprise_blocked", False) for s in solicitudes)
+            if not any(getattr(s, "has_workflow_blockers", False) for s in solicitudes)
             else "warning",
             "url": reverse("compras:solicitudes"),
             "cta": "Abrir solicitudes",
@@ -7282,7 +7371,9 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         },
     ]
     context = {
-        "solicitudes": solicitudes,
+        "solicitudes": solicitudes_visible,
+        "solicitudes_total_count": solicitudes_total_count,
+        "solicitudes_visible_count": len(solicitudes_visible),
         "insumo_options": _build_insumo_options(),
         "proveedor_options": list(Proveedor.objects.filter(activo=True).only("id", "nombre").order_by("nombre")),
         "categoria_options": [

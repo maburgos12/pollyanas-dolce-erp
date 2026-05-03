@@ -921,6 +921,89 @@
         </div>
       </div>
   </section>
+  {% if enterprise_board.blocker_detail_rows or enterprise_board.master_blocker_class_cards or enterprise_board.master_blocker_missing_cards or enterprise_board.master_blocker_detail_rows %}
+  <section class="card" style="margin: 12px 0;">
+    {% include "components/section_header.html" with title="Maestro ERP" %}
+    {% if enterprise_board.blocker_detail_rows %}
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Bloqueo</th>
+            <th>Insumo</th>
+            <th>Solicitudes</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in enterprise_board.blocker_detail_rows %}
+          <tr>
+            <td>{{ item.message }}</td>
+            <td>{{ item.insumo_nombre }}</td>
+            <td>{{ item.folios_preview }}{% if item.folios_more %} +{{ item.folios_more }}{% endif %}</td>
+            <td><a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% if enterprise_board.master_blocker_class_cards %}
+    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro por clase</div>
+    <div class="kpi-mini">
+      {% for item in enterprise_board.master_blocker_class_cards %}
+      <article class="kpi-card">
+        <div class="kpi-number {% if item.count > 0 %}is-danger{% else %}is-success{% endif %}">{{ item.count }}</div>
+        <div class="kpi-label">{{ item.class_label }} · {{ item.dominant_label }}</div>
+        <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if enterprise_board.master_blocker_missing_cards %}
+    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Bloqueos del maestro por dato faltante</div>
+    <div class="kpi-mini">
+      {% for item in enterprise_board.master_blocker_missing_cards %}
+      <article class="kpi-card">
+        <div class="kpi-number {% if item.count > 0 %}is-danger{% else %}is-success{% endif %}">{{ item.count }}</div>
+        <div class="kpi-label">{{ item.missing_label }} · {{ item.dominant_class_label }}</div>
+        <div class="muted">{{ item.action_label }}</div>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if enterprise_board.master_blocker_detail_rows %}
+    <div class="card-header" style="padding:16px 0 8px 0;border:0;">Detalle del maestro bloqueando solicitudes</div>
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Clase</th>
+            <th>Insumo</th>
+            <th>Faltante maestro</th>
+            <th>Folios</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in enterprise_board.master_blocker_detail_rows %}
+          <tr>
+            <td>{{ item.class_label }}</td>
+            <td>{{ item.insumo_nombre }}</td>
+            <td>{{ item.missing_field }}</td>
+            <td>{{ item.folios_preview }}{% if item.folios_more %} +{{ item.folios_more }}{% endif %}</td>
+            <td>
+              <a class="btn btn-secondary btn-sm" href="{{ item.action_url }}">{{ item.action_label }}</a>
+              {% if item.edit_url %}<a class="btn btn-secondary btn-sm" href="{{ item.edit_url }}">Editar artículo</a>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
   <div class="toolbar">
     <a href="{% url 'compras:solicitudes' %}?source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">Todos</a>
     <a href="{% url 'compras:solicitudes' %}?reabasto=critico&source={{ source_filter }}&plan_id={{ plan_filter }}&categoria={{ categoria_filter|urlencode }}&periodo_tipo={{ periodo_tipo }}&periodo_mes={{ periodo_mes }}&consumo_ref={{ consumo_ref_filter }}" class="btn {% if reabasto_filter == 'critico' %}btn-primary{% else %}btn-secondary{% endif %}">Críticos</a>
@@ -974,15 +1057,21 @@
           </td>
           <td>{{ s.insumo.nombre }}</td>
           <td>{{ s.proveedor_sugerido.nombre|default:"-" }}</td>
-          <td>
-            {% if s.reabasto_nivel == 'critico' %}
-              <span class="badge-rojo" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
-            {% elif s.reabasto_nivel == 'bajo' %}
-              <span class="badge-amarillo" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
-            {% else %}
-              <span class="badge-verde" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
-            {% endif %}
-          </td>
+	          <td>
+	            {% if s.reabasto_nivel == 'critico' %}
+	              <span class="badge-rojo" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
+	            {% elif s.reabasto_nivel == 'bajo' %}
+	              <span class="badge-amarillo" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
+	            {% else %}
+	              <span class="badge-verde" title="{{ s.reabasto_detalle }}">{{ s.reabasto_texto }}</span>
+	            {% endif %}
+	            {% if s.workflow_blocker_details %}
+	              <div class="muted">Incompleto</div>
+	              {% for detail in s.workflow_blocker_details|slice:":2" %}
+	                <div class="muted">{{ detail.action_label }} · {{ detail.missing_field }} · {{ detail.action_detail }}</div>
+	              {% endfor %}
+	            {% endif %}
+	          </td>
           <td class="text-end">{{ s.cantidad }}</td>
           <td class="text-end">${{ s.costo_unitario|floatformat:2 }}</td>
           <td class="text-end">${{ s.presupuesto_estimado|floatformat:2 }}</td>
@@ -1037,6 +1126,9 @@
   </div>
   <div class="totals" style="margin-top: 10px;">
     <strong>Presupuesto estimado del filtro:</strong> ${{ total_presupuesto|floatformat:2 }}
+    {% if solicitudes_total_count > solicitudes_visible_count %}
+      <span class="muted"> · Mostrando {{ solicitudes_visible_count }} de {{ solicitudes_total_count }} solicitudes del filtro.</span>
+    {% endif %}
   </div>
 </section>
 {% endblock %}
