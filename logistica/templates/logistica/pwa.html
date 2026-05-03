@@ -529,6 +529,16 @@
         background: rgba(201, 168, 76, 0.12);
         color: var(--gold);
       }
+      .daily-counter {
+        color: var(--gold);
+        font-weight: 900;
+        margin: 8px 0 12px;
+      }
+      .daily-counter.complete { color: var(--success); }
+      .daily-section-highlight {
+        border-color: #C8506A !important;
+        box-shadow: 0 0 0 2px rgba(200, 80, 106, 0.35);
+      }
 
       .thumb {
         width: 100%;
@@ -1481,6 +1491,7 @@
             inspeccionDiariaAviso: "",
             inspeccionDiariaObservaciones: "",
             inspeccionDiariaExpanded: { fluidos: true },
+            inspeccionDiariaHighlight: "",
             inspeccionDiariaChecks
           };
         }
@@ -1509,6 +1520,7 @@
         draft.inspeccionDiariaCompletada = false;
         draft.inspeccionDiariaAviso = "";
         draft.inspeccionDiariaObservaciones = "";
+        draft.inspeccionDiariaHighlight = "";
         Object.keys(draft.inspeccionDiariaChecks).forEach((field) => { draft.inspeccionDiariaChecks[field] = null; });
         if (!value) return renderBitacoraSalida();
         draft.inspeccionDiariaLoading = true;
@@ -1526,7 +1538,12 @@
       }
 
       function setInspeccionDiariaItem(field, value) {
-        ensureBitacoraSalidaDraft().inspeccionDiariaChecks[field] = value;
+        const draft = ensureBitacoraSalidaDraft();
+        draft.inspeccionDiariaChecks[field] = value;
+        const highlighted = inspeccionDiariaSecciones.find((section) => section.key === draft.inspeccionDiariaHighlight);
+        if (highlighted && highlighted.items.every(([itemField]) => draft.inspeccionDiariaChecks[itemField] !== null)) {
+          draft.inspeccionDiariaHighlight = "";
+        }
         renderBitacoraSalida();
       }
 
@@ -1534,6 +1551,7 @@
         const draft = ensureBitacoraSalidaDraft();
         const section = inspeccionDiariaSecciones.find((item) => item.key === key);
         section.items.forEach(([field]) => { draft.inspeccionDiariaChecks[field] = true; });
+        if (draft.inspeccionDiariaHighlight === key) draft.inspeccionDiariaHighlight = "";
         renderBitacoraSalida();
       }
 
@@ -1545,6 +1563,12 @@
         return Object.values(draft.inspeccionDiariaChecks).filter((value) => value === null).length;
       }
 
+      function primeraSeccionInspeccionDiariaPendiente(draft) {
+        return inspeccionDiariaSecciones.find((section) =>
+          section.items.some(([field]) => draft.inspeccionDiariaChecks[field] === null)
+        );
+      }
+
       function inspeccionDiariaTieneFallas(draft) {
         return Object.values(draft.inspeccionDiariaChecks).some((value) => value === false);
       }
@@ -1552,6 +1576,7 @@
       function marcarInspeccionDiariaTodosOk() {
         const draft = ensureBitacoraSalidaDraft();
         Object.keys(draft.inspeccionDiariaChecks).forEach((field) => { draft.inspeccionDiariaChecks[field] = true; });
+        draft.inspeccionDiariaHighlight = "";
         renderBitacoraSalida();
       }
 
@@ -1559,11 +1584,11 @@
         const draft = ensureBitacoraSalidaDraft();
         const open = Boolean(draft.inspeccionDiariaExpanded[section.key]);
         return `
-          <button class="section-toggle" type="button" onclick="toggleInspeccionDiariaSection('${section.key}')">
+          <button id="inspeccion-diaria-toggle-${section.key}" class="section-toggle ${draft.inspeccionDiariaHighlight === section.key ? "daily-section-highlight" : ""}" type="button" onclick="toggleInspeccionDiariaSection('${section.key}')">
             <span>${section.title}</span><span>${open ? "−" : "+"}</span>
           </button>
           ${open ? `
-            <section class="card report-card">
+            <section class="card report-card ${draft.inspeccionDiariaHighlight === section.key ? "daily-section-highlight" : ""}">
               <button class="secondary-btn" type="button" onclick="marcarInspeccionDiariaSeccionOk('${section.key}')">Marcar todos OK</button>
               ${section.items.map(([field, label]) => {
                 const value = draft.inspeccionDiariaChecks[field];
@@ -1585,7 +1610,23 @@
 
       async function continuarInspeccionDiaria() {
         const draft = ensureBitacoraSalidaDraft();
-        if (!inspeccionDiariaCompleta(draft)) return renderBitacoraSalida("Marca todos los puntos como OK o FALLA.");
+        if (!inspeccionDiariaCompleta(draft)) {
+          const section = primeraSeccionInspeccionDiariaPendiente(draft);
+          if (section) {
+            draft.inspeccionDiariaExpanded[section.key] = true;
+            draft.inspeccionDiariaHighlight = section.key;
+          }
+          await renderBitacoraSalida("Completa todos los puntos para continuar. Revisa la sección resaltada.");
+          if (section) {
+            setTimeout(() => {
+              document.getElementById(`inspeccion-diaria-toggle-${section.key}`)?.scrollIntoView({
+                behavior: "smooth",
+                block: "center"
+              });
+            }, 80);
+          }
+          return;
+        }
         const tieneFallas = inspeccionDiariaTieneFallas(draft);
         if (tieneFallas && !draft.inspeccionDiariaObservaciones.trim()) {
           return renderBitacoraSalida("Describe las fallas encontradas para continuar.");
@@ -1653,6 +1694,8 @@
           const mostrarChecklist = Boolean(draft.unidad) && !draft.inspeccionDiariaLoading && !yaInspeccionada && !draft.inspeccionDiariaCompletada;
           const tieneFallasDiarias = inspeccionDiariaTieneFallas(draft);
           const pendientesDiarios = inspeccionDiariaPendientes(draft);
+          const totalPuntosDiarios = Object.keys(draft.inspeccionDiariaChecks).length;
+          const marcadosDiarios = totalPuntosDiarios - pendientesDiarios;
           body = `
             <div class="${ubicacionLista ? "" : "gps-locked"}">
               <div class="field">
@@ -1672,9 +1715,9 @@
               ${mostrarChecklist ? `
                 <section class="card report-card">
                   <h2 style="color:var(--gold); margin-top:0;">Checklist pre-turno</h2>
+                  <p class="daily-counter ${pendientesDiarios ? "" : "complete"}">✅ ${marcadosDiarios} de ${totalPuntosDiarios} puntos marcados</p>
                   <p class="muted">Marca cada punto como OK o FALLA antes de capturar kilometraje y tablero.</p>
-                  <div class="daily-banner warning">Pendientes por marcar: ${pendientesDiarios}</div>
-                  <button class="secondary-btn" type="button" onclick="marcarInspeccionDiariaTodosOk()">Marcar todos OK</button>
+                  <button class="secondary-btn" type="button" onclick="marcarInspeccionDiariaTodosOk()">✅ Marcar todos los puntos como OK</button>
                 </section>
                 ${inspeccionDiariaSecciones.map(renderInspeccionDiariaSection).join("")}
                 ${tieneFallasDiarias ? `
@@ -1683,7 +1726,7 @@
                     <textarea id="inspeccion_diaria_observaciones" required oninput="state.bitacoraSalidaDraft.inspeccionDiariaObservaciones = this.value">${escapeHtml(draft.inspeccionDiariaObservaciones)}</textarea>
                   </div>
                 ` : ""}
-                <button class="primary-btn" type="button" onclick="continuarInspeccionDiaria()" ${inspeccionDiariaCompleta(draft) && (!tieneFallasDiarias || draft.inspeccionDiariaObservaciones.trim()) ? "" : "disabled"}>Continuar</button>
+                <button class="primary-btn" type="button" onclick="continuarInspeccionDiaria()">Continuar</button>
               ` : ""}
               ${puedeCapturarSalida ? `
                 <form onsubmit="guardarSalida(event)" novalidate>
