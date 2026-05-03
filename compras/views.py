@@ -9787,17 +9787,19 @@ def recepciones(request: HttpRequest) -> HttpResponse:
     query_without_closure.pop("closure_key", None)
     query_without_handoff = query_without_export.copy()
     query_without_handoff.pop("handoff_key", None)
-    plan_scope_context = _build_plan_scope_context(
-        source_filter=source_filter,
-        plan_filter=plan_filter,
-        q_filter=q_filter,
-        current_view="recepciones",
-        closure_key_filter=closure_key_raw,
-        handoff_key_filter=handoff_key_raw,
-        master_class_filter=master_class_filter,
-        master_missing_filter=master_missing_filter,
-        session=request.session,
-    )
+    plan_scope_context = None
+    if source_filter == "plan" and plan_filter:
+        plan_scope_context = _build_plan_scope_context(
+            source_filter=source_filter,
+            plan_filter=plan_filter,
+            q_filter=q_filter,
+            current_view="recepciones",
+            closure_key_filter=closure_key_raw,
+            handoff_key_filter=handoff_key_raw,
+            master_class_filter=master_class_filter,
+            master_missing_filter=master_missing_filter,
+            session=request.session,
+        )
 
     recepciones = list(recepciones_qs[:200])
     plan_ids: set[int] = set()
@@ -9889,7 +9891,12 @@ def recepciones(request: HttpRequest) -> HttpResponse:
 
     context = {
         "recepciones": recepciones,
+        "recepciones_total_count": len(recepciones),
+        "recepciones_pendientes_count": sum(1 for r in recepciones if r.estatus == RecepcionCompra.STATUS_PENDIENTE),
+        "recepciones_diferencias_count": sum(1 for r in recepciones if r.estatus == RecepcionCompra.STATUS_DIFERENCIAS),
+        "recepciones_cerradas_count": sum(1 for r in recepciones if r.estatus == RecepcionCompra.STATUS_CERRADA),
         "ordenes": ordenes_form_qs.order_by("-creado_en")[:200],
+        "ordenes_para_recibir_count": ordenes_form_qs.count(),
         "status_choices": RecepcionCompra.STATUS_CHOICES,
         "proveedores": Proveedor.objects.filter(activo=True).order_by("nombre")[:200],
         "proveedor_filter": proveedor_filter,
