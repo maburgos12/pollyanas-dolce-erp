@@ -3977,6 +3977,26 @@ def _build_insumo_options(limit: int = 1200):
     return options
 
 
+def _build_basic_insumo_options(limit: int = 1200):
+    cache_key = f"compras:solicitudes:basic-insumo-options:{int(limit or 1200)}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    options = [
+        {
+            "id": row["canonical"].id,
+            "nombre": _insumo_display_name(row["canonical"]),
+            "unidad": row["canonical"].unidad_base.codigo if row["canonical"].unidad_base_id else "",
+            "proveedor_sugerido_id": row["canonical"].proveedor_principal_id or "",
+            "proveedor_sugerido": row["canonical"].proveedor_principal.nombre if row["canonical"].proveedor_principal_id else "",
+        }
+        for row in canonicalized_active_insumos(limit=limit)
+    ]
+    cache.set(cache_key, options, 300)
+    return options
+
+
 def _canonical_catalog_maps(limit: int = 5000) -> tuple[dict[int, dict], dict[int, dict]]:
     canonical_rows = canonicalized_active_insumos(limit=limit)
     member_to_row: dict[int, dict] = {}
@@ -6166,6 +6186,38 @@ def _filtered_solicitudes(
         solicitudes_qs = solicitudes_qs.filter(estatus=estatus_filter)
 
     solicitudes = list(solicitudes_qs)
+    if not solicitudes:
+        if estatus_filter not in valid_statuses and estatus_filter not in {"BLOCKED_ERP", "APPROVED_READY", "APPROVED_WITH_OC"}:
+            estatus_filter = "ALL"
+        reabasto_filter = (reabasto_filter_raw or "all").lower()
+        if reabasto_filter not in {"critico", "bajo", "ok"}:
+            reabasto_filter = "all"
+        workflow_action_filter = (workflow_action_raw or "all").strip().lower()
+        if workflow_action_filter not in {"all", "corregir_maestro", "enviar_revision", "aprobar_rechazar", "crear_oc", "seguimiento_oc"}:
+            workflow_action_filter = "all"
+        blocker_key_filter = (blocker_key_raw or "all").strip().lower()
+        if blocker_key_filter not in {"all", "sin_costo", "sin_proveedor", "maestro_incompleto", "articulo_inactivo", "sin_catalogo", "no_canonico"}:
+            blocker_key_filter = "all"
+        plan_ids_all = set()
+        for area_val in SolicitudCompra.objects.filter(area__startswith="PLAN_PRODUCCION:").values_list("area", flat=True).distinct():
+            _, _, maybe_id = (area_val or "").partition(":")
+            if maybe_id.isdigit():
+                plan_ids_all.add(int(maybe_id))
+        plan_options = list(PlanProduccion.objects.filter(id__in=plan_ids_all).order_by("-fecha_produccion", "-id")[:100])
+        return (
+            solicitudes,
+            source_filter,
+            plan_filter,
+            categoria_filter,
+            reabasto_filter,
+            estatus_filter,
+            workflow_action_filter,
+            blocker_key_filter,
+            plan_options,
+            periodo_tipo,
+            periodo_mes,
+            periodo_label,
+        )
     member_to_row, canonical_by_id = _canonical_catalog_maps()
     canonical_ids = {
         canonical_insumo_by_id(s.insumo_id).id
@@ -7263,29 +7315,6 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
             periodo_label,
         )
 
-    provider_dashboard = _build_provider_dashboard(
-        periodo_mes,
-        source_filter,
-        plan_filter,
-        categoria_filter,
-        budget_ctx["presupuesto_rows_proveedor"],
-    )
-    category_dashboard = _build_category_dashboard(
-        periodo_mes,
-        source_filter,
-        plan_filter,
-        categoria_filter,
-        budget_ctx.get("presupuesto_rows_categoria", []),
-    )
-    consumo_dashboard = _build_consumo_vs_plan_dashboard(
-        periodo_tipo,
-        periodo_mes,
-        source_filter,
-        plan_filter,
-        categoria_filter,
-        consumo_ref_filter,
-    )
-
     query_without_export = request.GET.copy()
     query_without_export.pop("export", None)
     query_without_estatus = query_without_export.copy()
@@ -7374,7 +7403,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "solicitudes": solicitudes_visible,
         "solicitudes_total_count": solicitudes_total_count,
         "solicitudes_visible_count": len(solicitudes_visible),
-        "insumo_options": _build_insumo_options(),
+        "insumo_options": _build_basic_insumo_options(),
         "proveedor_options": list(Proveedor.objects.filter(activo=True).only("id", "nombre").order_by("nombre")),
         "categoria_options": [
             c
@@ -7436,10 +7465,7 @@ def solicitudes(request: HttpRequest) -> HttpResponse:
         "current_query_without_handoff": query_without_handoff.urlencode(),
         "plan_scope_context": plan_scope_context,
         "import_preview": import_preview,
-        "presupuesto_historial": _build_budget_history(periodo_mes, source_filter, plan_filter, categoria_filter),
-        "provider_dashboard": provider_dashboard,
-        "category_dashboard": category_dashboard,
-        "consumo_dashboard": consumo_dashboard,
+        "analytics_url": f"{reverse('compras:solicitudes_resumen_api')}?{query_without_export.urlencode()}",
         "workflow_summary": workflow_summary,
         "enterprise_board": enterprise_board,
         "supply_model_rows": supply_model_rows,
