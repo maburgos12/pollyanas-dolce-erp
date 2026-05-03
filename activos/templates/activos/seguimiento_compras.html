@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Bandeja de Seguimiento — Compras{% endblock %}
+{% block page_title %}Mantenimiento · Seguimiento{% endblock %}
+{% block body_class %}page-activos-seguimiento{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+<style>
+  .bandeja-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+  .bandeja-tab{padding:8px 16px;border:2px solid #e5dce1;border-radius:999px;background:#fff;color:#6f3150;font-weight:900;font-size:13px;cursor:pointer}
+  .bandeja-tab.active{background:#8B2252;border-color:#8B2252;color:#fff}
+  .bandeja-table{width:100%;border-collapse:collapse;font-size:13px}
+  .bandeja-table th{padding:10px 12px;border-bottom:2px solid rgba(139,34,82,.2);text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6f3150;font-weight:900}
+  .bandeja-table td{padding:12px;border-bottom:1px solid rgba(139,34,82,.08);vertical-align:top}
+  .bandeja-table tr:hover td{background:#fdf8fb}
+  .prioridad-badge,.estatus-pill{display:inline-flex;align-items:center;border-radius:999px;font-size:11px;font-weight:900}
+  .prioridad-badge{padding:3px 8px}.estatus-pill{padding:3px 9px;background:#f0eaed;color:#6f3150}
+  .p-critica{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}.p-alta{background:#fff7ed;color:#c2410c;border:1px solid #fdba74}.p-media{background:#fffbeb;color:#92400e;border:1px solid #fde68a}.p-baja{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+  .estatus-pill.abierto{background:#fef2f2;color:#991b1b}.estatus-pill.en_revision{background:#eff6ff;color:#1d4ed8}.estatus-pill.en_proceso{background:#fffbeb;color:#92400e}
+  .area-pill{font-size:11px;font-weight:800;color:#888}
+  .bandeja-empty{text-align:center;padding:40px;color:#aaa;font-size:14px}
+  .btn-accion{display:inline-flex;padding:5px 10px;border:1px solid #e5dce1;border-radius:6px;background:#fff;color:#8B2252;font-size:12px;font-weight:800;text-decoration:none}
+  .btn-accion:hover{background:#8B2252;color:#fff;border-color:#8B2252}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell bi-shell">
+  <nav class="module-tabs">
+    <a href="{% url 'activos:dashboard' %}" class="module-tab">Dashboard DG</a>
+    <a href="{% url 'activos:seguimiento-compras' %}" class="module-tab active">Bandeja Compras</a>
+    <a href="{% url 'fallas:dashboard' %}" class="module-tab">Fallas</a>
+    <a href="{% url 'activos:ordenes' %}" class="module-tab">Órdenes</a>
+  </nav>
+
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Compras · Seguimiento</div>
+      <h1 class="bi-hero-title">Bandeja de seguimiento</h1>
+      <p class="bi-copy">Fallas pendientes, órdenes de mantenimiento abiertas y reparaciones recientes de flota en una sola vista operativa.</p>
+    </div>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card"><span class="bi-status-label">Fallas pendientes</span><strong id="cnt-fallas">—</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Órdenes abiertas</span><strong id="cnt-ordenes">—</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Rep. flota 30d</span><strong id="cnt-reparaciones">—</strong></article>
+      </div>
+    </div>
+  </section>
+
+  <div class="bandeja-tabs">
+    <button class="bandeja-tab active" type="button" onclick="mostrarSeccion('fallas', this)">Fallas (<span id="tab-cnt-fallas">0</span>)</button>
+    <button class="bandeja-tab" type="button" onclick="mostrarSeccion('ordenes', this)">Mantenimiento (<span id="tab-cnt-ordenes">0</span>)</button>
+    <button class="bandeja-tab" type="button" onclick="mostrarSeccion('flota', this)">Flota (<span id="tab-cnt-flota">0</span>)</button>
+  </div>
+
+  <section id="sec-fallas" class="bi-panel">
+    <div class="bi-panel-head">
+      <div><div class="bi-kicker">Pendientes de resolución</div><h2 class="bi-panel-title">Fallas activas</h2></div>
+      <a href="{% url 'fallas:dashboard' %}" class="btn btn-secondary btn-small">Ver dashboard fallas</a>
+    </div>
+    <div style="overflow:auto">
+      <table class="bandeja-table">
+        <thead><tr><th>#</th><th>Sucursal</th><th>Falla</th><th>Área</th><th>Prioridad</th><th>Estatus</th><th>Fecha</th><th></th></tr></thead>
+        <tbody id="tbody-fallas"><tr><td colspan="8" class="bandeja-empty">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="sec-ordenes" class="bi-panel" style="display:none">
+    <div class="bi-panel-head">
+      <div><div class="bi-kicker">En proceso</div><h2 class="bi-panel-title">Órdenes de mantenimiento</h2></div>
+      <a href="{% url 'activos:ordenes' %}" class="btn btn-secondary btn-small">Ver todas</a>
+    </div>
+    <div style="overflow:auto">
+      <table class="bandeja-table">
+        <thead><tr><th>#</th><th>Activo</th><th>Sucursal</th><th>Tipo</th><th>Estatus</th><th>Responsable</th><th>Costo</th><th>Fecha prog.</th></tr></thead>
+        <tbody id="tbody-ordenes"><tr><td colspan="8" class="bandeja-empty">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="sec-flota" class="bi-panel" style="display:none">
+    <div class="bi-panel-head">
+      <div><div class="bi-kicker">Últimos 30 días</div><h2 class="bi-panel-title">Reparaciones de flota</h2></div>
+    </div>
+    <div style="overflow:auto">
+      <table class="bandeja-table">
+        <thead><tr><th>#</th><th>Vehículo</th><th>Falla</th><th>Proveedor</th><th>Costo</th><th>Fecha ingreso</th></tr></thead>
+        <tbody id="tbody-flota"><tr><td colspan="6" class="bandeja-empty">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+const token = localStorage.getItem("pd_logistica_access") || "";
+const csrf = "{{ csrf_token }}";
+function headers() {
+  const h = {"X-CSRFToken": csrf};
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
+function money(value) {
+  if (!value) return "—";
+  return new Intl.NumberFormat("es-MX", {style: "currency", currency: "MXN", maximumFractionDigits: 0}).format(Number(value || 0));
+}
+function dateFmt(value) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("es-MX", {dateStyle: "short", timeStyle: "short"}).format(new Date(value));
+}
+function esc(value) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+const PRIOR_BADGE = {
+  critica: '<span class="prioridad-badge p-critica">Crítica</span>',
+  alta: '<span class="prioridad-badge p-alta">Alta</span>',
+  media: '<span class="prioridad-badge p-media">Media</span>',
+  baja: '<span class="prioridad-badge p-baja">Baja</span>'
+};
+const AREA_LABEL = {ventas: "Ventas", produccion: "Producción", general: "General"};
+
+function mostrarSeccion(sec, btn) {
+  ["fallas", "ordenes", "flota"].forEach((name) => {
+    document.getElementById(`sec-${name}`).style.display = name === sec ? "" : "none";
+  });
+  document.querySelectorAll(".bandeja-tab").forEach((item) => item.classList.remove("active"));
+  btn.classList.add("active");
+}
+
+async function cargarBandeja() {
+  const response = await fetch("{% url 'activos:api-bandeja-compras' %}", {headers: headers()});
+  if (!response.ok) return;
+  const data = await response.json();
+  const nF = data.fallas_pendientes.length;
+  const nO = data.ordenes_abiertas.length;
+  const nR = data.reparaciones_recientes.length;
+  document.getElementById("cnt-fallas").textContent = nF;
+  document.getElementById("cnt-ordenes").textContent = nO;
+  document.getElementById("cnt-reparaciones").textContent = nR;
+  document.getElementById("tab-cnt-fallas").textContent = nF;
+  document.getElementById("tab-cnt-ordenes").textContent = nO;
+  document.getElementById("tab-cnt-flota").textContent = nR;
+
+  document.getElementById("tbody-fallas").innerHTML = nF ? data.fallas_pendientes.map((f) => {
+    const reportador = [f.reportado_por__first_name, f.reportado_por__last_name].filter(Boolean).join(" ") || "—";
+    return `<tr>
+      <td><strong>#${f.id}</strong></td>
+      <td>${esc(f.sucursal__nombre || "—")}</td>
+      <td><strong>${esc(f.titulo)}</strong><div style="font-size:11px;color:#888">${esc(reportador)}</div></td>
+      <td><span class="area-pill">${esc(AREA_LABEL[f.area] || f.area || "—")}</span></td>
+      <td>${PRIOR_BADGE[f.prioridad] || esc(f.prioridad || "—")}</td>
+      <td><span class="estatus-pill ${esc(f.estatus)}">${esc((f.estatus || "—").replace("_", " "))}</span></td>
+      <td style="font-size:11px">${dateFmt(f.fecha_reporte)}</td>
+      <td><a href="{% url 'fallas:dashboard' %}" class="btn-accion">Ver</a></td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="8" class="bandeja-empty">Sin fallas pendientes</td></tr>`;
+
+  document.getElementById("tbody-ordenes").innerHTML = nO ? data.ordenes_abiertas.map((o) => `<tr>
+    <td><strong>${esc(o.folio || "#" + o.id)}</strong></td>
+    <td><strong>${esc(o.activo_nombre || "—")}</strong><div style="font-size:11px;color:#888">${esc(o.activo_codigo || "")}</div></td>
+    <td>${esc(o.sucursal_nombre || "—")}</td>
+    <td>${esc(o.tipo || "—")}</td>
+    <td><span class="estatus-pill">${esc(o.estatus || "—")}</span></td>
+    <td>${esc(o.responsable || "—")}</td>
+    <td>${money(o.costo_total)}</td>
+    <td style="font-size:11px">${esc(o.fecha_programada || "—")}</td>
+  </tr>`).join("") : `<tr><td colspan="8" class="bandeja-empty">Sin órdenes abiertas</td></tr>`;
+
+  document.getElementById("tbody-flota").innerHTML = nR ? data.reparaciones_recientes.map((r) => `<tr>
+    <td><strong>#${r.id}</strong></td>
+    <td><strong>${esc(r.unidad__descripcion || "—")}</strong><div style="font-size:11px;color:#888">${esc(r.unidad__codigo || "")}</div></td>
+    <td>${esc(r.descripcion_falla || "—")}</td>
+    <td>${esc(r.proveedor || "—")}</td>
+    <td>${money(r.costo_total)}</td>
+    <td style="font-size:11px">${esc(r.fecha_ingreso || "—")}</td>
+  </tr>`).join("") : `<tr><td colspan="6" class="bandeja-empty">Sin reparaciones recientes.</td></tr>`;
+}
+cargarBandeja();
+setInterval(cargarBandeja, 3 * 60 * 1000);
+</script>
+{% endblock %}

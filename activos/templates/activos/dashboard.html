@@ -1,714 +1,166 @@
 {% extends "base.html" %}
+{% load static humanize %}
 
-{% block title %}Activos - Dashboard{% endblock %}
-{% block page_title %}Activos · Dashboard{% endblock %}
+{% block title %}Dashboard Ejecutivo — Pollyana's Dolce{% endblock %}
+{% block page_title %}Mantenimiento · Dashboard DG{% endblock %}
+{% block body_class %}page-activos-dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260326a">
+<style>
+  .exec-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:22px}
+  .exec-kpi,.exec-panel,.flota-card{background:#fff;border:1px solid rgba(139,34,82,.12);box-shadow:0 2px 8px rgba(39,18,29,.06)}
+  .exec-kpi{border-radius:12px;padding:18px 16px}
+  .exec-kpi-label{font-size:12px;color:#6f3150;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+  .exec-kpi-value{font-size:2.25rem;font-weight:900;line-height:1;margin:6px 0 4px}
+  .exec-kpi-sub{font-size:12px;color:#999}
+  .color-wine{color:#8B2252}.color-danger{color:#dc2626}.color-gold{color:#C9A84C}.color-ok{color:#16a34a}
+  .exec-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:20px}
+  .exec-panel{border-radius:12px;overflow:hidden}
+  .exec-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#8B2252;color:#fff;padding:12px 16px;font-size:13px;font-weight:900}
+  .exec-panel-body{padding:12px 16px}
+  .exec-bar-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #f0eaed;font-size:13px}
+  .exec-bar-item:last-child{border-bottom:0}
+  .exec-bar-name{font-weight:800;color:#3d1a2a}
+  .exec-bar-count{display:inline-flex;min-width:28px;justify-content:center;border-radius:999px;background:#8B2252;color:#fff;padding:2px 9px;font-size:12px;font-weight:900}
+  .exec-loading{color:#aaa;font-size:13px;padding:18px;text-align:center}
+  .exec-alerta{display:flex;align-items:center;gap:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;color:#92400e;font-size:13px;font-weight:800;margin-bottom:16px;padding:12px 16px}
+  .flota-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .flota-card{border-radius:10px;padding:12px}
+  .flota-card-name{font-weight:900;margin:0 0 4px;color:#3d1a2a}
+  .flota-card-sub{color:#888;margin:0;font-size:12px}
+  .mini-badge{display:inline-flex;align-items:center;min-height:22px;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:900;background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+  @media (max-width:900px){.exec-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.exec-grid,.flota-grid{grid-template-columns:1fr}}
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="module-tabs">
-  {% for tab in module_tabs %}
-    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
-  {% endfor %}
-</div>
+<div class="module-shell bi-shell" id="exec-app">
+  <nav class="module-tabs">
+    <a href="{% url 'activos:dashboard' %}" class="module-tab active">Dashboard DG</a>
+    <a href="{% url 'activos:seguimiento-compras' %}" class="module-tab">Bandeja Compras</a>
+    <a href="{% url 'fallas:dashboard' %}" class="module-tab">Fallas</a>
+    <a href="{% url 'activos:ordenes' %}" class="module-tab">Órdenes</a>
+  </nav>
 
-<section class="card">
-  <div class="card-header">Centro de mando ERP</div>
-  <div class="kpi-grid kpi-mini">
-    <article class="kpi-card">
-      <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
-      <div class="kpi-label">Semáforo global</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
-      <div class="kpi-label">Bloqueos abiertos</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
-      <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
-    </article>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Expediente ERP del módulo</div>
-  <div class="table-responsive">
-    <table class="table">
-      <tbody>
-        <tr>
-          <td style="width:28%;"><strong>Documento</strong></td>
-          <td>Activos, planes preventivos, órdenes de mantenimiento y bitácora técnica.</td>
-        </tr>
-        <tr>
-          <td><strong>Fuente de control</strong></td>
-          <td>Catálogo de equipos, planes vigentes, órdenes abiertas y registro histórico de servicios.</td>
-        </tr>
-        <tr>
-          <td><strong>Etapa ERP</strong></td>
-          <td>Gobierno del activo, mantenimiento programado y cierre documental del servicio.</td>
-        </tr>
-        <tr>
-          <td><strong>Propósito</strong></td>
-          <td>Garantizar disponibilidad del activo, trazabilidad de intervención y costo acumulado del ciclo de mantenimiento.</td>
-        </tr>
-        <tr>
-          <td><strong>Regla de salida</strong></td>
-          <td>Activo clasificado, con plan vigente, orden cerrada cuando aplica y bitácora lista para auditoría.</td>
-        </tr>
-        <tr>
-          <td><strong>Siguiente paso</strong></td>
-          <td>Usa la cadena documental para cerrar maestro, plan, orden y bitácora sin dejar equipos fuera de control.</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Workflow ERP del módulo</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Etapa</th>
-          <th>Responsable</th>
-          <th>Entrada</th>
-          <th>Control</th>
-          <th>Salida</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>01 · Maestro del activo</td>
-          <td>Activos / Mantenimiento</td>
-          <td>Alta del equipo y criticidad</td>
-          <td>Proveedor, ubicación y estado</td>
-          <td>Activo listo para plan</td>
-        </tr>
-        <tr>
-          <td>02 · Plan preventivo</td>
-          <td>Planeación / Operación</td>
-          <td>Frecuencia y responsable</td>
-          <td>Próxima ejecución y vigencia</td>
-          <td>Cobertura documental activa</td>
-        </tr>
-        <tr>
-          <td>03 · Orden de mantenimiento</td>
-          <td>Mantenimiento / Ejecución</td>
-          <td>Incidente o disparo preventivo</td>
-          <td>Responsable, prioridad y costo</td>
-          <td>Orden cerrada</td>
-        </tr>
-        <tr>
-          <td>04 · Bitácora técnica</td>
-          <td>DG / Auditoría</td>
-          <td>Servicio ejecutado</td>
-          <td>Evidencia y trazabilidad</td>
-          <td>Histórico auditable</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cadena documental ERP</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for item in enterprise_chain %}
-      <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-        <div class="enterprise-pill-title">{{ item.step }} · {{ item.title }}</div>
-        <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
-        <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
-          <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cadena troncal del mantenimiento</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Depende de</th>
-          <th>Responsable</th>
-          <th>Cierre</th>
-          <th>Estatus</th>
-          <th>Dependencia</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in enterprise_chain %}
-          <tr>
-            <td><strong>{{ item.step }} · {{ item.title }}</strong></td>
-            <td>{{ item.depends_on }}</td>
-            <td>{{ item.owner }}</td>
-            <td>{{ item.completion }}%</td>
-            <td>{{ item.status }}</td>
-            <td>{{ item.dependency_status }}</td>
-            <td>{{ item.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="enterprise-focus-alert tone-{% if enterprise_maturity_summary.attention_steps %}warning{% else %}success{% endif %}">
-    <div>
-      <div class="enterprise-focus-title">Prioridad ERP actual · {{ enterprise_maturity_summary.next_priority_title }}</div>
-      <div class="enterprise-focus-text">{{ enterprise_maturity_summary.next_priority_detail }}</div>
+  <section class="bi-hero">
+    <div class="bi-hero-main">
+      <div class="bi-kicker">Director General</div>
+      <h1 class="bi-hero-title">Panel de mantenimiento</h1>
+      <p class="bi-copy">Vista consolidada de fallas activas, mantenimiento en curso, costos recientes y estado de la flota.</p>
     </div>
-    <div class="enterprise-focus-actions">
-      <span class="module-chip {% if enterprise_maturity_summary.attention_steps %}blocked{% else %}manage{% endif %}">Cobertura {{ enterprise_maturity_summary.coverage_pct }}%</span>
-      <a class="btn btn-secondary btn-small" href="{{ enterprise_maturity_summary.next_priority_url }}">{{ enterprise_maturity_summary.next_priority_cta }}</a>
-    </div>
-  </div>
-</section>
-
-{% if executive_radar_rows %}
-<section class="card">
-  <div class="card-header">Radar ejecutivo ERP</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueo dominante</th>
-          <th>Depende de</th>
-          <th>Cierre</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in executive_radar_rows %}
-          <tr>
-            <td>
-              <strong>{{ row.phase }}</strong>
-              <div class="muted">{{ row.status }}</div>
-            </td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.dominant_blocker }}</td>
-            <td>
-              <strong>{{ row.depends_on }}</strong>
-              <div class="muted">{{ row.dependency_status }}</div>
-            </td>
-            <td>
-              <span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">
-                {{ row.progress_pct }}% · {{ row.blockers }} abiertos
-              </span>
-            </td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Cockpit ERP de activos</div>
-  <div class="alert alert-{% if enterprise_health_tone == 'success' %}success{% else %}danger{% endif %}" style="margin-bottom:14px;">
-    Salud operativa: <strong>{{ enterprise_health_label }}</strong>. Bloqueos abiertos: <strong>{{ enterprise_blockers_total }}</strong>.
-  </div>
-  <div class="kpi-grid">
-    {% for card in enterprise_cards %}
-      <article class="kpi-card">
-        <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
-        <div class="kpi-label">{{ card.label }}</div>
-        <div style="margin-top:10px;">
-          <a class="btn btn-secondary" href="{% url 'activos:activos' %}?master_gap={{ card.key }}">Revisar</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-  <div class="table-responsive" style="margin-top:14px;">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Activo</th>
-          <th>Estado ERP</th>
-          <th>Bloqueos</th>
-          <th>Siguiente acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in activos_blocker_rows %}
-          <tr>
-            <td>{{ row.activo.nombre }}</td>
-            <td><span class="badge badge-{% if row.status_tone == 'danger' %}danger{% else %}warning{% endif %}">{{ row.status_label }}</span></td>
-            <td>{{ row.gap_labels }}</td>
-            <td>{{ row.next_action }}</td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="4" class="text-muted">Sin bloqueos operativos en activos.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-{% if critical_path_rows %}
-<section class="card">
-  <div class="card-header">Ruta crítica ERP</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Prioridad</th>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Depende de</th>
-          <th>Lectura ejecutiva</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in critical_path_rows %}
-          <tr>
-            <td>{{ row.priority }}</td>
-            <td><strong>{{ row.title }}</strong></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.blockers }}</td>
-            <td>{{ row.completion }}%</td>
-            <td>{{ row.depends_on }}</td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Madurez ERP de activos</div>
-  <div class="kpi-grid">
-    <article class="kpi-card">
-      <div class="kpi-number is-success">{{ enterprise_maturity_summary.completed_steps }}</div>
-      <div class="kpi-label">Etapas estabilizadas</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number is-warning">{{ enterprise_maturity_summary.attention_steps }}</div>
-      <div class="kpi-label">Etapas con atención</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ enterprise_maturity_summary.coverage_pct }}%</div>
-      <div class="kpi-label">Cobertura documental</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente prioridad</div>
-      <div style="font-weight:700; margin:8px 0 6px;">{{ enterprise_maturity_summary.next_priority_title }}</div>
-      <div class="muted">{{ enterprise_maturity_summary.next_priority_detail }}</div>
-      <div style="margin-top:10px;">
-        <a class="btn btn-secondary btn-small" href="{{ enterprise_maturity_summary.next_priority_url }}">{{ enterprise_maturity_summary.next_priority_cta }}</a>
-      </div>
-    </article>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Criterios de cierre ERP</div>
-  <div class="enterprise-kpi-strip enterprise-kpi-strip-compact">
-    <article class="enterprise-kpi-card">
-      <div class="enterprise-kpi-label">Cierre global</div>
-      <div class="kpi-number">{{ release_gate_completion }}%</div>
-      <div class="muted">Activos, planes y órdenes listos para operar con trazabilidad mínima del módulo.</div>
-    </article>
-  </div>
-  <div class="blocker-list">
-    {% for row in release_gate_rows %}
-      <article class="stage-row">
-        <div class="stage-step">{{ row.step }}</div>
-        <div class="blocker-meta">
-          <strong>{{ row.title }}</strong>
-          <small>{{ row.detail }}</small>
-        </div>
-        <div class="module-chip-list">
-          <span class="module-chip manage">Cerrados {{ row.completed }}</span>
-          <span class="module-chip {% if row.tone == 'success' %}manage{% else %}blocked{% endif %}">Abiertos {{ row.open_count }}</span>
-        </div>
-        <div class="blocker-action">
-          <a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cadena de control ERP</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for item in enterprise_handoff_map %}
-      <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-        <div class="enterprise-pill-title">{{ item.label }}</div>
-        <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
-        <div class="muted">{{ item.status }}</div>
-        <div style="margin-top:10px;">
-          <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-{% if enterprise_handoff_map %}
-<section class="card">
-  <div class="card-header">Entrega de activos a downstream</div>
-  <p class="muted mb-2">
-    Expone si el módulo ya puede bajar con control hacia planes, órdenes y bitácora, junto con el criterio de salida documental de cada tramo.
-  </p>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Destino</th>
-          <th>Responsable</th>
-          <th>Estatus</th>
-          <th class="text-end">Bloqueos</th>
-          <th>Cierre</th>
-          <th>Depende de</th>
-          <th>Criterio de salida</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in enterprise_handoff_map %}
-          <tr>
-            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.status }}</td>
-            <td class="text-end">{{ row.count }}</td>
-            <td style="min-width:160px;">
-              <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="width: {{ row.completion }}%;"></div>
-              </div>
-              <div class="muted mt-1">{{ row.completion }}%</div>
-            </td>
-            <td>{{ row.depends_on }}</td>
-            <td>{{ row.exit_criteria }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Cierre por etapa documental</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Etapa</th>
-          <th>Responsable</th>
-          <th>Abiertos</th>
-          <th>Cerrados</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in document_stage_rows %}
-          <tr>
-            <td>{{ row.label }}</td>
-            <td>{{ row.owner|default:"Operación ERP" }}</td>
-            <td>{{ row.open }}</td>
-            <td>{{ row.closed }}</td>
-            <td>{{ row.completion }}%</td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">Abrir</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Mesa de gobierno ERP</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Frente</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in erp_governance_rows %}
-          <tr>
-            <td><strong>{{ row.front }}</strong></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.blockers }}</td>
-            <td>{{ row.completion }}%</td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Workflow ERP de activos</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Cierre</th>
-          <th>Lectura ejecutiva</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in workflow_stage_rows %}
-          <tr>
-            <td><strong>{{ row.step }} · {{ row.title }}</strong></td>
-            <td>{{ row.owner }}</td>
-            <td>
-              <span class="module-chip {% if row.tone == 'success' %}manage{% else %}blocked{% endif %}">
-                {{ row.completion }}%
-              </span>
-            </td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">Abrir</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Salud operativa ERP</div>
-  <div class="kpi-grid">
-    {% for card in operational_health_cards %}
-      <article class="kpi-card">
-        <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
-        <div class="kpi-label">{{ card.label }}</div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-<div class="kpi-grid">
-  <article class="kpi-card">
-    <div class="kpi-number">{{ activos_total }}</div>
-    <div class="kpi-label">Activos</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-number is-success">{{ activos_operativos }}</div>
-    <div class="kpi-label">Operativos</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-number is-warning">{{ activos_mantenimiento }}</div>
-    <div class="kpi-label">En mantenimiento</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-number is-danger">{{ activos_fuera_servicio }}</div>
-    <div class="kpi-label">Fuera de servicio</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-number is-danger">{{ planes_vencidos }}</div>
-    <div class="kpi-label">Planes vencidos</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-number is-warning">{{ planes_proxima_semana }}</div>
-    <div class="kpi-label">Próx. 7 días</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-number">{{ ordenes_abiertas }}</div>
-    <div class="kpi-label">Órdenes abiertas</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-number is-warning">{{ ordenes_en_proceso }}</div>
-    <div class="kpi-label">Órdenes en proceso</div>
-  </article>
-</div>
-
-<div class="kpi-grid">
-  <article class="kpi-card">
-    <div class="kpi-label">Costo mantenimiento mes</div>
-    <div class="kpi-number is-warning" style="font-size: 40px;">${{ costo_mes_total|floatformat:2 }}</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-label">Criticidad alta</div>
-    <div class="kpi-number is-danger" style="font-size: 40px;">{{ criticidad.ALTA|default:0 }}</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-label">Criticidad media</div>
-    <div class="kpi-number is-warning" style="font-size: 40px;">{{ criticidad.MEDIA|default:0 }}</div>
-  </article>
-  <article class="kpi-card">
-    <div class="kpi-label">Criticidad baja</div>
-    <div class="kpi-number is-success" style="font-size: 40px;">{{ criticidad.BAJA|default:0 }}</div>
-  </article>
-</div>
-
-<section class="card">
-  <div class="card-header">Próximos mantenimientos (45 días)</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Fecha</th>
-          <th>Activo</th>
-          <th>Plan</th>
-          <th>Tipo</th>
-          <th>Responsable</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in proximos %}
-          <tr>
-            <td>{{ p.proxima_ejecucion|date:"Y-m-d" }}</td>
-            <td>{{ p.activo_ref.nombre }}</td>
-            <td>{{ p.nombre }}</td>
-            <td>{{ p.get_tipo_display }}</td>
-            <td>{{ p.responsable|default:"-" }}</td>
-          </tr>
-        {% empty %}
-          <tr>
-            <td colspan="5" class="text-muted">Sin planes próximos.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Alertas críticas</div>
-  <div class="row" style="display:grid;grid-template-columns:repeat(2,minmax(320px,1fr));gap:14px;">
-    <div>
-      <h4 style="margin:0 0 8px;">Planes vencidos</h4>
-      <div class="table-responsive">
-        <table class="table table-striped">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Activo</th>
-              <th>Plan</th>
-              <th>Días vencido</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in planes_vencidos_rows %}
-              <tr>
-                <td>{{ item.plan.proxima_ejecucion|date:"Y-m-d" }}</td>
-                <td>{{ item.plan.activo_ref.nombre }}</td>
-                <td>{{ item.plan.nombre }}</td>
-                <td class="text-danger">{{ item.dias_vencido }}</td>
-              </tr>
-            {% empty %}
-              <tr><td colspan="4" class="text-muted">Sin planes vencidos.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+    <div class="bi-hero-side">
+      <div class="bi-hero-status-grid">
+        <article class="bi-status-card"><span class="bi-status-label">Fallas activas</span><strong id="kpi-fallas-activas">—</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Críticas</span><strong id="kpi-fallas-criticas" style="color:#dc2626">—</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Costo 30d</span><strong id="kpi-costo-mes">—</strong></article>
+        <article class="bi-status-card"><span class="bi-status-label">Unidades activas</span><strong id="kpi-flota">—</strong></article>
       </div>
     </div>
-    <div>
-      <h4 style="margin:0 0 8px;">Órdenes correctivas críticas/altas</h4>
-      <div class="table-responsive">
-        <table class="table table-striped">
-          <thead>
-            <tr>
-              <th>Folio</th>
-              <th>Activo</th>
-              <th>Prioridad</th>
-              <th>Programada</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for o in ordenes_criticas_rows %}
-              <tr>
-                <td>{{ o.folio }}</td>
-                <td>{{ o.activo_ref.nombre }}</td>
-                <td><span class="badge badge-danger">{{ o.prioridad }}</span></td>
-                <td>{{ o.fecha_programada|date:"Y-m-d" }}</td>
-              </tr>
-            {% empty %}
-              <tr><td colspan="4" class="text-muted">Sin órdenes críticas/altas abiertas.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</section>
+  </section>
 
-<section class="card">
-  <div class="card-header">Órdenes recientes</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Folio</th>
-          <th>Activo</th>
-          <th>Tipo</th>
-          <th>Programada</th>
-          <th>Estatus</th>
-          <th>Costo total</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for o in ordenes_recientes %}
-          <tr>
-            <td>{{ o.folio }}</td>
-            <td>{{ o.activo_ref.nombre }}</td>
-            <td>{{ o.get_tipo_display }}</td>
-            <td>{{ o.fecha_programada|date:"Y-m-d" }}</td>
-            <td><span class="badge badge-primary">{{ o.estatus }}</span></td>
-            <td>${{ o.costo_total|floatformat:2 }}</td>
-          </tr>
-        {% empty %}
-          <tr>
-            <td colspan="6" class="text-muted">Sin órdenes registradas.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="exec-alerta" id="alerta-sucursal" style="display:none">
+    <span id="alerta-sucursal-texto"></span>
+    <a href="/admin/activos/activo/" style="color:#92400e">Asignar desde admin</a>
   </div>
-</section>
+
+  <div class="exec-kpis">
+    <article class="exec-kpi"><div class="exec-kpi-label">Fallas esta semana</div><div class="exec-kpi-value color-wine" id="kpi-semana">—</div><div class="exec-kpi-sub">últimos 7 días</div></article>
+    <article class="exec-kpi"><div class="exec-kpi-label">Órdenes abiertas</div><div class="exec-kpi-value color-gold" id="kpi-ordenes">—</div><div class="exec-kpi-sub">equipo y maquinaria</div></article>
+    <article class="exec-kpi"><div class="exec-kpi-label">Reparaciones flota</div><div class="exec-kpi-value color-wine" id="kpi-reparaciones">—</div><div class="exec-kpi-sub">últimos 30 días</div></article>
+    <article class="exec-kpi"><div class="exec-kpi-label">Costo flota 30d</div><div class="exec-kpi-value color-danger" id="kpi-costo-flota">—</div><div class="exec-kpi-sub">reparaciones + servicios</div></article>
+  </div>
+
+  <div class="exec-grid">
+    <section class="exec-panel">
+      <div class="exec-panel-head">Fallas por sucursal <span class="mini-badge" id="badge-fallas-suc">0</span></div>
+      <div class="exec-panel-body" id="panel-fallas-sucursal"><div class="exec-loading">Cargando...</div></div>
+    </section>
+    <section class="exec-panel">
+      <div class="exec-panel-head">Fallas por área</div>
+      <div class="exec-panel-body" id="panel-fallas-area"><div class="exec-loading">Cargando...</div></div>
+    </section>
+    <section class="exec-panel">
+      <div class="exec-panel-head">Mantenimiento por tipo</div>
+      <div class="exec-panel-body" id="panel-ordenes-tipo"><div class="exec-loading">Cargando...</div></div>
+    </section>
+  </div>
+
+  <section class="bi-panel">
+    <div class="bi-panel-head">
+      <div><div class="bi-kicker">Logística</div><h2 class="bi-panel-title">Estado de flota</h2></div>
+    </div>
+    <div class="flota-grid" id="panel-flota"><div class="exec-loading">Cargando...</div></div>
+  </section>
+</div>
+
+<script>
+const token = localStorage.getItem("pd_logistica_access") || "";
+const csrf = "{{ csrf_token }}";
+function headers() {
+  const h = {"X-CSRFToken": csrf};
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
+function money(value) {
+  return new Intl.NumberFormat("es-MX", {style: "currency", currency: "MXN", maximumFractionDigits: 0}).format(Number(value || 0));
+}
+function esc(value) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+async function listJson(url) {
+  const response = await fetch(url, {headers: headers()});
+  if (!response.ok) return [];
+  const data = await response.json();
+  return Array.isArray(data) ? data : (data.results || []);
+}
+const AREA_LABEL = {ventas: "Ventas", produccion: "Producción", general: "General"};
+const TIPO_LABEL = {PREVENTIVO: "Preventivo", CORRECTIVO: "Correctivo"};
+
+function renderBars(id, rows, labelKey, emptyText, mapper = null) {
+  const el = document.getElementById(id);
+  el.innerHTML = rows.length ? rows.map((row) => `
+    <div class="exec-bar-item">
+      <span class="exec-bar-name">${esc(mapper ? mapper(row) : (row[labelKey] || "Sin dato"))}</span>
+      <span class="exec-bar-count">${row.total}</span>
+    </div>
+  `).join("") : `<div class="exec-loading">${emptyText}</div>`;
+}
+
+async function cargarDashboard() {
+  const response = await fetch("{% url 'activos:api-dashboard-ejecutivo' %}", {headers: headers()});
+  if (!response.ok) return;
+  const data = await response.json();
+  const costoTotal = Number(data.mantenimiento.costo_mes || 0) + Number(data.flota.costo_mes || 0);
+
+  document.getElementById("kpi-fallas-activas").textContent = data.fallas.activas;
+  document.getElementById("kpi-fallas-criticas").textContent = data.fallas.criticas;
+  document.getElementById("kpi-flota").textContent = data.flota.unidades_activas;
+  document.getElementById("kpi-costo-mes").textContent = money(costoTotal);
+  document.getElementById("kpi-semana").textContent = data.fallas.esta_semana;
+  document.getElementById("kpi-ordenes").textContent = data.mantenimiento.ordenes_abiertas;
+  document.getElementById("kpi-reparaciones").textContent = data.flota.reparaciones_mes;
+  document.getElementById("kpi-costo-flota").textContent = money(data.flota.costo_mes);
+
+  if (data.alertas.activos_sin_sucursal > 0) {
+    document.getElementById("alerta-sucursal").style.display = "flex";
+    document.getElementById("alerta-sucursal-texto").textContent = `${data.alertas.activos_sin_sucursal} activos sin sucursal asignada`;
+  }
+
+  document.getElementById("badge-fallas-suc").textContent = data.fallas.activas;
+  renderBars("panel-fallas-sucursal", data.fallas.por_sucursal, "sucursal__nombre", "Sin fallas activas");
+  renderBars("panel-fallas-area", data.fallas.por_area, "area", "Sin fallas activas", (row) => AREA_LABEL[row.area] || row.area);
+  renderBars("panel-ordenes-tipo", data.mantenimiento.por_tipo, "tipo", "Sin órdenes abiertas", (row) => TIPO_LABEL[row.tipo] || row.tipo);
+
+  const unidades = await listJson("/api/mantenimiento/unidades/");
+  document.getElementById("panel-flota").innerHTML = unidades.length ? unidades.map((u) => `
+    <article class="flota-card">
+      <p class="flota-card-name">${esc(u.descripcion)}</p>
+      <p class="flota-card-sub">${esc(u.codigo)} · ${esc(u.placa || "Sin placa")} · ${esc(u.sucursal_nombre || "")}</p>
+    </article>
+  `).join("") : `<div class="exec-loading">Sin unidades registradas.</div>`;
+}
+cargarDashboard();
+setInterval(cargarDashboard, 5 * 60 * 1000);
+</script>
 {% endblock %}
