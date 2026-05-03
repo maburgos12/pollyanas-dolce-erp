@@ -385,6 +385,49 @@ class InspeccionVehiculo(models.Model):
         return f"{self.unidad.codigo} · {self.repartidor} · {self.fecha:%Y-%m-%d %H:%M}"
 
 
+class InspeccionDiaria(models.Model):
+    unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="inspecciones_diarias")
+    repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT, related_name="inspecciones_diarias")
+    fecha = models.DateField(auto_now_add=True)
+    hora = models.DateTimeField(auto_now_add=True)
+
+    aceite_ok = models.BooleanField(default=False)
+    refrigerante_ok = models.BooleanField(default=False)
+    liquido_frenos_ok = models.BooleanField(default=False)
+    limpiaparabrisas_ok = models.BooleanField(default=False)
+    presion_llantas_ok = models.BooleanField(default=False)
+    desgaste_llantas_ok = models.BooleanField(default=False)
+    luces_ok = models.BooleanField(default=False)
+    escobillas_ok = models.BooleanField(default=False)
+    bateria_ok = models.BooleanField(default=False)
+    tablero_ok = models.BooleanField(default=False)
+    documentos_ok = models.BooleanField(default=False)
+    licencia_ok = models.BooleanField(default=False)
+    kit_emergencia_ok = models.BooleanField(default=False)
+
+    observaciones = models.TextField(blank=True)
+    tiene_fallas = models.BooleanField(default=False)
+    reporte_generado = models.ForeignKey(
+        "ReporteUnidad",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="inspeccion_origen",
+    )
+    ip_registro = models.GenericIPAddressField(null=True)
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+
+    class Meta:
+        unique_together = [("unidad", "fecha")]
+        ordering = ["-hora"]
+        verbose_name = "Inspección diaria"
+        verbose_name_plural = "Inspecciones diarias"
+
+    def __str__(self) -> str:
+        return f"{self.unidad.codigo} · {self.fecha:%Y-%m-%d}"
+
+
 class DocumentoUnidad(models.Model):
     TIPO_TARJETA_CIRCULACION = "tarjeta_circulacion"
     TIPO_SEGURO = "seguro"

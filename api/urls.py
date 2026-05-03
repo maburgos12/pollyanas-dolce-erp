@@ -117,6 +117,8 @@ from .logistica_views import (
     LogisticaTodosReportesView,
     LogisticaTokenView,
     LogisticaUnidadesView,
+    InspeccionDiariaCheckView,
+    InspeccionDiariaCreateView,
 )
 from .reportes_bi_views import ReportesBIDashboardView
 from .reportes_budget_views import BudgetVsActualView
@@ -355,6 +357,8 @@ urlpatterns = [
     path("logistica/bitacora-salida/activa/", LogisticaBitacoraSalidaActivaView.as_view(), name="api_logistica_bitacora_salida_activa"),
     path("logistica/bitacora-salida/hoy/", LogisticaBitacoraSalidaHoyView.as_view(), name="api_logistica_bitacora_salida_hoy"),
     path("logistica/bitacora-salida/<int:bitacora_id>/", LogisticaBitacoraSalidaDetailView.as_view(), name="api_logistica_bitacora_salida_detail"),
+    path("logistica/inspeccion-diaria/check/", InspeccionDiariaCheckView.as_view(), name="api_logistica_inspeccion_diaria_check"),
+    path("logistica/inspeccion-diaria/", InspeccionDiariaCreateView.as_view(), name="api_logistica_inspeccion_diaria"),
     path("logistica/inspeccion/", LogisticaInspeccionView.as_view(), name="api_logistica_inspeccion"),
     path("logistica/inspeccion/ultima/", LogisticaInspeccionUltimaView.as_view(), name="api_logistica_inspeccion_ultima"),
     path("logistica/rutas/", LogisticaRutasView.as_view(), name="api_logistica_rutas"),

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework import status
+from rest_framework import generics, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -18,7 +18,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from core.access import can_manage_logistica, can_view_logistica
 from core.audit import log_event
 from crm.models import PedidoCliente
-from logistica.models import BitacoraRepartidor, BitacoraSalidaLlegada, EntregaRuta, InspeccionVehiculo, Repartidor, ReporteUnidad, RutaEntrega, Unidad
+from logistica.models import BitacoraRepartidor, BitacoraSalidaLlegada, EntregaRuta, InspeccionDiaria, InspeccionVehiculo, Repartidor, ReporteUnidad, RutaEntrega, Unidad
 
 from .logistica_serializers import (
     LogisticaBitacoraSerializer,
@@ -29,6 +29,7 @@ from .logistica_serializers import (
     LogisticaEntregaSerializer,
     LogisticaInspeccionVehiculoCreateSerializer,
     LogisticaInspeccionVehiculoSerializer,
+    LogisticaInspeccionDiariaSerializer,
     LogisticaRepartidorSerializer,
     LogisticaReporteCreateSerializer,
     LogisticaReportePatchSerializer,
@@ -337,6 +338,97 @@ class LogisticaInspeccionUltimaView(_LogisticaBaseView):
         if not inspeccion:
             return Response({}, status=status.HTTP_200_OK)
         return Response(LogisticaInspeccionVehiculoSerializer(inspeccion).data, status=status.HTTP_200_OK)
+
+
+INSPECCION_DIARIA_BOOL_FIELDS = [
+    "aceite_ok",
+    "refrigerante_ok",
+    "liquido_frenos_ok",
+    "limpiaparabrisas_ok",
+    "presion_llantas_ok",
+    "desgaste_llantas_ok",
+    "luces_ok",
+    "escobillas_ok",
+    "bateria_ok",
+    "tablero_ok",
+    "documentos_ok",
+    "licencia_ok",
+    "kit_emergencia_ok",
+]
+
+
+class InspeccionDiariaCheckView(_LogisticaBaseView):
+    def get(self, request):
+        unidad_id = request.query_params.get("unidad_id")
+        if not unidad_id:
+            return Response({"detail": "unidad_id es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+        inspeccion = (
+            InspeccionDiaria.objects.select_related("repartidor__user", "unidad")
+            .filter(unidad_id=unidad_id, fecha=timezone.localdate())
+            .first()
+        )
+        if not inspeccion:
+            return Response({"ya_inspeccionada": False}, status=status.HTTP_200_OK)
+        hora_local = timezone.localtime(inspeccion.hora)
+        return Response(
+            {
+                "ya_inspeccionada": True,
+                "repartidor_nombre": inspeccion.repartidor.user.get_full_name() or inspeccion.repartidor.user.username,
+                "hora": hora_local.strftime("%H:%M"),
+                "fecha": inspeccion.fecha.isoformat(),
+                "inspeccion_id": inspeccion.id,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InspeccionDiariaCreateView(generics.CreateAPIView):
+    authentication_classes = _LogisticaBaseView.authentication_classes
+    permission_classes = _LogisticaBaseView.permission_classes
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    serializer_class = LogisticaInspeccionDiariaSerializer
+
+    def create(self, request, *args, **kwargs):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _is_repartidor(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden capturar inspección diaria."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = self.get_serializer(data=request.data, context={"repartidor": repartidor})
+        serializer.is_valid(raise_exception=True)
+        unidad = serializer.validated_data.get("unidad")
+        if InspeccionDiaria.objects.filter(unidad=unidad, fecha=timezone.localdate()).exists():
+            return Response(
+                {"error": "ya_existe", "mensaje": "Esta unidad ya fue inspeccionada hoy"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        observaciones = (serializer.validated_data.get("observaciones") or "").strip()
+        tiene_fallas = bool(observaciones) and any(
+            serializer.validated_data.get(field) is False for field in INSPECCION_DIARIA_BOOL_FIELDS
+        )
+        try:
+            with transaction.atomic():
+                inspeccion = serializer.save(ip_registro=request.META.get("REMOTE_ADDR"), tiene_fallas=tiene_fallas)
+                if tiene_fallas:
+                    reporte = ReporteUnidad.objects.create(
+                        repartidor=repartidor,
+                        unidad=inspeccion.unidad,
+                        tipo=ReporteUnidad.TIPO_OTRO,
+                        severidad=ReporteUnidad.SEVERIDAD_URGENTE,
+                        descripcion=f"Falla detectada en inspección diaria: {observaciones}",
+                        latitud=inspeccion.latitud,
+                        longitud=inspeccion.longitud,
+                        ip_reporte=request.META.get("REMOTE_ADDR"),
+                    )
+                    inspeccion.reporte_generado = reporte
+                    inspeccion.save(update_fields=["reporte_generado"])
+        except IntegrityError:
+            return Response(
+                {"error": "ya_existe", "mensaje": "Esta unidad ya fue inspeccionada hoy"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(LogisticaInspeccionDiariaSerializer(inspeccion).data, status=status.HTTP_201_CREATED)
 
 
 class LogisticaRutasView(_LogisticaBaseView):
