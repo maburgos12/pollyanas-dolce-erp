@@ -1,0 +1,17 @@
+{
+  "name": "Pollyana's Mantenimiento",
+  "short_name": "PD Mant.",
+  "description": "Registra mantenimientos de equipos y vehículos",
+  "start_url": "/mantenimiento/app/",
+  "display": "standalone",
+  "background_color": "#0f0f14",
+  "theme_color": "#8B2252",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/static/mantenimiento/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
