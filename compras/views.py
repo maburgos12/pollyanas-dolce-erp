@@ -9486,17 +9486,19 @@ def ordenes(request: HttpRequest) -> HttpResponse:
     query_without_closure.pop("closure_key", None)
     query_without_handoff = query_without_export.copy()
     query_without_handoff.pop("handoff_key", None)
-    plan_scope_context = _build_plan_scope_context(
-        source_filter=source_filter,
-        plan_filter=plan_filter,
-        q_filter=q_filter,
-        current_view="ordenes",
-        closure_key_filter=closure_key_raw,
-        handoff_key_filter=handoff_key_raw,
-        master_class_filter=master_class_filter,
-        master_missing_filter=master_missing_filter,
-        session=request.session,
-    )
+    plan_scope_context = None
+    if source_filter == "plan" and plan_filter:
+        plan_scope_context = _build_plan_scope_context(
+            source_filter=source_filter,
+            plan_filter=plan_filter,
+            q_filter=q_filter,
+            current_view="ordenes",
+            closure_key_filter=closure_key_raw,
+            handoff_key_filter=handoff_key_raw,
+            master_class_filter=master_class_filter,
+            master_missing_filter=master_missing_filter,
+            session=request.session,
+        )
 
     ordenes = list(ordenes_qs[:200])
     plan_ids = {
@@ -9591,6 +9593,19 @@ def ordenes(request: HttpRequest) -> HttpResponse:
 
     context = {
         "ordenes": ordenes,
+        "ordenes_total_count": len(ordenes),
+        "ordenes_borrador_count": sum(1 for o in ordenes if o.estatus == OrdenCompra.STATUS_BORRADOR),
+        "ordenes_enviadas_count": sum(1 for o in ordenes if o.estatus == OrdenCompra.STATUS_ENVIADA),
+        "ordenes_confirmadas_count": sum(1 for o in ordenes if o.estatus == OrdenCompra.STATUS_CONFIRMADA),
+        "ordenes_parciales_count": sum(1 for o in ordenes if o.estatus == OrdenCompra.STATUS_PARCIAL),
+        "ordenes_cerradas_count": sum(1 for o in ordenes if o.estatus == OrdenCompra.STATUS_CERRADA),
+        "ordenes_listas_recepcion_count": sum(
+            1
+            for o in ordenes
+            if o.estatus in {OrdenCompra.STATUS_CONFIRMADA, OrdenCompra.STATUS_PARCIAL}
+            and not getattr(o, "has_workflow_blockers", False)
+        ),
+        "solicitudes_aprobadas_count": solicitudes_form_qs.count(),
         "proveedores": Proveedor.objects.filter(activo=True).order_by("nombre")[:200],
         "solicitudes": solicitudes_form_qs.order_by("-creado_en")[:200],
         "status_choices": OrdenCompra.STATUS_CHOICES,
