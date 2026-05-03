@@ -8,6 +8,7 @@ from logistica.models import (
     BitacoraRepartidor,
     BitacoraSalidaLlegada,
     EntregaRuta,
+    InspeccionDiaria,
     InspeccionVehiculo,
     Repartidor,
     ReporteUnidad,
@@ -408,3 +409,37 @@ class LogisticaInspeccionVehiculoCreateSerializer(serializers.ModelSerializer):
             unidad=unidad,
             **validated_data,
         )
+
+
+class LogisticaInspeccionDiariaSerializer(serializers.ModelSerializer):
+    repartidor_nombre = serializers.SerializerMethodField()
+    unidad_codigo = serializers.CharField(source="unidad.codigo", read_only=True)
+    unidad_descripcion = serializers.CharField(source="unidad.descripcion", read_only=True)
+    reporte_generado_id = serializers.IntegerField(source="reporte_generado.id", read_only=True)
+
+    class Meta:
+        model = InspeccionDiaria
+        fields = "__all__"
+        read_only_fields = [
+            "id",
+            "repartidor",
+            "repartidor_nombre",
+            "unidad_codigo",
+            "unidad_descripcion",
+            "fecha",
+            "hora",
+            "tiene_fallas",
+            "reporte_generado",
+            "reporte_generado_id",
+            "ip_registro",
+        ]
+
+    def get_repartidor_nombre(self, obj):
+        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
+
+    def create(self, validated_data):
+        repartidor = self.context["repartidor"]
+        unidad = validated_data.get("unidad")
+        if not unidad or not unidad.activa:
+            raise serializers.ValidationError("Selecciona una unidad activa para inspeccionar.")
+        return InspeccionDiaria.objects.create(repartidor=repartidor, **validated_data)

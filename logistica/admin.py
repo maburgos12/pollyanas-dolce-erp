@@ -6,6 +6,7 @@ from .models import (
     ConfigAlertaFlota,
     DocumentoUnidad,
     EntregaRuta,
+    InspeccionDiaria,
     InspeccionVehiculo,
     LavadoUnidad,
     ReparacionUnidad,
@@ -151,6 +152,15 @@ class InspeccionVehiculoAdmin(admin.ModelAdmin):
     search_fields = ("repartidor__user__username", "unidad__codigo", "descripcion_golpes", "observaciones", "ip_registro")
     readonly_fields = ("fecha", "ip_registro")
     autocomplete_fields = ("repartidor", "unidad")
+
+
+@admin.register(InspeccionDiaria)
+class InspeccionDiariaAdmin(admin.ModelAdmin):
+    list_display = ("unidad", "repartidor", "fecha", "hora", "tiene_fallas", "reporte_generado")
+    list_filter = ("fecha", "tiene_fallas", "unidad")
+    search_fields = ("unidad__codigo", "repartidor__user__username")
+    autocomplete_fields = ("unidad", "repartidor", "reporte_generado")
+    readonly_fields = ("fecha", "hora", "ip_registro")
 
 
 @admin.register(DocumentoUnidad)
