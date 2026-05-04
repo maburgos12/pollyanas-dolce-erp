@@ -143,7 +143,7 @@
             <td colspan="2">{{ group.familia }}</td>
             <td class="text-end">{{ group.total.vendido|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ group.total.producido|floatformat:3|intcomma }}</td>
-            <td class="text-end">{{ group.total.dif|floatformat:3|intcomma }}</td>
+            <td class="text-end"><span class="{% if group.total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.dif|floatformat:3|intcomma }}</span></td>
             <td class="text-end">{{ group.total.merma_reportada|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ group.total.merma_calculada|floatformat:3|intcomma }}</td>
             <td class="text-end">${{ group.total.costo_merma|floatformat:2|intcomma }}</td>
@@ -165,7 +165,7 @@
             <td>{{ row.familia }}</td>
             <td class="text-end">{% if row.vendido is None %}<span class="muted">—</span>{% else %}{{ row.vendido|floatformat:3|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.producido is None %}<span class="muted">—</span>{% else %}{{ row.producido|floatformat:3|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.dif is None %}<span class="muted">—</span>{% else %}{{ row.dif|floatformat:3|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.dif is None %}<span class="muted">—</span>{% else %}<span class="{% if row.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.dif|floatformat:3|intcomma }}</span>{% endif %}</td>
             <td class="text-end">{% if row.merma_reportada is None %}<span class="muted">—</span>{% else %}{{ row.merma_reportada|floatformat:3|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.merma_calculada is None %}<span class="muted">—</span>{% else %}{{ row.merma_calculada|floatformat:3|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.costo_merma is None %}<span class="muted">—</span>{% else %}${{ row.costo_merma|floatformat:2|intcomma }}{% endif %}</td>
@@ -187,7 +187,7 @@
             <td colspan="2">Gran total</td>
             <td class="text-end">{{ grand_total.vendido|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ grand_total.producido|floatformat:3|intcomma }}</td>
-            <td class="text-end">{{ grand_total.dif|floatformat:3|intcomma }}</td>
+            <td class="text-end"><span class="{% if grand_total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.dif|floatformat:3|intcomma }}</span></td>
             <td class="text-end">{{ grand_total.merma_reportada|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ grand_total.merma_calculada|floatformat:3|intcomma }}</td>
             <td class="text-end">${{ grand_total.costo_merma|floatformat:2|intcomma }}</td>
