@@ -211,3 +211,70 @@ class PointTransferLine(models.Model):
             f"{self.transfer_external_id} · {self.origin_branch.name} -> {self.destination_branch.name} · "
             f"{self.item_name} · {self.received_quantity}"
         )
+
+
+class PointConversionLine(models.Model):
+    """
+    Registro de Entrada por Conversión desde Point (FK_TipoMovimiento=21).
+    Pasteles enteros convertidos a rebanadas u otras presentaciones derivadas.
+    """
+
+    branch = models.ForeignKey(
+        "pos_bridge.PointBranch",
+        on_delete=models.PROTECT,
+        related_name="conversion_lines",
+    )
+    erp_branch = models.ForeignKey(
+        "core.Sucursal",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="conversion_lines",
+    )
+    receta = models.ForeignKey(
+        "recetas.Receta",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="conversion_lines",
+    )
+    sync_job = models.ForeignKey(
+        "pos_bridge.PointSyncJob",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="conversion_lines",
+    )
+    movement_external_id = models.CharField(max_length=40, db_index=True)
+    source_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    movement_at = models.DateTimeField(db_index=True)
+    item_name = models.CharField(max_length=250)
+    item_code = models.CharField(max_length=80, blank=True, default="")
+    quantity = models.DecimalField(max_digits=18, decimal_places=3, default=0)
+    unit = models.CharField(max_length=40, blank=True, default="")
+    unit_cost = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    total_cost = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    source_item_name = models.CharField(
+        max_length=250,
+        blank=True,
+        default="",
+        help_text="Producto origen de la conversión (el pastel entero)",
+    )
+    source_item_code = models.CharField(max_length=80, blank=True, default="")
+    source_endpoint = models.CharField(max_length=160, blank=True, default="/Report/crea_Reporte_Largo")
+    raw_payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "pos_bridge_conversion_lines"
+        ordering = ["-movement_at", "branch__name"]
+        verbose_name = "Point conversion line"
+        verbose_name_plural = "Point conversion lines"
+        indexes = [
+            models.Index(fields=["movement_at", "branch"], name="pbconv_date_branch_idx"),
+            models.Index(fields=["item_code"], name="pbconv_item_code_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.movement_at} · {self.branch} · {self.item_name} · {self.quantity}"

@@ -1,5 +1,5 @@
 from pos_bridge.models.branch import PointBranch
-from pos_bridge.models.movements import PointProductionLine, PointTransferLine, PointWasteLine
+from pos_bridge.models.movements import PointConversionLine, PointProductionLine, PointTransferLine, PointWasteLine
 from pos_bridge.models.product import PointProduct, PointProductCategory
 from pos_bridge.models.product_history import (
     PointProductCostReconciliation,
@@ -46,6 +46,7 @@ __all__ = [
     "PointRecipeNodeLine",
     "PointInventorySnapshot",
     "PointWasteLine",
+    "PointConversionLine",
     "PointProductionLine",
     "PointTransferLine",
     "PointSyncJob",
