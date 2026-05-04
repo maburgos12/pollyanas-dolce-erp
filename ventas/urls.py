@@ -23,6 +23,7 @@ urlpatterns = [
     path("eventos/<int:event_id>/aprobar/", views.evento_approve, name="evento_approve"),
     path("eventos/<int:event_id>/rechazar/", views.evento_reject, name="evento_reject"),
     path("eventos/<int:event_id>/generar-produccion/", views.evento_generate_production, name="evento_generate_production"),
+    path("eventos/<int:event_id>/produccion/", views.EventoProduccionView.as_view(), name="evento_produccion"),
     path("eventos/<int:event_id>/confirmar-produccion/", views.evento_confirm_production, name="evento_confirm_production"),
     path("eventos/<int:event_id>/capacidad/", views.evento_capacity_rule_create, name="evento_capacity_rule_create"),
     path("eventos/<int:event_id>/capacidad/<int:rule_id>/eliminar/", views.evento_capacity_rule_delete, name="evento_capacity_rule_delete"),

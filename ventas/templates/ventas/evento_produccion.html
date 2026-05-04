@@ -1,0 +1,405 @@
+{% extends "base.html" %}
+{% block title %}Producción - {{ event.code }}{% endblock %}
+{% block page_title %}Producción · {{ event.name }}{% endblock %}
+{% block body_class %}page-ventas-evento-produccion{% endblock %}
+
+{% block extra_css %}
+<style>
+  .prod-spa {
+    --bg: #0f0f14;
+    --surface: #1a1a24;
+    --surface-2: #111118;
+    --border: #2a2a38;
+    --wine: #7b1a48;
+    --wine-dark: #5e1237;
+    --gold: #c9a84c;
+    --text: #e8e0d5;
+    --muted: #9b9298;
+    --success: #51b56f;
+    display: grid;
+    gap: 18px;
+    color: var(--text);
+  }
+
+  .prod-hero,
+  .prod-card,
+  .prod-table-panel {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+
+  .prod-hero {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 20px;
+    background: linear-gradient(135deg, var(--wine), var(--wine-dark));
+  }
+
+  .prod-title {
+    margin: 0 0 10px;
+    color: #fff;
+    font-size: 30px;
+    line-height: 1.08;
+    letter-spacing: 0;
+  }
+
+  .prod-meta,
+  .prod-actions,
+  .prod-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .prod-badge,
+  .prod-button,
+  .prod-tab {
+    display: inline-flex;
+    min-height: 36px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+    padding: 8px 12px;
+    text-decoration: none;
+  }
+
+  .prod-button {
+    min-height: 42px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .prod-button.primary {
+    border-color: var(--gold);
+    background: var(--gold);
+    color: #18130b;
+  }
+
+  .prod-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .prod-card {
+    min-height: 118px;
+    padding: 16px;
+  }
+
+  .prod-card span {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .prod-card strong {
+    display: block;
+    margin-top: 10px;
+    color: var(--text);
+    font-size: 28px;
+    line-height: 1;
+  }
+
+  .prod-total {
+    border: 1px solid rgba(201, 168, 76, 0.25);
+    border-radius: 8px;
+    background: #17151b;
+    color: var(--gold);
+    font-weight: 900;
+    padding: 14px 16px;
+  }
+
+  .prod-tabs {
+    border-bottom: 1px solid var(--border);
+    padding: 14px 14px 0;
+  }
+
+  .prod-tab {
+    border-color: var(--border);
+    border-radius: 8px 8px 0 0;
+    background: var(--surface-2);
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .prod-tab.is-active {
+    border-color: var(--gold);
+    border-bottom-color: var(--surface);
+    color: var(--gold);
+  }
+
+  .prod-tab-panel {
+    display: none;
+    padding: 16px;
+  }
+
+  .prod-tab-panel.is-active {
+    display: block;
+  }
+
+  .prod-table-wrap {
+    max-height: 68vh;
+    overflow: auto;
+  }
+
+  .prod-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .prod-table th,
+  .prod-table td {
+    border-bottom: 1px solid var(--border);
+    padding: 12px 10px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .prod-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface);
+    color: var(--gold);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .prod-table th:nth-child(2),
+  .prod-table td:nth-child(2) {
+    text-align: left;
+    white-space: normal;
+  }
+
+  .prod-table tbody tr:hover {
+    background: rgba(201, 168, 76, 0.07);
+  }
+
+  .prod-table tfoot td {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    border-top: 1px solid var(--gold);
+    background: #17151b;
+    color: var(--text);
+    font-weight: 900;
+  }
+
+  .prod-pct {
+    display: grid;
+    gap: 6px;
+    min-width: 130px;
+  }
+
+  .prod-pct-track {
+    height: 8px;
+    border-radius: 999px;
+    background: #252332;
+    overflow: hidden;
+  }
+
+  .prod-pct-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--wine), var(--gold));
+  }
+
+  .prod-note {
+    border: 1px solid rgba(201, 168, 76, 0.22);
+    border-radius: 8px;
+    background: #17151b;
+    color: var(--muted);
+    padding: 14px 16px;
+  }
+
+  @media (max-width: 980px) {
+    .prod-hero {
+      flex-direction: column;
+    }
+
+    .prod-summary {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .prod-summary {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-shell prod-spa">
+  <section class="prod-hero">
+    <div>
+      <h2 class="prod-title">{{ event.name }}</h2>
+      <div class="prod-meta">
+        <span class="prod-badge">{{ event.get_status_display }}</span>
+        <span class="prod-badge">{{ start_date|date:"d/m/Y" }} a {{ end_date|date:"d/m/Y" }}</span>
+        <span class="prod-badge">{{ event.code }}</span>
+      </div>
+    </div>
+    <div class="prod-actions">
+      <a class="prod-button" href="{% url 'ventas:evento_detail' event.id %}">Volver</a>
+      <a class="prod-button primary" href="{% url 'ventas:evento_produccion' event.id %}?formato=csv">Exportar CSV</a>
+    </div>
+  </section>
+
+  <section class="prod-summary">
+    <article class="prod-card">
+      <span>Total productos</span>
+      <strong>{{ resumen.n_productos }}</strong>
+    </article>
+    <article class="prod-card">
+      <span>Total piezas</span>
+      <strong>{{ resumen.total_piezas|floatformat:0 }}</strong>
+    </article>
+    <article class="prod-card">
+      <span>Ingreso {{ resumen.first_day_label }}</span>
+      <strong>${{ resumen.ingreso_dia_9|floatformat:0 }}</strong>
+    </article>
+    <article class="prod-card">
+      <span>Ingreso {{ resumen.last_day_label }}</span>
+      <strong>${{ resumen.ingreso_dia_10|floatformat:0 }}</strong>
+    </article>
+  </section>
+
+  <div class="prod-total">
+    Ingreso total rango: ${{ resumen.ingreso_total|floatformat:2 }}
+  </div>
+
+  <section class="prod-table-panel">
+    <div class="prod-tabs" role="tablist">
+      <button class="prod-tab is-active" type="button" data-tab-target="tab-consolidado">Consolidado</button>
+      {% for dia in dias %}
+      <button class="prod-tab" type="button" data-tab-target="tab-dia-{{ forloop.counter }}">{{ dia.fecha|date:"j M" }}</button>
+      {% endfor %}
+    </div>
+
+    <div id="tab-consolidado" class="prod-tab-panel is-active">
+      <div class="prod-table-wrap">
+        <table class="prod-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Producto</th>
+              <th>Qty</th>
+              <th>Precio unit</th>
+              <th>Ingreso</th>
+              <th>% del total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in consolidado.productos %}
+            <tr>
+              <td>{{ forloop.counter }}</td>
+              <td>{{ row.nombre }}</td>
+              <td>{{ row.qty|floatformat:2 }}</td>
+              <td>${{ row.precio|floatformat:2 }}</td>
+              <td>${{ row.ingreso|floatformat:2 }}</td>
+              <td>
+                <div class="prod-pct">
+                  <span>{{ row.pct|floatformat:2 }}%</span>
+                  <div class="prod-pct-track"><div class="prod-pct-fill" style="width:{{ row.pct|floatformat:0 }}%;"></div></div>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6">Sin forecasts para este rango.</td></tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td></td>
+              <td>Total</td>
+              <td>{{ consolidado.totales.qty|floatformat:2 }}</td>
+              <td></td>
+              <td>${{ consolidado.totales.ingreso|floatformat:2 }}</td>
+              <td>100.00%</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+    {% for dia in dias %}
+    <div id="tab-dia-{{ forloop.counter }}" class="prod-tab-panel">
+      <div class="prod-table-wrap">
+        <table class="prod-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Producto</th>
+              <th>Qty</th>
+              <th>Precio unit</th>
+              <th>Ingreso</th>
+              <th>% del total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in dia.productos %}
+            <tr>
+              <td>{{ forloop.counter }}</td>
+              <td>{{ row.nombre }}</td>
+              <td>{{ row.qty|floatformat:2 }}</td>
+              <td>${{ row.precio|floatformat:2 }}</td>
+              <td>${{ row.ingreso|floatformat:2 }}</td>
+              <td>
+                <div class="prod-pct">
+                  <span>{{ row.pct|floatformat:2 }}%</span>
+                  <div class="prod-pct-track"><div class="prod-pct-fill" style="width:{{ row.pct|floatformat:0 }}%;"></div></div>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6">Sin forecasts para este día.</td></tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td></td>
+              <td>Total</td>
+              <td>{{ dia.totales.qty|floatformat:2 }}</td>
+              <td></td>
+              <td>${{ dia.totales.ingreso|floatformat:2 }}</td>
+              <td>100.00%</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="prod-note">
+    Factor aplicado: {{ factor }} — calibrado post Día del Niño 30-abr-2026
+  </section>
+</div>
+
+<script>
+  (() => {
+    const tabs = Array.from(document.querySelectorAll(".prod-tab"));
+    const panels = Array.from(document.querySelectorAll(".prod-tab-panel"));
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.tabTarget;
+        tabs.forEach((item) => item.classList.toggle("is-active", item === tab));
+        panels.forEach((panel) => panel.classList.toggle("is-active", panel.id === target));
+      });
+    });
+  })();
+</script>
+{% endblock %}
