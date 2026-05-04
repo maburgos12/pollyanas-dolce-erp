@@ -67,6 +67,40 @@ def _decimal(value) -> Decimal:
         return Decimal("0")
 
 
+def _normalize_inventory_report_rows(records: list[dict]) -> list[dict]:
+    header_index = None
+    for index, record in enumerate(records):
+        labels = {str(value).strip().upper() for value in record.values() if value is not None}
+        if {"SUCURSAL", "PRODUCTO", "CANTIDAD"}.issubset(labels):
+            header_index = index
+            break
+    if header_index is None:
+        return records
+
+    header_row = records[header_index]
+    column_labels = {
+        column: str(label).strip()
+        for column, label in header_row.items()
+        if label is not None and str(label).strip()
+    }
+    rows = []
+    for record in records[header_index + 1 :]:
+        row = {
+            label: record.get(column)
+            for column, label in column_labels.items()
+            if record.get(column) is not None and str(record.get(column)).strip()
+        }
+        if not row:
+            continue
+        marker = " ".join(str(value).strip().upper() for value in row.values())
+        if "TOTAL POR" in marker or marker.startswith("TOTAL"):
+            continue
+        if not row.get("SUCURSAL") or not row.get("PRODUCTO") or row.get("CANTIDAD") is None:
+            continue
+        rows.append(row)
+    return rows
+
+
 def _coerce_datetime(value, *, default_date: date):
     if value in (None, ""):
         dt = datetime.combine(default_date, datetime_time.min)
@@ -100,7 +134,7 @@ def _read_report_rows(content: bytes) -> list[dict]:
         frame = tables[0] if tables else pd.DataFrame()
     frame = frame.dropna(how="all")
     rows = frame.where(pd.notnull(frame), None).to_dict(orient="records")
-    return [dict(row) for row in rows]
+    return _normalize_inventory_report_rows([dict(row) for row in rows])
 
 
 def _build_branch_map() -> dict[str, PointBranch]:
@@ -177,8 +211,11 @@ def _create_report(client: PointHttpSessionClient, *, date_from: date, date_to: 
 
 def _report_is_ready(report: dict) -> bool:
     status = report.get("Status")
+    status_description = str(report.get("Status_descripcion") or "").strip().lower()
+    if status_description in {"creado", "listo", "ready", "descargado"}:
+        return True
     if isinstance(status, str):
-        return status.strip().lower() in {"listo", "ready", "true", "1", "descargado"}
+        return status.strip().lower() in {"creado", "listo", "ready", "true", "1", "descargado"}
     return status in {True, 1, 2}
 
 
@@ -190,8 +227,8 @@ def _poll_report(client: PointHttpSessionClient, *, created_after) -> dict:
         candidates = []
         for report in reportes:
             name = str(report.get("Nombre_reporte") or "").upper()
-            module = str(report.get("Modulo") or "").upper()
-            if module == "INVENTARIO" and "MOVIMIENTOS" in name and _report_is_ready(report):
+            module = str(report.get("Modulo") or "").lower()
+            if "movimiento" in module and "MOVIMIENTOS" in name and _report_is_ready(report):
                 created_at = _coerce_datetime(report.get("Fecha_creacion"), default_date=created_after.date())
                 candidates.append((created_at, report))
         recent = [item for item in candidates if item[0] >= created_after]
