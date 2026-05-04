@@ -381,6 +381,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "pos_bridge.conversion_sync",
         "schedule": crontab(hour=4, minute=0, day_of_month="1"),
     },
+    # --- Alerta diaria: producción sin registros en Point ---
+    "reportes: alerta produccion sin registros": {
+        "task": "reportes.alerta_produccion_sin_registros",
+        "schedule": crontab(hour=7, minute=0),
+    },
 }
 
 EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")

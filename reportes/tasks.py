@@ -41,3 +41,61 @@ def task_cierre_produccion_nocturno(self):
         except Exception as exc:  # noqa: BLE001
             errors.append({"date": target.isoformat(), "error": str(exc)})
     return {"rebuilt_dates": len(results), "results": results, "errors": errors}
+
+
+@shared_task(name="reportes.alerta_produccion_sin_registros", bind=True, max_retries=1)
+def task_alerta_produccion_sin_registros(self):
+    """
+    Revisa si Point registro produccion en el dia habil anterior.
+    Si no hay registros, envia email de alerta a Direccion General.
+    """
+    from django.conf import settings
+    from django.core.mail import send_mail
+    from django.utils import timezone
+    from pos_bridge.models import PointProductionLine
+
+    today = timezone.localdate()
+    target = today - timedelta(days=1)
+    if target.weekday() == 6:  # domingo
+        target = today - timedelta(days=2)
+
+    count = PointProductionLine.objects.filter(
+        production_date=target,
+        is_insumo=False,
+    ).count()
+
+    if count > 0:
+        return {
+            "status": "ok",
+            "date": target.isoformat(),
+            "registros": count,
+        }
+
+    subject = f"Sin produccion registrada en Point - {target:%d/%b/%Y}"
+    body = (
+        "Alerta automatica del ERP Pollyana's Dolce.\n\n"
+        f"Point no tiene registros de produccion para el {target:%d/%m/%Y}.\n\n"
+        "Posibles causas:\n"
+        "  - Produccion Crucero no capturo en Point\n"
+        "  - El sync automatico del ERP no corrio\n"
+        "  - No hubo produccion ese dia\n\n"
+        "Verificar en: https://erp.pollyanasdolce.com/reportes/produccion/\n\n"
+        "-- ERP Pollyana's Dolce"
+    )
+
+    try:
+        send_mail(
+            subject=subject,
+            message=body,
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "erp@pollyanasdolce.com"),
+            recipient_list=["mauricio@pollyanasdolce.com"],
+            fail_silently=False,
+        )
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+    return {
+        "status": "alerta_enviada",
+        "date": target.isoformat(),
+        "registros": 0,
+    }
