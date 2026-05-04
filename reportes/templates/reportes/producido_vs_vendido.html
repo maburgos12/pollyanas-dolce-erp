@@ -33,7 +33,13 @@
     <form class="recipes-filters" method="get">
       <div>
         <label class="form-label" for="periodo">Periodo</label>
-        <input class="form-control" id="periodo" name="periodo" type="month" value="{{ selected_period }}">
+        <select class="form-select" id="periodo" name="periodo">
+          {% for p in periodos %}
+          <option value="{{ p }}" {% if p == selected_period %}selected{% endif %}>
+            {{ p|slice:":4" }}-{{ p|slice:"5:" }}
+          </option>
+          {% endfor %}
+        </select>
       </div>
       <div>
         <label class="form-label" for="familia">Familia</label>
