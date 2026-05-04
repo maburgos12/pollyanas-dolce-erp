@@ -347,6 +347,7 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_IMPORTS = ("pos_bridge.tasks",)
 CELERY_BEAT_SCHEDULE = {
     "logistica-alertar-documentos-por-vencer": {
         "task": "logistica.tasks.alertar_documentos_por_vencer",
@@ -374,6 +375,11 @@ CELERY_BEAT_SCHEDULE = {
     "reportes: cierre produccion nocturno": {
         "task": "reportes.cierre_produccion_nocturno",
         "schedule": crontab(hour=3, minute=15),
+    },
+    # --- Sync mensual de conversiones (rebanadas) ---
+    "pos_bridge: sync conversiones mensual": {
+        "task": "pos_bridge.conversion_sync",
+        "schedule": crontab(hour=4, minute=0, day_of_month="1"),
     },
 }
 
