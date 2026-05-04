@@ -238,18 +238,42 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         if sucursal_id:
             facts = facts.filter(branch__erp_branch_id=sucursal_id)
         if facts.exists():
-            return _aggregate_by_recipe(facts, "total_cantidad"), "PointSalesDailyProductFact"
+            sales_map = _aggregate_by_recipe(facts, "total_cantidad")
+            source = "PointSalesDailyProductFact"
+        else:
+            sales = PointDailySale.objects.filter(
+                sale_date__gte=period.month_start,
+                sale_date__lte=period.month_end,
+                receta_id__isnull=False,
+            )
+            if sucursal_id:
+                sales = sales.filter(branch__erp_branch_id=sucursal_id)
+            if sales.exists():
+                return _aggregate_by_recipe(sales, "quantity"), "PointDailySale"
+            return {}, "sin_datos"
 
-        sales = PointDailySale.objects.filter(
-            sale_date__gte=period.month_start,
-            sale_date__lte=period.month_end,
-            receta_id__isnull=False,
-        )
-        if sucursal_id:
-            sales = sales.filter(branch__erp_branch_id=sucursal_id)
-        if sales.exists():
-            return _aggregate_by_recipe(sales, "quantity"), "PointDailySale"
-        return {}, "sin_datos"
+        if not sucursal_id:
+            fpd_rows = (
+                FactProduccionDiaria.objects.filter(
+                    fecha__gte=period.month_start,
+                    fecha__lte=period.month_end,
+                    receta_id__isnull=False,
+                    vendido__gt=0,
+                )
+                .values("receta_id")
+                .annotate(total=Sum("vendido"))
+            )
+            filled = 0
+            for row in fpd_rows:
+                receta_id = int(row["receta_id"])
+                vendido = _decimal(row["total"])
+                if receta_id not in sales_map or sales_map[receta_id] == ZERO:
+                    sales_map[receta_id] = vendido
+                    filled += 1
+            if filled:
+                source = f"{source}+FactProduccionDiaria({filled})"
+
+        return sales_map, source
 
     def _production_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
         facts = FactProduccionDiaria.objects.filter(
