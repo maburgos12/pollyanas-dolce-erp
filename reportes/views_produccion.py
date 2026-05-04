@@ -9,7 +9,7 @@ from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models import Min, Sum
+from django.db.models import Min, Q, Sum
 from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
@@ -17,8 +17,8 @@ from django.views.generic import TemplateView
 
 from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
-from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact
-from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta
+from pos_bridge.models import PointConversionLine, PointDailySale, PointProductionLine, PointSalesDailyProductFact
+from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta, RecetaEquivalencia
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import FactProduccionDiaria
 
@@ -127,6 +127,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         if not sucursal_id and not recipe_ids:
             recipe_ids.update(recipe_id for recipe_id, value in closure_map["vendido"].items() if value)
         recipe_ids.update(recipe_id for recipe_id, value in merma_map.items() if value)
+        conversion_map = self._conversion_map(period)
+        recipe_ids.update(recipe_id for recipe_id, value in conversion_map.items() if value.get("convertido"))
 
         recipes_qs = Receta.objects.filter(
             id__in=recipe_ids,
@@ -142,6 +144,18 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
 
         cost_map = get_total_cost_map([recipe.id for recipe in recipes])
         rows = [self._build_row(recipe, sales_map, production_map, merma_map, merma_cost_map, cost_map) for recipe in recipes]
+        for row in rows:
+            conv = conversion_map.get(row["receta_id"]) or {}
+            row["convertido"] = conv.get("convertido", ZERO)
+            row["enteros_equivalentes"] = conv.get("enteros_equivalentes", ZERO)
+            row["conversion_factor"] = conv.get("factor", ZERO)
+            row["json"].update(
+                {
+                    "convertido": str(row["convertido"]),
+                    "enteros_equivalentes": str(row["enteros_equivalentes"]),
+                    "conversion_factor": str(row["conversion_factor"]),
+                }
+            )
         groups, grand_total = self._group_rows(rows)
 
         source_dates = _first_available_date()
@@ -171,6 +185,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "familias": self._families(),
             "groups": groups,
             "grand_total": grand_total,
+            "conversion_map": conversion_map,
             "json_rows": [row["json"] for row in rows],
             "fuentes": {
                 "ventas": sales_source,
@@ -180,6 +195,39 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "banners": banners,
             "source_dates": source_dates,
         }
+
+    def _conversion_map(self, period: PeriodSelection) -> dict[int, dict[str, Decimal]]:
+        rows = (
+            PointConversionLine.objects.filter(
+                movement_at__date__gte=period.month_start,
+                movement_at__date__lte=period.month_end,
+                receta_id__isnull=False,
+            )
+            .filter(Q(**{"raw_payload__CATEGORÍA": "Rebanada"}) | Q(raw_payload__CATEGORIA="Rebanada"))
+            .values("receta_id")
+            .annotate(total=Sum("quantity"))
+        )
+        equivalences = {
+            equivalence.receta_porcion_id: equivalence.factor_conversion
+            for equivalence in RecetaEquivalencia.objects.filter(
+                receta_porcion_id__in=[row["receta_id"] for row in rows if row.get("receta_id")],
+                activo=True,
+            )
+        }
+        result = {}
+        for row in rows:
+            receta_id = row["receta_id"]
+            if not receta_id:
+                continue
+            convertido = _decimal(row["total"])
+            factor = _decimal(equivalences.get(receta_id)) or Decimal("1")
+            enteros = (convertido / factor).quantize(Decimal("0.01")) if factor else ZERO
+            result[int(receta_id)] = {
+                "convertido": convertido,
+                "enteros_equivalentes": enteros,
+                "factor": factor,
+            }
+        return result
 
     def _sales_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
         facts = PointSalesDailyProductFact.objects.filter(
@@ -316,6 +364,11 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "merma_reportada": sum((row["merma_reportada"] for row in rows if row["merma_reportada"] is not None), ZERO),
             "merma_calculada": sum((row["merma_calculada"] for row in rows if row["merma_calculada"] is not None), ZERO),
             "costo_merma": sum((row["costo_merma"] for row in rows if row["costo_merma"] is not None), ZERO),
+            "convertido": sum((row["convertido"] for row in rows if row["convertido"] is not None), ZERO),
+            "enteros_equivalentes": sum(
+                (row["enteros_equivalentes"] for row in rows if row["enteros_equivalentes"] is not None),
+                ZERO,
+            ),
         }
         totals["pct_merma"] = (
             (totals["merma_reportada"] / totals["vendido"]) * Decimal("100")
