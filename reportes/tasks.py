@@ -4,6 +4,8 @@ from datetime import date, timedelta
 
 from celery import shared_task
 
+from reportes.analytics_service import rebuild_production_facts
+
 
 @shared_task(name="reportes.snapshot_historical_costing_task")
 def snapshot_historical_costing_task():
@@ -20,3 +22,22 @@ def snapshot_historical_costing_task():
         "missing_recipe_rows": summary.missing_recipe_rows,
         "producto_reventa_rows": summary.producto_reventa_rows,
     }
+
+
+@shared_task(name="reportes.cierre_produccion_nocturno", bind=True, max_retries=1, default_retry_delay=300)
+def task_cierre_produccion_nocturno(self):
+    """
+    Reconstruye FactProduccionDiaria para los ultimos 3 dias.
+    Corre despues del sync de ventas para usar datos frescos de Point.
+    """
+    today = date.today()
+    results = []
+    errors = []
+    for delta in range(3):
+        target = today - timedelta(days=delta)
+        try:
+            rows = rebuild_production_facts(start_date=target, end_date=target)
+            results.append({"date": target.isoformat(), "rows": rows})
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"date": target.isoformat(), "error": str(exc)})
+    return {"rebuilt_dates": len(results), "results": results, "errors": errors}

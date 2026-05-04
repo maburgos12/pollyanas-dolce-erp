@@ -364,6 +364,17 @@ CELERY_BEAT_SCHEDULE = {
         "task": "logistica.tasks.escalar_tickets_sin_respuesta",
         "schedule": 60 * 60,
     },
+    # --- Sync diario de ventas Point ---
+    "pos_bridge: sync ventas diario": {
+        "task": "pos_bridge.daily_sales_sync",
+        "schedule": crontab(hour=3, minute=0),
+        "kwargs": {"days": 3, "lag_days": 0},
+    },
+    # --- Cierre nocturno de producción ---
+    "reportes: cierre produccion nocturno": {
+        "task": "reportes.cierre_produccion_nocturno",
+        "schedule": crontab(hour=3, minute=15),
+    },
 }
 
 EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
