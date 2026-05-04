@@ -17,7 +17,7 @@
       <div>
         <div class="executive-eyebrow">Reportes</div>
         <h1 class="card-header">Producido vs Vendido</h1>
-        <p class="executive-section-copy">Comparativo operativo por receta, familia y sucursal para {{ selected_period_label }}.</p>
+        <p class="executive-section-copy">Comparativo operativo por receta y familia para {{ selected_period_label }}.</p>
       </div>
       <button class="btn btn-secondary" type="button" id="export-production-csv">Exportar CSV</button>
     </div>
@@ -34,15 +34,6 @@
       <div>
         <label class="form-label" for="periodo">Periodo</label>
         <input class="form-control" id="periodo" name="periodo" type="month" value="{{ selected_period }}">
-      </div>
-      <div>
-        <label class="form-label" for="sucursal">Sucursal</label>
-        <select class="form-select" id="sucursal" name="sucursal">
-          <option value="">Todas</option>
-          {% for sucursal in sucursales %}
-          <option value="{{ sucursal.id }}" {% if selected_sucursal == sucursal.id %}selected{% endif %}>{{ sucursal.codigo }} · {{ sucursal.nombre }}</option>
-          {% endfor %}
-        </select>
       </div>
       <div>
         <label class="form-label" for="familia">Familia</label>
