@@ -14,6 +14,7 @@ import unicodedata
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Avg, Case, Count, IntegerField, Max, Min, Q, Sum, When
@@ -21,16 +22,18 @@ from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views import View
 from openpyxl.chart import BarChart, LineChart, PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from core.access import has_any_role, ROLE_DG, ROLE_ADMIN, ROLE_PRODUCCION, ROLE_COMPRAS
+from core.access import can_view_rentabilidad, has_any_role, ROLE_DG, ROLE_ADMIN, ROLE_PRODUCCION, ROLE_COMPRAS
 from core.branch_catalog import EXCLUDED_BRANCH_CODES, POINT_MATURE_BRANCH_CODES, eligible_sales_event_branch_qs
 from core.models import Sucursal
 from maestros.models import Insumo
+from pos_bridge.models import PointProduct
 from recetas.models import LineaReceta, Receta
 from recetas.utils.commercial_composition import (
     build_commercial_recipe_lookup_context,
@@ -80,6 +83,10 @@ from ventas.services.requirements import build_input_requirements, build_purchas
 from ventas.tasks import run_event_projection_pipeline_task
 
 
+# Factor calibrado post Día del Niño 2026-04-30
+EVENTO_PRODUCCION_REVENUE_FACTOR = Decimal("0.98143")
+
+
 def _can_view_events(user) -> bool:
     return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_PRODUCCION, ROLE_COMPRAS, "VENTAS", "LECTURA")
 
@@ -94,6 +101,10 @@ def _can_approve_events(user) -> bool:
 
 def _can_manage_capacity(user) -> bool:
     return has_any_role(user, ROLE_ADMIN, ROLE_PRODUCCION)
+
+
+def _can_view_event_production_dashboard(user) -> bool:
+    return can_view_rentabilidad(user) or has_any_role(user, ROLE_DG, "VENTAS")
 
 
 def _event_branch_links(event: EventoVenta):
@@ -701,6 +712,200 @@ def _draft_entries_payload(entries_map: dict[tuple[int, int], Decimal]) -> list[
             }
         )
     return payload
+
+
+def _event_production_window(event: EventoVenta) -> tuple[date, date]:
+    start = getattr(event, "fecha_inicio", None) or (event.main_date - timedelta(days=1))
+    end = getattr(event, "fecha_fin", None) or event.main_date
+    if start > end:
+        start, end = end, start
+    return start, end
+
+
+def _point_price_map_by_recipe_code(product_ids: set[int]) -> dict[int, Decimal]:
+    recipes = Receta.objects.filter(id__in=product_ids).only("id", "codigo_point")
+    code_by_recipe_id = {recipe.id: (recipe.codigo_point or "").strip() for recipe in recipes}
+    codes = {code for code in code_by_recipe_id.values() if code}
+    point_prices: dict[str, Decimal] = {}
+    products = (
+        PointProduct.objects.filter(sku__in=codes, precio__isnull=False)
+        .order_by("-precio_activo", "-active", "-precio_actualizado_en", "-updated_at", "id")
+        .only("sku", "precio")
+    )
+    for point_product in products:
+        sku = (point_product.sku or "").strip()
+        if sku and sku not in point_prices:
+            point_prices[sku] = Decimal(str(point_product.precio or 0))
+    return {recipe_id: point_prices.get(code, ZERO) for recipe_id, code in code_by_recipe_id.items()}
+
+
+def _money(value: Decimal) -> Decimal:
+    return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+
+
+def _qty(value: Decimal) -> Decimal:
+    return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+
+
+def _build_event_production_dashboard(event: EventoVenta) -> dict:
+    start_date, end_date = _event_production_window(event)
+    forecast_dates = [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
+    scoped_qs = _event_forecast_qs(event).filter(forecast_date__in=forecast_dates)
+    raw_rows = list(
+        scoped_qs.values("product_id", "product__nombre", "forecast_date")
+        .annotate(total_qty=Sum("final_forecast"))
+        .filter(total_qty__gt=0)
+        .order_by("forecast_date", "-total_qty", "product__nombre")
+    )
+    price_map = _point_price_map_by_recipe_code({int(row["product_id"]) for row in raw_rows if row.get("product_id")})
+
+    by_day: dict[date, dict] = {
+        forecast_date: {
+            "fecha": forecast_date,
+            "label": forecast_date.strftime("%d/%m/%Y"),
+            "productos": [],
+            "totales": {"qty": ZERO, "ingreso": ZERO},
+        }
+        for forecast_date in forecast_dates
+    }
+    consolidated_map: dict[int, dict] = {}
+
+    for row in raw_rows:
+        product_id = int(row["product_id"])
+        forecast_date = row["forecast_date"]
+        product_name = row.get("product__nombre") or ""
+        qty = Decimal(str(row.get("total_qty") or 0))
+        unit_price = price_map.get(product_id, ZERO)
+        revenue = qty * unit_price * EVENTO_PRODUCCION_REVENUE_FACTOR
+        day_payload = by_day[forecast_date]
+        item = {
+            "product_id": product_id,
+            "nombre": product_name,
+            "qty": _qty(qty),
+            "precio": _money(unit_price),
+            "ingreso": _money(revenue),
+            "pct": ZERO,
+        }
+        day_payload["productos"].append(item)
+        day_payload["totales"]["qty"] += qty
+        day_payload["totales"]["ingreso"] += revenue
+
+        consolidated = consolidated_map.setdefault(
+            product_id,
+            {
+                "product_id": product_id,
+                "nombre": product_name,
+                "qty": ZERO,
+                "precio": unit_price,
+                "ingreso": ZERO,
+                "pct": ZERO,
+            },
+        )
+        consolidated["qty"] += qty
+        consolidated["ingreso"] += revenue
+
+    total_qty = sum((payload["totales"]["qty"] for payload in by_day.values()), ZERO)
+    total_ingreso = sum((payload["totales"]["ingreso"] for payload in by_day.values()), ZERO)
+
+    for day_payload in by_day.values():
+        day_total_ingreso = day_payload["totales"]["ingreso"]
+        for item in day_payload["productos"]:
+            item["pct"] = (
+                ((item["ingreso"] / day_total_ingreso) * Decimal("100")).quantize(Decimal("0.01"))
+                if day_total_ingreso > 0
+                else ZERO
+            )
+        day_payload["productos"].sort(key=lambda item: (-item["qty"], item["nombre"]))
+        day_payload["totales"]["qty"] = _qty(day_payload["totales"]["qty"])
+        day_payload["totales"]["ingreso"] = _money(day_payload["totales"]["ingreso"])
+
+    consolidated_productos = []
+    for item in consolidated_map.values():
+        item["qty"] = _qty(item["qty"])
+        item["precio"] = _money(item["precio"])
+        item["ingreso"] = _money(item["ingreso"])
+        item["pct"] = (
+            ((item["ingreso"] / total_ingreso) * Decimal("100")).quantize(Decimal("0.01"))
+            if total_ingreso > 0
+            else ZERO
+        )
+        consolidated_productos.append(item)
+    consolidated_productos.sort(key=lambda item: (-item["qty"], item["nombre"]))
+
+    dias = sorted(by_day.values(), key=lambda payload: payload["fecha"])
+    first_day = dias[0] if dias else None
+    last_day = dias[-1] if dias else None
+    consolidado = {
+        "label": "Consolidado",
+        "productos": consolidated_productos,
+        "totales": {
+            "qty": _qty(total_qty),
+            "ingreso": _money(total_ingreso),
+        },
+    }
+    return {
+        "event": event,
+        "start_date": start_date,
+        "end_date": end_date,
+        "factor": EVENTO_PRODUCCION_REVENUE_FACTOR,
+        "resumen": {
+            "n_productos": len(consolidated_productos),
+            "total_piezas": consolidado["totales"]["qty"],
+            "ingreso_total": consolidado["totales"]["ingreso"],
+            "ingreso_dia_9": first_day["totales"]["ingreso"] if first_day else ZERO,
+            "ingreso_dia_10": last_day["totales"]["ingreso"] if last_day else ZERO,
+            "first_day_label": first_day["label"] if first_day else "",
+            "last_day_label": last_day["label"] if last_day else "",
+        },
+        "consolidado": consolidado,
+        "dias": dias,
+    }
+
+
+def _event_production_csv_response(event: EventoVenta, dashboard: dict) -> HttpResponse:
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="evento-{event.id}-produccion.csv"'
+    writer = csv.writer(response, delimiter=";")
+    writer.writerow(
+        [
+            "SECCION",
+            "DIA",
+            "RECETA_ID",
+            "RECETA_NOMBRE",
+            "QTY_FORECAST",
+            "PRECIO_UNITARIO",
+            "INGRESO_PROYECTADO",
+            "PORCENTAJE_TOTAL",
+        ]
+    )
+    for row in dashboard["consolidado"]["productos"]:
+        writer.writerow(
+            [
+                "CONSOLIDADO",
+                "",
+                row["product_id"],
+                row["nombre"],
+                row["qty"],
+                row["precio"],
+                row["ingreso"],
+                row["pct"],
+            ]
+        )
+    for day in dashboard["dias"]:
+        for row in day["productos"]:
+            writer.writerow(
+                [
+                    "DIA",
+                    day["fecha"],
+                    row["product_id"],
+                    row["nombre"],
+                    row["qty"],
+                    row["precio"],
+                    row["ingreso"],
+                    row["pct"],
+                ]
+            )
+    return response
 
 
 def _extract_posted_adjustment_values(request) -> dict[tuple[int, int], Decimal]:
@@ -3783,6 +3988,19 @@ def evento_detail(request, event_id: int):
         "detail_source_filter_label": detail_source[1] if detail_source else "",
     }
     return render(request, "ventas/eventos_detail.html", context)
+
+
+class EventoProduccionView(LoginRequiredMixin, View):
+    template_name = "ventas/evento_produccion.html"
+
+    def get(self, request, event_id: int):
+        if not _can_view_event_production_dashboard(request.user):
+            raise PermissionDenied("No tienes permisos para ver el dashboard de produccion del evento.")
+        event = get_object_or_404(EventoVenta, pk=event_id)
+        dashboard = _build_event_production_dashboard(event)
+        if request.GET.get("formato") == "csv":
+            return _event_production_csv_response(event, dashboard)
+        return render(request, self.template_name, dashboard)
 
 
 @login_required
