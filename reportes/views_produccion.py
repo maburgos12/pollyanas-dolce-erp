@@ -10,6 +10,7 @@ from typing import Any
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db.models import Min, Sum
+from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.generic import TemplateView
@@ -150,11 +151,22 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             merma_source=merma_source,
             source_dates=source_dates,
         )
+        periodos_qs = (
+            FactProduccionDiaria.objects.annotate(mes=TruncMonth("fecha"))
+            .values_list("mes", flat=True)
+            .distinct()
+            .order_by("-mes")
+        )
+        periodos = [d.strftime("%Y-%m") for d in periodos_qs if d]
+        current = date.today().strftime("%Y-%m")
+        if current not in periodos:
+            periodos.insert(0, current)
 
         return {
             "module_tabs": self._module_tabs("producido_vs_vendido"),
             "selected_period": period.value,
             "selected_period_label": period.label,
+            "periodos": periodos,
             "selected_familia": familia,
             "familias": self._families(),
             "groups": groups,
