@@ -85,3 +85,29 @@ docker compose exec -T web python manage.py migrate --noinput
 | Maya omnicanal | /opt/pollyana-omnichannel | 8003 | api.pollyanasdolce.com |
 | ERP Django | /opt/pastelerias-erp | 8011 | erp.pollyanasdolce.com |
 | ad_agent (próximo) | /opt/ad-agent | 8004 | ads.pollyanasdolce.com |
+
+## Verificación en navegador
+
+Cuando la tarea afecte UI, flujos web, formularios, navegación, autenticación
+o integraciones visibles en navegador, usar **Chrome DevTools MCP** para validar
+el comportamiento real antes de cerrar la tarea.
+
+Aplica para:
+- Cambios en templates HTML del ERP
+- Nuevos endpoints o modificaciones a vistas Django
+- Flujos de autenticación y permisos
+- Integraciones con Point (scraping Playwright, sincronización)
+- Cualquier otro sistema web trabajado desde Codex
+
+### ERP — pruebas funcionales
+
+Para cambios en módulos operativos del ERP, validar el flujo afectado en navegador
+cuando sea posible, incluyendo:
+- Pantallas principales del módulo modificado
+- Formularios: envío, validación, respuesta
+- Errores de consola JavaScript
+- Network requests relevantes (XHR/Fetch)
+
+Ejemplo de instrucción a Codex:
+> "Valida el flujo en navegador antes de abrir el PR."
+> "Abre el módulo X en Chrome DevTools y verifica que no hay errores de consola."
