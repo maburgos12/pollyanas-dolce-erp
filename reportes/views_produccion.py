@@ -16,7 +16,6 @@ from django.views.generic import TemplateView
 
 from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
-from core.models import Sucursal
 from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact
 from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta
 from recetas.utils.derived_product_presentations import get_total_cost_map
@@ -111,7 +110,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
 
     def _build_context(self, request: HttpRequest) -> dict[str, Any]:
         period = _parse_period(request.GET.get("periodo") or request.GET.get("period"))
-        sucursal_id = _parse_int(request.GET.get("sucursal"))
+        sucursal_id = None  # Producción es centralizada en CEDIS; no aplica filtro por sucursal
         familia = (request.GET.get("familia") or "").strip()
 
         sales_map, sales_source = self._sales_map(period, sucursal_id)
@@ -156,9 +155,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "module_tabs": self._module_tabs("producido_vs_vendido"),
             "selected_period": period.value,
             "selected_period_label": period.label,
-            "selected_sucursal": sucursal_id or "",
             "selected_familia": familia,
-            "sucursales": Sucursal.objects.filter(activa=True).order_by("codigo", "nombre"),
             "familias": self._families(),
             "groups": groups,
             "grand_total": grand_total,
