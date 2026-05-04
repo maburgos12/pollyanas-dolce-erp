@@ -575,7 +575,7 @@ def rebuild_production_facts(*, start_date: date, end_date: date) -> int:
             is_insumo=False,
             receta_id__isnull=False,
         )
-        .values("production_date", "erp_branch_id", "receta_id")
+        .values("production_date", "branch__erp_branch_id", "receta_id")
         .annotate(total=Sum("produced_quantity"))
     )
     sold_rows = (
@@ -609,7 +609,7 @@ def rebuild_production_facts(*, start_date: date, end_date: date) -> int:
         lambda: {"producido": ZERO, "vendido": ZERO, "merma": ZERO, "transferido": ZERO}
     )
     for row in produced_rows:
-        rows_map[(row["production_date"], row.get("erp_branch_id"), row.get("receta_id"))]["producido"] += _to_decimal(row.get("total"))
+        rows_map[(row["production_date"], row.get("branch__erp_branch_id"), row.get("receta_id"))]["producido"] += _to_decimal(row.get("total"))
     for row in sold_rows:
         rows_map[(row["fecha"], row.get("sucursal_id"), row.get("receta_id"))]["vendido"] += _to_decimal(row.get("total"))
     for row in waste_rows:
