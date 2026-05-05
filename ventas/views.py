@@ -1528,7 +1528,6 @@ def _event_production_export_category(recipe: Receta) -> str:
         return "Vasos Preparados"
 
     name_parts = _ascii_norm(recipe.nombre or "").split()
-    last_word = name_parts[-1] if name_parts else ""
     size_map = {
         "grande": "Grande",
         "mediano": "Mediano",
@@ -1539,8 +1538,9 @@ def _event_production_export_category(recipe: Receta) -> str:
         "r": "Rebanada",
         "individual": "Individual",
     }
-    if last_word in size_map:
-        return size_map[last_word]
+    for token in reversed(name_parts):
+        if token in size_map:
+            return size_map[token]
     return (recipe.familia or "Sin categoria").strip() or "Sin categoria"
 
 
