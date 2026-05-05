@@ -230,31 +230,29 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         return result
 
     def _sales_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
-        facts = PointSalesDailyProductFact.objects.filter(
+        from reportes.models import FactProduccionDiaria
+
+        # Fuente primaria: PointDailySale (dato completo de Point, todos los productos mapeados)
+        sales = PointDailySale.objects.filter(
             sale_date__gte=period.month_start,
             sale_date__lte=period.month_end,
             receta_id__isnull=False,
         )
         if sucursal_id:
-            facts = facts.filter(branch__erp_branch_id=sucursal_id)
-        if facts.exists():
-            sales_map = _aggregate_by_recipe(facts, "total_cantidad")
-            source = "PointSalesDailyProductFact"
+            sales = sales.filter(branch__erp_branch_id=sucursal_id)
+
+        if sales.exists():
+            sales_map = _aggregate_by_recipe(sales, "quantity")
+            source = "PointDailySale"
         else:
-            sales = PointDailySale.objects.filter(
-                sale_date__gte=period.month_start,
-                sale_date__lte=period.month_end,
-                receta_id__isnull=False,
-            )
-            if sucursal_id:
-                sales = sales.filter(branch__erp_branch_id=sucursal_id)
-            if sales.exists():
-                return _aggregate_by_recipe(sales, "quantity"), "PointDailySale"
             return {}, "sin_datos"
 
+        # Fallback por receta: rellenar huecos desde FactProduccionDiaria.vendido
+        # Solo cuando no hay filtro de sucursal
         if not sucursal_id:
-            fpd_rows = (
-                FactProduccionDiaria.objects.filter(
+            fpd_qs = (
+                FactProduccionDiaria.objects
+                .filter(
                     fecha__gte=period.month_start,
                     fecha__lte=period.month_end,
                     receta_id__isnull=False,
@@ -264,14 +262,13 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 .annotate(total=Sum("vendido"))
             )
             filled = 0
-            for row in fpd_rows:
-                receta_id = int(row["receta_id"])
-                vendido = _decimal(row["total"])
-                if receta_id not in sales_map or sales_map[receta_id] == ZERO:
-                    sales_map[receta_id] = vendido
+            for row in fpd_qs:
+                rid = row["receta_id"]
+                if rid not in sales_map or sales_map[rid] == ZERO:
+                    sales_map[rid] = Decimal(str(row["total"]))
                     filled += 1
             if filled:
-                source = f"{source}+FactProduccionDiaria({filled})"
+                source = f"PointDailySale+FPD({filled})"
 
         return sales_map, source
 
