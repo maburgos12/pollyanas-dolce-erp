@@ -4060,8 +4060,14 @@ def evento_list(request):
     if q:
         qs = qs.filter(name__icontains=q)
 
+    events = list(qs[:200])
+    for event in events:
+        production_start, production_end = _event_production_window(event)
+        event.production_range_start = production_start
+        event.production_range_end = production_end
+
     context = {
-        "events": qs[:200],
+        "events": events,
         "status_choices": EventoVenta.STATUS_CHOICES,
         "status_filter": status,
         "event_type_filter": event_type,

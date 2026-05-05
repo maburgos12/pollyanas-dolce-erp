@@ -48,11 +48,11 @@
             <td>{{ event.event_type|default:"-" }}</td>
             <td>{{ event.main_date }}</td>
             <td>
-              {% if event.fecha_inicio and event.fecha_fin %}
-                {% if event.fecha_inicio == event.fecha_fin %}
-                  {{ event.fecha_fin }}
+              {% if event.production_range_start and event.production_range_end %}
+                {% if event.production_range_start == event.production_range_end %}
+                  {{ event.production_range_end }}
                 {% else %}
-                  {{ event.fecha_inicio }} a {{ event.fecha_fin }}
+                  {{ event.production_range_start }} a {{ event.production_range_end }}
                 {% endif %}
               {% else %}
                 -
