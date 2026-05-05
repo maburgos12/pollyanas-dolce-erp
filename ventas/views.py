@@ -865,6 +865,26 @@ def _event_production_totals(rows: list[dict]) -> dict[str, Decimal | int]:
     }
 
 
+EVENTO_PRODUCCION_TAMANO_ORDER = {
+    "grande": 0,
+    "mediano": 1,
+    "chico": 2,
+    "individual": 3,
+    "mini": 4,
+    "rebanada": 5,
+    "r": 6,
+}
+
+
+def _event_production_tamano_sort_key(nombre: str) -> tuple[str, int]:
+    nombre_lower = (nombre or "").strip().lower()
+    for tamano, orden in EVENTO_PRODUCCION_TAMANO_ORDER.items():
+        if nombre_lower.endswith(tamano):
+            base = nombre_lower[: -len(tamano)].strip()
+            return base, orden
+    return nombre_lower, 99
+
+
 def _event_production_group_rows(rows: list[dict]) -> tuple[list[dict], dict[str, Decimal]]:
     grouped: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
@@ -873,7 +893,7 @@ def _event_production_group_rows(rows: list[dict]) -> tuple[list[dict], dict[str
     groups = []
     grand_rows: list[dict] = []
     for family in sorted(grouped):
-        family_rows = sorted(grouped[family], key=lambda item: (-item["qty_total"], item["nombre"]))
+        family_rows = sorted(grouped[family], key=lambda item: _event_production_tamano_sort_key(item["nombre"]))
         grand_rows.extend(family_rows)
         groups.append({"familia": family, "rows": family_rows, "total": _event_production_totals(family_rows)})
     return groups, _event_production_totals(grand_rows)
