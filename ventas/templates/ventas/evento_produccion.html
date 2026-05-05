@@ -1,404 +1,344 @@
 {% extends "base.html" %}
+{% load humanize %}
+
 {% block title %}Producción - {{ event.code }}{% endblock %}
 {% block page_title %}Producción · {{ event.name }}{% endblock %}
-{% block body_class %}page-ventas-evento-produccion{% endblock %}
+{% block body_class %}page-reportes-produccion page-ventas-evento-produccion{% endblock %}
 
 {% block extra_css %}
 <style>
-  .prod-spa {
-    --bg: #0f0f14;
-    --surface: #1a1a24;
-    --surface-2: #111118;
-    --border: #2a2a38;
-    --wine: #7b1a48;
-    --wine-dark: #5e1237;
-    --gold: #c9a84c;
-    --text: #e8e0d5;
-    --muted: #9b9298;
-    --success: #51b56f;
-    display: grid;
-    gap: 18px;
-    color: var(--text);
-  }
-
-  .prod-hero,
-  .prod-card,
-  .prod-table-panel {
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-  }
-
-  .prod-hero {
-    display: flex;
-    justify-content: space-between;
-    gap: 18px;
-    padding: 20px;
-    background: linear-gradient(135deg, var(--wine), var(--wine-dark));
-  }
-
-  .prod-title {
-    margin: 0 0 10px;
-    color: #fff;
-    font-size: 30px;
-    line-height: 1.08;
-    letter-spacing: 0;
-  }
-
-  .prod-meta,
-  .prod-actions,
-  .prod-tabs {
+  .event-production-tabs {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
   }
 
-  .prod-badge,
-  .prod-button,
-  .prod-tab {
-    display: inline-flex;
-    min-height: 36px;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 999px;
-    color: #fff;
-    font-size: 12px;
-    font-weight: 900;
-    padding: 8px 12px;
-    text-decoration: none;
-  }
-
-  .prod-button {
-    min-height: 42px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.12);
-  }
-
-  .prod-button.primary {
-    border-color: var(--gold);
-    background: var(--gold);
-    color: #18130b;
-  }
-
-  .prod-summary {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-  }
-
-  .prod-card {
-    min-height: 118px;
-    padding: 16px;
-  }
-
-  .prod-card span {
-    display: block;
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .prod-card strong {
-    display: block;
-    margin-top: 10px;
-    color: var(--text);
-    font-size: 28px;
-    line-height: 1;
-  }
-
-  .prod-total {
-    border: 1px solid rgba(201, 168, 76, 0.25);
-    border-radius: 8px;
-    background: #17151b;
-    color: var(--gold);
-    font-weight: 900;
-    padding: 14px 16px;
-  }
-
-  .prod-tabs {
-    border-bottom: 1px solid var(--border);
-    padding: 14px 14px 0;
-  }
-
-  .prod-tab {
-    border-color: var(--border);
-    border-radius: 8px 8px 0 0;
-    background: var(--surface-2);
-    color: var(--muted);
+  .event-production-tabs .module-tab {
+    border: 0;
     cursor: pointer;
   }
 
-  .prod-tab.is-active {
-    border-color: var(--gold);
-    border-bottom-color: var(--surface);
-    color: var(--gold);
-  }
-
-  .prod-tab-panel {
+  .event-production-panel {
     display: none;
-    padding: 16px;
   }
 
-  .prod-tab-panel.is-active {
+  .event-production-panel.is-active {
     display: block;
   }
 
-  .prod-table-wrap {
-    max-height: 68vh;
-    overflow: auto;
-  }
-
-  .prod-table {
-    width: 100%;
-    min-width: 760px;
-    border-collapse: separate;
-    border-spacing: 0;
-  }
-
-  .prod-table th,
-  .prod-table td {
-    border-bottom: 1px solid var(--border);
-    padding: 12px 10px;
-    text-align: right;
-    white-space: nowrap;
-  }
-
-  .prod-table th {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: var(--surface);
-    color: var(--gold);
-    font-size: 12px;
-    font-weight: 900;
-  }
-
-  .prod-table th:nth-child(2),
-  .prod-table td:nth-child(2) {
-    text-align: left;
-    white-space: normal;
-  }
-
-  .prod-table tbody tr:hover {
-    background: rgba(201, 168, 76, 0.07);
-  }
-
-  .prod-table tfoot td {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    border-top: 1px solid var(--gold);
-    background: #17151b;
-    color: var(--text);
-    font-weight: 900;
-  }
-
-  .prod-pct {
-    display: grid;
-    gap: 6px;
-    min-width: 130px;
-  }
-
-  .prod-pct-track {
-    height: 8px;
-    border-radius: 999px;
-    background: #252332;
-    overflow: hidden;
-  }
-
-  .prod-pct-fill {
-    height: 100%;
-    border-radius: inherit;
-    background: linear-gradient(90deg, var(--wine), var(--gold));
-  }
-
-  .prod-note {
-    border: 1px solid rgba(201, 168, 76, 0.22);
+  .event-production-total {
+    margin-top: 14px;
+    border: 1px solid rgba(201, 168, 76, 0.28);
     border-radius: 8px;
-    background: #17151b;
-    color: var(--muted);
+    background: rgba(201, 168, 76, 0.08);
+    color: #c9a84c;
+    font-weight: 900;
     padding: 14px 16px;
   }
 
-  @media (max-width: 980px) {
-    .prod-hero {
-      flex-direction: column;
-    }
-
-    .prod-summary {
-      grid-template-columns: 1fr 1fr;
-    }
+  .event-production-pct {
+    display: grid;
+    gap: 6px;
+    min-width: 118px;
   }
 
-  @media (max-width: 640px) {
-    .prod-summary {
-      grid-template-columns: 1fr;
-    }
+  .event-production-track {
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.10);
+    overflow: hidden;
+  }
+
+  .event-production-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #7b1a48, #c9a84c);
+  }
+
+  .event-production-note {
+    color: var(--muted, #9b9298);
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="module-shell prod-spa">
-  <section class="prod-hero">
-    <div>
-      <h2 class="prod-title">{{ event.name }}</h2>
-      <div class="prod-meta">
-        <span class="prod-badge">{{ event.get_status_display }}</span>
-        <span class="prod-badge">{{ start_date|date:"d/m/Y" }} a {{ end_date|date:"d/m/Y" }}</span>
-        <span class="prod-badge">{{ event.code }}</span>
+<div class="container production-report">
+  <nav class="module-tabs" aria-label="Evento">
+    {% for tab in module_tabs %}
+    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="card">
+    <div class="section-header production-page-header">
+      <div>
+        <div class="executive-eyebrow">Eventos · Plan de Producción</div>
+        <h1 class="card-header">{{ event.name }}</h1>
+        <p class="executive-section-copy">Forecast operativo agrupado por familia y receta para {{ start_date|date:"d/m/Y" }} a {{ end_date|date:"d/m/Y" }}.</p>
       </div>
+      <button class="btn btn-secondary" type="button" id="export-event-production-csv">Exportar CSV</button>
     </div>
-    <div class="prod-actions">
-      <a class="prod-button" href="{% url 'ventas:evento_detail' event.id %}">Volver</a>
-      <a class="prod-button primary" href="{% url 'ventas:evento_produccion' event.id %}?formato=csv">Exportar CSV</a>
+    <div class="production-source-list" aria-label="Estado del evento">
+      <span class="badge bg-primary">{{ event.get_status_display }}</span>
+      <span class="badge bg-primary">{{ start_date|date:"d/m/Y" }} a {{ end_date|date:"d/m/Y" }}</span>
+      <span class="badge bg-primary">{{ event.code }}</span>
     </div>
   </section>
 
-  <section class="prod-summary">
-    <article class="prod-card">
-      <span>Total productos</span>
-      <strong>{{ resumen.n_productos }}</strong>
+  <section class="card">
+    <div class="card-header">Filtros</div>
+    <form class="recipes-filters" method="get">
+      <div>
+        <label class="form-label" for="familia">Familia</label>
+        <select class="form-select" id="familia" name="familia">
+          <option value="">Todas</option>
+          {% for familia in familias %}
+          <option value="{{ familia }}" {% if selected_familia == familia %}selected{% endif %}>{{ familia }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="production-filter-action">
+        <button class="btn btn-primary w-100" type="submit">Filtrar</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-card-inner">
+        <div class="kpi-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-number">{{ resumen.n_productos|intcomma }}</div>
+          <div class="kpi-label">Total productos</div>
+        </div>
+      </div>
     </article>
-    <article class="prod-card">
-      <span>Total piezas</span>
-      <strong>{{ resumen.total_piezas|floatformat:0 }}</strong>
+    <article class="kpi-card">
+      <div class="kpi-card-inner">
+        <div class="kpi-icon is-success">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-number is-success">{{ resumen.total_piezas|floatformat:0|intcomma }}</div>
+          <div class="kpi-label">Total piezas</div>
+        </div>
+      </div>
     </article>
-    <article class="prod-card">
-      <span>Ingreso {{ resumen.first_day_label }}</span>
-      <strong>${{ resumen.ingreso_dia_9|floatformat:0 }}</strong>
+    <article class="kpi-card">
+      <div class="kpi-card-inner">
+        <div class="kpi-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-number">${{ resumen.ingreso_dia_9|floatformat:0|intcomma }}</div>
+          <div class="kpi-label">Ingreso {{ resumen.first_day_label }}</div>
+        </div>
+      </div>
     </article>
-    <article class="prod-card">
-      <span>Ingreso {{ resumen.last_day_label }}</span>
-      <strong>${{ resumen.ingreso_dia_10|floatformat:0 }}</strong>
+    <article class="kpi-card">
+      <div class="kpi-card-inner">
+        <div class="kpi-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-number">${{ resumen.ingreso_dia_10|floatformat:0|intcomma }}</div>
+          <div class="kpi-label">Ingreso {{ resumen.last_day_label }}</div>
+        </div>
+      </div>
     </article>
   </section>
 
-  <div class="prod-total">
-    Ingreso total rango: ${{ resumen.ingreso_total|floatformat:2 }}
+  <div class="event-production-total">
+    Ingreso total rango: ${{ resumen.ingreso_total|floatformat:2|intcomma }}
   </div>
 
-  <section class="prod-table-panel">
-    <div class="prod-tabs" role="tablist">
-      <button class="prod-tab is-active" type="button" data-tab-target="tab-consolidado">Consolidado</button>
+  <section class="card">
+    <div class="event-production-tabs" role="tablist">
+      <button class="module-tab active" type="button" data-tab-target="tab-consolidado">Consolidado</button>
       {% for dia in dias %}
-      <button class="prod-tab" type="button" data-tab-target="tab-dia-{{ forloop.counter }}">{{ dia.fecha|date:"j M" }}</button>
+      <button class="module-tab" type="button" data-tab-target="tab-dia-{{ forloop.counter }}">{{ dia.fecha|date:"j M" }}</button>
       {% endfor %}
     </div>
 
-    <div id="tab-consolidado" class="prod-tab-panel is-active">
-      <div class="prod-table-wrap">
-        <table class="prod-table">
+    <div id="tab-consolidado" class="event-production-panel is-active">
+      <div class="section-header">
+        <h2 class="section-header-title">Detalle por familia y receta</h2>
+      </div>
+      {% if groups %}
+      <div class="table-responsive production-table-wrap">
+        <table class="table event-production-table">
           <thead>
             <tr>
-              <th>#</th>
+              <th class="text-end">#</th>
               <th>Producto</th>
-              <th>Qty</th>
-              <th>Precio unit</th>
-              <th>Ingreso</th>
-              <th>% del total</th>
+              <th>Familia</th>
+              <th class="text-end">QTY Consolidado</th>
+              <th class="text-end">QTY 9 May</th>
+              <th class="text-end">QTY 10 May</th>
+              <th class="text-end">Precio Unit</th>
+              <th class="text-end">Ingreso</th>
+              <th class="text-center">% del Total</th>
             </tr>
           </thead>
           <tbody>
-            {% for row in consolidado.productos %}
+            {% for group in groups %}
+            <tr class="production-subtotal-row">
+              <td colspan="3">{{ group.familia }}</td>
+              <td class="text-end">{{ group.total.qty_total|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_9|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_10|floatformat:2|intcomma }}</td>
+              <td></td>
+              <td class="text-end">${{ group.total.ingreso_total|floatformat:2|intcomma }}</td>
+              <td></td>
+            </tr>
+            {% for row in group.rows %}
             <tr>
-              <td>{{ forloop.counter }}</td>
+              <td class="text-end">{{ row.index }}</td>
               <td>{{ row.nombre }}</td>
-              <td>{{ row.qty|floatformat:2 }}</td>
-              <td>${{ row.precio|floatformat:2 }}</td>
-              <td>${{ row.ingreso|floatformat:2 }}</td>
-              <td>
-                <div class="prod-pct">
+              <td>{{ row.familia }}</td>
+              <td class="text-end">{{ row.qty_total|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ row.qty_9|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ row.qty_10|floatformat:2|intcomma }}</td>
+              <td class="text-end">${{ row.precio|floatformat:2|intcomma }}</td>
+              <td class="text-end">${{ row.ingreso_total|floatformat:2|intcomma }}</td>
+              <td class="text-center">
+                <div class="event-production-pct">
                   <span>{{ row.pct|floatformat:2 }}%</span>
-                  <div class="prod-pct-track"><div class="prod-pct-fill" style="width:{{ row.pct|floatformat:0 }}%;"></div></div>
+                  <div class="event-production-track"><div class="event-production-fill" style="width:{{ row.pct|floatformat:0 }}%;"></div></div>
                 </div>
               </td>
             </tr>
-            {% empty %}
-            <tr><td colspan="6">Sin forecasts para este rango.</td></tr>
             {% endfor %}
-          </tbody>
-          <tfoot>
-            <tr>
+            {% endfor %}
+            <tr class="production-grand-total-row">
+              <td colspan="3">Gran total</td>
+              <td class="text-end">{{ grand_total.qty_total|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ grand_total.qty_9|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ grand_total.qty_10|floatformat:2|intcomma }}</td>
               <td></td>
-              <td>Total</td>
-              <td>{{ consolidado.totales.qty|floatformat:2 }}</td>
-              <td></td>
-              <td>${{ consolidado.totales.ingreso|floatformat:2 }}</td>
-              <td>100.00%</td>
+              <td class="text-end">${{ grand_total.ingreso_total|floatformat:2|intcomma }}</td>
+              <td class="text-center">100.00%</td>
             </tr>
-          </tfoot>
+          </tbody>
         </table>
       </div>
+      {% else %}
+      {% include "components/empty_state.html" with message="Sin forecasts para este rango." icon="search" %}
+      {% endif %}
     </div>
+
     {% for dia in dias %}
-    <div id="tab-dia-{{ forloop.counter }}" class="prod-tab-panel">
-      <div class="prod-table-wrap">
-        <table class="prod-table">
+    <div id="tab-dia-{{ forloop.counter }}" class="event-production-panel">
+      <div class="section-header">
+        <h2 class="section-header-title">Detalle {{ dia.fecha|date:"d/m/Y" }}</h2>
+      </div>
+      {% if dia.groups %}
+      <div class="table-responsive production-table-wrap">
+        <table class="table event-production-table">
           <thead>
             <tr>
-              <th>#</th>
+              <th class="text-end">#</th>
               <th>Producto</th>
-              <th>Qty</th>
-              <th>Precio unit</th>
-              <th>Ingreso</th>
-              <th>% del total</th>
+              <th>Familia</th>
+              <th class="text-end">QTY Consolidado</th>
+              <th class="text-end">QTY 9 May</th>
+              <th class="text-end">QTY 10 May</th>
+              <th class="text-end">Precio Unit</th>
+              <th class="text-end">Ingreso</th>
+              <th class="text-center">% del Total</th>
             </tr>
           </thead>
           <tbody>
-            {% for row in dia.productos %}
+            {% for group in dia.groups %}
+            <tr class="production-subtotal-row">
+              <td colspan="3">{{ group.familia }}</td>
+              <td class="text-end">{{ group.total.qty_total|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_9|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_10|floatformat:2|intcomma }}</td>
+              <td></td>
+              <td class="text-end">${{ group.total.ingreso_total|floatformat:2|intcomma }}</td>
+              <td></td>
+            </tr>
+            {% for row in group.rows %}
             <tr>
-              <td>{{ forloop.counter }}</td>
+              <td class="text-end">{{ row.index }}</td>
               <td>{{ row.nombre }}</td>
-              <td>{{ row.qty|floatformat:2 }}</td>
-              <td>${{ row.precio|floatformat:2 }}</td>
-              <td>${{ row.ingreso|floatformat:2 }}</td>
-              <td>
-                <div class="prod-pct">
+              <td>{{ row.familia }}</td>
+              <td class="text-end">{{ row.qty_total|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ row.qty_9|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ row.qty_10|floatformat:2|intcomma }}</td>
+              <td class="text-end">${{ row.precio|floatformat:2|intcomma }}</td>
+              <td class="text-end">${{ row.ingreso_total|floatformat:2|intcomma }}</td>
+              <td class="text-center">
+                <div class="event-production-pct">
                   <span>{{ row.pct|floatformat:2 }}%</span>
-                  <div class="prod-pct-track"><div class="prod-pct-fill" style="width:{{ row.pct|floatformat:0 }}%;"></div></div>
+                  <div class="event-production-track"><div class="event-production-fill" style="width:{{ row.pct|floatformat:0 }}%;"></div></div>
                 </div>
               </td>
             </tr>
-            {% empty %}
-            <tr><td colspan="6">Sin forecasts para este día.</td></tr>
             {% endfor %}
-          </tbody>
-          <tfoot>
-            <tr>
+            {% endfor %}
+            <tr class="production-grand-total-row">
+              <td colspan="3">Gran total</td>
+              <td class="text-end">{{ dia.grand_total.qty_total|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ dia.grand_total.qty_9|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ dia.grand_total.qty_10|floatformat:2|intcomma }}</td>
               <td></td>
-              <td>Total</td>
-              <td>{{ dia.totales.qty|floatformat:2 }}</td>
-              <td></td>
-              <td>${{ dia.totales.ingreso|floatformat:2 }}</td>
-              <td>100.00%</td>
+              <td class="text-end">${{ dia.grand_total.ingreso_total|floatformat:2|intcomma }}</td>
+              <td class="text-center">100.00%</td>
             </tr>
-          </tfoot>
+          </tbody>
         </table>
       </div>
+      {% else %}
+      {% include "components/empty_state.html" with message="Sin forecasts para este día." icon="search" %}
+      {% endif %}
     </div>
     {% endfor %}
   </section>
 
-  <section class="prod-note">
-    Factor aplicado: {{ factor }} — calibrado post Día del Niño 30-abr-2026
+  <section class="card">
+    <div class="event-production-note">Factor aplicado: {{ factor }} — calibrado post Día del Niño 30-abr-2026</div>
   </section>
 </div>
+{% endblock %}
 
+{% block extra_js %}
 <script>
-  (() => {
-    const tabs = Array.from(document.querySelectorAll(".prod-tab"));
-    const panels = Array.from(document.querySelectorAll(".prod-tab-panel"));
-
+  (function () {
+    const tabs = Array.from(document.querySelectorAll('.event-production-tabs .module-tab'));
+    const panels = Array.from(document.querySelectorAll('.event-production-panel'));
     tabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
+      tab.addEventListener('click', function () {
         const target = tab.dataset.tabTarget;
-        tabs.forEach((item) => item.classList.toggle("is-active", item === tab));
-        panels.forEach((panel) => panel.classList.toggle("is-active", panel.id === target));
+        tabs.forEach((item) => item.classList.toggle('active', item === tab));
+        panels.forEach((panel) => panel.classList.toggle('is-active', panel.id === target));
       });
+    });
+
+    const button = document.getElementById('export-event-production-csv');
+    if (!button) return;
+    button.addEventListener('click', function () {
+      const table = document.querySelector('.event-production-panel.is-active table');
+      if (!table) return;
+      const rows = Array.from(table.querySelectorAll('tr')).map((tr) => {
+        return Array.from(tr.children).map((cell) => {
+          const value = cell.innerText.replace(/\s+/g, ' ').trim().replace(/"/g, '""');
+          return `"${value}"`;
+        }).join(',');
+      });
+      const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `evento_{{ event.id }}_produccion.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     });
   })();
 </script>
