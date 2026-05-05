@@ -368,9 +368,9 @@ def _product_alerts(rows: list[dict[str, Any]], category_avg_rotation: dict[str,
         diff_abs = abs(forecast - real)
         diff_pct = (diff_abs / real * Decimal("100")) if real else Decimal("100") if forecast else ZERO
         alert = None
-        if forecast < (real * Decimal("0.80")) and avg_rot >= Decimal("0.95"):
+        if real > ZERO and forecast < (real * Decimal("0.80")) and avg_rot >= Decimal("0.95"):
             alert = "probable_subestimacion"
-        elif forecast > (real * Decimal("1.30")) and avg_rot <= Decimal("1.05"):
+        elif real > ZERO and forecast > (real * Decimal("1.30")) and avg_rot <= Decimal("1.05"):
             alert = "probable_sobreestimacion"
         elif not real and category_avg and avg_rot > (category_avg * Decimal("1.20")):
             alert = "producto_nuevo_alta_rotacion"
