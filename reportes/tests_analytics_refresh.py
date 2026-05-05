@@ -19,7 +19,8 @@ from inventario.models import ExistenciaInsumo, MovimientoInventario
 from inventario.stock_trace import TRACE_RECONSTRUCTED_MOVEMENT
 from maestros.models import Insumo, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointProductionLine, PointSalesDailyProductFact, PointWasteLine
-from reportes.analytics_service import full_rebuild, rebuild_sales_facts, mark_analytics_dirty
+from recetas.models import Receta
+from reportes.analytics_service import full_rebuild, rebuild_production_facts, rebuild_sales_facts, mark_analytics_dirty
 from reportes.analytics_service import refresh_dashboard_daily_ops_materialized_view, refresh_dashboard_full_materialized_view
 from reportes.models import AnalyticRefreshWindow, FactInventarioDiario, FactProduccionDiaria, FactVentaDiaria
 from reportes.sales_dashboard_freshness import ensure_sales_dashboard_freshness
@@ -74,6 +75,37 @@ class AnalyticsSalesFactSourceSelectionTests(TestCase):
         sources = {row.sucursal.codigo: row.source_kind for row in fact_rows}
         self.assertEqual(sources["MATRIZ-T"], FactVentaDiaria.SOURCE_AUTHORITATIVE)
         self.assertEqual(sources["CRUCERO-T"], FactVentaDiaria.SOURCE_V2)
+
+
+class AnalyticsProductionFactWasteMappingTests(TestCase):
+    def test_rebuild_production_facts_repairs_waste_recipe_and_branch_from_staging(self):
+        target_date = date(2026, 4, 22)
+        branch = Sucursal.objects.create(codigo="LEYVA-T", nombre="Leyva Test", activa=True)
+        point_branch = PointBranch.objects.create(external_id="LEYVA", name="Leyva", erp_branch=branch)
+        receta = Receta.objects.create(
+            nombre="Bollo Lotus",
+            hash_contenido="hash-bollo-lotus-waste",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        )
+
+        PointWasteLine.objects.create(
+            branch=point_branch,
+            movement_external_id="WASTE-APRIL-1",
+            source_hash="waste-april-1",
+            movement_at=timezone.make_aware(datetime(2026, 4, 22, 8, 0)),
+            item_name="Bollo Lotus",
+            quantity=Decimal("2.000"),
+            total_cost=Decimal("32.57"),
+        )
+
+        inserted = rebuild_production_facts(start_date=target_date, end_date=target_date)
+
+        self.assertEqual(inserted, 1)
+        waste_line = PointWasteLine.objects.get(source_hash="waste-april-1")
+        self.assertEqual(waste_line.receta_id, receta.id)
+        self.assertEqual(waste_line.erp_branch_id, branch.id)
+        fact = FactProduccionDiaria.objects.get(fecha=target_date, receta=receta, sucursal=branch)
+        self.assertEqual(fact.merma, Decimal("2.000"))
 
 
 class BIForceRefreshEndpointTests(TestCase):

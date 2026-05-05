@@ -568,7 +568,57 @@ def rebuild_inventory_facts(*, start_date: date, end_date: date) -> int:
     return len(fact_rows)
 
 
+def _repair_point_waste_mappings(*, start_date: date, end_date: date) -> dict[str, int]:
+    """
+    Completa mapeos faltantes en staging de mermas ya extraidas desde Point.
+
+    PointWasteLine guarda siempre el nombre original del producto; si la receta o
+    sucursal se resolvio despues de la extraccion, este paso evita que la merma
+    quede fuera de FactProduccionDiaria al reconstruir analytics.
+    """
+    from recetas.models import Receta
+    from recetas.utils.normalizacion import normalizar_nombre
+
+    updated_recipes = 0
+    updated_branches = 0
+
+    waste_missing_branch = PointWasteLine.objects.filter(
+        movement_at__date__range=(start_date, end_date),
+        erp_branch_id__isnull=True,
+        branch__erp_branch_id__isnull=False,
+    ).select_related("branch")
+    for line in waste_missing_branch.iterator(chunk_size=500):
+        line.erp_branch_id = line.branch.erp_branch_id
+        line.save(update_fields=["erp_branch", "updated_at"])
+        updated_branches += 1
+
+    names = (
+        PointWasteLine.objects.filter(
+            movement_at__date__range=(start_date, end_date),
+            receta_id__isnull=True,
+        )
+        .exclude(item_name="")
+        .values_list("item_name", flat=True)
+        .distinct()
+    )
+    recipe_by_key = {}
+    for receta in Receta.objects.exclude(nombre_normalizado="").only("id", "nombre_normalizado").order_by("id"):
+        recipe_by_key.setdefault(receta.nombre_normalizado, receta.id)
+    for item_name in names:
+        receta_id = recipe_by_key.get(normalizar_nombre(item_name))
+        if not receta_id:
+            continue
+        updated_recipes += PointWasteLine.objects.filter(
+            movement_at__date__range=(start_date, end_date),
+            receta_id__isnull=True,
+            item_name=item_name,
+        ).update(receta_id=receta_id)
+
+    return {"waste_recipes": updated_recipes, "waste_branches": updated_branches}
+
+
 def rebuild_production_facts(*, start_date: date, end_date: date) -> int:
+    _repair_point_waste_mappings(start_date=start_date, end_date=end_date)
     produced_rows = (
         PointProductionLine.objects.filter(
             production_date__range=(start_date, end_date),
