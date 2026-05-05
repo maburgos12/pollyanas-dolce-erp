@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import shutil
 import socket
+from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -822,7 +823,53 @@ def _qty(value: Decimal) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"))
 
 
-def _build_event_production_dashboard(event: EventoVenta) -> dict:
+def _event_production_module_tabs(event: EventoVenta) -> list[dict[str, str | bool]]:
+    tabs = [
+        ("detalle", reverse("ventas:evento_detail", kwargs={"event_id": event.id}), "Detalle del evento"),
+        ("produccion", reverse("ventas:evento_produccion", kwargs={"event_id": event.id}), "Plan de Producción"),
+    ]
+    return [
+        {"key": key, "url": url, "label": label, "active": key == "produccion"}
+        for key, url, label in tabs
+    ]
+
+
+def _event_production_families(product_ids: set[int]) -> list[str]:
+    return list(
+        Receta.objects.filter(id__in=product_ids, tipo=Receta.TIPO_PRODUCTO_FINAL)
+        .exclude(familia="")
+        .order_by("familia")
+        .values_list("familia", flat=True)
+        .distinct()
+    )
+
+
+def _event_production_totals(rows: list[dict]) -> dict[str, Decimal]:
+    return {
+        "qty_9": _qty(sum((row["qty_9"] for row in rows), ZERO)),
+        "qty_10": _qty(sum((row["qty_10"] for row in rows), ZERO)),
+        "qty_total": _qty(sum((row["qty_total"] for row in rows), ZERO)),
+        "ingreso_9": _money(sum((row["ingreso_9"] for row in rows), ZERO)),
+        "ingreso_10": _money(sum((row["ingreso_10"] for row in rows), ZERO)),
+        "ingreso_total": _money(sum((row["ingreso_total"] for row in rows), ZERO)),
+    }
+
+
+def _event_production_group_rows(rows: list[dict]) -> tuple[list[dict], dict[str, Decimal]]:
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        grouped[row["familia"]].append(row)
+
+    groups = []
+    grand_rows: list[dict] = []
+    for family in sorted(grouped):
+        family_rows = sorted(grouped[family], key=lambda item: (-item["qty_total"], item["nombre"]))
+        grand_rows.extend(family_rows)
+        groups.append({"familia": family, "rows": family_rows, "total": _event_production_totals(family_rows)})
+    return groups, _event_production_totals(grand_rows)
+
+
+def _build_event_production_dashboard(event: EventoVenta, *, familia: str = "") -> dict:
     start_date, end_date = _event_production_window(event)
     forecast_dates = [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
     reference_date = timezone.localdate()
@@ -855,6 +902,13 @@ def _build_event_production_dashboard(event: EventoVenta) -> dict:
         .filter(total_qty__gt=0)
         .order_by("forecast_date", "-total_qty", "product__nombre")
     )
+    recipes = {
+        recipe.id: recipe
+        for recipe in Receta.objects.filter(
+            id__in=eligible_product_ids,
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        ).only("id", "nombre", "familia")
+    }
 
     by_day: dict[date, dict] = {
         forecast_date: {
@@ -869,8 +923,14 @@ def _build_event_production_dashboard(event: EventoVenta) -> dict:
 
     for row in raw_rows:
         product_id = int(row["product_id"])
+        recipe = recipes.get(product_id)
+        if not recipe:
+            continue
+        product_family = (recipe.familia or "").strip() or "Sin familia"
+        if familia and product_family != familia:
+            continue
         forecast_date = row["forecast_date"]
-        product_name = row.get("product__nombre") or ""
+        product_name = recipe.nombre or row.get("product__nombre") or ""
         qty = Decimal(str(row.get("total_qty") or 0))
         unit_price = price_map.get(product_id, ZERO)
         revenue = qty * unit_price * EVENTO_PRODUCCION_REVENUE_FACTOR
@@ -878,6 +938,7 @@ def _build_event_production_dashboard(event: EventoVenta) -> dict:
         item = {
             "product_id": product_id,
             "nombre": product_name,
+            "familia": product_family,
             "qty": _qty(qty),
             "precio": _money(unit_price),
             "ingreso": _money(revenue),
@@ -892,14 +953,19 @@ def _build_event_production_dashboard(event: EventoVenta) -> dict:
             {
                 "product_id": product_id,
                 "nombre": product_name,
+                "familia": product_family,
                 "qty": ZERO,
+                "qty_by_date": {forecast_date: ZERO for forecast_date in forecast_dates},
                 "precio": unit_price,
                 "ingreso": ZERO,
+                "ingreso_by_date": {forecast_date: ZERO for forecast_date in forecast_dates},
                 "pct": ZERO,
             },
         )
         consolidated["qty"] += qty
+        consolidated["qty_by_date"][forecast_date] += qty
         consolidated["ingreso"] += revenue
+        consolidated["ingreso_by_date"][forecast_date] += revenue
 
     total_qty = sum((payload["totales"]["qty"] for payload in by_day.values()), ZERO)
     total_ingreso = sum((payload["totales"]["ingreso"] for payload in by_day.values()), ZERO)
@@ -932,6 +998,53 @@ def _build_event_production_dashboard(event: EventoVenta) -> dict:
     dias = sorted(by_day.values(), key=lambda payload: payload["fecha"])
     first_day = dias[0] if dias else None
     last_day = dias[-1] if dias else None
+    first_date = first_day["fecha"] if first_day else None
+    last_date = last_day["fecha"] if last_day else None
+    for day_payload in dias:
+        day_rows = []
+        for index, item in enumerate(day_payload["productos"], start=1):
+            is_first_day = day_payload["fecha"] == first_date
+            is_last_day = day_payload["fecha"] == last_date
+            day_rows.append(
+                {
+                    "index": index,
+                    "product_id": item["product_id"],
+                    "nombre": item["nombre"],
+                    "familia": item["familia"],
+                    "qty_9": item["qty"] if is_first_day else ZERO,
+                    "qty_10": item["qty"] if is_last_day else ZERO,
+                    "qty_total": item["qty"],
+                    "precio": item["precio"],
+                    "ingreso_9": item["ingreso"] if is_first_day else ZERO,
+                    "ingreso_10": item["ingreso"] if is_last_day else ZERO,
+                    "ingreso_total": item["ingreso"],
+                    "pct": item["pct"],
+                }
+            )
+        day_payload["groups"], day_payload["grand_total"] = _event_production_group_rows(day_rows)
+    table_rows = []
+    for index, item in enumerate(consolidated_productos, start=1):
+        qty_9 = _qty(item["qty_by_date"].get(first_date, ZERO)) if first_date else ZERO
+        qty_10 = _qty(item["qty_by_date"].get(last_date, ZERO)) if last_date else ZERO
+        ingreso_9 = _money(item["ingreso_by_date"].get(first_date, ZERO)) if first_date else ZERO
+        ingreso_10 = _money(item["ingreso_by_date"].get(last_date, ZERO)) if last_date else ZERO
+        table_rows.append(
+            {
+                "index": index,
+                "product_id": item["product_id"],
+                "nombre": item["nombre"],
+                "familia": item["familia"],
+                "qty_9": qty_9,
+                "qty_10": qty_10,
+                "qty_total": item["qty"],
+                "precio": item["precio"],
+                "ingreso_9": ingreso_9,
+                "ingreso_10": ingreso_10,
+                "ingreso_total": item["ingreso"],
+                "pct": item["pct"],
+            }
+        )
+    groups, grand_total = _event_production_group_rows(table_rows)
     consolidado = {
         "label": "Consolidado",
         "productos": consolidated_productos,
@@ -939,18 +1052,25 @@ def _build_event_production_dashboard(event: EventoVenta) -> dict:
             "qty": _qty(total_qty),
             "ingreso": _money(total_ingreso),
         },
+        "groups": groups,
+        "grand_total": grand_total,
     }
     return {
         "event": event,
         "start_date": start_date,
         "end_date": end_date,
         "factor": EVENTO_PRODUCCION_REVENUE_FACTOR,
+        "module_tabs": _event_production_module_tabs(event),
+        "familias": _event_production_families(eligible_product_ids),
+        "selected_familia": familia,
+        "groups": groups,
+        "grand_total": grand_total,
         "resumen": {
             "n_productos": len(consolidated_productos),
-            "total_piezas": consolidado["totales"]["qty"],
-            "ingreso_total": consolidado["totales"]["ingreso"],
-            "ingreso_dia_9": first_day["totales"]["ingreso"] if first_day else ZERO,
-            "ingreso_dia_10": last_day["totales"]["ingreso"] if last_day else ZERO,
+            "total_piezas": grand_total["qty_total"],
+            "ingreso_total": grand_total["ingreso_total"],
+            "ingreso_dia_9": grand_total["ingreso_9"],
+            "ingreso_dia_10": grand_total["ingreso_10"],
             "first_day_label": first_day["label"] if first_day else "",
             "last_day_label": last_day["label"] if last_day else "",
         },
@@ -969,41 +1089,51 @@ def _event_production_csv_response(event: EventoVenta, dashboard: dict) -> HttpR
             "DIA",
             "RECETA_ID",
             "RECETA_NOMBRE",
-            "QTY_FORECAST",
+            "FAMILIA",
+            "QTY_CONSOLIDADO",
+            "QTY_9_MAY",
+            "QTY_10_MAY",
             "PRECIO_UNITARIO",
             "INGRESO_PROYECTADO",
             "PORCENTAJE_TOTAL",
         ]
     )
-    for row in dashboard["consolidado"]["productos"]:
-        writer.writerow(
-            [
-                "CONSOLIDADO",
-                "",
-                row["product_id"],
-                row["nombre"],
-                row["qty"],
-                row["precio"],
-                row["ingreso"],
-                row["pct"],
-            ]
-        )
-    for day in dashboard["dias"]:
-        for row in day["productos"]:
+    for group in dashboard["groups"]:
+        for row in group["rows"]:
             writer.writerow(
                 [
-                    "DIA",
-                    day["fecha"],
+                    "CONSOLIDADO",
+                    "",
                     row["product_id"],
                     row["nombre"],
-                    row["qty"],
+                    row["familia"],
+                    row["qty_total"],
+                    row["qty_9"],
+                    row["qty_10"],
                     row["precio"],
-                    row["ingreso"],
+                    row["ingreso_total"],
                     row["pct"],
                 ]
             )
+    for day in dashboard["dias"]:
+        for group in day["groups"]:
+            for row in group["rows"]:
+                writer.writerow(
+                    [
+                        "DIA",
+                        day["fecha"],
+                        row["product_id"],
+                        row["nombre"],
+                        row["familia"],
+                        row["qty_total"],
+                        row["qty_9"],
+                        row["qty_10"],
+                        row["precio"],
+                        row["ingreso_total"],
+                        row["pct"],
+                    ]
+                )
     return response
-
 
 def _extract_posted_adjustment_values(request) -> dict[tuple[int, int], Decimal]:
     values: dict[tuple[int, int], Decimal] = {}
@@ -4081,6 +4211,7 @@ def evento_detail(request, event_id: int):
         "can_manage": _can_manage_events(request.user),
         "can_approve": _can_approve_events(request.user),
         "can_manage_capacity": _can_manage_capacity(request.user),
+        "can_view_production_dashboard": _can_view_event_production_dashboard(request.user),
         "detail_source_filter": detail_source[0] if detail_source else "",
         "detail_source_filter_label": detail_source[1] if detail_source else "",
     }
@@ -4094,7 +4225,7 @@ class EventoProduccionView(LoginRequiredMixin, View):
         if not _can_view_event_production_dashboard(request.user):
             raise PermissionDenied("No tienes permisos para ver el dashboard de produccion del evento.")
         event = get_object_or_404(EventoVenta, pk=event_id)
-        dashboard = _build_event_production_dashboard(event)
+        dashboard = _build_event_production_dashboard(event, familia=(request.GET.get("familia") or "").strip())
         if request.GET.get("formato") == "csv":
             return _event_production_csv_response(event, dashboard)
         return render(request, self.template_name, dashboard)

@@ -249,6 +249,9 @@
           La base comercial vigente es <strong>{{ workflow_state|lower }}</strong>.
         </p>
         <div class="ventas-action-row" style="margin-top:16px;">
+          {% if can_view_production_dashboard %}
+          <a class="btn btn-secondary" href="{% url 'ventas:evento_produccion' event.id %}">Plan de Producción</a>
+          {% endif %}
           {% if can_manage %}
           <a class="btn btn-secondary" href="{% url 'ventas:evento_update' event.id %}">Editar evento</a>
           <a class="btn btn-secondary" href="{% url 'ventas:evento_adjustments_editor' event.id %}">Editor de ajustes</a>
