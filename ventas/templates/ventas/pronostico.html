@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Pronóstico de ventas - ERP{% endblock %}
+{% block body_class %}page-pronostico-ventas{% endblock %}
+
+{% block extra_css %}
+<style>
+  .forecast-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .forecast-tab-button { border: 1px solid #e2d6dc; background: #fff; color: #5d173a; border-radius: 8px; padding: 9px 14px; font-weight: 700; cursor: pointer; }
+  .forecast-tab-button.active { background: #7b1a48; color: #fff; border-color: #7b1a48; }
+  .forecast-tab-panel { display: none; }
+  .forecast-tab-panel.active { display: block; }
+  .forecast-branch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .forecast-branch-card { border: 1px solid #eadfe4; border-radius: 8px; padding: 16px; background: #fff; }
+  .forecast-branch-card h3 { margin: 0 0 8px; font-size: 1rem; color: #46112c; }
+  .forecast-branch-metrics { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; color: #5d173a; font-weight: 700; }
+  .forecast-top-list { margin: 0; padding-left: 18px; }
+  .forecast-chart-wrap { min-height: 280px; }
+  .forecast-muted { color: #776b72; }
+  .forecast-trend { font-weight: 800; }
+  .forecast-trend.sube { color: #198754; }
+  .forecast-trend.baja { color: #b42318; }
+  .forecast-trend.estable { color: #7b1a48; }
+  .forecast-form-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); align-items: end; }
+  .forecast-form-grid .forecast-branches { grid-column: span 1; }
+  @media (max-width: 900px) {
+    .forecast-form-grid { grid-template-columns: 1fr; }
+    .forecast-form-grid .forecast-branches { grid-column: auto; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container production-report">
+  <section class="card">
+    <div class="section-header production-page-header">
+      <div>
+        <div class="executive-eyebrow">Ventas</div>
+        <h1 class="card-header">Pronóstico de ventas</h1>
+        <p class="executive-section-copy">Proyección por receta, sucursal y día usando venta real comparable y tendencia reciente.</p>
+      </div>
+      {% if resumen %}
+      <button class="btn btn-secondary" type="button" id="export-forecast-csv">Exportar CSV</button>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Filtros</div>
+    {% if form_errors %}
+    <div class="production-banner-list">
+      {% for error in form_errors %}
+      <div class="alert alert-warning">{{ error }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <form class="recipes-filters forecast-form-grid" method="get">
+      <div>
+        <label class="form-label" for="fecha_inicio">Fecha inicio</label>
+        <input class="form-control" type="date" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio }}" required>
+      </div>
+      <div>
+        <label class="form-label" for="fecha_fin">Fecha fin</label>
+        <input class="form-control" type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}" required>
+      </div>
+      <div class="forecast-branches">
+        <label class="form-label" for="sucursales">Sucursales</label>
+        <select class="form-select" id="sucursales" name="sucursales" multiple size="4">
+          {% for branch in branches %}
+          <option value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}selected{% endif %}>{{ branch.codigo }} · {{ branch.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <button class="btn btn-primary w-100" type="submit">Calcular pronóstico</button>
+      </div>
+    </form>
+  </section>
+
+  {% if resumen %}
+  <section class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-card-inner">
+        <div class="kpi-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-4"/></svg>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-number">{{ resumen.total_piezas|intcomma }}</div>
+          <div class="kpi-label">Total piezas</div>
+        </div>
+      </div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-card-inner">
+        <div class="kpi-icon is-success">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-number is-success">${{ resumen.total_ingreso|floatformat:2|intcomma }}</div>
+          <div class="kpi-label">Total ingreso</div>
+        </div>
+      </div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-card-inner">
+        <div class="kpi-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-number">{{ resumen.dias|intcomma }}</div>
+          <div class="kpi-label">Días</div>
+        </div>
+      </div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-card-inner">
+        <div class="kpi-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-number">{{ resumen.productos|intcomma }}</div>
+          <div class="kpi-label">Productos</div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="section-header">
+      <div>
+        <h2 class="section-header-title">Detalle del pronóstico</h2>
+        <p class="executive-section-copy">Tendencia reciente: {{ resumen.recent_start }} a {{ resumen.recent_end }} · Comparable: {{ resumen.comparable_start }} a {{ resumen.comparable_end }}</p>
+      </div>
+    </div>
+
+    <div class="forecast-tabs" role="tablist" aria-label="Pronóstico">
+      <button class="forecast-tab-button active" type="button" data-tab="producto">Por producto</button>
+      <button class="forecast-tab-button" type="button" data-tab="dia">Por día</button>
+      <button class="forecast-tab-button" type="button" data-tab="sucursal">Por sucursal</button>
+    </div>
+
+    <div class="forecast-tab-panel active" id="forecast-tab-producto">
+      <div class="table-responsive production-table-wrap">
+        <table class="table" id="forecast-product-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Producto</th>
+              <th>Familia</th>
+              <th class="text-end">Total piezas</th>
+              <th class="text-end">Precio</th>
+              <th class="text-end">Ingreso</th>
+              <th class="text-end">% total</th>
+              <th class="text-center">Tendencia</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for group in por_producto_familias %}
+            <tr class="production-subtotal-row">
+              <td colspan="3">{{ group.familia }}</td>
+              <td class="text-end">{{ group.total_piezas|intcomma }}</td>
+              <td></td>
+              <td class="text-end">${{ group.total_ingreso|floatformat:2|intcomma }}</td>
+              <td></td>
+              <td></td>
+            </tr>
+            {% for row in group.rows %}
+            <tr>
+              <td>{{ forloop.counter }}</td>
+              <td>{{ row.nombre }}</td>
+              <td>{{ row.familia }}</td>
+              <td class="text-end">{{ row.total_piezas|intcomma }}</td>
+              <td class="text-end">${{ row.precio|floatformat:2|intcomma }}</td>
+              <td class="text-end">${{ row.total_ingreso|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ row.pct_del_total|floatformat:2 }}%</td>
+              <td class="text-center">
+                <span class="forecast-trend {{ row.tendencia }}">
+                  {% if row.tendencia == "sube" %}↑{% elif row.tendencia == "baja" %}↓{% else %}→{% endif %}
+                  {{ row.factor_tendencia|floatformat:2 }}x
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="forecast-tab-panel" id="forecast-tab-dia">
+      <div class="forecast-chart-wrap">
+        <canvas id="forecast-day-chart" height="110"></canvas>
+      </div>
+      <div class="table-responsive production-table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th class="text-end">Total piezas</th>
+              <th class="text-end">Total ingreso</th>
+              <th>Top producto del día</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in por_dia %}
+            <tr>
+              <td>{{ row.fecha }}</td>
+              <td class="text-end">{{ row.total_piezas|intcomma }}</td>
+              <td class="text-end">${{ row.total_ingreso|floatformat:2|intcomma }}</td>
+              <td>
+                {% if row.top_producto %}
+                {{ row.top_producto.nombre }} <span class="forecast-muted">({{ row.top_producto.total_piezas|intcomma }} pzas)</span>
+                {% else %}
+                <span class="forecast-muted">Sin venta proyectada</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="forecast-tab-panel" id="forecast-tab-sucursal">
+      <div class="forecast-branch-grid">
+        {% for branch in por_sucursal %}
+        <article class="forecast-branch-card">
+          <h3>{{ branch.sucursal }}</h3>
+          <div class="forecast-branch-metrics">
+            <span>{{ branch.total_piezas|intcomma }} pzas</span>
+            <span>${{ branch.total_ingreso|floatformat:2|intcomma }}</span>
+          </div>
+          <ol class="forecast-top-list">
+            {% for product in branch.productos %}
+            <li>{{ product.nombre }} · {{ product.total_piezas|intcomma }} pzas</li>
+            {% endfor %}
+          </ol>
+        </article>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  (function () {
+    const buttons = Array.from(document.querySelectorAll('.forecast-tab-button'));
+    const panels = {
+      producto: document.getElementById('forecast-tab-producto'),
+      dia: document.getElementById('forecast-tab-dia'),
+      sucursal: document.getElementById('forecast-tab-sucursal')
+    };
+    buttons.forEach((button) => {
+      button.addEventListener('click', function () {
+        buttons.forEach((item) => item.classList.remove('active'));
+        Object.values(panels).forEach((panel) => panel && panel.classList.remove('active'));
+        button.classList.add('active');
+        if (panels[button.dataset.tab]) panels[button.dataset.tab].classList.add('active');
+      });
+    });
+
+    const exportButton = document.getElementById('export-forecast-csv');
+    const table = document.getElementById('forecast-product-table');
+    if (exportButton && table) {
+      exportButton.addEventListener('click', function () {
+        const rows = Array.from(table.querySelectorAll('tr')).map((tr) => {
+          return Array.from(tr.children).map((cell) => {
+            const value = cell.innerText.replace(/\s+/g, ' ').trim().replace(/"/g, '""');
+            return `"${value}"`;
+          }).join(',');
+        });
+        const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'pronostico_ventas_{{ fecha_inicio }}_{{ fecha_fin }}.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    const chartCanvas = document.getElementById('forecast-day-chart');
+    if (chartCanvas && window.Chart) {
+      new Chart(chartCanvas, {
+        type: 'bar',
+        data: {
+          labels: [{% for row in por_dia %}'{{ row.fecha|date:"Y-m-d" }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+          datasets: [{
+            label: 'Piezas',
+            data: [{% for row in por_dia %}{{ row.total_piezas }}{% if not forloop.last %},{% endif %}{% endfor %}],
+            backgroundColor: '#7b1a48',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+  })();
+</script>
+{% endblock %}
