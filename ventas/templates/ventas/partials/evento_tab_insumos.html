@@ -1,0 +1,95 @@
+<div class="ventas-section-header">
+  <div>
+    <div class="card-header">Insumos y compras</div>
+    <p class="ventas-section-copy">Lectura táctica de faltantes, costo estimado de compra y prioridades de abastecimiento derivadas de la salida operativa del evento.</p>
+  </div>
+  <div class="ventas-chip-row">
+    <span class="ventas-chip" style="background:rgba(122,22,63,.08); color:#7a163f;">Faltante neto {{ purchase_summary.total_shortage|floatformat:0 }}</span>
+    <span class="ventas-chip" style="background:rgba(122,22,63,.08); color:#7a163f;">Compras pendientes {{ purchase_summary.pending_purchases }}</span>
+  </div>
+</div>
+
+<div class="ventas-grid-two">
+  <article class="ventas-card-soft">
+    <h3 class="ventas-section-title">Resumen de abastecimiento</h3>
+    <div class="ventas-metric-list">
+      <article class="ventas-metric">
+        <span class="ventas-metric-label">Faltante neto</span>
+        <span class="ventas-metric-value">{{ purchase_summary.total_shortage|floatformat:0 }}</span>
+      </article>
+      <article class="ventas-metric">
+        <span class="ventas-metric-label">Insumos alto riesgo</span>
+        <span class="ventas-metric-value">{{ purchase_summary.high_risk }}</span>
+      </article>
+      <article class="ventas-metric">
+        <span class="ventas-metric-label">Costo compra estimado</span>
+        <span class="ventas-metric-value">${{ purchase_summary.estimated_purchase_cost|floatformat:0 }}</span>
+      </article>
+    </div>
+  </article>
+
+  <article class="ventas-card-soft">
+    <h3 class="ventas-section-title">Acciones operativas</h3>
+    <div class="ventas-action-row">
+      <a class="btn btn-secondary" href="{% url 'ventas:evento_generate_inputs' event.id %}">Actualizar insumos</a>
+      <a class="btn btn-secondary" href="{% url 'ventas:evento_generate_purchases' event.id %}">Actualizar compras</a>
+      {% if can_approve %}
+      <a class="btn btn-secondary" href="{% url 'ventas:evento_generate_financials' event.id %}">Actualizar finanzas</a>
+      {% endif %}
+    </div>
+  </article>
+</div>
+
+<div class="ventas-grid-two" style="margin-top:16px;">
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Insumo crítico</th>
+          <th>Faltante neto</th>
+          <th>Riesgo</th>
+          <th>Requerido para</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in production_dataset.high_risk_inputs %}
+        <tr>
+          <td>{{ row.input_item_name }}</td>
+          <td>{{ row.net_shortage_qty|floatformat:0 }}</td>
+          <td>{{ row.risk_level_display }}</td>
+          <td>{{ row.required_by_date }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" class="muted">Sin insumos críticos en este momento.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Compra sugerida</th>
+          <th>Fecha límite</th>
+          <th>Proveedor</th>
+          <th>Costo estimado</th>
+          <th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in production_dataset.purchase_rows %}
+        <tr>
+          <td>{{ row.input_item_name }}</td>
+          <td>{{ row.purchase_deadline|default:"Sin fecha" }}</td>
+          <td>{{ row.supplier_name|default:"Por definir" }}</td>
+          <td>${{ row.estimated_cost|floatformat:0 }}</td>
+          <td>{{ row.status_display }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="muted">Sin requerimientos de compra visibles.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

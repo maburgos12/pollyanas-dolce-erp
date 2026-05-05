@@ -222,6 +222,24 @@
     color: #7c6570;
     font-size: 12px;
   }
+  .ventas-tab-loading {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-height:120px;
+    color:#7c6570;
+  }
+  .ventas-tab-spinner {
+    width:18px;
+    height:18px;
+    border:3px solid rgba(122,22,63,.18);
+    border-top-color:#7a163f;
+    border-radius:50%;
+    animation:ventas-tab-spin .8s linear infinite;
+  }
+  @keyframes ventas-tab-spin {
+    to { transform:rotate(360deg); }
+  }
   @media (max-width: 1100px) {
     .ventas-hero-grid,
     .ventas-grid-two,
@@ -285,7 +303,7 @@
           </article>
           <article class="ventas-metric dark">
             <span class="ventas-metric-label">Producción</span>
-            <span class="ventas-metric-value">{{ production_dataset.summary.production_lines }}</span>
+            <span class="ventas-metric-value">{{ production_summary.production_lines|default:0 }}</span>
           </article>
         </div>
         {% if executive_dataset.validation_message %}
@@ -319,12 +337,12 @@
   <section class="card">
     <div class="ventas-anchor-row">
       <a class="ventas-anchor" href="#resumen">Resumen ejecutivo</a>
-      <a class="ventas-anchor" href="#proyeccion">Proyección comercial</a>
+      <a class="ventas-anchor" href="#proyeccion" data-event-tab="proyeccion" data-tab-url="{% url 'ventas:evento_tab_proyeccion' event.id %}{% if detail_source_filter %}?detail_source={{ detail_source_filter }}{% endif %}">Proyección comercial</a>
       <a class="ventas-anchor" href="#ajustes">Ajustes de ventas</a>
-      <a class="ventas-anchor" href="#produccion">Producción</a>
-      <a class="ventas-anchor" href="#insumos">Insumos y compras</a>
+      <a class="ventas-anchor" href="#produccion" data-event-tab="produccion" data-tab-url="{% url 'ventas:evento_tab_produccion' event.id %}">Producción</a>
+      <a class="ventas-anchor" href="#insumos" data-event-tab="insumos" data-tab-url="{% url 'ventas:evento_tab_insumos' event.id %}">Insumos y compras</a>
       <a class="ventas-anchor" href="#archivos">Archivos ERP</a>
-      <a class="ventas-anchor" href="#trazabilidad">Aprobación y trazabilidad</a>
+      <a class="ventas-anchor" href="#trazabilidad" data-event-tab="trazabilidad" data-tab-url="{% url 'ventas:evento_tab_trazabilidad' event.id %}">Aprobación y trazabilidad</a>
     </div>
   </section>
 
@@ -502,7 +520,12 @@
     </div>
   </section>
 
-  <section id="proyeccion" class="card ventas-subsection">
+  <section id="proyeccion" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_proyeccion' event.id %}{% if detail_source_filter %}?detail_source={{ detail_source_filter }}{% endif %}" data-loaded="false">
+    <div class="ventas-tab-loading">
+      <span class="ventas-tab-spinner"></span>
+      <span>Proyección comercial lista para cargar.</span>
+    </div>
+    {% comment %}
     <div class="ventas-section-header">
       <div>
         <div class="card-header">Proyección comercial</div>
@@ -682,6 +705,7 @@
       </div>
       <div class="ventas-table-note">{{ week_trend_note }}</div>
     </details>
+    {% endcomment %}
   </section>
 
   <section id="ajustes" class="card ventas-subsection">
@@ -804,7 +828,12 @@
     </details>
   </section>
 
-  <section id="produccion" class="card ventas-subsection">
+  <section id="produccion" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_produccion' event.id %}" data-loaded="false">
+    <div class="ventas-tab-loading">
+      <span class="ventas-tab-spinner"></span>
+      <span>Producción lista para cargar.</span>
+    </div>
+    {% comment %}
     <div class="ventas-section-header">
       <div>
         <div class="card-header">Producción</div>
@@ -965,9 +994,15 @@
         </table>
       </div>
     </details>
+    {% endcomment %}
   </section>
 
-  <section id="insumos" class="card ventas-subsection">
+  <section id="insumos" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_insumos' event.id %}" data-loaded="false">
+    <div class="ventas-tab-loading">
+      <span class="ventas-tab-spinner"></span>
+      <span>Insumos y compras listos para cargar.</span>
+    </div>
+    {% comment %}
     <div class="ventas-section-header">
       <div>
         <div class="card-header">Insumos y compras</div>
@@ -1063,6 +1098,7 @@
         </table>
       </div>
     </div>
+    {% endcomment %}
   </section>
 
   <section id="archivos" class="card ventas-subsection">
@@ -1079,6 +1115,8 @@
         <a class="btn btn-secondary" href="{% url 'ventas:evento_export_main_day_projection' event.id %}">Excel día exacto</a>
         <a class="btn btn-secondary" href="{% url 'ventas:evento_export_branch_day_projection' event.id %}">Excel proyección por día</a>
         <a class="btn btn-secondary" href="{% url 'ventas:evento_export_executive_dashboard' event.id %}">Dashboard ejecutivo</a>
+        <a class="btn btn-secondary" href="{% url 'ventas:evento_export_produccion' event.id %}">Plan de producción</a>
+        <a class="btn btn-secondary" href="{% url 'ventas:evento_export_insumos' event.id %}">Requerimiento de insumos</a>
       </div>
     </div>
 
@@ -1132,7 +1170,12 @@
     </div>
   </section>
 
-  <section id="trazabilidad" class="card ventas-subsection">
+  <section id="trazabilidad" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_trazabilidad' event.id %}" data-loaded="false">
+    <div class="ventas-tab-loading">
+      <span class="ventas-tab-spinner"></span>
+      <span>Aprobación y trazabilidad listas para cargar.</span>
+    </div>
+    {% comment %}
     <div class="ventas-section-header">
       <div>
         <div class="card-header">Aprobación y trazabilidad</div>
@@ -1196,6 +1239,39 @@
         </table>
       </div>
     </div>
+    {% endcomment %}
   </section>
 </div>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const lazyLinks = document.querySelectorAll("[data-event-tab]");
+    const loadingMarkup = '<div class="ventas-tab-loading"><span class="ventas-tab-spinner"></span><span>Cargando información...</span></div>';
+    lazyLinks.forEach(function (link) {
+      link.addEventListener("click", function () {
+        const targetId = (link.getAttribute("href") || "").replace("#", "");
+        const target = document.getElementById(targetId);
+        const url = link.dataset.tabUrl || (target ? target.dataset.lazyUrl : "");
+        if (!target || !url || target.dataset.loaded === "true") {
+          return;
+        }
+        target.innerHTML = loadingMarkup;
+        fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("No se pudo cargar la sección.");
+            }
+            return response.text();
+          })
+          .then(function (html) {
+            target.innerHTML = html;
+            target.dataset.loaded = "true";
+          })
+          .catch(function () {
+            target.innerHTML = '<div class="ventas-alert" data-level="WARN"><strong>No se pudo cargar la sección</strong><div>Intenta de nuevo en unos segundos.</div></div>';
+            target.dataset.loaded = "false";
+          });
+      });
+    });
+  });
+</script>
 {% endblock %}

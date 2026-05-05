@@ -1,0 +1,160 @@
+<div class="ventas-section-header">
+  <div>
+    <div class="card-header">Producción</div>
+    <p class="ventas-section-copy">Subsección operativa dentro del evento. Traduce la base comercial vigente en demanda aprobada, surtido sugerido, producción requerida y alertas operativas.</p>
+  </div>
+  <span class="ventas-state-badge {% if production_dataset.summary.approved_basis %}ok{% else %}warn{% endif %}">
+    {% if production_dataset.summary.approved_basis %}Base aprobada{% else %}Base preliminar{% endif %}
+  </span>
+</div>
+
+<div class="ventas-grid-three">
+  <article class="ventas-card-soft">
+    <span class="ventas-metric-label">Líneas de demanda</span>
+    <span class="ventas-metric-value">{{ production_dataset.summary.demand_lines }}</span>
+    <div class="ventas-table-note">Shelf life de referencia: {{ production_dataset.summary.shelf_life_days }} días.</div>
+  </article>
+  <article class="ventas-card-soft">
+    <span class="ventas-metric-label">Líneas de producción</span>
+    <span class="ventas-metric-value">{{ production_dataset.summary.production_lines }}</span>
+    <div class="ventas-table-note">Se generan desde la proyección vigente del evento.</div>
+  </article>
+  <article class="ventas-card-soft">
+    <span class="ventas-metric-label">Brecha por capacidad</span>
+    <span class="ventas-metric-value">{{ production_dataset.summary.capacity_gap_total|floatformat:0 }}</span>
+    <div class="ventas-table-note">{{ production_dataset.summary.high_risk_inputs }} insumos de riesgo alto y {{ production_dataset.summary.pending_purchases }} compras pendientes.</div>
+  </article>
+</div>
+
+<div class="ventas-action-row" style="margin-top:16px;">
+  {% if can_manage_capacity %}
+  <a class="btn btn-secondary" href="{% url 'ventas:evento_generate_production' event.id %}">Regenerar producción</a>
+  <a class="btn btn-secondary" href="{% url 'ventas:evento_confirm_production' event.id %}">Confirmar producción</a>
+  {% endif %}
+  {% if can_manage or can_manage_capacity %}
+  <a class="btn btn-secondary" href="{% url 'ventas:evento_generate_inputs' event.id %}">Regenerar insumos</a>
+  <a class="btn btn-secondary" href="{% url 'ventas:evento_generate_purchases' event.id %}">Regenerar compras</a>
+  {% endif %}
+</div>
+
+{% if production_dataset.alerts %}
+<div class="ventas-alert-list" style="margin-top:16px;">
+  {% for alert in production_dataset.alerts %}
+  <div class="ventas-alert" data-level="{{ alert.level }}">
+    <strong>{{ alert.title }}</strong>
+    <div>{{ alert.detail }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<details style="margin-top:16px;" open>
+  <summary style="cursor:pointer; font-weight:700;">Demanda aprobada</summary>
+  <div class="table-responsive" style="margin-top:16px;">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Sucursal</th>
+          <th>Producto</th>
+          <th>Cantidad final</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in production_dataset.demand_rows %}
+        <tr>
+          <td>{{ row.date }}</td>
+          <td>{{ row.branch_code }}</td>
+          <td>{{ row.product_name }}</td>
+          <td><strong>{{ row.qty|floatformat:0 }}</strong></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" class="muted">Sin demanda aprobada visible.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<details style="margin-top:16px;">
+  <summary style="cursor:pointer; font-weight:700;">Surtido sugerido por sucursal</summary>
+  <div class="table-responsive" style="margin-top:16px;">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Fecha venta</th>
+          <th>Sucursal</th>
+          <th>Producto</th>
+          <th>Demanda aprobada</th>
+          <th>Inventario útil visible</th>
+          <th>Objetivo política</th>
+          <th>Surtido sugerido</th>
+          <th>Días cobertura</th>
+          <th>Observación</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in production_dataset.supply_rows %}
+        <tr>
+          <td>{{ row.sale_date }}</td>
+          <td>{{ row.branch_code }}</td>
+          <td>{{ row.product_name }}</td>
+          <td>{{ row.approved_demand|floatformat:0 }}</td>
+          <td>{{ row.visible_inventory }}</td>
+          <td>{{ row.policy_target|floatformat:0 }}</td>
+          <td><strong>{{ row.suggested_supply|floatformat:0 }}</strong></td>
+          <td>{{ row.coverage_days }}</td>
+          <td>{{ row.warning }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9" class="muted">Sin surtido sugerido disponible.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="ventas-table-note">En esta versión, el inventario útil por sucursal se muestra solo cuando exista integración directa. Si no, la sugerencia se calcula sobre demanda, política de stock y reglas operativas.</div>
+</details>
+
+<details style="margin-top:16px;">
+  <summary style="cursor:pointer; font-weight:700;">Producción requerida</summary>
+  <div class="table-responsive" style="margin-top:16px;">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Fecha producción</th>
+          <th>Producto</th>
+          <th>Requerido</th>
+          <th>Planificado</th>
+          <th>Stock terminado</th>
+          <th>Neto producir</th>
+          <th>Destino</th>
+          <th>Prioridad</th>
+          <th>Restricción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in production_dataset.production_rows %}
+        <tr>
+          <td>{{ row.plan_date }}</td>
+          <td>{{ row.product_name }}</td>
+          <td>{{ row.required_qty|floatformat:0 }}</td>
+          <td>{{ row.planned_qty|floatformat:0 }}</td>
+          <td>{{ row.existing_stock|floatformat:0 }}</td>
+          <td><strong>{{ row.net_qty_to_produce|floatformat:0 }}</strong></td>
+          <td>{{ row.destinations }}</td>
+          <td>{{ row.priority }}</td>
+          <td>
+            {% if row.capacity_gap_qty > 0 %}
+            Brecha {{ row.capacity_gap_qty|floatformat:0 }} · {{ row.constraint_reason }}
+            {% else %}
+            {{ row.constraint_reason|default:"Sin restricción" }}
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9" class="muted">Sin plan de producción visible.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
