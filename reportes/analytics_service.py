@@ -16,6 +16,7 @@ from inventario.models import MovimientoInventario
 from maestros.models import CostoInsumo
 from pos_bridge.historical_freeze import assert_not_frozen
 from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact, PointTransferLine, PointWasteLine
+from recetas.models import Receta
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import (
     AnalyticAuditLog,
@@ -25,7 +26,6 @@ from reportes.models import (
     FactProduccionDiaria,
     FactVentaDiaria,
     ForecastInput,
-    ProductoCostoOperativoMensual,
 )
 from reportes.dashboard_full_dataset import (
     ALLOWED_MONTH_WINDOWS,
@@ -227,13 +227,14 @@ def _preferred_legacy_endpoint_by_branch_day(
 def _latest_recipe_unit_cost_map(recipe_ids: set[int]) -> dict[int, Decimal]:
     if not recipe_ids:
         return {}
-    latest_rows = (
-        ProductoCostoOperativoMensual.objects.filter(receta_id__in=recipe_ids)
-        .order_by("receta_id", "-periodo")
-        .distinct("receta_id")
-        .values_list("receta_id", "costo_fabricacion_unit")
-    )
-    cost_map = {int(recipe_id): _to_decimal(unit_cost) for recipe_id, unit_cost in latest_rows}
+    cost_map: dict[int, Decimal] = {}
+    for receta in Receta.objects.filter(id__in=recipe_ids):
+        unit_cost = _to_decimal(getattr(receta, "costo_total_estimado_decimal", None))
+        if unit_cost <= 0:
+            unit_cost = _to_decimal(getattr(receta, "costo_total_estimado", None))
+        if unit_cost > 0:
+            cost_map[int(receta.id)] = unit_cost
+
     missing_ids = sorted(set(int(recipe_id) for recipe_id in recipe_ids) - set(cost_map))
     if missing_ids:
         fallback_map = get_total_cost_map(missing_ids)
