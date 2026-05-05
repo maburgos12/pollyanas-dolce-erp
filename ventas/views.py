@@ -33,7 +33,7 @@ from core.access import can_view_rentabilidad, has_any_role, ROLE_DG, ROLE_ADMIN
 from core.branch_catalog import EXCLUDED_BRANCH_CODES, POINT_MATURE_BRANCH_CODES, eligible_sales_event_branch_qs
 from core.models import Sucursal
 from maestros.models import Insumo
-from pos_bridge.models import PointProduct
+from pos_bridge.models import PointDailySale, PointProduct
 from recetas.models import LineaReceta, Receta
 from recetas.utils.commercial_composition import (
     build_commercial_recipe_lookup_context,
@@ -85,6 +85,9 @@ from ventas.tasks import run_event_projection_pipeline_task
 
 # Factor calibrado post Día del Niño 2026-04-30
 EVENTO_PRODUCCION_REVENUE_FACTOR = Decimal("0.98143")
+EVENTO_PRODUCCION_MIN_QTY = Decimal("1.0")
+EVENTO_PRODUCCION_RECENT_ACTIVITY_DAYS = 30
+EVENTO_PRODUCCION_PRICE_LOOKBACK_DAYS = 90
 
 
 def _can_view_events(user) -> bool:
@@ -739,6 +742,65 @@ def _point_price_map_by_recipe_code(product_ids: set[int]) -> dict[int, Decimal]
     return {recipe_id: point_prices.get(code, ZERO) for recipe_id, code in code_by_recipe_id.items()}
 
 
+def _recent_point_sale_product_ids(*, reference_date: date, product_ids: set[int], lookback_days: int) -> set[int]:
+    if not product_ids:
+        return set()
+    start_date = reference_date - timedelta(days=lookback_days)
+    return set(
+        PointDailySale.objects.filter(
+            receta_id__in=product_ids,
+            sale_date__gte=start_date,
+            sale_date__lt=reference_date,
+            quantity__gt=0,
+        )
+        .values_list("receta_id", flat=True)
+        .distinct()
+    )
+
+
+def _historical_point_price_map(*, reference_date: date, product_ids: set[int]) -> dict[int, Decimal]:
+    if not product_ids:
+        return {}
+    start_date = reference_date - timedelta(days=EVENTO_PRODUCCION_PRICE_LOOKBACK_DAYS)
+    price_samples: dict[int, list[Decimal]] = {}
+    rows = (
+        PointDailySale.objects.filter(
+            receta_id__in=product_ids,
+            sale_date__gte=start_date,
+            sale_date__lt=reference_date,
+            quantity__gt=0,
+            net_amount__gt=0,
+        )
+        .values_list("receta_id", "quantity", "net_amount")
+        .iterator()
+    )
+    for receta_id, quantity, net_amount in rows:
+        qty = Decimal(str(quantity or 0))
+        amount = Decimal(str(net_amount or 0))
+        if qty <= 0 or amount <= 0:
+            continue
+        price_samples.setdefault(int(receta_id), []).append(amount / qty)
+
+    prices: dict[int, Decimal] = {}
+    for product_id, samples in price_samples.items():
+        ordered = sorted(samples)
+        midpoint = len(ordered) // 2
+        if len(ordered) % 2:
+            prices[product_id] = ordered[midpoint]
+        else:
+            prices[product_id] = (ordered[midpoint - 1] + ordered[midpoint]) / Decimal("2")
+    return prices
+
+
+def _event_production_price_map(*, reference_date: date, product_ids: set[int]) -> dict[int, Decimal]:
+    price_map = _point_price_map_by_recipe_code(product_ids)
+    unresolved_ids = {product_id for product_id, price in price_map.items() if Decimal(str(price or 0)) <= 0}
+    for product_id, price in _historical_point_price_map(reference_date=reference_date, product_ids=unresolved_ids).items():
+        if price > 0:
+            price_map[product_id] = price
+    return price_map
+
+
 def _money(value: Decimal) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"))
 
@@ -750,14 +812,35 @@ def _qty(value: Decimal) -> Decimal:
 def _build_event_production_dashboard(event: EventoVenta) -> dict:
     start_date, end_date = _event_production_window(event)
     forecast_dates = [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
+    reference_date = timezone.localdate()
     scoped_qs = _event_forecast_qs(event).filter(forecast_date__in=forecast_dates)
+    product_totals = {
+        int(row["product_id"]): Decimal(str(row["total_qty"] or 0))
+        for row in scoped_qs.values("product_id").annotate(total_qty=Sum("final_forecast"))
+    }
+    candidate_product_ids = {
+        product_id
+        for product_id, total_qty in product_totals.items()
+        if total_qty >= EVENTO_PRODUCCION_MIN_QTY
+    }
+    recent_product_ids = _recent_point_sale_product_ids(
+        reference_date=reference_date,
+        product_ids=candidate_product_ids,
+        lookback_days=EVENTO_PRODUCCION_RECENT_ACTIVITY_DAYS,
+    )
+    price_map = _event_production_price_map(reference_date=reference_date, product_ids=recent_product_ids)
+    eligible_product_ids = {
+        product_id
+        for product_id in recent_product_ids
+        if Decimal(str(price_map.get(product_id) or 0)) > 0
+    }
     raw_rows = list(
-        scoped_qs.values("product_id", "product__nombre", "forecast_date")
+        scoped_qs.filter(product_id__in=eligible_product_ids)
+        .values("product_id", "product__nombre", "forecast_date")
         .annotate(total_qty=Sum("final_forecast"))
         .filter(total_qty__gt=0)
         .order_by("forecast_date", "-total_qty", "product__nombre")
     )
-    price_map = _point_price_map_by_recipe_code({int(row["product_id"]) for row in raw_rows if row.get("product_id")})
 
     by_day: dict[date, dict] = {
         forecast_date: {
