@@ -63,7 +63,7 @@ from pos_bridge.models import (
     PointDailyBranchIndicator,
     PointExtractionLog,
     PointSalesDailyCategoryFact,
-    PointSalesDailyProductFact,
+    PointDailySale,
     PointSyncJob,
 )
 from pos_bridge.config import load_point_bridge_settings
@@ -906,7 +906,7 @@ def _canonical_sales_history_summary(source: dict[str, object]) -> dict[str, obj
 
     authoritative_first = VentaAutoritativaPoint.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
     v2_category_first = PointSalesDailyCategoryFact.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
-    v2_product_first = PointSalesDailyProductFact.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
+    v2_product_first = PointDailySale.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
     start_candidates = [value for value in [authoritative_first, v2_category_first, v2_product_first] if value]
     if not start_candidates:
         return None
@@ -930,13 +930,13 @@ def _canonical_sales_history_summary(source: dict[str, object]) -> dict[str, obj
         top_recipes = list(rows_qs.values("product__nombre", "point_name").annotate(total=Sum("quantity")).order_by("-total", "product__nombre", "point_name")[:5])
     else:
         category_qs = PointSalesDailyCategoryFact.objects.all()
-        product_qs = PointSalesDailyProductFact.objects.all()
+        product_qs = PointDailySale.objects.all()
         total_rows = category_qs.count()
         first_date = category_qs.order_by("sale_date").values_list("sale_date", flat=True).first()
         last_date = category_qs.order_by("-sale_date").values_list("sale_date", flat=True).first()
         recipe_count = product_qs.exclude(receta_id__isnull=True).values_list("receta_id", flat=True).distinct().count() if product_qs.exists() else 0
         top_branches = list(category_qs.values("branch__erp_branch__codigo", "branch__erp_branch__nombre").annotate(total=Sum("total_cantidad")).order_by("-total", "branch__erp_branch__codigo")[:4])
-        top_recipes = list(product_qs.values("receta__nombre", "producto_nombre_historico").annotate(total=Sum("total_cantidad")).order_by("-total", "receta__nombre", "producto_nombre_historico")[:5]) if product_qs.exists() else []
+        top_recipes = list(product_qs.values("receta__nombre", "product__name").annotate(total=Sum("quantity")).order_by("-total", "receta__nombre", "product__name")[:5]) if product_qs.exists() else []
 
     active_days = int(selected.get("coverage_days") or 0)
     branch_count = int(selected.get("coverage_branches") or 0)

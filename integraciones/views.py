@@ -25,7 +25,6 @@ from pos_bridge.models import (
     PointDailySale,
     PointInventorySnapshot,
     PointProductionLine,
-    PointSalesDailyProductFact,
     PointSalesQualityAlert,
     PointSyncJob,
     PointTransferLine,
@@ -189,7 +188,6 @@ def _build_monitor_quick_links() -> list[dict[str, str]]:
 
 def _build_sales_monitor_cards(*, reference_date: date) -> list[dict[str, object]]:
     latest_point_daily_sale = PointDailySale.objects.order_by("-sale_date").values_list("sale_date", flat=True).first()
-    latest_v2_product = PointSalesDailyProductFact.objects.order_by("-sale_date").values_list("sale_date", flat=True).first()
     latest_authoritative = VentaAutoritativaPoint.objects.order_by("-sale_date").values_list("sale_date", flat=True).first()
     latest_fact = FactVentaDiaria.objects.order_by("-fecha").values_list("fecha", flat=True).first()
     dashboard_dataset = get_dashboard_sales_dataset(months=6)
@@ -205,14 +203,6 @@ def _build_sales_monitor_cards(*, reference_date: date) -> list[dict[str, object
             "latest_date": latest_point_daily_sale,
             "latest_generated_at": PointDailySale.objects.order_by("-updated_at").values_list("updated_at", flat=True).first(),
             "extra": f"{PointDailySale.objects.filter(sale_date=latest_point_daily_sale).count()} filas" if latest_point_daily_sale else "Sin filas",
-        },
-        {
-            "key": "point_sales_v2",
-            "label": "PointSalesDailyProductFact",
-            "detail": "Fact v2 por producto",
-            "latest_date": latest_v2_product,
-            "latest_generated_at": PointSalesDailyProductFact.objects.order_by("-updated_at").values_list("updated_at", flat=True).first(),
-            "extra": f"{PointSalesDailyProductFact.objects.filter(sale_date=latest_v2_product).count()} filas" if latest_v2_product else "Sin filas",
         },
         {
             "key": "authoritative_sales",

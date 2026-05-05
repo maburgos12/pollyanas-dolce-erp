@@ -65,7 +65,7 @@ from crm.models import PedidoCliente
 from control.models import VentaPOS, MermaPOS
 from rrhh.models import Empleado, NominaPeriodo
 from logistica.models import RutaEntrega, EntregaRuta
-from pos_bridge.models import PointDailyBranchIndicator, PointSalesDailyCategoryFact, PointSalesDailyProductFact
+from pos_bridge.models import PointDailyBranchIndicator, PointDailySale, PointSalesDailyCategoryFact
 from reportes.dashboard_daily_ops_dataset import get_dashboard_daily_ops_dataset
 from reportes.dashboard_full_dataset import (
     get_materialized_dashboard_full_payload,
@@ -1384,7 +1384,7 @@ def _canonical_dashboard_sales_history_summary(source: dict[str, object]) -> dic
 
     authoritative_first = VentaAutoritativaPoint.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
     v2_category_first = PointSalesDailyCategoryFact.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
-    v2_product_first = PointSalesDailyProductFact.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
+    v2_product_first = PointDailySale.objects.order_by("sale_date").values_list("sale_date", flat=True).first()
     start_candidates = [value for value in [authoritative_first, v2_category_first, v2_product_first] if value]
     if not start_candidates:
         return None
@@ -1416,7 +1416,7 @@ def _canonical_dashboard_sales_history_summary(source: dict[str, object]) -> dic
         )
     else:
         category_qs = PointSalesDailyCategoryFact.objects.all()
-        product_qs = PointSalesDailyProductFact.objects.all()
+        product_qs = PointDailySale.objects.all()
         total_rows = category_qs.count()
         first_date = category_qs.order_by("sale_date").values_list("sale_date", flat=True).first()
         last_date = category_qs.order_by("-sale_date").values_list("sale_date", flat=True).first()
@@ -1432,9 +1432,9 @@ def _canonical_dashboard_sales_history_summary(source: dict[str, object]) -> dic
         )
         top_recipes = (
             list(
-                product_qs.values("receta__nombre", "producto_nombre_historico")
-                .annotate(total=Sum("total_cantidad"))
-                .order_by("-total", "receta__nombre", "producto_nombre_historico")[:5]
+                product_qs.values("receta__nombre", "product__name")
+                .annotate(total=Sum("quantity"))
+                .order_by("-total", "receta__nombre", "product__name")[:5]
             )
             if product_qs.exists()
             else []

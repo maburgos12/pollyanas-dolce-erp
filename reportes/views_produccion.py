@@ -17,7 +17,7 @@ from django.views.generic import TemplateView
 
 from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
-from pos_bridge.models import PointConversionLine, PointDailySale, PointProductionLine, PointSalesDailyProductFact
+from pos_bridge.models import PointConversionLine, PointDailySale, PointProductionLine
 from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta, RecetaEquivalencia
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import FactProduccionDiaria
@@ -80,7 +80,7 @@ def _aggregate_by_recipe(queryset, field_name: str, recipe_field: str = "receta_
 
 def _first_available_date() -> dict[str, date | None]:
     return {
-        "ventas": PointSalesDailyProductFact.objects.aggregate(min_date=Min("sale_date"))["min_date"],
+        "ventas": PointDailySale.objects.aggregate(min_date=Min("sale_date"))["min_date"],
         "produccion": FactProduccionDiaria.objects.aggregate(min_date=Min("fecha"))["min_date"]
         or PointProductionLine.objects.aggregate(min_date=Min("production_date"))["min_date"],
         "merma": MermaMensualSucursal.objects.aggregate(min_date=Min("periodo"))["min_date"],
