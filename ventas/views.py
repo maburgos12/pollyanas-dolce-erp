@@ -34,6 +34,7 @@ from openpyxl.utils import get_column_letter
 from core.access import can_view_rentabilidad, has_any_role, ROLE_DG, ROLE_ADMIN, ROLE_PRODUCCION, ROLE_COMPRAS
 from core.branch_catalog import EXCLUDED_BRANCH_CODES, POINT_MATURE_BRANCH_CODES, eligible_sales_event_branch_qs
 from core.models import Sucursal
+from inventario.models import ExistenciaInsumo
 from maestros.models import Insumo
 from pos_bridge.models import PointDailySale, PointProduct
 from recetas.models import LineaReceta, Receta
@@ -55,6 +56,7 @@ from ventas.models import (
     EventoVentaNotification,
     EventoVentaProjectionArtifact,
     EventoVentaProductionLine,
+    EventoVentaProductionPlan,
     EventoVentaPurchaseRequirement,
     EventoVentaProducto,
     EventoVentaSucursal,
@@ -2630,6 +2632,134 @@ def _approval_traceability_dataset(event: EventoVenta) -> dict:
     }
 
 
+def _event_export_window(event: EventoVenta) -> tuple[date, date]:
+    start = getattr(event, "fecha_inicio", None) or event.analysis_start_date
+    end = getattr(event, "fecha_fin", None) or event.analysis_end_date
+    if start and end:
+        return start, end
+    return _event_projection_window(event)
+
+
+def _date_columns(start_date: date, end_date: date) -> list[date]:
+    dates: list[date] = []
+    current = start_date
+    while current <= end_date:
+        dates.append(current)
+        current += timedelta(days=1)
+    return dates
+
+
+def _event_detail_workflow_context(request, event: EventoVenta) -> dict:
+    active_adjustment_draft = _active_adjustment_draft(event)
+    latest_finalized_draft = (
+        event.adjustment_drafts.filter(status=EventoVentaAdjustmentDraft.STATUS_FINALIZED)
+        .order_by("-finalized_at", "-updated_at")
+        .first()
+    )
+    return {
+        "active_adjustment_draft": active_adjustment_draft,
+        "latest_finalized_draft": latest_finalized_draft,
+        "workflow_state": _event_forecast_version_label(
+            event,
+            active_adjustment_draft=active_adjustment_draft,
+            latest_finalized_draft=latest_finalized_draft,
+        ),
+        "event_ready_for_operations": _event_ready_for_operations(event),
+        "can_manage": _can_manage_events(request.user),
+        "can_approve": _can_approve_events(request.user),
+        "can_manage_capacity": _can_manage_capacity(request.user),
+        "can_view_production_dashboard": _can_view_event_production_dashboard(request.user),
+    }
+
+
+def _event_detail_light_payload(event: EventoVenta) -> dict:
+    forecast_qs = _event_forecast_qs(event)
+    week_forecast_qs = _week_scope_qs(event, forecast_qs)
+    week_start, week_end = _event_projection_window(event)
+    executive_dataset = _event_financial_dataset(
+        event,
+        forecast_qs,
+        start_date=week_start,
+        end_date=week_end,
+    )
+    focused_financial = (
+        _focused_financial_row(event)
+        if executive_dataset["financial_trusted"]
+        else None
+    )
+    main_day_row = next(
+        (
+            row
+            for row in executive_dataset.get("daily_rows", [])
+            if str(row.get("date") or "") == event.main_date.isoformat()
+        ),
+        None,
+    )
+    week_product_projection = _product_projection_rows(week_forecast_qs)
+    return {
+        "week_total_qty": week_forecast_qs.aggregate(total=Sum("final_forecast")).get("total") or 0,
+        "main_day_total_qty": (
+            forecast_qs.filter(forecast_date=event.main_date)
+            .aggregate(total=Sum("final_forecast"))
+            .get("total")
+            or 0
+        ),
+        "week_projected_revenue": (
+            executive_dataset["summary"]["sales"]
+            if executive_dataset["financial_trusted"]
+            else None
+        ),
+        "main_day_projected_revenue": (
+            (main_day_row or {}).get("sales") or 0
+            if executive_dataset["financial_trusted"]
+            else None
+        ),
+        "week_branch_breakdown": _branch_projection_rows(week_forecast_qs),
+        "week_product_projection": week_product_projection,
+        "week_scope_label": _week_scope_label(event),
+        "week_trend_note": _projection_trend_note(
+            week_product_projection,
+            label="la semana del evento",
+        ),
+        "executive_dataset": executive_dataset,
+        "focused_financial": focused_financial,
+        "considered_product_count": week_forecast_qs.values("product_id").distinct().count(),
+        "input_investment_required": _input_investment_amount(event),
+        "production_summary": {
+            "production_lines": event.production_plans.aggregate(total=Count("lines")).get("total") or 0,
+        },
+    }
+
+
+def _event_detail_snapshot_context(event: EventoVenta, request, *, detail_source_value: str = "") -> dict:
+    from ventas.services.event_detail_snapshot import get_event_detail_snapshot_payload
+
+    snapshot_payload = get_event_detail_snapshot_payload(event, generated_by=request.user)
+    detail_source = _event_detail_source_filter(detail_source_value)
+    week_product_projection = list(snapshot_payload.get("week_product_projection", []))
+    if detail_source:
+        week_product_projection = _filter_week_product_projection(week_product_projection, detail_source[0])
+    return {
+        "branches": _event_branch_links(event),
+        "considered_product_count": snapshot_payload.get("considered_product_count", 0),
+        "week_total_qty": snapshot_payload.get("week_total_qty", 0),
+        "main_day_total_qty": snapshot_payload.get("main_day_total_qty", 0),
+        "week_projected_revenue": snapshot_payload.get("week_projected_revenue"),
+        "main_day_projected_revenue": snapshot_payload.get("main_day_projected_revenue"),
+        "input_investment_required": snapshot_payload.get("input_investment_required", 0),
+        "week_branch_breakdown": snapshot_payload.get("week_branch_breakdown", []),
+        "week_product_projection": week_product_projection,
+        "week_scope_label": snapshot_payload.get("week_scope_label") or _week_scope_label(event),
+        "week_trend_note": snapshot_payload.get("week_trend_note", ""),
+        "executive_dataset": snapshot_payload.get("executive_dataset", {}),
+        "focused_financial": snapshot_payload.get("focused_financial"),
+        "production_dataset": snapshot_payload.get("production_dataset", {}),
+        "purchase_summary": snapshot_payload.get("purchase_summary", {}),
+        "detail_source_filter": detail_source[0] if detail_source else "",
+        "detail_source_filter_label": detail_source[1] if detail_source else "",
+    }
+
+
 def _branch_product_day_projection_sheets(event: EventoVenta, forecast_qs, *, start_date: date, end_date: date):
     branch_codes = [link.branch.codigo for link in _event_branch_links(event)]
     date_columns: list[date] = []
@@ -3368,6 +3498,343 @@ def _build_executive_dashboard_workbook_file(event: EventoVenta) -> tuple[str, b
     workbook.save(output)
     output.seek(0)
     filename = f"ventas_evento_{event.code.lower()}_dashboard_{week_start}_{week_end}.xlsx"
+    return filename, output.getvalue()
+
+
+def _style_operational_export_sheet(ws, *, max_column: int, data_start_row: int = 1, money_columns: tuple[int, ...] = ()) -> None:
+    brand_fill = PatternFill("solid", fgColor="7B1A48")
+    subtotal_fill = PatternFill("solid", fgColor="7B1A48")
+    soft_fill = PatternFill("solid", fgColor="F8E6EE")
+    white_font = Font(color="FFFFFF", bold=True)
+    header_font = Font(color="FFFFFF", bold=True)
+    thin_border = Border(bottom=Side(style="thin", color="E5CED8"))
+    for cell in ws[data_start_row]:
+        cell.fill = brand_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+    for row in ws.iter_rows(min_row=data_start_row + 1, max_row=ws.max_row, max_col=max_column):
+        first_value = str(row[0].value or "")
+        is_subtotal = first_value.startswith("Subtotal ") or first_value == "Total general"
+        for cell in row:
+            cell.border = thin_border
+            if is_subtotal:
+                cell.fill = subtotal_fill
+                cell.font = white_font
+            elif cell.row % 2 == 0:
+                cell.fill = soft_fill
+            if cell.column in money_columns:
+                cell.number_format = '$#,##0.00'
+            elif isinstance(cell.value, (int, float)):
+                cell.number_format = '#,##0'
+    ws.freeze_panes = f"A{data_start_row + 1}"
+    ws.auto_filter.ref = f"A{data_start_row}:{get_column_letter(max_column)}{ws.max_row}"
+
+
+def _event_unit_price_map(event: EventoVenta, product_ids: set[int], branch_ids: set[int], start_date: date, end_date: date) -> dict[tuple[int, int], Decimal]:
+    if not product_ids or not branch_ids:
+        return {}
+    commercial_context = build_commercial_recipe_lookup_context(product_ids)
+    return resolve_unit_prices_bulk(
+        product_ids,
+        start_date,
+        end_date,
+        branch_ids=branch_ids,
+        commercial_context=commercial_context,
+    )
+
+
+def _build_event_production_export_rows(event: EventoVenta):
+    start_date, end_date = _event_export_window(event)
+    date_columns = _date_columns(start_date, end_date)
+    branch_links = list(_event_branch_links(event))
+    branch_map = {link.branch_id: link.branch for link in branch_links}
+    branch_ids = set(branch_map)
+    by_branch_product: dict[tuple[int, int], dict[date, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+
+    branch_line_count = EventoVentaProductionLine.objects.filter(
+        production_plan__sales_event=event,
+        branch_id__in=branch_ids,
+    ).count()
+    plan_count = EventoVentaProductionPlan.objects.filter(sales_event=event).count()
+    if plan_count and branch_line_count:
+        lines = (
+            EventoVentaProductionLine.objects.filter(
+                production_plan__sales_event=event,
+                branch_id__in=branch_ids,
+            )
+            .select_related("production_plan", "product", "branch")
+            .order_by("branch__codigo", "product__familia", "product__nombre")
+        )
+        for line in lines:
+            day = line.production_day or line.production_plan.plan_date
+            if day < start_date or day > end_date:
+                continue
+            qty = Decimal(str(line.planned_qty or line.net_qty_to_produce or line.required_qty or 0))
+            if qty <= 0:
+                continue
+            by_branch_product[(int(line.branch_id), int(line.product_id))][day] += qty
+    else:
+        forecast_rows = (
+            _event_forecast_qs(event)
+            .filter(forecast_date__range=(start_date, end_date), branch_id__in=branch_ids)
+            .values(
+                "branch_id",
+                "product_id",
+                "forecast_date",
+            )
+            .annotate(total=Sum("final_forecast"))
+        )
+        for row in forecast_rows:
+            qty = Decimal(str(row.get("total") or 0))
+            if qty <= 0:
+                continue
+            by_branch_product[(int(row["branch_id"]), int(row["product_id"]))][row["forecast_date"]] += qty
+
+    product_ids = {product_id for _branch_id, product_id in by_branch_product}
+    products = {
+        product.id: product
+        for product in Receta.objects.filter(id__in=product_ids).only("id", "nombre", "familia", "categoria")
+    }
+    prices = _event_unit_price_map(event, product_ids, branch_ids, start_date, end_date)
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "date_columns": date_columns,
+        "branches": branch_links,
+        "branch_map": branch_map,
+        "by_branch_product": by_branch_product,
+        "products": products,
+        "prices": prices,
+    }
+
+
+def _append_event_production_summary_sheet(ws, payload: dict) -> None:
+    by_product: dict[int, dict] = {}
+    for (branch_id, product_id), day_values in payload["by_branch_product"].items():
+        total_qty = sum(day_values.values(), Decimal("0"))
+        if total_qty <= 0:
+            continue
+        product = payload["products"].get(product_id)
+        price = payload["prices"].get((product_id, branch_id), Decimal("0"))
+        row = by_product.setdefault(
+            product_id,
+            {
+                "family": getattr(product, "familia", "") or "Sin familia",
+                "product": getattr(product, "nombre", "") or "",
+                "qty": Decimal("0"),
+                "revenue": Decimal("0"),
+            },
+        )
+        row["qty"] += total_qty
+        row["revenue"] += total_qty * price
+
+    ws.append(["Familia", "Producto", "Total piezas", "Precio", "Ingreso proyectado"])
+    total_qty = Decimal("0")
+    total_revenue = Decimal("0")
+    for row in sorted(by_product.values(), key=lambda item: (item["family"], -item["qty"], item["product"])):
+        avg_price = row["revenue"] / row["qty"] if row["qty"] > 0 else Decimal("0")
+        ws.append([row["family"], row["product"], float(row["qty"]), float(avg_price), float(row["revenue"])])
+        total_qty += row["qty"]
+        total_revenue += row["revenue"]
+    ws.append(["Total general", "", float(total_qty), "", float(total_revenue)])
+    _style_operational_export_sheet(ws, max_column=5, data_start_row=1, money_columns=(4, 5))
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 42
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 20
+
+
+def _append_event_production_branch_sheet(ws, branch_id: int, payload: dict) -> None:
+    date_columns = payload["date_columns"]
+    headers = ["Familia", "Producto", *[f"QTY {day.strftime('%Y-%m-%d')}" for day in date_columns], "QTY Total"]
+    ws.append(headers)
+    rows: list[dict] = []
+    for (row_branch_id, product_id), day_values in payload["by_branch_product"].items():
+        if row_branch_id != branch_id:
+            continue
+        product = payload["products"].get(product_id)
+        total_qty = sum(day_values.values(), Decimal("0"))
+        if total_qty <= 0:
+            continue
+        rows.append(
+            {
+                "family": getattr(product, "familia", "") or "Sin familia",
+                "product": getattr(product, "nombre", "") or "",
+                "day_values": day_values,
+                "total": total_qty,
+            }
+        )
+    grand_total = Decimal("0")
+    for family in sorted({row["family"] for row in rows}):
+        family_rows = sorted(
+            [row for row in rows if row["family"] == family],
+            key=lambda item: (-item["total"], item["product"]),
+        )
+        family_totals = {
+            day: sum((row["day_values"].get(day, Decimal("0")) for row in family_rows), Decimal("0"))
+            for day in date_columns
+        }
+        family_total = sum(family_totals.values(), Decimal("0"))
+        ws.append([f"Subtotal {family}", "", *[float(family_totals[day]) for day in date_columns], float(family_total)])
+        for row in family_rows:
+            ws.append([row["family"], row["product"], *[float(row["day_values"].get(day, 0)) for day in date_columns], float(row["total"])])
+        grand_total += family_total
+    day_totals = [
+        sum((day_values.get(day, Decimal("0")) for (_branch_id, _product_id), day_values in payload["by_branch_product"].items() if _branch_id == branch_id), Decimal("0"))
+        for day in date_columns
+    ]
+    ws.append(["Total general", "", *[float(total) for total in day_totals], float(grand_total)])
+    max_column = 3 + len(date_columns)
+    _style_operational_export_sheet(ws, max_column=max_column, data_start_row=1)
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 42
+    for idx in range(3, max_column + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = 14
+
+
+def _build_event_production_workbook_file(event: EventoVenta) -> tuple[str, bytes]:
+    payload = _build_event_production_export_rows(event)
+    workbook = Workbook()
+    ws_summary = workbook.active
+    ws_summary.title = "Resumen"
+    _append_event_production_summary_sheet(ws_summary, payload)
+    for link in payload["branches"]:
+        branch_ws = workbook.create_sheet(_safe_sheet_title(link.branch.codigo))
+        _append_event_production_branch_sheet(branch_ws, link.branch_id, payload)
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    filename = f"ventas_evento_{event.code.lower()}_produccion_{payload['start_date']}_{payload['end_date']}.xlsx"
+    return filename, output.getvalue()
+
+
+def _build_input_requirement_export_payload(event: EventoVenta):
+    input_rows: dict[int, dict] = {}
+    branch_matrix: dict[int, dict[int, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+    requirements = list(
+        event.input_requirements.select_related("input_item__unidad_base", "input_item__proveedor_principal")
+        .order_by("-required_qty", "input_item__nombre")
+    )
+    if requirements:
+        for req in requirements:
+            input_item = req.input_item
+            input_rows[input_item.id] = {
+                "input_item": input_item,
+                "required_qty": Decimal(str(req.required_qty or 0)),
+                "stock_actual": Decimal(str(req.on_hand_qty or 0)),
+                "difference": Decimal(str(req.net_shortage_qty or 0)),
+            }
+        return input_rows, branch_matrix
+
+    start_date, end_date = _event_export_window(event)
+    forecast_rows = (
+        _event_forecast_qs(event)
+        .filter(forecast_date__range=(start_date, end_date))
+        .values("branch_id", "product_id")
+        .annotate(total=Sum("final_forecast"))
+    )
+    product_qty_by_branch: dict[tuple[int, int], Decimal] = {}
+    product_ids: set[int] = set()
+    branch_ids: set[int] = set()
+    for row in forecast_rows:
+        qty = Decimal(str(row.get("total") or 0))
+        if qty <= 0:
+            continue
+        product_ids.add(int(row["product_id"]))
+        branch_ids.add(int(row["branch_id"]))
+        product_qty_by_branch[(int(row["branch_id"]), int(row["product_id"]))] = qty
+    recipe_lines = (
+        LineaReceta.objects.filter(
+            receta_id__in=product_ids,
+            insumo_id__isnull=False,
+        )
+        .exclude(tipo_linea=LineaReceta.TIPO_SUBSECCION)
+        .select_related("insumo__unidad_base", "insumo__proveedor_principal")
+    )
+    lines_by_recipe: dict[int, list[LineaReceta]] = defaultdict(list)
+    for line in recipe_lines:
+        lines_by_recipe[int(line.receta_id)].append(line)
+    stock_map = {
+        row.insumo_id: Decimal(str(row.stock_actual or 0))
+        for row in ExistenciaInsumo.objects.filter(
+            insumo_id__in={line.insumo_id for line in recipe_lines}
+        )
+    }
+    for (branch_id, product_id), product_qty in product_qty_by_branch.items():
+        for line in lines_by_recipe.get(product_id, []):
+            line_qty = Decimal(str(line.cantidad or 0))
+            if line_qty <= 0:
+                continue
+            required_qty = product_qty * line_qty
+            input_item = line.insumo
+            row = input_rows.setdefault(
+                input_item.id,
+                {
+                    "input_item": input_item,
+                    "required_qty": Decimal("0"),
+                    "stock_actual": stock_map.get(input_item.id, Decimal("0")),
+                    "difference": Decimal("0"),
+                },
+            )
+            row["required_qty"] += required_qty
+            branch_matrix[input_item.id][branch_id] += required_qty
+    for row in input_rows.values():
+        row["difference"] = row["required_qty"] - row["stock_actual"]
+    return input_rows, branch_matrix
+
+
+def _build_event_inputs_workbook_file(event: EventoVenta) -> tuple[str, bytes]:
+    input_rows, branch_matrix = _build_input_requirement_export_payload(event)
+    branch_links = list(_event_branch_links(event))
+    workbook = Workbook()
+    ws_total = workbook.active
+    ws_total.title = "Insumos totales"
+    ws_total.append(["Insumo", "Unidad", "Cantidad requerida", "Stock actual", "Diferencia", "Proveedor"])
+    for row in sorted(input_rows.values(), key=lambda item: (-item["required_qty"], item["input_item"].nombre)):
+        input_item = row["input_item"]
+        ws_total.append(
+            [
+                input_item.nombre,
+                input_item.unidad_base.codigo if input_item.unidad_base_id else "",
+                float(row["required_qty"]),
+                float(row["stock_actual"]),
+                float(row["difference"]),
+                input_item.proveedor_principal.nombre if input_item.proveedor_principal_id else "Por definir",
+            ]
+        )
+    _style_operational_export_sheet(ws_total, max_column=6, data_start_row=1)
+    ws_total.column_dimensions["A"].width = 42
+    ws_total.column_dimensions["B"].width = 12
+    ws_total.column_dimensions["C"].width = 20
+    ws_total.column_dimensions["D"].width = 16
+    ws_total.column_dimensions["E"].width = 16
+    ws_total.column_dimensions["F"].width = 28
+
+    ws_branch = workbook.create_sheet("Por sucursal")
+    branch_headers = [link.branch.codigo for link in branch_links]
+    ws_branch.append(["Insumo", "Unidad", "Total", *branch_headers])
+    for input_id, row in sorted(input_rows.items(), key=lambda item: (-item[1]["required_qty"], item[1]["input_item"].nombre)):
+        input_item = row["input_item"]
+        ws_branch.append(
+            [
+                input_item.nombre,
+                input_item.unidad_base.codigo if input_item.unidad_base_id else "",
+                float(row["required_qty"]),
+                *[float(branch_matrix.get(input_id, {}).get(link.branch_id, Decimal("0"))) for link in branch_links],
+            ]
+        )
+    _style_operational_export_sheet(ws_branch, max_column=3 + len(branch_headers), data_start_row=1)
+    ws_branch.column_dimensions["A"].width = 42
+    ws_branch.column_dimensions["B"].width = 12
+    ws_branch.column_dimensions["C"].width = 16
+    for idx in range(4, 4 + len(branch_headers)):
+        ws_branch.column_dimensions[get_column_letter(idx)].width = 14
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    filename = f"ventas_evento_{event.code.lower()}_insumos.xlsx"
     return filename, output.getvalue()
 
 
@@ -4178,58 +4645,99 @@ def evento_detail(request, event_id: int):
         raise PermissionDenied("No tienes permisos para ver eventos comerciales.")
 
     event = get_object_or_404(EventoVenta, pk=event_id)
-    from ventas.services.event_detail_snapshot import get_event_detail_snapshot_payload
 
-    snapshot_payload = get_event_detail_snapshot_payload(event, generated_by=request.user)
     branches = _event_branch_links(event)
-    active_adjustment_draft = _active_adjustment_draft(event)
-    latest_finalized_draft = (
-        event.adjustment_drafts.filter(status=EventoVentaAdjustmentDraft.STATUS_FINALIZED)
-        .order_by("-finalized_at", "-updated_at")
-        .first()
-    )
-    traceability_dataset = _approval_traceability_dataset(event)
-    workflow_state = _event_forecast_version_label(
-        event,
-        active_adjustment_draft=active_adjustment_draft,
-        latest_finalized_draft=latest_finalized_draft,
-    )
+    workflow_context = _event_detail_workflow_context(request, event)
+    light_payload = _event_detail_light_payload(event)
     detail_source = _event_detail_source_filter(request.GET.get("detail_source"))
-    week_product_projection = list(snapshot_payload.get("week_product_projection", []))
+    week_product_projection = list(light_payload.get("week_product_projection", []))
     if detail_source:
         week_product_projection = _filter_week_product_projection(week_product_projection, detail_source[0])
     context = {
         "event": event,
         "branches": branches,
-        "considered_product_count": snapshot_payload.get("considered_product_count", 0),
-        "week_total_qty": snapshot_payload.get("week_total_qty", 0),
-        "main_day_total_qty": snapshot_payload.get("main_day_total_qty", 0),
-        "week_projected_revenue": snapshot_payload.get("week_projected_revenue"),
-        "main_day_projected_revenue": snapshot_payload.get("main_day_projected_revenue"),
-        "input_investment_required": snapshot_payload.get("input_investment_required", 0),
-        "week_branch_breakdown": snapshot_payload.get("week_branch_breakdown", []),
+        "considered_product_count": light_payload.get("considered_product_count", 0),
+        "week_total_qty": light_payload.get("week_total_qty", 0),
+        "main_day_total_qty": light_payload.get("main_day_total_qty", 0),
+        "week_projected_revenue": light_payload.get("week_projected_revenue"),
+        "main_day_projected_revenue": light_payload.get("main_day_projected_revenue"),
+        "input_investment_required": light_payload.get("input_investment_required", 0),
+        "week_branch_breakdown": light_payload.get("week_branch_breakdown", []),
         "week_product_projection": week_product_projection,
-        "week_scope_label": snapshot_payload.get("week_scope_label") or _week_scope_label(event),
-        "week_trend_note": snapshot_payload.get("week_trend_note", ""),
+        "week_scope_label": light_payload.get("week_scope_label") or _week_scope_label(event),
+        "week_trend_note": light_payload.get("week_trend_note", ""),
         "projection_artifacts": _latest_projection_artifacts(event),
         "adjustments": event.adjustments.select_related("product", "branch", "adjusted_by")[:20],
-        "active_adjustment_draft": active_adjustment_draft,
-        "latest_finalized_draft": latest_finalized_draft,
-        "workflow_state": workflow_state,
-        "executive_dataset": snapshot_payload.get("executive_dataset", {}),
-        "focused_financial": snapshot_payload.get("focused_financial"),
-        "production_dataset": snapshot_payload.get("production_dataset", {}),
-        "purchase_summary": snapshot_payload.get("purchase_summary", {}),
-        "traceability_dataset": traceability_dataset,
-        "event_ready_for_operations": _event_ready_for_operations(event),
-        "can_manage": _can_manage_events(request.user),
-        "can_approve": _can_approve_events(request.user),
-        "can_manage_capacity": _can_manage_capacity(request.user),
-        "can_view_production_dashboard": _can_view_event_production_dashboard(request.user),
+        "executive_dataset": light_payload.get("executive_dataset", {}),
+        "focused_financial": light_payload.get("focused_financial"),
+        "production_summary": light_payload.get("production_summary", {}),
         "detail_source_filter": detail_source[0] if detail_source else "",
         "detail_source_filter_label": detail_source[1] if detail_source else "",
     }
+    context.update(workflow_context)
     return render(request, "ventas/eventos_detail.html", context)
+
+
+class _EventoDetailTabView(LoginRequiredMixin, View):
+    template_name = ""
+
+    def dispatch(self, request, *args, **kwargs):
+        if not _can_view_events(request.user):
+            raise PermissionDenied("No tienes permisos para ver eventos comerciales.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_event(self):
+        return get_object_or_404(EventoVenta, pk=self.kwargs["event_id"])
+
+    def get_context_data(self, request, event: EventoVenta) -> dict:
+        return {"event": event}
+
+    def get(self, request, event_id: int):
+        event = self.get_event()
+        context = self.get_context_data(request, event)
+        context.update(_event_detail_workflow_context(request, event))
+        return render(request, self.template_name, context)
+
+
+class EventoTabProyeccionView(_EventoDetailTabView):
+    template_name = "ventas/partials/evento_tab_proyeccion.html"
+
+    def get_context_data(self, request, event: EventoVenta) -> dict:
+        context = _event_detail_snapshot_context(
+            event,
+            request,
+            detail_source_value=request.GET.get("detail_source", ""),
+        )
+        context["event"] = event
+        return context
+
+
+class EventoTabProduccionView(_EventoDetailTabView):
+    template_name = "ventas/partials/evento_tab_produccion.html"
+
+    def get_context_data(self, request, event: EventoVenta) -> dict:
+        context = _event_detail_snapshot_context(event, request)
+        context["event"] = event
+        return context
+
+
+class EventoTabInsumosView(_EventoDetailTabView):
+    template_name = "ventas/partials/evento_tab_insumos.html"
+
+    def get_context_data(self, request, event: EventoVenta) -> dict:
+        context = _event_detail_snapshot_context(event, request)
+        context["event"] = event
+        return context
+
+
+class EventoTabTrazabilidadView(_EventoDetailTabView):
+    template_name = "ventas/partials/evento_tab_trazabilidad.html"
+
+    def get_context_data(self, request, event: EventoVenta) -> dict:
+        return {
+            "event": event,
+            "traceability_dataset": _approval_traceability_dataset(event),
+        }
 
 
 class EventoProduccionView(LoginRequiredMixin, View):
@@ -4287,6 +4795,34 @@ def evento_export_executive_dashboard(request, event_id: int):
     )
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+class EventoExportProduccionView(LoginRequiredMixin, View):
+    def get(self, request, event_id: int):
+        if not _can_view_events(request.user):
+            raise PermissionDenied("No tienes permisos para exportar eventos comerciales.")
+        event = get_object_or_404(EventoVenta, pk=event_id)
+        filename, content = _build_event_production_workbook_file(event)
+        response = HttpResponse(
+            content,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+
+class EventoExportInsumosView(LoginRequiredMixin, View):
+    def get(self, request, event_id: int):
+        if not _can_view_events(request.user):
+            raise PermissionDenied("No tienes permisos para exportar eventos comerciales.")
+        event = get_object_or_404(EventoVenta, pk=event_id)
+        filename, content = _build_event_inputs_workbook_file(event)
+        response = HttpResponse(
+            content,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 @login_required
