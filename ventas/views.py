@@ -2672,59 +2672,85 @@ def _event_detail_workflow_context(request, event: EventoVenta) -> dict:
     }
 
 
+def _empty_executive_dataset(qty=ZERO, *, message: str = "") -> dict:
+    return {
+        "financial_trusted": False,
+        "summary": {
+            "qty": qty or ZERO,
+            "sales": ZERO,
+            "cogs": ZERO,
+            "profit": ZERO,
+            "margin": ZERO,
+        },
+        "coverage": {
+            "price_qty_pct": ZERO,
+            "cost_qty_pct": ZERO,
+            "products_with_cost": 0,
+            "products_with_price": 0,
+            "products_total": 0,
+        },
+        "daily_rows": [],
+        "family_rows": [],
+        "branch_rows": [],
+        "product_rows": [],
+        "validation_message": message,
+        "projection_model": None,
+    }
+
+
+def _cached_event_detail_snapshot_payload(event: EventoVenta) -> dict:
+    from ventas.services.event_detail_snapshot import get_event_detail_snapshot_payload
+
+    return get_event_detail_snapshot_payload(event, allow_refresh=False) or {}
+
+
 def _event_detail_light_payload(event: EventoVenta) -> dict:
+    snapshot_payload = _cached_event_detail_snapshot_payload(event)
+    if snapshot_payload:
+        production_summary = (snapshot_payload.get("production_dataset") or {}).get("summary") or {}
+        return {
+            "week_total_qty": snapshot_payload.get("week_total_qty", 0),
+            "main_day_total_qty": snapshot_payload.get("main_day_total_qty", 0),
+            "week_projected_revenue": snapshot_payload.get("week_projected_revenue"),
+            "main_day_projected_revenue": snapshot_payload.get("main_day_projected_revenue"),
+            "week_branch_breakdown": snapshot_payload.get("week_branch_breakdown", []),
+            "week_product_projection": [],
+            "week_scope_label": snapshot_payload.get("week_scope_label") or _week_scope_label(event),
+            "week_trend_note": snapshot_payload.get("week_trend_note", ""),
+            "executive_dataset": snapshot_payload.get("executive_dataset", {}),
+            "focused_financial": snapshot_payload.get("focused_financial"),
+            "considered_product_count": snapshot_payload.get("considered_product_count", 0),
+            "input_investment_required": snapshot_payload.get("input_investment_required", 0),
+            "production_summary": {
+                "production_lines": production_summary.get("production_lines", 0),
+            },
+        }
+
     forecast_qs = _event_forecast_qs(event)
     week_forecast_qs = _week_scope_qs(event, forecast_qs)
-    week_start, week_end = _event_projection_window(event)
-    executive_dataset = _event_financial_dataset(
-        event,
-        forecast_qs,
-        start_date=week_start,
-        end_date=week_end,
-    )
-    focused_financial = (
-        _focused_financial_row(event)
-        if executive_dataset["financial_trusted"]
-        else None
-    )
-    main_day_row = next(
-        (
-            row
-            for row in executive_dataset.get("daily_rows", [])
-            if str(row.get("date") or "") == event.main_date.isoformat()
-        ),
-        None,
-    )
-    week_product_projection = _product_projection_rows(week_forecast_qs)
+    week_total_qty = week_forecast_qs.aggregate(total=Sum("final_forecast")).get("total") or ZERO
     return {
-        "week_total_qty": week_forecast_qs.aggregate(total=Sum("final_forecast")).get("total") or 0,
+        "week_total_qty": week_total_qty,
         "main_day_total_qty": (
             forecast_qs.filter(forecast_date=event.main_date)
             .aggregate(total=Sum("final_forecast"))
             .get("total")
             or 0
         ),
-        "week_projected_revenue": (
-            executive_dataset["summary"]["sales"]
-            if executive_dataset["financial_trusted"]
-            else None
-        ),
-        "main_day_projected_revenue": (
-            (main_day_row or {}).get("sales") or 0
-            if executive_dataset["financial_trusted"]
-            else None
-        ),
+        "week_projected_revenue": None,
+        "main_day_projected_revenue": None,
+        "branches": _event_branch_links(event),
         "week_branch_breakdown": _branch_projection_rows(week_forecast_qs),
-        "week_product_projection": week_product_projection,
+        "week_product_projection": [],
         "week_scope_label": _week_scope_label(event),
-        "week_trend_note": _projection_trend_note(
-            week_product_projection,
-            label="la semana del evento",
+        "week_trend_note": "",
+        "executive_dataset": _empty_executive_dataset(
+            week_total_qty,
+            message="Snapshot ejecutivo no disponible; usa las tabs para cargar el detalle operativo bajo demanda.",
         ),
-        "executive_dataset": executive_dataset,
-        "focused_financial": focused_financial,
+        "focused_financial": None,
         "considered_product_count": week_forecast_qs.values("product_id").distinct().count(),
-        "input_investment_required": _input_investment_amount(event),
+        "input_investment_required": 0,
         "production_summary": {
             "production_lines": event.production_plans.aggregate(total=Count("lines")).get("total") or 0,
         },
@@ -2732,9 +2758,9 @@ def _event_detail_light_payload(event: EventoVenta) -> dict:
 
 
 def _event_detail_snapshot_context(event: EventoVenta, request, *, detail_source_value: str = "") -> dict:
-    from ventas.services.event_detail_snapshot import get_event_detail_snapshot_payload
-
-    snapshot_payload = get_event_detail_snapshot_payload(event, generated_by=request.user)
+    snapshot_payload = _cached_event_detail_snapshot_payload(event)
+    if not snapshot_payload:
+        return _event_detail_light_payload(event)
     detail_source = _event_detail_source_filter(detail_source_value)
     week_product_projection = list(snapshot_payload.get("week_product_projection", []))
     if detail_source:
@@ -2757,6 +2783,111 @@ def _event_detail_snapshot_context(event: EventoVenta, request, *, detail_source
         "purchase_summary": snapshot_payload.get("purchase_summary", {}),
         "detail_source_filter": detail_source[0] if detail_source else "",
         "detail_source_filter_label": detail_source[1] if detail_source else "",
+    }
+
+
+def _purchase_summary_for_event(event: EventoVenta) -> dict:
+    return {
+        "total_shortage": _round_money(
+            event.input_requirements.aggregate(total=Sum("net_shortage_qty")).get("total") or 0
+        ),
+        "high_risk": event.input_requirements.filter(
+            risk_level=EventoVentaInputRequirement.RISK_HIGH
+        ).count(),
+        "pending_purchases": event.purchase_requirements.filter(
+            status=EventoVentaPurchaseRequirement.STATUS_PENDIENTE
+        ).count(),
+        "estimated_purchase_cost": _round_money(
+            event.purchase_requirements.aggregate(total=Sum("estimated_cost")).get("total") or 0
+        ),
+    }
+
+
+def _production_operational_dataset_lite(event: EventoVenta) -> dict:
+    start_date, end_date = _event_projection_window(event)
+    demand_rows_raw = list(
+        _event_forecast_qs(event)
+        .filter(forecast_date__range=(start_date, end_date))
+        .values("forecast_date", "branch__codigo", "product__nombre")
+        .annotate(total=Sum("final_forecast"))
+        .order_by("forecast_date", "branch__codigo", "product__nombre")[:120]
+    )
+    demand_rows = [
+        {
+            "date": row["forecast_date"],
+            "branch_code": row["branch__codigo"],
+            "product_name": row["product__nombre"],
+            "qty": Decimal(str(row.get("total") or 0)).quantize(Decimal("0.001")),
+        }
+        for row in demand_rows_raw
+    ]
+    production_rows = []
+    capacity_gap_total = ZERO
+    for plan in event.production_plans.prefetch_related("lines__product").order_by("plan_date", "id"):
+        for line in plan.lines.all():
+            capacity_gap_total += Decimal(str(line.capacity_gap_qty or 0))
+            production_rows.append(
+                {
+                    "plan_date": plan.plan_date,
+                    "product_name": line.product.nombre,
+                    "required_qty": Decimal(str(line.required_qty or 0)).quantize(Decimal("0.001")),
+                    "planned_qty": Decimal(str(line.planned_qty or 0)).quantize(Decimal("0.001")),
+                    "net_qty_to_produce": Decimal(str(line.net_qty_to_produce or 0)).quantize(Decimal("0.001")),
+                    "existing_stock": Decimal(str(line.existing_finished_stock or 0)).quantize(Decimal("0.001")),
+                    "capacity_gap_qty": Decimal(str(line.capacity_gap_qty or 0)).quantize(Decimal("0.001")),
+                    "priority": line.priority or "MEDIA",
+                    "destinations": line.branch.codigo if line.branch_id else "General",
+                    "constraint_reason": line.constraint_reason or "",
+                }
+            )
+            if len(production_rows) >= 120:
+                break
+        if len(production_rows) >= 120:
+            break
+    high_risk_inputs = [
+        {
+            "input_item_name": row.input_item.nombre,
+            "net_shortage_qty": str(row.net_shortage_qty or 0),
+            "risk_level_display": row.get_risk_level_display(),
+            "required_by_date": row.required_by_date.isoformat() if row.required_by_date else "",
+        }
+        for row in event.input_requirements.filter(risk_level=EventoVentaInputRequirement.RISK_HIGH)
+        .select_related("input_item")
+        .order_by("-net_shortage_qty", "input_item__nombre")[:10]
+    ]
+    purchase_rows = [
+        {
+            "input_item_name": row.input_requirement.input_item.nombre,
+            "purchase_deadline": row.purchase_deadline.isoformat() if row.purchase_deadline else "",
+            "supplier_name": row.supplier.nombre if row.supplier_id and row.supplier else "Por definir",
+            "estimated_cost": str(row.estimated_cost or 0),
+            "status_display": row.get_status_display(),
+        }
+        for row in event.purchase_requirements.select_related("input_requirement__input_item", "supplier")
+        .order_by("purchase_deadline", "-estimated_cost")[:12]
+    ]
+    return {
+        "demand_rows": demand_rows,
+        "supply_rows": [],
+        "production_rows": production_rows,
+        "alerts": [
+            {
+                "level": "INFO",
+                "title": "Carga rápida",
+                "detail": "Vista operativa ligera para evitar recalcular objetivos completos en el request web.",
+            }
+        ],
+        "summary": {
+            "approved_basis": _event_ready_for_operations(event),
+            "shelf_life_days": SAFE_SHELF_LIFE_DAYS,
+            "demand_lines": len(demand_rows_raw),
+            "production_lines": len(production_rows),
+            "high_risk_inputs": len(high_risk_inputs),
+            "pending_purchases": event.purchase_requirements.filter(status=EventoVentaPurchaseRequirement.STATUS_PENDIENTE).count(),
+            "capacity_gap_total": capacity_gap_total.quantize(Decimal("0.001")),
+        },
+        "high_risk_inputs": high_risk_inputs,
+        "purchase_rows": purchase_rows,
     }
 
 
@@ -4716,18 +4847,35 @@ class EventoTabProduccionView(_EventoDetailTabView):
     template_name = "ventas/partials/evento_tab_produccion.html"
 
     def get_context_data(self, request, event: EventoVenta) -> dict:
-        context = _event_detail_snapshot_context(event, request)
-        context["event"] = event
-        return context
+        snapshot_payload = _cached_event_detail_snapshot_payload(event)
+        return {
+            "event": event,
+            "production_dataset": (
+                snapshot_payload.get("production_dataset")
+                if snapshot_payload
+                else _production_operational_dataset_lite(event)
+            ),
+        }
 
 
 class EventoTabInsumosView(_EventoDetailTabView):
     template_name = "ventas/partials/evento_tab_insumos.html"
 
     def get_context_data(self, request, event: EventoVenta) -> dict:
-        context = _event_detail_snapshot_context(event, request)
-        context["event"] = event
-        return context
+        snapshot_payload = _cached_event_detail_snapshot_payload(event)
+        return {
+            "event": event,
+            "production_dataset": (
+                snapshot_payload.get("production_dataset")
+                if snapshot_payload
+                else _production_operational_dataset_lite(event)
+            ),
+            "purchase_summary": (
+                snapshot_payload.get("purchase_summary")
+                if snapshot_payload
+                else _purchase_summary_for_event(event)
+            ),
+        }
 
 
 class EventoTabTrazabilidadView(_EventoDetailTabView):
