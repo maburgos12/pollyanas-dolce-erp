@@ -40,6 +40,14 @@
   .ventas-hero .btn-ghost:hover {
     background: rgba(255,255,255,.18) !important;
   }
+  .ventas-hero .ventas-header-danger {
+    color: #7b1a48 !important;
+    background: transparent !important;
+    border: 1px solid #7b1a48 !important;
+  }
+  .ventas-hero .ventas-header-danger:hover {
+    background: rgba(123,26,72,.08) !important;
+  }
   .ventas-chip-row,
   .ventas-anchor-row,
   .ventas-action-row,
@@ -156,7 +164,7 @@
   .ventas-bar-fill {
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, #7a163f, #bf4a73);
+    background: #7b1a48;
   }
   .ventas-mini-columns {
     display: flex;
@@ -175,7 +183,7 @@
     width: 100%;
     max-width: 44px;
     border-radius: 14px 14px 6px 6px;
-    background: linear-gradient(180deg, #bf4a73, #7a163f);
+    background: #7b1a48;
     min-height: 12px;
   }
   .ventas-mini-col-label {
@@ -312,10 +320,10 @@
           {% endif %}
           {% if can_approve %}
           <a class="btn btn-primary" href="{% url 'ventas:evento_approve' event.id %}">Aprobar</a>
-          <a class="btn btn-ghost" href="{% url 'ventas:evento_reject' event.id %}">Rechazar</a>
+          <a class="btn btn-ghost ventas-header-danger" href="{% url 'ventas:evento_reject' event.id %}">Rechazar</a>
           {% endif %}
           {% if can_manage %}
-          <a class="btn btn-ghost" href="{% url 'ventas:evento_close' event.id %}">Cerrar evento</a>
+          <a class="btn btn-ghost ventas-header-danger" href="{% url 'ventas:evento_close' event.id %}">Cerrar evento</a>
           {% endif %}
         </div>
       </div>
@@ -387,7 +395,7 @@
 
     <div class="ventas-grid-three">
       <article class="ventas-card-soft">
-        <div class="ventas-metric-list">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
           <article class="ventas-metric">
             <span class="ventas-metric-label">Volumen proyectado</span>
             <span class="ventas-metric-value">{{ executive_dataset.summary.qty|floatformat:0 }}</span>
