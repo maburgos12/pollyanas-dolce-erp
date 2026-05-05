@@ -4785,12 +4785,13 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   width: 95px;
   min-width: 95px;
 }
-.production-table-wrap > table.table th {
+.production-table-wrap th {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 0.78rem;
-  letter-spacing: 0;
+  padding-left: 6px;
+  padding-right: 6px;
 }
 .production-subtotal-row td {
   background: var(--gris-suave);
