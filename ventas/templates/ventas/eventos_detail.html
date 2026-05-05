@@ -10,10 +10,11 @@
     gap: 18px;
   }
   .ventas-hero {
-    background: linear-gradient(135deg, rgba(122, 22, 63, 0.98), rgba(77, 14, 40, 0.95));
-    color: #fff;
-    border: 0;
-    overflow: hidden;
+    background: #fff;
+    color: #34232b;
+    border: 1px solid rgba(122,22,63,.10);
+    box-shadow: 0 14px 32px rgba(80, 28, 50, .08);
+    overflow: visible;
   }
   .ventas-hero-grid {
     display: grid;
@@ -22,23 +23,23 @@
   }
   .ventas-hero-copy h2 {
     margin: 0 0 8px;
-    font-size: 32px;
+    font-size: 1.8rem;
     line-height: 1.05;
     font-family: "Playfair Display", serif;
-    color: #fff !important;
+    color: #34232b !important;
   }
   .ventas-hero-copy p {
     margin: 0;
-    color: rgba(255,255,255,.92) !important;
+    color: #67505a !important;
     max-width: 72ch;
   }
   .ventas-hero .btn-ghost {
-    color: #fff !important;
-    border-color: rgba(255,255,255,.42) !important;
-    background: rgba(255,255,255,.10) !important;
+    color: #7b1a48 !important;
+    border-color: rgba(122,22,63,.24) !important;
+    background: transparent !important;
   }
   .ventas-hero .btn-ghost:hover {
-    background: rgba(255,255,255,.18) !important;
+    background: rgba(122,22,63,.08) !important;
   }
   .ventas-hero .ventas-header-danger {
     color: #7b1a48 !important;
@@ -66,8 +67,9 @@
     font-weight: 700;
   }
   .ventas-chip {
-    background: rgba(255,255,255,.14);
-    color: #fff;
+    background: #fff;
+    color: #4d3b43;
+    border: 1px solid rgba(62,42,50,.14);
   }
   .ventas-anchor {
     text-decoration: none;
@@ -76,15 +78,18 @@
     border: 1px solid rgba(122,22,63,.14);
   }
   .ventas-side-panel {
-    background: rgba(255,255,255,.08);
-    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(122,22,63,.03);
+    border: 1px solid rgba(122,22,63,.10);
     border-radius: 18px;
     padding: 18px;
   }
   .ventas-side-panel .ventas-table-note {
-    color: rgba(255,255,255,.84) !important;
+    color: #67505a !important;
     font-size: 13px;
     line-height: 1.45;
+  }
+  .ventas-side-panel h3 {
+    color: #34232b;
   }
   .ventas-side-panel h3,
   .ventas-section-title {
@@ -99,9 +104,9 @@
     border-radius: 16px;
   }
   .ventas-metric.dark {
-    background: rgba(255,255,255,.10);
-    border-color: rgba(255,255,255,.12);
-    color: #fff;
+    background: #fff;
+    border-color: rgba(122,22,63,.10);
+    color: #34232b;
   }
   .ventas-metric-label {
     display: block;
@@ -111,7 +116,7 @@
     color: rgba(62,42,50,.7);
   }
   .ventas-metric.dark .ventas-metric-label {
-    color: rgba(255,255,255,.72);
+    color: rgba(62,42,50,.7);
   }
   .ventas-metric-value {
     display: block;
@@ -263,6 +268,33 @@
     color: #7a163f;
     font-weight: 800;
   }
+  .ventas-more-actions {
+    position: relative;
+  }
+  .ventas-more-actions summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  .ventas-more-actions summary::-webkit-details-marker {
+    display: none;
+  }
+  .ventas-more-actions[open] .ventas-more-menu {
+    display: grid;
+  }
+  .ventas-more-menu {
+    display: none;
+    position: absolute;
+    z-index: 8;
+    right: 0;
+    top: calc(100% + 8px);
+    min-width: 210px;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 14px;
+    background: #fff;
+    border: 1px solid rgba(122,22,63,.12);
+    box-shadow: 0 16px 30px rgba(70, 28, 45, .16);
+  }
   .ventas-tab-loading {
     display:flex;
     align-items:center;
@@ -303,33 +335,38 @@
           <span class="ventas-chip">{{ week_scope_label }}</span>
         </div>
         <h2>{{ event.name }}</h2>
-        <p>
-          Evento comercial con control ejecutivo, ajuste versionado, salida operativa para producción y artifacts ERP.
-          La base comercial vigente es <strong>{{ workflow_state|lower }}</strong>.
-        </p>
         <div class="ventas-action-row" style="margin-top:16px;">
           {% if can_view_production_dashboard %}
           <a class="btn btn-secondary" href="{% url 'ventas:evento_produccion' event.id %}">Plan de Producción</a>
           {% endif %}
           {% if can_manage %}
-          <a class="btn btn-secondary" href="{% url 'ventas:evento_update' event.id %}">Editar evento</a>
-          <a class="btn btn-secondary" href="{% url 'ventas:evento_adjustments_editor' event.id %}">Editor de ajustes</a>
           {% if not active_adjustment_draft %}
           <a class="btn btn-secondary" href="{% url 'ventas:evento_submit_approval' event.id %}">Enviar a aprobación</a>
           {% endif %}
           {% endif %}
           {% if can_approve %}
           <a class="btn btn-primary" href="{% url 'ventas:evento_approve' event.id %}">Aprobar</a>
-          <a class="btn btn-ghost ventas-header-danger" href="{% url 'ventas:evento_reject' event.id %}">Rechazar</a>
           {% endif %}
-          {% if can_manage %}
-          <a class="btn btn-ghost ventas-header-danger" href="{% url 'ventas:evento_close' event.id %}">Cerrar evento</a>
+          {% if can_manage or can_approve %}
+          <details class="ventas-more-actions">
+            <summary class="btn btn-ghost">Más acciones</summary>
+            <div class="ventas-more-menu">
+              {% if can_manage %}
+              <a class="btn btn-secondary" href="{% url 'ventas:evento_update' event.id %}">Editar evento</a>
+              <a class="btn btn-secondary" href="{% url 'ventas:evento_adjustments_editor' event.id %}">Editor de ajustes</a>
+              <a class="btn btn-ghost ventas-header-danger" href="{% url 'ventas:evento_close' event.id %}">Cerrar evento</a>
+              {% endif %}
+              {% if can_approve %}
+              <a class="btn btn-ghost ventas-header-danger" href="{% url 'ventas:evento_reject' event.id %}">Rechazar</a>
+              {% endif %}
+            </div>
+          </details>
           {% endif %}
         </div>
       </div>
       <aside class="ventas-side-panel">
         <h3>Lectura rápida</h3>
-        <div class="ventas-metric-list" style="margin-top:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-top:12px;">
           <article class="ventas-metric dark">
             <span class="ventas-metric-label">Volumen esperado</span>
             <span class="ventas-metric-value">{{ executive_dataset.summary.qty|floatformat:0 }}</span>
@@ -346,25 +383,6 @@
             <span class="ventas-metric-label">Producción</span>
             <span class="ventas-metric-value">{{ production_summary.production_lines|default:0 }}</span>
           </article>
-        </div>
-        {% if executive_dataset.validation_message %}
-        <div class="ventas-table-note" style="margin-top:14px;">
-          {{ executive_dataset.validation_message }}
-        </div>
-        {% endif %}
-        {% if executive_dataset.projection_model %}
-        <div class="ventas-table-note" style="margin-top:12px;">
-          Modelo ejecutivo: same-store {{ executive_dataset.projection_model.same_store_factor|floatformat:4 }},
-          expansión {{ executive_dataset.projection_model.expansion_factor|floatformat:4 }},
-          contracción {{ executive_dataset.projection_model.contraction_factor|floatformat:4 }}.
-        </div>
-        {% endif %}
-        <div class="ventas-table-note" style="margin-top:14px;">
-          {% if event_ready_for_operations %}
-          La versión ya quedó liberada para operación. Producción, insumos y compras consumen esta base.
-          {% else %}
-          La salida operativa se muestra como vista preliminar hasta que Dirección apruebe el evento.
-          {% endif %}
         </div>
       </aside>
     </div>
