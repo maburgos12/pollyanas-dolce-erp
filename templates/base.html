@@ -321,6 +321,19 @@
                             <span>Ventas · Eventos</span>
                         </a>
                     </li>
+                    <li>
+                        <a href="{% url 'ventas:tendencias' %}"
+                           class="{% if request.resolver_match.url_name == 'tendencias' %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 19V5"/>
+                                    <path d="M4 19h16"/>
+                                    <path d="m7 15 4-4 3 3 5-7"/>
+                                </svg>
+                            </span>
+                            <span>Tendencias de mix</span>
+                        </a>
+                    </li>
                     {% endif %}
                     {% if ui_access.can_view_crm %}
                     <li>
