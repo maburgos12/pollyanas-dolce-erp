@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import shutil
 import socket
 from collections import defaultdict
@@ -823,6 +824,13 @@ def _qty(value: Decimal) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"))
 
 
+def _production_qty(value: Decimal) -> int:
+    qty = Decimal(str(value or 0))
+    if qty <= 0:
+        return 0
+    return math.ceil(float(qty))
+
+
 def _event_production_module_tabs(event: EventoVenta) -> list[dict[str, str | bool]]:
     tabs = [
         ("detalle", reverse("ventas:evento_detail", kwargs={"event_id": event.id}), "Detalle del evento"),
@@ -844,11 +852,11 @@ def _event_production_families(product_ids: set[int]) -> list[str]:
     )
 
 
-def _event_production_totals(rows: list[dict]) -> dict[str, Decimal]:
+def _event_production_totals(rows: list[dict]) -> dict[str, Decimal | int]:
     return {
-        "qty_9": _qty(sum((row["qty_9"] for row in rows), ZERO)),
-        "qty_10": _qty(sum((row["qty_10"] for row in rows), ZERO)),
-        "qty_total": _qty(sum((row["qty_total"] for row in rows), ZERO)),
+        "qty_9": sum((row["qty_9"] for row in rows), 0),
+        "qty_10": sum((row["qty_10"] for row in rows), 0),
+        "qty_total": sum((row["qty_total"] for row in rows), 0),
         "ingreso_9": _money(sum((row["ingreso_9"] for row in rows), ZERO)),
         "ingreso_10": _money(sum((row["ingreso_10"] for row in rows), ZERO)),
         "ingreso_total": _money(sum((row["ingreso_total"] for row in rows), ZERO)),
@@ -939,7 +947,7 @@ def _build_event_production_dashboard(event: EventoVenta, *, familia: str = "") 
             "product_id": product_id,
             "nombre": product_name,
             "familia": product_family,
-            "qty": _qty(qty),
+            "qty": _production_qty(qty),
             "precio": _money(unit_price),
             "ingreso": _money(revenue),
             "pct": ZERO,
@@ -979,12 +987,12 @@ def _build_event_production_dashboard(event: EventoVenta, *, familia: str = "") 
                 else ZERO
             )
         day_payload["productos"].sort(key=lambda item: (-item["qty"], item["nombre"]))
-        day_payload["totales"]["qty"] = _qty(day_payload["totales"]["qty"])
+        day_payload["totales"]["qty"] = sum((item["qty"] for item in day_payload["productos"]), 0)
         day_payload["totales"]["ingreso"] = _money(day_payload["totales"]["ingreso"])
 
     consolidated_productos = []
     for item in consolidated_map.values():
-        item["qty"] = _qty(item["qty"])
+        item["qty"] = sum((_production_qty(qty) for qty in item["qty_by_date"].values()), 0)
         item["precio"] = _money(item["precio"])
         item["ingreso"] = _money(item["ingreso"])
         item["pct"] = (
@@ -1011,8 +1019,8 @@ def _build_event_production_dashboard(event: EventoVenta, *, familia: str = "") 
                     "product_id": item["product_id"],
                     "nombre": item["nombre"],
                     "familia": item["familia"],
-                    "qty_9": item["qty"] if is_first_day else ZERO,
-                    "qty_10": item["qty"] if is_last_day else ZERO,
+                    "qty_9": item["qty"] if is_first_day else 0,
+                    "qty_10": item["qty"] if is_last_day else 0,
                     "qty_total": item["qty"],
                     "precio": item["precio"],
                     "ingreso_9": item["ingreso"] if is_first_day else ZERO,
@@ -1024,8 +1032,8 @@ def _build_event_production_dashboard(event: EventoVenta, *, familia: str = "") 
         day_payload["groups"], day_payload["grand_total"] = _event_production_group_rows(day_rows)
     table_rows = []
     for index, item in enumerate(consolidated_productos, start=1):
-        qty_9 = _qty(item["qty_by_date"].get(first_date, ZERO)) if first_date else ZERO
-        qty_10 = _qty(item["qty_by_date"].get(last_date, ZERO)) if last_date else ZERO
+        qty_9 = _production_qty(item["qty_by_date"].get(first_date, ZERO)) if first_date else 0
+        qty_10 = _production_qty(item["qty_by_date"].get(last_date, ZERO)) if last_date else 0
         ingreso_9 = _money(item["ingreso_by_date"].get(first_date, ZERO)) if first_date else ZERO
         ingreso_10 = _money(item["ingreso_by_date"].get(last_date, ZERO)) if last_date else ZERO
         table_rows.append(
