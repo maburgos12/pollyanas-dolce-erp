@@ -801,6 +801,19 @@ def _event_production_price_map(*, reference_date: date, product_ids: set[int]) 
     return price_map
 
 
+def _event_production_campaign_noise_product_ids(product_ids: set[int]) -> set[int]:
+    excluded_ids: set[int] = set()
+    products = Receta.objects.filter(id__in=product_ids).only("id", "nombre", "familia")
+    for product in products:
+        name_norm = _ascii_norm(product.nombre or "")
+        family_norm = _ascii_norm(product.familia or "")
+        has_campaign_marker = "arcoiris" in name_norm or "🌈" in (product.nombre or "")
+        is_bollo_mini = family_norm == "bollo" and "mini" in name_norm
+        if has_campaign_marker or is_bollo_mini:
+            excluded_ids.add(product.id)
+    return excluded_ids
+
+
 def _money(value: Decimal) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"))
 
@@ -829,10 +842,11 @@ def _build_event_production_dashboard(event: EventoVenta) -> dict:
         lookback_days=EVENTO_PRODUCCION_RECENT_ACTIVITY_DAYS,
     )
     price_map = _event_production_price_map(reference_date=reference_date, product_ids=recent_product_ids)
+    campaign_noise_ids = _event_production_campaign_noise_product_ids(recent_product_ids)
     eligible_product_ids = {
         product_id
         for product_id in recent_product_ids
-        if Decimal(str(price_map.get(product_id) or 0)) > 0
+        if product_id not in campaign_noise_ids and Decimal(str(price_map.get(product_id) or 0)) > 0
     }
     raw_rows = list(
         scoped_qs.filter(product_id__in=eligible_product_ids)
