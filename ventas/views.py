@@ -19,7 +19,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Avg, Case, Count, IntegerField, Max, Min, Q, Sum, When
+from django.db.models import Avg, Case, Count, DecimalField, IntegerField, Max, Min, Q, Sum, When
 from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -1479,36 +1479,256 @@ def _append_event_production_dashboard_sheet(
             ws.column_dimensions[column].width = width
 
 
-def _event_production_dashboard_workbook_response(event: EventoVenta) -> HttpResponse:
-    dashboard = _build_event_production_dashboard(event)
-    day_labels = [_event_production_sheet_title(day_payload["fecha"]) for day_payload in dashboard["dias"]]
-    first_day_label = day_labels[0].lower() if day_labels else "9 mayo"
-    last_day_label = day_labels[-1].lower() if day_labels else "10 mayo"
-    workbook = Workbook()
-    consolidated_ws = workbook.active
-    _append_event_production_dashboard_sheet(
-        consolidated_ws,
-        title="Consolidado",
-        groups=dashboard["groups"],
-        grand_total=dashboard["grand_total"],
-        mode="consolidado",
-        first_day_label=first_day_label,
-        last_day_label=last_day_label,
+EVENTO_CATALOGO_MAESTRO_REASON = "catalogo_maestro_evento"
+EVENTO_PRODUCCION_EXPORT_CATEGORY_ORDER = {
+    "Bollos": 0,
+    "Empanadas": 1,
+    "Galletas": 2,
+    "Individual": 3,
+    "Grande": 4,
+    "Mediano": 5,
+    "Chico": 6,
+    "Mini": 7,
+    "Rebanada": 8,
+    "Vasos Preparados": 9,
+}
+
+
+def _event_master_catalog_product_ids(event: EventoVenta) -> set[int]:
+    return set(
+        EventoVentaProducto.objects.filter(
+            sales_event=event,
+            is_active=True,
+            inclusion_reason=EVENTO_CATALOGO_MAESTRO_REASON,
+        ).values_list("product_id", flat=True)
     )
-    for day_payload, day_label in zip(dashboard["dias"], day_labels):
-        day_ws = workbook.create_sheet(day_label)
-        _append_event_production_dashboard_sheet(
-            day_ws,
-            title=day_ws.title,
-            groups=day_payload["groups"],
-            grand_total=day_payload["grand_total"],
-            mode="dia",
+
+
+def _event_production_export_product_ids(event: EventoVenta, forecast_dates: list[date]) -> set[int]:
+    master_ids = _event_master_catalog_product_ids(event)
+    if master_ids:
+        return master_ids
+    return set(
+        _event_forecast_qs(event)
+        .filter(forecast_date__in=forecast_dates)
+        .values_list("product_id", flat=True)
+        .distinct()
+    )
+
+
+def _event_production_export_category(recipe: Receta) -> str:
+    family_norm = _ascii_norm(recipe.familia or "")
+    if family_norm == "bollo":
+        return "Bollos"
+    if family_norm == "empanadas":
+        return "Empanadas"
+    if family_norm == "galletas":
+        return "Galletas"
+    if family_norm == "vasos preparados":
+        return "Vasos Preparados"
+
+    name_parts = _ascii_norm(recipe.nombre or "").split()
+    last_word = name_parts[-1] if name_parts else ""
+    size_map = {
+        "grande": "Grande",
+        "mediano": "Mediano",
+        "chico": "Chico",
+        "mini": "Mini",
+        "rebanada": "Rebanada",
+        "reb": "Rebanada",
+        "r": "Rebanada",
+        "individual": "Individual",
+    }
+    if last_word in size_map:
+        return size_map[last_word]
+    return (recipe.familia or "Sin categoria").strip() or "Sin categoria"
+
+
+def _build_event_master_production_export_rows(event: EventoVenta) -> tuple[list[dict], dict, date | None, date | None]:
+    start_date, end_date = _event_production_window(event)
+    forecast_dates = [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
+    first_date = forecast_dates[0] if forecast_dates else None
+    last_date = forecast_dates[-1] if forecast_dates else None
+    product_ids = _event_production_export_product_ids(event, forecast_dates)
+    recipes = {
+        recipe.id: recipe
+        for recipe in Receta.objects.filter(id__in=product_ids, tipo=Receta.TIPO_PRODUCTO_FINAL).only("id", "nombre", "familia")
+    }
+    scoped_qs = _event_forecast_qs(event).filter(
+        forecast_date__in=forecast_dates,
+        product_id__in=set(recipes),
+    )
+    day_9_case = Case(
+        When(forecast_date=first_date, then="final_forecast"),
+        default=ZERO,
+        output_field=DecimalField(max_digits=18, decimal_places=3),
+    )
+    day_10_case = Case(
+        When(forecast_date=last_date, then="final_forecast"),
+        default=ZERO,
+        output_field=DecimalField(max_digits=18, decimal_places=3),
+    )
+    aggregate_rows = (
+        scoped_qs.values("product_id")
+        .annotate(
+            qty_day_9=Sum(day_9_case),
+            qty_day_10=Sum(day_10_case),
+            projection=Sum("final_forecast"),
+            suggested=Sum("aggressive_forecast"),
         )
+        .order_by("product_id")
+    )
+    rows: list[dict] = []
+    totals = {"day_9": 0, "day_10": 0, "projection": 0, "suggested": 0, "difference": 0}
+    for aggregate in aggregate_rows:
+        recipe = recipes.get(int(aggregate["product_id"]))
+        if not recipe:
+            continue
+        day_9 = _production_qty(aggregate.get("qty_day_9") or ZERO)
+        day_10 = _production_qty(aggregate.get("qty_day_10") or ZERO)
+        projection = day_9 + day_10
+        suggested = _production_qty(aggregate.get("suggested") or ZERO)
+        difference = suggested - projection
+        category = _event_production_export_category(recipe)
+        rows.append(
+            {
+                "category": category,
+                "product": recipe.nombre,
+                "day_9": day_9,
+                "day_10": day_10,
+                "projection": projection,
+                "suggested": suggested,
+                "difference": difference,
+                "category_order": EVENTO_PRODUCCION_EXPORT_CATEGORY_ORDER.get(category, 99),
+            }
+        )
+        totals["day_9"] += day_9
+        totals["day_10"] += day_10
+        totals["projection"] += projection
+        totals["suggested"] += suggested
+        totals["difference"] += difference
+    rows.sort(key=lambda row: (row["category_order"], _ascii_norm(row["product"])))
+    return rows, totals, first_date, last_date
+
+
+def _style_event_master_production_export(ws) -> None:
+    brand_fill = PatternFill("solid", fgColor="7B1A48")
+    light_fill = PatternFill("solid", fgColor="F6F2F4")
+    total_fill = PatternFill("solid", fgColor="3E3E3E")
+    white_font = Font(color="FFFFFF", bold=True)
+    header_font = Font(color="7B1A48", bold=True)
+    thin_border = Border(bottom=Side(style="thin", color="E5CED8"))
+
+    for cell in ws[1]:
+        cell.fill = light_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = thin_border
+
+    data_row_index = 0
+    for row_idx in range(2, ws.max_row + 1):
+        first_cell = ws.cell(row_idx, 1)
+        row_kind = str(ws.cell(row_idx, 8).value or "")
+        if row_kind == "category":
+            for col_idx in range(1, 8):
+                cell = ws.cell(row_idx, col_idx)
+                cell.fill = brand_fill
+                cell.font = white_font
+                cell.border = thin_border
+                cell.alignment = Alignment(horizontal="left" if col_idx <= 2 else "right", vertical="center")
+            first_cell.alignment = Alignment(horizontal="left", vertical="center")
+            continue
+        if row_kind == "total":
+            for col_idx in range(1, 8):
+                cell = ws.cell(row_idx, col_idx)
+                cell.fill = total_fill
+                cell.font = white_font
+                cell.border = thin_border
+                cell.alignment = Alignment(horizontal="left" if col_idx <= 2 else "right", vertical="center")
+            continue
+        data_row_index += 1
+        fill = light_fill if data_row_index % 2 == 0 else None
+        for col_idx in range(1, 8):
+            cell = ws.cell(row_idx, col_idx)
+            if fill:
+                cell.fill = fill
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="left" if col_idx <= 2 else "right", vertical="center")
+
+    ws.delete_cols(8)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:G{ws.max_row}"
+    widths = {"A": 18, "B": 42, "C": 12, "D": 12, "E": 14, "F": 14, "G": 12}
+    for column, width in widths.items():
+        ws.column_dimensions[column].width = width
+
+
+def _event_production_dashboard_workbook_response(event: EventoVenta) -> HttpResponse:
+    rows, totals, first_date, last_date = _build_event_master_production_export_rows(event)
+    first_day_label = f"Día {first_date.day}" if first_date else "Día 1"
+    last_day_label = f"Día {last_date.day}" if last_date else "Día 2"
+    workbook = Workbook()
+    ws = workbook.active
+    ws.title = "Plan de produccion"
+    ws.append(["Categoría", "Producto", first_day_label, last_day_label, "Proyección", "QTY Sugerida", "Diferencia", "_kind"])
+    current_category = None
+    category_totals = {"day_9": 0, "day_10": 0, "projection": 0, "suggested": 0, "difference": 0}
+
+    def _append_category_row(category: str, subtotal: dict) -> None:
+        ws.append(
+            [
+                category,
+                "Subtotal",
+                subtotal["day_9"],
+                subtotal["day_10"],
+                subtotal["projection"],
+                subtotal["suggested"],
+                subtotal["difference"],
+                "category",
+            ]
+        )
+
+    for row in rows:
+        if row["category"] != current_category:
+            current_category = row["category"]
+            category_totals = {
+                "day_9": sum(item["day_9"] for item in rows if item["category"] == current_category),
+                "day_10": sum(item["day_10"] for item in rows if item["category"] == current_category),
+                "projection": sum(item["projection"] for item in rows if item["category"] == current_category),
+                "suggested": sum(item["suggested"] for item in rows if item["category"] == current_category),
+                "difference": sum(item["difference"] for item in rows if item["category"] == current_category),
+            }
+            _append_category_row(current_category, category_totals)
+        ws.append(
+            [
+                row["category"],
+                row["product"],
+                row["day_9"],
+                row["day_10"],
+                row["projection"],
+                row["suggested"],
+                row["difference"],
+                "data",
+            ]
+        )
+    ws.append(
+        [
+            "Total general",
+            "",
+            totals["day_9"],
+            totals["day_10"],
+            totals["projection"],
+            totals["suggested"],
+            totals["difference"],
+            "total",
+        ]
+    )
+    _style_event_master_production_export(ws)
 
     output = BytesIO()
     workbook.save(output)
     output.seek(0)
-    filename = f"evento-{event.id}-plan-produccion-{dashboard['start_date']}-{dashboard['end_date']}.xlsx"
+    filename = f"evento-{event.id}-plan-produccion-{first_date}-{last_date}.xlsx"
     response = HttpResponse(
         output.getvalue(),
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
