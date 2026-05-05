@@ -83,7 +83,7 @@
         <h1 class="card-header">{{ event.name }}</h1>
         <p class="executive-section-copy">Forecast operativo agrupado por familia y receta para {{ start_date|date:"d/m/Y" }} a {{ end_date|date:"d/m/Y" }}.</p>
       </div>
-      <button class="btn btn-secondary" type="button" id="export-event-production-csv">Exportar CSV</button>
+      <a class="btn btn-secondary" href="{% url 'ventas:evento_export_produccion' event.id %}">Descargar Excel</a>
     </div>
     <div class="production-source-list" aria-label="Estado del evento">
       <span class="badge bg-primary">{{ event.get_status_display }}</span>
@@ -323,28 +323,6 @@
         tabs.forEach((item) => item.classList.toggle('active', item === tab));
         panels.forEach((panel) => panel.classList.toggle('is-active', panel.id === target));
       });
-    });
-
-    const button = document.getElementById('export-event-production-csv');
-    if (!button) return;
-    button.addEventListener('click', function () {
-      const table = document.querySelector('.event-production-panel.is-active table');
-      if (!table) return;
-      const rows = Array.from(table.querySelectorAll('tr')).map((tr) => {
-        return Array.from(tr.children).map((cell) => {
-          const value = cell.innerText.replace(/\s+/g, ' ').trim().replace(/"/g, '""');
-          return `"${value}"`;
-        }).join(',');
-      });
-      const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `evento_{{ event.id }}_produccion.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
     });
   })();
 </script>
