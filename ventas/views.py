@@ -79,6 +79,7 @@ from ventas.services.forecasting import (
     executive_event_product_scope,
     generate_event_forecast,
 )
+from ventas.services.forecasting_v9 import V9_MODEL_VERSION
 from ventas.services.notifications import create_unique_notification
 from ventas.services.operational_targets import build_operational_targets
 from ventas.services.postmortem import build_postmortem
@@ -1647,6 +1648,53 @@ def _style_dashboard_table_sheet(
     ws.freeze_panes = "A4"
     if enable_filter:
         ws.auto_filter.ref = f"A3:{get_column_letter(max_column)}{ws.max_row}"
+
+
+def _append_v9_alerts_sheet(ws, event: EventoVenta) -> None:
+    def _as_float(value) -> float:
+        if value in (None, ""):
+            return 0.0
+        return float(Decimal(str(value or 0)))
+
+    ws.append(
+        [
+            "Familia",
+            "Producto",
+            "Sucursal",
+            "Real 2025",
+            "Rotacion 2026",
+            "Factor rotacion",
+            "Factor sucursal",
+            "Forecast v8",
+            "Forecast v9",
+            "Diferencia",
+            "Diferencia %",
+            "Alerta",
+        ]
+    )
+    forecast_rows = (
+        EventoVentaForecast.objects.filter(sales_event=event, model_version=V9_MODEL_VERSION)
+        .select_related("product", "branch")
+        .order_by("product__familia", "product__nombre", "branch__codigo", "forecast_date")
+    )
+    for forecast in forecast_rows:
+        explanation = forecast.explanation_json or {}
+        ws.append(
+            [
+                forecast.product.familia or "Sin familia",
+                forecast.product.nombre,
+                forecast.branch.codigo,
+                _as_float(explanation.get("real_2025", explanation.get("base_2025", 0))),
+                _as_float(explanation.get("rotacion_2026", 0)),
+                _as_float(explanation.get("factor_rotacion", 0)),
+                _as_float(explanation.get("factor_sucursal", 0)),
+                _as_float(explanation.get("forecast_v8", 0)),
+                float(forecast.final_forecast or 0),
+                _as_float(explanation.get("diferencia", 0)),
+                _as_float(explanation.get("diferencia_pct", 0)),
+                explanation.get("alerta") or "",
+            ]
+        )
 
 
 def _style_dashboard_summary_sheet(
@@ -3407,6 +3455,7 @@ def _build_executive_dashboard_workbook_file(event: EventoVenta) -> tuple[str, b
     ws_validation = workbook.create_sheet("Validacion")
     ws_audit = workbook.create_sheet("Auditoria")
     ws_governance = workbook.create_sheet("Gobernanza SKU")
+    ws_alerts_v9 = workbook.create_sheet("Alertas v9")
 
     summary = dataset["summary"]
     validated_summary = dataset["validated_summary"]
@@ -3600,6 +3649,7 @@ def _build_executive_dashboard_workbook_file(event: EventoVenta) -> tuple[str, b
                 interpretation.nota_negocio,
             ]
         )
+    _append_v9_alerts_sheet(ws_alerts_v9, event)
     ws_validation.append([])
     ws_validation.append(["Clasificacion SKU evento", "Cantidad"])
     for classification, qty in sorted(governance_counts.items()):
@@ -3615,6 +3665,7 @@ def _build_executive_dashboard_workbook_file(event: EventoVenta) -> tuple[str, b
         "Validacion",
         "Auditoria",
         "Gobernanza SKU",
+        "Alertas v9",
     ]
     for row in _event_module_audit_rows(
         event,
@@ -3764,6 +3815,31 @@ def _build_executive_dashboard_workbook_file(event: EventoVenta) -> tuple[str, b
     ws_governance.column_dimensions["F"].width = 16
     ws_governance.column_dimensions["G"].width = 30
     ws_governance.column_dimensions["H"].width = 48
+
+    _style_dashboard_table_sheet(
+        ws_alerts_v9,
+        report_title="Pollyana's Dolce · Alertas forecast v9",
+        subtitle=f"{event.name} · Producto, sucursal y dia · {scope_label}",
+        max_column=12,
+        qty_columns=(4, 5, 9, 10),
+        percent_columns=(11,),
+        text_heavy_columns=(1, 2, 3, 12),
+    )
+    for col, width in {
+        "A": 20,
+        "B": 34,
+        "C": 18,
+        "D": 14,
+        "E": 16,
+        "F": 16,
+        "G": 16,
+        "H": 14,
+        "I": 14,
+        "J": 14,
+        "K": 16,
+        "L": 26,
+    }.items():
+        ws_alerts_v9.column_dimensions[col].width = width
 
     if dataset["daily_rows"]:
         revenue_chart = LineChart()
