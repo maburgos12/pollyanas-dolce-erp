@@ -29,7 +29,7 @@ from openpyxl.chart import BarChart, LineChart, PieChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 
 from core.access import can_view_rentabilidad, has_any_role, ROLE_DG, ROLE_ADMIN, ROLE_PRODUCCION, ROLE_COMPRAS
 from core.branch_catalog import EXCLUDED_BRANCH_CODES, POINT_MATURE_BRANCH_CODES, eligible_sales_event_branch_qs
@@ -1163,6 +1163,202 @@ def _event_production_csv_response(event: EventoVenta, dashboard: dict) -> HttpR
                         row["pct"],
                     ]
                 )
+    return response
+
+
+def _event_production_sheet_title(value: date | str) -> str:
+    if isinstance(value, date):
+        month_names = {
+            1: "Enero",
+            2: "Febrero",
+            3: "Marzo",
+            4: "Abril",
+            5: "Mayo",
+            6: "Junio",
+            7: "Julio",
+            8: "Agosto",
+            9: "Septiembre",
+            10: "Octubre",
+            11: "Noviembre",
+            12: "Diciembre",
+        }
+        return _safe_sheet_title(f"{value.day} {month_names[value.month]}")
+    return _safe_sheet_title(str(value))
+
+
+def _append_event_production_dashboard_sheet(
+    ws,
+    *,
+    title: str,
+    groups: list[dict],
+    grand_total: dict,
+    mode: str,
+    first_day_label: str = "9 mayo",
+    last_day_label: str = "10 mayo",
+) -> None:
+    ws.title = _safe_sheet_title(title)
+    if mode == "consolidado":
+        headers = [
+            "#",
+            "Producto",
+            "Familia",
+            "QTY consolidado",
+            f"QTY {first_day_label}",
+            f"QTY {last_day_label}",
+            "Precio unit",
+            "Ingreso",
+            "% del total",
+        ]
+        money_columns = (7, 8)
+        percent_column = 9
+    else:
+        headers = ["#", "Producto", "Familia", "QTY", "Precio unit", "Ingreso", "% del total"]
+        money_columns = (5, 6)
+        percent_column = 7
+    ws.append(headers)
+
+    row_number = 1
+    for group in groups:
+        total = group["total"]
+        if mode == "consolidado":
+            ws.append(
+                [
+                    f"Subtotal {group['familia']}",
+                    "",
+                    "",
+                    total["qty_total"],
+                    total["qty_9"],
+                    total["qty_10"],
+                    "",
+                    float(total["ingreso_total"]),
+                    "",
+                ]
+            )
+        else:
+            ws.append(
+                [
+                    f"Subtotal {group['familia']}",
+                    "",
+                    "",
+                    total["qty_total"],
+                    "",
+                    float(total["ingreso_total"]),
+                    "",
+                ]
+            )
+        for row in group["rows"]:
+            if mode == "consolidado":
+                ws.append(
+                    [
+                        row_number,
+                        row["nombre"],
+                        row["familia"],
+                        row["qty_total"],
+                        row["qty_9"],
+                        row["qty_10"],
+                        float(row["precio"]),
+                        float(row["ingreso_total"]),
+                        float(row["pct"]) / 100,
+                    ]
+                )
+            else:
+                ws.append(
+                    [
+                        row_number,
+                        row["nombre"],
+                        row["familia"],
+                        row["qty_total"],
+                        float(row["precio"]),
+                        float(row["ingreso_total"]),
+                        float(row["pct"]) / 100,
+                    ]
+                )
+            row_number += 1
+
+    if mode == "consolidado":
+        ws.append(
+            [
+                "Total general",
+                "",
+                "",
+                grand_total["qty_total"],
+                grand_total["qty_9"],
+                grand_total["qty_10"],
+                "",
+                float(grand_total["ingreso_total"]),
+                1 if grand_total["ingreso_total"] else 0,
+            ]
+        )
+    else:
+        ws.append(
+            [
+                "Total general",
+                "",
+                "",
+                grand_total["qty_total"],
+                "",
+                float(grand_total["ingreso_total"]),
+                1 if grand_total["ingreso_total"] else 0,
+            ]
+        )
+
+    max_column = len(headers)
+    _style_operational_export_sheet(ws, max_column=max_column, data_start_row=1, money_columns=money_columns)
+    for cell in ws.iter_cols(min_col=percent_column, max_col=percent_column, min_row=2, max_row=ws.max_row):
+        for pct_cell in cell:
+            if isinstance(pct_cell.value, (int, float)):
+                pct_cell.number_format = "0.00%"
+    widths = {
+        "A": 18,
+        "B": 42,
+        "C": 22,
+        "D": 16,
+        "E": 14,
+        "F": 14,
+        "G": 14,
+        "H": 16,
+        "I": 14,
+    }
+    for column, width in widths.items():
+        if ws.max_column >= column_index_from_string(column):
+            ws.column_dimensions[column].width = width
+
+
+def _event_production_dashboard_workbook_response(event: EventoVenta) -> HttpResponse:
+    dashboard = _build_event_production_dashboard(event)
+    day_labels = [_event_production_sheet_title(day_payload["fecha"]) for day_payload in dashboard["dias"]]
+    first_day_label = day_labels[0].lower() if day_labels else "9 mayo"
+    last_day_label = day_labels[-1].lower() if day_labels else "10 mayo"
+    workbook = Workbook()
+    consolidated_ws = workbook.active
+    _append_event_production_dashboard_sheet(
+        consolidated_ws,
+        title="Consolidado",
+        groups=dashboard["groups"],
+        grand_total=dashboard["grand_total"],
+        mode="consolidado",
+        first_day_label=first_day_label,
+        last_day_label=last_day_label,
+    )
+    for day_payload, day_label in zip(dashboard["dias"], day_labels):
+        day_ws = workbook.create_sheet(day_label)
+        _append_event_production_dashboard_sheet(
+            day_ws,
+            title=day_ws.title,
+            groups=day_payload["groups"],
+            grand_total=day_payload["grand_total"],
+            mode="dia",
+        )
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    filename = f"evento-{event.id}-plan-produccion-{dashboard['start_date']}-{dashboard['end_date']}.xlsx"
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 
 def _extract_posted_adjustment_values(request) -> dict[tuple[int, int], Decimal]:
@@ -4916,6 +5112,8 @@ class EventoProduccionView(LoginRequiredMixin, View):
             raise PermissionDenied("No tienes permisos para ver el dashboard de produccion del evento.")
         event = get_object_or_404(EventoVenta, pk=event_id)
         dashboard = _build_event_production_dashboard(event, familia=(request.GET.get("familia") or "").strip())
+        if request.GET.get("formato") == "xlsx":
+            return _event_production_dashboard_workbook_response(event)
         if request.GET.get("formato") == "csv":
             return _event_production_csv_response(event, dashboard)
         return render(request, self.template_name, dashboard)
@@ -4970,13 +5168,7 @@ class EventoExportProduccionView(LoginRequiredMixin, View):
         if not _can_view_events(request.user):
             raise PermissionDenied("No tienes permisos para exportar eventos comerciales.")
         event = get_object_or_404(EventoVenta, pk=event_id)
-        filename, content = _build_event_production_workbook_file(event)
-        response = HttpResponse(
-            content,
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return response
+        return _event_production_dashboard_workbook_response(event)
 
 
 class EventoExportInsumosView(LoginRequiredMixin, View):
