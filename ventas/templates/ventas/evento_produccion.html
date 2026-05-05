@@ -59,6 +59,12 @@
   .event-production-note {
     color: var(--muted, #9b9298);
   }
+
+  .event-production-table .production-subtotal-row td {
+    background: var(--gris-suave);
+    color: var(--vino);
+    font-weight: 800;
+  }
 </style>
 {% endblock %}
 
@@ -187,9 +193,9 @@
             {% for group in groups %}
             <tr class="production-subtotal-row">
               <td colspan="3">{{ group.familia }}</td>
-              <td class="text-end">{{ group.total.qty_total|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ group.total.qty_9|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ group.total.qty_10|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_total|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_9|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_10|intcomma }}</td>
               <td></td>
               <td class="text-end">${{ group.total.ingreso_total|floatformat:2|intcomma }}</td>
               <td></td>
@@ -199,9 +205,9 @@
               <td class="text-end">{{ row.index }}</td>
               <td>{{ row.nombre }}</td>
               <td>{{ row.familia }}</td>
-              <td class="text-end">{{ row.qty_total|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ row.qty_9|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ row.qty_10|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ row.qty_total|intcomma }}</td>
+              <td class="text-end">{{ row.qty_9|intcomma }}</td>
+              <td class="text-end">{{ row.qty_10|intcomma }}</td>
               <td class="text-end">${{ row.precio|floatformat:2|intcomma }}</td>
               <td class="text-end">${{ row.ingreso_total|floatformat:2|intcomma }}</td>
               <td class="text-center">
@@ -215,9 +221,9 @@
             {% endfor %}
             <tr class="production-grand-total-row">
               <td colspan="3">Gran total</td>
-              <td class="text-end">{{ grand_total.qty_total|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ grand_total.qty_9|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ grand_total.qty_10|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ grand_total.qty_total|intcomma }}</td>
+              <td class="text-end">{{ grand_total.qty_9|intcomma }}</td>
+              <td class="text-end">{{ grand_total.qty_10|intcomma }}</td>
               <td></td>
               <td class="text-end">${{ grand_total.ingreso_total|floatformat:2|intcomma }}</td>
               <td class="text-center">100.00%</td>
@@ -255,9 +261,9 @@
             {% for group in dia.groups %}
             <tr class="production-subtotal-row">
               <td colspan="3">{{ group.familia }}</td>
-              <td class="text-end">{{ group.total.qty_total|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ group.total.qty_9|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ group.total.qty_10|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_total|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_9|intcomma }}</td>
+              <td class="text-end">{{ group.total.qty_10|intcomma }}</td>
               <td></td>
               <td class="text-end">${{ group.total.ingreso_total|floatformat:2|intcomma }}</td>
               <td></td>
@@ -267,9 +273,9 @@
               <td class="text-end">{{ row.index }}</td>
               <td>{{ row.nombre }}</td>
               <td>{{ row.familia }}</td>
-              <td class="text-end">{{ row.qty_total|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ row.qty_9|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ row.qty_10|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ row.qty_total|intcomma }}</td>
+              <td class="text-end">{{ row.qty_9|intcomma }}</td>
+              <td class="text-end">{{ row.qty_10|intcomma }}</td>
               <td class="text-end">${{ row.precio|floatformat:2|intcomma }}</td>
               <td class="text-end">${{ row.ingreso_total|floatformat:2|intcomma }}</td>
               <td class="text-center">
@@ -283,9 +289,9 @@
             {% endfor %}
             <tr class="production-grand-total-row">
               <td colspan="3">Gran total</td>
-              <td class="text-end">{{ dia.grand_total.qty_total|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ dia.grand_total.qty_9|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ dia.grand_total.qty_10|floatformat:2|intcomma }}</td>
+              <td class="text-end">{{ dia.grand_total.qty_total|intcomma }}</td>
+              <td class="text-end">{{ dia.grand_total.qty_9|intcomma }}</td>
+              <td class="text-end">{{ dia.grand_total.qty_10|intcomma }}</td>
               <td></td>
               <td class="text-end">${{ dia.grand_total.ingreso_total|floatformat:2|intcomma }}</td>
               <td class="text-center">100.00%</td>
