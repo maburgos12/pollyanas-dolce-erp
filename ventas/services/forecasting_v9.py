@@ -105,8 +105,16 @@ def _active_event_products(event: EventoVenta) -> list[Receta]:
 
 
 def _active_event_branches(event: EventoVenta) -> list[Sucursal]:
-    return list(
+    linked_branches = list(
         Sucursal.objects.filter(sales_events__sales_event=event, sales_events__is_active=True, activa=True)
+        .exclude(codigo__in=EXCLUDED_BRANCH_CODES)
+        .distinct()
+        .order_by("codigo")
+    )
+    if linked_branches:
+        return linked_branches
+    return list(
+        Sucursal.objects.filter(sales_event_forecasts__sales_event=event, activa=True)
         .exclude(codigo__in=EXCLUDED_BRANCH_CODES)
         .distinct()
         .order_by("codigo")
