@@ -25,28 +25,11 @@
     font-size: 32px;
     line-height: 1.05;
     font-family: "Playfair Display", serif;
-    color: #fff !important;
   }
   .ventas-hero-copy p {
     margin: 0;
-    color: rgba(255,255,255,.92) !important;
+    color: rgba(255,255,255,.86);
     max-width: 72ch;
-  }
-  .ventas-hero .btn-ghost {
-    color: #fff !important;
-    border-color: rgba(255,255,255,.42) !important;
-    background: rgba(255,255,255,.10) !important;
-  }
-  .ventas-hero .btn-ghost:hover {
-    background: rgba(255,255,255,.18) !important;
-  }
-  .ventas-hero .ventas-header-danger {
-    color: #7b1a48 !important;
-    background: transparent !important;
-    border: 1px solid #7b1a48 !important;
-  }
-  .ventas-hero .ventas-header-danger:hover {
-    background: rgba(123,26,72,.08) !important;
   }
   .ventas-chip-row,
   .ventas-anchor-row,
@@ -81,11 +64,6 @@
     border-radius: 18px;
     padding: 18px;
   }
-  .ventas-side-panel .ventas-table-note {
-    color: rgba(255,255,255,.84) !important;
-    font-size: 13px;
-    line-height: 1.45;
-  }
   .ventas-side-panel h3,
   .ventas-section-title {
     margin: 0 0 8px;
@@ -93,7 +71,7 @@
   }
   .ventas-metric {
     min-width: 130px;
-    padding: 16px;
+    padding: 14px 16px;
     background: rgba(122,22,63,.05);
     border: 1px solid rgba(122,22,63,.08);
     border-radius: 16px;
@@ -119,13 +97,6 @@
     font-size: 24px;
     font-weight: 800;
     line-height: 1;
-  }
-  #resumen .ventas-metric {
-    min-width: 150px;
-    padding: 1rem;
-  }
-  #resumen .ventas-metric-value {
-    font-size: 1.4rem;
   }
   .ventas-grid-two,
   .ventas-grid-three {
@@ -164,7 +135,7 @@
   .ventas-bar-fill {
     height: 100%;
     border-radius: inherit;
-    background: #7b1a48;
+    background: linear-gradient(90deg, #7a163f, #bf4a73);
   }
   .ventas-mini-columns {
     display: flex;
@@ -183,7 +154,7 @@
     width: 100%;
     max-width: 44px;
     border-radius: 14px 14px 6px 6px;
-    background: #7b1a48;
+    background: linear-gradient(180deg, #bf4a73, #7a163f);
     min-height: 12px;
   }
   .ventas-mini-col-label {
@@ -251,36 +222,6 @@
     color: #7c6570;
     font-size: 12px;
   }
-  .ventas-model-details {
-    margin-top: 12px;
-    border: 1px solid rgba(122,22,63,.12);
-    border-radius: 14px;
-    background: rgba(255,255,255,.72);
-    padding: 10px 12px;
-  }
-  .ventas-model-details summary {
-    cursor: pointer;
-    color: #7a163f;
-    font-weight: 800;
-  }
-  .ventas-tab-loading {
-    display:flex;
-    align-items:center;
-    gap:10px;
-    min-height:120px;
-    color:#7c6570;
-  }
-  .ventas-tab-spinner {
-    width:18px;
-    height:18px;
-    border:3px solid rgba(122,22,63,.18);
-    border-top-color:#7a163f;
-    border-radius:50%;
-    animation:ventas-tab-spin .8s linear infinite;
-  }
-  @keyframes ventas-tab-spin {
-    to { transform:rotate(360deg); }
-  }
   @media (max-width: 1100px) {
     .ventas-hero-grid,
     .ventas-grid-two,
@@ -308,9 +249,6 @@
           La base comercial vigente es <strong>{{ workflow_state|lower }}</strong>.
         </p>
         <div class="ventas-action-row" style="margin-top:16px;">
-          {% if can_view_production_dashboard %}
-          <a class="btn btn-secondary" href="{% url 'ventas:evento_produccion' event.id %}">Plan de Producción</a>
-          {% endif %}
           {% if can_manage %}
           <a class="btn btn-secondary" href="{% url 'ventas:evento_update' event.id %}">Editar evento</a>
           <a class="btn btn-secondary" href="{% url 'ventas:evento_adjustments_editor' event.id %}">Editor de ajustes</a>
@@ -320,10 +258,10 @@
           {% endif %}
           {% if can_approve %}
           <a class="btn btn-primary" href="{% url 'ventas:evento_approve' event.id %}">Aprobar</a>
-          <a class="btn btn-ghost ventas-header-danger" href="{% url 'ventas:evento_reject' event.id %}">Rechazar</a>
+          <a class="btn btn-ghost" href="{% url 'ventas:evento_reject' event.id %}">Rechazar</a>
           {% endif %}
           {% if can_manage %}
-          <a class="btn btn-ghost ventas-header-danger" href="{% url 'ventas:evento_close' event.id %}">Cerrar evento</a>
+          <a class="btn btn-ghost" href="{% url 'ventas:evento_close' event.id %}">Cerrar evento</a>
           {% endif %}
         </div>
       </div>
@@ -344,22 +282,27 @@
           </article>
           <article class="ventas-metric dark">
             <span class="ventas-metric-label">Producción</span>
-            <span class="ventas-metric-value">{{ production_summary.production_lines|default:0 }}</span>
+            <span class="ventas-metric-value">{{ production_dataset.summary.production_lines }}</span>
           </article>
         </div>
         {% if executive_dataset.validation_message %}
-        <div class="ventas-table-note" style="margin-top:14px;">
+        <div class="ventas-table-note" style="color:rgba(255,255,255,.72); margin-top:14px;">
           {{ executive_dataset.validation_message }}
         </div>
         {% endif %}
         {% if executive_dataset.projection_model %}
-        <div class="ventas-table-note" style="margin-top:12px;">
-          Modelo ejecutivo: same-store {{ executive_dataset.projection_model.same_store_factor|floatformat:4 }},
+        <div class="ventas-table-note" style="color:rgba(255,255,255,.72); margin-top:12px;">
+          Modelo ejecutivo:
+          same-store {{ executive_dataset.projection_model.same_store_factor|floatformat:4 }},
           expansión {{ executive_dataset.projection_model.expansion_factor|floatformat:4 }},
           contracción {{ executive_dataset.projection_model.contraction_factor|floatformat:4 }}.
         </div>
+        <div class="ventas-table-note" style="color:rgba(255,255,255,.72);">
+          Benchmark {{ executive_dataset.projection_model.benchmark_source }}:
+          ${{ executive_dataset.projection_model.benchmark_sales|floatformat:2 }}.
+        </div>
         {% endif %}
-        <div class="ventas-table-note" style="margin-top:14px;">
+        <div class="ventas-table-note" style="color:rgba(255,255,255,.72); margin-top:14px;">
           {% if event_ready_for_operations %}
           La versión ya quedó liberada para operación. Producción, insumos y compras consumen esta base.
           {% else %}
@@ -373,12 +316,12 @@
   <section class="card">
     <div class="ventas-anchor-row">
       <a class="ventas-anchor" href="#resumen">Resumen ejecutivo</a>
-      <a class="ventas-anchor" href="#proyeccion" data-event-tab="proyeccion" data-tab-url="{% url 'ventas:evento_tab_proyeccion' event.id %}{% if detail_source_filter %}?detail_source={{ detail_source_filter }}{% endif %}">Proyección comercial</a>
+      <a class="ventas-anchor" href="#proyeccion">Proyección comercial</a>
       <a class="ventas-anchor" href="#ajustes">Ajustes de ventas</a>
-      <a class="ventas-anchor" href="#produccion" data-event-tab="produccion" data-tab-url="{% url 'ventas:evento_tab_produccion' event.id %}">Producción</a>
-      <a class="ventas-anchor" href="#insumos" data-event-tab="insumos" data-tab-url="{% url 'ventas:evento_tab_insumos' event.id %}">Insumos y compras</a>
+      <a class="ventas-anchor" href="#produccion">Producción</a>
+      <a class="ventas-anchor" href="#insumos">Insumos y compras</a>
       <a class="ventas-anchor" href="#archivos">Archivos ERP</a>
-      <a class="ventas-anchor" href="#trazabilidad" data-event-tab="trazabilidad" data-tab-url="{% url 'ventas:evento_tab_trazabilidad' event.id %}">Aprobación y trazabilidad</a>
+      <a class="ventas-anchor" href="#trazabilidad">Aprobación y trazabilidad</a>
     </div>
   </section>
 
@@ -395,7 +338,7 @@
 
     <div class="ventas-grid-three">
       <article class="ventas-card-soft">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+        <div class="ventas-metric-list">
           <article class="ventas-metric">
             <span class="ventas-metric-label">Volumen proyectado</span>
             <span class="ventas-metric-value">{{ executive_dataset.summary.qty|floatformat:0 }}</span>
@@ -433,36 +376,33 @@
           </article>
         </div>
         {% endif %}
-        <details class="ventas-model-details">
-          <summary>Ver detalles del modelo</summary>
-          {% if executive_dataset.validation_message %}
-          <div class="ventas-table-note">
-            {{ executive_dataset.validation_message }}
-          </div>
-          {% endif %}
-          <div class="ventas-table-note">
-            La interpretación central del SKU distingue receta directa, base + addon, histórico legado y casos bloqueados. UI y exports usan esta misma clasificación.
-          </div>
-          {% if focused_financial %}
-          <div class="ventas-table-note">
-            Escenario foco {{ event.get_scenario_focus_display|lower }}: ingresos ${{ focused_financial.estimated_sales|floatformat:0 }}, utilidad bruta ${{ focused_financial.estimated_gross_profit|floatformat:0 }}, ROI bruto {{ focused_financial.expected_roi|floatformat:1 }}%.
-          </div>
-          <div class="ventas-table-note">
-            El ROI mostrado corresponde a costo directo del mix proyectado; no sustituye una rentabilidad operativa total del evento.
-          </div>
-          {% endif %}
-          {% if executive_dataset.projection_model %}
-          <div class="ventas-table-note">
-            Descomposición ejecutiva: base comparable {{ executive_dataset.projection_model.historical_comparable_qty|floatformat:0 }} piezas,
-            same-store proyectado {{ executive_dataset.projection_model.projected_same_store_qty|floatformat:0 }},
-            expansión incremental {{ executive_dataset.projection_model.expansion_increment_qty|floatformat:0 }},
-            contracción {{ executive_dataset.projection_model.contraction_qty|floatformat:0 }}.
-          </div>
-          <div class="ventas-table-note">
-            {{ executive_dataset.projection_model.final_projection_reasoning }}
-          </div>
-          {% endif %}
-        </details>
+        {% if executive_dataset.validation_message %}
+        <div class="ventas-table-note">
+          {{ executive_dataset.validation_message }}
+        </div>
+        {% endif %}
+        <div class="ventas-table-note">
+          La interpretación central del SKU distingue receta directa, base + addon, histórico legado y casos bloqueados. UI y exports usan esta misma clasificación.
+        </div>
+        {% if focused_financial %}
+        <div class="ventas-table-note">
+          Escenario foco {{ event.get_scenario_focus_display|lower }}: ingresos ${{ focused_financial.estimated_sales|floatformat:0 }}, utilidad bruta ${{ focused_financial.estimated_gross_profit|floatformat:0 }}, ROI bruto {{ focused_financial.expected_roi|floatformat:1 }}%.
+        </div>
+        <div class="ventas-table-note">
+          El ROI mostrado corresponde a costo directo del mix proyectado; no sustituye una rentabilidad operativa total del evento.
+        </div>
+        {% endif %}
+        {% if executive_dataset.projection_model %}
+        <div class="ventas-table-note">
+          Descomposición ejecutiva: base comparable {{ executive_dataset.projection_model.historical_comparable_qty|floatformat:0 }} piezas,
+          same-store proyectado {{ executive_dataset.projection_model.projected_same_store_qty|floatformat:0 }},
+          expansión incremental {{ executive_dataset.projection_model.expansion_increment_qty|floatformat:0 }},
+          contracción {{ executive_dataset.projection_model.contraction_qty|floatformat:0 }}.
+        </div>
+        <div class="ventas-table-note">
+          {{ executive_dataset.projection_model.final_projection_reasoning }}
+        </div>
+        {% endif %}
       </article>
 
       <article class="ventas-card-soft">
@@ -559,11 +499,7 @@
     </div>
   </section>
 
-  <section id="proyeccion" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_proyeccion' event.id %}{% if detail_source_filter %}?detail_source={{ detail_source_filter }}{% endif %}" data-loaded="false">
-    <div class="ventas-tab-loading">
-      <span>Proyección comercial lista para cargar.</span>
-    </div>
-    {% comment %}
+  <section id="proyeccion" class="card ventas-subsection">
     <div class="ventas-section-header">
       <div>
         <div class="card-header">Proyección comercial</div>
@@ -743,7 +679,6 @@
       </div>
       <div class="ventas-table-note">{{ week_trend_note }}</div>
     </details>
-    {% endcomment %}
   </section>
 
   <section id="ajustes" class="card ventas-subsection">
@@ -866,11 +801,7 @@
     </details>
   </section>
 
-  <section id="produccion" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_produccion' event.id %}" data-loaded="false">
-    <div class="ventas-tab-loading">
-      <span>Producción lista para cargar.</span>
-    </div>
-    {% comment %}
+  <section id="produccion" class="card ventas-subsection">
     <div class="ventas-section-header">
       <div>
         <div class="card-header">Producción</div>
@@ -1031,14 +962,9 @@
         </table>
       </div>
     </details>
-    {% endcomment %}
   </section>
 
-  <section id="insumos" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_insumos' event.id %}" data-loaded="false">
-    <div class="ventas-tab-loading">
-      <span>Insumos y compras listos para cargar.</span>
-    </div>
-    {% comment %}
+  <section id="insumos" class="card ventas-subsection">
     <div class="ventas-section-header">
       <div>
         <div class="card-header">Insumos y compras</div>
@@ -1134,7 +1060,6 @@
         </table>
       </div>
     </div>
-    {% endcomment %}
   </section>
 
   <section id="archivos" class="card ventas-subsection">
@@ -1151,8 +1076,6 @@
         <a class="btn btn-secondary" href="{% url 'ventas:evento_export_main_day_projection' event.id %}">Excel día exacto</a>
         <a class="btn btn-secondary" href="{% url 'ventas:evento_export_branch_day_projection' event.id %}">Excel proyección por día</a>
         <a class="btn btn-secondary" href="{% url 'ventas:evento_export_executive_dashboard' event.id %}">Dashboard ejecutivo</a>
-        <a class="btn btn-secondary" href="{% url 'ventas:evento_export_produccion' event.id %}">Plan de producción</a>
-        <a class="btn btn-secondary" href="{% url 'ventas:evento_export_insumos' event.id %}">Requerimiento de insumos</a>
       </div>
     </div>
 
@@ -1206,11 +1129,7 @@
     </div>
   </section>
 
-  <section id="trazabilidad" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_trazabilidad' event.id %}" data-loaded="false">
-    <div class="ventas-tab-loading">
-      <span>Aprobación y trazabilidad listas para cargar.</span>
-    </div>
-    {% comment %}
+  <section id="trazabilidad" class="card ventas-subsection">
     <div class="ventas-section-header">
       <div>
         <div class="card-header">Aprobación y trazabilidad</div>
@@ -1274,52 +1193,6 @@
         </table>
       </div>
     </div>
-    {% endcomment %}
   </section>
 </div>
-<script>
-  document.addEventListener("DOMContentLoaded", function () {
-    const lazyLinks = document.querySelectorAll("[data-event-tab]");
-    const loadingMarkup = '<div class="ventas-tab-loading"><span class="ventas-tab-spinner"></span><span>Cargando información...</span></div>';
-    const errorMarkup = '<div class="ventas-alert" data-level="WARN"><strong>No se pudo cargar.</strong><div>Intenta de nuevo.</div><div style="margin-top:10px;"><button type="button" class="btn btn-secondary" data-tab-retry>Reintentar</button></div></div>';
-    lazyLinks.forEach(function (link) {
-      link.addEventListener("click", function () {
-        const targetId = (link.getAttribute("href") || "").replace("#", "");
-        const target = document.getElementById(targetId);
-        const url = link.dataset.tabUrl || (target ? target.dataset.lazyUrl : "");
-        if (!target || !url || target.dataset.loaded === "true") {
-          return;
-        }
-        target.innerHTML = loadingMarkup;
-        const controller = new AbortController();
-        const timeoutId = window.setTimeout(function () {
-          controller.abort();
-        }, 15000);
-        fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" }, signal: controller.signal })
-          .then(function (response) {
-            if (!response.ok) {
-              throw new Error("No se pudo cargar la sección.");
-            }
-            return response.text();
-          })
-          .then(function (html) {
-            window.clearTimeout(timeoutId);
-            target.innerHTML = html;
-            target.dataset.loaded = "true";
-          })
-          .catch(function (error) {
-            window.clearTimeout(timeoutId);
-            target.innerHTML = errorMarkup;
-            target.dataset.loaded = "false";
-            const retry = target.querySelector("[data-tab-retry]");
-            if (retry) {
-              retry.addEventListener("click", function () {
-                link.click();
-              });
-            }
-          });
-      });
-    });
-  });
-</script>
 {% endblock %}

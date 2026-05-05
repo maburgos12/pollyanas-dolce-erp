@@ -16,7 +16,6 @@ from inventario.models import MovimientoInventario
 from maestros.models import CostoInsumo
 from pos_bridge.historical_freeze import assert_not_frozen
 from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact, PointTransferLine, PointWasteLine
-from recetas.models import Receta
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import (
     AnalyticAuditLog,
@@ -26,6 +25,7 @@ from reportes.models import (
     FactProduccionDiaria,
     FactVentaDiaria,
     ForecastInput,
+    ProductoCostoOperativoMensual,
 )
 from reportes.dashboard_full_dataset import (
     ALLOWED_MONTH_WINDOWS,
@@ -227,14 +227,13 @@ def _preferred_legacy_endpoint_by_branch_day(
 def _latest_recipe_unit_cost_map(recipe_ids: set[int]) -> dict[int, Decimal]:
     if not recipe_ids:
         return {}
-    cost_map: dict[int, Decimal] = {}
-    for receta in Receta.objects.filter(id__in=recipe_ids):
-        unit_cost = _to_decimal(getattr(receta, "costo_total_estimado_decimal", None))
-        if unit_cost <= 0:
-            unit_cost = _to_decimal(getattr(receta, "costo_total_estimado", None))
-        if unit_cost > 0:
-            cost_map[int(receta.id)] = unit_cost
-
+    latest_rows = (
+        ProductoCostoOperativoMensual.objects.filter(receta_id__in=recipe_ids)
+        .order_by("receta_id", "-periodo")
+        .distinct("receta_id")
+        .values_list("receta_id", "costo_fabricacion_unit")
+    )
+    cost_map = {int(recipe_id): _to_decimal(unit_cost) for recipe_id, unit_cost in latest_rows}
     missing_ids = sorted(set(int(recipe_id) for recipe_id in recipe_ids) - set(cost_map))
     if missing_ids:
         fallback_map = get_total_cost_map(missing_ids)
@@ -569,76 +568,7 @@ def rebuild_inventory_facts(*, start_date: date, end_date: date) -> int:
     return len(fact_rows)
 
 
-def _repair_point_waste_mappings(*, start_date: date, end_date: date) -> dict[str, int]:
-    """
-    Completa mapeos faltantes en staging de mermas ya extraidas desde Point.
-
-    PointWasteLine guarda siempre el nombre original de Point; si la receta,
-    insumo o sucursal se resolvio despues de la extraccion, este paso evita
-    que la merma quede sin clasificacion antes de reconstruir analytics.
-    """
-    from maestros.models import Insumo, InsumoAlias
-    from recetas.models import Receta
-    from recetas.utils.normalizacion import normalizar_nombre
-
-    updated_recipes = 0
-    updated_supplies = 0
-    updated_branches = 0
-
-    waste_missing_branch = PointWasteLine.objects.filter(
-        movement_at__date__range=(start_date, end_date),
-        erp_branch_id__isnull=True,
-        branch__erp_branch_id__isnull=False,
-    ).select_related("branch")
-    for line in waste_missing_branch.iterator(chunk_size=500):
-        line.erp_branch_id = line.branch.erp_branch_id
-        line.save(update_fields=["erp_branch", "updated_at"])
-        updated_branches += 1
-
-    names = (
-        PointWasteLine.objects.filter(
-            movement_at__date__range=(start_date, end_date),
-            receta_id__isnull=True,
-        )
-        .exclude(item_name="")
-        .values_list("item_name", flat=True)
-        .distinct()
-    )
-    recipe_by_key = {}
-    for receta in Receta.objects.exclude(nombre_normalizado="").only("id", "nombre_normalizado").order_by("id"):
-        recipe_by_key.setdefault(receta.nombre_normalizado, receta.id)
-    supply_by_key = {}
-    for insumo in Insumo.objects.exclude(nombre_normalizado="").only("id", "nombre_normalizado", "nombre_point").order_by("id"):
-        supply_by_key.setdefault(insumo.nombre_normalizado, insumo.id)
-        point_key = normalizar_nombre(insumo.nombre_point or "")
-        if point_key:
-            supply_by_key.setdefault(point_key, insumo.id)
-    for alias in InsumoAlias.objects.select_related("insumo").only("nombre_normalizado", "insumo_id").order_by("id"):
-        supply_by_key.setdefault(alias.nombre_normalizado, alias.insumo_id)
-    for item_name in names:
-        item_key = normalizar_nombre(item_name)
-        receta_id = recipe_by_key.get(item_key)
-        if receta_id:
-            updated_recipes += PointWasteLine.objects.filter(
-                movement_at__date__range=(start_date, end_date),
-                receta_id__isnull=True,
-                item_name=item_name,
-            ).update(receta_id=receta_id)
-            continue
-        insumo_id = supply_by_key.get(item_key)
-        if insumo_id:
-            updated_supplies += PointWasteLine.objects.filter(
-                movement_at__date__range=(start_date, end_date),
-                receta_id__isnull=True,
-                insumo_id__isnull=True,
-                item_name=item_name,
-            ).update(insumo_id=insumo_id)
-
-    return {"waste_recipes": updated_recipes, "waste_supplies": updated_supplies, "waste_branches": updated_branches}
-
-
 def rebuild_production_facts(*, start_date: date, end_date: date) -> int:
-    _repair_point_waste_mappings(start_date=start_date, end_date=end_date)
     produced_rows = (
         PointProductionLine.objects.filter(
             production_date__range=(start_date, end_date),

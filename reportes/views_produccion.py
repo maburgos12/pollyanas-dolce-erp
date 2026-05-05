@@ -17,7 +17,7 @@ from django.views.generic import TemplateView
 
 from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
-from pos_bridge.models import PointConversionLine, PointDailySale, PointProductionLine
+from pos_bridge.models import PointConversionLine, PointDailySale, PointProductionLine, PointSalesDailyProductFact
 from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta, RecetaEquivalencia
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import FactProduccionDiaria
@@ -80,7 +80,7 @@ def _aggregate_by_recipe(queryset, field_name: str, recipe_field: str = "receta_
 
 def _first_available_date() -> dict[str, date | None]:
     return {
-        "ventas": PointDailySale.objects.aggregate(min_date=Min("sale_date"))["min_date"],
+        "ventas": PointSalesDailyProductFact.objects.aggregate(min_date=Min("sale_date"))["min_date"],
         "produccion": FactProduccionDiaria.objects.aggregate(min_date=Min("fecha"))["min_date"]
         or PointProductionLine.objects.aggregate(min_date=Min("production_date"))["min_date"],
         "merma": MermaMensualSucursal.objects.aggregate(min_date=Min("periodo"))["min_date"],
@@ -230,9 +230,16 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         return result
 
     def _sales_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
-        from reportes.models import FactProduccionDiaria
+        facts = PointSalesDailyProductFact.objects.filter(
+            sale_date__gte=period.month_start,
+            sale_date__lte=period.month_end,
+            receta_id__isnull=False,
+        )
+        if sucursal_id:
+            facts = facts.filter(branch__erp_branch_id=sucursal_id)
+        if facts.exists():
+            return _aggregate_by_recipe(facts, "total_cantidad"), "PointSalesDailyProductFact"
 
-        # Fuente primaria: PointDailySale (dato completo de Point, todos los productos mapeados)
         sales = PointDailySale.objects.filter(
             sale_date__gte=period.month_start,
             sale_date__lte=period.month_end,
@@ -240,37 +247,9 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         )
         if sucursal_id:
             sales = sales.filter(branch__erp_branch_id=sucursal_id)
-
         if sales.exists():
-            sales_map = _aggregate_by_recipe(sales, "quantity")
-            source = "PointDailySale"
-        else:
-            return {}, "sin_datos"
-
-        # Fallback por receta: rellenar huecos desde FactProduccionDiaria.vendido
-        # Solo cuando no hay filtro de sucursal
-        if not sucursal_id:
-            fpd_qs = (
-                FactProduccionDiaria.objects
-                .filter(
-                    fecha__gte=period.month_start,
-                    fecha__lte=period.month_end,
-                    receta_id__isnull=False,
-                    vendido__gt=0,
-                )
-                .values("receta_id")
-                .annotate(total=Sum("vendido"))
-            )
-            filled = 0
-            for row in fpd_qs:
-                rid = row["receta_id"]
-                if rid not in sales_map or sales_map[rid] == ZERO:
-                    sales_map[rid] = Decimal(str(row["total"]))
-                    filled += 1
-            if filled:
-                source = f"PointDailySale+FPD({filled})"
-
-        return sales_map, source
+            return _aggregate_by_recipe(sales, "quantity"), "PointDailySale"
+        return {}, "sin_datos"
 
     def _production_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
         facts = FactProduccionDiaria.objects.filter(
