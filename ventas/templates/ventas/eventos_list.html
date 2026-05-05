@@ -34,6 +34,7 @@
             <th>Nombre</th>
             <th>Tipo</th>
             <th>Fecha principal</th>
+            <th>Rango</th>
             <th>Estatus</th>
             <th>Prioridad</th>
             <th></th>
@@ -46,11 +47,23 @@
             <td>{{ event.name }}</td>
             <td>{{ event.event_type|default:"-" }}</td>
             <td>{{ event.main_date }}</td>
+            <td>
+              {% if event.fecha_inicio and event.fecha_fin %}
+                {% if event.fecha_inicio == event.fecha_fin %}
+                  {{ event.fecha_fin }}
+                {% else %}
+                  {{ event.fecha_inicio }} a {{ event.fecha_fin }}
+                {% endif %}
+              {% else %}
+                -
+              {% endif %}
+            </td>
             <td><span class="badge">{{ event.get_status_display }}</span></td>
             <td>{{ event.get_priority_display }}</td>
             <td class="text-end">
               <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
                 <a class="btn btn-sm btn-secondary" href="{% url 'ventas:evento_detail' event.id %}">Abrir</a>
+                <a class="btn btn-sm btn-ghost" href="{% url 'ventas:evento_produccion' event.pk %}">Producción</a>
                 {% if can_manage %}
                   {% if event.status == "BORRADOR" or event.status == "RECHAZADO" %}
                   <form method="post" action="{% url 'ventas:evento_delete' event.id %}" onsubmit="return confirm('¿Eliminar este evento? Esta acción no se puede deshacer.');">
@@ -65,7 +78,7 @@
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="7" class="muted">No hay eventos con esos filtros.</td></tr>
+          <tr><td colspan="8" class="muted">No hay eventos con esos filtros.</td></tr>
           {% endfor %}
         </tbody>
       </table>
