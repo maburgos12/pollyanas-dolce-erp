@@ -25,11 +25,20 @@
     font-size: 32px;
     line-height: 1.05;
     font-family: "Playfair Display", serif;
+    color: #fff !important;
   }
   .ventas-hero-copy p {
     margin: 0;
-    color: rgba(255,255,255,.86);
+    color: rgba(255,255,255,.92) !important;
     max-width: 72ch;
+  }
+  .ventas-hero .btn-ghost {
+    color: #fff !important;
+    border-color: rgba(255,255,255,.42) !important;
+    background: rgba(255,255,255,.10) !important;
+  }
+  .ventas-hero .btn-ghost:hover {
+    background: rgba(255,255,255,.18) !important;
   }
   .ventas-chip-row,
   .ventas-anchor-row,
@@ -64,6 +73,11 @@
     border-radius: 18px;
     padding: 18px;
   }
+  .ventas-side-panel .ventas-table-note {
+    color: rgba(255,255,255,.84) !important;
+    font-size: 13px;
+    line-height: 1.45;
+  }
   .ventas-side-panel h3,
   .ventas-section-title {
     margin: 0 0 8px;
@@ -71,7 +85,7 @@
   }
   .ventas-metric {
     min-width: 130px;
-    padding: 14px 16px;
+    padding: 16px;
     background: rgba(122,22,63,.05);
     border: 1px solid rgba(122,22,63,.08);
     border-radius: 16px;
@@ -97,6 +111,13 @@
     font-size: 24px;
     font-weight: 800;
     line-height: 1;
+  }
+  #resumen .ventas-metric {
+    min-width: 150px;
+    padding: 1rem;
+  }
+  #resumen .ventas-metric-value {
+    font-size: 1.4rem;
   }
   .ventas-grid-two,
   .ventas-grid-three {
@@ -222,6 +243,18 @@
     color: #7c6570;
     font-size: 12px;
   }
+  .ventas-model-details {
+    margin-top: 12px;
+    border: 1px solid rgba(122,22,63,.12);
+    border-radius: 14px;
+    background: rgba(255,255,255,.72);
+    padding: 10px 12px;
+  }
+  .ventas-model-details summary {
+    cursor: pointer;
+    color: #7a163f;
+    font-weight: 800;
+  }
   .ventas-tab-loading {
     display:flex;
     align-items:center;
@@ -307,23 +340,18 @@
           </article>
         </div>
         {% if executive_dataset.validation_message %}
-        <div class="ventas-table-note" style="color:rgba(255,255,255,.72); margin-top:14px;">
+        <div class="ventas-table-note" style="margin-top:14px;">
           {{ executive_dataset.validation_message }}
         </div>
         {% endif %}
         {% if executive_dataset.projection_model %}
-        <div class="ventas-table-note" style="color:rgba(255,255,255,.72); margin-top:12px;">
-          Modelo ejecutivo:
-          same-store {{ executive_dataset.projection_model.same_store_factor|floatformat:4 }},
+        <div class="ventas-table-note" style="margin-top:12px;">
+          Modelo ejecutivo: same-store {{ executive_dataset.projection_model.same_store_factor|floatformat:4 }},
           expansión {{ executive_dataset.projection_model.expansion_factor|floatformat:4 }},
           contracción {{ executive_dataset.projection_model.contraction_factor|floatformat:4 }}.
         </div>
-        <div class="ventas-table-note" style="color:rgba(255,255,255,.72);">
-          Benchmark {{ executive_dataset.projection_model.benchmark_source }}:
-          ${{ executive_dataset.projection_model.benchmark_sales|floatformat:2 }}.
-        </div>
         {% endif %}
-        <div class="ventas-table-note" style="color:rgba(255,255,255,.72); margin-top:14px;">
+        <div class="ventas-table-note" style="margin-top:14px;">
           {% if event_ready_for_operations %}
           La versión ya quedó liberada para operación. Producción, insumos y compras consumen esta base.
           {% else %}
@@ -397,33 +425,36 @@
           </article>
         </div>
         {% endif %}
-        {% if executive_dataset.validation_message %}
-        <div class="ventas-table-note">
-          {{ executive_dataset.validation_message }}
-        </div>
-        {% endif %}
-        <div class="ventas-table-note">
-          La interpretación central del SKU distingue receta directa, base + addon, histórico legado y casos bloqueados. UI y exports usan esta misma clasificación.
-        </div>
-        {% if focused_financial %}
-        <div class="ventas-table-note">
-          Escenario foco {{ event.get_scenario_focus_display|lower }}: ingresos ${{ focused_financial.estimated_sales|floatformat:0 }}, utilidad bruta ${{ focused_financial.estimated_gross_profit|floatformat:0 }}, ROI bruto {{ focused_financial.expected_roi|floatformat:1 }}%.
-        </div>
-        <div class="ventas-table-note">
-          El ROI mostrado corresponde a costo directo del mix proyectado; no sustituye una rentabilidad operativa total del evento.
-        </div>
-        {% endif %}
-        {% if executive_dataset.projection_model %}
-        <div class="ventas-table-note">
-          Descomposición ejecutiva: base comparable {{ executive_dataset.projection_model.historical_comparable_qty|floatformat:0 }} piezas,
-          same-store proyectado {{ executive_dataset.projection_model.projected_same_store_qty|floatformat:0 }},
-          expansión incremental {{ executive_dataset.projection_model.expansion_increment_qty|floatformat:0 }},
-          contracción {{ executive_dataset.projection_model.contraction_qty|floatformat:0 }}.
-        </div>
-        <div class="ventas-table-note">
-          {{ executive_dataset.projection_model.final_projection_reasoning }}
-        </div>
-        {% endif %}
+        <details class="ventas-model-details">
+          <summary>Ver detalles del modelo</summary>
+          {% if executive_dataset.validation_message %}
+          <div class="ventas-table-note">
+            {{ executive_dataset.validation_message }}
+          </div>
+          {% endif %}
+          <div class="ventas-table-note">
+            La interpretación central del SKU distingue receta directa, base + addon, histórico legado y casos bloqueados. UI y exports usan esta misma clasificación.
+          </div>
+          {% if focused_financial %}
+          <div class="ventas-table-note">
+            Escenario foco {{ event.get_scenario_focus_display|lower }}: ingresos ${{ focused_financial.estimated_sales|floatformat:0 }}, utilidad bruta ${{ focused_financial.estimated_gross_profit|floatformat:0 }}, ROI bruto {{ focused_financial.expected_roi|floatformat:1 }}%.
+          </div>
+          <div class="ventas-table-note">
+            El ROI mostrado corresponde a costo directo del mix proyectado; no sustituye una rentabilidad operativa total del evento.
+          </div>
+          {% endif %}
+          {% if executive_dataset.projection_model %}
+          <div class="ventas-table-note">
+            Descomposición ejecutiva: base comparable {{ executive_dataset.projection_model.historical_comparable_qty|floatformat:0 }} piezas,
+            same-store proyectado {{ executive_dataset.projection_model.projected_same_store_qty|floatformat:0 }},
+            expansión incremental {{ executive_dataset.projection_model.expansion_increment_qty|floatformat:0 }},
+            contracción {{ executive_dataset.projection_model.contraction_qty|floatformat:0 }}.
+          </div>
+          <div class="ventas-table-note">
+            {{ executive_dataset.projection_model.final_projection_reasoning }}
+          </div>
+          {% endif %}
+        </details>
       </article>
 
       <article class="ventas-card-soft">
@@ -522,7 +553,6 @@
 
   <section id="proyeccion" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_proyeccion' event.id %}{% if detail_source_filter %}?detail_source={{ detail_source_filter }}{% endif %}" data-loaded="false">
     <div class="ventas-tab-loading">
-      <span class="ventas-tab-spinner"></span>
       <span>Proyección comercial lista para cargar.</span>
     </div>
     {% comment %}
@@ -830,7 +860,6 @@
 
   <section id="produccion" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_produccion' event.id %}" data-loaded="false">
     <div class="ventas-tab-loading">
-      <span class="ventas-tab-spinner"></span>
       <span>Producción lista para cargar.</span>
     </div>
     {% comment %}
@@ -999,7 +1028,6 @@
 
   <section id="insumos" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_insumos' event.id %}" data-loaded="false">
     <div class="ventas-tab-loading">
-      <span class="ventas-tab-spinner"></span>
       <span>Insumos y compras listos para cargar.</span>
     </div>
     {% comment %}
@@ -1172,7 +1200,6 @@
 
   <section id="trazabilidad" class="card ventas-subsection" data-lazy-url="{% url 'ventas:evento_tab_trazabilidad' event.id %}" data-loaded="false">
     <div class="ventas-tab-loading">
-      <span class="ventas-tab-spinner"></span>
       <span>Aprobación y trazabilidad listas para cargar.</span>
     </div>
     {% comment %}
@@ -1246,6 +1273,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     const lazyLinks = document.querySelectorAll("[data-event-tab]");
     const loadingMarkup = '<div class="ventas-tab-loading"><span class="ventas-tab-spinner"></span><span>Cargando información...</span></div>';
+    const errorMarkup = '<div class="ventas-alert" data-level="WARN"><strong>No se pudo cargar.</strong><div>Intenta de nuevo.</div><div style="margin-top:10px;"><button type="button" class="btn btn-secondary" data-tab-retry>Reintentar</button></div></div>';
     lazyLinks.forEach(function (link) {
       link.addEventListener("click", function () {
         const targetId = (link.getAttribute("href") || "").replace("#", "");
@@ -1255,7 +1283,11 @@
           return;
         }
         target.innerHTML = loadingMarkup;
-        fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(function () {
+          controller.abort();
+        }, 15000);
+        fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" }, signal: controller.signal })
           .then(function (response) {
             if (!response.ok) {
               throw new Error("No se pudo cargar la sección.");
@@ -1263,12 +1295,20 @@
             return response.text();
           })
           .then(function (html) {
+            window.clearTimeout(timeoutId);
             target.innerHTML = html;
             target.dataset.loaded = "true";
           })
-          .catch(function () {
-            target.innerHTML = '<div class="ventas-alert" data-level="WARN"><strong>No se pudo cargar la sección</strong><div>Intenta de nuevo en unos segundos.</div></div>';
+          .catch(function (error) {
+            window.clearTimeout(timeoutId);
+            target.innerHTML = errorMarkup;
             target.dataset.loaded = "false";
+            const retry = target.querySelector("[data-tab-retry]");
+            if (retry) {
+              retry.addEventListener("click", function () {
+                link.click();
+              });
+            }
           });
       });
     });
