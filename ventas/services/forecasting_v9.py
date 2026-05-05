@@ -12,7 +12,7 @@ from typing import Any
 from django.db.models import Q, Sum
 from django.utils import timezone
 
-from core.branch_catalog import EXCLUDED_BRANCH_CODES
+from core.branch_catalog import EXCLUDED_BRANCH_CODES, POINT_MATURE_BRANCH_CODES
 from core.models import Sucursal
 from pos_bridge.models import PointDailySale
 from recetas.models import Receta
@@ -99,6 +99,7 @@ def _reference_window(event: EventoVenta) -> tuple[date, date, date, date]:
 def _active_event_products(event: EventoVenta) -> list[Receta]:
     return list(
         Receta.objects.filter(sales_event_products__sales_event=event, sales_event_products__is_active=True)
+        .exclude(familia__iexact="Bebidas")
         .distinct()
         .order_by("familia", "categoria", "nombre")
     )
@@ -235,20 +236,48 @@ def _fallback_base(
     active_products: list[Receta],
     rotacion_2026: Decimal,
     event_dates_2025: tuple[date, date],
+    start_2026: date,
+    end_2026: date,
 ) -> tuple[Decimal, int]:
     family = _family(product)
     size = _product_size(product)
+
+    def _shrunk_family_base(peer_products: list[Receta], peer_avg: Decimal) -> Decimal:
+        if not peer_avg:
+            return ZERO
+        peer_rotation_total = ZERO
+        peer_rotation_count = 0
+        for peer in peer_products:
+            peer_rotation = _point_sales_qty(peer, branch, start_2026, end_2026) / Decimal(LOOKBACK_DAYS)
+            if peer_rotation > ZERO:
+                peer_rotation_total += peer_rotation
+                peer_rotation_count += 1
+        promedio_familia_rotacion = (
+            peer_rotation_total / Decimal(peer_rotation_count)
+            if peer_rotation_count
+            else ZERO
+        )
+        if rotacion_2026 > ZERO and promedio_familia_rotacion > ZERO:
+            shrink_factor = min(ONE, rotacion_2026 / promedio_familia_rotacion)
+        elif rotacion_2026 > ZERO:
+            shrink_factor = Decimal("0.60")
+        else:
+            shrink_factor = Decimal("0.30")
+        return min(peer_avg * shrink_factor, peer_avg * Decimal("0.60"))
+
     peer_same_size = [p for p in active_products if _family(p) == family and _product_size(p) == size and p.id != product.id]
     if peer_same_size:
         total = _point_sales_qty_for_products(peer_same_size, branch, target_day, target_day)
         if total:
-            return total / Decimal(len(peer_same_size)), 1
+            peer_avg = total / Decimal(len(peer_same_size))
+            return _shrunk_family_base(peer_same_size, peer_avg), 1
 
     peer_family = [p for p in active_products if _family(p) == family and p.id != product.id]
     if peer_family:
         total = _point_sales_qty_for_products(peer_family, branch, target_day, target_day)
         if total:
-            return total / Decimal(len(peer_family)), 2
+            peer_avg = total / Decimal(len(peer_family))
+            return _shrunk_family_base(peer_family, peer_avg), 2
 
     family_products = [p for p in active_products if _family(p) == family]
     family_event_2025 = _point_sales_qty_for_products(family_products, branch, event_dates_2025[0], event_dates_2025[1])
@@ -259,7 +288,8 @@ def _fallback_base(
         multiplier = family_event_2025 / april_daily_avg
         return rotacion_2026 * multiplier, 3
 
-    return rotacion_2026 * Decimal("1.5"), 4
+    fallback_multiplier = Decimal("1.10") if branch.codigo in POINT_MATURE_BRANCH_CODES else Decimal("0.80")
+    return rotacion_2026 * fallback_multiplier, 4
 
 
 def _branch_factor(branch: Sucursal, products: list[Receta], start_2026: date, end_2026: date, start_2025: date, end_2025: date) -> tuple[Decimal, bool]:
@@ -403,6 +433,8 @@ def generate_event_forecast_v9(event: EventoVenta) -> list[dict[str, Any]]:
                         active_products=products,
                         rotacion_2026=context.rotacion_2026,
                         event_dates_2025=event_dates_2025,
+                        start_2026=start_2026,
+                        end_2026=end_2026,
                     )
                 bases_by_day[forecast_date] = base
                 fallback_by_day[forecast_date] = fallback_level
@@ -414,6 +446,12 @@ def generate_event_forecast_v9(event: EventoVenta) -> list[dict[str, Any]]:
                 forecast_decimal = forecast_total * share
                 forecast_v8 = _forecast_v8_total(event, product, branch, forecast_date)
                 real_2025 = real_by_day[forecast_date]
+                historyless_cap_applied = False
+                if not real_2025:
+                    historyless_cap = context.rotacion_2026 * Decimal("3.0")
+                    if historyless_cap > ZERO and forecast_decimal > historyless_cap:
+                        forecast_decimal = historyless_cap
+                        historyless_cap_applied = True
                 diff = forecast_decimal - forecast_v8
                 diff_pct = (diff / forecast_v8 * Decimal("100")) if forecast_v8 else ZERO
                 rows.append(
@@ -443,6 +481,7 @@ def generate_event_forecast_v9(event: EventoVenta) -> list[dict[str, Any]]:
                         "diferencia": diff,
                         "diferencia_pct": diff_pct,
                         "cap_aplicado": context.factor_rotacion_cap_aplicado or context.factor_sucursal_cap_aplicado,
+                        "historyless_cap_aplicado": historyless_cap_applied,
                     }
                 )
 
@@ -468,6 +507,7 @@ def generate_event_forecast_v9(event: EventoVenta) -> list[dict[str, Any]]:
             "rotacion_2026": float(row["rotacion_2026"]),
             "rotacion_2025": float(row["rotacion_2025"]),
             "cap_aplicado": bool(row["cap_aplicado"]),
+            "historyless_cap_aplicado": bool(row["historyless_cap_aplicado"]),
             "real_2025": float(row["real_2025"]),
             "real_2025_rango_producto_sucursal": float(row["real_2025_range"]),
             "forecast_v8": float(row["forecast_v8"]),
