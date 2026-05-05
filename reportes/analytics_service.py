@@ -572,14 +572,16 @@ def _repair_point_waste_mappings(*, start_date: date, end_date: date) -> dict[st
     """
     Completa mapeos faltantes en staging de mermas ya extraidas desde Point.
 
-    PointWasteLine guarda siempre el nombre original del producto; si la receta o
-    sucursal se resolvio despues de la extraccion, este paso evita que la merma
-    quede fuera de FactProduccionDiaria al reconstruir analytics.
+    PointWasteLine guarda siempre el nombre original de Point; si la receta,
+    insumo o sucursal se resolvio despues de la extraccion, este paso evita
+    que la merma quede sin clasificacion antes de reconstruir analytics.
     """
+    from maestros.models import Insumo, InsumoAlias
     from recetas.models import Receta
     from recetas.utils.normalizacion import normalizar_nombre
 
     updated_recipes = 0
+    updated_supplies = 0
     updated_branches = 0
 
     waste_missing_branch = PointWasteLine.objects.filter(
@@ -604,17 +606,34 @@ def _repair_point_waste_mappings(*, start_date: date, end_date: date) -> dict[st
     recipe_by_key = {}
     for receta in Receta.objects.exclude(nombre_normalizado="").only("id", "nombre_normalizado").order_by("id"):
         recipe_by_key.setdefault(receta.nombre_normalizado, receta.id)
+    supply_by_key = {}
+    for insumo in Insumo.objects.exclude(nombre_normalizado="").only("id", "nombre_normalizado", "nombre_point").order_by("id"):
+        supply_by_key.setdefault(insumo.nombre_normalizado, insumo.id)
+        point_key = normalizar_nombre(insumo.nombre_point or "")
+        if point_key:
+            supply_by_key.setdefault(point_key, insumo.id)
+    for alias in InsumoAlias.objects.select_related("insumo").only("nombre_normalizado", "insumo_id").order_by("id"):
+        supply_by_key.setdefault(alias.nombre_normalizado, alias.insumo_id)
     for item_name in names:
-        receta_id = recipe_by_key.get(normalizar_nombre(item_name))
-        if not receta_id:
+        item_key = normalizar_nombre(item_name)
+        receta_id = recipe_by_key.get(item_key)
+        if receta_id:
+            updated_recipes += PointWasteLine.objects.filter(
+                movement_at__date__range=(start_date, end_date),
+                receta_id__isnull=True,
+                item_name=item_name,
+            ).update(receta_id=receta_id)
             continue
-        updated_recipes += PointWasteLine.objects.filter(
-            movement_at__date__range=(start_date, end_date),
-            receta_id__isnull=True,
-            item_name=item_name,
-        ).update(receta_id=receta_id)
+        insumo_id = supply_by_key.get(item_key)
+        if insumo_id:
+            updated_supplies += PointWasteLine.objects.filter(
+                movement_at__date__range=(start_date, end_date),
+                receta_id__isnull=True,
+                insumo_id__isnull=True,
+                item_name=item_name,
+            ).update(insumo_id=insumo_id)
 
-    return {"waste_recipes": updated_recipes, "waste_branches": updated_branches}
+    return {"waste_recipes": updated_recipes, "waste_supplies": updated_supplies, "waste_branches": updated_branches}
 
 
 def rebuild_production_facts(*, start_date: date, end_date: date) -> int:
