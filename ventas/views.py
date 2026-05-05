@@ -115,6 +115,10 @@ def _can_view_event_production_dashboard(user) -> bool:
     return can_view_rentabilidad(user) or has_any_role(user, ROLE_DG, "VENTAS")
 
 
+def _can_view_sales_trends(user) -> bool:
+    return can_view_rentabilidad(user) or has_any_role(user, ROLE_DG, "VENTAS")
+
+
 def _event_branch_links(event: EventoVenta):
     return (
         EventoVentaSucursal.objects.filter(
@@ -128,8 +132,158 @@ def _event_branch_links(event: EventoVenta):
     )
 
 
+class VentasTendenciasView(LoginRequiredMixin, View):
+    def get(self, request):
+        if not _can_view_sales_trends(request.user):
+            raise PermissionDenied("No tienes permisos para ver tendencias de ventas.")
+        context = _sales_trend_rows()
+        context["module_tabs"] = [
+            {"label": "Eventos", "url": reverse("ventas:eventos"), "active": False},
+            {"label": "Tendencias de mix", "url": reverse("ventas:tendencias"), "active": True},
+        ]
+        return render(request, "ventas/tendencias.html", context)
+
+
 def _event_forecast_qs(event: EventoVenta):
     return EventoVentaForecast.objects.filter(sales_event=event).exclude(branch__codigo__in=EXCLUDED_BRANCH_CODES)
+
+
+def _trend_as_pct(value: Decimal) -> Decimal:
+    return (value * Decimal("100")).quantize(Decimal("0.01"))
+
+
+def _trend_signal(delta_share: Decimal, growth_pct: Decimal, *, is_new: bool = False) -> str:
+    if is_new:
+        return "Nuevo con tracción"
+    if delta_share > Decimal("0.003") and growth_pct > Decimal("20"):
+        return "Subir ponderación"
+    if delta_share < Decimal("-0.003") and growth_pct < Decimal("-20"):
+        return "Bajar ponderación"
+    if abs(delta_share) <= Decimal("0.001"):
+        return "Mantener"
+    return "Revisar mix"
+
+
+def _sales_trend_rows() -> dict[str, object]:
+    one = Decimal("1")
+    today = timezone.localdate()
+    recent_start = today - timedelta(days=29)
+    recent_end = today
+    comparable_start = recent_start.replace(year=recent_start.year - 1)
+    comparable_end = recent_end.replace(year=recent_end.year - 1)
+
+    def _period_qty(start: date, end: date) -> dict[int, Decimal]:
+        rows = (
+            PointDailySale.objects.filter(
+                sale_date__range=(start, end),
+                receta__isnull=False,
+                receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
+            )
+            .values("receta_id")
+            .annotate(qty=Sum("quantity"))
+        )
+        return {int(row["receta_id"]): Decimal(str(row["qty"] or 0)) for row in rows}
+
+    qty_2026 = _period_qty(recent_start, recent_end)
+    qty_2025 = _period_qty(comparable_start, comparable_end)
+    product_ids = sorted(set(qty_2026) | set(qty_2025))
+    products = Receta.objects.in_bulk(product_ids)
+    total_2026 = sum(qty_2026.values(), ZERO)
+    total_2025 = sum(qty_2025.values(), ZERO)
+    rows: list[dict[str, object]] = []
+    families: dict[str, dict[str, object]] = defaultdict(
+        lambda: {"familia": "", "unidades_2025": ZERO, "unidades_2026": ZERO}
+    )
+
+    for product_id in product_ids:
+        product = products.get(product_id)
+        if not product:
+            continue
+        units_2026 = qty_2026.get(product_id, ZERO)
+        units_2025 = qty_2025.get(product_id, ZERO)
+        if not units_2026 and not units_2025:
+            continue
+        share_2026 = (units_2026 / total_2026) if total_2026 else ZERO
+        share_2025 = (units_2025 / total_2025) if total_2025 else ZERO
+        delta_share = share_2026 - share_2025
+        growth_factor = (units_2026 + one) / (units_2025 + one)
+        growth_pct = (growth_factor - one) * Decimal("100")
+        family = product.familia or "Sin familia"
+        row = {
+            "product_id": product_id,
+            "producto": product.nombre,
+            "familia": family,
+            "unidades_2025": units_2025,
+            "unidades_2026": units_2026,
+            "share_2025": _trend_as_pct(share_2025),
+            "share_2026": _trend_as_pct(share_2026),
+            "delta_share": delta_share,
+            "delta_share_pct": _trend_as_pct(delta_share),
+            "factor_crecimiento": growth_factor,
+            "crecimiento_pct": growth_pct.quantize(Decimal("0.01")),
+            "senal_forecast": _trend_signal(delta_share, growth_pct, is_new=bool(units_2026 and not units_2025)),
+            "is_gain": growth_pct > Decimal("20"),
+            "is_loss": growth_pct < Decimal("-20"),
+            "promedio_diario": (units_2026 / Decimal("30")).quantize(Decimal("0.01")),
+        }
+        rows.append(row)
+        families[family]["familia"] = family
+        families[family]["unidades_2025"] += units_2025
+        families[family]["unidades_2026"] += units_2026
+
+    family_rows: list[dict[str, object]] = []
+    family_factors: dict[str, Decimal] = {}
+    for family, values in families.items():
+        family_2025 = values["unidades_2025"]
+        family_2026 = values["unidades_2026"]
+        share_2026 = (family_2026 / total_2026) if total_2026 else ZERO
+        share_2025 = (family_2025 / total_2025) if total_2025 else ZERO
+        delta = share_2026 - share_2025
+        factor = (family_2026 + one) / (family_2025 + one)
+        family_factors[family] = factor
+        family_rows.append(
+            {
+                "familia": family,
+                "share_2025": _trend_as_pct(share_2025),
+                "share_2026": _trend_as_pct(share_2026),
+                "delta_share": _trend_as_pct(delta),
+                "delta_raw": delta,
+                "trend": "up" if delta > Decimal("0.001") else "down" if delta < Decimal("-0.001") else "flat",
+                "bar_width": min(abs(float(delta) * 1200), 100),
+            }
+        )
+
+    for row in rows:
+        multiplier = family_factors.get(row["familia"], one)
+        row["proyeccion_evento"] = (row["promedio_diario"] * multiplier).quantize(Decimal("0.01"))
+
+    ganadores = sorted(rows, key=lambda row: row["delta_share"], reverse=True)[:15]
+    perdedores = sorted(rows, key=lambda row: row["delta_share"])[:15]
+    sin_historia = sorted(
+        [row for row in rows if row["unidades_2026"] > ZERO and row["unidades_2025"] == ZERO],
+        key=lambda row: row["unidades_2026"],
+        reverse=True,
+    )[:20]
+    family_rows.sort(key=lambda row: row["delta_raw"], reverse=True)
+
+    return {
+        "recent_start": recent_start,
+        "recent_end": recent_end,
+        "comparable_start": comparable_start,
+        "comparable_end": comparable_end,
+        "ganadores": ganadores,
+        "perdedores": perdedores,
+        "familias": family_rows,
+        "sin_historia": sin_historia,
+        "summary": {
+            "productos_analizados": len(rows),
+            "ganando_share": sum(1 for row in rows if row["delta_share"] > Decimal("0.001")),
+            "perdiendo_share": sum(1 for row in rows if row["delta_share"] < Decimal("-0.001")),
+            "nuevos_traccion": len([row for row in rows if row["unidades_2026"] > ZERO and row["unidades_2025"] == ZERO]),
+            "total_2026": total_2026,
+            "total_2025": total_2025,
+        },
+    }
 
 
 DIRECT_METHODS = (
