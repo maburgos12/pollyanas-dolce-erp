@@ -6,6 +6,7 @@ app_name = "ventas"
 urlpatterns = [
     path("", views.evento_list, name="home"),
     path("pronostico/", views.PronosticoVentasView, name="pronostico"),
+    path("pronostico/exportar.xlsx", views.PronosticoExportExcelView, name="pronostico_export_excel"),
     path("eventos/", views.evento_list, name="eventos"),
     path("eventos/nuevo/", views.evento_create, name="evento_create"),
     path("eventos/<int:event_id>/", views.evento_detail, name="evento_detail"),
