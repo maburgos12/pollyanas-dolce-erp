@@ -126,6 +126,44 @@ def _trend_label(factor: Decimal) -> str:
     return "estable"
 
 
+FORECAST_CATEGORY_ORDER = [
+    "Bollos",
+    "Empanadas",
+    "Galletas",
+    "Individual",
+    "Grande",
+    "Mediano",
+    "Chico",
+    "Mini",
+    "Rebanada",
+    "Vasos Preparados",
+    "Pay",
+    "Otros",
+]
+
+
+def _forecast_category(*, product_name: str, family: str) -> str:
+    text = f"{product_name or ''} {family or ''}"
+    normalized = "".join(ch for ch in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(ch))
+    checks = [
+        ("Bollos", ("bollo",)),
+        ("Empanadas", ("empanada",)),
+        ("Galletas", ("galleta",)),
+        ("Individual", ("individual",)),
+        ("Grande", ("grande", " gde", " g")),
+        ("Mediano", ("mediano", " med", " m")),
+        ("Chico", ("chico", " ch", " c")),
+        ("Mini", ("mini",)),
+        ("Rebanada", ("rebanada",)),
+        ("Vasos Preparados", ("vaso",)),
+        ("Pay", ("pay",)),
+    ]
+    for label, needles in checks:
+        if any(needle in normalized for needle in needles):
+            return label
+    return "Otros"
+
+
 def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: set[int]) -> dict:
     selected_days = list(_date_range(start_date, end_date))
     if not selected_days or not branch_ids:
@@ -284,6 +322,8 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
                 "total_ingreso": Decimal("0"),
                 "factor_tendencia": Decimal("1"),
                 "tendencia": "estable",
+                "categoria_excel": _forecast_category(product_name=receta.nombre, family=receta.familia or ""),
+                "por_dia": defaultdict(int),
             },
         )
         branch_total = branch_totals.setdefault(
@@ -293,7 +333,17 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
                 "codigo": branch.codigo,
                 "total_piezas": 0,
                 "total_ingreso": Decimal("0"),
-                "productos": defaultdict(lambda: {"nombre": "", "total_piezas": 0, "total_ingreso": Decimal("0")}),
+                "productos": defaultdict(
+                    lambda: {
+                        "nombre": "",
+                        "familia": "",
+                        "categoria_excel": "Otros",
+                        "precio": Decimal("0"),
+                        "total_piezas": 0,
+                        "total_ingreso": Decimal("0"),
+                        "por_dia": defaultdict(int),
+                    }
+                ),
             },
         )
 
@@ -317,12 +367,17 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
 
             product_total["total_piezas"] += forecast_qty
             product_total["total_ingreso"] += revenue
+            product_total["por_dia"][day] += forecast_qty
             branch_total["total_piezas"] += forecast_qty
             branch_total["total_ingreso"] += revenue
             branch_product = branch_total["productos"][recipe_id]
             branch_product["nombre"] = receta.nombre
+            branch_product["familia"] = receta.familia or "Sin familia"
+            branch_product["categoria_excel"] = _forecast_category(product_name=receta.nombre, family=receta.familia or "")
+            branch_product["precio"] = price
             branch_product["total_piezas"] += forecast_qty
             branch_product["total_ingreso"] += revenue
+            branch_product["por_dia"][day] += forecast_qty
             day_totals[day]["total_piezas"] += forecast_qty
             day_totals[day]["total_ingreso"] += revenue
             day_product_totals[day][recipe_id] += forecast_qty
@@ -339,6 +394,7 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
         row["tendencia"] = _trend_label(avg_factor)
         row["pct_del_total"] = (Decimal(row["total_piezas"]) / Decimal(total_pieces) * Decimal("100")).quantize(Decimal("0.01")) if total_pieces else Decimal("0")
         row["total_ingreso"] = row["total_ingreso"].quantize(Decimal("0.01"))
+        row["por_dia"] = dict(row["por_dia"])
         por_producto.append(row)
 
     por_producto.sort(key=lambda item: (item["familia"], -item["total_piezas"], item["nombre"]))
@@ -372,6 +428,10 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
     for row in branch_totals.values():
         products = list(row["productos"].values())
         products.sort(key=lambda item: (-item["total_piezas"], item["nombre"]))
+        for product in products:
+            product["total_ingreso"] = product["total_ingreso"].quantize(Decimal("0.01"))
+            product["por_dia"] = dict(product["por_dia"])
+        row["productos_excel"] = products
         row["productos"] = products[:5]
         row["total_ingreso"] = row["total_ingreso"].quantize(Decimal("0.01"))
         por_sucursal.append(row)
@@ -389,12 +449,259 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
             "recent_rotation_start": recent_rotation_start,
             "comparable_start": comparable_start,
             "comparable_end": comparable_end,
+            "fecha_inicio": start_date,
+            "fecha_fin": end_date,
+            "dias_rango": selected_days,
         },
         "por_dia": por_dia,
         "por_producto": por_producto,
         "por_producto_familias": family_groups,
         "por_sucursal": por_sucursal,
     }
+
+
+def _calcular_pronostico(request) -> dict:
+    active_branches = Sucursal.objects.filter(activa=True).order_by("nombre")
+    default_branch_ids = set(active_branches.values_list("id", flat=True))
+    selected_branch_ids = {int(value) for value in request.GET.getlist("sucursales") if str(value).isdigit()}
+    if not selected_branch_ids:
+        selected_branch_ids = set(default_branch_ids)
+    else:
+        selected_branch_ids &= default_branch_ids
+
+    fecha_inicio_raw = (request.GET.get("fecha_inicio") or "").strip()
+    fecha_fin_raw = (request.GET.get("fecha_fin") or "").strip()
+    resultados = {}
+    form_errors = []
+    fecha_inicio = None
+    fecha_fin = None
+
+    if fecha_inicio_raw or fecha_fin_raw:
+        try:
+            fecha_inicio = date.fromisoformat(fecha_inicio_raw)
+            fecha_fin = date.fromisoformat(fecha_fin_raw)
+        except ValueError:
+            form_errors.append("Selecciona fechas validas para calcular el pronostico.")
+        if fecha_inicio and fecha_fin and fecha_inicio > fecha_fin:
+            form_errors.append("La fecha inicio no puede ser posterior a la fecha fin.")
+        if fecha_inicio and fecha_fin and (fecha_fin - fecha_inicio).days > 45:
+            form_errors.append("El rango maximo permitido es de 46 dias para mantener el calculo operativo.")
+        if not selected_branch_ids:
+            form_errors.append("Selecciona al menos una sucursal activa.")
+
+        if not form_errors and fecha_inicio and fecha_fin:
+            resultados = _build_pronostico_ventas(
+                start_date=fecha_inicio,
+                end_date=fecha_fin,
+                branch_ids=selected_branch_ids,
+            )
+
+    return {
+        "branches": active_branches,
+        "selected_branch_ids": selected_branch_ids,
+        "fecha_inicio": fecha_inicio,
+        "fecha_fin": fecha_fin,
+        "fecha_inicio_raw": fecha_inicio_raw,
+        "fecha_fin_raw": fecha_fin_raw,
+        "form_errors": form_errors,
+        "resultados": resultados,
+    }
+
+
+def _forecast_day_label(day: date) -> str:
+    weekdays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    return f"{weekdays[day.weekday()]} {day.day} {months[day.month - 1]}"
+
+
+def _forecast_sheet_title(value: str, used_names: set[str]) -> str:
+    invalid = set("[]:*?/\\")
+    clean = "".join("_" if ch in invalid else ch for ch in (value or "Sucursal")).strip() or "Sucursal"
+    clean = clean[:31]
+    candidate = clean
+    counter = 2
+    while candidate in used_names:
+        suffix = f" {counter}"
+        candidate = f"{clean[:31 - len(suffix)]}{suffix}"
+        counter += 1
+    used_names.add(candidate)
+    return candidate
+
+
+def _forecast_excel_rows(products: list[dict], days: list[date]) -> list[dict]:
+    order_index = {category: index for index, category in enumerate(FORECAST_CATEGORY_ORDER)}
+    rows = []
+    for product in products:
+        category = product.get("categoria_excel") or "Otros"
+        rows.append(
+            {
+                "categoria": category,
+                "producto": product.get("nombre") or "",
+                "por_dia": product.get("por_dia") or {},
+                "total": int(product.get("total_piezas") or 0),
+                "precio": _decimal(product.get("precio")),
+                "ingreso": _decimal(product.get("total_ingreso")).quantize(Decimal("0.01")),
+                "order": order_index.get(category, len(order_index)),
+            }
+        )
+    rows.sort(key=lambda item: (item["order"], -item["total"], item["producto"]))
+    return rows
+
+
+def _write_forecast_sheet(ws, *, title: str, subtitle: str, products: list[dict], days: list[date]):
+    ws.title = title
+    header_fill = PatternFill("solid", fgColor="F5E6ED")
+    header_font = Font(color="7B1A48", bold=True)
+    subtotal_fill = PatternFill("solid", fgColor="7B1A48")
+    total_fill = PatternFill("solid", fgColor="3D0A24")
+    white_bold = Font(color="FFFFFF", bold=True)
+    alternate_fill = PatternFill("solid", fgColor="FDF2F6")
+    thin = Side(style="thin", color="E8D7DF")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    headers = ["Categoría", "Producto", *[_forecast_day_label(day) for day in days], "Total", "Precio", "Ingreso proyectado"]
+    last_col = len(headers)
+    ws.cell(row=1, column=1, value=f"Pronóstico de Ventas — {subtitle}")
+    ws.cell(row=1, column=1).font = Font(color="3D0A24", bold=True, size=14)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    ws.cell(row=2, column=1, value=f"Generado: {timezone.localdate().isoformat()} | Tendencia: últimos 90 días")
+    ws.cell(row=2, column=1).font = Font(color="7B1A48", italic=True)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_col)
+
+    header_row = 4
+    for col, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.border = border
+        cell.alignment = Alignment(horizontal="center")
+
+    rows = _forecast_excel_rows(products, days)
+    current_row = header_row + 1
+    grand_day_totals = {day: 0 for day in days}
+    grand_total = 0
+    grand_income = Decimal("0")
+    by_category = defaultdict(list)
+    for row in rows:
+        by_category[row["categoria"]].append(row)
+
+    for category in FORECAST_CATEGORY_ORDER:
+        category_rows = by_category.get(category, [])
+        if not category_rows:
+            continue
+        category_day_totals = {day: 0 for day in days}
+        category_total = 0
+        category_income = Decimal("0")
+        for item_index, item in enumerate(category_rows):
+            fill = alternate_fill if item_index % 2 else None
+            ws.cell(row=current_row, column=1, value=item["categoria"])
+            ws.cell(row=current_row, column=2, value=item["producto"])
+            for col_offset, day in enumerate(days, start=3):
+                qty = int(item["por_dia"].get(day, 0) or 0)
+                ws.cell(row=current_row, column=col_offset, value=qty)
+                ws.cell(row=current_row, column=col_offset).number_format = "#,##0"
+                category_day_totals[day] += qty
+                grand_day_totals[day] += qty
+            total_col = 3 + len(days)
+            price_col = total_col + 1
+            income_col = total_col + 2
+            ws.cell(row=current_row, column=total_col, value=item["total"])
+            ws.cell(row=current_row, column=total_col).number_format = "#,##0"
+            ws.cell(row=current_row, column=price_col, value=float(item["precio"]))
+            ws.cell(row=current_row, column=price_col).number_format = '$ #,##0.00'
+            ws.cell(row=current_row, column=income_col, value=float(item["ingreso"]))
+            ws.cell(row=current_row, column=income_col).number_format = '$ #,##0.00'
+            category_total += item["total"]
+            category_income += item["ingreso"]
+            grand_total += item["total"]
+            grand_income += item["ingreso"]
+            for col in range(1, last_col + 1):
+                cell = ws.cell(row=current_row, column=col)
+                cell.border = border
+                if fill:
+                    cell.fill = fill
+                if col >= 3:
+                    cell.alignment = Alignment(horizontal="right")
+            current_row += 1
+
+        ws.cell(row=current_row, column=1, value=f"Subtotal {category}")
+        ws.cell(row=current_row, column=2, value="")
+        for col_offset, day in enumerate(days, start=3):
+            ws.cell(row=current_row, column=col_offset, value=category_day_totals[day])
+            ws.cell(row=current_row, column=col_offset).number_format = "#,##0"
+        total_col = 3 + len(days)
+        price_col = total_col + 1
+        income_col = total_col + 2
+        ws.cell(row=current_row, column=total_col, value=category_total)
+        ws.cell(row=current_row, column=total_col).number_format = "#,##0"
+        ws.cell(row=current_row, column=price_col, value="")
+        ws.cell(row=current_row, column=income_col, value=float(category_income))
+        ws.cell(row=current_row, column=income_col).number_format = '$ #,##0.00'
+        for col in range(1, last_col + 1):
+            cell = ws.cell(row=current_row, column=col)
+            cell.fill = subtotal_fill
+            cell.font = white_bold
+            cell.border = border
+            if col >= 3:
+                cell.alignment = Alignment(horizontal="right")
+        current_row += 1
+
+    ws.cell(row=current_row, column=1, value="Total general")
+    ws.cell(row=current_row, column=2, value="")
+    for col_offset, day in enumerate(days, start=3):
+        ws.cell(row=current_row, column=col_offset, value=grand_day_totals[day])
+        ws.cell(row=current_row, column=col_offset).number_format = "#,##0"
+    total_col = 3 + len(days)
+    price_col = total_col + 1
+    income_col = total_col + 2
+    ws.cell(row=current_row, column=total_col, value=grand_total)
+    ws.cell(row=current_row, column=total_col).number_format = "#,##0"
+    ws.cell(row=current_row, column=price_col, value="")
+    ws.cell(row=current_row, column=income_col, value=float(grand_income))
+    ws.cell(row=current_row, column=income_col).number_format = '$ #,##0.00'
+    for col in range(1, last_col + 1):
+        cell = ws.cell(row=current_row, column=col)
+        cell.fill = total_fill
+        cell.font = white_bold
+        cell.border = border
+        if col >= 3:
+            cell.alignment = Alignment(horizontal="right")
+
+    ws.freeze_panes = "A5"
+    for col in range(1, last_col + 1):
+        letter = get_column_letter(col)
+        max_len = 0
+        for cell in ws[letter]:
+            value = "" if cell.value is None else str(cell.value)
+            max_len = max(max_len, len(value))
+        ws.column_dimensions[letter].width = min(max(max_len + 2, 10), 38)
+
+
+def _build_pronostico_excel(resultados: dict) -> bytes:
+    resumen = resultados["resumen"]
+    days = list(resumen.get("dias_rango") or [])
+    subtitle = f"{resumen['fecha_inicio']} a {resumen['fecha_fin']}"
+    workbook = Workbook()
+    used_names: set[str] = set()
+    _write_forecast_sheet(
+        workbook.active,
+        title=_forecast_sheet_title("Resumen general", used_names),
+        subtitle=subtitle,
+        products=resultados.get("por_producto", []),
+        days=days,
+    )
+    for branch in resultados.get("por_sucursal", []):
+        ws = workbook.create_sheet()
+        _write_forecast_sheet(
+            ws,
+            title=_forecast_sheet_title(branch.get("sucursal") or "Sucursal", used_names),
+            subtitle=subtitle,
+            products=branch.get("productos_excel", []),
+            days=days,
+        )
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 def _event_branch_links(event: EventoVenta):
@@ -3909,49 +4216,17 @@ def PronosticoVentasView(request):
     if not _can_view_events(request.user):
         raise PermissionDenied("No tienes permisos para ver pronosticos de ventas.")
 
-    active_branches = Sucursal.objects.filter(activa=True).order_by("nombre")
-    default_branch_ids = set(active_branches.values_list("id", flat=True))
-    selected_branch_ids = {int(value) for value in request.GET.getlist("sucursales") if str(value).isdigit()}
-    if not selected_branch_ids:
-        selected_branch_ids = set(default_branch_ids)
-    else:
-        selected_branch_ids &= default_branch_ids
-
-    fecha_inicio_raw = (request.GET.get("fecha_inicio") or "").strip()
-    fecha_fin_raw = (request.GET.get("fecha_fin") or "").strip()
-    resultados = {}
-    form_errors = []
-    fecha_inicio = None
-    fecha_fin = None
-
-    if fecha_inicio_raw or fecha_fin_raw:
-        try:
-            fecha_inicio = date.fromisoformat(fecha_inicio_raw)
-            fecha_fin = date.fromisoformat(fecha_fin_raw)
-        except ValueError:
-            form_errors.append("Selecciona fechas validas para calcular el pronostico.")
-        if fecha_inicio and fecha_fin and fecha_inicio > fecha_fin:
-            form_errors.append("La fecha inicio no puede ser posterior a la fecha fin.")
-        if fecha_inicio and fecha_fin and (fecha_fin - fecha_inicio).days > 45:
-            form_errors.append("El rango maximo permitido es de 46 dias para mantener el calculo operativo.")
-        if not selected_branch_ids:
-            form_errors.append("Selecciona al menos una sucursal activa.")
-
-        if not form_errors and fecha_inicio and fecha_fin:
-            resultados = _build_pronostico_ventas(
-                start_date=fecha_inicio,
-                end_date=fecha_fin,
-                branch_ids=selected_branch_ids,
-            )
-            if not resultados:
-                messages.warning(request, "No se encontro base suficiente para calcular el pronostico con esos filtros.")
+    pronostico = _calcular_pronostico(request)
+    resultados = pronostico["resultados"]
+    if (pronostico["fecha_inicio_raw"] or pronostico["fecha_fin_raw"]) and not pronostico["form_errors"] and not resultados:
+        messages.warning(request, "No se encontro base suficiente para calcular el pronostico con esos filtros.")
 
     context = {
-        "branches": active_branches,
-        "selected_branch_ids": selected_branch_ids,
-        "fecha_inicio": fecha_inicio_raw,
-        "fecha_fin": fecha_fin_raw,
-        "form_errors": form_errors,
+        "branches": pronostico["branches"],
+        "selected_branch_ids": pronostico["selected_branch_ids"],
+        "fecha_inicio": pronostico["fecha_inicio_raw"],
+        "fecha_fin": pronostico["fecha_fin_raw"],
+        "form_errors": pronostico["form_errors"],
         "resultados": resultados,
         "resumen": resultados.get("resumen") if resultados else None,
         "por_dia": resultados.get("por_dia", []) if resultados else [],
@@ -3959,6 +4234,29 @@ def PronosticoVentasView(request):
         "por_sucursal": resultados.get("por_sucursal", []) if resultados else [],
     }
     return render(request, "ventas/pronostico.html", context)
+
+
+@login_required
+def PronosticoExportExcelView(request):
+    if not _can_view_events(request.user):
+        raise PermissionDenied("No tienes permisos para exportar pronosticos de ventas.")
+
+    pronostico = _calcular_pronostico(request)
+    if pronostico["form_errors"]:
+        return HttpResponse("\n".join(pronostico["form_errors"]), status=400, content_type="text/plain; charset=utf-8")
+    resultados = pronostico["resultados"]
+    if not resultados:
+        return HttpResponse("No se encontro base suficiente para calcular el pronostico.", status=404, content_type="text/plain; charset=utf-8")
+
+    content = _build_pronostico_excel(resultados)
+    fecha_inicio = pronostico["fecha_inicio"].isoformat()
+    fecha_fin = pronostico["fecha_fin"].isoformat()
+    response = HttpResponse(
+        content,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="pronostico_ventas_{fecha_inicio}_{fecha_fin}.xlsx"'
+    return response
 
 
 @login_required

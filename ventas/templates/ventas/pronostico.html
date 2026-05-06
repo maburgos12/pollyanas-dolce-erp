@@ -27,6 +27,7 @@
   .forecast-branch-checkboxes { border: 1px solid #d8cbd1; border-radius: 8px; max-height: 210px; overflow-y: auto; padding: 8px; background: #fff; }
   .forecast-branch-option { display: flex; align-items: center; gap: 8px; min-height: 28px; color: #3f2d36; font-size: .92rem; line-height: 1.2; }
   .forecast-branch-option input { flex: 0 0 auto; }
+  .forecast-export-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   @media (max-width: 900px) {
     .forecast-form-grid { grid-template-columns: 1fr; }
     .forecast-form-grid .forecast-branches { grid-column: auto; }
@@ -44,7 +45,10 @@
         <p class="executive-section-copy">Proyección por receta, sucursal y día usando venta real comparable y tendencia reciente.</p>
       </div>
       {% if resumen %}
-      <button class="btn btn-secondary" type="button" id="export-forecast-csv">Exportar CSV</button>
+      <div class="forecast-export-actions">
+        <button class="btn btn-secondary" type="button" id="export-forecast-csv">Exportar CSV</button>
+        <a class="btn btn-secondary" id="export-forecast-excel" href="{% url 'ventas:pronostico_export_excel' %}" data-base-url="{% url 'ventas:pronostico_export_excel' %}">Exportar Excel</a>
+      </div>
       {% endif %}
     </div>
   </section>
@@ -58,7 +62,7 @@
       {% endfor %}
     </div>
     {% endif %}
-    <form class="recipes-filters forecast-form-grid" method="get">
+    <form class="recipes-filters forecast-form-grid" method="get" id="forecast-filter-form">
       <div>
         <label class="form-label" for="fecha_inicio">Fecha inicio</label>
         <input class="form-control" type="date" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio }}" required>
@@ -271,7 +275,21 @@
     });
 
     const exportButton = document.getElementById('export-forecast-csv');
+    const excelButton = document.getElementById('export-forecast-excel');
+    const filterForm = document.getElementById('forecast-filter-form');
     const table = document.getElementById('forecast-product-table');
+    if (excelButton) {
+      const updateExcelHref = function () {
+        if (!filterForm) {
+          excelButton.href = excelButton.dataset.baseUrl + window.location.search;
+          return;
+        }
+        const params = new URLSearchParams(new FormData(filterForm));
+        excelButton.href = excelButton.dataset.baseUrl + '?' + params.toString();
+      };
+      updateExcelHref();
+      excelButton.addEventListener('click', updateExcelHref);
+    }
     if (exportButton && table) {
       exportButton.addEventListener('click', function () {
         const rows = Array.from(table.querySelectorAll('tr')).map((tr) => {
