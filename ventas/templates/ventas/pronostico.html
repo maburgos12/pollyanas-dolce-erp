@@ -24,9 +24,13 @@
   .forecast-trend.estable { color: #7b1a48; }
   .forecast-form-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); align-items: end; }
   .forecast-form-grid .forecast-branches { grid-column: span 1; }
-  .forecast-branch-checkboxes { border: 1px solid #d8cbd1; border-radius: 8px; max-height: 210px; overflow-y: auto; padding: 8px; background: #fff; }
-  .forecast-branch-option { display: flex; align-items: center; gap: 8px; min-height: 28px; color: #3f2d36; font-size: .92rem; line-height: 1.2; }
-  .forecast-branch-option input { flex: 0 0 auto; }
+  .forecast-branch-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .forecast-branch-chip { display: inline-flex; align-items: center; border: 1px solid #7b1a48; border-radius: 999px; background: #fff; color: #7b1a48; cursor: pointer; font-size: .9rem; font-weight: 700; line-height: 1; min-height: 34px; padding: 0 12px; transition: background-color .15s ease, color .15s ease; }
+  .forecast-branch-chip:hover { background: #f5e6ed; }
+  .forecast-branch-chip input { position: absolute; opacity: 0; pointer-events: none; }
+  .forecast-branch-chip-check { display: none; margin-right: 6px; }
+  .forecast-branch-chip:has(input:checked) { background: #7b1a48; color: #fff; }
+  .forecast-branch-chip:has(input:checked) .forecast-branch-chip-check { display: inline; }
   @media (max-width: 900px) {
     .forecast-form-grid { grid-template-columns: 1fr; }
     .forecast-form-grid .forecast-branches { grid-column: auto; }
@@ -69,11 +73,11 @@
       </div>
       <div class="forecast-branches">
         <div class="form-label">Sucursales</div>
-        <div class="forecast-branch-checkboxes" id="sucursales">
+        <div class="forecast-branch-chips" id="sucursales">
           {% for branch in branches %}
-          <label class="forecast-branch-option">
+          <label class="forecast-branch-chip">
             <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %}>
-            <span>{{ branch.codigo }} · {{ branch.nombre }}</span>
+            <span><span class="forecast-branch-chip-check">✓</span>{{ branch.nombre }}</span>
           </label>
           {% endfor %}
         </div>
