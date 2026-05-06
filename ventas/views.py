@@ -9,7 +9,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from celery.result import AsyncResult
 from django.core.exceptions import PermissionDenied
-from django.db.models import Sum
+from django.db.models import Count, Sum
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -31,17 +31,11 @@ from ventas.tasks import calcular_y_guardar_pronostico
 
 
 EXCLUDED_PRODUCT_CATEGORIES = {
-    "ACCESORIOS DE REPOSTERÍA",
-    "ALEGRIA",
-    "ALEGRÍA",
-    "CAFE",
-    "CAFÉ",
     "COCA-COLA",
     "CLARITA",
-    "GRANMARK",
     "HIELO Y AGUA MAR DE CORTÉZ",
     "INDUSTRIAS LEC",
-    "PILLINES",
+    "MEDIA PLANCHA",
     "PLÁSTICOS",
     "PLASTICOS",
     "REGALOS",
@@ -49,7 +43,26 @@ EXCLUDED_PRODUCT_CATEGORIES = {
     "SAN VALENTÍN",
     "SAN VALENTIN",
     "TE",
+}
+EXCLUDED_PRODUCT_NAME_TERMS = (
+    "tarjeta de regalo",
+    "servicio domicilio",
+    "extra 100",
+    "media plancha",
+)
+ACCESSORY_CATEGORIES = {
+    "ACCESORIOS DE REPOSTERÍA",
+    "ALEGRIA",
+    "ALEGRÍA",
+    "GLOW",
+    "GRANMARK",
+    "PILLINES",
     "VELAS SPARKLERS",
+    "VIVA PARTY",
+}
+BEVERAGE_CATEGORIES = {
+    "CAFE",
+    "CAFÉ",
 }
 CATALOG_CATEGORY_ORDER = [
     "Bollo",
@@ -66,6 +79,8 @@ CATALOG_CATEGORY_ORDER = [
     "Pay Mediano",
     "Vasos Preparados Grande",
     "Otros postres",
+    "Bebidas",
+    "Accesorios",
 ]
 CATALOG_CATEGORY_INDEX = {category.casefold(): index for index, category in enumerate(CATALOG_CATEGORY_ORDER)}
 
@@ -75,6 +90,11 @@ def _is_excluded_product_category(category: str) -> bool:
     if normalized in EXCLUDED_PRODUCT_CATEGORIES:
         return True
     return False
+
+
+def _is_excluded_product_name(name: str) -> bool:
+    name_fold = (name or "").casefold()
+    return any(term in name_fold for term in EXCLUDED_PRODUCT_NAME_TERMS)
 
 
 def _clean_category_label(value: str | None) -> str:
@@ -92,6 +112,13 @@ def _catalog_category_sort_key(category: str) -> tuple[int, int, str]:
 def _category_for_catalog_product(product: PointProduct) -> str:
     category = _clean_category_label(product.category)
     name = product.name or ""
+    category_upper = category.upper()
+    if category_upper in ACCESSORY_CATEGORIES:
+        return "Accesorios"
+    if category_upper in BEVERAGE_CATEGORIES:
+        return "Bebidas"
+    if category_upper in {"VASOS GRANDE", "VASOS MINI", "VASO PREPARADO MINI"}:
+        return "Vasos Preparados Grande"
     is_sabor = "sabor" in category.casefold() or name.casefold().startswith("sabor")
     if not is_sabor:
         return category
@@ -176,8 +203,23 @@ def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
         )
         .exclude(point_product__name__istartswith="TOPPING")
         .exclude(point_product__name__icontains="topping")
+        .exclude(point_product__name__icontains="tarjeta de regalo")
+        .exclude(point_product__name__icontains="servicio domicilio")
+        .exclude(point_product__name__icontains="extra 100")
+        .exclude(point_product__name__icontains="media plancha")
         .values_list("point_product__sku", flat=True)
         .distinct()
+    )
+    pay_durazno_skus = set(
+        PointSalesDailyProductFact.objects.filter(
+            sale_date__gte=timezone.localdate() - timedelta(days=90),
+            point_product__active=True,
+            point_product__name__icontains="Pay de Queso con Durazno",
+        )
+        .values("point_product__sku")
+        .annotate(dias=Count("sale_date", distinct=True))
+        .filter(dias__lte=3)
+        .values_list("point_product__sku", flat=True)
     )
     categorias_raw: dict[str, list[dict]] = defaultdict(list)
     products = (
@@ -188,6 +230,10 @@ def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
         .order_by("category", "name")
     )
     for product in products:
+        if _is_excluded_product_name(product.name):
+            continue
+        if product.sku in pay_durazno_skus:
+            continue
         category = _category_for_catalog_product(product)
         if _is_excluded_product_category(category):
             continue
