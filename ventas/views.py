@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 
@@ -23,8 +23,6 @@ from core.models import Sucursal
 from pos_bridge.models import PointProduct, PointSalesDailyProductFact
 from ventas.models import PronosticoGuardado
 from ventas.services.pronostico_engine import (
-    EXCLUDED_TERMS,
-    FORECASTABLE_TERMS,
     MONTHS_ES,
     ORDEN_CATEGORIAS,
     WEEKDAYS_ES,
@@ -33,72 +31,82 @@ from ventas.tasks import calcular_y_guardar_pronostico
 
 
 EXCLUDED_PRODUCT_CATEGORIES = {
-    "ACCESORIOS",
+    "ACCESORIOS DE REPOSTERÍA",
+    "ALEGRIA",
     "ALEGRÍA",
     "CAFE",
     "CAFÉ",
     "COCA-COLA",
     "CLARITA",
     "GRANMARK",
-    "HIELO",
-    "INDUSTRIAS",
+    "HIELO Y AGUA MAR DE CORTÉZ",
+    "INDUSTRIAS LEC",
     "PILLINES",
     "PLÁSTICOS",
     "PLASTICOS",
     "REGALOS",
     "ROSCA",
+    "SAN VALENTÍN",
+    "SAN VALENTIN",
     "TE",
-    "VELAS",
+    "VELAS SPARKLERS",
 }
-MAIN_PRODUCT_CATEGORIES = {
-    "BOLLO",
-    "EMPANADAS",
-    "GALLETAS",
-    "CHEESECAKE",
-    "INDIVIDUAL",
-    "PASTEL GRANDE",
-    "PASTEL MEDIANO",
-    "PASTEL CHICO",
-    "PASTEL MINI",
-    "REBANADA",
-    "PAY GRANDE",
-    "PAY MEDIANO",
-    "VASOS PREPARADOS GRANDE",
-}
-SECONDARY_PRODUCT_CATEGORIES = {
-    "CHICO",
-    "GRANDE",
-    "MEDIANO",
-    "MEDIA PLANCHA",
-    "OTROS POSTRES",
-    "VASO PREPARADO MINI",
-    "VASOS GRANDE",
-    "VASOS MINI",
-}
+CATALOG_CATEGORY_ORDER = [
+    "Bollo",
+    "Empanadas",
+    "Galletas",
+    "Cheesecake",
+    "Individual",
+    "Pastel Grande",
+    "Pastel Mediano",
+    "Pastel Chico",
+    "Pastel Mini",
+    "Rebanada",
+    "Pay Grande",
+    "Pay Mediano",
+    "Vasos Preparados Grande",
+    "Otros postres",
+]
+CATALOG_CATEGORY_INDEX = {category.casefold(): index for index, category in enumerate(CATALOG_CATEGORY_ORDER)}
 
 
 def _is_excluded_product_category(category: str) -> bool:
-    normalized = category.upper()
+    normalized = _clean_category_label(category).upper()
     if normalized in EXCLUDED_PRODUCT_CATEGORIES:
         return True
-    return (
-        normalized.startswith("HIELO")
-        or normalized.startswith("INDUSTRIAS")
-        or normalized.startswith("VELA")
-        or normalized.startswith("ACCESORIO")
-    )
+    return False
 
 
-def _is_relevant_product_option(category: str, name: str) -> bool:
-    category_norm = category.upper()
-    haystack = f"{category} {name}".casefold()
-    if any(term in haystack for term in EXCLUDED_TERMS):
-        return False
-    return (
-        category_norm in MAIN_PRODUCT_CATEGORIES
-        or category_norm in SECONDARY_PRODUCT_CATEGORIES
-        or any(term in haystack for term in FORECASTABLE_TERMS)
-    )
+def _clean_category_label(value: str | None) -> str:
+    return " ".join((value or "Sin categoría").strip().split()) or "Sin categoría"
+
+
+def _catalog_category_sort_key(category: str) -> tuple[int, int, str]:
+    label = _clean_category_label(category)
+    index = CATALOG_CATEGORY_INDEX.get(label.casefold())
+    if index is not None:
+        return (0, index, label.casefold())
+    return (1, len(CATALOG_CATEGORY_ORDER), label.casefold())
+
+
+def _category_for_catalog_product(product: PointProduct) -> str:
+    category = _clean_category_label(product.category)
+    name = product.name or ""
+    is_sabor = "sabor" in category.casefold() or name.casefold().startswith("sabor")
+    if not is_sabor:
+        return category
+    name_fold = name.casefold()
+    if "grande" in name_fold:
+        return "Pay Grande"
+    if "mediano" in name_fold:
+        return "Pay Mediano"
+    if "rebanada" in name_fold:
+        return "Rebanada"
+    if "chico" in name_fold:
+        return "Pay Chico"
+    if "mini" in name_fold:
+        return "Pay Mini"
+    return category
 
 
 def _can_view_pronostico(user) -> bool:
@@ -159,24 +167,41 @@ def _selected_product_skus(request) -> list[str]:
 
 
 def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
-    categorias = OrderedDict()
+    hace_30 = timezone.localdate() - timedelta(days=30)
+    skus_vigentes = set(
+        PointSalesDailyProductFact.objects.filter(
+            sale_date__gte=hace_30,
+            point_product__active=True,
+            point_product__sku__gt="",
+        )
+        .exclude(point_product__name__istartswith="TOPPING")
+        .exclude(point_product__name__icontains="topping")
+        .values_list("point_product__sku", flat=True)
+        .distinct()
+    )
+    categorias_raw: dict[str, list[dict]] = defaultdict(list)
     products = (
-        PointProduct.objects.filter(active=True, precio_temporada=False)
-        .exclude(sku="")
+        PointProduct.objects.filter(active=True, sku__in=skus_vigentes)
+        .exclude(name__istartswith="TOPPING")
+        .exclude(name__icontains="topping")
         .only("id", "sku", "name", "category")
         .order_by("category", "name")
     )
     for product in products:
-        category = (product.category or "Sin categoría").strip() or "Sin categoría"
-        if _is_excluded_product_category(category) or not _is_relevant_product_option(category, product.name):
+        category = _category_for_catalog_product(product)
+        if _is_excluded_product_category(category):
             continue
-        categorias.setdefault(category, []).append(
+        categorias_raw[category].append(
             {
                 "id": product.id,
                 "nombre": product.name,
                 "sku": product.sku,
             }
         )
+
+    categorias = OrderedDict()
+    for category in sorted(categorias_raw, key=_catalog_category_sort_key):
+        categorias[category] = sorted(categorias_raw[category], key=lambda product: product["nombre"].casefold())
     return categorias
 
 
@@ -565,7 +590,7 @@ def PronosticoVentasView(request):
         "fecha_inicio": fecha_inicio_raw,
         "fecha_fin": fecha_fin_raw,
         "categorias_productos": categorias_productos,
-        "categorias_principales": MAIN_PRODUCT_CATEGORIES,
+        "categorias_principales": {category.upper() for category in CATALOG_CATEGORY_ORDER},
         "selected_product_skus": set(selected_product_skus),
         "form_errors": form_errors,
         "pronosticos_guardados": _pronosticos_for_user(request.user)[:10],
