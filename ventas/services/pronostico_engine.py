@@ -34,19 +34,49 @@ FECHAS_ESPECIALES = {
     (12, 31): "Año Nuevo",
 }
 ORDEN_CATEGORIAS = [
-    "Bollos",
+    "Bollo",
     "Empanadas",
     "Galletas",
     "Cheesecake",
     "Individual",
-    "Grande",
-    "Mediano",
-    "Chico",
-    "Mini",
+    "Pastel Grande",
+    "Pastel Mediano",
+    "Pastel Chico",
+    "Pastel Mini",
     "Rebanada",
-    "Vasos Preparados",
-    "Pay",
-    "Otros",
+    "Pay Grande",
+    "Pay Mediano",
+    "Vasos Preparados Grande",
+    "Otros postres",
+    "Accesorios de repostería",
+    "Alegría",
+    "Café",
+    "Chico",
+    "Clarita",
+    "Coca-cola",
+    "D-rigaldi",
+    "Glow",
+    "Grande",
+    "Granmark",
+    "Hielo y agua mar de cortéz",
+    "Industrias lec",
+    "Letrero B",
+    "Letreros",
+    "Media Plancha",
+    "Mediano",
+    "Pillines",
+    "Plásticos",
+    "REGALOS",
+    "Rosca",
+    "San Valentín",
+    "TE",
+    "Vaso Preparado Mini",
+    "Vasos Grande",
+    "Vasos Mini",
+    "Vela Sparklers",
+    "Velas Sparklers",
+    "Viva party",
+    "Xtudio",
 ]
 CATEGORY_INDEX = {category: index for index, category in enumerate(ORDEN_CATEGORIAS)}
 WEEKDAYS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
@@ -127,36 +157,40 @@ def _trend_label(factor: float) -> str:
     return "estable"
 
 
-def categoria_producto(nombre: str | None, familia: str | None) -> str:
-    nombre_lower = (nombre or "").strip().casefold()
-    familia_lower = (familia or "").strip().casefold()
+def _clean_label(value: str | None) -> str:
+    return " ".join((value or "").strip().split())
 
-    if nombre_lower.endswith("grande"):
-        return "Grande"
-    if nombre_lower.endswith("mediano"):
-        return "Mediano"
-    if nombre_lower.endswith("chico"):
-        return "Chico"
-    if nombre_lower.endswith("mini"):
-        return "Mini"
-    if nombre_lower.endswith(" r") or "rebanada" in nombre_lower:
-        return "Rebanada"
-    if nombre_lower.endswith("individual"):
-        return "Individual"
 
-    if familia_lower in {"bollo", "bollos"}:
-        return "Bollos"
-    if familia_lower in {"empanada", "empanadas"}:
-        return "Empanadas"
-    if familia_lower in {"galleta", "galletas"}:
-        return "Galletas"
-    if familia_lower == "cheesecake":
-        return "Cheesecake"
-    if familia_lower == "vasos preparados":
-        return "Vasos Preparados"
-    if familia_lower == "pay":
-        return "Pay"
-    return "Otros"
+def _category_sort_key(category: str | None) -> tuple[int, int, str]:
+    label = _clean_label(category)
+    if label in CATEGORY_INDEX:
+        return (0, CATEGORY_INDEX[label], label.casefold())
+    return (1, len(CATEGORY_INDEX), label.casefold())
+
+
+def _product_sort_key(product: dict) -> tuple[tuple[int, int, str], int, str]:
+    return (_category_sort_key(product.get("categoria")), -product["total_piezas"], product["nombre"])
+
+
+def categoria_producto(
+    *,
+    point_category: str | None,
+    familia: str | None,
+    receta_codigo_point: str | None = None,
+    category_by_sku: dict[str, str] | None = None,
+) -> str:
+    codigo_point = _clean_label(receta_codigo_point)
+    if codigo_point and category_by_sku:
+        category = _clean_label(category_by_sku.get(codigo_point))
+        if category:
+            return category
+
+    category = _clean_label(point_category)
+    if category:
+        return category
+
+    fallback = _clean_label(familia)
+    return fallback or "Sin categoría"
 
 
 def _is_forecastable_product(*, nombre: str, familia: str, receta: Receta | None) -> bool:
@@ -344,7 +378,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
     product_ids = {int(row["point_product_id"]) for row in rows if row.get("point_product_id")}
     product_map = {
         product.id: product
-        for product in PointProduct.objects.filter(id__in=product_ids).only("id", "name", "category", "precio")
+        for product in PointProduct.objects.filter(id__in=product_ids).only("id", "sku", "name", "category", "precio")
     }
     recipe_by_product: dict[int, int] = {}
     recipe_ids = set()
@@ -356,7 +390,14 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
             recipe_ids.add(recipe_id)
     recipe_map = {
         receta.id: receta
-        for receta in Receta.objects.filter(id__in=recipe_ids).only("id", "nombre", "familia", "categoria", "tipo")
+        for receta in Receta.objects.filter(id__in=recipe_ids).only("id", "codigo_point", "nombre", "familia", "categoria", "tipo")
+    }
+    recipe_codes = {_clean_label(receta.codigo_point) for receta in recipe_map.values() if _clean_label(receta.codigo_point)}
+    category_by_sku = {
+        _clean_label(row["sku"]): _clean_label(row["category"])
+        for row in PointProduct.objects.filter(sku__in=recipe_codes)
+        .exclude(category="")
+        .values("sku", "category")
     }
 
     histories: dict[tuple[int, int], dict[date, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
@@ -449,7 +490,12 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
             Decimal("0"),
         ) / Decimal("30")
         factor = _clamp(float((recent_avg + Decimal("1.0")) / (comparable_avg + Decimal("1.0"))), 0.70, 1.50)
-        category = categoria_producto(name, family)
+        category = categoria_producto(
+            point_category=product.category,
+            familia=receta.familia if receta else family,
+            receta_codigo_point=receta.codigo_point if receta else "",
+            category_by_sku=category_by_sku,
+        )
         price = price_by_product.get(product_id, Decimal("0.00"))
 
         day_values = []
@@ -631,11 +677,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
                 "categorias": _build_categories(products),
                 "productos": sorted(
                     products,
-                    key=lambda item: (
-                        CATEGORY_INDEX.get(item["categoria"], CATEGORY_INDEX["Otros"]),
-                        -item["total_piezas"],
-                        item["nombre"],
-                    ),
+                    key=_product_sort_key,
                 ),
             }
         )
@@ -671,11 +713,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         "por_sucursal": por_sucursal,
         "por_producto": sorted(
             product_totals.values(),
-            key=lambda item: (
-                CATEGORY_INDEX.get(item["categoria"], CATEGORY_INDEX["Otros"]),
-                -item["total_piezas"],
-                item["nombre"],
-            ),
+            key=_product_sort_key,
         ),
         "por_producto_familias": [
             {
@@ -691,7 +729,8 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
 
 def _build_categories(products: list[dict]) -> list[dict]:
     categories = []
-    for category in ORDEN_CATEGORIAS:
+    category_names = sorted({product.get("categoria") or "Sin categoría" for product in products}, key=_category_sort_key)
+    for category in category_names:
         category_products = [product for product in products if product.get("categoria") == category]
         if not category_products:
             continue
