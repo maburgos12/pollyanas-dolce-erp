@@ -11,11 +11,11 @@
   .forecast-tab-button.active { background: #7b1a48; color: #fff; border-color: #7b1a48; }
   .forecast-tab-panel { display: none; }
   .forecast-tab-panel.active { display: block; }
-  .forecast-branch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
-  .forecast-branch-card { border: 1px solid #eadfe4; border-radius: 8px; padding: 16px; background: #fff; }
-  .forecast-branch-card h3 { margin: 0 0 8px; font-size: 1rem; color: #46112c; }
-  .forecast-branch-metrics { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; color: #5d173a; font-weight: 700; }
-  .forecast-top-list { margin: 0; padding-left: 18px; }
+  .forecast-branch-section { border-top: 1px solid #eadfe4; padding-top: 18px; margin-top: 18px; }
+  .forecast-branch-section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .forecast-branch-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+  .forecast-branch-header h3 { margin: 0; font-size: 1.05rem; color: #46112c; }
+  .forecast-branch-summary { display: flex; gap: 14px; flex-wrap: wrap; color: #5d173a; font-weight: 800; }
   .forecast-chart-wrap { min-height: 280px; }
   .forecast-muted { color: #776b72; }
   .forecast-trend { font-weight: 800; }
@@ -24,9 +24,13 @@
   .forecast-trend.estable { color: #7b1a48; }
   .forecast-form-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); align-items: end; }
   .forecast-form-grid .forecast-branches { grid-column: span 1; }
-  .forecast-branch-checkboxes { border: 1px solid #d8cbd1; border-radius: 8px; max-height: 210px; overflow-y: auto; padding: 8px; background: #fff; }
-  .forecast-branch-option { display: flex; align-items: center; gap: 8px; min-height: 28px; color: #3f2d36; font-size: .92rem; line-height: 1.2; }
-  .forecast-branch-option input { flex: 0 0 auto; }
+  .forecast-branch-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .forecast-branch-chip { cursor: pointer; }
+  .forecast-branch-chip input { display: none; }
+  .forecast-chip { display: inline-block; padding: 4px 14px; border-radius: 20px; border: 1px solid #7b1a48; color: #7b1a48; font-size: 13px; user-select: none; transition: all .15s; }
+  .forecast-branch-chip input:checked + .forecast-chip { background: #7b1a48; color: #fff; }
+  .forecast-chip:hover { background: #f5e6ed; }
+  .forecast-branch-chip input:checked + .forecast-chip:hover { background: #7b1a48; }
   @media (max-width: 900px) {
     .forecast-form-grid { grid-template-columns: 1fr; }
     .forecast-form-grid .forecast-branches { grid-column: auto; }
@@ -69,11 +73,11 @@
       </div>
       <div class="forecast-branches">
         <div class="form-label">Sucursales</div>
-        <div class="forecast-branch-checkboxes" id="sucursales">
+        <div class="forecast-branch-chips" id="sucursales">
           {% for branch in branches %}
-          <label class="forecast-branch-option">
-            <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %}>
-            <span>{{ branch.codigo }} · {{ branch.nombre }}</span>
+          <label class="forecast-branch-chip">
+            <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %} hidden>
+            <span class="forecast-chip">{{ branch.nombre }}</span>
           </label>
           {% endfor %}
         </div>
@@ -229,22 +233,66 @@
     </div>
 
     <div class="forecast-tab-panel" id="forecast-tab-sucursal">
-      <div class="forecast-branch-grid">
-        {% for branch in por_sucursal %}
-        <article class="forecast-branch-card">
+      {% for branch in por_sucursal %}
+      <section class="forecast-branch-section">
+        <div class="forecast-branch-header">
           <h3>{{ branch.sucursal }}</h3>
-          <div class="forecast-branch-metrics">
+          <div class="forecast-branch-summary">
             <span>{{ branch.total_piezas|intcomma }} pzas</span>
             <span>${{ branch.total_ingreso|floatformat:2|intcomma }}</span>
           </div>
-          <ol class="forecast-top-list">
-            {% for product in branch.productos %}
-            <li>{{ product.nombre }} · {{ product.total_piezas|intcomma }} pzas</li>
-            {% endfor %}
-          </ol>
-        </article>
-        {% endfor %}
-      </div>
+        </div>
+        <div class="table-responsive production-table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>Familia</th>
+                <th class="text-end">Piezas</th>
+                <th class="text-end">Precio</th>
+                <th class="text-end">Ingreso</th>
+                <th class="text-end">% del total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% regroup branch.productos by familia as family_groups %}
+              {% for group in family_groups %}
+              <tr class="production-subtotal-row">
+                <td colspan="6">{{ group.grouper|default:"Sin familia" }}</td>
+              </tr>
+              {% for product in group.list %}
+              <tr>
+                <td>{{ product.nombre }}</td>
+                <td>{{ product.familia|default:"—" }}</td>
+                <td class="text-end">{{ product.total_piezas|intcomma }}</td>
+                <td class="text-end">
+                  {% if product.precio %}
+                  ${{ product.precio|floatformat:2|intcomma }}
+                  {% elif product.total_piezas %}
+                  ${% widthratio product.total_ingreso product.total_piezas 1 %}
+                  {% else %}
+                  <span class="forecast-muted">—</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">${{ product.total_ingreso|floatformat:2|intcomma }}</td>
+                <td class="text-end">{% widthratio product.total_piezas branch.total_piezas 100 %}%</td>
+              </tr>
+              {% endfor %}
+              {% endfor %}
+              <tr class="production-grand-total-row">
+                <td colspan="2">Total {{ branch.sucursal }}</td>
+                <td class="text-end">{{ branch.total_piezas|intcomma }}</td>
+                <td></td>
+                <td class="text-end">${{ branch.total_ingreso|floatformat:2|intcomma }}</td>
+                <td class="text-end">100%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {% empty %}
+      <div class="alert alert-warning">Sin datos por sucursal para los filtros seleccionados.</div>
+      {% endfor %}
     </div>
   </section>
   {% endif %}
