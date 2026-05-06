@@ -98,76 +98,15 @@
   </section>
 
   <section class="card">
-    <div class="section-header">
-      <div>
-        <h2 class="section-header-title">Pronósticos generados</h2>
-        <p class="executive-section-copy">Últimos cálculos guardados por tu usuario.</p>
-      </div>
-      <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Ver todos</a>
-    </div>
-    <div class="saved-forecast-filters">
-      <div>
-        <label class="form-label" for="saved-forecast-search">Buscar</label>
-        <input class="form-control" type="search" id="saved-forecast-search" placeholder="Buscar por nombre...">
-      </div>
-      <div>
-        <label class="form-label" for="saved-forecast-from">Desde fecha</label>
-        <input class="form-control" type="date" id="saved-forecast-from">
-      </div>
-      <div>
-        <label class="form-label" for="saved-forecast-to">Hasta fecha</label>
-        <input class="form-control" type="date" id="saved-forecast-to">
-      </div>
-      <button class="btn btn-primary" type="button" id="saved-forecast-filter">Buscar</button>
-    </div>
-    <div class="table-responsive production-table-wrap">
-      <table class="table" id="saved-forecasts-table">
-        <thead>
-          <tr>
-            <th>Nombre</th>
-            <th>Rango</th>
-            <th class="text-end">Piezas</th>
-            <th class="text-end">Ingreso</th>
-            <th>Método</th>
-            <th>Fecha</th>
-            <th class="text-end">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in pronosticos_guardados %}
-          <tr data-forecast-row data-name="{{ item.nombre|lower }}" data-start='{{ item.fecha_inicio|date:"Y-m-d" }}' data-end='{{ item.fecha_fin|date:"Y-m-d" }}'>
-            <td>{{ item.nombre }}</td>
-            <td>{{ item.fecha_inicio }} a {{ item.fecha_fin }}</td>
-            <td class="text-end">{{ item.total_piezas|intcomma }}</td>
-            <td class="text-end">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
-            <td>{{ item.resultado_json.resumen.metodo|default:"-" }}</td>
-            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
-            <td class="text-end">
-              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
-              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
-              <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}" style="display:inline;">
-                {% csrf_token %}
-                <button class="btn btn-secondary btn-sm" type="submit" onclick="return confirm('¿Eliminar este pronóstico?')">Eliminar</button>
-              </form>
-            </td>
-          </tr>
-          {% empty %}
-          <tr>
-            <td colspan="7" class="text-center text-muted">Aún no hay pronósticos guardados.</td>
-          </tr>
-          {% endfor %}
-          <tr id="saved-forecasts-empty-filter" style="display:none;">
-            <td colspan="7" class="text-center text-muted">Sin pronósticos que coincidan con los filtros.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="card">
     <details id="nuevo-calculo">
-      <summary class="new-forecast-summary">
-        <span>＋</span> Calcular nuevo pronóstico
+      <summary style="list-style:none; cursor:pointer;">
+        <div style="
+          display:inline-flex; align-items:center; gap:8px;
+          background:#7b1a48; color:white; font-weight:600;
+          font-size:14px; padding:10px 20px; border-radius:6px;
+          margin-bottom:16px; user-select:none;">
+          ＋ Calcular nuevo pronóstico
+        </div>
       </summary>
       <div class="card-header">Filtros</div>
       {% if form_errors %}
@@ -244,6 +183,73 @@
         </div>
       </form>
     </details>
+  </section>
+
+  <section class="card">
+    <div class="section-header">
+      <div>
+        <h2 class="section-header-title">Pronósticos generados</h2>
+        <p class="executive-section-copy">Últimos cálculos guardados por tu usuario.</p>
+      </div>
+      <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Ver todos</a>
+    </div>
+    <div class="saved-forecast-filters">
+      <div>
+        <label class="form-label" for="saved-forecast-search">Buscar</label>
+        <input class="form-control" type="search" id="saved-forecast-search" placeholder="Buscar por nombre...">
+      </div>
+      <div>
+        <label class="form-label" for="saved-forecast-from">Desde fecha</label>
+        <input class="form-control" type="date" id="saved-forecast-from">
+      </div>
+      <div>
+        <label class="form-label" for="saved-forecast-to">Hasta fecha</label>
+        <input class="form-control" type="date" id="saved-forecast-to">
+      </div>
+      <button class="btn btn-primary" type="button" id="saved-forecast-filter">Buscar</button>
+    </div>
+    <div class="table-responsive production-table-wrap">
+      <table class="table" id="saved-forecasts-table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Rango</th>
+            <th class="text-end">Piezas</th>
+            <th class="text-end">Ingreso</th>
+            <th>Método</th>
+            <th>Fecha</th>
+            <th class="text-end">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in pronosticos_guardados %}
+          <tr data-forecast-row data-name="{{ item.nombre|lower }}" data-start='{{ item.fecha_inicio|date:"Y-m-d" }}' data-end='{{ item.fecha_fin|date:"Y-m-d" }}'>
+            <td>{{ item.nombre }}</td>
+            <td>{{ item.fecha_inicio }} a {{ item.fecha_fin }}</td>
+            <td class="text-end">{{ item.total_piezas|intcomma }}</td>
+            <td class="text-end">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
+            <td>{{ item.resultado_json.resumen.metodo|default:"-" }}</td>
+            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+            <td class="text-end">
+              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
+              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
+              <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}" style="display:inline;">
+                {% csrf_token %}
+                <button class="btn btn-secondary btn-sm" type="submit" onclick="return confirm('¿Eliminar este pronóstico?')">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7" class="text-center text-muted">Aún no hay pronósticos guardados.</td>
+          </tr>
+          {% endfor %}
+          <tr id="saved-forecasts-empty-filter" style="display:none;">
+            <td colspan="7" class="text-center text-muted">Sin pronósticos que coincidan con los filtros.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   {% if fechas_especiales_en_rango %}
