@@ -22,10 +22,24 @@
   .forecast-trend.sube { color: #198754; }
   .forecast-trend.baja { color: #b42318; }
   .forecast-trend.estable { color: #7b1a48; }
+  .page-pronostico-ventas .kpi-card,
+  .page-pronostico-ventas .kpi-card-inner,
+  .page-pronostico-ventas .kpi-body {
+    min-width: 0;
+  }
   .page-pronostico-ventas .kpi-number,
   .page-pronostico-ventas .kpi-number.is-success,
   .page-pronostico-ventas .kpi-number.is-warning,
-  .page-pronostico-ventas .kpi-number.is-danger { color: #7b1a48; }
+  .page-pronostico-ventas .kpi-number.is-danger {
+    color: #7b1a48;
+    display: block;
+    font-size: clamp(1.2rem, 3vw, 2rem);
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+  }
   .page-pronostico-ventas .kpi-icon.is-success { background: #f5e6ed; color: #7b1a48; }
   .forecast-form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
   .forecast-form-grid .forecast-branches { grid-column: span 1; }
@@ -150,7 +164,7 @@
             <span id="suc-label">Todas las sucursales</span>
             <span>▾</span>
           </button>
-          <div id="suc-menu" class="forecast-sucursales-menu">
+          <div id="suc-menu" class="forecast-sucursales-menu" style="display:none;">
             {% for branch in branches %}
             <label class="forecast-sucursales-option">
               <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %} onchange="updateSucLabel()">
