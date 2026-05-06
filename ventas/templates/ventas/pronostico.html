@@ -64,22 +64,15 @@
         <label class="form-label" for="fecha_fin">Fecha fin</label>
         <input class="form-control" type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}" required>
       </div>
-      <div class="forecast-branches">
-        <div class="form-label">Sucursales</div>
-        <details style="border:1px solid #e0c8d0; border-radius:8px; padding:8px 12px; cursor:pointer;">
-          <summary style="font-weight:500; color:#7b1a48; list-style:none;">
-            Sucursales <span id="selected-count">({{ selected_branch_ids|length }} seleccionadas)</span>
-          </summary>
-          <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;">
+      <div>
+        <label style="font-weight:500; font-size:13px; color:#555; display:block; margin-bottom:6px;">Sucursales</label>
+        <select name="sucursales" multiple size="5"
+          style="width:200px; border:1px solid #ddd; border-radius:6px; padding:4px; font-size:13px;">
           {% for branch in branches %}
-          <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
-            <input type="checkbox" name="sucursales" value="{{ branch.id }}"
-                   {% if branch.id in selected_branch_ids %}checked{% endif %} onchange="updateCount()">
-            {{ branch.nombre }}
-          </label>
+          <option value="{{ branch.id }}" selected>{{ branch.nombre }}</option>
           {% endfor %}
-          </div>
-        </details>
+        </select>
+        <div style="font-size:11px; color:#999; margin-top:3px;">Ctrl+clic para seleccionar varias</div>
       </div>
       <div>
         <button class="btn btn-primary w-100" type="submit">Calcular pronóstico</button>
@@ -301,18 +294,6 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
-  function updateCount() {
-    const total = document.querySelectorAll('[name=sucursales]').length;
-    const checked = document.querySelectorAll('[name=sucursales]:checked').length;
-    const selectedCount = document.getElementById('selected-count');
-    if (selectedCount) {
-      selectedCount.textContent = checked === total ? '(todas)' : '(' + checked + ' seleccionadas)';
-    }
-  }
-
-  window.updateCount = updateCount;
-  document.addEventListener('DOMContentLoaded', updateCount);
-
   (function () {
     const buttons = Array.from(document.querySelectorAll('.forecast-tab-button'));
     const panels = {
