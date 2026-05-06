@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import math
-from io import BytesIO
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Avg, Count, Max, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -18,424 +16,19 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from core.access import has_any_role, ROLE_ADMIN, ROLE_COMPRAS, ROLE_DG, ROLE_PRODUCCION
+from core.access import ROLE_ADMIN, ROLE_COMPRAS, ROLE_DG, ROLE_PRODUCCION, has_any_role
 from core.models import Sucursal
-from pos_bridge.models import PointProduct, PointSalesDailyProductFact
-from recetas.models import Receta
 from ventas.models import PronosticoGuardado
+from ventas.services.pronostico_engine import (
+    MONTHS_ES,
+    ORDEN_CATEGORIAS,
+    WEEKDAYS_ES,
+    calcular_pronostico,
+)
 
 
 def _can_view_pronostico(user) -> bool:
     return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_PRODUCCION, ROLE_COMPRAS, "VENTAS", "LECTURA")
-
-
-def _date_range(start: date, end: date):
-    current = start
-    while current <= end:
-        yield current
-        current += timedelta(days=1)
-
-
-def _decimal(value) -> Decimal:
-    if value is None:
-        return Decimal("0")
-    if isinstance(value, Decimal):
-        return value
-    return Decimal(str(value))
-
-
-def _ceil_decimal(value: Decimal) -> int:
-    return int(math.ceil(float(value))) if value > 0 else 0
-
-
-def _trend_label(factor: Decimal) -> str:
-    if factor >= Decimal("1.08"):
-        return "sube"
-    if factor <= Decimal("0.92"):
-        return "baja"
-    return "estable"
-
-
-CATEGORY_ORDER = [
-    "Bollos",
-    "Empanadas",
-    "Galletas",
-    "Individual",
-    "Cheesecake",
-    "Grande",
-    "Mediano",
-    "Chico",
-    "Mini",
-    "Rebanada",
-    "Vasos Preparados",
-    "Pay",
-    "Otros",
-]
-CATEGORY_INDEX = {category: index for index, category in enumerate(CATEGORY_ORDER)}
-WEEKDAYS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
-
-
-def _forecast_category(nombre: str | None, familia: str | None) -> str:
-    nombre_lower = (nombre or "").strip().casefold()
-    familia_lower = (familia or "").strip().casefold()
-
-    if nombre_lower.endswith("grande"):
-        return "Grande"
-    if nombre_lower.endswith("mediano"):
-        return "Mediano"
-    if nombre_lower.endswith("chico"):
-        return "Chico"
-    if nombre_lower.endswith("mini"):
-        return "Mini"
-    if nombre_lower.endswith(" r") or "rebanada" in nombre_lower:
-        return "Rebanada"
-    if nombre_lower.endswith("individual"):
-        return "Individual"
-
-    if familia_lower in {"bollo", "bollos"}:
-        return "Bollos"
-    if familia_lower in {"empanada", "empanadas"}:
-        return "Empanadas"
-    if familia_lower in {"galleta", "galletas"}:
-        return "Galletas"
-    if familia_lower == "cheesecake":
-        return "Cheesecake"
-    if familia_lower == "vasos preparados":
-        return "Vasos Preparados"
-    if familia_lower == "pay":
-        return "Pay"
-    return "Otros"
-
-
-def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: set[int]) -> dict:
-    selected_days = list(_date_range(start_date, end_date))
-    if not selected_days or not branch_ids:
-        return {}
-
-    base_qs = PointSalesDailyProductFact.objects.filter(
-        point_product_id__isnull=False,
-        point_product__precio_temporada=False,
-        branch__erp_branch_id__in=branch_ids,
-        branch__erp_branch__activa=True,
-    ).exclude(
-        Q(point_product__name__icontains="sobre pedido") | Q(receta__nombre__icontains="sobre pedido")
-    ).exclude(
-        Q(point_product__name__icontains="sp ") | Q(point_product__name__icontains=" sp") |
-        Q(receta__nombre__icontains="sp ") | Q(receta__nombre__icontains=" sp")
-    )
-    latest_sale_date = base_qs.aggregate(max_date=Max("sale_date")).get("max_date")
-    if not latest_sale_date:
-        return {}
-
-    recent_end = min(latest_sale_date, start_date - timedelta(days=1))
-    recent_start = recent_end - timedelta(days=89)
-    recent_rotation_start = recent_end - timedelta(days=29)
-    comparable_start = recent_start - timedelta(days=364)
-    comparable_end = recent_end - timedelta(days=364)
-
-    rotating_product_ids = set(
-        base_qs.filter(sale_date__range=(recent_rotation_start, recent_end))
-        .values("point_product_id")
-        .annotate(qty=Sum("total_cantidad"))
-        .filter(qty__gt=0)
-        .values_list("point_product_id", flat=True)
-    )
-    if not rotating_product_ids:
-        return {}
-    base_qs = base_qs.filter(point_product_id__in=rotating_product_ids)
-
-    recent_rows = list(
-        base_qs.filter(sale_date__range=(recent_start, recent_end))
-        .values("point_product_id", "branch__erp_branch_id")
-        .annotate(
-            qty=Sum("total_cantidad"),
-            revenue=Sum("total_venta_neta"),
-            sale_days=Count("sale_date", distinct=True),
-        )
-    )
-    eligible_pairs = {
-        (int(row["point_product_id"]), int(row["branch__erp_branch_id"]))
-        for row in recent_rows
-        if _decimal(row.get("qty")) > 0
-    }
-    if not eligible_pairs:
-        return {}
-
-    point_product_ids = {product_id for product_id, _branch_id in eligible_pairs}
-    recent_qty = {
-        (int(row["point_product_id"]), int(row["branch__erp_branch_id"])): _decimal(row.get("qty"))
-        for row in recent_rows
-    }
-    recent_revenue = {
-        (int(row["point_product_id"]), int(row["branch__erp_branch_id"])): _decimal(row.get("revenue"))
-        for row in recent_rows
-    }
-
-    comparable_qty = {
-        (int(row["point_product_id"]), int(row["branch__erp_branch_id"])): _decimal(row.get("qty"))
-        for row in base_qs.filter(
-            sale_date__range=(comparable_start, comparable_end),
-            point_product_id__in=point_product_ids,
-        )
-        .values("point_product_id", "branch__erp_branch_id")
-        .annotate(qty=Sum("total_cantidad"))
-    }
-
-    factors: dict[tuple[int, int], Decimal] = {}
-    alpha = Decimal("1.0")
-    recent_days = Decimal("90")
-    for pair in eligible_pairs:
-        recent_avg = recent_qty.get(pair, Decimal("0")) / recent_days
-        comparable_avg = comparable_qty.get(pair, Decimal("0")) / recent_days
-        factor = (recent_avg + alpha) / (comparable_avg + alpha)
-        factors[pair] = min(Decimal("1.80"), max(Decimal("0.60"), factor))
-
-    homologue_dates = [day - timedelta(days=364) for day in selected_days]
-    history_start = min(homologue_dates) - timedelta(days=3)
-    history_end = max(homologue_dates) + timedelta(days=3)
-    history_qty: dict[tuple[int, int, date], Decimal] = {}
-    for row in (
-        base_qs.filter(
-            sale_date__range=(history_start, history_end),
-            point_product_id__in=point_product_ids,
-        )
-        .values("point_product_id", "branch__erp_branch_id", "sale_date")
-        .annotate(qty=Sum("total_cantidad"))
-    ):
-        key = (int(row["point_product_id"]), int(row["branch__erp_branch_id"]), row["sale_date"])
-        history_qty[key] = _decimal(row.get("qty"))
-
-    product_map = {
-        product.id: product
-        for product in PointProduct.objects.filter(id__in=point_product_ids).only("id", "name", "category", "precio")
-    }
-    recipe_id_by_product: dict[int, int] = {}
-    for row in (
-        base_qs.filter(point_product_id__in=point_product_ids, receta_id__isnull=False)
-        .values("point_product_id", "receta_id")
-        .distinct()
-    ):
-        recipe_id_by_product.setdefault(int(row["point_product_id"]), int(row["receta_id"]))
-    recipe_ids = set(recipe_id_by_product.values())
-    recipe_map = {
-        receta.id: receta
-        for receta in Receta.objects.filter(id__in=recipe_ids).only("id", "nombre", "familia", "categoria")
-    }
-    branch_map = {
-        branch.id: branch
-        for branch in Sucursal.objects.filter(id__in=branch_ids).only("id", "codigo", "nombre")
-    }
-
-    price_by_product: dict[int, Decimal] = {}
-    for product_id in point_product_ids:
-        qty = sum(qty for (pid, _bid), qty in recent_qty.items() if pid == product_id)
-        revenue = sum(amount for (pid, _bid), amount in recent_revenue.items() if pid == product_id)
-        if qty > 0 and revenue > 0:
-            price_by_product[product_id] = (revenue / qty).quantize(Decimal("0.01"))
-
-    for row in (
-        base_qs.filter(point_product_id__in=point_product_ids, point_product__precio__isnull=False, point_product__precio_activo=True)
-        .values("point_product_id")
-        .annotate(avg_price=Avg("point_product__precio"))
-    ):
-        product_id = int(row["point_product_id"])
-        if product_id not in price_by_product and row.get("avg_price") is not None:
-            price_by_product[product_id] = _decimal(row.get("avg_price")).quantize(Decimal("0.01"))
-
-    product_totals: dict[int, dict] = {}
-    branch_totals: dict[int, dict] = {}
-    day_totals: dict[date, dict] = {}
-    day_product_totals: dict[date, dict[int, int]] = defaultdict(lambda: defaultdict(int))
-    product_factor_values: dict[int, list[Decimal]] = defaultdict(list)
-    product_day_details: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-
-    for day in selected_days:
-        day_totals[day] = {"fecha": day, "fecha_iso": day.isoformat(), "total_piezas": 0, "total_ingreso": Decimal("0"), "top_5_productos": []}
-
-    for product_id, branch_id in sorted(eligible_pairs):
-        product = product_map.get(product_id)
-        receta = recipe_map.get(recipe_id_by_product.get(product_id))
-        branch = branch_map.get(branch_id)
-        if not product or not branch:
-            continue
-        display_name = product.name or (receta.nombre if receta else "Producto")
-        family = (receta.familia if receta else "") or product.category or "Sin familia"
-        category = (receta.categoria if receta else "") or product.category or ""
-        forecast_category = _forecast_category(display_name, family)
-        price = price_by_product.get(product_id, Decimal("0"))
-        factor = factors.get((product_id, branch_id), Decimal("1"))
-        product_factor_values[product_id].append(factor)
-        recent_avg = recent_qty.get((product_id, branch_id), Decimal("0")) / recent_days
-
-        product_total = product_totals.setdefault(
-            product_id,
-            {
-                "receta_id": receta.id if receta else None,
-                "point_product_id": product_id,
-                "nombre": display_name,
-                "familia": family,
-                "categoria": category,
-                "categoria_pronostico": forecast_category,
-                "total_piezas": 0,
-                "precio": price,
-                "total_ingreso": Decimal("0"),
-                "factor_tendencia": Decimal("1"),
-                "tendencia": "estable",
-            },
-        )
-        branch_total = branch_totals.setdefault(
-            branch_id,
-            {
-                "sucursal": branch.nombre,
-                "codigo": branch.codigo,
-                "total_piezas": 0,
-                "total_ingreso": Decimal("0"),
-                "productos": defaultdict(
-                    lambda: {
-                        "receta_id": None,
-                        "point_product_id": None,
-                        "nombre": "",
-                        "familia": "",
-                        "categoria": "",
-                        "categoria_pronostico": "",
-                        "precio": Decimal("0"),
-                        "total_piezas": 0,
-                        "total_ingreso": Decimal("0"),
-                        "por_dia": defaultdict(int),
-                    }
-                ),
-            },
-        )
-
-        for day in selected_days:
-            homologue = day - timedelta(days=364)
-            exact_base = history_qty.get((product_id, branch_id, homologue))
-            if exact_base is None:
-                window_values = [
-                    history_qty.get((product_id, branch_id, homologue + timedelta(days=offset)), Decimal("0"))
-                    for offset in range(-3, 4)
-                ]
-                positive_values = [value for value in window_values if value > 0]
-                base_qty = sum(positive_values, Decimal("0")) / Decimal(len(positive_values)) if positive_values else Decimal("0")
-            else:
-                base_qty = exact_base
-
-            forecast_qty = _ceil_decimal(base_qty * factor) if base_qty > 0 else _ceil_decimal(recent_avg)
-            if forecast_qty <= 0:
-                continue
-            revenue = Decimal(forecast_qty) * price
-
-            product_total["total_piezas"] += forecast_qty
-            product_total["total_ingreso"] += revenue
-            branch_total["total_piezas"] += forecast_qty
-            branch_total["total_ingreso"] += revenue
-            branch_product = branch_total["productos"][product_id]
-            branch_product["receta_id"] = receta.id if receta else None
-            branch_product["point_product_id"] = product_id
-            branch_product["nombre"] = display_name
-            branch_product["familia"] = family
-            branch_product["categoria"] = category
-            branch_product["categoria_pronostico"] = forecast_category
-            branch_product["precio"] = price
-            branch_product["total_piezas"] += forecast_qty
-            branch_product["total_ingreso"] += revenue
-            branch_product["por_dia"][day.isoformat()] += forecast_qty
-            day_totals[day]["total_piezas"] += forecast_qty
-            day_totals[day]["total_ingreso"] += revenue
-            day_product_totals[day][product_id] += forecast_qty
-            product_day_details[product_id][day.isoformat()] += forecast_qty
-
-    total_pieces = sum(row["total_piezas"] for row in product_totals.values())
-    total_income = sum((row["total_ingreso"] for row in product_totals.values()), Decimal("0"))
-
-    por_producto = []
-    for product_id, row in product_totals.items():
-        factor_values = product_factor_values.get(product_id) or [Decimal("1")]
-        avg_factor = sum(factor_values, Decimal("0")) / Decimal(len(factor_values))
-        row["factor_tendencia"] = avg_factor.quantize(Decimal("0.01"))
-        row["tendencia"] = _trend_label(avg_factor)
-        row["pct_del_total"] = (Decimal(row["total_piezas"]) / Decimal(total_pieces) * Decimal("100")).quantize(Decimal("0.01")) if total_pieces else Decimal("0")
-        row["total_ingreso"] = row["total_ingreso"].quantize(Decimal("0.01"))
-        row["por_dia"] = dict(sorted(product_day_details.get(product_id, {}).items()))
-        por_producto.append(row)
-
-    por_producto.sort(
-        key=lambda item: (
-            CATEGORY_INDEX.get(item.get("categoria_pronostico") or "Otros", CATEGORY_INDEX["Otros"]),
-            -item["total_piezas"],
-            item["nombre"],
-        )
-    )
-    producto_nombre = {row["point_product_id"]: row["nombre"] for row in por_producto}
-
-    family_groups = []
-    for familia in CATEGORY_ORDER:
-        rows = [row for row in por_producto if (row.get("categoria_pronostico") or "Otros") == familia]
-        if not rows:
-            continue
-        rows.sort(key=lambda item: (-item["total_piezas"], item["nombre"]))
-        subtotal_pieces = sum(row["total_piezas"] for row in rows)
-        subtotal_income = sum((row["total_ingreso"] for row in rows), Decimal("0"))
-        family_groups.append(
-            {
-                "familia": familia,
-                "total_piezas": subtotal_pieces,
-                "total_ingreso": subtotal_income.quantize(Decimal("0.01")),
-                "rows": rows,
-            }
-        )
-
-    por_dia = []
-    for day in selected_days:
-        top_products = sorted(day_product_totals[day].items(), key=lambda item: (-item[1], producto_nombre.get(item[0], "")))[:5]
-        row = day_totals[day]
-        row["total_ingreso"] = row["total_ingreso"].quantize(Decimal("0.01"))
-        row["top_5_productos"] = [{"nombre": producto_nombre.get(product_id, "Producto"), "total_piezas": qty} for product_id, qty in top_products]
-        row["top_producto"] = row["top_5_productos"][0] if row["top_5_productos"] else None
-        por_dia.append(row)
-
-    por_sucursal = []
-    for row in branch_totals.values():
-        products = list(row["productos"].values())
-        products.sort(
-            key=lambda item: (
-                CATEGORY_INDEX.get(item.get("categoria_pronostico") or "Otros", CATEGORY_INDEX["Otros"]),
-                -item["total_piezas"],
-                item["nombre"],
-            )
-        )
-        for product in products:
-            product["total_ingreso"] = product["total_ingreso"].quantize(Decimal("0.01"))
-            product["por_dia"] = dict(sorted(product["por_dia"].items()))
-        row["productos"] = products
-        row["total_ingreso"] = row["total_ingreso"].quantize(Decimal("0.01"))
-        por_sucursal.append(row)
-    por_sucursal.sort(key=lambda item: (-item["total_piezas"], item["sucursal"]))
-
-    return {
-        "fechas": [day.isoformat() for day in selected_days],
-        "resumen": {
-            "total_piezas": total_pieces,
-            "total_ingreso": total_income.quantize(Decimal("0.01")),
-            "dias": len(selected_days),
-            "productos": len(por_producto),
-            "sucursales": len(por_sucursal),
-            "recent_start": recent_start,
-            "recent_end": recent_end,
-            "recent_rotation_start": recent_rotation_start,
-            "comparable_start": comparable_start,
-            "comparable_end": comparable_end,
-        },
-        "por_dia": por_dia,
-        "por_producto": por_producto,
-        "por_producto_familias": family_groups,
-        "por_sucursal": por_sucursal,
-    }
-
-
-def _calcular_pronostico(*, start_date: date, end_date: date, branch_ids: set[int]) -> dict:
-    return _build_pronostico_ventas(start_date=start_date, end_date=end_date, branch_ids=branch_ids)
 
 
 def _json_ready(value):
@@ -468,7 +61,7 @@ def _int_from_json(value) -> int:
 
 def _parse_iso_date(value: str) -> date | None:
     try:
-        return date.fromisoformat(value)
+        return date.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
 
@@ -480,39 +73,43 @@ def _date_header(value: str) -> str:
     return f"{WEEKDAYS_ES[parsed.weekday()]} {parsed.day} {MONTHS_ES[parsed.month - 1]}"
 
 
-def _category_for_row(row: dict) -> str:
-    saved_category = row.get("categoria_pronostico")
-    if saved_category in CATEGORY_INDEX:
-        return saved_category
-    return _forecast_category(row.get("nombre") or row.get("producto"), row.get("familia") or row.get("categoria"))
+def _selected_branch_ids(request, *, source: str = "GET") -> set[int]:
+    values = request.GET.getlist("sucursales") if source == "GET" else request.POST.getlist("sucursales")
+    selected = {int(value) for value in values if str(value).isdigit()}
+    active = set(Sucursal.objects.filter(activa=True).values_list("id", flat=True))
+    return (selected & active) if selected else set(active)
 
 
-def _forecast_rows_for_excel(rows: list[dict]) -> list[dict]:
-    excel_rows = []
-    for row in rows:
-        total_pieces = _int_from_json(row.get("total_piezas"))
-        if total_pieces <= 0:
-            continue
-        price = _decimal_from_json(row.get("precio"))
-        income = _decimal_from_json(row.get("total_ingreso"))
-        excel_rows.append(
-            {
-                "categoria": _category_for_row(row),
-                "producto": row.get("nombre") or "Producto",
-                "por_dia": row.get("por_dia") or {},
-                "total_piezas": total_pieces,
-                "precio": price,
-                "total_ingreso": income,
-            }
-        )
-    excel_rows.sort(
-        key=lambda item: (
-            CATEGORY_INDEX.get(item["categoria"], CATEGORY_INDEX["Otros"]),
-            -item["total_piezas"],
-            item["producto"],
-        )
-    )
-    return excel_rows
+def _validate_dates(fecha_inicio_raw: str, fecha_fin_raw: str) -> tuple[date | None, date | None, list[str]]:
+    errors = []
+    fecha_inicio = _parse_iso_date(fecha_inicio_raw)
+    fecha_fin = _parse_iso_date(fecha_fin_raw)
+    if not fecha_inicio or not fecha_fin:
+        errors.append("Selecciona fechas validas para calcular el pronostico.")
+        return fecha_inicio, fecha_fin, errors
+    if fecha_inicio > fecha_fin:
+        errors.append("La fecha inicio no puede ser posterior a la fecha fin.")
+    if (fecha_fin - fecha_inicio).days > 45:
+        errors.append("El rango maximo permitido es de 46 dias para mantener el calculo operativo.")
+    return fecha_inicio, fecha_fin, errors
+
+
+def _empty_result_context(resultados: dict | None) -> dict:
+    resultados = resultados or {}
+    resumen = resultados.get("resumen")
+    if resumen:
+        resumen = dict(resumen)
+        resumen.setdefault("n_productos", resumen.get("productos", 0))
+        resumen.setdefault("n_sucursales", resumen.get("sucursales", 0))
+    return {
+        "resultados": resultados,
+        "resumen": resumen,
+        "fechas_tabla": resultados.get("fechas_tabla") or [],
+        "fechas_especiales_en_rango": (resultados.get("resumen") or {}).get("fechas_especiales") or [],
+        "por_categoria": resultados.get("por_categoria") or [],
+        "por_dia": resultados.get("por_dia") or [],
+        "por_sucursal": resultados.get("por_sucursal") or [],
+    }
 
 
 def _safe_sheet_title(raw_title: str, used_titles: set[str]) -> str:
@@ -539,70 +136,71 @@ def _style_row(ws, row_number: int, *, fill: str | None = None, font_color: str 
         cell.alignment = Alignment(vertical="center")
 
 
-def _write_pronostico_sheet(ws, *, title: str, subtitle: str, fechas: list[str], rows: list[dict]):
+def _product_day_value(product: dict, fecha_iso: str, escenario: str = "recomendado") -> int:
+    dias = product.get("dias") or {}
+    day_data = dias.get(fecha_iso) or {}
+    return _int_from_json(day_data.get(escenario, 0))
+
+
+def _write_pronostico_sheet(ws, *, title: str, subtitle: str, fechas: list[str], categorias: list[dict]):
     ws["A1"] = title
     ws["A1"].font = Font(color="7B1A48", bold=True, size=14)
     ws["A2"] = subtitle
     ws["A2"].font = Font(color="555555", size=10)
     ws.cell(row=3, column=1, value="")
 
-    headers = ["Categoría", "Producto"] + [_date_header(fecha) for fecha in fechas] + ["Total", "Precio", "Ingreso proyectado"]
+    headers = ["Categoría", "Producto"] + [_date_header(fecha) for fecha in fechas] + ["Total", "Precio", "Ingreso"]
     ws.append(headers)
     _style_row(ws, 4, fill="F5E6ED", font_color="7B1A48", bold=True)
     ws.freeze_panes = "A5"
 
     data_start_row = 5
+    current_row = data_start_row
     grand_total_by_day = {fecha: 0 for fecha in fechas}
     grand_total_pieces = 0
     grand_total_income = Decimal("0")
-    current_row = data_start_row
 
-    for category in CATEGORY_ORDER:
-        category_rows = [row for row in rows if row["categoria"] == category]
-        if not category_rows:
+    category_map = {category.get("categoria"): category for category in categorias}
+    for category_name in ORDEN_CATEGORIAS:
+        category = category_map.get(category_name)
+        if not category:
             continue
+
         subtotal_by_day = {fecha: 0 for fecha in fechas}
         subtotal_pieces = 0
         subtotal_income = Decimal("0")
-        for row in category_rows:
-            day_values = [_int_from_json(row["por_dia"].get(fecha, 0)) for fecha in fechas]
-            ws.append(
-                [category, row["producto"]]
-                + day_values
-                + [row["total_piezas"], float(row["precio"]), float(row["total_ingreso"])]
-            )
+        for product in category.get("productos") or []:
+            total_pieces = _int_from_json(product.get("total_piezas"))
+            if total_pieces <= 0:
+                continue
+            day_values = [_product_day_value(product, fecha) for fecha in fechas]
+            price = _decimal_from_json(product.get("precio"))
+            income = _decimal_from_json(product.get("total_ingreso"))
+            ws.append([category_name, product.get("nombre") or "Producto"] + day_values + [total_pieces, float(price), float(income)])
             if (current_row - data_start_row) % 2:
                 _style_row(ws, current_row, fill="FDF2F6")
+
             for fecha, value in zip(fechas, day_values, strict=False):
                 subtotal_by_day[fecha] += value
                 grand_total_by_day[fecha] += value
-            subtotal_pieces += row["total_piezas"]
-            subtotal_income += row["total_ingreso"]
-            grand_total_pieces += row["total_piezas"]
-            grand_total_income += row["total_ingreso"]
+            subtotal_pieces += total_pieces
+            subtotal_income += income
+            grand_total_pieces += total_pieces
+            grand_total_income += income
             current_row += 1
 
-        ws.append(
-            [f"Subtotal {category}", ""]
-            + [subtotal_by_day[fecha] for fecha in fechas]
-            + [subtotal_pieces, "", float(subtotal_income)]
-        )
+        ws.append([f"Subtotal {category_name}", ""] + [subtotal_by_day[fecha] for fecha in fechas] + [subtotal_pieces, "", float(subtotal_income)])
         _style_row(ws, current_row, fill="7B1A48", font_color="FFFFFF", bold=True)
         current_row += 1
 
-    ws.append(
-        ["Total general", ""]
-        + [grand_total_by_day[fecha] for fecha in fechas]
-        + [grand_total_pieces, "", float(grand_total_income)]
-    )
+    ws.append(["Total general", ""] + [grand_total_by_day[fecha] for fecha in fechas] + [grand_total_pieces, "", float(grand_total_income)])
     _style_row(ws, current_row, fill="3D0A24", font_color="FFFFFF", bold=True)
 
-    last_row = ws.max_row
     first_day_col = 3
     total_col = first_day_col + len(fechas)
     price_col = total_col + 1
     income_col = price_col + 1
-    for row in ws.iter_rows(min_row=data_start_row, max_row=last_row):
+    for row in ws.iter_rows(min_row=data_start_row, max_row=ws.max_row):
         for index, cell in enumerate(row, start=1):
             if first_day_col <= index <= total_col:
                 cell.number_format = "#,##0"
@@ -614,18 +212,68 @@ def _write_pronostico_sheet(ws, *, title: str, subtitle: str, fechas: list[str],
     for column_cells in ws.columns:
         column_letter = get_column_letter(column_cells[0].column)
         max_length = max(len(str(cell.value or "")) for cell in column_cells)
-        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 42)
+        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 44)
+
+
+def _write_escenarios_sheet(ws, *, title: str, subtitle: str, categorias: list[dict]):
+    ws["A1"] = title
+    ws["A1"].font = Font(color="7B1A48", bold=True, size=14)
+    ws["A2"] = subtitle
+    ws["A2"].font = Font(color="555555", size=10)
+    ws.cell(row=3, column=1, value="")
+    ws.append(["Categoría", "Producto", "Conservador", "Recomendado", "Agresivo", "Precio", "Ingreso recomendado"])
+    _style_row(ws, 4, fill="F5E6ED", font_color="7B1A48", bold=True)
+    ws.freeze_panes = "A5"
+
+    current_row = 5
+    category_map = {category.get("categoria"): category for category in categorias}
+    for category_name in ORDEN_CATEGORIAS:
+        category = category_map.get(category_name)
+        if not category:
+            continue
+        for product in category.get("productos") or []:
+            escenarios = product.get("escenarios") or {}
+            price = _decimal_from_json(product.get("precio"))
+            income = _decimal_from_json(product.get("total_ingreso"))
+            ws.append(
+                [
+                    category_name,
+                    product.get("nombre") or "Producto",
+                    _int_from_json(escenarios.get("conservador")),
+                    _int_from_json(escenarios.get("recomendado") or product.get("total_piezas")),
+                    _int_from_json(escenarios.get("agresivo")),
+                    float(price),
+                    float(income),
+                ]
+            )
+            if current_row % 2:
+                _style_row(ws, current_row, fill="FDF2F6")
+            current_row += 1
+
+    for row in ws.iter_rows(min_row=5, max_row=ws.max_row):
+        for index, cell in enumerate(row, start=1):
+            if index in {3, 4, 5}:
+                cell.number_format = "#,##0"
+            elif index in {6, 7}:
+                cell.number_format = "$#,##0.00"
+
+    for column_cells in ws.columns:
+        column_letter = get_column_letter(column_cells[0].column)
+        max_length = max(len(str(cell.value or "")) for cell in column_cells)
+        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 44)
 
 
 def _build_pronostico_excel_response(pronostico: PronosticoGuardado) -> HttpResponse:
     resultados = pronostico.resultado_json or {}
     fechas = resultados.get("fechas") or []
+    resumen = resultados.get("resumen") or {}
     workbook = Workbook()
     used_titles = set()
     generated_at = timezone.localtime(pronostico.creado_en).strftime("%Y-%m-%d %H:%M")
     user_label = pronostico.creado_por.get_full_name() if pronostico.creado_por else ""
     user_label = user_label or (pronostico.creado_por.get_username() if pronostico.creado_por else "Sin usuario")
     subtitle = (
+        f"Metodo: {resumen.get('metodo', 'pronostico')} | "
         f"Rango: {pronostico.fecha_inicio} a {pronostico.fecha_fin} | "
         f"Generado: {generated_at} | Por: {user_label}"
     )
@@ -637,18 +285,26 @@ def _build_pronostico_excel_response(pronostico: PronosticoGuardado) -> HttpResp
         title=pronostico.nombre,
         subtitle=subtitle,
         fechas=fechas,
-        rows=_forecast_rows_for_excel(resultados.get("por_producto") or []),
+        categorias=resultados.get("por_categoria") or [],
     )
 
     for branch in resultados.get("por_sucursal") or []:
-        sheet = workbook.create_sheet(_safe_sheet_title(branch.get("sucursal") or "Sucursal", used_titles))
+        sheet = workbook.create_sheet(_safe_sheet_title(branch.get("sucursal_nombre") or branch.get("sucursal") or "Sucursal", used_titles))
         _write_pronostico_sheet(
             sheet,
-            title=f"{pronostico.nombre} — {branch.get('sucursal') or 'Sucursal'}",
+            title=f"{pronostico.nombre} - {branch.get('sucursal_nombre') or branch.get('sucursal') or 'Sucursal'}",
             subtitle=subtitle,
             fechas=fechas,
-            rows=_forecast_rows_for_excel(branch.get("productos") or []),
+            categorias=branch.get("categorias") or [],
         )
+
+    scenarios_sheet = workbook.create_sheet(_safe_sheet_title("Escenarios", used_titles))
+    _write_escenarios_sheet(
+        scenarios_sheet,
+        title=f"Escenarios - {pronostico.nombre}",
+        subtitle=subtitle,
+        categorias=resultados.get("por_categoria") or [],
+    )
 
     buffer = BytesIO()
     workbook.save(buffer)
@@ -670,66 +326,35 @@ def _get_pronostico_for_user(user, pk: int) -> PronosticoGuardado:
     return get_object_or_404(_pronosticos_for_user(user), pk=pk)
 
 
-def _pronostico_context_from_result(resultados: dict) -> dict:
-    return {
-        "resultados": resultados,
-        "resumen": resultados.get("resumen") if resultados else None,
-        "por_dia": resultados.get("por_dia", []) if resultados else [],
-        "por_producto_familias": resultados.get("por_producto_familias", []) if resultados else [],
-        "por_sucursal": resultados.get("por_sucursal", []) if resultados else [],
-    }
-
-
 @login_required
 def PronosticoVentasView(request):
     if not _can_view_pronostico(request.user):
         raise PermissionDenied("No tienes permisos para ver pronosticos de ventas.")
 
-    active_branches = Sucursal.objects.filter(activa=True).order_by("nombre")
-    default_branch_ids = set(active_branches.values_list("id", flat=True))
-    selected_branch_ids = {int(value) for value in request.GET.getlist("sucursales") if str(value).isdigit()}
-    if not selected_branch_ids:
-        selected_branch_ids = set(default_branch_ids)
-    else:
-        selected_branch_ids &= default_branch_ids
-
+    branches = Sucursal.objects.filter(activa=True).order_by("nombre")
     fecha_inicio_raw = (request.GET.get("fecha_inicio") or "").strip()
     fecha_fin_raw = (request.GET.get("fecha_fin") or "").strip()
+    selected_branch_ids = _selected_branch_ids(request)
     resultados = {}
     form_errors = []
-    fecha_inicio = None
-    fecha_fin = None
 
     if fecha_inicio_raw or fecha_fin_raw:
-        try:
-            fecha_inicio = date.fromisoformat(fecha_inicio_raw)
-            fecha_fin = date.fromisoformat(fecha_fin_raw)
-        except ValueError:
-            form_errors.append("Selecciona fechas validas para calcular el pronostico.")
-        if fecha_inicio and fecha_fin and fecha_inicio > fecha_fin:
-            form_errors.append("La fecha inicio no puede ser posterior a la fecha fin.")
-        if fecha_inicio and fecha_fin and (fecha_fin - fecha_inicio).days > 45:
-            form_errors.append("El rango maximo permitido es de 46 dias para mantener el calculo operativo.")
+        fecha_inicio, fecha_fin, form_errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
         if not selected_branch_ids:
             form_errors.append("Selecciona al menos una sucursal activa.")
-
         if not form_errors and fecha_inicio and fecha_fin:
-            resultados = _calcular_pronostico(
-                start_date=fecha_inicio,
-                end_date=fecha_fin,
-                branch_ids=selected_branch_ids,
-            )
-            if not resultados:
+            resultados = calcular_pronostico(fecha_inicio, fecha_fin, selected_branch_ids)
+            if not resultados.get("resumen", {}).get("total_piezas"):
                 messages.warning(request, "No se encontro base suficiente para calcular el pronostico con esos filtros.")
 
     context = {
-        "branches": active_branches,
+        "branches": branches,
         "selected_branch_ids": selected_branch_ids,
         "fecha_inicio": fecha_inicio_raw,
         "fecha_fin": fecha_fin_raw,
         "form_errors": form_errors,
         "pronosticos_guardados": _pronosticos_for_user(request.user)[:10],
-        **_pronostico_context_from_result(resultados),
+        **_empty_result_context(resultados),
     }
     return render(request, "ventas/pronostico.html", context)
 
@@ -743,40 +368,24 @@ def PronosticoGuardarView(request):
     nombre = (request.POST.get("nombre") or "").strip()
     fecha_inicio_raw = (request.POST.get("fecha_inicio") or "").strip()
     fecha_fin_raw = (request.POST.get("fecha_fin") or "").strip()
-    selected_branch_ids = {int(value) for value in request.POST.getlist("sucursales") if str(value).isdigit()}
-    active_branch_ids = set(Sucursal.objects.filter(activa=True).values_list("id", flat=True))
-    selected_branch_ids &= active_branch_ids
-
-    try:
-        fecha_inicio = date.fromisoformat(fecha_inicio_raw)
-        fecha_fin = date.fromisoformat(fecha_fin_raw)
-    except ValueError:
-        messages.error(request, "Selecciona fechas validas para guardar el pronostico.")
-        return redirect("ventas:pronostico")
-
-    if fecha_inicio > fecha_fin:
-        messages.error(request, "La fecha inicio no puede ser posterior a la fecha fin.")
-        return redirect("ventas:pronostico")
-    if (fecha_fin - fecha_inicio).days > 45:
-        messages.error(request, "El rango maximo permitido es de 46 dias.")
-        return redirect("ventas:pronostico")
+    fecha_inicio, fecha_fin, errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
+    selected_branch_ids = _selected_branch_ids(request, source="POST")
     if not selected_branch_ids:
-        messages.error(request, "Selecciona al menos una sucursal activa.")
+        errors.append("Selecciona al menos una sucursal activa.")
+    if errors:
+        for error in errors:
+            messages.error(request, error)
         return redirect("ventas:pronostico")
 
-    resultados = _calcular_pronostico(
-        start_date=fecha_inicio,
-        end_date=fecha_fin,
-        branch_ids=selected_branch_ids,
-    )
-    if not resultados:
+    resultados = calcular_pronostico(fecha_inicio, fecha_fin, selected_branch_ids)
+    resumen = resultados.get("resumen") or {}
+    if not resumen.get("total_piezas"):
         messages.warning(request, "No se encontro base suficiente para guardar el pronostico con esos filtros.")
         return redirect("ventas:pronostico")
 
     if not nombre:
         nombre = f"Pronóstico {fecha_inicio} a {fecha_fin}"
 
-    resumen = resultados.get("resumen") or {}
     pronostico = PronosticoGuardado.objects.create(
         nombre=nombre,
         fecha_inicio=fecha_inicio,
@@ -795,21 +404,15 @@ def PronosticoGuardarView(request):
 def PronosticoListaView(request):
     if not _can_view_pronostico(request.user):
         raise PermissionDenied("No tienes permisos para ver pronosticos guardados.")
-
-    return render(
-        request,
-        "ventas/pronostico_lista.html",
-        {"pronosticos": _pronosticos_for_user(request.user)},
-    )
+    return render(request, "ventas/pronostico_lista.html", {"pronosticos": _pronosticos_for_user(request.user)})
 
 
 @login_required
 def PronosticoDetalleView(request, pk: int):
     if not _can_view_pronostico(request.user):
         raise PermissionDenied("No tienes permisos para ver este pronostico.")
-
     pronostico = _get_pronostico_for_user(request.user, pk)
-    context = {"pronostico": pronostico, **_pronostico_context_from_result(pronostico.resultado_json or {})}
+    context = {"pronostico": pronostico, **_empty_result_context(pronostico.resultado_json or {})}
     return render(request, "ventas/pronostico_detalle.html", context)
 
 
@@ -817,7 +420,6 @@ def PronosticoDetalleView(request, pk: int):
 def PronosticoExcelView(request, pk: int):
     if not _can_view_pronostico(request.user):
         raise PermissionDenied("No tienes permisos para exportar este pronostico.")
-
     pronostico = _get_pronostico_for_user(request.user, pk)
     return _build_pronostico_excel_response(pronostico)
 
@@ -827,7 +429,6 @@ def PronosticoExcelView(request, pk: int):
 def PronosticoEliminarView(request, pk: int):
     if not _can_view_pronostico(request.user):
         raise PermissionDenied("No tienes permisos para eliminar este pronostico.")
-
     pronostico = _get_pronostico_for_user(request.user, pk)
     pronostico.delete()
     messages.success(request, "Pronostico eliminado.")
