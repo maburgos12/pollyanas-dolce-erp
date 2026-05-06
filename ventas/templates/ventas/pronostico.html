@@ -7,6 +7,11 @@
 {% block extra_css %}
 <style>
   .page-pronostico-ventas .forecast-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .page-pronostico-ventas .saved-forecast-filters { display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:12px; align-items:end; margin-bottom:16px; }
+  .page-pronostico-ventas .new-forecast-summary { cursor:pointer; padding:12px 0; font-size:16px; font-weight:600; color:#7b1a48; list-style:none; display:flex; align-items:center; gap:8px; user-select:none; }
+  .page-pronostico-ventas .new-forecast-summary::-webkit-details-marker { display:none; }
+  .page-pronostico-ventas .forecast-product-section > summary { cursor:pointer; list-style:none; user-select:none; }
+  .page-pronostico-ventas .forecast-product-section > summary::-webkit-details-marker { display:none; }
   .page-pronostico-ventas .forecast-filter-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; align-items:end; }
   .page-pronostico-ventas .forecast-filter-submit { margin-top:16px; }
   .page-pronostico-ventas .forecast-branch-filter { position:relative; width:100%; }
@@ -63,6 +68,7 @@
   .page-pronostico-ventas .forecast-modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
   .page-pronostico-ventas .forecast-chart-wrap { min-height:280px; }
   @media (max-width: 900px) {
+    .page-pronostico-ventas .saved-forecast-filters { grid-template-columns:1fr; }
     .page-pronostico-ventas .forecast-filter-grid { grid-template-columns:1fr; }
     .page-pronostico-ventas .forecast-product-grid { grid-template-columns:1fr; }
     .page-pronostico-ventas .forecast-actions,
@@ -91,76 +97,150 @@
   </section>
 
   <section class="card">
-    <div class="card-header">Filtros</div>
-    {% if form_errors %}
-    <div class="production-banner-list">
-      {% for error in form_errors %}
-      <div class="alert alert-warning">{{ error }}</div>
-      {% endfor %}
+    <div class="section-header">
+      <div>
+        <h2 class="section-header-title">Pronósticos generados</h2>
+        <p class="executive-section-copy">Últimos cálculos guardados por tu usuario.</p>
+      </div>
+      <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Ver todos</a>
     </div>
-    {% endif %}
-    <form method="post" id="forecast-form">
-      {% csrf_token %}
-      <div class="forecast-filter-grid">
-        <div>
-          <label class="form-label" for="fecha_inicio">Fecha inicio</label>
-          <input class="form-control" type="date" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio }}" required>
-        </div>
-        <div>
-          <label class="form-label" for="fecha_fin">Fecha fin</label>
-          <input class="form-control" type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}" required>
-        </div>
-        <div>
-          <label class="form-label" for="suc-btn">Sucursales</label>
-          <div class="forecast-branch-filter">
-            <button type="button" id="suc-btn" class="forecast-branch-button">
-              <span id="suc-label">Todas las sucursales</span>
-              <span>▾</span>
-            </button>
-            <div id="suc-menu" class="forecast-branch-menu">
-              {% for branch in branches %}
-              <label>
-                <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %} onchange="updateSucLabel()">
-                {{ branch.nombre }}
-              </label>
-              {% endfor %}
-              <div style="margin-top:8px; padding-top:8px; border-top:1px solid #eee; text-align:right;">
-                <button type="button" class="btn btn-primary btn-sm" onclick="closeSuc()">Aceptar</button>
+    <div class="saved-forecast-filters">
+      <div>
+        <label class="form-label" for="saved-forecast-search">Buscar</label>
+        <input class="form-control" type="search" id="saved-forecast-search" placeholder="Buscar por nombre...">
+      </div>
+      <div>
+        <label class="form-label" for="saved-forecast-from">Desde fecha</label>
+        <input class="form-control" type="date" id="saved-forecast-from">
+      </div>
+      <div>
+        <label class="form-label" for="saved-forecast-to">Hasta fecha</label>
+        <input class="form-control" type="date" id="saved-forecast-to">
+      </div>
+      <button class="btn btn-primary" type="button" id="saved-forecast-filter">Buscar</button>
+    </div>
+    <div class="table-responsive production-table-wrap">
+      <table class="table" id="saved-forecasts-table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Rango</th>
+            <th class="text-end">Piezas</th>
+            <th class="text-end">Ingreso</th>
+            <th>Método</th>
+            <th>Fecha</th>
+            <th class="text-end">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in pronosticos_guardados %}
+          <tr data-forecast-row data-name="{{ item.nombre|lower }}" data-start='{{ item.fecha_inicio|date:"Y-m-d" }}' data-end='{{ item.fecha_fin|date:"Y-m-d" }}'>
+            <td>{{ item.nombre }}</td>
+            <td>{{ item.fecha_inicio }} a {{ item.fecha_fin }}</td>
+            <td class="text-end">{{ item.total_piezas|intcomma }}</td>
+            <td class="text-end">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
+            <td>{{ item.resultado_json.resumen.metodo|default:"-" }}</td>
+            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+            <td class="text-end">
+              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
+              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
+              <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}" style="display:inline;">
+                {% csrf_token %}
+                <button class="btn btn-secondary btn-sm" type="submit" onclick="return confirm('¿Eliminar este pronóstico?')">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7" class="text-center text-muted">Aún no hay pronósticos guardados.</td>
+          </tr>
+          {% endfor %}
+          <tr id="saved-forecasts-empty-filter" style="display:none;">
+            <td colspan="7" class="text-center text-muted">Sin pronósticos que coincidan con los filtros.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <details id="nuevo-calculo">
+      <summary class="new-forecast-summary">
+        <span>＋</span> Calcular nuevo pronóstico
+      </summary>
+      <div class="card-header">Filtros</div>
+      {% if form_errors %}
+      <div class="production-banner-list">
+        {% for error in form_errors %}
+        <div class="alert alert-warning">{{ error }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <form method="post" id="forecast-form">
+        {% csrf_token %}
+        <div class="forecast-filter-grid">
+          <div>
+            <label class="form-label" for="fecha_inicio">Fecha inicio</label>
+            <input class="form-control" type="date" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio }}" required>
+          </div>
+          <div>
+            <label class="form-label" for="fecha_fin">Fecha fin</label>
+            <input class="form-control" type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}" required>
+          </div>
+          <div>
+            <label class="form-label" for="suc-btn">Sucursales</label>
+            <div class="forecast-branch-filter">
+              <button type="button" id="suc-btn" class="forecast-branch-button">
+                <span id="suc-label">Todas las sucursales</span>
+                <span>▾</span>
+              </button>
+              <div id="suc-menu" class="forecast-branch-menu">
+                {% for branch in branches %}
+                <label>
+                  <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %} onchange="updateSucLabel()">
+                  {{ branch.nombre }}
+                </label>
+                {% endfor %}
+                <div style="margin-top:8px; padding-top:8px; border-top:1px solid #eee; text-align:right;">
+                  <button type="button" class="btn btn-primary btn-sm" onclick="closeSuc()">Aceptar</button>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-      <div class="forecast-product-section">
-        <div class="forecast-product-header">
-          <h3>Productos a incluir</h3>
-          <div class="forecast-product-actions">
-            <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(true)">Seleccionar todos</button>
-            <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(false)">Limpiar todo</button>
-          </div>
-        </div>
-        {% for category, products in categorias_productos.items %}
-        <details class="forecast-product-group" {% if category|upper in categorias_principales %}open{% endif %}>
-          <summary class="forecast-product-summary">
-            {{ category }}
-            <span>({{ products|length }} productos)</span>
-            <button class="btn btn-secondary btn-sm" type="button" onclick="toggleCat(event, this)">Todos / Ninguno</button>
+        <details class="forecast-product-section" id="productos-incluir">
+          <summary>
+            <div class="forecast-product-header">
+              <h3>Productos a incluir</h3>
+              <div class="forecast-product-actions">
+                <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(event, true)">Seleccionar todos</button>
+                <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(event, false)">Limpiar todo</button>
+              </div>
+            </div>
           </summary>
-          <div class="forecast-product-grid">
-            {% for prod in products %}
-            <label class="forecast-product-option">
-              <input type="checkbox" name="productos_incluidos" value="{{ prod.sku }}" {% if prod.sku in selected_product_skus %}checked{% endif %}>
-              <span title="{{ prod.nombre }}">{{ prod.nombre }}</span>
-            </label>
-            {% endfor %}
-          </div>
+          {% for category, products in categorias_productos.items %}
+          <details class="forecast-product-group" {% if category|upper in categorias_principales %}open{% endif %}>
+            <summary class="forecast-product-summary">
+              {{ category }}
+              <span>({{ products|length }} productos)</span>
+              <button class="btn btn-secondary btn-sm" type="button" onclick="toggleCat(event, this)">Todos / Ninguno</button>
+            </summary>
+            <div class="forecast-product-grid">
+              {% for prod in products %}
+              <label class="forecast-product-option">
+                <input type="checkbox" name="productos_incluidos" value="{{ prod.sku }}" {% if prod.sku in selected_product_skus %}checked{% endif %}>
+                <span title="{{ prod.nombre }}">{{ prod.nombre }}</span>
+              </label>
+              {% endfor %}
+            </div>
+          </details>
+          {% endfor %}
         </details>
-        {% endfor %}
-      </div>
-      <div class="forecast-filter-submit">
-        <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Calcular pronóstico</button>
-      </div>
-    </form>
+        <div class="forecast-filter-submit">
+          <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Calcular pronóstico</button>
+        </div>
+      </form>
+    </details>
   </section>
 
   {% if fechas_especiales_en_rango %}
@@ -383,54 +463,6 @@
   </section>
   {% endif %}
 
-  <section class="card">
-    <div class="section-header">
-      <div>
-        <h2 class="section-header-title">Pronósticos guardados</h2>
-        <p class="executive-section-copy">Últimos cálculos guardados por tu usuario.</p>
-      </div>
-      <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Ver todos</a>
-    </div>
-    <div class="table-responsive production-table-wrap">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Nombre</th>
-            <th>Rango</th>
-            <th class="text-end">Piezas</th>
-            <th class="text-end">Ingreso</th>
-            <th>Método</th>
-            <th>Fecha</th>
-            <th class="text-end">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in pronosticos_guardados %}
-          <tr>
-            <td>{{ item.nombre }}</td>
-            <td>{{ item.fecha_inicio }} a {{ item.fecha_fin }}</td>
-            <td class="text-end">{{ item.total_piezas|intcomma }}</td>
-            <td class="text-end">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
-            <td>{{ item.resultado_json.resumen.metodo|default:"-" }}</td>
-            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
-            <td class="text-end">
-              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
-              <a class="btn btn-secondary btn-sm" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
-              <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}" style="display:inline;">
-                {% csrf_token %}
-                <button class="btn btn-secondary btn-sm" type="submit" onclick="return confirm('¿Eliminar este pronóstico?')">Eliminar</button>
-              </form>
-            </td>
-          </tr>
-          {% empty %}
-          <tr>
-            <td colspan="7" class="text-center text-muted">Aún no hay pronósticos guardados.</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
 </div>
 
 {% if resumen %}
@@ -478,7 +510,12 @@
     if (sucMenu) sucMenu.style.display = 'none';
     updateSucLabel();
   }
-  function setAllProducts(checked) {
+  function setAllProducts(eventOrChecked, checkedValue) {
+    const checked = typeof checkedValue === 'boolean' ? checkedValue : eventOrChecked;
+    if (eventOrChecked && typeof eventOrChecked.preventDefault === 'function') {
+      eventOrChecked.preventDefault();
+      eventOrChecked.stopPropagation();
+    }
     document.querySelectorAll('#forecast-form [name=productos_incluidos]').forEach(function (input) {
       input.checked = checked;
     });
@@ -504,6 +541,44 @@
     });
     updateSucLabel();
   }
+
+  (function () {
+    const table = document.getElementById('saved-forecasts-table');
+    const search = document.getElementById('saved-forecast-search');
+    const from = document.getElementById('saved-forecast-from');
+    const to = document.getElementById('saved-forecast-to');
+    const button = document.getElementById('saved-forecast-filter');
+    const empty = document.getElementById('saved-forecasts-empty-filter');
+    if (!table || !search || !from || !to || !button) return;
+
+    const rows = Array.from(table.querySelectorAll('[data-forecast-row]'));
+    function applySavedForecastFilters() {
+      const term = search.value.trim().toLowerCase();
+      const start = from.value;
+      const end = to.value;
+      let visible = 0;
+
+      rows.forEach(function (row) {
+        const name = row.dataset.name || '';
+        const rowStart = row.dataset.start || '';
+        const rowEnd = row.dataset.end || '';
+        const matchesName = !term || name.includes(term);
+        const matchesStart = !start || rowEnd >= start;
+        const matchesEnd = !end || rowStart <= end;
+        const show = matchesName && matchesStart && matchesEnd;
+        row.style.display = show ? '' : 'none';
+        if (show) visible += 1;
+      });
+
+      if (empty) empty.style.display = rows.length && visible === 0 ? '' : 'none';
+    }
+
+    button.addEventListener('click', applySavedForecastFilters);
+    [search, from, to].forEach(function (input) {
+      input.addEventListener('input', applySavedForecastFilters);
+      input.addEventListener('change', applySavedForecastFilters);
+    });
+  })();
 
   (function () {
     const form = document.getElementById('forecast-form');
