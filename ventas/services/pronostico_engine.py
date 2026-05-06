@@ -196,6 +196,14 @@ def _ceil(value: Decimal | float) -> int:
     return int(math.ceil(numeric)) if numeric > 0 else 0
 
 
+def _is_special_context_day(target_day: date) -> bool:
+    return (
+        (target_day.month, target_day.day) in FECHAS_ESPECIALES
+        or ((target_day + timedelta(days=1)).month, (target_day + timedelta(days=1)).day) in FECHAS_ESPECIALES
+        or ((target_day - timedelta(days=1)).month, (target_day - timedelta(days=1)).day) in FECHAS_ESPECIALES
+    )
+
+
 def _calcular_producto_prophet(serie_df: pd.DataFrame, fechas_rango: list[date], festivos_df: pd.DataFrame) -> dict:
     logging.getLogger("prophet").setLevel(logging.WARNING)
     logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
@@ -216,14 +224,62 @@ def _calcular_producto_prophet(serie_df: pd.DataFrame, fechas_rango: list[date],
     m.add_country_holidays(country_name="MX")
     m.fit(clean_df, iter=300)
 
-    future = pd.DataFrame({"ds": pd.to_datetime(fechas_rango)})
+    previous_event_days: dict[date, date] = {}
+    for target_day in fechas_rango:
+        if not _is_special_context_day(target_day):
+            continue
+        try:
+            previous_event_days[target_day] = date(target_day.year - 1, target_day.month, target_day.day)
+        except ValueError:
+            continue
+
+    prediction_days = list(dict.fromkeys([*fechas_rango, *previous_event_days.values()]))
+    future = pd.DataFrame({"ds": pd.to_datetime(prediction_days)})
     forecast = m.predict(future)
+    forecast_by_day = {
+        row.ds.date(): {
+            "yhat": float(row.yhat),
+            "yhat_lower": float(row.yhat_lower),
+            "yhat_upper": float(row.yhat_upper),
+        }
+        for row in forecast.itertuples()
+    }
+    history_by_day = {
+        row.ds.date(): float(row.y)
+        for row in clean_df.itertuples()
+    }
+
+    recomendado = []
+    conservador = []
+    agresivo = []
+    used_hybrid = False
+    for target_day in fechas_rango:
+        prediction = forecast_by_day.get(target_day, {"yhat": 0.0, "yhat_lower": 0.0, "yhat_upper": 0.0})
+        yhat = prediction["yhat"]
+        lower = prediction["yhat_lower"]
+        upper = prediction["yhat_upper"]
+
+        previous_event_day = previous_event_days.get(target_day)
+        event_base = history_by_day.get(previous_event_day, 0.0) if previous_event_day else 0.0
+        previous_prediction = forecast_by_day.get(previous_event_day) if previous_event_day else None
+        previous_yhat = previous_prediction["yhat"] if previous_prediction else 0.0
+        if event_base > 0 and previous_yhat > 0:
+            ratio = _clamp(yhat / previous_yhat, 0.85, 1.20)
+            yhat = event_base * ratio
+            lower = yhat * 0.90
+            upper = yhat * 1.12
+            used_hybrid = True
+
+        recomendado.append(max(0, math.ceil(float(yhat))))
+        conservador.append(max(0, math.ceil(float(lower))))
+        agresivo.append(max(0, math.ceil(float(upper))))
+
     return {
-        "recomendado": [max(0, math.ceil(float(v))) for v in forecast["yhat"].values],
-        "conservador": [max(0, math.ceil(float(v))) for v in forecast["yhat_lower"].values],
-        "agresivo": [max(0, math.ceil(float(v))) for v in forecast["yhat_upper"].values],
+        "recomendado": recomendado,
+        "conservador": conservador,
+        "agresivo": agresivo,
         "confianza": min(0.95, 0.60 + len(clean_df) / 1000),
-        "metodo": "prophet",
+        "metodo": "prophet+hibrido-fecha-especial" if used_hybrid else "prophet",
     }
 
 
@@ -905,16 +961,39 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
             for (pair_product_id, branch_id), qty in recent_pair_qty.items()
             if pair_product_id == product_id and branch_id in branch_map and qty > 0
         }
+        event_branch_weights_by_day: dict[str, tuple[dict[int, Decimal], Decimal]] = {}
+        for item in day_values:
+            target_day = item["fecha"]
+            if not _is_special_context_day(target_day):
+                continue
+            try:
+                previous_event_day = date(target_day.year - 1, target_day.month, target_day.day)
+            except ValueError:
+                continue
+            event_weights = {
+                branch_id: history.get(previous_event_day, Decimal("0"))
+                for (pair_product_id, branch_id), history in histories.items()
+                if pair_product_id == product_id and branch_id in branch_map
+            }
+            event_weights = {branch_id: qty for branch_id, qty in event_weights.items() if qty > 0}
+            event_total = sum(event_weights.values(), Decimal("0"))
+            if event_total > 0:
+                event_branch_weights_by_day[item["fecha_iso"]] = (event_weights, event_total)
         total_weight = sum(branch_weights.values(), Decimal("0"))
         if total_weight > 0:
             for branch_id, weight in branch_weights.items():
-                share = float(weight / total_weight)
+                recent_share = float(weight / total_weight)
                 branch_day_values = []
                 branch_total_recommended = 0
                 branch_total_conservative = 0
                 branch_total_aggressive = 0
                 branch_total_income = Decimal("0.00")
                 for item in day_values:
+                    event_weights, event_total = event_branch_weights_by_day.get(item["fecha_iso"], ({}, Decimal("0")))
+                    if event_total > 0:
+                        share = float(event_weights.get(branch_id, Decimal("0")) / event_total)
+                    else:
+                        share = recent_share
                     recomendado = max(0, int(round(item["recomendado"] * share)))
                     conservador = max(0, int(round(item["conservador"] * share)))
                     agresivo = max(0, int(round(item["agresivo"] * share)))
