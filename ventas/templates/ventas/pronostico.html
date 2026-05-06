@@ -24,6 +24,13 @@
   .forecast-trend.estable { color: #7b1a48; }
   .forecast-form-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); align-items: end; }
   .forecast-form-grid .forecast-branches { grid-column: span 1; }
+  .forecast-header-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .forecast-modal-backdrop { display: none; position: fixed; inset: 0; z-index: 1200; background: rgba(61, 10, 36, 0.32); align-items: center; justify-content: center; padding: 18px; }
+  .forecast-modal-backdrop.active { display: flex; }
+  .forecast-modal { width: min(460px, 100%); background: #fff; border-radius: 12px; box-shadow: 0 18px 42px rgba(61, 10, 36, 0.22); border: 1px solid #f1dce6; padding: 22px; }
+  .forecast-modal-title { margin: 0 0 6px; color: #3d0a24; font-size: 1.15rem; font-weight: 800; }
+  .forecast-modal-copy { margin: 0 0 18px; color: #776b72; font-size: 0.92rem; }
+  .forecast-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
   @media (max-width: 900px) {
     .forecast-form-grid { grid-template-columns: 1fr; }
     .forecast-form-grid .forecast-branches { grid-column: auto; }
@@ -40,9 +47,13 @@
         <h1 class="card-header">Pronóstico de ventas</h1>
         <p class="executive-section-copy">Proyección por receta, sucursal y día usando venta real comparable y tendencia reciente.</p>
       </div>
+      <div class="forecast-header-actions">
+        <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Ver guardados</a>
       {% if resumen %}
-      <button class="btn btn-secondary" type="button" id="export-forecast-csv">Exportar CSV</button>
+        <button class="btn btn-primary" type="button" id="open-save-forecast">Guardar pronóstico</button>
+        <button class="btn btn-secondary" type="button" id="export-forecast-csv">Exportar CSV</button>
       {% endif %}
+      </div>
     </div>
   </section>
 
@@ -69,7 +80,7 @@
         <select name="sucursales" multiple size="5"
           style="width:200px; border:1px solid #ddd; border-radius:6px; padding:4px; font-size:13px;">
           {% for branch in branches %}
-          <option value="{{ branch.id }}" selected>{{ branch.nombre }}</option>
+          <option value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}selected{% endif %}>{{ branch.nombre }}</option>
           {% endfor %}
         </select>
         <div style="font-size:11px; color:#999; margin-top:3px;">Ctrl+clic para seleccionar varias</div>
@@ -288,7 +299,79 @@
     </div>
   </section>
   {% endif %}
+
+  <section class="card">
+    <div class="section-header">
+      <div>
+        <h2 class="section-header-title">Pronósticos guardados</h2>
+        <p class="executive-section-copy">Últimos 10 pronósticos generados por tu usuario.</p>
+      </div>
+      <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Ver todos</a>
+    </div>
+    {% if pronosticos_guardados %}
+    <div class="table-responsive production-table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Rango</th>
+            <th class="text-end">Piezas</th>
+            <th class="text-end">Ingreso</th>
+            <th>Fecha</th>
+            <th class="text-end">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in pronosticos_guardados %}
+          <tr>
+            <td>{{ item.nombre }}</td>
+            <td>{{ item.fecha_inicio }} a {{ item.fecha_fin }}</td>
+            <td class="text-end">{{ item.total_piezas|intcomma }}</td>
+            <td class="text-end">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
+            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+            <td class="text-end">
+              <a class="btn btn-secondary" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
+              <a class="btn btn-secondary" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
+              <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}" style="display:inline;" onsubmit="return confirm('¿Eliminar este pronóstico guardado?');">
+                {% csrf_token %}
+                <button class="btn btn-secondary" type="submit">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="alert alert-warning">Todavía no hay pronósticos guardados.</div>
+    {% endif %}
+  </section>
 </div>
+
+{% if resumen %}
+<div class="forecast-modal-backdrop" id="save-forecast-modal" aria-hidden="true">
+  <div class="forecast-modal" role="dialog" aria-modal="true" aria-labelledby="save-forecast-title">
+    <h2 class="forecast-modal-title" id="save-forecast-title">Guardar pronóstico</h2>
+    <p class="forecast-modal-copy">Guarda este cálculo para consultarlo después o descargarlo en Excel.</p>
+    <form method="post" action="{% url 'ventas:pronostico_guardar' %}">
+      {% csrf_token %}
+      <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio }}">
+      <input type="hidden" name="fecha_fin" value="{{ fecha_fin }}">
+      {% for branch in branches %}
+      {% if branch.id in selected_branch_ids %}
+      <input type="hidden" name="sucursales" value="{{ branch.id }}">
+      {% endif %}
+      {% endfor %}
+      <label class="form-label" for="forecast-save-name">Nombre</label>
+      <input class="form-control" id="forecast-save-name" name="nombre" maxlength="200" value="Pronóstico {{ fecha_inicio }} a {{ fecha_fin }}" required>
+      <div class="forecast-modal-actions">
+        <button class="btn btn-secondary" type="button" id="close-save-forecast">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
@@ -337,7 +420,7 @@
       new Chart(chartCanvas, {
         type: 'bar',
         data: {
-          labels: [{% for row in por_dia %}'{{ row.fecha|date:"Y-m-d" }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+          labels: [{% for row in por_dia %}'{{ row.fecha_iso|default:row.fecha }}'{% if not forloop.last %},{% endif %}{% endfor %}],
           datasets: [{
             label: 'Piezas',
             data: [{% for row in por_dia %}{{ row.total_piezas }}{% if not forloop.last %},{% endif %}{% endfor %}],
@@ -349,6 +432,28 @@
           responsive: true,
           plugins: { legend: { display: false } },
           scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+
+    const modal = document.getElementById('save-forecast-modal');
+    const openSave = document.getElementById('open-save-forecast');
+    const closeSave = document.getElementById('close-save-forecast');
+    if (modal && openSave && closeSave) {
+      openSave.addEventListener('click', function () {
+        modal.classList.add('active');
+        modal.setAttribute('aria-hidden', 'false');
+        const nameInput = document.getElementById('forecast-save-name');
+        if (nameInput) nameInput.focus();
+      });
+      closeSave.addEventListener('click', function () {
+        modal.classList.remove('active');
+        modal.setAttribute('aria-hidden', 'true');
+      });
+      modal.addEventListener('click', function (event) {
+        if (event.target === modal) {
+          modal.classList.remove('active');
+          modal.setAttribute('aria-hidden', 'true');
         }
       });
     }

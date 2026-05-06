@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -46,3 +47,21 @@ class VentaAutoritativaPoint(models.Model):
 
     def __str__(self) -> str:
         return f"{self.sale_date} · {self.branch.codigo} · {self.point_name or self.product_code}"
+
+
+class PronosticoGuardado(models.Model):
+    nombre = models.CharField(max_length=200)
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
+    sucursales = models.ManyToManyField("core.Sucursal", blank=True)
+    resultado_json = models.JSONField(default=dict)
+    total_piezas = models.IntegerField(default=0)
+    total_ingreso = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+
+    def __str__(self) -> str:
+        return self.nombre
