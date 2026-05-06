@@ -87,7 +87,8 @@
       {% endfor %}
     </div>
     {% endif %}
-    <form method="get" id="forecast-form">
+    <form method="post" id="forecast-form">
+      {% csrf_token %}
       <div class="forecast-filter-grid">
         <div>
           <label class="form-label" for="fecha_inicio">Fecha inicio</label>
@@ -119,14 +120,14 @@
         </div>
       </div>
       <div class="forecast-filter-submit">
-        <button class="btn btn-primary w-100" type="submit">Calcular pronóstico</button>
+        <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Calcular pronóstico</button>
       </div>
     </form>
   </section>
 
   {% if fechas_especiales_en_rango %}
   <div class="forecast-special-banner">
-    ⭐ Este rango incluye {% for item in fechas_especiales_en_rango %}{{ item.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %} — pronóstico basado en venta real histórica exacta del año anterior y Holt-Winters.
+    ⭐ Este rango incluye {% for item in fechas_especiales_en_rango %}{{ item.nombre }}{% if not forloop.last %}, {% endif %}{% endfor %} — pronóstico basado en Prophet con ajuste híbrido de fecha especial.
   </div>
   {% endif %}
 
@@ -446,6 +447,16 @@
     });
     updateSucLabel();
   }
+
+  (function () {
+    const form = document.getElementById('forecast-form');
+    const submit = document.getElementById('forecast-submit');
+    if (!form || !submit) return;
+    form.addEventListener('submit', function () {
+      submit.disabled = true;
+      submit.textContent = 'Iniciando cálculo...';
+    });
+  })();
 
   document.querySelectorAll('.forecast-tab').forEach(function (tab) {
     tab.addEventListener('click', function () {
