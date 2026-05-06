@@ -21,19 +21,15 @@ AGENTS = [
             "summarize",
             "request_approval",
         ],
-        "supported_goal_types_json": [
-            "operational_chain_review",
-        ],
+        "supported_goal_types_json": [],
         "context_files_json": [
             ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
-            ".agent/skills/60-automation-ops/skill-sales-event-publication-guard/SKILL.md",
         ],
         "blocking_rules_json": [
             "no_missing_context",
             "no_invalid_handoff",
         ],
         "handoff_targets_json": [
-            "agente_publicacion_eventos_ventas",
             "agente_produccion",
             "agente_compras",
             "agente_conciliacion",
@@ -87,19 +83,12 @@ AGENTS = [
             "capacity_alert",
             "recipe_gap_review",
         ],
-        "supported_goal_types_json": [
-            "production_readiness_guard",
-        ],
+        "supported_goal_types_json": [],
         "context_files_json": [
             ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
         ],
-        "blocking_rules_json": [
-            "event_not_ready_for_production",
-            "production_plan_missing",
-        ],
-        "handoff_targets_json": [
-            "agente_compras",
-        ],
+        "blocking_rules_json": [],
+        "handoff_targets_json": [],
         "requires_human_approval_default": True,
         "priority_order": 30,
     },
@@ -122,20 +111,12 @@ AGENTS = [
             "supplier_risk_alert",
             "inventory_refresh_request",
         ],
-        "supported_goal_types_json": [
-            "purchase_review_guard",
-        ],
+        "supported_goal_types_json": [],
         "context_files_json": [
             ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
         ],
-        "blocking_rules_json": [
-            "event_not_validated_by_production",
-            "input_requirements_missing",
-            "purchase_requirements_missing",
-        ],
-        "handoff_targets_json": [
-            "agente_conciliacion",
-        ],
+        "blocking_rules_json": [],
+        "handoff_targets_json": [],
         "requires_human_approval_default": True,
         "priority_order": 40,
     },
@@ -158,60 +139,14 @@ AGENTS = [
             "retry_sync_request",
             "issue_escalation",
         ],
-        "supported_goal_types_json": [
-            "reconciliation_guard",
-        ],
+        "supported_goal_types_json": [],
         "context_files_json": [
             ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
         ],
-        "blocking_rules_json": [
-            "artifact_disk_db_mismatch",
-            "financial_publication_mismatch",
-        ],
+        "blocking_rules_json": [],
         "handoff_targets_json": [],
         "requires_human_approval_default": True,
         "priority_order": 50,
-    },
-    {
-        "code": "agente_publicacion_eventos_ventas",
-        "name": "Agente de Publicacion de Eventos de Ventas",
-        "domain": "ventas",
-        "status": "active",
-        "description": (
-            "Valida taxonomia, workflow, artifacts y consistencia financiera antes de permitir "
-            "publicacion de paquetes comerciales."
-        ),
-        "owner_department_code": "VENTAS",
-        "system_prompt_version": "v1-agent-runtime",
-        "allowed_tools_json": [
-            "skill.sales_event_publication_guard",
-            "python.ventas.publication_guard",
-            "orm.ventas.sales_event",
-            "orm.ventas.projection_artifacts",
-        ],
-        "allowed_actions_json": [
-            "review_publication",
-            "publish_if_safe",
-            "block_publication",
-        ],
-        "supported_goal_types_json": [
-            "sales_event_publication_guard",
-        ],
-        "context_files_json": [
-            ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
-            ".agent/skills/60-automation-ops/skill-sales-event-publication-guard/SKILL.md",
-        ],
-        "blocking_rules_json": [
-            "workflow_gate_not_ready",
-            "unknown_base_methods",
-            "mature_branch_without_base",
-            "financials_missing",
-        ],
-        "handoff_targets_json": [
-            "agente_produccion",
-        ],
-        "requires_human_approval_default": True,
-        "priority_order": 25,
     },
 ]
 
@@ -240,12 +175,6 @@ CAPABILITIES = [
         "capability_key": "integrations.execute.pos_sync_refresh",
         "scope_type": "execute_safe_action",
         "resource_key": "POST /api/pos-bridge/sync-jobs/trigger/",
-    },
-    {
-        "agent_code": "director_operativo",
-        "capability_key": "runtime.execute.operational_chain_review",
-        "scope_type": "execute_safe_action",
-        "resource_key": "PYTHON orquestacion.services.agent_runtime operational_chain_review",
     },
     {
         "agent_code": "agente_demanda_ventas",
@@ -284,34 +213,10 @@ CAPABILITIES = [
         "resource_key": "COMMAND python manage.py measure_sales_day_close",
     },
     {
-        "agent_code": "agente_publicacion_eventos_ventas",
-        "capability_key": "sales.read.event_publication_state",
-        "scope_type": "read",
-        "resource_key": "ORM ventas.EventoVenta + ventas.EventoVentaProjectionArtifact",
-    },
-    {
-        "agent_code": "agente_publicacion_eventos_ventas",
-        "capability_key": "sales.analyze.publication_guard",
-        "scope_type": "analyze",
-        "resource_key": "PYTHON orquestacion.services.sales_event_publication_guard",
-    },
-    {
-        "agent_code": "agente_publicacion_eventos_ventas",
-        "capability_key": "sales.execute.publish_if_safe",
-        "scope_type": "execute_safe_action",
-        "resource_key": "PYTHON ventas.views._persist_projection_artifacts",
-    },
-    {
         "agent_code": "agente_produccion",
         "capability_key": "mrp.analyze.explode",
         "scope_type": "analyze",
         "resource_key": "POST /api/mrp/explode/",
-    },
-    {
-        "agent_code": "agente_produccion",
-        "capability_key": "mrp.analyze.production_readiness_guard",
-        "scope_type": "analyze",
-        "resource_key": "PYTHON orquestacion.services.multi_agent_guards.observe_production_readiness",
     },
     {
         "agent_code": "agente_produccion",
@@ -330,12 +235,6 @@ CAPABILITIES = [
         "capability_key": "recipes.analyze.gap_audit",
         "scope_type": "analyze",
         "resource_key": "COMMAND python manage.py run_recipe_gap_audit",
-    },
-    {
-        "agent_code": "agente_compras",
-        "capability_key": "inventory.analyze.purchase_review_guard",
-        "scope_type": "analyze",
-        "resource_key": "PYTHON orquestacion.services.multi_agent_guards.observe_purchase_review",
     },
     {
         "agent_code": "agente_compras",
@@ -372,12 +271,6 @@ CAPABILITIES = [
         "capability_key": "inventory.execute.refresh_sync",
         "scope_type": "execute_safe_action",
         "resource_key": "COMMAND python manage.py run_inventory_sync",
-    },
-    {
-        "agent_code": "agente_conciliacion",
-        "capability_key": "control.analyze.reconciliation_guard",
-        "scope_type": "analyze",
-        "resource_key": "PYTHON orquestacion.services.multi_agent_guards.observe_reconciliation_guard",
     },
     {
         "agent_code": "agente_conciliacion",
@@ -650,34 +543,6 @@ RULES = [
         "secondary_agent_code": "director_operativo",
         "action_mode": "approval_required",
         "cooldown_minutes": 180,
-        "is_active": True,
-    },
-    {
-        "code": "sales_event_operational_chain_review",
-        "name": "Cadena operativa multi-agente del evento comercial",
-        "trigger_type": "manual",
-        "source_event": "sales.event_operational_chain_review",
-        "condition_json": {
-            "requires": [
-                "sales_event",
-                "forecast_week",
-                "financials",
-                "production_plan",
-                "input_requirements",
-                "purchase_requirements",
-            ],
-            "entity_scope": "ventas.EventoVenta",
-            "goal_type": "operational_chain_review",
-            "handoff_sequence": [
-                "sales_event_publication_guard",
-                "production_readiness_guard",
-                "purchase_review_guard",
-            ],
-        },
-        "primary_agent_code": "director_operativo",
-        "secondary_agent_code": "agente_conciliacion",
-        "action_mode": "approval_required",
-        "cooldown_minutes": 60,
         "is_active": True,
     },
     {

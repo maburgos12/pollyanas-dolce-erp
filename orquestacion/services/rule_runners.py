@@ -30,7 +30,6 @@ from maestros.utils.canonical_catalog import (
 from orquestacion.models import AgentDefinition, AgentSuggestion, AgentTask, OrchestrationRule, OrchestrationRun
 from orquestacion.services.agent_runtime import Goal, run_agent_goal
 from recetas.models import LineaReceta, PlanProduccion, PronosticoVenta, SolicitudVenta, VentaHistorica
-from ventas.models import EventoVenta
 
 
 @dataclass(frozen=True)
@@ -46,7 +45,6 @@ class RuleRunResult:
 SUPPORTED_RULE_CODES = (
     "daily_production_plan_missing",
     "plan_demand_production_purchase_chain",
-    "sales_event_operational_chain_review",
     "purchase_exception_requires_dg_approval",
     "inventory_adjustment_authorization_guard",
     "near_expiry_or_low_rotation_review",
@@ -496,93 +494,6 @@ def run_plan_demand_production_purchase_chain(
             suggestion_id=created_suggestion_ids[0] if created_suggestion_ids else None,
         )
 
-
-def run_sales_event_operational_chain_review(
-    *,
-    event_id: int | None = None,
-    reference_dt: datetime | None = None,
-    created_by=None,
-    trigger_source: str = "management_command",
-) -> RuleRunResult:
-    rule = OrchestrationRule.objects.select_related("primary_agent", "secondary_agent").get(
-        code="sales_event_operational_chain_review"
-    )
-    if not event_id:
-        raise ValueError("La regla 'sales_event_operational_chain_review' requiere event_id.")
-
-    event = EventoVenta.objects.filter(pk=event_id).first()
-    if event is None:
-        raise ValueError(f"No existe EventoVenta con id={event_id}.")
-
-    local_dt = _coerce_local_datetime(reference_dt)
-    if _has_recent_sales_event_chain_run(rule=rule, event_id=event.id, reference_dt=local_dt):
-        return RuleRunResult(
-            created=False,
-            status="skipped_cooldown",
-            message=f"Ya existe una corrida reciente de cadena multi-agente para el evento {event.id}.",
-        )
-
-    result = run_agent_goal(
-        Goal(
-            goal_type="operational_chain_review",
-            objective=f"Coordinar cadena operativa del evento comercial {event.code}",
-            agent_code="director_operativo",
-            entity_type="ventas.EventoVenta",
-            entity_id=event.id,
-            requested_action="review",
-            metadata={
-                "rule_code": rule.code,
-                "trigger_source": trigger_source,
-                "event_code": event.code,
-            },
-        ),
-        actor=created_by,
-    )
-    run = OrchestrationRun.objects.get(id=result.run_id)
-    run.rule = rule
-    run.trigger_source = trigger_source
-    run.context_json = {
-        **(run.context_json or {}),
-        "event_id": event.id,
-        "event_code": event.code,
-        "reference_date": local_dt.date().isoformat(),
-        "rule_code": rule.code,
-    }
-    run.result_summary_json = {
-        **(run.result_summary_json or {}),
-        "event_id": event.id,
-        "event_code": event.code,
-        "rule_code": rule.code,
-    }
-    run.save(update_fields=["rule", "trigger_source", "context_json", "result_summary_json"])
-
-    child_run_ids = list(run.delegations_sent.exclude(child_run_id=None).values_list("child_run_id", flat=True))
-    suggestion = (
-        AgentSuggestion.objects.filter(task__run_id__in=[run.id, *child_run_ids])
-        .order_by("-id")
-        .first()
-    )
-    blocked_task = (
-        AgentTask.objects.filter(run_id__in=[run.id, *child_run_ids], status=AgentTask.STATUS_BLOCKED)
-        .order_by("id")
-        .first()
-    )
-    status = "success_no_issue" if result.status == OrchestrationRun.STATUS_SUCCESS else "success_issue_created"
-    message = (
-        f"La cadena multi-agente del evento {event.code} cerró sin bloqueos."
-        if status == "success_no_issue"
-        else f"La cadena multi-agente del evento {event.code} detectó bloqueos y dejó evidencia."
-    )
-    return RuleRunResult(
-        created=True,
-        status=status,
-        message=message,
-        run_id=run.id,
-        task_id=blocked_task.id if blocked_task else result.task_id,
-        suggestion_id=suggestion.id if suggestion else None,
-    )
-
-
 def run_inventory_adjustment_authorization_guard(
     *,
     reference_dt: datetime | None = None,
@@ -866,13 +777,6 @@ def run_rule_by_code(
             created_by=created_by,
             trigger_source=trigger_source,
         )
-    if normalized_code == "sales_event_operational_chain_review":
-        return run_sales_event_operational_chain_review(
-            event_id=event_id,
-            reference_dt=reference_dt,
-            created_by=created_by,
-            trigger_source=trigger_source,
-        )
     if normalized_code == "purchase_exception_requires_dg_approval":
         return run_purchase_exception_requires_dg_approval(
             reference_dt=reference_dt,
@@ -917,21 +821,6 @@ def _extract_cutoff(rule: OrchestrationRule) -> time:
     hour, minute = cutoff_raw.split(":", 1)
     return time(hour=int(hour), minute=int(minute))
 
-
-def _has_recent_sales_event_chain_run(
-    *,
-    rule: OrchestrationRule,
-    event_id: int,
-    reference_dt: datetime,
-) -> bool:
-    if rule.cooldown_minutes <= 0:
-        return False
-    cooldown_since = reference_dt - timedelta(minutes=rule.cooldown_minutes)
-    return OrchestrationRun.objects.filter(
-        rule=rule,
-        started_at__gte=cooldown_since,
-        context_json__event_id=event_id,
-    ).exists()
 
 
 def _has_recent_run(*, rule: OrchestrationRule, production_date: date, reference_dt: datetime) -> bool:

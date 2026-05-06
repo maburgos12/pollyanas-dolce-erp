@@ -9,7 +9,7 @@ from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from core.branch_catalog import eligible_sales_event_branch_qs
+from core.branch_catalog import eligible_operational_branch_qs
 from core.models import Sucursal
 from recetas.views import _build_forecast_backtest_preview, _parse_date_safe
 
@@ -114,9 +114,9 @@ class Command(BaseCommand):
 
         sucursal_ids = [int(value) for value in (options.get("sucursal_id") or [])]
         if options.get("all_sucursales"):
-            sucursales = list(eligible_sales_event_branch_qs())
+            sucursales = list(eligible_operational_branch_qs())
         elif sucursal_ids:
-            sucursales = list(eligible_sales_event_branch_qs().filter(id__in=sucursal_ids))
+            sucursales = list(eligible_operational_branch_qs().filter(id__in=sucursal_ids))
             found_ids = {s.id for s in sucursales}
             missing = [sid for sid in sucursal_ids if sid not in found_ids]
             if missing:

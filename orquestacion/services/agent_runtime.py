@@ -27,32 +27,7 @@ BASE_CONTEXT_FILES = [
     ".agent/skills/00-core/skill-erp-context/SKILL.md",
     ".agent/skills/00-core/skill-director-general-mode/SKILL.md",
 ]
-GOAL_CONTEXT_FILES = {
-    "sales_event_publication_guard": [
-        ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
-        ".agent/skills/60-automation-ops/skill-sales-event-publication-guard/SKILL.md",
-    ],
-    "production_readiness_guard": [
-        ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
-    ],
-    "purchase_review_guard": [
-        ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
-    ],
-    "reconciliation_guard": [
-        ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
-    ],
-    "operational_chain_review": [
-        ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
-        ".agent/skills/60-automation-ops/skill-sales-event-publication-guard/SKILL.md",
-    ],
-}
-SALES_EVENT_GOAL_TYPES = {
-    "sales_event_publication_guard",
-    "production_readiness_guard",
-    "purchase_review_guard",
-    "reconciliation_guard",
-    "operational_chain_review",
-}
+GOAL_CONTEXT_FILES: dict[str, list[str]] = {}
 
 
 @dataclass(frozen=True)
@@ -359,9 +334,6 @@ def run_agent_goal(
 ) -> ExecutionResult:
     if goal.goal_type not in _goal_handlers():
         raise ValueError(f"Goal type no soportado todavía: {goal.goal_type}")
-    if goal.entity_type != "ventas.EventoVenta" or not goal.entity_id:
-        raise ValueError("El runtime multi-agente actual requiere entity_type='ventas.EventoVenta' y entity_id válido.")
-
     handler = _goal_handlers()[goal.goal_type]
     normalized_goal = Goal(
         goal_type=goal.goal_type,
@@ -449,25 +421,16 @@ def run_agent_goal(
         ),
     )
 
-    if normalized_goal.goal_type == "operational_chain_review":
-        result = _run_operational_chain(
-            normalized_goal,
-            run=run,
-            task=task,
-            actor=actor,
-            base_dir=base_dir,
-        )
-    else:
-        result = _run_single_goal(
-            normalized_goal,
-            handler=handler,
-            run=run,
-            task=task,
-            actor=actor,
-            context=context,
-            memory=memory,
-            tool_registry=tool_registry,
-        )
+    result = _run_single_goal(
+        normalized_goal,
+        handler=handler,
+        run=run,
+        task=task,
+        actor=actor,
+        context=context,
+        memory=memory,
+        tool_registry=tool_registry,
+    )
 
     if delegation_record:
         delegation_record.child_run = OrchestrationRun.objects.get(id=result.run_id)
@@ -588,159 +551,6 @@ def _run_single_goal(
     )
 
 
-def _run_operational_chain(goal: Goal, *, run: OrchestrationRun, task: AgentTask, actor, base_dir: str | Path | None) -> ExecutionResult:
-    from ventas.models import EventoVenta
-
-    event = EventoVenta.objects.prefetch_related("projection_artifacts", "financials").get(pk=goal.entity_id)
-    observation = {
-        "goal": goal.goal_type,
-        "event_id": goal.entity_id,
-        "event_status": event.status,
-        "sequence": [
-            "sales_event_publication_guard",
-            "production_readiness_guard",
-            "purchase_review_guard",
-        ],
-    }
-    _create_checkpoint(
-        run=run,
-        step=ExecutionStep(
-            iteration=2,
-            phase=AgentLoopCheckpoint.PHASE_OBSERVE,
-            title="Cadena operativa preparada para delegación.",
-            details=observation,
-        ),
-    )
-
-    child_goals = [
-        Goal(
-            goal_type="sales_event_publication_guard",
-            objective=f"Revisar publicabilidad comercial del evento {goal.entity_id}",
-            agent_code="agente_publicacion_eventos_ventas",
-            entity_type=goal.entity_type,
-            entity_id=goal.entity_id,
-            requested_action="review",
-            metadata={"delegated_by": task.agent.code},
-        ),
-        Goal(
-            goal_type="production_readiness_guard",
-            objective=f"Revisar readiness productiva del evento {goal.entity_id}",
-            agent_code="agente_produccion",
-            entity_type=goal.entity_type,
-            entity_id=goal.entity_id,
-            requested_action="review",
-            metadata={"delegated_by": task.agent.code},
-        ),
-        Goal(
-            goal_type="purchase_review_guard",
-            objective=f"Revisar readiness de compras del evento {goal.entity_id}",
-            agent_code="agente_compras",
-            entity_type=goal.entity_type,
-            entity_id=goal.entity_id,
-            requested_action="review",
-            metadata={"delegated_by": task.agent.code},
-        ),
-    ]
-    _create_checkpoint(
-        run=run,
-        step=ExecutionStep(
-            iteration=3,
-            phase=AgentLoopCheckpoint.PHASE_THINK,
-            title="El orquestador decidió delegar a agentes especializados.",
-            details={"child_goals": [child.goal_type for child in child_goals]},
-        ),
-    )
-
-    child_results: list[ExecutionResult] = []
-    for index, child_goal in enumerate(child_goals, start=1):
-        child_results.append(
-            run_agent_goal(
-                child_goal,
-                actor=actor,
-                base_dir=base_dir,
-                parent_run=run,
-                parent_task=task,
-                delegation_order=index,
-            )
-        )
-
-    if _should_delegate_reconciliation(event=event, child_results=child_results):
-        reconciliation_goal = Goal(
-            goal_type="reconciliation_guard",
-            objective=f"Conciliar consistencia operativa del evento {goal.entity_id}",
-            agent_code="agente_conciliacion",
-            entity_type=goal.entity_type,
-            entity_id=goal.entity_id,
-            requested_action="review",
-            metadata={"delegated_by": task.agent.code},
-        )
-        child_goals.append(reconciliation_goal)
-        child_results.append(
-            run_agent_goal(
-                reconciliation_goal,
-                actor=actor,
-                base_dir=base_dir,
-                parent_run=run,
-                parent_task=task,
-                delegation_order=len(child_goals),
-            )
-        )
-
-    delegations = [
-        {
-            "goal_type": child_goal.goal_type,
-            "run_id": result.run_id,
-            "task_id": result.task_id,
-            "status": result.status,
-            "decision": result.decision,
-            "blocking_findings": [finding.as_dict() for finding in result.blocking_findings],
-        }
-        for child_goal, result in zip(child_goals, child_results)
-    ]
-    executed_actions = [
-        {
-            "action": "delegate_goal",
-            **delegation,
-        }
-        for delegation in delegations
-    ]
-
-    blocking_findings = [
-        finding
-        for result in child_results
-        for finding in result.blocking_findings
-    ]
-    decision = "chain_blocked" if blocking_findings else "complete_review"
-    verification = _verify_goal_outcome(goal, decision=decision)
-    _create_checkpoint(
-        run=run,
-        step=ExecutionStep(
-            iteration=4,
-            phase=AgentLoopCheckpoint.PHASE_VERIFY,
-            title="Validación consolidada de la cadena operativa.",
-            details={
-                "decision": decision,
-                "delegations": delegations,
-                "verification": verification,
-            },
-        ),
-    )
-    return _finalize_run(
-        run=run,
-        task=task,
-        goal=goal,
-        context=build_agent_context(goal, base_dir=base_dir),
-        memory=load_agent_memory(base_dir=base_dir),
-        tool_registry=resolve_tool_registry(goal),
-        decision=decision,
-        observation=observation,
-        blocking_findings=blocking_findings,
-        executed_actions=executed_actions,
-        verification=verification,
-        delegations=delegations,
-    )
-
-
 def _finalize_run(
     *,
     run: OrchestrationRun,
@@ -813,23 +623,10 @@ def _finalize_run(
         observation=observation,
         delegations=delegations,
         limits=[
-            "El runtime multi-agente actual aún se limita a goals sobre ventas.EventoVenta.",
             "Las skills siguen siendo contexto documental; el binding MCP nativo aún no está integrado al runtime.",
             "Todavía no existe scheduler persistente ni memoria de largo plazo autoregenerada.",
         ],
     )
-
-
-def _should_delegate_reconciliation(*, event, child_results: list[ExecutionResult]) -> bool:
-    if any(result.blocking_findings for result in child_results):
-        return True
-    if event.projection_artifacts.filter(forecast_version=event.version).exists():
-        return True
-    if not event.financials.filter(scenario=event.scenario_focus).exists():
-        return True
-    if event.status in {"ENVIADO_A_COMPRAS", "EN_EJECUCION", "CERRADO", "EVALUADO_POST_EVENTO"}:
-        return True
-    return False
 
 
 def _create_checkpoint(*, run: OrchestrationRun, step: ExecutionStep) -> AgentLoopCheckpoint:
@@ -843,30 +640,7 @@ def _create_checkpoint(*, run: OrchestrationRun, step: ExecutionStep) -> AgentLo
 
 
 def _verify_goal_outcome(goal: Goal, *, decision: str) -> dict[str, Any]:
-    from ventas.models import EventoVenta
-    from ventas.views import _projection_artifact_dir
-
-    event = EventoVenta.objects.get(pk=goal.entity_id)
-    artifact_dir = _projection_artifact_dir(event)
-    active_rows = event.projection_artifacts.filter(forecast_version=event.version).count()
-    active_files = len([path for path in artifact_dir.glob("*") if path.is_file()]) if artifact_dir.exists() else 0
-    summary = "Loop revisado sin publicación."
-    if decision == "publish":
-        summary = "Artifacts publicados y verificados."
-    elif decision in {"block", "chain_blocked"}:
-        summary = "Loop bloqueado con evidencia."
-    return {
-        "event_status": event.status,
-        "event_version": event.version,
-        "active_artifact_rows": active_rows,
-        "active_artifact_files": active_files,
-        "production_plans": event.production_plans.count(),
-        "confirmed_production_plans": event.production_plans.filter(status="CONFIRMADO").count(),
-        "input_requirements": event.input_requirements.count(),
-        "purchase_requirements": event.purchase_requirements.count(),
-        "summary": summary,
-    }
-
+    return {"decision": decision, "status": "not_applicable"}
 
 def _parse_markdown_sections(raw_markdown: str) -> dict[str, list[str]]:
     sections: dict[str, list[str]] = {}
@@ -904,113 +678,7 @@ def _log_runtime_audit(*, run: OrchestrationRun, task: AgentTask, goal: Goal, de
 
 
 def _goal_handlers() -> dict[str, GoalHandlerDefinition]:
-    from orquestacion.services.multi_agent_guards import (
-        observe_production_readiness,
-        observe_purchase_review,
-        observe_reconciliation_guard,
-    )
-    from orquestacion.services.sales_event_publication_guard import (
-        execute_sales_event_publication,
-        observe_sales_event_publication,
-    )
-
-    return {
-        "sales_event_publication_guard": GoalHandlerDefinition(
-            goal_type="sales_event_publication_guard",
-            agent_code="agente_publicacion_eventos_ventas",
-            observer=observe_sales_event_publication,
-            executor=execute_sales_event_publication,
-            blocking_rules=[
-                "workflow_gate_not_ready",
-                "unknown_base_methods",
-                "mature_branch_without_base",
-                "financials_missing",
-            ],
-            handoff_targets=["agente_produccion"],
-            tool_hints=[
-                {
-                    "tool_key": "python.sales_event_publication_guard",
-                    "description": "Observa taxonomía, workflow y artifacts del evento comercial.",
-                    "kind": "python_callable",
-                    "executable": True,
-                    "source": "orquestacion.services.sales_event_publication_guard.observe_sales_event_publication",
-                },
-                {
-                    "tool_key": "python.persist_projection_artifacts",
-                    "description": "Publica artifacts si el guardrail ya validó el evento.",
-                    "kind": "python_callable",
-                    "executable": True,
-                    "source": "ventas.views._persist_projection_artifacts",
-                },
-            ],
-        ),
-        "production_readiness_guard": GoalHandlerDefinition(
-            goal_type="production_readiness_guard",
-            agent_code="agente_produccion",
-            observer=observe_production_readiness,
-            blocking_rules=["event_not_ready_for_production", "production_plan_missing"],
-            handoff_targets=["agente_compras"],
-            tool_hints=[
-                {
-                    "tool_key": "python.production_readiness_guard",
-                    "description": "Valida readiness productiva sobre planes y workflow del evento.",
-                    "kind": "python_callable",
-                    "executable": True,
-                    "source": "orquestacion.services.multi_agent_guards.observe_production_readiness",
-                }
-            ],
-        ),
-        "purchase_review_guard": GoalHandlerDefinition(
-            goal_type="purchase_review_guard",
-            agent_code="agente_compras",
-            observer=observe_purchase_review,
-            blocking_rules=["event_not_validated_by_production", "input_requirements_missing"],
-            handoff_targets=["agente_conciliacion"],
-            tool_hints=[
-                {
-                    "tool_key": "python.purchase_review_guard",
-                    "description": "Valida readiness de compras e insumos del evento.",
-                    "kind": "python_callable",
-                    "executable": True,
-                    "source": "orquestacion.services.multi_agent_guards.observe_purchase_review",
-                }
-            ],
-        ),
-        "reconciliation_guard": GoalHandlerDefinition(
-            goal_type="reconciliation_guard",
-            agent_code="agente_conciliacion",
-            observer=observe_reconciliation_guard,
-            blocking_rules=["artifact_disk_db_mismatch", "financial_publication_mismatch"],
-            tool_hints=[
-                {
-                    "tool_key": "python.reconciliation_guard",
-                    "description": "Valida consistencia DB/disco y cobertura financiera del evento.",
-                    "kind": "python_callable",
-                    "executable": True,
-                    "source": "orquestacion.services.multi_agent_guards.observe_reconciliation_guard",
-                }
-            ],
-        ),
-        "operational_chain_review": GoalHandlerDefinition(
-            goal_type="operational_chain_review",
-            agent_code="director_operativo",
-            observer=lambda goal: (None, {"goal": goal.goal_type}, []),
-            handoff_targets=[
-                "agente_publicacion_eventos_ventas",
-                "agente_produccion",
-                "agente_compras",
-            ],
-            tool_hints=[
-                {
-                    "tool_key": "python.operational_chain_review",
-                    "description": "Orquesta la cadena publicación -> producción -> compras.",
-                    "kind": "python_callable",
-                    "executable": True,
-                    "source": "orquestacion.services.agent_runtime._run_operational_chain",
-                }
-            ],
-        ),
-    }
+    return {}
 
 
 def _map_run_status_to_delegation(status: str) -> str:
