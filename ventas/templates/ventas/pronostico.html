@@ -24,13 +24,6 @@
   .forecast-trend.estable { color: #7b1a48; }
   .forecast-form-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); align-items: end; }
   .forecast-form-grid .forecast-branches { grid-column: span 1; }
-  .forecast-branch-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .forecast-branch-chip { cursor: pointer; }
-  .forecast-branch-chip input { display: none; }
-  .forecast-chip { display: inline-block; padding: 4px 14px; border-radius: 20px; border: 1px solid #7b1a48; color: #7b1a48; font-size: 13px; user-select: none; transition: all .15s; }
-  .forecast-branch-chip input:checked + .forecast-chip { background: #7b1a48; color: #fff; }
-  .forecast-chip:hover { background: #f5e6ed; }
-  .forecast-branch-chip input:checked + .forecast-chip:hover { background: #7b1a48; }
   @media (max-width: 900px) {
     .forecast-form-grid { grid-template-columns: 1fr; }
     .forecast-form-grid .forecast-branches { grid-column: auto; }
@@ -71,16 +64,15 @@
         <label class="form-label" for="fecha_fin">Fecha fin</label>
         <input class="form-control" type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}" required>
       </div>
-      <div class="forecast-branches">
-        <div class="form-label">Sucursales</div>
-        <div class="forecast-branch-chips" id="sucursales">
+      <div>
+        <label style="font-weight:500; font-size:13px; color:#555; display:block; margin-bottom:6px;">Sucursales</label>
+        <select name="sucursales" multiple size="5"
+          style="width:200px; border:1px solid #ddd; border-radius:6px; padding:4px; font-size:13px;">
           {% for branch in branches %}
-          <label class="forecast-branch-chip">
-            <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %} hidden>
-            <span class="forecast-chip">{{ branch.nombre }}</span>
-          </label>
+          <option value="{{ branch.id }}" selected>{{ branch.nombre }}</option>
           {% endfor %}
-        </div>
+        </select>
+        <div style="font-size:11px; color:#999; margin-top:3px;">Ctrl+clic para seleccionar varias</div>
       </div>
       <div>
         <button class="btn btn-primary w-100" type="submit">Calcular pronóstico</button>
