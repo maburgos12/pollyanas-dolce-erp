@@ -43,12 +43,14 @@ def calcular_y_guardar_pronostico(
     fecha_fin_str,
     sucursal_ids,
     usuario_id,
+    skus_incluidos=None,
 ):
     fecha_inicio = date.fromisoformat(fecha_inicio_str)
     fecha_fin = date.fromisoformat(fecha_fin_str)
     sucursal_ids = [int(value) for value in (sucursal_ids or [])]
+    skus_incluidos = [str(value).strip() for value in (skus_incluidos or []) if str(value).strip()]
 
-    resultado = calcular_pronostico(fecha_inicio, fecha_fin, set(sucursal_ids))
+    resultado = calcular_pronostico(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
 
     from django.contrib.auth import get_user_model
 

@@ -252,6 +252,7 @@ def _calcular_producto_prophet(serie_df: pd.DataFrame, fechas_rango: list[date],
     recomendado = []
     conservador = []
     agresivo = []
+    confianzas = []
     used_hybrid = False
     for target_day in fechas_rango:
         prediction = forecast_by_day.get(target_day, {"yhat": 0.0, "yhat_lower": 0.0, "yhat_upper": 0.0})
@@ -273,12 +274,14 @@ def _calcular_producto_prophet(serie_df: pd.DataFrame, fechas_rango: list[date],
         recomendado.append(max(0, math.ceil(float(yhat))))
         conservador.append(max(0, math.ceil(float(lower))))
         agresivo.append(max(0, math.ceil(float(upper))))
+        interval_confidence = 1 - ((float(upper) - float(lower)) / ((2 * float(yhat)) + 1))
+        confianzas.append(_clamp(interval_confidence, 0.50, 0.95))
 
     return {
         "recomendado": recomendado,
         "conservador": conservador,
         "agresivo": agresivo,
-        "confianza": min(0.95, 0.60 + len(clean_df) / 1000),
+        "confianza": round(sum(confianzas) / len(confianzas), 3) if confianzas else 0.0,
         "metodo": "prophet+hibrido-fecha-especial" if used_hybrid else "prophet",
     }
 
@@ -318,11 +321,12 @@ def _calcular_serie_ets(serie_df: pd.DataFrame, fechas_rango: list[date]) -> dic
         conservador.append(_ceil(lower_value))
         agresivo.append(_ceil(upper_value))
 
+    n_dias_historia = int((clean_df["y"] > 0).sum())
     return {
         "recomendado": recomendado,
         "conservador": conservador,
         "agresivo": agresivo,
-        "confianza": confidence,
+        "confianza": min(0.75, 0.50 + n_dias_historia / 500),
         "metodo": method,
     }
 
@@ -663,12 +667,12 @@ def _special_day_forecast(
     )
 
 
-def _forecastable_queryset(branch_ids: set[int]):
+def _forecastable_queryset(branch_ids: set[int], skus_incluidos: set[str] | None = None):
     forecastable_filter = Q(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
     for term in FORECASTABLE_TERMS:
         forecastable_filter |= Q(point_product__name__icontains=term) | Q(point_product__category__icontains=term)
 
-    return (
+    queryset = (
         PointSalesDailyProductFact.objects.filter(
             point_product_id__isnull=False,
             point_product__precio_temporada=False,
@@ -686,12 +690,22 @@ def _forecastable_queryset(branch_ids: set[int]):
             | Q(receta__nombre__icontains=" sp")
         )
     )
+    if skus_incluidos is not None:
+        queryset = queryset.filter(point_product__sku__in=skus_incluidos)
+    return queryset
 
 
-def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[int] | list[int] | None = None) -> dict:
+def calcular_pronostico(
+    fecha_inicio: date,
+    fecha_fin: date,
+    sucursal_ids: set[int] | list[int] | None = None,
+    skus_incluidos: set[str] | list[str] | None = None,
+) -> dict:
     selected_days = list(_date_range(fecha_inicio, fecha_fin))
     if not selected_days:
         return _empty_result(fecha_inicio, fecha_fin)
+    selected_skus = {str(value).strip() for value in (skus_incluidos or []) if str(value).strip()}
+    sku_filter = selected_skus if skus_incluidos is not None else None
 
     active_branches = Sucursal.objects.filter(activa=True).order_by("nombre")
     active_branch_ids = set(active_branches.values_list("id", flat=True))
@@ -706,7 +720,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         branch.id: branch
         for branch in Sucursal.objects.filter(id__in=branch_ids).only("id", "codigo", "nombre").order_by("nombre")
     }
-    base_qs = _forecastable_queryset(branch_ids)
+    base_qs = _forecastable_queryset(branch_ids, sku_filter)
     sale_bounds = base_qs.filter(sale_date__lt=fecha_inicio).aggregate(
         min_date=Min("sale_date"),
         max_date=Max("sale_date"),
@@ -830,7 +844,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
     }
     product_day_rank: dict[date, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     method_counts = defaultdict(int)
-    confidence_values: list[float] = []
+    confidence_weighted_sum = 0.0
     special_days_in_range = _special_days(selected_days)
     range_has_special = bool(special_days_in_range)
     product_forecasts: dict[int, dict] = {}
@@ -1038,7 +1052,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
                 }
 
         method_counts[method] += 1
-        confidence_values.append(confidence)
+        confidence_weighted_sum += confidence * total_recommended
 
     total_pieces = sum(product["total_piezas"] for product in product_totals.values())
     total_income = sum((product["total_ingreso"] for product in product_totals.values()), Decimal("0.00"))
@@ -1121,7 +1135,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         main_method = "promedio-ponderado"
     if special_days_in_range and "fecha-especial" not in main_method:
         main_method = f"{main_method}+fecha-especial"
-    confidence_avg = round(sum(confidence_values) / len(confidence_values), 3) if confidence_values else 0.0
+    confidence_avg = round(confidence_weighted_sum / total_pieces, 3) if total_pieces else 0.0
     fechas_especiales = special_days_in_range
 
     return {

@@ -38,6 +38,11 @@
   .page-pronostico-ventas .forecast-branch-header h3 { margin:0; color:#3d0a24; font-size:1rem; font-weight:900; }
   .page-pronostico-ventas .forecast-branch-totals { display:flex; gap:14px; flex-wrap:wrap; color:#7b1a48; font-weight:800; font-size:0.92rem; }
   .page-pronostico-ventas .forecast-chart-wrap { min-height:280px; }
+  .page-pronostico-ventas .forecast-confidence { color:#3d0a24; font-weight:800; margin:-8px 0 18px; }
+  .page-pronostico-ventas .comparison-alert { display:inline-flex; align-items:center; justify-content:center; min-width:34px; border-radius:999px; padding:3px 8px; font-weight:900; }
+  .page-pronostico-ventas .comparison-alert.ok { background:#e8f5ee; color:#198754; }
+  .page-pronostico-ventas .comparison-alert.sobre { background:#fff3cd; color:#9a6700; }
+  .page-pronostico-ventas .comparison-alert.bajo { background:#fde7ea; color:#b02a37; }
   @media print {
     .sidebar, .messages-container, .forecast-actions, .forecast-tabs, .btn { display:none !important; }
     .main-content { margin:0 !important; padding:0 !important; }
@@ -115,6 +120,11 @@
   <div class="forecast-method">
     Modelo: {{ resumen.metodo }} · Tendencia: {{ resumen.tendencia_reciente }} · Comparable: {{ resumen.comparable }}
   </div>
+  {% if resumen.confianza_promedio %}
+  <div class="forecast-confidence">
+    Confianza del modelo: {{ resumen.confianza_pct|floatformat:0 }}% — basado en intervalo de predicción Prophet.
+  </div>
+  {% endif %}
 
   <section class="card">
     <div class="section-header">
@@ -124,6 +134,9 @@
       <button class="forecast-tab active" type="button" data-tab="category">Por categoría</button>
       <button class="forecast-tab" type="button" data-tab="day">Por día</button>
       <button class="forecast-tab" type="button" data-tab="branch">Por sucursal</button>
+      {% if tiene_real %}
+      <button class="forecast-tab" type="button" data-tab="comparison">Real vs Pronóstico</button>
+      {% endif %}
     </div>
 
     <div class="forecast-panel active" id="panel-category">
@@ -277,6 +290,85 @@
       </section>
       {% endfor %}
     </div>
+    {% if tiene_real %}
+    <div class="forecast-panel" id="panel-comparison">
+      <section class="kpi-grid">
+        <article class="kpi-card">
+          <div class="kpi-card-inner">
+            <div class="kpi-icon">P</div>
+            <div class="kpi-body">
+              <div class="kpi-number">{{ resumen_comparativa.total_pronostico|floatformat:0|intcomma }}</div>
+              <div class="kpi-label">Total pronóstico</div>
+            </div>
+          </div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-card-inner">
+            <div class="kpi-icon is-success">R</div>
+            <div class="kpi-body">
+              <div class="kpi-number is-success">{{ resumen_comparativa.total_real|floatformat:0|intcomma }}</div>
+              <div class="kpi-label">Total real</div>
+            </div>
+          </div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-card-inner">
+            <div class="kpi-icon">D</div>
+            <div class="kpi-body">
+              <div class="kpi-number">{{ resumen_comparativa.diferencia_total|floatformat:0|intcomma }}</div>
+              <div class="kpi-label">Diferencia</div>
+            </div>
+          </div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-card-inner">
+            <div class="kpi-icon is-success">%</div>
+            <div class="kpi-body">
+              <div class="kpi-number is-success">{{ resumen_comparativa.precision_pct|floatformat:1 }}%</div>
+              <div class="kpi-label">Precisión</div>
+            </div>
+          </div>
+        </article>
+      </section>
+      <div class="forecast-method">
+        {{ resumen_comparativa.productos_acertados }} productos dentro de ±15% ·
+        {{ resumen_comparativa.productos_sobre }} quedaron cortos ·
+        {{ resumen_comparativa.productos_bajo }} quedaron sobreproducidos
+      </div>
+      <div class="table-responsive production-table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Producto</th>
+              <th class="text-end">Pronóstico</th>
+              <th class="text-end">Real</th>
+              <th class="text-end">Diferencia</th>
+              <th class="text-end">% diff</th>
+              <th class="text-center">Alerta</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in comparativa %}
+            <tr>
+              <td>{{ row.categoria }}</td>
+              <td>{{ row.nombre }}</td>
+              <td class="text-end">{{ row.pronostico_piezas|floatformat:0|intcomma }}</td>
+              <td class="text-end">{{ row.real_piezas|floatformat:0|intcomma }}</td>
+              <td class="text-end">{{ row.diferencia|floatformat:0|intcomma }}</td>
+              <td class="text-end">{{ row.diferencia_pct|floatformat:1 }}%</td>
+              <td class="text-center">
+                <span class="comparison-alert {{ row.alerta }}">
+                  {% if row.alerta == "ok" %}✓{% elif row.alerta == "sobre" %}↑{% else %}↓{% endif %}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
   </section>
   {% endif %}
 </div>

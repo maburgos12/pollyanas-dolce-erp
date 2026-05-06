@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -9,6 +9,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from celery.result import AsyncResult
 from django.core.exceptions import PermissionDenied
+from django.db.models import Sum
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -19,13 +20,85 @@ from openpyxl.utils import get_column_letter
 
 from core.access import ROLE_ADMIN, ROLE_COMPRAS, ROLE_DG, ROLE_PRODUCCION, has_any_role
 from core.models import Sucursal
+from pos_bridge.models import PointProduct, PointSalesDailyProductFact
 from ventas.models import PronosticoGuardado
 from ventas.services.pronostico_engine import (
+    EXCLUDED_TERMS,
+    FORECASTABLE_TERMS,
     MONTHS_ES,
     ORDEN_CATEGORIAS,
     WEEKDAYS_ES,
 )
 from ventas.tasks import calcular_y_guardar_pronostico
+
+
+EXCLUDED_PRODUCT_CATEGORIES = {
+    "ACCESORIOS",
+    "ALEGRÍA",
+    "CAFE",
+    "CAFÉ",
+    "COCA-COLA",
+    "CLARITA",
+    "GRANMARK",
+    "HIELO",
+    "INDUSTRIAS",
+    "PILLINES",
+    "PLÁSTICOS",
+    "PLASTICOS",
+    "REGALOS",
+    "ROSCA",
+    "TE",
+    "VELAS",
+}
+MAIN_PRODUCT_CATEGORIES = {
+    "BOLLO",
+    "EMPANADAS",
+    "GALLETAS",
+    "CHEESECAKE",
+    "INDIVIDUAL",
+    "PASTEL GRANDE",
+    "PASTEL MEDIANO",
+    "PASTEL CHICO",
+    "PASTEL MINI",
+    "REBANADA",
+    "PAY GRANDE",
+    "PAY MEDIANO",
+    "VASOS PREPARADOS GRANDE",
+}
+SECONDARY_PRODUCT_CATEGORIES = {
+    "CHICO",
+    "GRANDE",
+    "MEDIANO",
+    "MEDIA PLANCHA",
+    "OTROS POSTRES",
+    "VASO PREPARADO MINI",
+    "VASOS GRANDE",
+    "VASOS MINI",
+}
+
+
+def _is_excluded_product_category(category: str) -> bool:
+    normalized = category.upper()
+    if normalized in EXCLUDED_PRODUCT_CATEGORIES:
+        return True
+    return (
+        normalized.startswith("HIELO")
+        or normalized.startswith("INDUSTRIAS")
+        or normalized.startswith("VELA")
+        or normalized.startswith("ACCESORIO")
+    )
+
+
+def _is_relevant_product_option(category: str, name: str) -> bool:
+    category_norm = category.upper()
+    haystack = f"{category} {name}".casefold()
+    if any(term in haystack for term in EXCLUDED_TERMS):
+        return False
+    return (
+        category_norm in MAIN_PRODUCT_CATEGORIES
+        or category_norm in SECONDARY_PRODUCT_CATEGORIES
+        or any(term in haystack for term in FORECASTABLE_TERMS)
+    )
 
 
 def _can_view_pronostico(user) -> bool:
@@ -81,6 +154,126 @@ def _selected_branch_ids(request, *, source: str = "GET") -> set[int]:
     return (selected & active) if selected else set(active)
 
 
+def _selected_product_skus(request) -> list[str]:
+    return [value.strip() for value in request.POST.getlist("productos_incluidos") if value.strip()]
+
+
+def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
+    categorias = OrderedDict()
+    products = (
+        PointProduct.objects.filter(active=True, precio_temporada=False)
+        .exclude(sku="")
+        .only("id", "sku", "name", "category")
+        .order_by("category", "name")
+    )
+    for product in products:
+        category = (product.category or "Sin categoría").strip() or "Sin categoría"
+        if _is_excluded_product_category(category) or not _is_relevant_product_option(category, product.name):
+            continue
+        categorias.setdefault(category, []).append(
+            {
+                "id": product.id,
+                "nombre": product.name,
+                "sku": product.sku,
+            }
+        )
+    return categorias
+
+
+def _build_comparativa_real(pronostico: PronosticoGuardado, resultados: dict) -> tuple[bool, list[dict], dict]:
+    if pronostico.fecha_fin >= timezone.localdate():
+        return False, [], {}
+
+    productos = []
+    for category in resultados.get("por_categoria") or []:
+        for product in category.get("productos") or []:
+            product_id = product.get("point_product_id")
+            if not product_id:
+                continue
+            productos.append(
+                {
+                    "point_product_id": int(product_id),
+                    "nombre": product.get("nombre") or "Producto",
+                    "categoria": product.get("categoria") or category.get("categoria") or "Sin categoría",
+                    "pronostico_piezas": _decimal_from_json(product.get("total_piezas")),
+                }
+            )
+    if not productos:
+        return False, [], {}
+
+    product_ids = {item["point_product_id"] for item in productos}
+    real_qs = PointSalesDailyProductFact.objects.filter(
+        sale_date__range=(pronostico.fecha_inicio, pronostico.fecha_fin),
+        point_product_id__in=product_ids,
+    )
+    branch_ids = set(pronostico.sucursales.values_list("id", flat=True))
+    if branch_ids:
+        real_qs = real_qs.filter(branch__erp_branch_id__in=branch_ids)
+
+    reales = {
+        int(row["point_product_id"]): _decimal_from_json(row["real_piezas"])
+        for row in real_qs.values("point_product_id").annotate(real_piezas=Sum("total_cantidad"))
+        if row.get("point_product_id")
+    }
+    if not reales:
+        return False, [], {}
+
+    comparativa = []
+    total_pronostico = Decimal("0")
+    total_real = Decimal("0")
+    productos_acertados = 0
+    productos_sobre = 0
+    productos_bajo = 0
+    for product in productos:
+        pron = product["pronostico_piezas"]
+        real = reales.get(product["point_product_id"], Decimal("0"))
+        diferencia = real - pron
+        diferencia_pct = (diferencia / pron * Decimal("100")) if pron > 0 else Decimal("0")
+        abs_pct = abs(diferencia_pct)
+        if abs_pct < Decimal("15"):
+            alerta = "ok"
+            productos_acertados += 1
+        elif real > pron * Decimal("1.15"):
+            alerta = "sobre"
+            productos_sobre += 1
+        else:
+            alerta = "bajo"
+            productos_bajo += 1
+
+        total_pronostico += pron
+        total_real += real
+        comparativa.append(
+            {
+                "nombre": product["nombre"],
+                "categoria": product["categoria"],
+                "pronostico_piezas": pron,
+                "real_piezas": real,
+                "diferencia": diferencia,
+                "diferencia_pct": diferencia_pct,
+                "alerta": alerta,
+                "_abs_pct": abs_pct,
+            }
+        )
+
+    comparativa.sort(key=lambda item: (-item["_abs_pct"], item["categoria"], item["nombre"]))
+    for item in comparativa:
+        item.pop("_abs_pct", None)
+    diferencia_total = total_real - total_pronostico
+    precision_pct = Decimal("0")
+    if total_real > 0:
+        precision_pct = max(Decimal("0"), Decimal("100") - (abs(diferencia_total) / total_real * Decimal("100")))
+    resumen_comparativa = {
+        "total_pronostico": total_pronostico,
+        "total_real": total_real,
+        "diferencia_total": diferencia_total,
+        "precision_pct": precision_pct,
+        "productos_acertados": productos_acertados,
+        "productos_sobre": productos_sobre,
+        "productos_bajo": productos_bajo,
+    }
+    return True, comparativa, resumen_comparativa
+
+
 def _validate_dates(fecha_inicio_raw: str, fecha_fin_raw: str) -> tuple[date | None, date | None, list[str]]:
     errors = []
     fecha_inicio = _parse_iso_date(fecha_inicio_raw)
@@ -102,6 +295,7 @@ def _empty_result_context(resultados: dict | None) -> dict:
         resumen = dict(resumen)
         resumen.setdefault("n_productos", resumen.get("productos", 0))
         resumen.setdefault("n_sucursales", resumen.get("sucursales", 0))
+        resumen["confianza_pct"] = float(_decimal_from_json(resumen.get("confianza_promedio"))) * 100
     return {
         "resultados": resultados,
         "resumen": resumen,
@@ -338,12 +532,18 @@ def PronosticoVentasView(request):
     fecha_inicio_raw = (data.get("fecha_inicio") or "").strip()
     fecha_fin_raw = (data.get("fecha_fin") or "").strip()
     selected_branch_ids = _selected_branch_ids(request, source=source)
+    categorias_productos = _catalogo_productos_por_categoria()
+    available_skus = {product["sku"] for products in categorias_productos.values() for product in products}
+    selected_product_skus = _selected_product_skus(request) if request.method == "POST" else sorted(available_skus)
     form_errors = []
 
     if request.method == "POST":
         fecha_inicio, fecha_fin, form_errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
+        selected_product_skus = [sku for sku in selected_product_skus if sku in available_skus]
         if not selected_branch_ids:
             form_errors.append("Selecciona al menos una sucursal activa.")
+        if not selected_product_skus:
+            form_errors.append("Selecciona al menos un producto para incluir en el pronostico.")
         if not form_errors and fecha_inicio and fecha_fin:
             nombre = f"Pronóstico {fecha_inicio.isoformat()} a {fecha_fin.isoformat()}"
             task = calcular_y_guardar_pronostico.delay(
@@ -352,6 +552,7 @@ def PronosticoVentasView(request):
                 fecha_fin.isoformat(),
                 sorted(selected_branch_ids),
                 request.user.id,
+                selected_product_skus,
             )
             request.session["pronostico_task"] = task.id
             return redirect("ventas:pronostico_esperando", task_id=task.id)
@@ -363,6 +564,9 @@ def PronosticoVentasView(request):
         "selected_branch_ids": selected_branch_ids,
         "fecha_inicio": fecha_inicio_raw,
         "fecha_fin": fecha_fin_raw,
+        "categorias_productos": categorias_productos,
+        "categorias_principales": MAIN_PRODUCT_CATEGORIES,
+        "selected_product_skus": set(selected_product_skus),
         "form_errors": form_errors,
         "pronosticos_guardados": _pronosticos_for_user(request.user)[:10],
         **_empty_result_context({}),
@@ -401,6 +605,7 @@ def PronosticoGuardarView(request):
     fecha_fin_raw = (request.POST.get("fecha_fin") or "").strip()
     fecha_inicio, fecha_fin, errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
     selected_branch_ids = _selected_branch_ids(request, source="POST")
+    selected_product_skus = _selected_product_skus(request)
     if not selected_branch_ids:
         errors.append("Selecciona al menos una sucursal activa.")
     if errors:
@@ -417,6 +622,7 @@ def PronosticoGuardarView(request):
         fecha_fin_str=fecha_fin.isoformat(),
         sucursal_ids=sorted(selected_branch_ids),
         usuario_id=request.user.id,
+        skus_incluidos=selected_product_skus or None,
     )
     request.session["pronostico_task"] = task.id
     return redirect("ventas:pronostico_esperando", task_id=task.id)
@@ -434,7 +640,15 @@ def PronosticoDetalleView(request, pk: int):
     if not _can_view_pronostico(request.user):
         raise PermissionDenied("No tienes permisos para ver este pronostico.")
     pronostico = _get_pronostico_for_user(request.user, pk)
-    context = {"pronostico": pronostico, **_empty_result_context(pronostico.resultado_json or {})}
+    resultados = pronostico.resultado_json or {}
+    tiene_real, comparativa, resumen_comparativa = _build_comparativa_real(pronostico, resultados)
+    context = {
+        "pronostico": pronostico,
+        "tiene_real": tiene_real,
+        "comparativa": comparativa,
+        "resumen_comparativa": resumen_comparativa,
+        **_empty_result_context(resultados),
+    }
     return render(request, "ventas/pronostico_detalle.html", context)
 
 
