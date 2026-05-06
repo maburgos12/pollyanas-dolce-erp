@@ -7,8 +7,9 @@ from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from celery.result import AsyncResult
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -23,8 +24,8 @@ from ventas.services.pronostico_engine import (
     MONTHS_ES,
     ORDEN_CATEGORIAS,
     WEEKDAYS_ES,
-    calcular_pronostico,
 )
+from ventas.tasks import calcular_y_guardar_pronostico
 
 
 def _can_view_pronostico(user) -> bool:
@@ -332,20 +333,30 @@ def PronosticoVentasView(request):
         raise PermissionDenied("No tienes permisos para ver pronosticos de ventas.")
 
     branches = Sucursal.objects.filter(activa=True).order_by("nombre")
-    fecha_inicio_raw = (request.GET.get("fecha_inicio") or "").strip()
-    fecha_fin_raw = (request.GET.get("fecha_fin") or "").strip()
-    selected_branch_ids = _selected_branch_ids(request)
-    resultados = {}
+    source = "POST" if request.method == "POST" else "GET"
+    data = request.POST if request.method == "POST" else request.GET
+    fecha_inicio_raw = (data.get("fecha_inicio") or "").strip()
+    fecha_fin_raw = (data.get("fecha_fin") or "").strip()
+    selected_branch_ids = _selected_branch_ids(request, source=source)
     form_errors = []
 
-    if fecha_inicio_raw or fecha_fin_raw:
+    if request.method == "POST":
         fecha_inicio, fecha_fin, form_errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
         if not selected_branch_ids:
             form_errors.append("Selecciona al menos una sucursal activa.")
         if not form_errors and fecha_inicio and fecha_fin:
-            resultados = calcular_pronostico(fecha_inicio, fecha_fin, selected_branch_ids)
-            if not resultados.get("resumen", {}).get("total_piezas"):
-                messages.warning(request, "No se encontro base suficiente para calcular el pronostico con esos filtros.")
+            nombre = f"Pronóstico {fecha_inicio.isoformat()} a {fecha_fin.isoformat()}"
+            task = calcular_y_guardar_pronostico.delay(
+                nombre,
+                fecha_inicio.isoformat(),
+                fecha_fin.isoformat(),
+                sorted(selected_branch_ids),
+                request.user.id,
+            )
+            request.session["pronostico_task"] = task.id
+            return redirect("ventas:pronostico_esperando", task_id=task.id)
+        for error in form_errors:
+            messages.error(request, error)
 
     context = {
         "branches": branches,
@@ -354,9 +365,29 @@ def PronosticoVentasView(request):
         "fecha_fin": fecha_fin_raw,
         "form_errors": form_errors,
         "pronosticos_guardados": _pronosticos_for_user(request.user)[:10],
-        **_empty_result_context(resultados),
+        **_empty_result_context({}),
     }
     return render(request, "ventas/pronostico.html", context)
+
+
+@login_required
+def PronosticoEsperandoView(request, task_id: str):
+    if not _can_view_pronostico(request.user):
+        raise PermissionDenied("No tienes permisos para ver este pronostico.")
+    return render(request, "ventas/pronostico_esperando.html", {"task_id": task_id})
+
+
+@login_required
+def PronosticoStatusView(request, task_id: str):
+    if not _can_view_pronostico(request.user):
+        raise PermissionDenied("No tienes permisos para ver este pronostico.")
+    result = AsyncResult(task_id)
+    payload = {"status": result.status, "result": None}
+    if result.successful():
+        payload["result"] = result.result
+    elif result.failed():
+        payload["error"] = str(result.info)
+    return JsonResponse(payload)
 
 
 @login_required
@@ -377,27 +408,18 @@ def PronosticoGuardarView(request):
             messages.error(request, error)
         return redirect("ventas:pronostico")
 
-    resultados = calcular_pronostico(fecha_inicio, fecha_fin, selected_branch_ids)
-    resumen = resultados.get("resumen") or {}
-    if not resumen.get("total_piezas"):
-        messages.warning(request, "No se encontro base suficiente para guardar el pronostico con esos filtros.")
-        return redirect("ventas:pronostico")
-
     if not nombre:
         nombre = f"Pronóstico {fecha_inicio} a {fecha_fin}"
 
-    pronostico = PronosticoGuardado.objects.create(
+    task = calcular_y_guardar_pronostico.delay(
         nombre=nombre,
-        fecha_inicio=fecha_inicio,
-        fecha_fin=fecha_fin,
-        resultado_json=_json_ready(resultados),
-        total_piezas=_int_from_json(resumen.get("total_piezas")),
-        total_ingreso=_decimal_from_json(resumen.get("total_ingreso")),
-        creado_por=request.user,
+        fecha_inicio_str=fecha_inicio.isoformat(),
+        fecha_fin_str=fecha_fin.isoformat(),
+        sucursal_ids=sorted(selected_branch_ids),
+        usuario_id=request.user.id,
     )
-    pronostico.sucursales.set(selected_branch_ids)
-    messages.success(request, "Pronostico guardado correctamente.")
-    return redirect("ventas:pronostico_detalle", pk=pronostico.pk)
+    request.session["pronostico_task"] = task.id
+    return redirect("ventas:pronostico_esperando", task_id=task.id)
 
 
 @login_required
