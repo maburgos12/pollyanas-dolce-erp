@@ -24,13 +24,6 @@
   .forecast-trend.estable { color: #7b1a48; }
   .forecast-form-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); align-items: end; }
   .forecast-form-grid .forecast-branches { grid-column: span 1; }
-  .forecast-branch-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .forecast-branch-chip { cursor: pointer; }
-  .forecast-branch-chip input { display: none; }
-  .forecast-chip { display: inline-block; padding: 4px 14px; border-radius: 20px; border: 1px solid #7b1a48; color: #7b1a48; font-size: 13px; user-select: none; transition: all .15s; }
-  .forecast-branch-chip input:checked + .forecast-chip { background: #7b1a48; color: #fff; }
-  .forecast-chip:hover { background: #f5e6ed; }
-  .forecast-branch-chip input:checked + .forecast-chip:hover { background: #7b1a48; }
   @media (max-width: 900px) {
     .forecast-form-grid { grid-template-columns: 1fr; }
     .forecast-form-grid .forecast-branches { grid-column: auto; }
@@ -73,14 +66,20 @@
       </div>
       <div class="forecast-branches">
         <div class="form-label">Sucursales</div>
-        <div class="forecast-branch-chips" id="sucursales">
+        <details style="border:1px solid #e0c8d0; border-radius:8px; padding:8px 12px; cursor:pointer;">
+          <summary style="font-weight:500; color:#7b1a48; list-style:none;">
+            Sucursales <span id="selected-count">({{ selected_branch_ids|length }} seleccionadas)</span>
+          </summary>
+          <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;">
           {% for branch in branches %}
-          <label class="forecast-branch-chip">
-            <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %} hidden>
-            <span class="forecast-chip">{{ branch.nombre }}</span>
+          <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
+            <input type="checkbox" name="sucursales" value="{{ branch.id }}"
+                   {% if branch.id in selected_branch_ids %}checked{% endif %} onchange="updateCount()">
+            {{ branch.nombre }}
           </label>
           {% endfor %}
-        </div>
+          </div>
+        </details>
       </div>
       <div>
         <button class="btn btn-primary w-100" type="submit">Calcular pronóstico</button>
@@ -302,6 +301,18 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
+  function updateCount() {
+    const total = document.querySelectorAll('[name=sucursales]').length;
+    const checked = document.querySelectorAll('[name=sucursales]:checked').length;
+    const selectedCount = document.getElementById('selected-count');
+    if (selectedCount) {
+      selectedCount.textContent = checked === total ? '(todas)' : '(' + checked + ' seleccionadas)';
+    }
+  }
+
+  window.updateCount = updateCount;
+  document.addEventListener('DOMContentLoaded', updateCount);
+
   (function () {
     const buttons = Array.from(document.querySelectorAll('.forecast-tab-button'));
     const panels = {
