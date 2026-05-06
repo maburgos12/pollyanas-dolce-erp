@@ -20,7 +20,7 @@ from openpyxl.utils import get_column_letter
 
 from core.access import has_any_role, ROLE_ADMIN, ROLE_COMPRAS, ROLE_DG, ROLE_PRODUCCION
 from core.models import Sucursal
-from pos_bridge.models import PointSalesDailyProductFact
+from pos_bridge.models import PointProduct, PointSalesDailyProductFact
 from recetas.models import Receta
 from ventas.models import PronosticoGuardado
 
@@ -56,13 +56,64 @@ def _trend_label(factor: Decimal) -> str:
     return "estable"
 
 
+CATEGORY_ORDER = [
+    "Bollos",
+    "Empanadas",
+    "Galletas",
+    "Individual",
+    "Cheesecake",
+    "Grande",
+    "Mediano",
+    "Chico",
+    "Mini",
+    "Rebanada",
+    "Vasos Preparados",
+    "Pay",
+    "Otros",
+]
+CATEGORY_INDEX = {category: index for index, category in enumerate(CATEGORY_ORDER)}
+WEEKDAYS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+
+def _forecast_category(nombre: str | None, familia: str | None) -> str:
+    nombre_lower = (nombre or "").strip().casefold()
+    familia_lower = (familia or "").strip().casefold()
+
+    if nombre_lower.endswith("grande"):
+        return "Grande"
+    if nombre_lower.endswith("mediano"):
+        return "Mediano"
+    if nombre_lower.endswith("chico"):
+        return "Chico"
+    if nombre_lower.endswith("mini"):
+        return "Mini"
+    if nombre_lower.endswith(" r") or "rebanada" in nombre_lower:
+        return "Rebanada"
+    if nombre_lower.endswith("individual"):
+        return "Individual"
+
+    if familia_lower in {"bollo", "bollos"}:
+        return "Bollos"
+    if familia_lower in {"empanada", "empanadas"}:
+        return "Empanadas"
+    if familia_lower in {"galleta", "galletas"}:
+        return "Galletas"
+    if familia_lower == "cheesecake":
+        return "Cheesecake"
+    if familia_lower == "vasos preparados":
+        return "Vasos Preparados"
+    if familia_lower == "pay":
+        return "Pay"
+    return "Otros"
+
+
 def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: set[int]) -> dict:
     selected_days = list(_date_range(start_date, end_date))
     if not selected_days or not branch_ids:
         return {}
 
     base_qs = PointSalesDailyProductFact.objects.filter(
-        receta_id__isnull=False,
         point_product_id__isnull=False,
         point_product__precio_temporada=False,
         branch__erp_branch_id__in=branch_ids,
@@ -72,9 +123,6 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
     ).exclude(
         Q(point_product__name__icontains="sp ") | Q(point_product__name__icontains=" sp") |
         Q(receta__nombre__icontains="sp ") | Q(receta__nombre__icontains=" sp")
-    ).exclude(
-        Q(receta__familia__icontains="pay") &
-        (Q(point_product__name__icontains="rebanada") | Q(receta__nombre__icontains="rebanada"))
     )
     latest_sale_date = base_qs.aggregate(max_date=Max("sale_date")).get("max_date")
     if not latest_sale_date:
@@ -86,20 +134,20 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
     comparable_start = recent_start - timedelta(days=364)
     comparable_end = recent_end - timedelta(days=364)
 
-    rotating_recipe_ids = set(
+    rotating_product_ids = set(
         base_qs.filter(sale_date__range=(recent_rotation_start, recent_end))
-        .values("receta_id")
+        .values("point_product_id")
         .annotate(qty=Sum("total_cantidad"))
         .filter(qty__gt=0)
-        .values_list("receta_id", flat=True)
+        .values_list("point_product_id", flat=True)
     )
-    if not rotating_recipe_ids:
+    if not rotating_product_ids:
         return {}
-    base_qs = base_qs.filter(receta_id__in=rotating_recipe_ids)
+    base_qs = base_qs.filter(point_product_id__in=rotating_product_ids)
 
     recent_rows = list(
         base_qs.filter(sale_date__range=(recent_start, recent_end))
-        .values("receta_id", "branch__erp_branch_id")
+        .values("point_product_id", "branch__erp_branch_id")
         .annotate(
             qty=Sum("total_cantidad"),
             revenue=Sum("total_venta_neta"),
@@ -107,30 +155,30 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
         )
     )
     eligible_pairs = {
-        (int(row["receta_id"]), int(row["branch__erp_branch_id"]))
+        (int(row["point_product_id"]), int(row["branch__erp_branch_id"]))
         for row in recent_rows
         if _decimal(row.get("qty")) > 0
     }
     if not eligible_pairs:
         return {}
 
-    recipe_ids = {recipe_id for recipe_id, _branch_id in eligible_pairs}
+    point_product_ids = {product_id for product_id, _branch_id in eligible_pairs}
     recent_qty = {
-        (int(row["receta_id"]), int(row["branch__erp_branch_id"])): _decimal(row.get("qty"))
+        (int(row["point_product_id"]), int(row["branch__erp_branch_id"])): _decimal(row.get("qty"))
         for row in recent_rows
     }
     recent_revenue = {
-        (int(row["receta_id"]), int(row["branch__erp_branch_id"])): _decimal(row.get("revenue"))
+        (int(row["point_product_id"]), int(row["branch__erp_branch_id"])): _decimal(row.get("revenue"))
         for row in recent_rows
     }
 
     comparable_qty = {
-        (int(row["receta_id"]), int(row["branch__erp_branch_id"])): _decimal(row.get("qty"))
+        (int(row["point_product_id"]), int(row["branch__erp_branch_id"])): _decimal(row.get("qty"))
         for row in base_qs.filter(
             sale_date__range=(comparable_start, comparable_end),
-            receta_id__in=recipe_ids,
+            point_product_id__in=point_product_ids,
         )
-        .values("receta_id", "branch__erp_branch_id")
+        .values("point_product_id", "branch__erp_branch_id")
         .annotate(qty=Sum("total_cantidad"))
     }
 
@@ -150,14 +198,26 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
     for row in (
         base_qs.filter(
             sale_date__range=(history_start, history_end),
-            receta_id__in=recipe_ids,
+            point_product_id__in=point_product_ids,
         )
-        .values("receta_id", "branch__erp_branch_id", "sale_date")
+        .values("point_product_id", "branch__erp_branch_id", "sale_date")
         .annotate(qty=Sum("total_cantidad"))
     ):
-        key = (int(row["receta_id"]), int(row["branch__erp_branch_id"]), row["sale_date"])
+        key = (int(row["point_product_id"]), int(row["branch__erp_branch_id"]), row["sale_date"])
         history_qty[key] = _decimal(row.get("qty"))
 
+    product_map = {
+        product.id: product
+        for product in PointProduct.objects.filter(id__in=point_product_ids).only("id", "name", "category", "precio")
+    }
+    recipe_id_by_product: dict[int, int] = {}
+    for row in (
+        base_qs.filter(point_product_id__in=point_product_ids, receta_id__isnull=False)
+        .values("point_product_id", "receta_id")
+        .distinct()
+    ):
+        recipe_id_by_product.setdefault(int(row["point_product_id"]), int(row["receta_id"]))
+    recipe_ids = set(recipe_id_by_product.values())
     recipe_map = {
         receta.id: receta
         for receta in Receta.objects.filter(id__in=recipe_ids).only("id", "nombre", "familia", "categoria")
@@ -167,21 +227,21 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
         for branch in Sucursal.objects.filter(id__in=branch_ids).only("id", "codigo", "nombre")
     }
 
-    price_by_recipe: dict[int, Decimal] = {}
-    for recipe_id in recipe_ids:
-        qty = sum(qty for (rid, _bid), qty in recent_qty.items() if rid == recipe_id)
-        revenue = sum(amount for (rid, _bid), amount in recent_revenue.items() if rid == recipe_id)
+    price_by_product: dict[int, Decimal] = {}
+    for product_id in point_product_ids:
+        qty = sum(qty for (pid, _bid), qty in recent_qty.items() if pid == product_id)
+        revenue = sum(amount for (pid, _bid), amount in recent_revenue.items() if pid == product_id)
         if qty > 0 and revenue > 0:
-            price_by_recipe[recipe_id] = (revenue / qty).quantize(Decimal("0.01"))
+            price_by_product[product_id] = (revenue / qty).quantize(Decimal("0.01"))
 
     for row in (
-        base_qs.filter(receta_id__in=recipe_ids, point_product__precio__isnull=False, point_product__precio_activo=True)
-        .values("receta_id")
+        base_qs.filter(point_product_id__in=point_product_ids, point_product__precio__isnull=False, point_product__precio_activo=True)
+        .values("point_product_id")
         .annotate(avg_price=Avg("point_product__precio"))
     ):
-        recipe_id = int(row["receta_id"])
-        if recipe_id not in price_by_recipe and row.get("avg_price") is not None:
-            price_by_recipe[recipe_id] = _decimal(row.get("avg_price")).quantize(Decimal("0.01"))
+        product_id = int(row["point_product_id"])
+        if product_id not in price_by_product and row.get("avg_price") is not None:
+            price_by_product[product_id] = _decimal(row.get("avg_price")).quantize(Decimal("0.01"))
 
     product_totals: dict[int, dict] = {}
     branch_totals: dict[int, dict] = {}
@@ -193,23 +253,30 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
     for day in selected_days:
         day_totals[day] = {"fecha": day, "fecha_iso": day.isoformat(), "total_piezas": 0, "total_ingreso": Decimal("0"), "top_5_productos": []}
 
-    for recipe_id, branch_id in sorted(eligible_pairs):
-        receta = recipe_map.get(recipe_id)
+    for product_id, branch_id in sorted(eligible_pairs):
+        product = product_map.get(product_id)
+        receta = recipe_map.get(recipe_id_by_product.get(product_id))
         branch = branch_map.get(branch_id)
-        if not receta or not branch:
+        if not product or not branch:
             continue
-        price = price_by_recipe.get(recipe_id, Decimal("0"))
-        factor = factors.get((recipe_id, branch_id), Decimal("1"))
-        product_factor_values[recipe_id].append(factor)
-        recent_avg = recent_qty.get((recipe_id, branch_id), Decimal("0")) / recent_days
+        display_name = product.name or (receta.nombre if receta else "Producto")
+        family = (receta.familia if receta else "") or product.category or "Sin familia"
+        category = (receta.categoria if receta else "") or product.category or ""
+        forecast_category = _forecast_category(display_name, family)
+        price = price_by_product.get(product_id, Decimal("0"))
+        factor = factors.get((product_id, branch_id), Decimal("1"))
+        product_factor_values[product_id].append(factor)
+        recent_avg = recent_qty.get((product_id, branch_id), Decimal("0")) / recent_days
 
         product_total = product_totals.setdefault(
-            recipe_id,
+            product_id,
             {
-                "receta_id": recipe_id,
-                "nombre": receta.nombre,
-                "familia": receta.familia or "Sin familia",
-                "categoria": receta.categoria or "",
+                "receta_id": receta.id if receta else None,
+                "point_product_id": product_id,
+                "nombre": display_name,
+                "familia": family,
+                "categoria": category,
+                "categoria_pronostico": forecast_category,
                 "total_piezas": 0,
                 "precio": price,
                 "total_ingreso": Decimal("0"),
@@ -226,9 +293,12 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
                 "total_ingreso": Decimal("0"),
                 "productos": defaultdict(
                     lambda: {
+                        "receta_id": None,
+                        "point_product_id": None,
                         "nombre": "",
                         "familia": "",
                         "categoria": "",
+                        "categoria_pronostico": "",
                         "precio": Decimal("0"),
                         "total_piezas": 0,
                         "total_ingreso": Decimal("0"),
@@ -240,10 +310,10 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
 
         for day in selected_days:
             homologue = day - timedelta(days=364)
-            exact_base = history_qty.get((recipe_id, branch_id, homologue))
+            exact_base = history_qty.get((product_id, branch_id, homologue))
             if exact_base is None:
                 window_values = [
-                    history_qty.get((recipe_id, branch_id, homologue + timedelta(days=offset)), Decimal("0"))
+                    history_qty.get((product_id, branch_id, homologue + timedelta(days=offset)), Decimal("0"))
                     for offset in range(-3, 4)
                 ]
                 positive_values = [value for value in window_values if value > 0]
@@ -260,39 +330,50 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
             product_total["total_ingreso"] += revenue
             branch_total["total_piezas"] += forecast_qty
             branch_total["total_ingreso"] += revenue
-            branch_product = branch_total["productos"][recipe_id]
-            branch_product["nombre"] = receta.nombre
-            branch_product["familia"] = receta.familia or "Sin familia"
-            branch_product["categoria"] = receta.categoria or ""
+            branch_product = branch_total["productos"][product_id]
+            branch_product["receta_id"] = receta.id if receta else None
+            branch_product["point_product_id"] = product_id
+            branch_product["nombre"] = display_name
+            branch_product["familia"] = family
+            branch_product["categoria"] = category
+            branch_product["categoria_pronostico"] = forecast_category
             branch_product["precio"] = price
             branch_product["total_piezas"] += forecast_qty
             branch_product["total_ingreso"] += revenue
             branch_product["por_dia"][day.isoformat()] += forecast_qty
             day_totals[day]["total_piezas"] += forecast_qty
             day_totals[day]["total_ingreso"] += revenue
-            day_product_totals[day][recipe_id] += forecast_qty
-            product_day_details[recipe_id][day.isoformat()] += forecast_qty
+            day_product_totals[day][product_id] += forecast_qty
+            product_day_details[product_id][day.isoformat()] += forecast_qty
 
     total_pieces = sum(row["total_piezas"] for row in product_totals.values())
     total_income = sum((row["total_ingreso"] for row in product_totals.values()), Decimal("0"))
 
     por_producto = []
-    for recipe_id, row in product_totals.items():
-        factor_values = product_factor_values.get(recipe_id) or [Decimal("1")]
+    for product_id, row in product_totals.items():
+        factor_values = product_factor_values.get(product_id) or [Decimal("1")]
         avg_factor = sum(factor_values, Decimal("0")) / Decimal(len(factor_values))
         row["factor_tendencia"] = avg_factor.quantize(Decimal("0.01"))
         row["tendencia"] = _trend_label(avg_factor)
         row["pct_del_total"] = (Decimal(row["total_piezas"]) / Decimal(total_pieces) * Decimal("100")).quantize(Decimal("0.01")) if total_pieces else Decimal("0")
         row["total_ingreso"] = row["total_ingreso"].quantize(Decimal("0.01"))
-        row["por_dia"] = dict(sorted(product_day_details.get(recipe_id, {}).items()))
+        row["por_dia"] = dict(sorted(product_day_details.get(product_id, {}).items()))
         por_producto.append(row)
 
-    por_producto.sort(key=lambda item: (item["familia"], -item["total_piezas"], item["nombre"]))
-    producto_nombre = {row["receta_id"]: row["nombre"] for row in por_producto}
+    por_producto.sort(
+        key=lambda item: (
+            CATEGORY_INDEX.get(item.get("categoria_pronostico") or "Otros", CATEGORY_INDEX["Otros"]),
+            -item["total_piezas"],
+            item["nombre"],
+        )
+    )
+    producto_nombre = {row["point_product_id"]: row["nombre"] for row in por_producto}
 
     family_groups = []
-    for familia in sorted({row["familia"] for row in por_producto}):
-        rows = [row for row in por_producto if row["familia"] == familia]
+    for familia in CATEGORY_ORDER:
+        rows = [row for row in por_producto if (row.get("categoria_pronostico") or "Otros") == familia]
+        if not rows:
+            continue
         rows.sort(key=lambda item: (-item["total_piezas"], item["nombre"]))
         subtotal_pieces = sum(row["total_piezas"] for row in rows)
         subtotal_income = sum((row["total_ingreso"] for row in rows), Decimal("0"))
@@ -310,14 +391,20 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
         top_products = sorted(day_product_totals[day].items(), key=lambda item: (-item[1], producto_nombre.get(item[0], "")))[:5]
         row = day_totals[day]
         row["total_ingreso"] = row["total_ingreso"].quantize(Decimal("0.01"))
-        row["top_5_productos"] = [{"nombre": producto_nombre.get(recipe_id, "Producto"), "total_piezas": qty} for recipe_id, qty in top_products]
+        row["top_5_productos"] = [{"nombre": producto_nombre.get(product_id, "Producto"), "total_piezas": qty} for product_id, qty in top_products]
         row["top_producto"] = row["top_5_productos"][0] if row["top_5_productos"] else None
         por_dia.append(row)
 
     por_sucursal = []
     for row in branch_totals.values():
         products = list(row["productos"].values())
-        products.sort(key=lambda item: (-item["total_piezas"], item["nombre"]))
+        products.sort(
+            key=lambda item: (
+                CATEGORY_INDEX.get(item.get("categoria_pronostico") or "Otros", CATEGORY_INDEX["Otros"]),
+                -item["total_piezas"],
+                item["nombre"],
+            )
+        )
         for product in products:
             product["total_ingreso"] = product["total_ingreso"].quantize(Decimal("0.01"))
             product["por_dia"] = dict(sorted(product["por_dia"].items()))
@@ -345,25 +432,6 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
         "por_producto_familias": family_groups,
         "por_sucursal": por_sucursal,
     }
-
-
-CATEGORY_ORDER = [
-    "Bollos",
-    "Empanadas",
-    "Galletas",
-    "Individual",
-    "Grande",
-    "Mediano",
-    "Chico",
-    "Mini",
-    "Rebanada",
-    "Vasos Preparados",
-    "Pay",
-    "Otros",
-]
-CATEGORY_INDEX = {category: index for index, category in enumerate(CATEGORY_ORDER)}
-WEEKDAYS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
 
 def _calcular_pronostico(*, start_date: date, end_date: date, branch_ids: set[int]) -> dict:
@@ -413,21 +481,10 @@ def _date_header(value: str) -> str:
 
 
 def _category_for_row(row: dict) -> str:
-    candidates = [
-        str(row.get("categoria") or ""),
-        str(row.get("familia") or ""),
-        str(row.get("nombre") or ""),
-    ]
-    normalized = " ".join(candidates).casefold()
-    for category in CATEGORY_ORDER:
-        if category == "Otros":
-            continue
-        category_norm = category.casefold()
-        if category_norm in normalized:
-            return category
-    if "vaso" in normalized:
-        return "Vasos Preparados"
-    return "Otros"
+    saved_category = row.get("categoria_pronostico")
+    if saved_category in CATEGORY_INDEX:
+        return saved_category
+    return _forecast_category(row.get("nombre") or row.get("producto"), row.get("familia") or row.get("categoria"))
 
 
 def _forecast_rows_for_excel(rows: list[dict]) -> list[dict]:
