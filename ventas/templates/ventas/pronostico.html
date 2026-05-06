@@ -22,11 +22,16 @@
   .forecast-trend.sube { color: #198754; }
   .forecast-trend.baja { color: #b42318; }
   .forecast-trend.estable { color: #7b1a48; }
-  .forecast-form-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); align-items: end; }
-  .forecast-form-grid .forecast-branches { grid-column: span 1; }
+  .forecast-form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 12px; }
+  .forecast-sucursal-filter { position: relative; min-width: 0; }
+  .forecast-sucursal-button { display: flex; justify-content: space-between; align-items: center; gap: 8px; cursor: pointer; text-align: left; }
+  .forecast-sucursal-dropdown { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 100; width: 100%; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  .forecast-sucursal-option { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer; }
+  .forecast-sucursal-actions { margin-top: 8px; text-align: right; }
+  .forecast-form-action { grid-column: 1 / -1; justify-self: end; width: min(100%, 260px); }
   @media (max-width: 900px) {
     .forecast-form-grid { grid-template-columns: 1fr; }
-    .forecast-form-grid .forecast-branches { grid-column: auto; }
+    .forecast-form-action { width: 100%; }
   }
 </style>
 {% endblock %}
@@ -64,17 +69,27 @@
         <label class="form-label" for="fecha_fin">Fecha fin</label>
         <input class="form-control" type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}" required>
       </div>
-      <div>
-        <label style="font-weight:500; font-size:13px; color:#555; display:block; margin-bottom:6px;">Sucursales</label>
-        <select name="sucursales" multiple size="5"
-          style="width:200px; border:1px solid #ddd; border-radius:6px; padding:4px; font-size:13px;">
+      <div class="forecast-sucursal-filter">
+        <label class="form-label">Sucursales</label>
+        <button class="form-control forecast-sucursal-button" type="button" onclick="toggleDropdown()">
+          <span id="suc-label">Todas las sucursales</span>
+          <span aria-hidden="true">▾</span>
+        </button>
+        <div class="forecast-sucursal-dropdown" id="suc-dropdown">
           {% for branch in branches %}
-          <option value="{{ branch.id }}" selected>{{ branch.nombre }}</option>
+          <label class="forecast-sucursal-option">
+            <input type="checkbox" name="sucursales" value="{{ branch.id }}" checked> {{ branch.nombre }}
+          </label>
           {% endfor %}
-        </select>
-        <div style="font-size:11px; color:#999; margin-top:3px;">Ctrl+clic para seleccionar varias</div>
+          <div class="forecast-sucursal-actions">
+            <button type="button" onclick="toggleDropdown()"
+              style="background:#7b1a48; color:white; border:none;
+                     border-radius:4px; padding:4px 12px; cursor:pointer;
+                     font-size:12px;">Aceptar</button>
+          </div>
+        </div>
       </div>
-      <div>
+      <div class="forecast-form-action">
         <button class="btn btn-primary w-100" type="submit">Calcular pronóstico</button>
       </div>
     </form>
@@ -294,6 +309,22 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
+  function toggleDropdown() {
+    const d = document.getElementById('suc-dropdown');
+    d.style.display = d.style.display === 'none' ? 'block' : 'none';
+    const checked = document.querySelectorAll('[name=sucursales]:checked').length;
+    const total = document.querySelectorAll('[name=sucursales]').length;
+    document.getElementById('suc-label').textContent =
+      checked === total ? 'Todas las sucursales' : checked + ' sucursales';
+  }
+
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('#suc-dropdown') &&
+        !e.target.closest('button[onclick]')) {
+      document.getElementById('suc-dropdown').style.display = 'none';
+    }
+  });
+
   (function () {
     const buttons = Array.from(document.querySelectorAll('.forecast-tab-button'));
     const panels = {
