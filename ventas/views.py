@@ -137,6 +137,14 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
         point_product__precio_temporada=False,
         branch__erp_branch_id__in=branch_ids,
         branch__erp_branch__activa=True,
+    ).exclude(
+        Q(point_product__name__icontains="sobre pedido") | Q(receta__nombre__icontains="sobre pedido")
+    ).exclude(
+        Q(point_product__name__icontains="sp ") | Q(point_product__name__icontains=" sp") |
+        Q(receta__nombre__icontains="sp ") | Q(receta__nombre__icontains=" sp")
+    ).exclude(
+        Q(receta__familia__icontains="pay") &
+        (Q(point_product__name__icontains="rebanada") | Q(receta__nombre__icontains="rebanada"))
     )
     latest_sale_date = base_qs.aggregate(max_date=Max("sale_date")).get("max_date")
     if not latest_sale_date:
@@ -144,8 +152,20 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
 
     recent_end = min(latest_sale_date, start_date - timedelta(days=1))
     recent_start = recent_end - timedelta(days=89)
+    recent_rotation_start = recent_end - timedelta(days=29)
     comparable_start = recent_start - timedelta(days=364)
     comparable_end = recent_end - timedelta(days=364)
+
+    rotating_recipe_ids = set(
+        base_qs.filter(sale_date__range=(recent_rotation_start, recent_end))
+        .values("receta_id")
+        .annotate(qty=Sum("total_cantidad"))
+        .filter(qty__gt=0)
+        .values_list("receta_id", flat=True)
+    )
+    if not rotating_recipe_ids:
+        return {}
+    base_qs = base_qs.filter(receta_id__in=rotating_recipe_ids)
 
     recent_rows = list(
         base_qs.filter(sale_date__range=(recent_start, recent_end))
@@ -366,6 +386,7 @@ def _build_pronostico_ventas(*, start_date: date, end_date: date, branch_ids: se
             "sucursales": len(por_sucursal),
             "recent_start": recent_start,
             "recent_end": recent_end,
+            "recent_rotation_start": recent_rotation_start,
             "comparable_start": comparable_start,
             "comparable_end": comparable_end,
         },
@@ -3888,7 +3909,7 @@ def PronosticoVentasView(request):
     if not _can_view_events(request.user):
         raise PermissionDenied("No tienes permisos para ver pronosticos de ventas.")
 
-    active_branches = Sucursal.objects.filter(activa=True).order_by("codigo", "nombre")
+    active_branches = Sucursal.objects.filter(activa=True).order_by("nombre")
     default_branch_ids = set(active_branches.values_list("id", flat=True))
     selected_branch_ids = {int(value) for value in request.GET.getlist("sucursales") if str(value).isdigit()}
     if not selected_branch_ids:

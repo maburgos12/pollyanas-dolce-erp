@@ -66,7 +66,7 @@
       </div>
       <div class="forecast-branches">
         <label class="form-label" for="sucursales">Sucursales</label>
-        <select class="form-select" id="sucursales" name="sucursales" multiple size="4">
+        <select class="form-select" id="sucursales" name="sucursales" multiple size="{{ branches|length }}">
           {% for branch in branches %}
           <option value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}selected{% endif %}>{{ branch.codigo }} · {{ branch.nombre }}</option>
           {% endfor %}
