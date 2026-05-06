@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Pronósticos guardados - ERP{% endblock %}
+{% block body_class %}page-pronostico-ventas{% endblock %}
+
+{% block content %}
+<div class="container production-report">
+  <section class="card">
+    <div class="section-header production-page-header">
+      <div>
+        <div class="executive-eyebrow">Ventas</div>
+        <h1 class="card-header">Pronósticos guardados</h1>
+        <p class="executive-section-copy">Historial de pronósticos generados por tu usuario.</p>
+      </div>
+      <a class="btn btn-primary" href="{% url 'ventas:pronostico' %}">Nuevo pronóstico</a>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-header">
+      <h2 class="section-header-title">Listado</h2>
+    </div>
+    {% if pronosticos %}
+    <div class="table-responsive production-table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Rango</th>
+            <th>Sucursales</th>
+            <th class="text-end">Piezas</th>
+            <th class="text-end">Ingreso</th>
+            <th>Fecha</th>
+            <th class="text-end">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in pronosticos %}
+          <tr>
+            <td>{{ item.nombre }}</td>
+            <td>{{ item.fecha_inicio }} a {{ item.fecha_fin }}</td>
+            <td>
+              {% for branch in item.sucursales.all %}
+              {{ branch.nombre }}{% if not forloop.last %}, {% endif %}
+              {% empty %}
+              <span class="muted">Todas</span>
+              {% endfor %}
+            </td>
+            <td class="text-end">{{ item.total_piezas|intcomma }}</td>
+            <td class="text-end">${{ item.total_ingreso|floatformat:2|intcomma }}</td>
+            <td>{{ item.creado_en|date:"Y-m-d H:i" }}</td>
+            <td class="text-end">
+              <a class="btn btn-secondary" href="{% url 'ventas:pronostico_detalle' item.id %}">Ver</a>
+              <a class="btn btn-secondary" href="{% url 'ventas:pronostico_excel' item.id %}">Excel</a>
+              <form method="post" action="{% url 'ventas:pronostico_eliminar' item.id %}" style="display:inline;" onsubmit="return confirm('¿Eliminar este pronóstico guardado?');">
+                {% csrf_token %}
+                <button class="btn btn-secondary" type="submit">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="alert alert-warning">Todavía no hay pronósticos guardados.</div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

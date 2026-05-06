@@ -1,0 +1,202 @@
+{% load humanize %}
+
+{% if resumen %}
+<section class="kpi-grid">
+  <article class="kpi-card">
+    <div class="kpi-card-inner">
+      <div class="kpi-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-4"/></svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-number">{{ resumen.total_piezas|intcomma }}</div>
+        <div class="kpi-label">Total piezas</div>
+      </div>
+    </div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card-inner">
+      <div class="kpi-icon is-success">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-number is-success">${{ resumen.total_ingreso|floatformat:2|intcomma }}</div>
+        <div class="kpi-label">Total ingreso</div>
+      </div>
+    </div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card-inner">
+      <div class="kpi-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-number">{{ resumen.dias|intcomma }}</div>
+        <div class="kpi-label">Días</div>
+      </div>
+    </div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-card-inner">
+      <div class="kpi-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4Z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+      </div>
+      <div class="kpi-body">
+        <div class="kpi-number">{{ resumen.productos|intcomma }}</div>
+        <div class="kpi-label">Productos</div>
+      </div>
+    </div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="section-header">
+    <div>
+      <h2 class="section-header-title">Detalle del pronóstico</h2>
+      <p class="executive-section-copy">Tendencia reciente: {{ resumen.recent_start }} a {{ resumen.recent_end }} · Comparable: {{ resumen.comparable_start }} a {{ resumen.comparable_end }}</p>
+    </div>
+  </div>
+
+  <div class="forecast-tabs" role="tablist" aria-label="Pronóstico">
+    <button class="forecast-tab-button active" type="button" data-tab="producto">Por producto</button>
+    <button class="forecast-tab-button" type="button" data-tab="dia">Por día</button>
+    <button class="forecast-tab-button" type="button" data-tab="sucursal">Por sucursal</button>
+  </div>
+
+  <div class="forecast-tab-panel active" id="forecast-tab-producto">
+    <div class="table-responsive production-table-wrap">
+      <table class="table" id="forecast-product-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Producto</th>
+            <th>Familia</th>
+            <th class="text-end">Total piezas</th>
+            <th class="text-end">Precio</th>
+            <th class="text-end">Ingreso</th>
+            <th class="text-end">% total</th>
+            <th class="text-center">Tendencia</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for group in por_producto_familias %}
+          <tr class="production-subtotal-row">
+            <td colspan="3">{{ group.familia }}</td>
+            <td class="text-end">{{ group.total_piezas|intcomma }}</td>
+            <td></td>
+            <td class="text-end">${{ group.total_ingreso|floatformat:2|intcomma }}</td>
+            <td></td>
+            <td></td>
+          </tr>
+          {% for row in group.rows %}
+          <tr>
+            <td>{{ forloop.counter }}</td>
+            <td>{{ row.nombre }}</td>
+            <td>{{ row.familia }}</td>
+            <td class="text-end">{{ row.total_piezas|intcomma }}</td>
+            <td class="text-end">${{ row.precio|floatformat:2|intcomma }}</td>
+            <td class="text-end">${{ row.total_ingreso|floatformat:2|intcomma }}</td>
+            <td class="text-end">{{ row.pct_del_total|floatformat:2 }}%</td>
+            <td class="text-center">
+              <span class="forecast-trend {{ row.tendencia }}">
+                {% if row.tendencia == "sube" %}↑{% elif row.tendencia == "baja" %}↓{% else %}→{% endif %}
+                {{ row.factor_tendencia|floatformat:2 }}x
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="forecast-tab-panel" id="forecast-tab-dia">
+    <div class="forecast-chart-wrap">
+      <canvas id="forecast-day-chart" height="110"></canvas>
+    </div>
+    <div class="table-responsive production-table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th class="text-end">Total piezas</th>
+            <th class="text-end">Total ingreso</th>
+            <th>Top producto del día</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in por_dia %}
+          <tr>
+            <td>{{ row.fecha }}</td>
+            <td class="text-end">{{ row.total_piezas|intcomma }}</td>
+            <td class="text-end">${{ row.total_ingreso|floatformat:2|intcomma }}</td>
+            <td>
+              {% if row.top_producto %}
+              {{ row.top_producto.nombre }} <span class="forecast-muted">({{ row.top_producto.total_piezas|intcomma }} pzas)</span>
+              {% else %}
+              <span class="forecast-muted">Sin venta proyectada</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="forecast-tab-panel" id="forecast-tab-sucursal">
+    {% for branch in por_sucursal %}
+    <section class="forecast-branch-section">
+      <div class="forecast-branch-header">
+        <h3>{{ branch.sucursal }}</h3>
+        <div class="forecast-branch-summary">
+          <span>{{ branch.total_piezas|intcomma }} pzas</span>
+          <span>${{ branch.total_ingreso|floatformat:2|intcomma }}</span>
+        </div>
+      </div>
+      <div class="table-responsive production-table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Familia</th>
+              <th class="text-end">Piezas</th>
+              <th class="text-end">Precio</th>
+              <th class="text-end">Ingreso</th>
+              <th class="text-end">% del total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% regroup branch.productos by familia as family_groups %}
+            {% for group in family_groups %}
+            <tr class="production-subtotal-row">
+              <td colspan="6">{{ group.grouper|default:"Sin familia" }}</td>
+            </tr>
+            {% for product in group.list %}
+            <tr>
+              <td>{{ product.nombre }}</td>
+              <td>{{ product.familia|default:"—" }}</td>
+              <td class="text-end">{{ product.total_piezas|intcomma }}</td>
+              <td class="text-end">${{ product.precio|floatformat:2|intcomma }}</td>
+              <td class="text-end">${{ product.total_ingreso|floatformat:2|intcomma }}</td>
+              <td class="text-end">{% widthratio product.total_piezas branch.total_piezas 100 %}%</td>
+            </tr>
+            {% endfor %}
+            {% endfor %}
+            <tr class="production-grand-total-row">
+              <td colspan="2">Total {{ branch.sucursal }}</td>
+              <td class="text-end">{{ branch.total_piezas|intcomma }}</td>
+              <td></td>
+              <td class="text-end">${{ branch.total_ingreso|floatformat:2|intcomma }}</td>
+              <td class="text-end">100%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% empty %}
+    <div class="alert alert-warning">Sin datos por sucursal para este pronóstico.</div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

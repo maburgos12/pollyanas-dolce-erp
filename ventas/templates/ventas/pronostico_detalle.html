@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}{{ pronostico.nombre }} - ERP{% endblock %}
+{% block body_class %}page-pronostico-ventas{% endblock %}
+
+{% block extra_css %}
+<style>
+  .forecast-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .forecast-tab-button { border: 1px solid #e2d6dc; background: #fff; color: #5d173a; border-radius: 8px; padding: 9px 14px; font-weight: 700; cursor: pointer; }
+  .forecast-tab-button.active { background: #7b1a48; color: #fff; border-color: #7b1a48; }
+  .forecast-tab-panel { display: none; }
+  .forecast-tab-panel.active { display: block; }
+  .forecast-branch-section { border-top: 1px solid #eadfe4; padding-top: 18px; margin-top: 18px; }
+  .forecast-branch-section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .forecast-branch-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+  .forecast-branch-header h3 { margin: 0; font-size: 1.05rem; color: #46112c; }
+  .forecast-branch-summary { display: flex; gap: 14px; flex-wrap: wrap; color: #5d173a; font-weight: 800; }
+  .forecast-chart-wrap { min-height: 280px; }
+  .forecast-muted { color: #776b72; }
+  .forecast-trend { font-weight: 800; }
+  .forecast-trend.sube { color: #198754; }
+  .forecast-trend.baja { color: #b42318; }
+  .forecast-trend.estable { color: #7b1a48; }
+  .forecast-header-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .forecast-meta-list { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 8px; color: #776b72; font-size: 0.92rem; }
+  @media print {
+    .sidebar,
+    .forecast-header-actions,
+    .forecast-tabs,
+    .topbar,
+    .module-tabs { display: none !important; }
+    .layout-wrapper,
+    .main-content,
+    .content { display: block !important; margin: 0 !important; padding: 0 !important; }
+    .container { width: 100% !important; max-width: none !important; padding: 0 !important; }
+    .forecast-tab-panel { display: block !important; }
+    .card, .kpi-card { box-shadow: none !important; break-inside: avoid; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container production-report">
+  <section class="card">
+    <div class="section-header production-page-header">
+      <div>
+        <div class="executive-eyebrow">Pronóstico guardado</div>
+        <h1 class="card-header">{{ pronostico.nombre }}</h1>
+        <p class="executive-section-copy">{{ pronostico.fecha_inicio }} a {{ pronostico.fecha_fin }}</p>
+        <div class="forecast-meta-list">
+          <span>Creado por {{ pronostico.creado_por.get_full_name|default:pronostico.creado_por.username|default:"Sin usuario" }}</span>
+          <span>{{ pronostico.creado_en|date:"Y-m-d H:i" }}</span>
+        </div>
+      </div>
+      <div class="forecast-header-actions">
+        <a class="btn btn-primary" href="{% url 'ventas:pronostico_excel' pronostico.id %}">Exportar Excel</a>
+        <button class="btn btn-secondary" type="button" onclick="window.print()">Imprimir</button>
+        <a class="btn btn-secondary" href="{% url 'ventas:pronostico_guardados' %}">Volver</a>
+      </div>
+    </div>
+  </section>
+
+  {% include "ventas/partials/pronostico_resultados.html" %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  (function () {
+    const buttons = Array.from(document.querySelectorAll('.forecast-tab-button'));
+    const panels = {
+      producto: document.getElementById('forecast-tab-producto'),
+      dia: document.getElementById('forecast-tab-dia'),
+      sucursal: document.getElementById('forecast-tab-sucursal')
+    };
+    buttons.forEach((button) => {
+      button.addEventListener('click', function () {
+        buttons.forEach((item) => item.classList.remove('active'));
+        Object.values(panels).forEach((panel) => panel && panel.classList.remove('active'));
+        button.classList.add('active');
+        if (panels[button.dataset.tab]) panels[button.dataset.tab].classList.add('active');
+      });
+    });
+
+    const chartCanvas = document.getElementById('forecast-day-chart');
+    if (chartCanvas && window.Chart) {
+      new Chart(chartCanvas, {
+        type: 'bar',
+        data: {
+          labels: [{% for row in por_dia %}'{{ row.fecha_iso|default:row.fecha }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+          datasets: [{
+            label: 'Piezas',
+            data: [{% for row in por_dia %}{{ row.total_piezas }}{% if not forloop.last %},{% endif %}{% endfor %}],
+            backgroundColor: '#7b1a48',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+  })();
+</script>
+{% endblock %}
