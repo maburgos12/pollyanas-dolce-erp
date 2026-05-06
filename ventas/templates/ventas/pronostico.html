@@ -13,6 +13,17 @@
   .page-pronostico-ventas .forecast-branch-button { width:100%; height:42px; border:1px solid #ced4da; border-radius:6px; background:#fff; cursor:pointer; font-size:14px; padding:0 12px; text-align:left; display:flex; justify-content:space-between; align-items:center; color:#333; }
   .page-pronostico-ventas .forecast-branch-menu { display:none; position:absolute; top:100%; left:0; width:100%; background:#fff; border:1px solid #ced4da; border-radius:6px; padding:8px; z-index:200; box-shadow:0 4px 12px rgba(0,0,0,0.1); margin-top:2px; }
   .page-pronostico-ventas .forecast-branch-menu label { display:flex; align-items:center; gap:8px; padding:5px 4px; font-size:13px; cursor:pointer; color:#333; }
+  .page-pronostico-ventas .forecast-product-section { margin-top:18px; border-top:1px solid #eadce3; padding-top:16px; }
+  .page-pronostico-ventas .forecast-product-header { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:10px; }
+  .page-pronostico-ventas .forecast-product-header h3 { margin:0; color:#3d0a24; font-size:1rem; font-weight:900; }
+  .page-pronostico-ventas .forecast-product-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .page-pronostico-ventas .forecast-product-group { border:1px solid #eadce3; border-radius:8px; margin-bottom:8px; background:#fff; overflow:hidden; }
+  .page-pronostico-ventas .forecast-product-summary { display:flex; align-items:center; gap:10px; padding:10px 12px; color:#3d0a24; font-weight:800; cursor:pointer; }
+  .page-pronostico-ventas .forecast-product-summary span { color:#776b72; font-weight:700; font-size:0.85rem; }
+  .page-pronostico-ventas .forecast-product-summary .btn { margin-left:auto; }
+  .page-pronostico-ventas .forecast-product-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:4px; padding:8px 12px 12px; }
+  .page-pronostico-ventas .forecast-product-option { display:flex; align-items:center; gap:6px; font-size:13px; color:#4f464b; min-width:0; }
+  .page-pronostico-ventas .forecast-product-option span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .page-pronostico-ventas .forecast-special-banner { background:#fff3cd; border:1px solid #ffc107; color:#6b4c00; border-radius:8px; padding:12px 14px; margin-bottom:16px; font-weight:600; }
   .page-pronostico-ventas .kpi-number,
   .page-pronostico-ventas .kpi-number.is-success,
@@ -53,6 +64,7 @@
   .page-pronostico-ventas .forecast-chart-wrap { min-height:280px; }
   @media (max-width: 900px) {
     .page-pronostico-ventas .forecast-filter-grid { grid-template-columns:1fr; }
+    .page-pronostico-ventas .forecast-product-grid { grid-template-columns:1fr; }
     .page-pronostico-ventas .forecast-actions,
     .page-pronostico-ventas .forecast-branch-header { justify-content:flex-start; }
   }
@@ -118,6 +130,32 @@
             </div>
           </div>
         </div>
+      </div>
+      <div class="forecast-product-section">
+        <div class="forecast-product-header">
+          <h3>Productos a incluir</h3>
+          <div class="forecast-product-actions">
+            <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(true)">Seleccionar todos</button>
+            <button class="btn btn-secondary btn-sm" type="button" onclick="setAllProducts(false)">Limpiar todo</button>
+          </div>
+        </div>
+        {% for category, products in categorias_productos.items %}
+        <details class="forecast-product-group" {% if category|upper in categorias_principales %}open{% endif %}>
+          <summary class="forecast-product-summary">
+            {{ category }}
+            <span>({{ products|length }} productos)</span>
+            <button class="btn btn-secondary btn-sm" type="button" onclick="toggleCat(event, this)">Todos / Ninguno</button>
+          </summary>
+          <div class="forecast-product-grid">
+            {% for prod in products %}
+            <label class="forecast-product-option">
+              <input type="checkbox" name="productos_incluidos" value="{{ prod.sku }}" {% if prod.sku in selected_product_skus %}checked{% endif %}>
+              <span title="{{ prod.nombre }}">{{ prod.nombre }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </details>
+        {% endfor %}
       </div>
       <div class="forecast-filter-submit">
         <button class="btn btn-primary w-100" type="submit" id="forecast-submit">Calcular pronóstico</button>
@@ -409,6 +447,9 @@
       <input type="hidden" name="sucursales" value="{{ branch.id }}">
       {% endif %}
       {% endfor %}
+      {% for sku in selected_product_skus %}
+      <input type="hidden" name="productos_incluidos" value="{{ sku }}">
+      {% endfor %}
       <label class="form-label" for="forecast-name">Nombre</label>
       <input class="form-control" id="forecast-name" name="nombre" value="Pronóstico {{ fecha_inicio }} a {{ fecha_fin }}" maxlength="200" required>
       <div class="forecast-modal-actions">
@@ -436,6 +477,22 @@
   function closeSuc() {
     if (sucMenu) sucMenu.style.display = 'none';
     updateSucLabel();
+  }
+  function setAllProducts(checked) {
+    document.querySelectorAll('#forecast-form [name=productos_incluidos]').forEach(function (input) {
+      input.checked = checked;
+    });
+  }
+  function toggleCat(event, button) {
+    event.preventDefault();
+    event.stopPropagation();
+    const details = button.closest('details');
+    if (!details) return;
+    const inputs = Array.from(details.querySelectorAll('[name=productos_incluidos]'));
+    const shouldCheck = inputs.some((input) => !input.checked);
+    inputs.forEach(function (input) {
+      input.checked = shouldCheck;
+    });
   }
   if (sucBtn && sucMenu) {
     sucBtn.addEventListener('click', function (event) {
