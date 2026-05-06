@@ -64,15 +64,31 @@
         <label class="form-label" for="fecha_fin">Fecha fin</label>
         <input class="form-control" type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}" required>
       </div>
-      <div>
-        <label style="font-weight:500; font-size:13px; color:#555; display:block; margin-bottom:6px;">Sucursales</label>
-        <select name="sucursales" multiple size="5"
-          style="width:200px; border:1px solid #ddd; border-radius:6px; padding:4px; font-size:13px;">
+      <div style="position:relative; display:inline-block;">
+        <button type="button" onclick="toggleDropdown()"
+          style="border:1px solid #ddd; border-radius:6px; padding:6px 12px;
+                 background:white; cursor:pointer; font-size:13px; min-width:160px;
+                 display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span id="suc-label">Todas las sucursales</span> ▾
+        </button>
+        <div id="suc-dropdown"
+          style="display:none; position:absolute; top:100%; left:0; z-index:100;
+                 background:white; border:1px solid #ddd; border-radius:6px;
+                 padding:8px; min-width:200px; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
           {% for branch in branches %}
-          <option value="{{ branch.id }}" selected>{{ branch.nombre }}</option>
+          <label style="display:flex; align-items:center; gap:8px;
+                        padding:4px 0; font-size:13px; cursor:pointer;">
+            <input type="checkbox" name="sucursales"
+                   value="{{ branch.id }}" checked> {{ branch.nombre }}
+          </label>
           {% endfor %}
-        </select>
-        <div style="font-size:11px; color:#999; margin-top:3px;">Ctrl+clic para seleccionar varias</div>
+          <div style="margin-top:8px; text-align:right;">
+            <button type="button" onclick="toggleDropdown()"
+              style="background:#7b1a48; color:white; border:none;
+                     border-radius:4px; padding:4px 12px; cursor:pointer;
+                     font-size:12px;">Aceptar</button>
+          </div>
+        </div>
       </div>
       <div>
         <button class="btn btn-primary w-100" type="submit">Calcular pronóstico</button>
@@ -294,6 +310,22 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
+  function toggleDropdown() {
+    const d = document.getElementById('suc-dropdown');
+    d.style.display = d.style.display === 'none' ? 'block' : 'none';
+    const checked = document.querySelectorAll('[name=sucursales]:checked').length;
+    const total = document.querySelectorAll('[name=sucursales]').length;
+    document.getElementById('suc-label').textContent =
+      checked === total ? 'Todas las sucursales' : checked + ' sucursales';
+  }
+
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('#suc-dropdown') &&
+        !e.target.closest('button[onclick]')) {
+      document.getElementById('suc-dropdown').style.display = 'none';
+    }
+  });
+
   (function () {
     const buttons = Array.from(document.querySelectorAll('.forecast-tab-button'));
     const panels = {
