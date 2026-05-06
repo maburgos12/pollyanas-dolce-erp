@@ -22,8 +22,75 @@
   .forecast-trend.sube { color: #198754; }
   .forecast-trend.baja { color: #b42318; }
   .forecast-trend.estable { color: #7b1a48; }
-  .forecast-form-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); align-items: end; }
+  .page-pronostico-ventas .kpi-number,
+  .page-pronostico-ventas .kpi-number.is-success,
+  .page-pronostico-ventas .kpi-number.is-warning,
+  .page-pronostico-ventas .kpi-number.is-danger { color: #7b1a48; }
+  .page-pronostico-ventas .kpi-icon.is-success { background: #f5e6ed; color: #7b1a48; }
+  .forecast-form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
   .forecast-form-grid .forecast-branches { grid-column: span 1; }
+  .forecast-filter-action { grid-column: 3; }
+  .forecast-sucursales-dropdown { position: relative; display: inline-block; width: 100%; }
+  .forecast-sucursales-button {
+    width: 100%;
+    height: 42px;
+    min-height: var(--control-height);
+    border: 1px solid var(--rosa-deep);
+    border-radius: var(--radius-sm);
+    background: white;
+    cursor: pointer;
+    color: var(--texto);
+    font-family: inherit;
+    font-size: 14px;
+    padding: 0 14px;
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+  .forecast-sucursales-button:focus {
+    border-color: #7b1a48;
+    box-shadow: 0 0 0 3px rgba(139, 34, 82, 0.1);
+    outline: none;
+  }
+  .forecast-sucursales-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    background: white;
+    border: 1px solid var(--rosa-deep);
+    border-radius: var(--radius-sm);
+    padding: 8px;
+    z-index: 200;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+    margin-top: 2px;
+  }
+  .forecast-sucursales-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 4px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .forecast-sucursales-actions {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+    text-align: right;
+  }
+  .forecast-sucursales-accept {
+    background: #7b1a48;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 5px 16px;
+    font-size: 13px;
+    cursor: pointer;
+  }
   .forecast-header-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   .forecast-modal-backdrop { display: none; position: fixed; inset: 0; z-index: 1200; background: rgba(61, 10, 36, 0.32); align-items: center; justify-content: center; padding: 18px; }
   .forecast-modal-backdrop.active { display: flex; }
@@ -34,6 +101,7 @@
   @media (max-width: 900px) {
     .forecast-form-grid { grid-template-columns: 1fr; }
     .forecast-form-grid .forecast-branches { grid-column: auto; }
+    .forecast-filter-action { grid-column: auto; }
   }
 </style>
 {% endblock %}
@@ -75,17 +143,27 @@
         <label class="form-label" for="fecha_fin">Fecha fin</label>
         <input class="form-control" type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}" required>
       </div>
-      <div>
+      <div class="forecast-branches">
         <label style="font-weight:500; font-size:13px; color:#555; display:block; margin-bottom:6px;">Sucursales</label>
-        <select name="sucursales" multiple size="5"
-          style="width:200px; border:1px solid #ddd; border-radius:6px; padding:4px; font-size:13px;">
-          {% for branch in branches %}
-          <option value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}selected{% endif %}>{{ branch.nombre }}</option>
-          {% endfor %}
-        </select>
-        <div style="font-size:11px; color:#999; margin-top:3px;">Ctrl+clic para seleccionar varias</div>
+        <div class="forecast-sucursales-dropdown">
+          <button type="button" id="suc-btn" class="forecast-sucursales-button">
+            <span id="suc-label">Todas las sucursales</span>
+            <span>▾</span>
+          </button>
+          <div id="suc-menu" class="forecast-sucursales-menu">
+            {% for branch in branches %}
+            <label class="forecast-sucursales-option">
+              <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %} onchange="updateSucLabel()">
+              {{ branch.nombre }}
+            </label>
+            {% endfor %}
+            <div class="forecast-sucursales-actions">
+              <button type="button" class="forecast-sucursales-accept" onclick="closeSuc()">Aceptar</button>
+            </div>
+          </div>
+        </div>
       </div>
-      <div>
+      <div class="forecast-filter-action">
         <button class="btn btn-primary w-100" type="submit">Calcular pronóstico</button>
       </div>
     </form>
@@ -258,7 +336,7 @@
               </tr>
             </thead>
             <tbody>
-              {% regroup branch.productos by familia as family_groups %}
+              {% regroup branch.productos by categoria_pronostico as family_groups %}
               {% for group in family_groups %}
               <tr class="production-subtotal-row">
                 <td colspan="6">{{ group.grouper|default:"Sin familia" }}</td>
@@ -392,6 +470,37 @@
         if (panels[button.dataset.tab]) panels[button.dataset.tab].classList.add('active');
       });
     });
+
+    const sucBtn = document.getElementById('suc-btn');
+    const sucMenu = document.getElementById('suc-menu');
+    const sucLabel = document.getElementById('suc-label');
+    function getSucursalCheckboxes() {
+      if (!sucMenu) return [];
+      return Array.from(sucMenu.querySelectorAll('input[name="sucursales"]'));
+    }
+    window.updateSucLabel = function () {
+      const checkboxes = getSucursalCheckboxes();
+      const total = checkboxes.length;
+      const checked = checkboxes.filter((checkbox) => checkbox.checked).length;
+      if (!sucLabel) return;
+      sucLabel.textContent = checked === total ? 'Todas las sucursales' : checked === 0 ? 'Sin sucursales' : checked + ' sucursales';
+    };
+    window.closeSuc = function () {
+      if (sucMenu) sucMenu.style.display = 'none';
+      window.updateSucLabel();
+    };
+    if (sucBtn && sucMenu) {
+      sucBtn.addEventListener('click', function (event) {
+        event.stopPropagation();
+        sucMenu.style.display = sucMenu.style.display === 'none' || !sucMenu.style.display ? 'block' : 'none';
+      });
+      document.addEventListener('click', function (event) {
+        if (!sucMenu.contains(event.target) && !sucBtn.contains(event.target)) {
+          sucMenu.style.display = 'none';
+        }
+      });
+      window.updateSucLabel();
+    }
 
     const exportButton = document.getElementById('export-forecast-csv');
     const table = document.getElementById('forecast-product-table');
