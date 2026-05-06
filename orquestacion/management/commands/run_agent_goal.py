@@ -11,8 +11,8 @@ class Command(BaseCommand):
     help = "Ejecuta el runtime mínimo de un agente real sobre un objetivo explícito."
 
     def add_arguments(self, parser):
-        parser.add_argument("--goal", required=True, help="Tipo de objetivo, por ejemplo sales_event_publication_guard.")
-        parser.add_argument("--event-id", type=int, required=True, help="ID del EventoVenta a revisar.")
+        parser.add_argument("--goal", required=True, help="Tipo de objetivo registrado en orquestacion.")
+        parser.add_argument("--event-id", type=int, required=True, help="ID de entidad a revisar.")
         parser.add_argument(
             "--agent-code",
             default="",
@@ -36,7 +36,7 @@ class Command(BaseCommand):
             goal_type=str(options["goal"]).strip(),
             objective=(str(options.get("objective") or "").strip() or "Ejecutar objetivo de agente"),
             agent_code=str(options.get("agent_code") or "").strip(),
-            entity_type="ventas.EventoVenta",
+            entity_type="",
             entity_id=int(options["event_id"]),
             requested_action=str(options.get("requested_action") or "review").strip(),
         )

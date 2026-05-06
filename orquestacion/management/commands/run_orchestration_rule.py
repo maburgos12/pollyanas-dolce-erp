@@ -34,7 +34,7 @@ class Command(BaseCommand):
             "--event-id",
             type=int,
             default=None,
-            help="ID de EventoVenta cuando la regla opera sobre un evento comercial específico.",
+            help="ID de entidad opcional para reglas que lo requieran.",
         )
 
     def handle(self, *args, **options):

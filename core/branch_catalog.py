@@ -38,7 +38,3 @@ def eligible_operational_branch_qs(reference_date=None):
         .exclude(codigo__in=EXCLUDED_BRANCH_CODES)
         .order_by("codigo")
     )
-
-
-def eligible_sales_event_branch_qs():
-    return eligible_operational_branch_qs()

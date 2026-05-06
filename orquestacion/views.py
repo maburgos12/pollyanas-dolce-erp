@@ -122,12 +122,6 @@ def _build_rule_source_link(*, rule_code: str, details: dict | None = None, resu
             )
         return (reverse("recetas:plan_produccion"), "Abrir producción")
 
-    if rule_code == "sales_event_operational_chain_review":
-        event_id = details.get("event_id") or result_summary.get("event_id")
-        if event_id:
-            return (reverse("ventas:evento_detail", args=[event_id]), "Abrir evento comercial")
-        return (reverse("ventas:eventos"), "Abrir eventos comerciales")
-
     return ("", "")
 
 

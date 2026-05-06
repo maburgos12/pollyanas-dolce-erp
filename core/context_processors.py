@@ -24,8 +24,6 @@ from core.access import (
     can_view_rentabilidad,
     can_view_sistema,
     can_view_ventas,
-    can_view_ventas_eventos,
-    can_manage_ventas_eventos,
     is_repartidor_only,
     is_branch_capture_only,
 )
@@ -65,8 +63,6 @@ def ui_access(request):
             "can_manage_rrhh": can_manage_rrhh(user),
             "can_capture_piso": can_capture_piso(user),
             "can_view_ventas": can_view_ventas(user),
-            "can_view_ventas_eventos": can_view_ventas_eventos(user),
-            "can_manage_ventas_eventos": can_manage_ventas_eventos(user),
             "can_view_fallas": can_view_fallas,
             "branch_capture_only": is_branch_capture_only(user),
             "repartidor_only": is_repartidor_only(user),

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from celery import shared_task
 
-from orquestacion.services.event_chain_scheduler import run_sales_event_chain_batch
 from orquestacion.services.rule_runners import run_rule_by_code
 
 
@@ -49,42 +48,4 @@ def task_run_rule(
         "run_id": result.run_id,
         "task_id": result.task_id,
         "suggestion_id": result.suggestion_id,
-    }
-
-
-@shared_task(
-    name="orquestacion.run_sales_event_chains",
-    bind=True,
-    acks_late=True,
-    max_retries=1,
-    default_retry_delay=300,
-    time_limit=900,
-    soft_time_limit=840,
-)
-def task_run_sales_event_chains(
-    self,
-    *,
-    event_ids: list[int] | None = None,
-    triggered_by_id: int | None = None,
-    limit: int = 25,
-):
-    results = run_sales_event_chain_batch(
-        event_ids=event_ids,
-        created_by=_resolve_user(triggered_by_id),
-        trigger_source="celery_batch",
-        limit=limit,
-    )
-    return {
-        "processed": len(results),
-        "results": [
-            {
-                "created": result.created,
-                "status": result.status,
-                "message": result.message,
-                "run_id": result.run_id,
-                "task_id": result.task_id,
-                "suggestion_id": result.suggestion_id,
-            }
-            for result in results
-        ],
     }

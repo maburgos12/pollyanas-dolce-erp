@@ -242,24 +242,9 @@ def can_manage_crm(user: AbstractBaseUser) -> bool:
     return has_any_role(user, ROLE_ADMIN, ROLE_VENTAS) and not _is_locked(user, "lock_crm")
 
 
-def can_view_ventas_eventos(user: AbstractBaseUser) -> bool:
-    return has_any_role(
-        user,
-        ROLE_DG,
-        ROLE_ADMIN,
-        ROLE_VENTAS,
-        ROLE_PRODUCCION,
-        ROLE_COMPRAS,
-        ROLE_LECTURA,
-    ) and not _is_locked(user, "lock_crm")
-
-
 def can_view_ventas(user: AbstractBaseUser) -> bool:
-    return can_view_ventas_eventos(user)
+    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_VENTAS, ROLE_LECTURA) and not _is_locked(user, "lock_ventas")
 
-
-def can_manage_ventas_eventos(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_ADMIN, ROLE_VENTAS) and not _is_locked(user, "lock_crm")
 
 
 def can_view_logistica(user: AbstractBaseUser) -> bool:
