@@ -7,20 +7,24 @@ from decimal import Decimal
 
 import numpy as np
 import pandas as pd
-from django.db.models import Avg, Max, Q, Sum
+from django.db.models import Avg, Max, Min, Q, Sum
 
 from core.models import Sucursal
 from pos_bridge.models import PointProduct, PointSalesDailyProductFact
 from recetas.models import Receta
 
 try:
-    from statsmodels.tsa.holtwinters import ExponentialSmoothing
+    from statsmodels.tsa.exponential_smoothing.ets import ETSModel
+    from statsmodels.tsa.seasonal import STL
 except ImportError:  # pragma: no cover - production dependency is installed in the container.
-    ExponentialSmoothing = None
+    ETSModel = None
+    STL = None
 
 
 HISTORY_START = date(2022, 1, 1)
-TRAINING_DAYS = 730
+MIN_MODEL_OBSERVATIONS = 30
+SPECIAL_RATIO_MIN = 0.94
+SPECIAL_RATIO_MAX = 1.15
 FECHAS_ESPECIALES = {
     (1, 6): "Reyes",
     (2, 14): "San Valentín",
@@ -237,43 +241,66 @@ def _special_days(days: list[date]) -> list[dict]:
     ]
 
 
-def _fit_holt_winters(series: pd.Series, horizon: int) -> tuple[pd.Series, float, str]:
-    if ExponentialSmoothing is None or horizon <= 0 or series.sum() <= 0:
-        return pd.Series(dtype=float), 0.0, "promedio-simple"
+def _confidence_from_aic(aic: float | None, n_obs: int) -> float:
+    if aic is None or not np.isfinite(aic) or n_obs <= 0:
+        return 0.55
+    aic_per_obs = abs(float(aic)) / max(n_obs, 1)
+    return _clamp(1.0 / (1.0 + (aic_per_obs / 100.0)), 0.35, 0.90)
 
-    clean_series = series.astype(float).clip(lower=0).tail(730)
-    attempts = []
-    if len(clean_series) >= 21:
-        attempts.append(7)
 
-    for seasonal_periods in attempts:
+def _event_confidence(years: int) -> float:
+    if years >= 3:
+        return 0.92
+    if years == 2:
+        return 0.82
+    if years == 1:
+        return 0.70
+    return 0.50
+
+
+def _prediction_interval_columns(frame: pd.DataFrame) -> tuple[np.ndarray | None, np.ndarray | None]:
+    lower_candidates = ("mean_ci_lower", "pi_lower", "lower PI", "lower", "mean_se")
+    upper_candidates = ("mean_ci_upper", "pi_upper", "upper PI", "upper")
+    lower = next((frame[column].to_numpy(dtype=float) for column in lower_candidates if column in frame), None)
+    upper = next((frame[column].to_numpy(dtype=float) for column in upper_candidates if column in frame), None)
+    if lower is not None and upper is not None:
+        return lower, upper
+    return None, None
+
+
+def _fit_ets(series: pd.Series, horizon: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, str]:
+    if ETSModel is None or horizon <= 0 or series.sum() <= 0:
+        forecast = _simple_average_forecast(series, horizon).to_numpy(dtype=float)
+        return forecast * 0.90, forecast, forecast * 1.12, 0.45, "promedio-simple"
+
+    clean_series = series.astype(float).clip(lower=0)
+    try:
+        model = ETSModel(
+            clean_series,
+            error="add",
+            trend="add",
+            seasonal="add",
+            seasonal_periods=7,
+            initialization_method="estimated",
+        )
+        fit = model.fit(disp=False)
+        forecast = np.asarray(fit.forecast(horizon), dtype=float)
+        lower = None
+        upper = None
         try:
-            model = ExponentialSmoothing(
-                clean_series,
-                trend="add",
-                seasonal="add",
-                seasonal_periods=seasonal_periods,
-                initialization_method="estimated",
-            )
-            fit = model.fit(
-                optimized=False,
-                smoothing_level=0.25,
-                smoothing_trend=0.05,
-                smoothing_seasonal=0.20,
-                remove_bias=False,
-            )
-            forecast = fit.forecast(horizon).clip(lower=0)
-            fitted = fit.fittedvalues.reindex(clean_series.index).fillna(0)
-            residual = clean_series - fitted
-            sse = float(np.square(residual).sum())
-            centered = clean_series - float(clean_series.mean())
-            sst = float(np.square(centered).sum())
-            confidence = _clamp(1 - (sse / sst), 0.0, 1.0) if sst > 0 else 0.0
-            return forecast, confidence, "holt-winters"
+            prediction = fit.get_prediction(start=len(clean_series), end=len(clean_series) + horizon - 1)
+            lower, upper = _prediction_interval_columns(prediction.summary_frame(alpha=0.10))
         except Exception:
-            continue
-
-    return pd.Series(dtype=float), 0.0, "promedio-simple"
+            lower = upper = None
+        if lower is None or upper is None:
+            lower = forecast * 0.90
+            upper = forecast * 1.12
+        confidence = _confidence_from_aic(getattr(fit, "aic", None), len(clean_series))
+        return np.clip(lower, 0, None), np.clip(forecast, 0, None), np.clip(upper, 0, None), confidence, "ets-estacional"
+    except Exception:
+        forecast = _simple_average_forecast(series, horizon).to_numpy(dtype=float)
+        confidence = min(0.55, len(series[series > 0]) / 90) if len(series) else 0.0
+        return forecast * 0.90, forecast, forecast * 1.12, confidence, "promedio-simple"
 
 
 def _simple_average_forecast(series: pd.Series, horizon: int) -> pd.Series:
@@ -293,6 +320,148 @@ def _series_from_history(history: dict[date, Decimal], *, end_date: date) -> pd.
     index = pd.date_range(start=start_date, end=end_date, freq="D")
     values = [float(history.get(day.date(), Decimal("0"))) for day in index]
     return pd.Series(values, index=index)
+
+
+def _history_dataframe(series: pd.Series, special_days: set[tuple[int, int]]) -> pd.DataFrame:
+    frame = pd.DataFrame({"fecha": series.index, "qty": series.to_numpy(dtype=float)})
+    frame["dia_semana"] = frame["fecha"].dt.weekday
+    frame["semana_año"] = frame["fecha"].dt.isocalendar().week.astype(int)
+    frame["es_fecha_especial"] = frame["fecha"].map(lambda value: 1 if (value.month, value.day) in special_days else 0)
+    frame["nombre_evento"] = frame["fecha"].map(lambda value: FECHAS_ESPECIALES.get((value.month, value.day), ""))
+    return frame
+
+
+def _window_average_from_history(history: dict[date, Decimal], start: date, end: date, days: int = 30) -> Decimal:
+    total = sum((qty for day, qty in history.items() if start <= day <= end), Decimal("0"))
+    return total / Decimal(days)
+
+
+def _stl_trend_ratio(
+    series: pd.Series,
+    history: dict[date, Decimal],
+    *,
+    trend_start: date,
+    history_end: date,
+) -> float:
+    positive_values = series[series > 0]
+    alpha = max(float(positive_values.mean()) * 0.1, 1.0) if not positive_values.empty else 1.0
+    recent_fallback = _window_average_from_history(history, trend_start, history_end)
+    comparable_start = trend_start - timedelta(days=364)
+    comparable_end = history_end - timedelta(days=364)
+    comparable_fallback = _window_average_from_history(history, comparable_start, comparable_end)
+
+    if STL is None or len(series) < 60 or series.sum() <= 0:
+        ratio = (float(recent_fallback) + alpha) / (float(comparable_fallback) + alpha)
+        return _clamp(ratio, SPECIAL_RATIO_MIN, SPECIAL_RATIO_MAX)
+
+    try:
+        stl_series = series.astype(float).clip(lower=0).tail(450)
+        result = STL(stl_series, period=7, robust=True).fit()
+        trend = pd.Series(result.trend, index=stl_series.index).replace([np.inf, -np.inf], np.nan).dropna()
+        recent_window = trend.loc[pd.Timestamp(trend_start) : pd.Timestamp(history_end)]
+        previous_window = trend.loc[pd.Timestamp(comparable_start) : pd.Timestamp(comparable_end)]
+        if recent_window.empty:
+            recent_window = trend.tail(30)
+        if previous_window.empty and len(trend) >= 395:
+            previous_window = trend.iloc[-395:-365]
+        trend_recent = float(recent_window.mean()) if not recent_window.empty else float(recent_fallback)
+        trend_previous = float(previous_window.mean()) if not previous_window.empty else float(comparable_fallback)
+        ratio = (trend_recent + alpha) / (trend_previous + alpha)
+    except Exception:
+        ratio = (float(recent_fallback) + alpha) / (float(comparable_fallback) + alpha)
+    return _clamp(ratio, SPECIAL_RATIO_MIN, SPECIAL_RATIO_MAX)
+
+
+def _event_history(history: dict[date, Decimal], target_day: date) -> tuple[Decimal, list[Decimal]]:
+    values = []
+    anchor = Decimal("0")
+    for previous_year in (target_day.year - 1, target_day.year - 2, target_day.year - 3):
+        try:
+            event_day = date(previous_year, target_day.month, target_day.day)
+        except ValueError:
+            continue
+        qty = history.get(event_day, Decimal("0"))
+        if qty > 0:
+            values.append(qty)
+            if anchor <= 0:
+                anchor = qty
+    return anchor, values
+
+
+def _weighted_insufficient_forecast(
+    *,
+    history: dict[date, Decimal],
+    target_day: date,
+    trend_start: date,
+    history_end: date,
+) -> Decimal:
+    recent_avg = _window_average_from_history(history, trend_start, history_end)
+    event_base, _values = _event_history(history, target_day)
+    if event_base > 0:
+        return (event_base * Decimal("0.65")) + (recent_avg * Decimal("1.5") * Decimal("0.35"))
+    return recent_avg * Decimal("1.5")
+
+
+def _special_day_forecast(
+    *,
+    series: pd.Series,
+    history: dict[date, Decimal],
+    target_day: date,
+    trend_start: date,
+    history_end: date,
+    sale_days: int,
+    trend_ratio: float | None = None,
+) -> tuple[Decimal, int, int, float, float, str]:
+    if sale_days < MIN_MODEL_OBSERVATIONS:
+        forecast = _weighted_insufficient_forecast(
+            history=history,
+            target_day=target_day,
+            trend_start=trend_start,
+            history_end=history_end,
+        )
+        ratio = (
+            trend_ratio
+            if trend_ratio is not None
+            else _stl_trend_ratio(series, history, trend_start=trend_start, history_end=history_end)
+        )
+        forecast = forecast * Decimal(str(ratio))
+        conservador = _ceil(forecast * Decimal("0.92"))
+        agresivo = _ceil(forecast * Decimal("1.10"))
+        return forecast, conservador, agresivo, ratio, 0.58, "promedio-ponderado+fecha-especial"
+
+    event_base, event_values = _event_history(history, target_day)
+    ratio = (
+        trend_ratio
+        if trend_ratio is not None
+        else _stl_trend_ratio(series, history, trend_start=trend_start, history_end=history_end)
+    )
+    if event_base <= 0:
+        forecast = _weighted_insufficient_forecast(
+            history=history,
+            target_day=target_day,
+            trend_start=trend_start,
+            history_end=history_end,
+        )
+        conservador = _ceil(forecast * Decimal("0.92"))
+        agresivo = _ceil(forecast * Decimal("1.10"))
+        return forecast, conservador, agresivo, ratio, 0.55, "promedio-ponderado+fecha-especial"
+
+    forecast = event_base * Decimal(str(ratio))
+    if len(event_values) >= 2:
+        std_events = Decimal(str(float(np.std([float(value) for value in event_values]))))
+        conservador = _ceil(forecast - (std_events * Decimal("0.5")))
+        agresivo = _ceil(forecast + (std_events * Decimal("0.5")))
+    else:
+        conservador = _ceil(forecast * Decimal("0.92"))
+        agresivo = _ceil(forecast * Decimal("1.10"))
+    return (
+        forecast,
+        conservador,
+        agresivo,
+        ratio,
+        _event_confidence(len(event_values)),
+        "regresion-estacional+fecha-especial",
+    )
 
 
 def _forecastable_queryset(branch_ids: set[int]):
@@ -339,11 +508,16 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         for branch in Sucursal.objects.filter(id__in=branch_ids).only("id", "codigo", "nombre").order_by("nombre")
     }
     base_qs = _forecastable_queryset(branch_ids)
-    latest_sale_date = base_qs.filter(sale_date__lt=fecha_inicio).aggregate(max_date=Max("sale_date")).get("max_date")
+    sale_bounds = base_qs.filter(sale_date__lt=fecha_inicio).aggregate(
+        min_date=Min("sale_date"),
+        max_date=Max("sale_date"),
+    )
+    latest_sale_date = sale_bounds.get("max_date")
     if not latest_sale_date:
         return _empty_result(fecha_inicio, fecha_fin, len(branch_ids))
 
     history_end = min(latest_sale_date, fecha_inicio - timedelta(days=1))
+    oldest_sale_date = sale_bounds.get("min_date") or HISTORY_START
     trend_start = history_end - timedelta(days=29)
     trend_comparable_start = trend_start - timedelta(days=364)
     trend_comparable_end = history_end - timedelta(days=364)
@@ -365,7 +539,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         return _empty_result(fecha_inicio, fecha_fin, len(branch_ids))
     recent_product_ids = {product_id for product_id, _branch_id in recent_pairs}
 
-    history_start = max(HISTORY_START, history_end - timedelta(days=TRAINING_DAYS))
+    history_start = oldest_sale_date
     rows = list(
         base_qs.filter(sale_date__range=(history_start, history_end), point_product_id__in=recent_product_ids)
         .values("point_product_id", "branch__erp_branch_id", "sale_date", "receta_id")
@@ -401,6 +575,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
     }
 
     histories: dict[tuple[int, int], dict[date, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+    product_histories: dict[int, dict[date, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
     recent_pair_qty: dict[tuple[int, int], Decimal] = defaultdict(Decimal)
     revenue_by_product_recent: dict[int, dict[str, Decimal]] = defaultdict(lambda: {"qty": Decimal("0"), "revenue": Decimal("0")})
     revenue_by_product_all: dict[int, dict[str, Decimal]] = defaultdict(lambda: {"qty": Decimal("0"), "revenue": Decimal("0")})
@@ -413,6 +588,7 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         qty = _decimal(row.get("qty"))
         revenue = _decimal(row.get("revenue"))
         histories[(product_id, branch_id)][sale_date] += qty
+        product_histories[product_id][sale_date] += qty
         revenue_by_product_all[product_id]["qty"] += qty
         revenue_by_product_all[product_id]["revenue"] += revenue
         if trend_start <= sale_date <= history_end:
@@ -456,6 +632,9 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
     product_day_rank: dict[date, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     method_counts = defaultdict(int)
     confidence_values: list[float] = []
+    special_days_in_range = _special_days(selected_days)
+    range_has_special = bool(special_days_in_range)
+    product_trend_ratio_cache: dict[int, float] = {}
 
     for (product_id, branch_id), history in histories.items():
         if recent_pair_qty.get((product_id, branch_id), Decimal("0")) <= 0:
@@ -469,27 +648,28 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         if not _is_forecastable_product(nombre=name, familia=family, receta=receta):
             continue
 
-        sale_days = sum(1 for qty in history.values() if qty > 0)
         series = _series_from_history(history, end_date=history_end)
-        pair_recent_qty = recent_pair_qty.get((product_id, branch_id), Decimal("0"))
-        if sale_days >= 30 and pair_recent_qty >= Decimal("50"):
-            hw_forecast, confidence, method = _fit_holt_winters(series, forecast_horizon)
+        history_frame = _history_dataframe(series, set(FECHAS_ESPECIALES))
+        sale_days = int((history_frame["qty"] > 0).sum())
+        special_trend_ratio = None
+        if range_has_special:
+            if product_id not in product_trend_ratio_cache:
+                product_series = _series_from_history(product_histories[product_id], end_date=history_end)
+                product_trend_ratio_cache[product_id] = _stl_trend_ratio(
+                    product_series,
+                    product_histories[product_id],
+                    trend_start=trend_start,
+                    history_end=history_end,
+                )
+            special_trend_ratio = product_trend_ratio_cache[product_id]
+        if not range_has_special and sale_days >= MIN_MODEL_OBSERVATIONS:
+            ets_lower, ets_forecast, ets_upper, ets_confidence, ets_method = _fit_ets(series, forecast_horizon)
         else:
-            hw_forecast, confidence, method = pd.Series(dtype=float), 0.0, "promedio-simple"
-        if hw_forecast.empty:
-            hw_forecast = _simple_average_forecast(series, forecast_horizon)
-            confidence = min(0.50, sale_days / 60) if sale_days else 0.0
-            method = "promedio-simple"
+            ets_lower = ets_forecast = ets_upper = np.array([], dtype=float)
+            ets_confidence = 0.0
+            ets_method = "promedio-ponderado"
+        simple_forecast = _simple_average_forecast(series, forecast_horizon)
 
-        recent_avg = sum(
-            (qty for day, qty in history.items() if trend_start <= day <= history_end),
-            Decimal("0"),
-        ) / Decimal("30")
-        comparable_avg = sum(
-            (qty for day, qty in history.items() if trend_comparable_start <= day <= trend_comparable_end),
-            Decimal("0"),
-        ) / Decimal("30")
-        factor = _clamp(float((recent_avg + Decimal("1.0")) / (comparable_avg + Decimal("1.0"))), 0.70, 1.50)
         category = categoria_producto(
             point_category=product.category,
             familia=receta.familia if receta else family,
@@ -503,26 +683,65 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         total_conservative = 0
         total_aggressive = 0
         total_income = Decimal("0.00")
-        used_method = method
+        factor_weight = 0.0
+        confidence_sum = 0.0
+        confidence_count = 0
+        method_votes: dict[str, int] = defaultdict(int)
 
         for day in selected_days:
             forecast_index = max(0, (day - history_end).days - 1)
-            if forecast_index < len(hw_forecast):
-                hw_value = Decimal(str(float(hw_forecast.iloc[forecast_index])))
+            is_special_day = (day.month, day.day) in FECHAS_ESPECIALES
+            if is_special_day:
+                final_value, conservador, agresivo, day_factor, day_confidence, day_method = _special_day_forecast(
+                    series=series,
+                    history=history,
+                    target_day=day,
+                    trend_start=trend_start,
+                    history_end=history_end,
+                    sale_days=sale_days,
+                    trend_ratio=special_trend_ratio,
+                )
+            elif sale_days < MIN_MODEL_OBSERVATIONS:
+                final_value = _weighted_insufficient_forecast(
+                    history=history,
+                    target_day=day,
+                    trend_start=trend_start,
+                    history_end=history_end,
+                )
+                conservador = _ceil(final_value * Decimal("0.90"))
+                agresivo = _ceil(final_value * Decimal("1.12"))
+                day_factor = 1.0
+                day_confidence = min(0.55, sale_days / 60) if sale_days else 0.0
+                day_method = "promedio-ponderado"
+            elif range_has_special:
+                if forecast_index < len(simple_forecast):
+                    simple_value = Decimal(str(float(simple_forecast.iloc[forecast_index])))
+                else:
+                    simple_value = Decimal(str(float(simple_forecast.iloc[-1]))) if not simple_forecast.empty else Decimal("0")
+                final_value = max(Decimal("0"), simple_value)
+                conservador = _ceil(final_value * Decimal("0.90"))
+                agresivo = _ceil(final_value * Decimal("1.12"))
+                day_factor = 1.0
+                day_confidence = min(0.60, sale_days / 120) if sale_days else 0.0
+                day_method = "promedio-simple"
             else:
-                hw_value = Decimal(str(float(hw_forecast.iloc[-1]))) if not hw_forecast.empty else Decimal("0")
-            model_value = max(Decimal("0"), hw_value * Decimal(str(factor)))
-            special_name = FECHAS_ESPECIALES.get((day.month, day.day))
-            anchor_value = history.get(date(day.year - 1, day.month, day.day), Decimal("0")) if special_name else Decimal("0")
-            if special_name and anchor_value > 0:
-                final_value = (anchor_value * Decimal("0.70")) + (model_value * Decimal("0.30"))
-                used_method = f"{method}+fecha-especial"
-            else:
-                final_value = model_value
+                if forecast_index < len(ets_forecast):
+                    model_value = Decimal(str(float(ets_forecast[forecast_index])))
+                    lower_value = float(ets_lower[forecast_index]) if forecast_index < len(ets_lower) else float(model_value) * 0.90
+                    upper_value = float(ets_upper[forecast_index]) if forecast_index < len(ets_upper) else float(model_value) * 1.12
+                else:
+                    fallback = _simple_average_forecast(series, 1).iloc[0]
+                    model_value = Decimal(str(float(fallback)))
+                    lower_value = float(fallback) * 0.90
+                    upper_value = float(fallback) * 1.12
+                final_value = max(Decimal("0"), model_value)
+                conservador = _ceil(lower_value)
+                agresivo = _ceil(upper_value)
+                day_factor = 1.0
+                day_confidence = ets_confidence
+                day_method = ets_method
 
-            conservador = _ceil(final_value * Decimal("0.90"))
             recomendado = _ceil(final_value)
-            agresivo = _ceil(final_value * Decimal("1.12"))
             if recomendado <= 0 and conservador <= 0 and agresivo <= 0:
                 continue
 
@@ -544,9 +763,20 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
             day_totals[day]["total_piezas"] += recomendado
             day_totals[day]["total_ingreso"] += income
             product_day_rank[day][name] += recomendado
+            factor_weight += day_factor * recomendado
+            confidence_sum += day_confidence
+            confidence_count += 1
+            method_votes[day_method] += 1
 
         if total_recommended <= 0:
             continue
+        pair_factor = factor_weight / total_recommended if total_recommended else 1.0
+        pair_confidence = confidence_sum / confidence_count if confidence_count else 0.0
+        special_method_votes = {method: count for method, count in method_votes.items() if "fecha-especial" in method}
+        if special_method_votes:
+            used_method = max(special_method_votes.items(), key=lambda item: item[1])[0]
+        else:
+            used_method = max(method_votes.items(), key=lambda item: item[1])[0] if method_votes else "sin-modelo"
 
         product_payload = {
             "point_product_id": product_id,
@@ -575,18 +805,18 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
             "total_ingreso": _money(total_income),
             "pct_total": 0.0,
             "pct_del_total": Decimal("0.00"),
-            "factor_tendencia": round(factor, 2),
-            "tendencia": _trend_label(factor),
+            "factor_tendencia": round(pair_factor, 2),
+            "tendencia": _trend_label(pair_factor),
             "metodo_usado": used_method,
-            "confianza": round(confidence, 3),
+            "confianza": round(pair_confidence, 3),
         }
         branch_products[branch_id][product_id] = dict(product_payload)
 
         aggregate = product_totals.get(product_id)
         if aggregate is None:
             aggregate = dict(product_payload)
-            aggregate["_factor_weight"] = factor * total_recommended
-            aggregate["_confidence_sum"] = confidence
+            aggregate["_factor_weight"] = pair_factor * total_recommended
+            aggregate["_confidence_sum"] = pair_confidence
             aggregate["_pairs"] = 1
             aggregate["_method_counts"] = {used_method: 1}
             product_totals[product_id] = aggregate
@@ -605,12 +835,12 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
                 day_bucket["conservador"] += item["conservador"]
                 day_bucket["recomendado"] += item["recomendado"]
                 day_bucket["agresivo"] += item["agresivo"]
-            aggregate["_factor_weight"] += factor * total_recommended
-            aggregate["_confidence_sum"] += confidence
+            aggregate["_factor_weight"] += pair_factor * total_recommended
+            aggregate["_confidence_sum"] += pair_confidence
             aggregate["_pairs"] += 1
             aggregate["_method_counts"][used_method] = aggregate["_method_counts"].get(used_method, 0) + 1
         method_counts[used_method] += 1
-        confidence_values.append(confidence)
+        confidence_values.append(pair_confidence)
 
     total_pieces = sum(product["total_piezas"] for product in product_totals.values())
     total_income = sum((product["total_ingreso"] for product in product_totals.values()), Decimal("0.00"))
@@ -683,11 +913,16 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         )
     por_sucursal.sort(key=lambda item: item["sucursal_nombre"])
 
-    main_method = "holt-winters" if any("holt-winters" in method for method in method_counts) else "promedio-simple"
-    if _special_days(selected_days):
+    if any("regresion-estacional" in method for method in method_counts):
+        main_method = "regresion-estacional"
+    elif any("ets-estacional" in method for method in method_counts):
+        main_method = "ets-estacional"
+    else:
+        main_method = "promedio-ponderado"
+    if special_days_in_range and "fecha-especial" not in main_method:
         main_method = f"{main_method}+fecha-especial"
     confidence_avg = round(sum(confidence_values) / len(confidence_values), 3) if confidence_values else 0.0
-    fechas_especiales = _special_days(selected_days)
+    fechas_especiales = special_days_in_range
 
     return {
         "fechas": [day.isoformat() for day in selected_days],
