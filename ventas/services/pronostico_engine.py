@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import logging
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -12,6 +14,13 @@ from django.db.models import Avg, Max, Min, Q, Sum
 from core.models import Sucursal
 from pos_bridge.models import PointProduct, PointSalesDailyProductFact
 from recetas.models import Receta
+
+try:
+    from prophet import Prophet
+
+    PROPHET_AVAILABLE = True
+except ImportError:  # pragma: no cover - optional production dependency.
+    PROPHET_AVAILABLE = False
 
 try:
     from statsmodels.tsa.exponential_smoothing.ets import ETSModel
@@ -37,6 +46,56 @@ FECHAS_ESPECIALES = {
     (12, 25): "Navidad",
     (12, 31): "Año Nuevo",
 }
+FESTIVOS_POLLYANAS = pd.DataFrame(
+    {
+        "holiday": ["dia_madres"] * 3
+        + ["dia_nino"] * 3
+        + ["dia_padre"] * 3
+        + ["navidad"] * 3
+        + ["nochebuena"] * 3
+        + ["año_nuevo"] * 3
+        + ["reyes"] * 3
+        + ["san_valentin"] * 3
+        + ["halloween"] * 3
+        + ["dia_muertos"] * 3,
+        "ds": pd.to_datetime(
+            [
+                "2024-05-12",
+                "2025-05-10",
+                "2026-05-10",
+                "2024-04-30",
+                "2025-04-30",
+                "2026-04-30",
+                "2024-06-16",
+                "2025-06-15",
+                "2026-06-21",
+                "2024-12-25",
+                "2025-12-25",
+                "2026-12-25",
+                "2024-12-24",
+                "2025-12-24",
+                "2026-12-24",
+                "2024-12-31",
+                "2025-12-31",
+                "2026-12-31",
+                "2024-01-06",
+                "2025-01-06",
+                "2026-01-06",
+                "2024-02-14",
+                "2025-02-14",
+                "2026-02-14",
+                "2024-10-31",
+                "2025-10-31",
+                "2026-10-31",
+                "2024-11-02",
+                "2025-11-02",
+                "2026-11-02",
+            ]
+        ),
+        "lower_window": [0] * 30,
+        "upper_window": [1] * 30,
+    }
+)
 ORDEN_CATEGORIAS = [
     "Bollo",
     "Empanadas",
@@ -135,6 +194,90 @@ def _decimal(value) -> Decimal:
 def _ceil(value: Decimal | float) -> int:
     numeric = float(value)
     return int(math.ceil(numeric)) if numeric > 0 else 0
+
+
+def _calcular_producto_prophet(serie_df: pd.DataFrame, fechas_rango: list[date], festivos_df: pd.DataFrame) -> dict:
+    logging.getLogger("prophet").setLevel(logging.WARNING)
+    logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
+
+    clean_df = serie_df[["ds", "y"]].copy()
+    clean_df["ds"] = pd.to_datetime(clean_df["ds"])
+    clean_df["y"] = pd.to_numeric(clean_df["y"], errors="coerce").fillna(0.0).clip(lower=0.0)
+
+    m = Prophet(
+        holidays=festivos_df,
+        seasonality_mode="multiplicative",
+        yearly_seasonality=True,
+        weekly_seasonality=True,
+        daily_seasonality=False,
+        interval_width=0.90,
+        changepoint_prior_scale=0.05,
+    )
+    m.add_country_holidays(country_name="MX")
+    m.fit(clean_df, iter=300)
+
+    future = pd.DataFrame({"ds": pd.to_datetime(fechas_rango)})
+    forecast = m.predict(future)
+    return {
+        "recomendado": [max(0, math.ceil(float(v))) for v in forecast["yhat"].values],
+        "conservador": [max(0, math.ceil(float(v))) for v in forecast["yhat_lower"].values],
+        "agresivo": [max(0, math.ceil(float(v))) for v in forecast["yhat_upper"].values],
+        "confianza": min(0.95, 0.60 + len(clean_df) / 1000),
+        "metodo": "prophet",
+    }
+
+
+def _calcular_serie_ets(serie_df: pd.DataFrame, fechas_rango: list[date]) -> dict:
+    if not fechas_rango:
+        return {"recomendado": [], "conservador": [], "agresivo": [], "confianza": 0.0, "metodo": "sin-fechas"}
+
+    clean_df = serie_df[["ds", "y"]].copy()
+    clean_df["ds"] = pd.to_datetime(clean_df["ds"])
+    clean_df["y"] = pd.to_numeric(clean_df["y"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    clean_df = clean_df.sort_values("ds")
+    if clean_df.empty:
+        empty = [0] * len(fechas_rango)
+        return {"recomendado": empty, "conservador": empty, "agresivo": empty, "confianza": 0.0, "metodo": "sin-datos"}
+
+    series = pd.Series(clean_df["y"].to_numpy(dtype=float), index=pd.DatetimeIndex(clean_df["ds"]))
+    history_end = clean_df["ds"].max().date()
+    horizon = max(1, (max(fechas_rango) - history_end).days)
+    lower, forecast, upper, confidence, method = _fit_ets(series, horizon)
+
+    recomendado = []
+    conservador = []
+    agresivo = []
+    for day in fechas_rango:
+        forecast_index = max(0, (day - history_end).days - 1)
+        if forecast_index < len(forecast):
+            model_value = float(forecast[forecast_index])
+            lower_value = float(lower[forecast_index]) if forecast_index < len(lower) else model_value * 0.90
+            upper_value = float(upper[forecast_index]) if forecast_index < len(upper) else model_value * 1.12
+        else:
+            fallback = float(_simple_average_forecast(series, 1).iloc[0])
+            model_value = fallback
+            lower_value = fallback * 0.90
+            upper_value = fallback * 1.12
+        recomendado.append(_ceil(model_value))
+        conservador.append(_ceil(lower_value))
+        agresivo.append(_ceil(upper_value))
+
+    return {
+        "recomendado": recomendado,
+        "conservador": conservador,
+        "agresivo": agresivo,
+        "confianza": confidence,
+        "metodo": method,
+    }
+
+
+def _calcular_serie(serie_df: pd.DataFrame, fechas_rango: list[date]) -> dict:
+    if PROPHET_AVAILABLE and len(serie_df) >= 60:
+        try:
+            return _calcular_producto_prophet(serie_df, fechas_rango, FESTIVOS_POLLYANAS)
+        except Exception:
+            pass
+    return _calcular_serie_ets(serie_df, fechas_rango)
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -634,13 +777,32 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
     confidence_values: list[float] = []
     special_days_in_range = _special_days(selected_days)
     range_has_special = bool(special_days_in_range)
-    product_trend_ratio_cache: dict[int, float] = {}
-
-    for (product_id, branch_id), history in histories.items():
-        if recent_pair_qty.get((product_id, branch_id), Decimal("0")) <= 0:
+    product_forecasts: dict[int, dict] = {}
+    tareas = []
+    for product_id in sorted(recent_product_ids):
+        history = product_histories.get(product_id)
+        if not history:
             continue
+        series = _series_from_history(history, end_date=history_end)
+        serie_df = pd.DataFrame({"ds": series.index, "y": series.to_numpy(dtype=float)})
+        tareas.append((product_id, serie_df, selected_days))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_calcular_serie, serie, fechas): key
+            for key, serie, fechas in tareas
+        }
+        task_series = {key: serie for key, serie, _fechas in tareas}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                product_forecasts[key] = future.result()
+            except Exception:
+                product_forecasts[key] = _calcular_serie_ets(task_series[key], selected_days)
+
+    for product_id in sorted(recent_product_ids):
         product = product_map.get(product_id)
-        if not product or branch_id not in branch_map:
+        if not product:
             continue
         receta = recipe_map.get(recipe_by_product.get(product_id))
         name = product.name or (receta.nombre if receta else "Producto")
@@ -648,27 +810,14 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         if not _is_forecastable_product(nombre=name, familia=family, receta=receta):
             continue
 
+        history = product_histories.get(product_id)
+        if not history:
+            continue
         series = _series_from_history(history, end_date=history_end)
-        history_frame = _history_dataframe(series, set(FECHAS_ESPECIALES))
-        sale_days = int((history_frame["qty"] > 0).sum())
-        special_trend_ratio = None
-        if range_has_special:
-            if product_id not in product_trend_ratio_cache:
-                product_series = _series_from_history(product_histories[product_id], end_date=history_end)
-                product_trend_ratio_cache[product_id] = _stl_trend_ratio(
-                    product_series,
-                    product_histories[product_id],
-                    trend_start=trend_start,
-                    history_end=history_end,
-                )
-            special_trend_ratio = product_trend_ratio_cache[product_id]
-        if not range_has_special and sale_days >= MIN_MODEL_OBSERVATIONS:
-            ets_lower, ets_forecast, ets_upper, ets_confidence, ets_method = _fit_ets(series, forecast_horizon)
-        else:
-            ets_lower = ets_forecast = ets_upper = np.array([], dtype=float)
-            ets_confidence = 0.0
-            ets_method = "promedio-ponderado"
-        simple_forecast = _simple_average_forecast(series, forecast_horizon)
+        forecast_result = product_forecasts.get(product_id)
+        if forecast_result is None:
+            serie_df = pd.DataFrame({"ds": series.index, "y": series.to_numpy(dtype=float)})
+            forecast_result = _calcular_serie(serie_df, selected_days)
 
         category = categoria_producto(
             point_category=product.category,
@@ -677,71 +826,21 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
             category_by_sku=category_by_sku,
         )
         price = price_by_product.get(product_id, Decimal("0.00"))
+        method = forecast_result.get("metodo") or "sin-modelo"
+        confidence = float(forecast_result.get("confianza") or 0.0)
 
         day_values = []
         total_recommended = 0
         total_conservative = 0
         total_aggressive = 0
         total_income = Decimal("0.00")
-        factor_weight = 0.0
-        confidence_sum = 0.0
-        confidence_count = 0
-        method_votes: dict[str, int] = defaultdict(int)
-
-        for day in selected_days:
-            forecast_index = max(0, (day - history_end).days - 1)
-            is_special_day = (day.month, day.day) in FECHAS_ESPECIALES
-            if is_special_day:
-                final_value, conservador, agresivo, day_factor, day_confidence, day_method = _special_day_forecast(
-                    series=series,
-                    history=history,
-                    target_day=day,
-                    trend_start=trend_start,
-                    history_end=history_end,
-                    sale_days=sale_days,
-                    trend_ratio=special_trend_ratio,
-                )
-            elif sale_days < MIN_MODEL_OBSERVATIONS:
-                final_value = _weighted_insufficient_forecast(
-                    history=history,
-                    target_day=day,
-                    trend_start=trend_start,
-                    history_end=history_end,
-                )
-                conservador = _ceil(final_value * Decimal("0.90"))
-                agresivo = _ceil(final_value * Decimal("1.12"))
-                day_factor = 1.0
-                day_confidence = min(0.55, sale_days / 60) if sale_days else 0.0
-                day_method = "promedio-ponderado"
-            elif range_has_special:
-                if forecast_index < len(simple_forecast):
-                    simple_value = Decimal(str(float(simple_forecast.iloc[forecast_index])))
-                else:
-                    simple_value = Decimal(str(float(simple_forecast.iloc[-1]))) if not simple_forecast.empty else Decimal("0")
-                final_value = max(Decimal("0"), simple_value)
-                conservador = _ceil(final_value * Decimal("0.90"))
-                agresivo = _ceil(final_value * Decimal("1.12"))
-                day_factor = 1.0
-                day_confidence = min(0.60, sale_days / 120) if sale_days else 0.0
-                day_method = "promedio-simple"
-            else:
-                if forecast_index < len(ets_forecast):
-                    model_value = Decimal(str(float(ets_forecast[forecast_index])))
-                    lower_value = float(ets_lower[forecast_index]) if forecast_index < len(ets_lower) else float(model_value) * 0.90
-                    upper_value = float(ets_upper[forecast_index]) if forecast_index < len(ets_upper) else float(model_value) * 1.12
-                else:
-                    fallback = _simple_average_forecast(series, 1).iloc[0]
-                    model_value = Decimal(str(float(fallback)))
-                    lower_value = float(fallback) * 0.90
-                    upper_value = float(fallback) * 1.12
-                final_value = max(Decimal("0"), model_value)
-                conservador = _ceil(lower_value)
-                agresivo = _ceil(upper_value)
-                day_factor = 1.0
-                day_confidence = ets_confidence
-                day_method = ets_method
-
-            recomendado = _ceil(final_value)
+        for index, day in enumerate(selected_days):
+            recomendado_values = forecast_result.get("recomendado", [0] * len(selected_days))
+            conservador_values = forecast_result.get("conservador", [0] * len(selected_days))
+            agresivo_values = forecast_result.get("agresivo", [0] * len(selected_days))
+            recomendado = int(recomendado_values[index] or 0) if index < len(recomendado_values) else 0
+            conservador = int(conservador_values[index] or 0) if index < len(conservador_values) else 0
+            agresivo = int(agresivo_values[index] or 0) if index < len(agresivo_values) else 0
             if recomendado <= 0 and conservador <= 0 and agresivo <= 0:
                 continue
 
@@ -763,20 +862,9 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
             day_totals[day]["total_piezas"] += recomendado
             day_totals[day]["total_ingreso"] += income
             product_day_rank[day][name] += recomendado
-            factor_weight += day_factor * recomendado
-            confidence_sum += day_confidence
-            confidence_count += 1
-            method_votes[day_method] += 1
 
         if total_recommended <= 0:
             continue
-        pair_factor = factor_weight / total_recommended if total_recommended else 1.0
-        pair_confidence = confidence_sum / confidence_count if confidence_count else 0.0
-        special_method_votes = {method: count for method, count in method_votes.items() if "fecha-especial" in method}
-        if special_method_votes:
-            used_method = max(special_method_votes.items(), key=lambda item: item[1])[0]
-        else:
-            used_method = max(method_votes.items(), key=lambda item: item[1])[0] if method_votes else "sin-modelo"
 
         product_payload = {
             "point_product_id": product_id,
@@ -805,42 +893,73 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
             "total_ingreso": _money(total_income),
             "pct_total": 0.0,
             "pct_del_total": Decimal("0.00"),
-            "factor_tendencia": round(pair_factor, 2),
-            "tendencia": _trend_label(pair_factor),
-            "metodo_usado": used_method,
-            "confianza": round(pair_confidence, 3),
+            "factor_tendencia": 1.0,
+            "tendencia": "estable",
+            "metodo_usado": method,
+            "confianza": round(confidence, 3),
         }
-        branch_products[branch_id][product_id] = dict(product_payload)
+        product_totals[product_id] = product_payload
 
-        aggregate = product_totals.get(product_id)
-        if aggregate is None:
-            aggregate = dict(product_payload)
-            aggregate["_factor_weight"] = pair_factor * total_recommended
-            aggregate["_confidence_sum"] = pair_confidence
-            aggregate["_pairs"] = 1
-            aggregate["_method_counts"] = {used_method: 1}
-            product_totals[product_id] = aggregate
-        else:
-            aggregate["total_piezas"] += total_recommended
-            aggregate["total_ingreso"] = _money(aggregate["total_ingreso"] + total_income)
-            aggregate["escenarios"]["conservador"] += total_conservative
-            aggregate["escenarios"]["recomendado"] += total_recommended
-            aggregate["escenarios"]["agresivo"] += total_aggressive
-            for item in day_values:
-                day_key = item["fecha_iso"]
-                day_bucket = aggregate["dias"].setdefault(
-                    day_key,
-                    {"conservador": 0, "recomendado": 0, "agresivo": 0},
-                )
-                day_bucket["conservador"] += item["conservador"]
-                day_bucket["recomendado"] += item["recomendado"]
-                day_bucket["agresivo"] += item["agresivo"]
-            aggregate["_factor_weight"] += pair_factor * total_recommended
-            aggregate["_confidence_sum"] += pair_confidence
-            aggregate["_pairs"] += 1
-            aggregate["_method_counts"][used_method] = aggregate["_method_counts"].get(used_method, 0) + 1
-        method_counts[used_method] += 1
-        confidence_values.append(pair_confidence)
+        branch_weights = {
+            branch_id: qty
+            for (pair_product_id, branch_id), qty in recent_pair_qty.items()
+            if pair_product_id == product_id and branch_id in branch_map and qty > 0
+        }
+        total_weight = sum(branch_weights.values(), Decimal("0"))
+        if total_weight > 0:
+            for branch_id, weight in branch_weights.items():
+                share = float(weight / total_weight)
+                branch_day_values = []
+                branch_total_recommended = 0
+                branch_total_conservative = 0
+                branch_total_aggressive = 0
+                branch_total_income = Decimal("0.00")
+                for item in day_values:
+                    recomendado = max(0, int(round(item["recomendado"] * share)))
+                    conservador = max(0, int(round(item["conservador"] * share)))
+                    agresivo = max(0, int(round(item["agresivo"] * share)))
+                    if recomendado <= 0 and conservador <= 0 and agresivo <= 0:
+                        continue
+                    income = _money(Decimal(recomendado) * price)
+                    branch_total_recommended += recomendado
+                    branch_total_conservative += conservador
+                    branch_total_aggressive += agresivo
+                    branch_total_income += income
+                    branch_day_values.append(
+                        {
+                            "fecha": item["fecha"],
+                            "fecha_iso": item["fecha_iso"],
+                            "fecha_label": item["fecha_label"],
+                            "conservador": conservador,
+                            "recomendado": recomendado,
+                            "agresivo": agresivo,
+                        }
+                    )
+                if branch_total_recommended <= 0:
+                    continue
+                branch_products[branch_id][product_id] = {
+                    **product_payload,
+                    "dias": {
+                        item["fecha_iso"]: {
+                            "conservador": item["conservador"],
+                            "recomendado": item["recomendado"],
+                            "agresivo": item["agresivo"],
+                        }
+                        for item in branch_day_values
+                    },
+                    "dias_lista": branch_day_values,
+                    "por_dia": {item["fecha_iso"]: item["recomendado"] for item in branch_day_values},
+                    "escenarios": {
+                        "conservador": branch_total_conservative,
+                        "recomendado": branch_total_recommended,
+                        "agresivo": branch_total_aggressive,
+                    },
+                    "total_piezas": branch_total_recommended,
+                    "total_ingreso": _money(branch_total_income),
+                }
+
+        method_counts[method] += 1
+        confidence_values.append(confidence)
 
     total_pieces = sum(product["total_piezas"] for product in product_totals.values())
     total_income = sum((product["total_ingreso"] for product in product_totals.values()), Decimal("0.00"))
@@ -913,7 +1032,9 @@ def calcular_pronostico(fecha_inicio: date, fecha_fin: date, sucursal_ids: set[i
         )
     por_sucursal.sort(key=lambda item: item["sucursal_nombre"])
 
-    if any("regresion-estacional" in method for method in method_counts):
+    if any("prophet" in method for method in method_counts):
+        main_method = "prophet"
+    elif any("regresion-estacional" in method for method in method_counts):
         main_method = "regresion-estacional"
     elif any("ets-estacional" in method for method in method_counts):
         main_method = "ets-estacional"
