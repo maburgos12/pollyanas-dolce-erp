@@ -24,6 +24,9 @@
   .forecast-trend.estable { color: #7b1a48; }
   .forecast-form-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); align-items: end; }
   .forecast-form-grid .forecast-branches { grid-column: span 1; }
+  .forecast-branch-checkboxes { border: 1px solid #d8cbd1; border-radius: 8px; max-height: 210px; overflow-y: auto; padding: 8px; background: #fff; }
+  .forecast-branch-option { display: flex; align-items: center; gap: 8px; min-height: 28px; color: #3f2d36; font-size: .92rem; line-height: 1.2; }
+  .forecast-branch-option input { flex: 0 0 auto; }
   @media (max-width: 900px) {
     .forecast-form-grid { grid-template-columns: 1fr; }
     .forecast-form-grid .forecast-branches { grid-column: auto; }
@@ -65,12 +68,15 @@
         <input class="form-control" type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin }}" required>
       </div>
       <div class="forecast-branches">
-        <label class="form-label" for="sucursales">Sucursales</label>
-        <select class="form-select" id="sucursales" name="sucursales" multiple size="{{ branches|length }}">
+        <div class="form-label">Sucursales</div>
+        <div class="forecast-branch-checkboxes" id="sucursales">
           {% for branch in branches %}
-          <option value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}selected{% endif %}>{{ branch.codigo }} · {{ branch.nombre }}</option>
+          <label class="forecast-branch-option">
+            <input type="checkbox" name="sucursales" value="{{ branch.id }}" {% if branch.id in selected_branch_ids %}checked{% endif %}>
+            <span>{{ branch.codigo }} · {{ branch.nombre }}</span>
+          </label>
           {% endfor %}
-        </select>
+        </div>
       </div>
       <div>
         <button class="btn btn-primary w-100" type="submit">Calcular pronóstico</button>
