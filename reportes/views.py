@@ -5381,6 +5381,16 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     total_derived_sales = sum((Decimal(str(line.venta_derivada_equivalente or 0)) for line in lines), Decimal("0"))
     total_direct_waste = sum((Decimal(str(line.merma_directa_enteros or 0)) for line in lines), Decimal("0"))
     total_derived_waste = sum((Decimal(str(line.merma_derivada_equivalente or 0)) for line in lines), Decimal("0"))
+    total_closing_cedis = sum((Decimal(str(line.inventario_final_point_cedis or 0)) for line in lines), Decimal("0"))
+    total_closing_sucursales = sum(
+        (Decimal(str(line.inventario_final_point_sucursales or 0)) for line in lines),
+        Decimal("0"),
+    )
+    total_closing_point = sum((Decimal(str(line.inventario_final_point_total or 0)) for line in lines), Decimal("0"))
+    total_closing_difference = sum(
+        (Decimal(str(line.diferencia_teorico_vs_point or 0)) for line in lines),
+        Decimal("0"),
+    )
 
     conversion_rows = [
         line
@@ -5426,6 +5436,7 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     notes_rows = [row.strip() for row in (closure.notes or "").splitlines() if row.strip()] if closure else []
     opening_meta = (closure.metadata or {}).get("opening_meta", {}) if closure else {}
     validation = (closure.metadata or {}).get("validation", {}) if closure else {}
+    automation_reviews = list(validation.get("automation_reviews") or []) if closure else []
     unmatched_products = list(opening_meta.get("unmatched_products") or [])[:8]
     lock_event = (closure.metadata or {}).get("lock_event", {}) if closure else {}
     lock_guard_errors: list[str] = []
@@ -5467,6 +5478,15 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
                 "detail": f"El cierre tiene {len(catalog_issue_rows)} linea(s) con derivadas o catalogo pendientes.",
             }
         )
+    for review in automation_reviews:
+        if not review.get("passed"):
+            exception_rows.append(
+                {
+                    "tone": "warning",
+                    "title": str(review.get("label") or "Revisión automática"),
+                    "detail": str(review.get("detail") or review.get("status") or "Revisar cierre automático."),
+                }
+            )
     if closure and closure.is_locked:
         exception_rows.append(
             {
@@ -5492,6 +5512,10 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         "total_derived_sales": total_derived_sales,
         "total_direct_waste": total_direct_waste,
         "total_derived_waste": total_derived_waste,
+        "total_closing_cedis": total_closing_cedis,
+        "total_closing_sucursales": total_closing_sucursales,
+        "total_closing_point": total_closing_point,
+        "total_closing_difference": total_closing_difference,
         "catalog_issue_count": len(catalog_issue_rows),
         "conversion_rows": conversion_rows[:8],
         "catalog_issue_rows": catalog_issue_rows[:8],
@@ -5501,6 +5525,7 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         "lock_event": lock_event,
         "lock_guard_errors": lock_guard_errors,
         "validation": validation,
+        "automation_reviews": automation_reviews,
         "exception_rows": exception_rows,
     }
 
@@ -5510,13 +5535,17 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
     response["Content-Disposition"] = f'attachment; filename="cierre_producto_{context["selected_month"]}.csv"'
     writer = csv.writer(response)
     writer.writerow(["Mes", context["selected_month"]])
-    writer.writerow(["Estado", context["closure"].status if context.get("closure") else ""])
-    writer.writerow(["Opening source", context["closure"].opening_source if context.get("closure") else ""])
+    writer.writerow(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
+    writer.writerow(["Fuente inventario inicial", context["closure"].get_opening_source_display() if context.get("closure") else ""])
     writer.writerow(["Inventario inicial", context["total_opening"]])
     writer.writerow(["Produccion", context["total_production"]])
     writer.writerow(["Venta equivalente", context["total_sales"]])
     writer.writerow(["Merma equivalente", context["total_waste"]])
     writer.writerow(["Inventario final", context["total_ending"]])
+    writer.writerow(["Inventario Point CEDIS", context["total_closing_cedis"]])
+    writer.writerow(["Inventario Point sucursales", context["total_closing_sucursales"]])
+    writer.writerow(["Inventario Point total", context["total_closing_point"]])
+    writer.writerow(["Diferencia teorico vs Point", context["total_closing_difference"]])
     writer.writerow([])
     writer.writerow(
         [
@@ -5528,6 +5557,11 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
             "Venta derivada",
             "Merma total",
             "Final teorico",
+            "Point CEDIS",
+            "Point sucursales",
+            "Point total",
+            "Diferencia",
+            "Estado",
             "Catalog issue",
             "Catalog issue note",
         ]
@@ -5543,6 +5577,11 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
                 line.venta_derivada_equivalente,
                 line.merma_total_equivalente,
                 line.inventario_final_teorico,
+                line.inventario_final_point_cedis,
+                line.inventario_final_point_sucursales,
+                line.inventario_final_point_total,
+                line.diferencia_teorico_vs_point,
+                line.get_estado_auditoria_display(),
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]
@@ -5555,13 +5594,17 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
     summary_ws = wb.active
     summary_ws.title = "Resumen"
     summary_ws.append(["Mes", context["selected_month"]])
-    summary_ws.append(["Estado", context["closure"].status if context.get("closure") else ""])
-    summary_ws.append(["Opening source", context["closure"].opening_source if context.get("closure") else ""])
+    summary_ws.append(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
+    summary_ws.append(["Fuente inventario inicial", context["closure"].get_opening_source_display() if context.get("closure") else ""])
     summary_ws.append(["Inventario inicial", float(context["total_opening"])])
     summary_ws.append(["Produccion", float(context["total_production"])])
     summary_ws.append(["Venta equivalente", float(context["total_sales"])])
     summary_ws.append(["Merma equivalente", float(context["total_waste"])])
     summary_ws.append(["Inventario final", float(context["total_ending"])])
+    summary_ws.append(["Inventario Point CEDIS", float(context["total_closing_cedis"])])
+    summary_ws.append(["Inventario Point sucursales", float(context["total_closing_sucursales"])])
+    summary_ws.append(["Inventario Point total", float(context["total_closing_point"])])
+    summary_ws.append(["Diferencia teorico vs Point", float(context["total_closing_difference"])])
 
     detail_ws = wb.create_sheet("Detalle")
     detail_ws.append(
@@ -5574,6 +5617,11 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
             "Venta derivada",
             "Merma total",
             "Final teorico",
+            "Point CEDIS",
+            "Point sucursales",
+            "Point total",
+            "Diferencia",
+            "Estado",
             "Catalog issue",
             "Catalog issue note",
         ]
@@ -5589,6 +5637,11 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
                 float(line.venta_derivada_equivalente or 0),
                 float(line.merma_total_equivalente or 0),
                 float(line.inventario_final_teorico or 0),
+                float(line.inventario_final_point_cedis or 0),
+                float(line.inventario_final_point_sucursales or 0),
+                float(line.inventario_final_point_total or 0),
+                float(line.diferencia_teorico_vs_point or 0),
+                line.get_estado_auditoria_display(),
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]

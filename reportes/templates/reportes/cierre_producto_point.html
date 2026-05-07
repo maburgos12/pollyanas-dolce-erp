@@ -26,7 +26,7 @@
     <div class="bi-hero-main">
       <div class="bi-kicker">Point · Conciliación mensual</div>
       <h1 class="bi-hero-title">Cierre teórico de producto terminado</h1>
-      <p class="bi-copy">Conciliación automática del mes: inventario inicial teórico + producción - venta equivalente - merma equivalente. En esta fase no entra inventario físico.</p>
+      <p class="bi-copy">Conciliación automática del mes: inventario inicial teórico + producción - venta equivalente - merma equivalente contra inventario final Point de CEDIS y sucursales.</p>
       <div class="bi-hero-highlights">
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Mes visible</div>
@@ -39,9 +39,9 @@
           <div class="bi-hero-highlight-meta">Incluye enteros + rebanadas regresadas a entero</div>
         </article>
         <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Inventario final</div>
+          <div class="bi-hero-highlight-label">Inventario final teórico</div>
           <div class="bi-hero-highlight-value">{{ total_ending|floatformat:2|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">{% if catalog_issue_count %}{{ catalog_issue_count }} alertas de catálogo{% else %}Sin alertas de catálogo{% endif %}</div>
+          <div class="bi-hero-highlight-meta">Point físico {{ total_closing_point|floatformat:2|intcomma }} · Dif {{ total_closing_difference|floatformat:2|intcomma }}</div>
         </article>
       </div>
     </div>
@@ -102,7 +102,7 @@
       <div class="bi-summary-band">
         <div class="bi-summary-chip">
           <span>Modelo</span>
-          <strong>Solo teórico</strong>
+          <strong>Teórico + Point físico</strong>
         </div>
         <div class="bi-summary-chip">
           <span>Conversión</span>
@@ -144,6 +144,11 @@
       <div class="bi-kpi-label">Inventario final teórico</div>
       <div class="bi-kpi-note">{{ total_waste|floatformat:2|intcomma }} de merma equivalente en el mes</div>
     </article>
+    <article class="bi-kpi-card">
+      <div class="bi-kpi-value {% if total_closing_difference > 0 %}danger{% elif total_closing_difference < 0 %}warning{% else %}success{% endif %}">{{ total_closing_point|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Inventario final Point</div>
+      <div class="bi-kpi-note">CEDIS {{ total_closing_cedis|floatformat:2|intcomma }} · sucursales {{ total_closing_sucursales|floatformat:2|intcomma }}</div>
+    </article>
   </section>
 
   <section class="bi-grid-feature">
@@ -184,7 +189,19 @@
           <div class="bi-insight-value">{{ total_derived_waste|floatformat:2|intcomma }}</div>
           <div class="bi-insight-meta">Merma de presentaciones derivadas llevada a la receta padre.</div>
         </article>
+        <article class="bi-insight-card">
+          <div class="bi-insight-label">Diferencia física</div>
+          <div class="bi-insight-value">{{ total_closing_difference|floatformat:2|intcomma }}</div>
+          <div class="bi-insight-meta">Teórico menos inventario final Point.</div>
+        </article>
       </div>
+      {% if automation_reviews %}
+      <div class="bi-note">
+        {% for review in automation_reviews %}
+        <div><strong>{{ review.label }}:</strong> {{ review.status }} · {{ review.detail }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% if notes_rows %}
       <div class="bi-note">
         {% for row in notes_rows %}
@@ -352,34 +369,34 @@
       <div>
         <div class="bi-kicker">Auditoría de líneas</div>
         <h2 class="bi-panel-title">Detalle del cierre mensual</h2>
-        <p class="bi-panel-copy">Cada línea representa una receta padre conciliada. El detalle deja visible la fuente equivalente por ventas y merma derivada.</p>
+        <p class="bi-panel-copy">Cada línea representa una receta padre conciliada contra el inventario final Point separado por CEDIS y sucursales.</p>
       </div>
       <div class="bi-panel-actions">
         <span class="bi-pill is-muted">{{ closure.lines.count|intcomma }} líneas</span>
       </div>
     </div>
-    <div class="table-responsive">
+    <div class="bi-closure-table-wrap">
       <table class="bi-table bi-table-compact bi-closure-table">
         <colgroup>
           <col class="col-receta-padre">
-          <col class="col-metric">
-          <col class="col-metric">
-          <col class="col-metric">
-          <col class="col-metric">
-          <col class="col-metric">
-          <col class="col-metric">
-          <col class="col-lectura">
+          <col class="col-metric"><col class="col-metric"><col class="col-metric"><col class="col-metric">
+          <col class="col-metric"><col class="col-metric"><col class="col-metric"><col class="col-metric">
+          <col class="col-metric"><col class="col-metric"><col class="col-estado">
         </colgroup>
         <thead>
           <tr>
             <th>Receta padre</th>
-            <th class="text-end">Inicial</th>
+            <th class="text-end">Inv inicial</th>
             <th class="text-end">Producción</th>
             <th class="text-end">Venta directa</th>
             <th class="text-end">Venta derivada</th>
-            <th class="text-end">Merma total</th>
-            <th class="text-end">Final teórico</th>
-            <th>Lectura</th>
+            <th class="text-end">Merma</th>
+            <th class="text-end">Inv teórico</th>
+            <th class="text-end">CEDIS</th>
+            <th class="text-end">Sucursales</th>
+            <th class="text-end">Point total</th>
+            <th class="text-end">Diferencia</th>
+            <th>Estado</th>
           </tr>
         </thead>
         <tbody>
@@ -395,17 +412,13 @@
             <td class="text-end bi-closure-metric-cell">{{ line.venta_derivada_equivalente|floatformat:2|intcomma }}</td>
             <td class="text-end bi-closure-metric-cell">{{ line.merma_total_equivalente|floatformat:2|intcomma }}</td>
             <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_teorico|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_point_cedis|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_point_sucursales|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_point_total|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell {% if line.diferencia_teorico_vs_point > 0 %}danger{% elif line.diferencia_teorico_vs_point < 0 %}warning{% endif %}">{{ line.diferencia_teorico_vs_point|floatformat:2|intcomma }}</td>
             <td class="bi-closure-reading-cell">
-              {% if line.has_catalog_issue %}
-              <span class="bi-tone warning">Catálogo</span>
-              <div class="bi-subtle">{{ line.catalog_issue_note }}</div>
-              {% elif line.venta_derivada_equivalente or line.merma_derivada_equivalente %}
-              <span class="bi-tone neutral">Con derivadas</span>
-              <div class="bi-subtle">{{ line.source_sale_rows|intcomma }} ventas · {{ line.source_waste_rows|intcomma }} mermas</div>
-              {% else %}
-              <span class="bi-tone success">Directo</span>
-              <div class="bi-subtle">{{ line.source_snapshot_count|intcomma }} snapshots · {{ line.source_production_rows|intcomma }} producciones</div>
-              {% endif %}
+              <span class="bi-tone {% if line.estado_auditoria == 'CUADRA' or line.estado_auditoria == 'CUADRA_CON_MERMA' %}success{% elif line.estado_auditoria == 'SOBRANTE_FISICO' %}warning{% else %}danger{% endif %}">{{ line.get_estado_auditoria_display }}</span>
+              <div class="bi-subtle">{{ line.detalle_auditoria }}</div>
             </td>
           </tr>
           {% endfor %}

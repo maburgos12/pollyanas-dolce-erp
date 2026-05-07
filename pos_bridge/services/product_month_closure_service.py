@@ -61,6 +61,8 @@ class _AggregateBucket:
     row_count: int = 0
     direct_value: Decimal = ZERO
     derived_value: Decimal = ZERO
+    cedis_value: Decimal = ZERO
+    sucursales_value: Decimal = ZERO
     snapshot_count: int = 0
     has_catalog_issue: bool = False
     issue_notes: set[str] | None = None
@@ -135,6 +137,13 @@ class ProductMonthClosureService:
                     merma_derivada_equivalente=row["merma_derivada_equivalente"],
                     merma_total_equivalente=row["merma_total_equivalente"],
                     inventario_final_teorico=row["inventario_final_teorico"],
+                    inventario_final_point_cedis=row["inventario_final_point_cedis"],
+                    inventario_final_point_sucursales=row["inventario_final_point_sucursales"],
+                    inventario_final_point_total=row["inventario_final_point_total"],
+                    diferencia_teorico_vs_point=row["diferencia_teorico_vs_point"],
+                    estado_auditoria=row["estado_auditoria"],
+                    detalle_auditoria=row["detalle_auditoria"],
+                    source_closing_snapshot_count=row["source_closing_snapshot_count"],
                     source_snapshot_count=row["source_snapshot_count"],
                     source_sale_rows=row["source_sale_rows"],
                     source_production_rows=row["source_production_rows"],
@@ -170,8 +179,9 @@ class ProductMonthClosureService:
         production = self._load_production(month_start=month_start, month_end=month_end)
         sales, sales_meta = self._load_sales(month_start=month_start, month_end=month_end)
         waste = self._load_waste(month_start=month_start, month_end=month_end)
+        closing_inventory, closing_meta = self._load_closing_inventory(month_end=month_end)
 
-        recipe_ids = set(openings) | set(production) | set(sales) | set(waste)
+        recipe_ids = set(openings) | set(production) | set(sales) | set(waste) | set(closing_inventory)
         if not recipe_ids:
             raise ProductMonthClosureError(f"No hay datos para construir cierre mensual {month_start:%Y-%m}.")
 
@@ -205,6 +215,10 @@ class ProductMonthClosureService:
             "sales": ZERO,
             "waste": ZERO,
             "ending": ZERO,
+            "closing_cedis": ZERO,
+            "closing_sucursales": ZERO,
+            "closing_total": ZERO,
+            "difference": ZERO,
         }
         catalog_issue_count = 0
 
@@ -216,21 +230,33 @@ class ProductMonthClosureService:
             production_bucket = production.get(receta_id, _AggregateBucket())
             sales_bucket = sales.get(receta_id, _AggregateBucket())
             waste_bucket = waste.get(receta_id, _AggregateBucket())
+            closing_bucket = closing_inventory.get(receta_id, _AggregateBucket())
             sale_total = sales_bucket.direct_value + sales_bucket.derived_value
             waste_total = waste_bucket.direct_value + waste_bucket.derived_value
             ending_total = opening_bucket.value + production_bucket.value - sale_total - waste_total
+            difference_total = ending_total - closing_bucket.value
             issue_notes = set()
             for bucket in (opening_bucket, production_bucket, sales_bucket, waste_bucket):
                 if bucket.has_catalog_issue:
                     issue_notes.update(bucket.issue_notes or set())
             if issue_notes:
                 catalog_issue_count += 1
+            audit_status, audit_detail = self._resolve_audit_status(
+                has_catalog_issue=bool(issue_notes),
+                closing_inventory_available=bool(closing_meta.get("snapshot_rows")),
+                difference=difference_total,
+                waste_total=waste_total,
+            )
 
             totals["opening"] += opening_bucket.value
             totals["production"] += production_bucket.value
             totals["sales"] += sale_total
             totals["waste"] += waste_total
             totals["ending"] += ending_total
+            totals["closing_cedis"] += closing_bucket.cedis_value
+            totals["closing_sucursales"] += closing_bucket.sucursales_value
+            totals["closing_total"] += closing_bucket.value
+            totals["difference"] += difference_total
 
             line_rows.append(
                 {
@@ -244,6 +270,13 @@ class ProductMonthClosureService:
                     "merma_derivada_equivalente": waste_bucket.derived_value,
                     "merma_total_equivalente": waste_total,
                     "inventario_final_teorico": ending_total,
+                    "inventario_final_point_cedis": closing_bucket.cedis_value,
+                    "inventario_final_point_sucursales": closing_bucket.sucursales_value,
+                    "inventario_final_point_total": closing_bucket.value,
+                    "diferencia_teorico_vs_point": difference_total,
+                    "estado_auditoria": audit_status,
+                    "detalle_auditoria": audit_detail,
+                    "source_closing_snapshot_count": closing_bucket.snapshot_count,
                     "source_snapshot_count": opening_bucket.snapshot_count,
                     "source_sale_rows": sales_bucket.row_count,
                     "source_production_rows": production_bucket.row_count,
@@ -261,6 +294,22 @@ class ProductMonthClosureService:
         validation["catalog_issue_line_count"] = catalog_issue_count
         if catalog_issue_count:
             validation["blocking_issues"].append("Existen lineas con incidencias de catalogo o derivadas.")
+        closing_validation = self._build_closing_inventory_validation(
+            closing_meta=closing_meta,
+            line_rows=line_rows,
+            totals=totals,
+        )
+        validation["warnings"] = list(
+            dict.fromkeys(list(validation.get("warnings") or []) + list(closing_validation.get("warnings") or []))
+        )
+        validation["blocking_issues"] = list(
+            dict.fromkeys(
+                list(validation.get("blocking_issues") or [])
+                + list(closing_validation.get("blocking_issues") or [])
+            )
+        )
+        validation["automation_reviews"] = closing_validation["automation_reviews"]
+        validation["closing_inventory"] = closing_validation["closing_inventory"]
         validation["lock_ready"] = not validation["blocking_issues"]
         notes = self._build_notes(
             opening_source=opening_source,
@@ -280,6 +329,7 @@ class ProductMonthClosureService:
             "metadata": {
                 "opening_meta": opening_meta,
                 "sales_meta": sales_meta,
+                "closing_inventory_meta": closing_meta,
                 "recipe_count": len(recipe_ids),
                 "validation": validation,
             },
@@ -364,6 +414,13 @@ class ProductMonthClosureService:
                     merma_derivada_equivalente=ZERO,
                     merma_total_equivalente=ZERO,
                     inventario_final_teorico=row["inventario_final_teorico"],
+                    inventario_final_point_cedis=ZERO,
+                    inventario_final_point_sucursales=ZERO,
+                    inventario_final_point_total=ZERO,
+                    diferencia_teorico_vs_point=row["inventario_final_teorico"],
+                    estado_auditoria=ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO,
+                    detalle_auditoria="Bootstrap histórico sin inventario físico Point del cierre.",
+                    source_closing_snapshot_count=0,
                     source_snapshot_count=0,
                     source_sale_rows=0,
                     source_production_rows=0,
@@ -464,11 +521,28 @@ class ProductMonthClosureService:
         )
         if previous_closure is not None:
             buckets: dict[int, _AggregateBucket] = {}
-            for line in previous_closure.lines.select_related("receta_padre").all():
-                buckets[line.receta_padre_id] = _AggregateBucket(value=Decimal(str(line.inventario_final_teorico or 0)))
             previous_metadata = dict(previous_closure.metadata or {})
             previous_opening_meta = dict(previous_metadata.get("opening_meta") or {})
             previous_validation = dict(previous_metadata.get("validation") or {})
+            previous_closing_inventory = dict(previous_validation.get("closing_inventory") or {})
+            use_physical_closing = bool(int(previous_closing_inventory.get("snapshot_rows") or 0) > 0)
+            for line in previous_closure.lines.select_related("receta_padre").all():
+                if use_physical_closing:
+                    opening_value = Decimal(str(line.inventario_final_point_total or 0))
+                    cedis_value = Decimal(str(line.inventario_final_point_cedis or 0))
+                    sucursales_value = Decimal(str(line.inventario_final_point_sucursales or 0))
+                    snapshot_count = int(line.source_closing_snapshot_count or 0)
+                else:
+                    opening_value = Decimal(str(line.inventario_final_teorico or 0))
+                    cedis_value = ZERO
+                    sucursales_value = ZERO
+                    snapshot_count = 0
+                buckets[line.receta_padre_id] = _AggregateBucket(
+                    value=opening_value,
+                    cedis_value=cedis_value,
+                    sucursales_value=sucursales_value,
+                    snapshot_count=snapshot_count,
+                )
             bootstrap_seed = dict(previous_metadata.get("bootstrap_seed") or {})
             unmatched_products = list(previous_opening_meta.get("unmatched_products") or [])
             if not unmatched_products:
@@ -484,6 +558,7 @@ class ProductMonthClosureService:
                     "upstream_validation_blocking_issues": list(previous_validation.get("blocking_issues") or [])[:20],
                     "bootstrap_seeded": bool(bootstrap_seed.get("is_seed")),
                     "bootstrap_source_label": bootstrap_seed.get("source_label") or "",
+                    "previous_closure_opening_basis": "physical_point_closing" if use_physical_closing else "theoretical_closing",
                 },
             )
 
@@ -585,6 +660,120 @@ class ProductMonthClosureService:
             "snapshot_days_from_target": days_from_target,
             "unmatched_products": unmatched_products[:50],
         }
+
+    def _load_closing_inventory(self, *, month_end: date):
+        snapshot_ids, snapshot_meta = self._latest_snapshot_ids_near_date(snapshot_date=month_end)
+        if not snapshot_ids:
+            snapshot_meta["warnings"] = ["No existe snapshot Point para inventario final del mes."]
+            return {}, snapshot_meta
+
+        snapshots = (
+            PointInventorySnapshot.objects.select_related("product", "branch", "branch__erp_branch")
+            .filter(id__in=snapshot_ids)
+            .order_by("product__name", "branch__name", "id")
+        )
+
+        buckets: dict[int, _AggregateBucket] = {}
+        unmatched_products: list[str] = []
+        for snap in snapshots:
+            receta = self.matcher.resolve_receta(codigo_point=snap.product.sku, point_name=snap.product.name)
+            if receta is None:
+                unmatched_products.append(snap.product.name)
+                continue
+            parent_receta, qty, issue_note, is_derived = self._canonical_recipe_quantity(
+                receta=receta,
+                quantity=Decimal(str(snap.stock or 0)),
+            )
+            if parent_receta is None:
+                continue
+            bucket = buckets.setdefault(parent_receta.id, _AggregateBucket())
+            bucket.value += qty
+            bucket.snapshot_count += 1
+            if self._is_cedis_inventory_scope(snap):
+                bucket.cedis_value += qty
+            else:
+                bucket.sucursales_value += qty
+            if issue_note:
+                bucket.has_catalog_issue = True
+                bucket.issue_notes.add(issue_note)
+            if is_derived:
+                bucket.derived_value += qty
+            else:
+                bucket.direct_value += qty
+
+        snapshot_meta["unmatched_products"] = unmatched_products[:50]
+        snapshot_meta["snapshot_rows"] = len(snapshot_ids)
+        snapshot_meta["matched_recipe_count"] = len(buckets)
+        return buckets, snapshot_meta
+
+    def _latest_snapshot_ids_near_date(self, *, snapshot_date: date):
+        tolerance_days = getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", self.DEFAULT_SNAPSHOT_TOLERANCE_DAYS)
+        target_start = timezone.make_aware(datetime.combine(snapshot_date, time.min), timezone.get_current_timezone())
+        target_end = timezone.make_aware(datetime.combine(snapshot_date, time.max), timezone.get_current_timezone())
+        before_at = (
+            PointInventorySnapshot.objects.filter(captured_at__lte=target_end)
+            .order_by("-captured_at", "-id")
+            .values_list("captured_at", flat=True)
+            .first()
+        )
+        after_at = (
+            PointInventorySnapshot.objects.filter(captured_at__gte=target_start)
+            .order_by("captured_at", "id")
+            .values_list("captured_at", flat=True)
+            .first()
+        )
+        candidates = [value for value in [before_at, after_at] if value is not None]
+        if not candidates:
+            return [], {
+                "snapshot_date": snapshot_date.isoformat(),
+                "snapshot_effective_date": "",
+                "snapshot_tolerance_days": int(tolerance_days),
+                "snapshot_missing_exact_day": True,
+                "snapshot_within_tolerance": False,
+                "snapshot_fallback_used": False,
+                "snapshot_days_from_target": None,
+                "snapshot_rows": 0,
+            }
+
+        selected_at = min(candidates, key=lambda value: abs(value - target_start))
+        effective_date = selected_at.date()
+        day_start = timezone.make_aware(datetime.combine(effective_date, time.min), timezone.get_current_timezone())
+        day_end = timezone.make_aware(datetime.combine(effective_date, time.max), timezone.get_current_timezone())
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT DISTINCT ON (branch_id, product_id) id
+                FROM pos_bridge_inventory_snapshots
+                WHERE captured_at >= %s AND captured_at <= %s
+                ORDER BY branch_id, product_id, captured_at DESC, id DESC
+                """,
+                [day_start, day_end],
+            )
+            snapshot_ids = [row[0] for row in cursor.fetchall()]
+        days_from_target = abs((effective_date - snapshot_date).days)
+        return snapshot_ids, {
+            "snapshot_date": snapshot_date.isoformat(),
+            "snapshot_effective_date": effective_date.isoformat(),
+            "snapshot_tolerance_days": int(tolerance_days),
+            "snapshot_missing_exact_day": effective_date != snapshot_date,
+            "snapshot_within_tolerance": bool(days_from_target <= int(tolerance_days)),
+            "snapshot_fallback_used": effective_date != snapshot_date,
+            "snapshot_days_from_target": days_from_target,
+            "snapshot_rows": len(snapshot_ids),
+        }
+
+    def _is_cedis_inventory_scope(self, snapshot: PointInventorySnapshot) -> bool:
+        branch = snapshot.branch
+        erp_branch = getattr(branch, "erp_branch", None)
+        code = str(getattr(erp_branch, "codigo", "") or "").strip().upper()
+        name = normalizar_nombre(getattr(branch, "name", "") or "")
+        if code in {"CEDIS", "DEVOLUCIONES", "ALMACEN"}:
+            return True
+        if "cedis" in name or "produccion" in name or "devolucion" in name or "almacen" in name:
+            return True
+        if erp_branch is not None and not bool(getattr(erp_branch, "activa", True)):
+            return True
+        return False
 
     def _load_production(self, *, month_start: date, month_end: date):
         buckets: dict[int, _AggregateBucket] = {}
@@ -805,6 +994,114 @@ class ProductMonthClosureService:
         parent_receta, qty, issue_note, is_derived, _source = resolve_closure_recipe_quantity(receta, quantity)
         return parent_receta, qty, issue_note, is_derived
 
+    def _resolve_audit_status(
+        self,
+        *,
+        has_catalog_issue: bool,
+        closing_inventory_available: bool,
+        difference: Decimal,
+        waste_total: Decimal,
+    ) -> tuple[str, str]:
+        tolerance = Decimal("0.01")
+        if has_catalog_issue:
+            return (
+                ProductoMonthClosureLine.AUDIT_STATUS_REVISAR_CATALOGO,
+                "La línea tiene una incidencia de catálogo u homologación.",
+            )
+        if not closing_inventory_available:
+            return (
+                ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO,
+                "No hay snapshot Point de inventario final para comparar contra el teórico.",
+            )
+        if abs(difference) <= tolerance:
+            if Decimal(str(waste_total or 0)) > tolerance:
+                return (
+                    ProductoMonthClosureLine.AUDIT_STATUS_CUADRA_CON_MERMA,
+                    "El cierre cuadra después de descontar la merma registrada.",
+                )
+            return (
+                ProductoMonthClosureLine.AUDIT_STATUS_CUADRA,
+                "El inventario teórico coincide con el inventario final Point.",
+            )
+        if difference < ZERO:
+            return (
+                ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
+                "Point reporta más inventario físico que el inventario teórico.",
+            )
+        return (
+            ProductoMonthClosureLine.AUDIT_STATUS_FALTANTE_NO_EXPLICADO,
+            "El inventario teórico es mayor al inventario físico Point.",
+        )
+
+    def _build_closing_inventory_validation(
+        self,
+        *,
+        closing_meta: dict,
+        line_rows: list[dict[str, object]],
+        totals: dict[str, Decimal],
+    ) -> dict[str, object]:
+        warnings: list[str] = []
+        blocking_issues: list[str] = []
+        snapshot_rows = int(closing_meta.get("snapshot_rows") or 0)
+        snapshot_within_tolerance = bool(closing_meta.get("snapshot_within_tolerance"))
+        matched_recipe_count = int(closing_meta.get("matched_recipe_count") or 0)
+        unmatched_products = list(closing_meta.get("unmatched_products") or [])
+        total_check = totals["closing_cedis"] + totals["closing_sucursales"]
+        inventory_math_ok = abs(total_check - totals["closing_total"]) <= Decimal("0.01")
+
+        if snapshot_rows <= 0:
+            blocking_issues.append("No existe inventario final Point para auditar el cierre mensual.")
+        elif not snapshot_within_tolerance:
+            blocking_issues.append("El snapshot de inventario final Point esta fuera de tolerancia.")
+        if snapshot_rows > 0 and matched_recipe_count <= 0:
+            blocking_issues.append("El inventario final Point no pudo homologarse a recetas ERP.")
+        if unmatched_products:
+            warnings.append("El inventario final Point trae productos sin homologacion Point -> ERP.")
+        if not inventory_math_ok:
+            blocking_issues.append("La suma CEDIS + sucursales no coincide con el total Point del cierre.")
+
+        review_rows = [
+            {
+                "label": "Inventario Point disponible",
+                "status": "Correcto" if snapshot_rows > 0 and snapshot_within_tolerance else "Revisar",
+                "passed": bool(snapshot_rows > 0 and snapshot_within_tolerance),
+                "detail": (
+                    f"{snapshot_rows} snapshots; fecha efectiva "
+                    f"{closing_meta.get('snapshot_effective_date') or 'sin fecha'}."
+                ),
+            },
+            {
+                "label": "Homologación de productos",
+                "status": "Correcto" if matched_recipe_count > 0 else "Revisar",
+                "passed": bool(matched_recipe_count > 0),
+                "detail": f"{matched_recipe_count} recetas homologadas en el inventario final.",
+            },
+            {
+                "label": "Consistencia matemática",
+                "status": "Correcto" if inventory_math_ok and line_rows else "Revisar",
+                "passed": bool(inventory_math_ok and line_rows),
+                "detail": (
+                    f"CEDIS + sucursales = {total_check}; total Point = {totals['closing_total']}."
+                ),
+            },
+        ]
+
+        return {
+            "warnings": list(dict.fromkeys(warnings)),
+            "blocking_issues": list(dict.fromkeys(blocking_issues)),
+            "automation_reviews": review_rows,
+            "closing_inventory": {
+                "snapshot_rows": snapshot_rows,
+                "matched_recipe_count": matched_recipe_count,
+                "unmatched_products_count": len(unmatched_products),
+                "snapshot_effective_date": closing_meta.get("snapshot_effective_date") or "",
+                "closing_cedis": str(totals["closing_cedis"]),
+                "closing_sucursales": str(totals["closing_sucursales"]),
+                "closing_total": str(totals["closing_total"]),
+                "difference": str(totals["difference"]),
+            },
+        }
+
     def _build_validation_summary(self, *, opening_meta: dict) -> dict[str, object]:
         unmatched_products = list(opening_meta.get("unmatched_products") or [])
         snapshot_fallback_used = bool(opening_meta.get("snapshot_fallback_used"))
@@ -819,6 +1116,8 @@ class ProductMonthClosureService:
             warnings.append("El opening uso snapshot previo dentro de tolerancia.")
         if bootstrap_seeded:
             warnings.append("El opening proviene de un bootstrap historico aprobado.")
+        if opening_meta.get("previous_closure_opening_basis") == "theoretical_closing":
+            warnings.append("El opening heredado usa cierre teorico previo porque no habia inventario fisico Point.")
         if unmatched_products:
             blocking_issues.append("Existen productos del opening sin homologacion Point -> ERP.")
         if snapshot_missing_exact_day and not snapshot_within_tolerance:
@@ -929,6 +1228,9 @@ class ProductMonthClosureService:
             message += " La venta usa PointDailySale oficial por sucursal y dia."
         elif (sales_meta or {}).get("mode") == "bridge_history":
             message += " La venta usa VentaHistorica POINT_BRIDGE_SALES."
+        closing_inventory = dict(validation.get("closing_inventory") or {})
+        if closing_inventory.get("snapshot_effective_date"):
+            message += f" El inventario final Point usa snapshot efectivo {closing_inventory['snapshot_effective_date']}."
         warnings = list((sales_meta or {}).get("warnings") or [])
         if warnings:
             message += f" {' '.join(warnings)}"
