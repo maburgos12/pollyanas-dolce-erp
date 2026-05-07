@@ -173,6 +173,10 @@ class Repartidor(models.Model):
     )
     telefono = models.CharField(max_length=30, blank=True, default="")
     sucursal = models.ForeignKey(Sucursal, on_delete=models.PROTECT, related_name="repartidores_logistica")
+    numero_licencia = models.CharField(max_length=60, blank=True, default="")
+    licencia_expedicion = models.DateField(null=True, blank=True)
+    licencia_expiracion = models.DateField(null=True, blank=True)
+    archivo_licencia = models.FileField(upload_to="licencias_repartidores/", null=True, blank=True)
 
     class Meta:
         ordering = ["user__username"]

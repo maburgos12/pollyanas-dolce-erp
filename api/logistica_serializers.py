@@ -119,6 +119,10 @@ class LogisticaRepartidorSerializer(serializers.ModelSerializer):
             "sucursal_codigo",
             "sucursal_nombre",
             "unidad_asignada",
+            "numero_licencia",
+            "licencia_expedicion",
+            "licencia_expiracion",
+            "archivo_licencia",
         ]
         read_only_fields = fields
 
