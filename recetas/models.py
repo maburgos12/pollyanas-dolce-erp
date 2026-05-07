@@ -962,6 +962,21 @@ class ProductoMonthClosure(models.Model):
 
 
 class ProductoMonthClosureLine(models.Model):
+    AUDIT_STATUS_CUADRA = "CUADRA"
+    AUDIT_STATUS_CUADRA_CON_MERMA = "CUADRA_CON_MERMA"
+    AUDIT_STATUS_SOBRANTE_FISICO = "SOBRANTE_FISICO"
+    AUDIT_STATUS_FALTANTE_NO_EXPLICADO = "FALTANTE_NO_EXPLICADO"
+    AUDIT_STATUS_SIN_INVENTARIO_FISICO = "SIN_INVENTARIO_FISICO"
+    AUDIT_STATUS_REVISAR_CATALOGO = "REVISAR_CATALOGO"
+    AUDIT_STATUS_CHOICES = [
+        (AUDIT_STATUS_CUADRA, "Cuadra"),
+        (AUDIT_STATUS_CUADRA_CON_MERMA, "Cuadra con merma"),
+        (AUDIT_STATUS_SOBRANTE_FISICO, "Sobrante físico"),
+        (AUDIT_STATUS_FALTANTE_NO_EXPLICADO, "Faltante no explicado"),
+        (AUDIT_STATUS_SIN_INVENTARIO_FISICO, "Sin inventario físico"),
+        (AUDIT_STATUS_REVISAR_CATALOGO, "Revisar catálogo"),
+    ]
+
     closure = models.ForeignKey(ProductoMonthClosure, related_name="lines", on_delete=models.CASCADE)
     receta_padre = models.ForeignKey(Receta, related_name="product_month_closure_lines", on_delete=models.PROTECT)
     inventario_inicial_teorico = models.DecimalField(max_digits=18, decimal_places=6, default=0)
@@ -973,6 +988,18 @@ class ProductoMonthClosureLine(models.Model):
     merma_derivada_equivalente = models.DecimalField(max_digits=18, decimal_places=6, default=0)
     merma_total_equivalente = models.DecimalField(max_digits=18, decimal_places=6, default=0)
     inventario_final_teorico = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    inventario_final_point_cedis = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    inventario_final_point_sucursales = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    inventario_final_point_total = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    diferencia_teorico_vs_point = models.DecimalField(max_digits=18, decimal_places=6, default=0)
+    estado_auditoria = models.CharField(
+        max_length=32,
+        choices=AUDIT_STATUS_CHOICES,
+        default=AUDIT_STATUS_SIN_INVENTARIO_FISICO,
+        db_index=True,
+    )
+    detalle_auditoria = models.CharField(max_length=255, blank=True, default="")
+    source_closing_snapshot_count = models.PositiveIntegerField(default=0)
     source_snapshot_count = models.PositiveIntegerField(default=0)
     source_sale_rows = models.PositiveIntegerField(default=0)
     source_production_rows = models.PositiveIntegerField(default=0)

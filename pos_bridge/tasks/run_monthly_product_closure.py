@@ -28,18 +28,29 @@ def run_monthly_product_closure(
     triggered_by=None,
     rebuild: bool = False,
     lock_after_build: bool = False,
+    sync_inventory_before_build: bool = False,
 ) -> dict[str, object]:
     target_month = _resolve_target_month(month=month, anchor_date=anchor_date)
+    inventory_sync_result = None
+    if sync_inventory_before_build:
+        from pos_bridge.tasks.run_inventory_sync import run_inventory_sync
+
+        inventory_sync_result = run_inventory_sync(triggered_by=triggered_by)
+
     existing = ProductoMonthClosure.objects.filter(month_start=target_month).order_by("-id").first()
     if existing is not None and not rebuild:
         validation = dict((existing.metadata or {}).get("validation") or {})
         return {
             "action": "skipped_existing",
+            "action_label": "Cierre existente",
             "month": target_month.strftime("%Y-%m"),
             "closure_id": existing.id,
             "closure_status": existing.status,
+            "closure_status_label": existing.get_status_display(),
             "is_locked": existing.is_locked,
             "lock_ready": bool(validation.get("lock_ready")),
+            "inventory_sync": inventory_sync_result,
+            "automation_reviews": list(validation.get("automation_reviews") or []),
         }
 
     closure = ProductMonthClosureService().build(
@@ -53,9 +64,13 @@ def run_monthly_product_closure(
     validation = dict((closure.metadata or {}).get("validation") or {})
     return {
         "action": "built",
+        "action_label": "Cierre construido",
         "month": target_month.strftime("%Y-%m"),
         "closure_id": closure.id,
         "closure_status": closure.status,
+        "closure_status_label": closure.get_status_display(),
         "is_locked": closure.is_locked,
         "lock_ready": bool(validation.get("lock_ready")),
+        "inventory_sync": inventory_sync_result,
+        "automation_reviews": list(validation.get("automation_reviews") or []),
     }

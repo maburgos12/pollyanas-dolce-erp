@@ -200,6 +200,7 @@ def task_monthly_product_closure(
     month: str | None = None,
     rebuild: bool = False,
     lock_after_build: bool = False,
+    sync_inventory_before_build: bool = False,
     triggered_by_id: int | None = None,
 ):
     user = _resolve_user(triggered_by_id)
@@ -208,6 +209,7 @@ def task_monthly_product_closure(
         triggered_by=user,
         rebuild=rebuild,
         lock_after_build=lock_after_build,
+        sync_inventory_before_build=sync_inventory_before_build,
     )
 
 
