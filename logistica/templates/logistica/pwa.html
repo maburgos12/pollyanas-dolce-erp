@@ -1380,7 +1380,7 @@
         } else if (draft.step === 2) {
           const ubicacionLista = isGeoReady(draft);
           body = `
-            <div class="${ubicacionLista || licenciaBloquea ? "" : "gps-locked"}">
+            <div class="${ubicacionLista ? "" : "gps-locked"}">
               <h1 class="screen-title">Detalles</h1>
               ${progressDots(2)}
               <div class="severity-row">
@@ -1865,7 +1865,7 @@
           const totalPuntosDiarios = Object.keys(draft.inspeccionDiariaChecks).length;
           const marcadosDiarios = totalPuntosDiarios - pendientesDiarios;
           body = `
-            <div class="${ubicacionLista ? "" : "gps-locked"}">
+            <div class="${ubicacionLista || licenciaBloquea ? "" : "gps-locked"}">
               ${licenciaBanner()}
               ${licenciaBloquea ? `
                 <button class="secondary-btn" type="button" onclick="showScreen('dashboard')">Volver al panel principal</button>
@@ -2156,7 +2156,7 @@
                     ℹ️ Esta unidad ya fue revisada por ${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")} el ${escapeHtml(draft.inspeccionDiariaCheck.fecha || "hoy")} a las ${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}. Si detectaste algo nuevo puedes registrar un reporte independiente.
                   </div>
                   <div class="confirm-actions">
-                    <button class="primary-btn" type="button" onclick="showScreen('nuevo_reporte')">Registrar reporte</button>
+                    <button class="primary-btn" type="button" onclick="startNuevoReporte()">Registrar reporte</button>
                     <button class="secondary-btn" type="button" onclick="state.inspeccionDraft.verFormularioCompleto = true; renderInspeccionVehiculo()">Ver de todas formas</button>
                   </div>
                 ` : ""}
