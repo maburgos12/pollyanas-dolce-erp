@@ -103,6 +103,9 @@ class LogisticaUnidadSerializer(serializers.ModelSerializer):
 
 class LogisticaRepartidorSerializer(serializers.ModelSerializer):
     nombre = serializers.SerializerMethodField()
+    licencia_estado = serializers.SerializerMethodField()
+    licencia_dias_para_vencer = serializers.SerializerMethodField()
+    licencia_mensaje = serializers.SerializerMethodField()
     username = serializers.CharField(source="user.username", read_only=True)
     unidad_asignada = LogisticaUnidadSerializer(read_only=True)
     sucursal_codigo = serializers.CharField(source="sucursal.codigo", read_only=True)
@@ -123,11 +126,43 @@ class LogisticaRepartidorSerializer(serializers.ModelSerializer):
             "licencia_expedicion",
             "licencia_expiracion",
             "archivo_licencia",
+            "licencia_estado",
+            "licencia_dias_para_vencer",
+            "licencia_mensaje",
         ]
         read_only_fields = fields
 
     def get_nombre(self, obj):
         return obj.user.get_full_name() or obj.user.username
+
+    def _licencia_delta(self, obj):
+        if not obj.licencia_expiracion:
+            return None
+        return (obj.licencia_expiracion - timezone.localdate()).days
+
+    def get_licencia_estado(self, obj):
+        dias = self._licencia_delta(obj)
+        if dias is None:
+            return "sin_datos"
+        if dias < 0:
+            return "vencida"
+        if dias <= 30:
+            return "por_vencer"
+        return "vigente"
+
+    def get_licencia_dias_para_vencer(self, obj):
+        return self._licencia_delta(obj)
+
+    def get_licencia_mensaje(self, obj):
+        estado = self.get_licencia_estado(obj)
+        dias = self._licencia_delta(obj)
+        if estado == "sin_datos":
+            return "Licencia no registrada."
+        if estado == "vencida":
+            return "Licencia vencida."
+        if estado == "por_vencer":
+            return f"Tu licencia vence en {dias} día{'s' if dias != 1 else ''}."
+        return "Licencia vigente."
 
 
 class LogisticaReporteSerializer(serializers.ModelSerializer):
