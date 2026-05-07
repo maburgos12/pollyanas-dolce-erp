@@ -153,6 +153,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         production_map, production_source = self._production_map(period, sucursal_id)
         merma_map, merma_cost_map, merma_source = self._merma_maps(period, sucursal_id)
         closure_map = self._closure_map(period)
+        recipe_ids.update(recipe_id for recipe_id, value in production_map.items() if value)
 
         if not sucursal_id and sales_source == "sin_datos" and closure_map["vendido"]:
             sales_map = closure_map["vendido"]
