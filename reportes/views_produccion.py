@@ -277,7 +277,28 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         if sucursal_id:
             facts = facts.filter(branch__erp_branch_id=sucursal_id)
         if facts.exists():
-            return _aggregate_by_recipe(facts, "total_cantidad"), "PointSalesDailyProductFact"
+            sales_map = _aggregate_by_recipe(facts, "total_cantidad")
+            source = "PointSalesDailyProductFact"
+            if not sucursal_id:
+                fpd_rows = (
+                    FactProduccionDiaria.objects.filter(
+                        fecha__gte=period.month_start,
+                        fecha__lte=period.month_end,
+                        receta_id__isnull=False,
+                        vendido__gt=0,
+                    )
+                    .values("receta_id")
+                    .annotate(total=Sum("vendido"))
+                )
+                filled = 0
+                for row in fpd_rows:
+                    receta_id = int(row["receta_id"])
+                    if receta_id not in sales_map or sales_map[receta_id] == ZERO:
+                        sales_map[receta_id] = _decimal(row["total"])
+                        filled += 1
+                if filled:
+                    source = f"{source}+FactProduccionDiaria({filled})"
+            return sales_map, source
 
         sales = PointDailySale.objects.filter(
             sale_date__gte=period.month_start,
