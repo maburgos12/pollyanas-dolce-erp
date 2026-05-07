@@ -73,9 +73,24 @@ class UnidadAdmin(admin.ModelAdmin):
 
 @admin.register(Repartidor)
 class RepartidorAdmin(admin.ModelAdmin):
-    list_display = ("user", "telefono", "sucursal", "unidad_asignada")
-    list_filter = ("sucursal", "unidad_asignada")
-    search_fields = ("user__username", "user__first_name", "user__last_name", "telefono", "unidad_asignada__codigo")
+    list_display = (
+        "user",
+        "telefono",
+        "sucursal",
+        "unidad_asignada",
+        "numero_licencia",
+        "licencia_expedicion",
+        "licencia_expiracion",
+    )
+    list_filter = ("sucursal", "unidad_asignada", "licencia_expiracion")
+    search_fields = (
+        "user__username",
+        "user__first_name",
+        "user__last_name",
+        "telefono",
+        "numero_licencia",
+        "unidad_asignada__codigo",
+    )
     autocomplete_fields = ("user", "unidad_asignada", "sucursal")
 
 
