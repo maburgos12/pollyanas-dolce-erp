@@ -17,7 +17,7 @@
       <div>
         <div class="executive-eyebrow">Reportes</div>
         <h1 class="card-header">Producido vs Vendido</h1>
-        <p class="executive-section-copy">Comparativo operativo por receta y familia para {{ selected_period_label }}.</p>
+        <p class="executive-section-copy">Comparativo operativo por receta y categoría para {{ selected_period_label }}.</p>
       </div>
       <button class="btn btn-secondary" type="button" id="export-production-csv">Exportar CSV</button>
     </div>
@@ -42,11 +42,11 @@
         </select>
       </div>
       <div>
-        <label class="form-label" for="familia">Familia</label>
-        <select class="form-select" id="familia" name="familia">
+        <label class="form-label" for="categoria">Categoría</label>
+        <select class="form-select" id="categoria" name="categoria">
           <option value="">Todas</option>
-          {% for familia in familias %}
-          <option value="{{ familia }}" {% if selected_familia == familia %}selected{% endif %}>{{ familia }}</option>
+          {% for categoria in categorias %}
+          <option value="{{ categoria }}" {% if selected_categoria == categoria %}selected{% endif %}>{{ categoria }}</option>
           {% endfor %}
         </select>
       </div>
@@ -116,20 +116,20 @@
 
   <section class="card">
     <div class="section-header">
-      <h2 class="section-header-title">Detalle por familia y receta</h2>
+      <h2 class="section-header-title">Detalle por categoría y receta</h2>
     </div>
     {% if groups %}
     <div class="table-responsive production-table-wrap">
       <table class="table" id="production-table">
         <colgroup>
           <col><!-- RECETA: ancho via CSS col:first-child -->
-          <col><!-- FAMILIA -->
+          <col><!-- CATEGORÍA -->
           <col><col><col><col><col><col><col><col><col>
         </colgroup>
         <thead>
           <tr>
             <th>Receta</th>
-            <th>Familia</th>
+            <th>Categoría</th>
             <th class="text-end">Vendido</th>
             <th class="text-end">Producido</th>
             <th class="text-end">Dif (Prod-Vend)</th>
@@ -144,7 +144,7 @@
         <tbody>
           {% for group in groups %}
           <tr class="production-subtotal-row">
-            <td colspan="2">{{ group.familia }}</td>
+            <td colspan="2">{{ group.categoria }}</td>
             <td class="text-end">{{ group.total.vendido|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ group.total.producido|floatformat:3|intcomma }}</td>
             <td class="text-end"><span class="{% if group.total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.dif|floatformat:3|intcomma }}</span></td>
@@ -168,7 +168,7 @@
           {% for row in group.rows %}
           <tr>
             <td>{{ row.receta }}</td>
-            <td>{{ row.familia }}</td>
+            <td>{{ row.categoria }}</td>
             <td class="text-end">{% if row.vendido is None %}<span class="muted">—</span>{% else %}{{ row.vendido|floatformat:3|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.producido is None %}<span class="muted">—</span>{% else %}{{ row.producido|floatformat:3|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.dif is None %}<span class="muted">—</span>{% else %}<span class="{% if row.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.dif|floatformat:3|intcomma }}</span>{% endif %}</td>

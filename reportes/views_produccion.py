@@ -25,6 +25,31 @@ from reportes.models import FactProduccionDiaria
 
 ZERO = Decimal("0")
 
+CATEGORY_ORDER = [
+    "Pastel Mini",
+    "Pastel Chico",
+    "Pastel Mediano",
+    "Pastel Grande",
+    "Pastel Individual",
+    "Individual",
+    "Media Plancha",
+    "Rosca",
+    "Rebanada",
+    "Pay Mediano",
+    "Pay Grande",
+    "Vaso Preparado Mini",
+    "Vasos Mini",
+    "Vasos Grande",
+    "Vasos Preparados Grande",
+    "Bollo",
+    "Cheesecake",
+    "Empanadas",
+    "Galletas",
+    "Otros postres",
+    "Café",
+]
+CATEGORY_ORDER_INDEX = {name.lower(): index for index, name in enumerate(CATEGORY_ORDER)}
+
 
 @dataclass(frozen=True)
 class PeriodSelection:
@@ -78,6 +103,15 @@ def _aggregate_by_recipe(queryset, field_name: str, recipe_field: str = "receta_
     }
 
 
+def _category_label(value: str | None) -> str:
+    return (value or "").strip() or "Sin categoría"
+
+
+def _category_sort_key(value: str | None) -> tuple[int, str]:
+    label = _category_label(value)
+    return (CATEGORY_ORDER_INDEX.get(label.lower(), len(CATEGORY_ORDER)), label.lower())
+
+
 def _first_available_date() -> dict[str, date | None]:
     return {
         "ventas": PointSalesDailyProductFact.objects.aggregate(min_date=Min("sale_date"))["min_date"],
@@ -112,7 +146,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
     def _build_context(self, request: HttpRequest) -> dict[str, Any]:
         period = _parse_period(request.GET.get("periodo") or request.GET.get("period"))
         sucursal_id = None  # Producción es centralizada en CEDIS; no aplica filtro por sucursal
-        familia = (request.GET.get("familia") or "").strip()
+        categoria = (request.GET.get("categoria") or request.GET.get("familia") or "").strip()
 
         sales_map, sales_source = self._sales_map(period, sucursal_id)
         recipe_ids = set(sales_map)
@@ -133,10 +167,13 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         recipes_qs = Receta.objects.filter(
             id__in=recipe_ids,
             tipo=Receta.TIPO_PRODUCTO_FINAL,
-        ).order_by("familia", "nombre")
-        if familia:
-            recipes_qs = recipes_qs.filter(familia=familia)
-        recipes = list(recipes_qs)
+        )
+        if categoria:
+            recipes_qs = recipes_qs.filter(categoria=categoria)
+        recipes = sorted(
+            list(recipes_qs),
+            key=lambda recipe: (_category_sort_key(recipe.categoria), recipe.nombre.lower()),
+        )
 
         if not sucursal_id and production_source == "sin_datos" and closure_map["producido"]:
             production_map = closure_map["producido"]
@@ -181,8 +218,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "selected_period": period.value,
             "selected_period_label": period.label,
             "periodos": periodos,
-            "selected_familia": familia,
-            "familias": self._families(),
+            "selected_categoria": categoria,
+            "selected_familia": categoria,
+            "categorias": self._categories(),
+            "familias": self._categories(),
             "groups": groups,
             "grand_total": grand_total,
             "conversion_map": conversion_map,
@@ -323,11 +362,12 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         pct_merma = None
         if merma_reportada is not None and vendido and vendido > ZERO:
             pct_merma = (merma_reportada / vendido) * Decimal("100")
-        familia = (recipe.familia or "").strip() or "Sin familia"
+        categoria = _category_label(recipe.categoria)
         row = {
             "receta_id": recipe.id,
             "receta": recipe.nombre,
-            "familia": familia,
+            "categoria": categoria,
+            "familia": categoria,
             "vendido": vendido,
             "producido": producido,
             "dif": merma_calculada,
@@ -346,14 +386,21 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
     def _group_rows(self, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
-            grouped[row["familia"]].append(row)
+            grouped[row["categoria"]].append(row)
 
         groups = []
         grand_rows: list[dict[str, Any]] = []
-        for family in sorted(grouped):
-            family_rows = grouped[family]
+        for category in sorted(grouped, key=_category_sort_key):
+            family_rows = grouped[category]
             grand_rows.extend(family_rows)
-            groups.append({"familia": family, "rows": family_rows, "total": self._totals(family_rows)})
+            groups.append(
+                {
+                    "categoria": category,
+                    "familia": category,
+                    "rows": family_rows,
+                    "total": self._totals(family_rows),
+                }
+            )
         return groups, self._totals(grand_rows)
 
     def _totals(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -400,14 +447,17 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             banners.append("Merma: sin registros consolidados para este periodo.")
         return banners
 
-    def _families(self) -> list[str]:
-        return list(
+    def _categories(self) -> list[str]:
+        values = (
             Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
-            .exclude(familia="")
-            .order_by("familia")
-            .values_list("familia", flat=True)
+            .exclude(categoria="")
+            .values_list("categoria", flat=True)
             .distinct()
         )
+        return sorted({_category_label(value) for value in values}, key=_category_sort_key)
+
+    def _families(self) -> list[str]:
+        return self._categories()
 
     def _module_tabs(self, active: str) -> list[dict[str, str | bool]]:
         tabs = [
