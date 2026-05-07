@@ -79,22 +79,18 @@ def _is_category_row(product_name: str, numeric_values: list[Decimal]) -> bool:
 
 def _name_variants(raw_name: str) -> set[str]:
     normalized = normalizar_nombre(raw_name or "")
-    variants = {normalized}
-    replacements = [
-        (" rebanada", " r"),
-        (" r", " rebanada"),
-        (" de ", " "),
-        (" roll ", " rol "),
-        (" rol ", " roll "),
-    ]
-    pending = [normalized]
-    for current in pending:
-        for source, target in replacements:
-            if source in current:
-                variant = current.replace(source, target)
-                if variant not in variants:
-                    variants.add(variant)
-                    pending.append(variant)
+    bases = {
+        normalized,
+        normalized.replace(" de ", " "),
+        normalized.replace(" roll ", " rol "),
+        normalized.replace(" rol ", " roll "),
+    }
+    variants = set(bases)
+    for base in bases:
+        if base.endswith(" rebanada"):
+            variants.add(f"{base[:-9].rstrip()} r")
+        if base.endswith(" r"):
+            variants.add(f"{base[:-2].rstrip()} rebanada")
     return {value.strip() for value in variants if value.strip()}
 
 
