@@ -123,6 +123,18 @@
                         </a>
                     </li>
                     <li>
+                        <a href="{% url 'reportes:cierre_producto' %}"
+                           class="{% if request.path == '/reportes/cierre-producto/' %}active{% endif %}">
+                            <span class="nav-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h16"/>
+                                    <path d="M8 5v14"/><path d="M16 5v14"/>
+                                </svg>
+                            </span>
+                            <span>Cierre producto</span>
+                        </a>
+                    </li>
+                    <li>
                         <a href="{% url 'reportes:proyectos_inversion' %}"
                            class="{% if '/reportes/proyectos-inversion/' in request.path %}active{% endif %}">
                             <span class="nav-icon" aria-hidden="true">
