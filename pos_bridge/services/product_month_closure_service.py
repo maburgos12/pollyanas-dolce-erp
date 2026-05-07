@@ -579,8 +579,9 @@ class ProductMonthClosureService:
 
     def _load_opening_from_snapshots(self, *, snapshot_date: date):
         tolerance_days = getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", self.DEFAULT_SNAPSHOT_TOLERANCE_DAYS)
-        target_start = timezone.make_aware(datetime.combine(snapshot_date, time.min), timezone.get_current_timezone())
-        target_end = timezone.make_aware(datetime.combine(snapshot_date, time.max), timezone.get_current_timezone())
+        current_timezone = timezone.get_current_timezone()
+        target_start = timezone.make_aware(datetime.combine(snapshot_date, time.min), current_timezone)
+        target_end = timezone.make_aware(datetime.combine(snapshot_date, time.max), current_timezone)
         before_at = (
             PointInventorySnapshot.objects.filter(captured_at__lte=target_end)
             .order_by("-captured_at", "-id")
@@ -599,9 +600,9 @@ class ProductMonthClosureService:
                 f"No existe snapshot Point para resolver inventario inicial al cierre de {snapshot_date.isoformat()}."
             )
         selected_at = min(candidates, key=lambda value: abs(value - target_start))
-        effective_date = selected_at.date()
-        day_start = timezone.make_aware(datetime.combine(effective_date, time.min), timezone.get_current_timezone())
-        day_end = timezone.make_aware(datetime.combine(effective_date, time.max), timezone.get_current_timezone())
+        effective_date = timezone.localtime(selected_at, current_timezone).date()
+        day_start = timezone.make_aware(datetime.combine(effective_date, time.min), current_timezone)
+        day_end = timezone.make_aware(datetime.combine(effective_date, time.max), current_timezone)
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -708,8 +709,9 @@ class ProductMonthClosureService:
 
     def _latest_snapshot_ids_near_date(self, *, snapshot_date: date):
         tolerance_days = getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", self.DEFAULT_SNAPSHOT_TOLERANCE_DAYS)
-        target_start = timezone.make_aware(datetime.combine(snapshot_date, time.min), timezone.get_current_timezone())
-        target_end = timezone.make_aware(datetime.combine(snapshot_date, time.max), timezone.get_current_timezone())
+        current_timezone = timezone.get_current_timezone()
+        target_start = timezone.make_aware(datetime.combine(snapshot_date, time.min), current_timezone)
+        target_end = timezone.make_aware(datetime.combine(snapshot_date, time.max), current_timezone)
         before_at = (
             PointInventorySnapshot.objects.filter(captured_at__lte=target_end)
             .order_by("-captured_at", "-id")
@@ -736,9 +738,9 @@ class ProductMonthClosureService:
             }
 
         selected_at = min(candidates, key=lambda value: abs(value - target_start))
-        effective_date = selected_at.date()
-        day_start = timezone.make_aware(datetime.combine(effective_date, time.min), timezone.get_current_timezone())
-        day_end = timezone.make_aware(datetime.combine(effective_date, time.max), timezone.get_current_timezone())
+        effective_date = timezone.localtime(selected_at, current_timezone).date()
+        day_start = timezone.make_aware(datetime.combine(effective_date, time.min), current_timezone)
+        day_end = timezone.make_aware(datetime.combine(effective_date, time.max), current_timezone)
         with connection.cursor() as cursor:
             cursor.execute(
                 """

@@ -105,7 +105,10 @@ class PointMovementSyncServiceTests(TestCase):
     def setUp(self):
         self.unit = UnidadMedida.objects.create(codigo="pza", nombre="Pieza", tipo=UnidadMedida.TIPO_PIEZA)
         self.branch_matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz")
-        self.branch_cedis = Sucursal.objects.create(codigo="CEDIS", nombre="CEDIS")
+        self.branch_cedis, _ = Sucursal.objects.update_or_create(
+            codigo="CEDIS",
+            defaults={"nombre": "CEDIS", "activa": True},
+        )
         self.branch_produccion_crucero = Sucursal.objects.create(codigo="PRODUCCION_CRUCERO", nombre="Produccion Crucero")
 
     def test_run_waste_sync_persists_merma_pos(self):
