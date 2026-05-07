@@ -318,6 +318,17 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         period: PeriodSelection,
         sucursal_id: int | None,
     ) -> tuple[dict[int, Decimal], dict[int, Decimal], str]:
+        fact_rows = FactProduccionDiaria.objects.filter(
+            fecha__gte=period.month_start,
+            fecha__lte=period.month_end,
+            receta_id__isnull=False,
+            merma__gt=0,
+        )
+        if sucursal_id:
+            fact_rows = fact_rows.filter(sucursal_id=sucursal_id)
+        if fact_rows.exists():
+            return _aggregate_by_recipe(fact_rows, "merma"), {}, "FactProduccionDiaria"
+
         rows = MermaMensualSucursal.objects.filter(periodo=period.month_start, receta_id__isnull=False)
         if sucursal_id:
             rows = rows.filter(sucursal_id=sucursal_id)
