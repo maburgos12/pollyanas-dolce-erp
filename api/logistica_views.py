@@ -99,6 +99,24 @@ def _serializer_error_message(errors) -> str:
     return "Datos inválidos."
 
 
+def _licencia_turno_bloqueo(repartidor: Repartidor) -> dict | None:
+    if not repartidor.licencia_expiracion:
+        return {
+            "error": "licencia_no_vigente",
+            "estado": "sin_datos",
+            "mensaje": "No puedes iniciar turno porque tu licencia no está registrada.",
+        }
+    dias = (repartidor.licencia_expiracion - timezone.localdate()).days
+    if dias < 0:
+        return {
+            "error": "licencia_no_vigente",
+            "estado": "vencida",
+            "mensaje": "No puedes iniciar turno porque tu licencia está vencida.",
+            "licencia_expiracion": repartidor.licencia_expiracion.isoformat(),
+        }
+    return None
+
+
 class LogisticaTokenView(TokenObtainPairView):
     parser_classes = [JSONParser, FormParser]
 
@@ -256,6 +274,10 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
         repartidor = _get_repartidor_for_user(request.user)
         if not repartidor or not _is_repartidor(request.user):
             return Response({"detail": "Solo repartidores registrados pueden iniciar bitácora."}, status=status.HTTP_403_FORBIDDEN)
+
+        licencia_bloqueo = _licencia_turno_bloqueo(repartidor)
+        if licencia_bloqueo:
+            return Response(licencia_bloqueo, status=status.HTTP_403_FORBIDDEN)
 
         abierta = BitacoraSalidaLlegada.objects.select_related("unidad").filter(repartidor=repartidor, cerrada=False).first()
         if abierta:

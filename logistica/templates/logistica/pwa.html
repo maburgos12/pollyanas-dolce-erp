@@ -608,6 +608,65 @@
         box-shadow: 0 0 0 2px rgba(200, 80, 106, 0.35);
       }
 
+      .license-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #22222e;
+        color: #aaa;
+        font-size: 12px;
+        font-weight: 900;
+        margin-top: 6px;
+        padding: 8px 11px;
+      }
+      .license-pill::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #aaa;
+      }
+      .license-pill.ok {
+        border-color: #33aa55;
+        background: #16351f;
+        color: #55cc77;
+      }
+      .license-pill.ok::before {
+        background: #55cc77;
+        box-shadow: 0 0 12px #55cc77;
+      }
+      .license-pill.warning {
+        border-color: #C9A84C;
+        background: #3a3014;
+        color: var(--gold);
+      }
+      .license-pill.warning::before {
+        background: #C9A84C;
+        box-shadow: 0 0 12px #C9A84C;
+      }
+      .license-pill.blocked {
+        border-color: #C8506A;
+        background: #3a1a1a;
+        color: #ff6b7a;
+      }
+      .license-pill.blocked::before {
+        background: #ff6b7a;
+        box-shadow: 0 0 12px #ff6b7a;
+      }
+      .license-banner {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--surface);
+        margin: 12px 0 16px;
+        padding: 14px;
+        font-weight: 900;
+      }
+      .license-banner.ok { border-color: #33aa55; color: #55cc77; background: #16351f; }
+      .license-banner.warning { border-color: #C9A84C; color: var(--gold); background: #3a3014; }
+      .license-banner.blocked { border-color: #C8506A; color: #ff6b7a; background: #3a1a1a; }
+
       .thumb {
         width: 100%;
         max-height: 180px;
@@ -1007,11 +1066,47 @@
       function normalizePerfil(raw) {
         const repartidor = raw?.repartidor || {};
         const unidad = raw?.unidad || repartidor?.unidad_asignada || {};
+        const username = raw?.user?.username || repartidor?.username || "";
+        const nombreCompleto = raw?.nombre || raw?.user?.nombre || repartidor?.nombre || "";
+        const nombreLimpio = String(nombreCompleto || "").trim();
+        const primerNombre = nombreLimpio && nombreLimpio !== username
+          ? nombreLimpio.split(/\s+/)[0]
+          : (username || "repartidor");
         return {
-          nombre: raw?.nombre || raw?.user?.nombre || repartidor?.nombre || "Repartidor",
+          nombre: nombreLimpio || username || "repartidor",
+          primerNombre,
+          repartidor,
           unidad,
           ultimosServicios: raw?.ultimos_servicios || []
         };
+      }
+
+      function licenciaMeta() {
+        const repartidor = state.perfil?.repartidor || {};
+        const estado = repartidor.licencia_estado || "sin_datos";
+        const dias = repartidor.licencia_dias_para_vencer;
+        const expiracion = repartidor.licencia_expiracion || "";
+        if (estado === "vigente") {
+          return { estado, tone: "ok", label: "Licencia vigente", mensaje: expiracion ? `Licencia vigente hasta ${expiracion}.` : "Licencia vigente.", bloquea: false };
+        }
+        if (estado === "por_vencer") {
+          const label = Number.isFinite(Number(dias)) ? `Vence en ${dias} días` : "Licencia por vencer";
+          return { estado, tone: "warning", label, mensaje: `Tu licencia vence en ${dias} día${Number(dias) === 1 ? "" : "s"}. Entrega la renovación a administración.`, bloquea: false };
+        }
+        if (estado === "vencida") {
+          return { estado, tone: "blocked", label: "Licencia vencida", mensaje: "Tu licencia está vencida. Puedes usar la app para reportes, pero no puedes abrir turno.", bloquea: true };
+        }
+        return { estado: "sin_datos", tone: "blocked", label: "Licencia no registrada", mensaje: "Tu licencia no está registrada. Puedes usar la app para reportes, pero no puedes abrir turno.", bloquea: true };
+      }
+
+      function licenciaPill() {
+        const licencia = licenciaMeta();
+        return `<div class="license-pill ${licencia.tone}" title="${escapeHtml(licencia.mensaje)}">${escapeHtml(licencia.label)}</div>`;
+      }
+
+      function licenciaBanner() {
+        const licencia = licenciaMeta();
+        return `<div class="license-banner ${licencia.tone}">${escapeHtml(licencia.mensaje)}</div>`;
       }
 
       async function apiFetch(path, options = {}) {
@@ -1055,12 +1150,13 @@
       }
 
       function shell(content) {
-        const nombre = escapeHtml(state.perfil?.nombre || "");
+        const nombre = escapeHtml(state.perfil?.primerNombre || state.perfil?.nombre || "");
         return `
           <div class="topbar">
             <div>
               <div class="mini-brand">Pollyana's</div>
               <p class="hello">Hola, ${nombre}</p>
+              ${licenciaPill()}
             </div>
             <button class="logout" onclick="logout()">Salir</button>
           </div>
@@ -1284,7 +1380,7 @@
         } else if (draft.step === 2) {
           const ubicacionLista = isGeoReady(draft);
           body = `
-            <div class="${ubicacionLista ? "" : "gps-locked"}">
+            <div class="${ubicacionLista || licenciaBloquea ? "" : "gps-locked"}">
               <h1 class="screen-title">Detalles</h1>
               ${progressDots(2)}
               <div class="severity-row">
@@ -1759,67 +1855,74 @@
         let body = "";
         if (!tieneSalida) {
           const ubicacionLista = isGeoReady(draft);
+          const licencia = licenciaMeta();
+          const licenciaBloquea = licencia.bloquea;
           const yaInspeccionada = Boolean(draft.inspeccionDiariaCheck?.ya_inspeccionada);
-          const puedeCapturarSalida = Boolean(draft.unidad) && (yaInspeccionada || draft.inspeccionDiariaCompletada);
-          const mostrarChecklist = Boolean(draft.unidad) && !draft.inspeccionDiariaLoading && !yaInspeccionada && !draft.inspeccionDiariaCompletada;
+          const puedeCapturarSalida = !licenciaBloquea && Boolean(draft.unidad) && (yaInspeccionada || draft.inspeccionDiariaCompletada);
+          const mostrarChecklist = !licenciaBloquea && Boolean(draft.unidad) && !draft.inspeccionDiariaLoading && !yaInspeccionada && !draft.inspeccionDiariaCompletada;
           const tieneFallasDiarias = inspeccionDiariaTieneFallas(draft);
           const pendientesDiarios = inspeccionDiariaPendientes(draft);
           const totalPuntosDiarios = Object.keys(draft.inspeccionDiariaChecks).length;
           const marcadosDiarios = totalPuntosDiarios - pendientesDiarios;
           body = `
             <div class="${ubicacionLista ? "" : "gps-locked"}">
-              <div class="field">
-                <label for="unidad_salida">Unidad</label>
-                <select id="unidad_salida" name="unidad" required onchange="seleccionarUnidadSalida(this.value)">
-                  <option value="">Selecciona unidad</option>
-                  ${state.unidades.map((unidad) => `<option value="${unidad.id}" ${String(draft.unidad) === String(unidad.id) ? "selected" : ""}>${escapeHtml(unidad.codigo)} · ${escapeHtml(unidad.descripcion || "")}</option>`).join("")}
-                </select>
-              </div>
-              ${draft.inspeccionDiariaLoading ? `<p class="unit-line">Revisando inspección diaria...</p>` : ""}
-              ${yaInspeccionada ? `
-                <div class="daily-banner">
-                  <span style="font-size:22px;">✅</span> Unidad ya inspeccionada hoy por <strong>${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")}</strong> a las <time>${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}</time>. Puedes proceder directamente al inicio de turno.
+              ${licenciaBanner()}
+              ${licenciaBloquea ? `
+                <button class="secondary-btn" type="button" onclick="showScreen('dashboard')">Volver al panel principal</button>
+              ` : `
+                <div class="field">
+                  <label for="unidad_salida">Unidad</label>
+                  <select id="unidad_salida" name="unidad" required onchange="seleccionarUnidadSalida(this.value)">
+                    <option value="">Selecciona unidad</option>
+                    ${state.unidades.map((unidad) => `<option value="${unidad.id}" ${String(draft.unidad) === String(unidad.id) ? "selected" : ""}>${escapeHtml(unidad.codigo)} · ${escapeHtml(unidad.descripcion || "")}</option>`).join("")}
+                  </select>
                 </div>
-              ` : ""}
-              ${draft.inspeccionDiariaAviso ? `<div class="daily-banner warning">${escapeHtml(draft.inspeccionDiariaAviso)}</div>` : ""}
-              ${mostrarChecklist ? `
-                <section class="card report-card daily-checklist-card">
-                  <h2 style="color:var(--gold); margin-top:0;">Checklist pre-turno</h2>
-                  <p class="daily-counter ${pendientesDiarios ? "" : "complete"}">${marcadosDiarios} de ${totalPuntosDiarios} puntos marcados</p>
-                  <p class="muted">Marca cada punto como OK o FALLA antes de capturar kilometraje y tablero.</p>
-                  <button class="daily-mark-all" type="button" onclick="marcarInspeccionDiariaTodosOk()">✅ Marcar todos los puntos como OK</button>
-                </section>
-                ${inspeccionDiariaSecciones.map(renderInspeccionDiariaSection).join("")}
-                ${tieneFallasDiarias ? `
-                  <div class="field daily-fail-field">
-                    <label for="inspeccion_diaria_observaciones">⚠️ Describe las fallas encontradas</label>
-                    <textarea id="inspeccion_diaria_observaciones" required placeholder="Anota qué falla viste y si la unidad puede salir o debe detenerse." oninput="state.bitacoraSalidaDraft.inspeccionDiariaObservaciones = this.value">${escapeHtml(draft.inspeccionDiariaObservaciones)}</textarea>
+                ${draft.inspeccionDiariaLoading ? `<p class="unit-line">Revisando inspección diaria...</p>` : ""}
+                ${yaInspeccionada ? `
+                  <div class="daily-banner">
+                    <span style="font-size:22px;">✅</span> Unidad ya inspeccionada hoy por <strong>${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")}</strong> a las <time>${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}</time>. Puedes proceder directamente al inicio de turno.
                   </div>
                 ` : ""}
-                <button class="primary-btn daily-continue" type="button" onclick="continuarInspeccionDiaria()">Continuar</button>
-              ` : ""}
-              ${puedeCapturarSalida ? `
-                <div class="form-salida">
-                  <div class="field">
-                    <label for="km_salida">KM salida</label>
-                    <input id="km_salida" name="km_salida" type="number" min="0" required value="${escapeHtml(draft.km_salida)}" oninput="state.bitacoraSalidaDraft.km_salida = this.value">
+                ${draft.inspeccionDiariaAviso ? `<div class="daily-banner warning">${escapeHtml(draft.inspeccionDiariaAviso)}</div>` : ""}
+                ${mostrarChecklist ? `
+                  <section class="card report-card daily-checklist-card">
+                    <h2 style="color:var(--gold); margin-top:0;">Checklist pre-turno</h2>
+                    <p class="daily-counter ${pendientesDiarios ? "" : "complete"}">${marcadosDiarios} de ${totalPuntosDiarios} puntos marcados</p>
+                    <p class="muted">Marca cada punto como OK o FALLA antes de capturar kilometraje y tablero.</p>
+                    <button class="daily-mark-all" type="button" onclick="marcarInspeccionDiariaTodosOk()">✅ Marcar todos los puntos como OK</button>
+                  </section>
+                  ${inspeccionDiariaSecciones.map(renderInspeccionDiariaSection).join("")}
+                  ${tieneFallasDiarias ? `
+                    <div class="field daily-fail-field">
+                      <label for="inspeccion_diaria_observaciones">⚠️ Describe las fallas encontradas</label>
+                      <textarea id="inspeccion_diaria_observaciones" required placeholder="Anota qué falla viste y si la unidad puede salir o debe detenerse." oninput="state.bitacoraSalidaDraft.inspeccionDiariaObservaciones = this.value">${escapeHtml(draft.inspeccionDiariaObservaciones)}</textarea>
+                    </div>
+                  ` : ""}
+                  <button class="primary-btn daily-continue" type="button" onclick="continuarInspeccionDiaria()">Continuar</button>
+                ` : ""}
+                ${puedeCapturarSalida ? `
+                  <div class="form-salida">
+                    <div class="field">
+                      <label for="km_salida">KM salida</label>
+                      <input id="km_salida" name="km_salida" type="number" min="0" required value="${escapeHtml(draft.km_salida)}" oninput="state.bitacoraSalidaDraft.km_salida = this.value">
+                    </div>
+                    <div class="field">
+                      <label>Nivel gas salida</label>
+                      ${gasSelector(draft.nivel_gas_salida, "selectGasSalida")}
+                    </div>
+                    <div class="field">
+                      <label for="foto_salida">Foto tablero</label>
+                      ${fotoInput("foto_salida", Boolean(draft.foto_tablero_salida), "setFotoBitacora(this, 'foto_tablero_salida', 'fotoSalidaPreview')")}
+                      ${draft.fotoSalidaPreview ? `<img class="thumb" src="${draft.fotoSalidaPreview}" alt="Vista previa tablero salida">` : ""}
+                      ${draft.fotoSalidaError ? `<p class="error">${escapeHtml(draft.fotoSalidaError)}</p>` : ""}
+                    </div>
+                    <p class="gps-registered">📍 Ubicación registrada</p>
+                    <button class="primary-btn" type="button" onclick="guardarSalida()" ${ubicacionLista && draft.km_salida && draft.nivel_gas_salida && draft.foto_tablero_salida ? "" : "disabled"}>Iniciar turno</button>
                   </div>
-                  <div class="field">
-                    <label>Nivel gas salida</label>
-                    ${gasSelector(draft.nivel_gas_salida, "selectGasSalida")}
-                  </div>
-                  <div class="field">
-                    <label for="foto_salida">Foto tablero</label>
-                    ${fotoInput("foto_salida", Boolean(draft.foto_tablero_salida), "setFotoBitacora(this, 'foto_tablero_salida', 'fotoSalidaPreview')")}
-                    ${draft.fotoSalidaPreview ? `<img class="thumb" src="${draft.fotoSalidaPreview}" alt="Vista previa tablero salida">` : ""}
-                    ${draft.fotoSalidaError ? `<p class="error">${escapeHtml(draft.fotoSalidaError)}</p>` : ""}
-                  </div>
-                  <p class="gps-registered">📍 Ubicación registrada</p>
-                  <button class="primary-btn" type="button" onclick="guardarSalida()" ${ubicacionLista && draft.km_salida && draft.nivel_gas_salida && draft.foto_tablero_salida ? "" : "disabled"}>Iniciar turno</button>
-                </div>
-              ` : ""}
+                ` : ""}
+              `}
             </div>
-            ${geoOverlay(draft, "capturarUbicacionSalida")}
+            ${licenciaBloquea ? "" : geoOverlay(draft, "capturarUbicacionSalida")}
           `;
         } else {
           body = `
