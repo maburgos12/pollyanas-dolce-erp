@@ -4754,19 +4754,23 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 .production-filter-action { align-self: end; }
 
 .production-table-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow-x: hidden;
 }
 .production-table-wrap table,
 .production-table-wrap > table.table,
 .production-table-wrap #production-table {
-  min-width: 1210px;
-  width: max-content;
+  min-width: 0;
+  width: 100%;
   table-layout: fixed;
 }
-.production-table-wrap col:first-child  { width: 170px; }
-.production-table-wrap col:nth-child(2) { width: 80px; }
-.production-table-wrap col:nth-child(n+3) { width: 90px; }
+.production-table-wrap .production-col-receta { width: 15%; }
+.production-table-wrap .production-col-categoria { width: 10%; }
+.production-table-wrap .production-col-small { width: 8%; }
+.production-table-wrap .production-col-dif { width: 11%; }
+.production-table-wrap .production-col-merma { width: 11%; }
+.production-table-wrap .production-col-enteros { width: 9%; }
+.production-table-wrap .production-col-costo { width: 10%; }
+.production-table-wrap .production-col-percent { width: 5%; }
 
 .production-table-wrap td,
 .production-table-wrap th {
@@ -4775,22 +4779,29 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   vertical-align: middle;
   padding: 6px 8px;
 }
-.production-table-wrap td:first-child,
-.production-table-wrap th:first-child {
+.production-table-wrap th {
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  font-size: 0.7rem;
+  letter-spacing: 0;
+}
+.production-table-wrap td:first-child {
   white-space: normal;
   word-break: break-word;
   line-height: 1.3;
 }
-.production-table-wrap td:nth-child(2),
-.production-table-wrap th:nth-child(2) {
+.production-table-wrap td:nth-child(2) {
   white-space: normal;
   word-break: break-word;
   line-height: 1.3;
+}
+.production-table-wrap th:first-child,
+.production-table-wrap th:nth-child(2) {
+  text-align: left;
 }
 .production-table-wrap th:nth-child(n+3) {
   white-space: nowrap;
-  font-size: 0.72rem;
-  letter-spacing: 0;
   text-align: right;
 }
 .production-table-wrap td:nth-child(n+3) {
