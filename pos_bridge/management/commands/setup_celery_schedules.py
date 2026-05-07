@@ -118,7 +118,7 @@ class Command(BaseCommand):
                 "task": "pos_bridge.production_sync",
                 "crontab": production_cron,
                 "interval": None,
-                "kwargs": json.dumps({"days": 1, "lag_days": 1}),
+                "kwargs": json.dumps({"days": 7, "lag_days": 0}),
                 "enabled": True,
             },
         )
