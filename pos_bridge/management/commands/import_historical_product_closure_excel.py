@@ -13,7 +13,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
-from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine
+from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta
 from recetas.utils.normalizacion import normalizar_nombre
 
 
@@ -77,6 +77,46 @@ def _is_category_row(product_name: str, numeric_values: list[Decimal]) -> bool:
     return sum(1 for value in numeric_values if value != 0) <= 1
 
 
+def _name_variants(raw_name: str) -> set[str]:
+    normalized = normalizar_nombre(raw_name or "")
+    variants = {normalized}
+    replacements = [
+        (" rebanada", " r"),
+        (" r", " rebanada"),
+        (" de ", " "),
+        (" roll ", " rol "),
+        (" rol ", " roll "),
+    ]
+    pending = [normalized]
+    for current in pending:
+        for source, target in replacements:
+            if source in current:
+                variant = current.replace(source, target)
+                if variant not in variants:
+                    variants.add(variant)
+                    pending.append(variant)
+    return {value.strip() for value in variants if value.strip()}
+
+
+def _build_recipe_variant_map() -> dict[str, Receta]:
+    result: dict[str, Receta] = {}
+    for receta in Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).order_by("id"):
+        for variant in _name_variants(receta.nombre):
+            result.setdefault(variant, receta)
+    return result
+
+
+def _resolve_receta(*, matcher: PointSalesMatchingService, variant_map: dict[str, Receta], product_name: str):
+    receta = matcher.resolve_receta(codigo_point="", point_name=product_name)
+    if receta is not None:
+        return receta
+    for variant in _name_variants(product_name):
+        receta = variant_map.get(variant)
+        if receta is not None:
+            return receta
+    return None
+
+
 class Command(BaseCommand):
     help = "Importa un cierre mensual historico completo desde el Excel operativo de producido vs vendido."
 
@@ -117,6 +157,7 @@ class Command(BaseCommand):
         ws = wb[sheet_name]
 
         matcher = PointSalesMatchingService()
+        recipe_variant_map = _build_recipe_variant_map()
         rows: list[dict[str, object]] = []
         unmatched_rows: list[dict[str, object]] = []
         category = ""
@@ -156,7 +197,7 @@ class Command(BaseCommand):
             if not any(value != 0 for value in numeric_values):
                 continue
 
-            receta = matcher.resolve_receta(codigo_point="", point_name=product_name)
+            receta = _resolve_receta(matcher=matcher, variant_map=recipe_variant_map, product_name=product_name)
             row_payload = {
                 "row_number": row_idx,
                 "category": category,
