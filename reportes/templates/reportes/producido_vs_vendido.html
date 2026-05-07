@@ -124,7 +124,7 @@
         <colgroup>
           <col><!-- RECETA: ancho via CSS col:first-child -->
           <col><!-- CATEGORÍA -->
-          <col><col><col><col><col><col><col><col><col>
+          <col><col><col><col><col><col><col><col>
         </colgroup>
         <thead>
           <tr>
@@ -134,7 +134,6 @@
             <th class="text-end">Producido</th>
             <th class="text-end">Dif (Prod-Vend)</th>
             <th class="text-end">Merma reportada</th>
-            <th class="text-end">Merma calculada</th>
             <th class="text-end">Convertido</th>
             <th class="text-end">Enteros equiv.</th>
             <th class="text-end">Costo merma</th>
@@ -149,7 +148,6 @@
             <td class="text-end">{{ group.total.producido|floatformat:3|intcomma }}</td>
             <td class="text-end"><span class="{% if group.total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.dif|floatformat:3|intcomma }}</span></td>
             <td class="text-end">{{ group.total.merma_reportada|floatformat:3|intcomma }}</td>
-            <td class="text-end">{{ group.total.merma_calculada|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ group.total.convertido|floatformat:0|intcomma }}</td>
             <td class="text-end">{{ group.total.enteros_equivalentes|floatformat:1|intcomma }}</td>
             <td class="text-end">${{ group.total.costo_merma|floatformat:2|intcomma }}</td>
@@ -173,7 +171,6 @@
             <td class="text-end">{% if row.producido is None %}<span class="muted">—</span>{% else %}{{ row.producido|floatformat:3|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.dif is None %}<span class="muted">—</span>{% else %}<span class="{% if row.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.dif|floatformat:3|intcomma }}</span>{% endif %}</td>
             <td class="text-end">{% if row.merma_reportada is None %}<span class="muted">—</span>{% else %}{{ row.merma_reportada|floatformat:3|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.merma_calculada is None %}<span class="muted">—</span>{% else %}{{ row.merma_calculada|floatformat:3|intcomma }}{% endif %}</td>
             <td class="text-end">
               {% if row.convertido %}
               {{ row.convertido|floatformat:0|intcomma }}
@@ -212,7 +209,6 @@
             <td class="text-end">{{ grand_total.producido|floatformat:3|intcomma }}</td>
             <td class="text-end"><span class="{% if grand_total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.dif|floatformat:3|intcomma }}</span></td>
             <td class="text-end">{{ grand_total.merma_reportada|floatformat:3|intcomma }}</td>
-            <td class="text-end">{{ grand_total.merma_calculada|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ grand_total.convertido|floatformat:0|intcomma }}</td>
             <td class="text-end">{{ grand_total.enteros_equivalentes|floatformat:1|intcomma }}</td>
             <td class="text-end">${{ grand_total.costo_merma|floatformat:2|intcomma }}</td>

@@ -385,9 +385,9 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         vendido = sales_map.get(recipe.id)
         producido = production_map.get(recipe.id)
         merma_reportada = merma_map.get(recipe.id)
-        merma_calculada = None
+        dif = None
         if producido is not None and vendido is not None:
-            merma_calculada = producido - vendido
+            dif = producido - vendido
         costo_unitario = cost_map.get(recipe.id, ZERO)
         costo_merma = merma_cost_map.get(recipe.id)
         if costo_merma is None and merma_reportada is not None and costo_unitario:
@@ -403,9 +403,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "familia": categoria,
             "vendido": vendido,
             "producido": producido,
-            "dif": merma_calculada,
+            "dif": dif,
             "merma_reportada": merma_reportada,
-            "merma_calculada": merma_calculada,
             "costo_merma": costo_merma,
             "pct_merma": pct_merma,
         }
@@ -442,7 +441,6 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "producido": sum((row["producido"] for row in rows if row["producido"] is not None), ZERO),
             "dif": sum((row["dif"] for row in rows if row["dif"] is not None), ZERO),
             "merma_reportada": sum((row["merma_reportada"] for row in rows if row["merma_reportada"] is not None), ZERO),
-            "merma_calculada": sum((row["merma_calculada"] for row in rows if row["merma_calculada"] is not None), ZERO),
             "costo_merma": sum((row["costo_merma"] for row in rows if row["costo_merma"] is not None), ZERO),
             "convertido": sum((row["convertido"] for row in rows if row["convertido"] is not None), ZERO),
             "enteros_equivalentes": sum(
