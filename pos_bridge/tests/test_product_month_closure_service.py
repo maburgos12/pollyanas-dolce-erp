@@ -29,7 +29,10 @@ from pos_bridge.models.movements import PointProductionLine
 class ProductMonthClosureServiceTests(TestCase):
     def setUp(self):
         self.service = ProductMonthClosureService()
-        self.sucursal = Sucursal.objects.create(codigo="CEDIS", nombre="CEDIS")
+        self.sucursal, _ = Sucursal.objects.update_or_create(
+            codigo="CEDIS",
+            defaults={"nombre": "CEDIS", "activa": True},
+        )
         self.point_branch = PointBranch.objects.create(
             external_id="CEDIS",
             name="CEDIS",

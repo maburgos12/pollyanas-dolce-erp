@@ -876,7 +876,10 @@ class DerivedProductPresentationCostingTests(TestCase):
             self.assertIn('"status": "Pendientes de ejecucion"', payload)
 
     def test_produccion_cedis_weekly_dashboard_is_available(self):
-        branch_cedis = Sucursal.objects.create(codigo="CEDIS", nombre="CEDIS", activa=True)
+        branch_cedis, _ = Sucursal.objects.update_or_create(
+            codigo="CEDIS",
+            defaults={"nombre": "CEDIS", "activa": True},
+        )
         branch_matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
         point_branch_cedis = PointBranch.objects.create(external_id="8", name="CEDIS", erp_branch=branch_cedis)
         point_branch_matriz = PointBranch.objects.create(external_id="1", name="Matriz", erp_branch=branch_matriz)

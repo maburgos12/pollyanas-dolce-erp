@@ -320,6 +320,7 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
                 "status": "BUILT",
                 "is_locked": False,
                 "metadata": {"validation": {"lock_ready": True}},
+                "get_status_display": lambda self: "Construido",
             },
         )()
         with (
