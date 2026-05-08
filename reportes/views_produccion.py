@@ -210,18 +210,25 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             row["conversion_salida"] = conv.get("conversion_salida", ZERO)
             row["conversion_factor"] = conv.get("factor", ZERO)
             inventory = closure_map["inventario"].get(row["receta_id"]) or {}
-            row["inventario_inicial"] = inventory.get("inventario_inicial")
-            row["inventario_final_point_total"] = inventory.get("inventario_final_point_total")
-            row["inventario_final_teorico"] = self._theoretical_inventory(row)
-            row["diferencia_inventario"] = (
-                row["inventario_final_teorico"] - row["inventario_final_point_total"]
-                if row["inventario_final_teorico"] is not None and row["inventario_final_point_total"] is not None
-                else None
-            )
-            row["estado_inventario"] = _inventory_status(
-                theoretical=row["inventario_final_teorico"],
-                physical=row["inventario_final_point_total"],
-            )
+            if row["produccion_referencia"]:
+                row["inventario_inicial"] = None
+                row["inventario_final_point_total"] = None
+                row["inventario_final_teorico"] = None
+                row["diferencia_inventario"] = None
+                row["estado_inventario"] = "Referencia"
+            else:
+                row["inventario_inicial"] = inventory.get("inventario_inicial")
+                row["inventario_final_point_total"] = inventory.get("inventario_final_point_total")
+                row["inventario_final_teorico"] = self._theoretical_inventory(row)
+                row["diferencia_inventario"] = (
+                    row["inventario_final_teorico"] - row["inventario_final_point_total"]
+                    if row["inventario_final_teorico"] is not None and row["inventario_final_point_total"] is not None
+                    else None
+                )
+                row["estado_inventario"] = _inventory_status(
+                    theoretical=row["inventario_final_teorico"],
+                    physical=row["inventario_final_point_total"],
+                )
             row["json"].update(
                 {
                     "convertido": str(row["convertido"]),
