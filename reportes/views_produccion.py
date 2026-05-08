@@ -9,7 +9,7 @@ from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models import Min, Q, Sum
+from django.db.models import Min, Sum
 from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
@@ -17,7 +17,7 @@ from django.views.generic import TemplateView
 
 from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
-from pos_bridge.models import PointConversionLine, PointDailySale, PointProductionLine, PointSalesDailyProductFact
+from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact
 from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta, RecetaEquivalencia
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import FactProduccionDiaria
@@ -176,7 +176,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         if not sucursal_id and not recipe_ids:
             recipe_ids.update(closure_map["inventario"])
         recipe_ids.update(recipe_id for recipe_id, value in merma_map.items() if value)
-        conversion_map = self._conversion_map(period)
+        conversion_map = self._conversion_map(sales_map)
         recipe_ids.update(
             recipe_id
             for recipe_id, value in conversion_map.items()
@@ -274,31 +274,22 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "source_dates": source_dates,
         }
 
-    def _conversion_map(self, period: PeriodSelection) -> dict[int, dict[str, Decimal]]:
-        rows = list(
-            PointConversionLine.objects.filter(
-                movement_at__date__gte=period.month_start,
-                movement_at__date__lte=period.month_end,
-                receta_id__isnull=False,
-            )
-            .filter(Q(**{"raw_payload__CATEGORÍA": "Rebanada"}) | Q(raw_payload__CATEGORIA="Rebanada"))
-            .values("receta_id")
-            .annotate(total=Sum("quantity"))
-        )
+    def _conversion_map(self, sales_map: dict[int, Decimal]) -> dict[int, dict[str, Decimal]]:
         equivalences = {
             equivalence.receta_porcion_id: equivalence
             for equivalence in RecetaEquivalencia.objects.filter(
-                receta_porcion_id__in=[row["receta_id"] for row in rows if row.get("receta_id")],
+                receta_porcion_id__in=sales_map.keys(),
                 activo=True,
             )
         }
         result = {}
-        for row in rows:
-            receta_id = row["receta_id"]
-            if not receta_id:
-                continue
-            convertido = _decimal(row["total"])
+        for receta_id, vendido_porcion in sales_map.items():
             equivalence = equivalences.get(receta_id)
+            if not equivalence:
+                continue
+            convertido = _decimal(vendido_porcion)
+            if not convertido:
+                continue
             factor = _decimal(equivalence.factor_conversion if equivalence else None) or Decimal("1")
             enteros = (convertido / factor).quantize(Decimal("0.01")) if factor else ZERO
             portion_data = result.setdefault(
