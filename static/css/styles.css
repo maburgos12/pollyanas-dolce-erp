@@ -4745,6 +4745,12 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 /* === Producido vs Vendido === */
 .production-report .card-header { margin-bottom: 0; }
 .production-page-header { align-items: flex-start; }
+.production-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
 .production-source-list,
 .production-banner-list {
   display: flex;
@@ -4752,6 +4758,38 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   gap: 8px;
 }
 .production-filter-action { align-self: end; }
+
+.production-report .kpi-card {
+  overflow: hidden;
+}
+
+.production-report .kpi-card-inner {
+  align-items: center;
+  min-width: 0;
+}
+
+.production-report .kpi-icon {
+  flex: 0 0 44px;
+}
+
+.production-report .kpi-body {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.production-report .kpi-number {
+  width: 100%;
+  max-width: 100%;
+  font-size: clamp(30px, 2.2vw, 46px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  font-variant-numeric: tabular-nums;
+}
+
+.production-report .kpi-number-currency {
+  font-size: clamp(26px, 2vw, 40px);
+}
 
 .production-table-wrap {
   container-type: inline-size;
@@ -4771,9 +4809,9 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 .production-table-wrap .production-col-merma { width: 6.8%; }
 .production-table-wrap .production-col-enteros { width: 6%; }
 .production-table-wrap .production-col-costo { width: 6.6%; }
-.production-table-wrap .production-col-percent { width: 4.8%; }
+.production-table-wrap .production-col-percent { width: 6.2%; }
 .production-table-wrap .production-col-inv { width: 5.2%; }
-.production-table-wrap .production-col-estado { width: 8.4%; }
+.production-table-wrap .production-col-estado { width: 7%; }
 
 .production-table-wrap table.table td,
 .production-table-wrap table.table th,
@@ -4821,19 +4859,42 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   font-variant-numeric: tabular-nums;
   font-size: clamp(0.58rem, 0.68vw, 0.86rem);
 }
+.production-table-wrap table.table th:nth-child(10),
+.production-table-wrap table.table td:nth-child(10) {
+  text-align: center;
+  padding-inline: 3px;
+}
 .production-table-wrap .badge {
-  max-width: 100%;
-  min-width: 0;
-  padding-inline: 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 68px);
+  min-width: 48px;
+  min-height: 26px;
+  border-radius: 999px;
+  box-sizing: border-box;
+  padding: 4px 7px;
+  line-height: 1;
+  font-size: clamp(0.62rem, 0.72vw, 0.82rem);
+  font-weight: 800;
+  letter-spacing: 0;
+  text-align: center;
   white-space: nowrap;
 }
-.production-table-wrap .production-state-cell {
+.production-table-wrap table.table th:nth-child(15),
+.production-table-wrap table.table td.production-state-cell {
   white-space: normal;
+  text-align: center;
+  padding-inline: 4px;
+}
+
+.production-table-wrap table.table td.production-state-cell {
+  overflow: visible;
   word-break: normal;
-  overflow-wrap: break-word;
-  text-align: left;
-  font-size: 0.72rem;
-  line-height: 1.2;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  font-size: clamp(0.64rem, 0.72vw, 0.82rem);
+  line-height: 1.16;
 }
 .production-subtotal-row td {
   background: var(--gris-suave);
