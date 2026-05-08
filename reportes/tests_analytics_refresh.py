@@ -24,10 +24,44 @@ from reportes.analytics_service import refresh_dashboard_daily_ops_materialized_
 from reportes.models import AnalyticRefreshWindow, FactInventarioDiario, FactProduccionDiaria, FactVentaDiaria
 from reportes.sales_dashboard_freshness import ensure_sales_dashboard_freshness
 from reportes.views import _sales_refresh_status
+from recetas.models import Receta
 from ventas.models import VentaAutoritativaPoint
 
 
 class AnalyticsSalesFactSourceSelectionTests(TestCase):
+    def test_rebuild_sales_facts_resolves_authoritative_recipe_by_point_code_and_name(self):
+        sale_date = date(2026, 1, 8)
+        matriz = Sucursal.objects.create(codigo="AUTH-MAP", nombre="Matriz Auth", activa=True)
+        receta = Receta.objects.create(
+            nombre="Pastel de 3 Pecados R",
+            codigo_point="0110",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            categoria="Rebanada",
+            hash_contenido="auth-recipe-resolution-test",
+        )
+        VentaAutoritativaPoint.objects.create(
+            branch=matriz,
+            sale_date=sale_date,
+            product_code="0110",
+            point_name="Pastel de 3 Pecados R",
+            category="Rebanada",
+            product=None,
+            quantity=Decimal("4"),
+            gross_amount=Decimal("40.00"),
+            discount_amount=Decimal("0.00"),
+            total_amount=Decimal("40.00"),
+            tax_amount=Decimal("0.00"),
+            net_amount=Decimal("40.00"),
+        )
+
+        inserted = rebuild_sales_facts(start_date=sale_date, end_date=sale_date)
+
+        self.assertEqual(inserted, 1)
+        fact = FactVentaDiaria.objects.get(fecha=sale_date)
+        self.assertEqual(fact.source_kind, FactVentaDiaria.SOURCE_AUTHORITATIVE)
+        self.assertEqual(fact.receta_id, receta.id)
+        self.assertEqual(fact.cantidad, Decimal("4"))
+
     def test_rebuild_sales_facts_selects_source_per_branch_day(self):
         sale_date = date(2026, 4, 5)
         matriz = Sucursal.objects.create(codigo="MATRIZ-T", nombre="Matriz Test", activa=True)
