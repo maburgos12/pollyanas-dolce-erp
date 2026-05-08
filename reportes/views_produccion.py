@@ -112,6 +112,24 @@ def _category_sort_key(value: str | None) -> tuple[int, str]:
     return (CATEGORY_ORDER_INDEX.get(label.lower(), len(CATEGORY_ORDER)), label.lower())
 
 
+def _sum_or_none(rows: list[dict[str, Any]], key: str) -> Decimal | None:
+    values = [row[key] for row in rows if row.get(key) is not None]
+    if not values:
+        return None
+    return sum(values, ZERO)
+
+
+def _inventory_status(*, theoretical: Decimal | None, physical: Decimal | None) -> str:
+    if theoretical is None or physical is None:
+        return ""
+    difference = theoretical - physical
+    if abs(difference) <= Decimal("0.01"):
+        return "Cuadra"
+    if difference < ZERO:
+        return "Sobrante físico"
+    return "Faltante no explicado"
+
+
 def _first_available_date() -> dict[str, date | None]:
     return {
         "ventas": PointSalesDailyProductFact.objects.aggregate(min_date=Min("sale_date"))["min_date"],
@@ -155,15 +173,12 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         closure_map = self._closure_map(period)
         recipe_ids.update(recipe_id for recipe_id, value in production_map.items() if value)
 
-        if not sucursal_id and sales_source == "sin_datos" and closure_map["vendido"]:
-            sales_map = closure_map["vendido"]
-            sales_source = "ProductoMonthClosureLine"
-            recipe_ids.update(recipe_id for recipe_id, value in sales_map.items() if value)
         if not sucursal_id and not recipe_ids:
-            recipe_ids.update(recipe_id for recipe_id, value in closure_map["vendido"].items() if value)
+            recipe_ids.update(closure_map["inventario"])
         recipe_ids.update(recipe_id for recipe_id, value in merma_map.items() if value)
         conversion_map = self._conversion_map(period)
         recipe_ids.update(recipe_id for recipe_id, value in conversion_map.items() if value.get("convertido"))
+        recipe_ids.update(closure_map["inventario"])
 
         recipes_qs = Receta.objects.filter(
             id__in=recipe_ids,
@@ -176,10 +191,6 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             key=lambda recipe: (_category_sort_key(recipe.categoria), recipe.nombre.lower()),
         )
 
-        if not sucursal_id and production_source == "sin_datos" and closure_map["producido"]:
-            production_map = closure_map["producido"]
-            production_source = "ProductoMonthClosureLine"
-
         cost_map = get_total_cost_map([recipe.id for recipe in recipes])
         rows = [self._build_row(recipe, sales_map, production_map, merma_map, merma_cost_map, cost_map) for recipe in recipes]
         for row in rows:
@@ -189,10 +200,17 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             row["conversion_factor"] = conv.get("factor", ZERO)
             inventory = closure_map["inventario"].get(row["receta_id"]) or {}
             row["inventario_inicial"] = inventory.get("inventario_inicial")
-            row["inventario_final_teorico"] = inventory.get("inventario_final_teorico")
             row["inventario_final_point_total"] = inventory.get("inventario_final_point_total")
-            row["diferencia_inventario"] = inventory.get("diferencia_inventario")
-            row["estado_inventario"] = inventory.get("estado_inventario", "")
+            row["inventario_final_teorico"] = self._theoretical_inventory(row)
+            row["diferencia_inventario"] = (
+                row["inventario_final_teorico"] - row["inventario_final_point_total"]
+                if row["inventario_final_teorico"] is not None and row["inventario_final_point_total"] is not None
+                else None
+            )
+            row["estado_inventario"] = _inventory_status(
+                theoretical=row["inventario_final_teorico"],
+                physical=row["inventario_final_point_total"],
+            )
             row["json"].update(
                 {
                     "convertido": str(row["convertido"]),
@@ -377,24 +395,15 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
     def _closure_map(self, period: PeriodSelection) -> dict[str, Any]:
         closure = ProductoMonthClosure.objects.filter(month_start=period.month_start).first()
         if closure is None:
-            return {"producido": {}, "vendido": {}, "merma": {}, "inventario": {}, "source": "sin_cierre"}
+            return {"inventario": {}, "source": "sin_cierre"}
         lines = ProductoMonthClosureLine.objects.filter(closure=closure)
         inventory_map = {}
         for line in lines:
             inventory_map[line.receta_padre_id] = {
                 "inventario_inicial": _decimal(line.inventario_inicial_teorico),
-                "inventario_final_teorico": _decimal(line.inventario_final_teorico),
                 "inventario_final_point_total": _decimal(line.inventario_final_point_total),
-                "diferencia_inventario": _decimal(line.diferencia_teorico_vs_point),
-                "estado_inventario": line.get_estado_auditoria_display(),
             }
-        return {
-            "producido": _aggregate_by_recipe(lines, "produccion_mes", recipe_field="receta_padre_id"),
-            "vendido": _aggregate_by_recipe(lines, "venta_total_equivalente", recipe_field="receta_padre_id"),
-            "merma": _aggregate_by_recipe(lines, "merma_total_equivalente", recipe_field="receta_padre_id"),
-            "inventario": inventory_map,
-            "source": "ProductoMonthClosureLine",
-        }
+        return {"inventario": inventory_map, "source": "ProductoMonthClosureLine"}
 
     def _build_row(
         self,
@@ -438,6 +447,16 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         }
         return row
 
+    def _theoretical_inventory(self, row: dict[str, Any]) -> Decimal | None:
+        if row["inventario_inicial"] is None:
+            return None
+        return (
+            row["inventario_inicial"]
+            + (row["producido"] or ZERO)
+            - (row["vendido"] or ZERO)
+            - (row["merma_reportada"] or ZERO)
+        )
+
     def _group_rows(self, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
@@ -470,19 +489,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 (row["enteros_equivalentes"] for row in rows if row["enteros_equivalentes"] is not None),
                 ZERO,
             ),
-            "inventario_inicial": sum((row["inventario_inicial"] for row in rows if row["inventario_inicial"] is not None), ZERO),
-            "inventario_final_teorico": sum(
-                (row["inventario_final_teorico"] for row in rows if row["inventario_final_teorico"] is not None),
-                ZERO,
-            ),
-            "inventario_final_point_total": sum(
-                (row["inventario_final_point_total"] for row in rows if row["inventario_final_point_total"] is not None),
-                ZERO,
-            ),
-            "diferencia_inventario": sum(
-                (row["diferencia_inventario"] for row in rows if row["diferencia_inventario"] is not None),
-                ZERO,
-            ),
+            "inventario_inicial": _sum_or_none(rows, "inventario_inicial"),
+            "inventario_final_teorico": _sum_or_none(rows, "inventario_final_teorico"),
+            "inventario_final_point_total": _sum_or_none(rows, "inventario_final_point_total"),
+            "diferencia_inventario": _sum_or_none(rows, "diferencia_inventario"),
         }
         totals["pct_merma"] = (
             (totals["merma_reportada"] / totals["vendido"]) * Decimal("100")

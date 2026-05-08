@@ -9,12 +9,16 @@ from pathlib import Path
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from openpyxl import load_workbook
 
+from control.models import MermaMensualSucursal
+from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta
 from recetas.utils.normalizacion import normalizar_nombre
+from reportes.models import FactProduccionDiaria
 
 
 def _month_cursor(value: str) -> date:
@@ -113,8 +117,116 @@ def _resolve_receta(*, matcher: PointSalesMatchingService, variant_map: dict[str
     return None
 
 
+def _aggregate_by_recipe(queryset, field_name: str, recipe_field: str = "receta_id") -> dict[int, Decimal]:
+    rows = queryset.values(recipe_field).annotate(total=Sum(field_name))
+    return {
+        int(row[recipe_field]): _parse_decimal(row["total"])
+        for row in rows
+        if row.get(recipe_field)
+    }
+
+
+def _sales_map(month_start: date, month_end: date) -> tuple[dict[int, Decimal], str]:
+    facts = PointSalesDailyProductFact.objects.filter(
+        sale_date__gte=month_start,
+        sale_date__lte=month_end,
+        receta_id__isnull=False,
+    )
+    if facts.exists():
+        sales_map = _aggregate_by_recipe(facts, "total_cantidad")
+        source_parts = ["PointSalesDailyProductFact"]
+        for fallback_qs, field_name, source_name in [
+            (
+                FactProduccionDiaria.objects.filter(
+                    fecha__gte=month_start,
+                    fecha__lte=month_end,
+                    receta_id__isnull=False,
+                    vendido__gt=0,
+                ),
+                "vendido",
+                "FactProduccionDiaria",
+            ),
+            (
+                PointDailySale.objects.filter(
+                    sale_date__gte=month_start,
+                    sale_date__lte=month_end,
+                    receta_id__isnull=False,
+                ),
+                "quantity",
+                "PointDailySale",
+            ),
+        ]:
+            fallback_map = _aggregate_by_recipe(fallback_qs, field_name)
+            filled = 0
+            for receta_id, value in fallback_map.items():
+                if receta_id not in sales_map or sales_map[receta_id] == Decimal("0"):
+                    sales_map[receta_id] = value
+                    filled += 1
+            if filled:
+                source_parts.append(f"{source_name}({filled})")
+        return sales_map, "+".join(source_parts)
+
+    sales = PointDailySale.objects.filter(
+        sale_date__gte=month_start,
+        sale_date__lte=month_end,
+        receta_id__isnull=False,
+    )
+    if sales.exists():
+        return _aggregate_by_recipe(sales, "quantity"), "PointDailySale"
+
+    fact_sales = FactProduccionDiaria.objects.filter(
+        fecha__gte=month_start,
+        fecha__lte=month_end,
+        receta_id__isnull=False,
+        vendido__gt=0,
+    )
+    if fact_sales.exists():
+        return _aggregate_by_recipe(fact_sales, "vendido"), "FactProduccionDiaria"
+    return {}, "sin_datos"
+
+
+def _production_map(month_start: date, month_end: date) -> tuple[dict[int, Decimal], str]:
+    facts = FactProduccionDiaria.objects.filter(
+        fecha__gte=month_start,
+        fecha__lte=month_end,
+        receta_id__isnull=False,
+    )
+    if facts.exists():
+        return _aggregate_by_recipe(facts, "producido"), "FactProduccionDiaria"
+
+    point_rows = PointProductionLine.objects.filter(
+        production_date__gte=month_start,
+        production_date__lte=month_end,
+        receta_id__isnull=False,
+        is_insumo=False,
+    )
+    if point_rows.exists():
+        return _aggregate_by_recipe(point_rows, "produced_quantity"), "PointProductionLine"
+    return {}, "sin_datos"
+
+
+def _merma_maps(month_start: date, month_end: date) -> tuple[dict[int, Decimal], dict[int, Decimal], str]:
+    fact_rows = FactProduccionDiaria.objects.filter(
+        fecha__gte=month_start,
+        fecha__lte=month_end,
+        receta_id__isnull=False,
+        merma__gt=0,
+    )
+    if fact_rows.exists():
+        return _aggregate_by_recipe(fact_rows, "merma"), {}, "FactProduccionDiaria"
+
+    rows = MermaMensualSucursal.objects.filter(periodo=month_start, receta_id__isnull=False)
+    if rows.exists():
+        return (
+            _aggregate_by_recipe(rows, "unidades_merma"),
+            _aggregate_by_recipe(rows, "costo_merma"),
+            "MermaMensualSucursal",
+        )
+    return {}, {}, "sin_datos"
+
+
 class Command(BaseCommand):
-    help = "Importa un cierre mensual historico completo desde el Excel operativo de producido vs vendido."
+    help = "Importa inventarios historicos desde el Excel operativo sin sustituir ventas, produccion ni merma."
 
     def add_arguments(self, parser):
         parser.add_argument("input_path", help="Ruta absoluta del Excel fuente.")
@@ -172,19 +284,9 @@ class Command(BaseCommand):
 
             values = {
                 "inventario_inicial": _parse_decimal(ws[f"D{row_idx}"].value),
-                "produccion": _parse_decimal(ws[f"E{row_idx}"].value),
-                "venta": _parse_decimal(ws[f"F{row_idx}"].value),
-                "conversion": _parse_decimal(ws[f"G{row_idx}"].value),
-                "inventario_teorico": _parse_decimal(ws[f"H{row_idx}"].value),
                 "cedis": _parse_decimal(ws[f"I{row_idx}"].value),
                 "sucursales": _parse_decimal(ws[f"J{row_idx}"].value),
                 "fisico_total": _parse_decimal(ws[f"K{row_idx}"].value),
-                "dif_teorico_fisico": _parse_decimal(ws[f"L{row_idx}"].value),
-                "merma_ventas": _parse_decimal(ws[f"N{row_idx}"].value),
-                "merma_logistica": _parse_decimal(ws[f"O{row_idx}"].value),
-                "merma_total": _parse_decimal(ws[f"P{row_idx}"].value),
-                "dif_con_merma": _parse_decimal(ws[f"Q{row_idx}"].value),
-                "inventario_final_excel": _parse_decimal(ws[f"R{row_idx}"].value),
             }
             numeric_values = list(values.values())
             if _is_category_row(product_name, numeric_values):
@@ -218,19 +320,9 @@ class Command(BaseCommand):
         grouped_rows: dict[int, dict[str, object]] = {}
         decimal_keys = [
             "inventario_inicial",
-            "produccion",
-            "venta",
-            "conversion",
-            "inventario_teorico",
             "cedis",
             "sucursales",
             "fisico_total",
-            "dif_teorico_fisico",
-            "merma_ventas",
-            "merma_logistica",
-            "merma_total",
-            "dif_con_merma",
-            "inventario_final_excel",
         ]
         for source_row in matched_source_rows:
             receta = source_row["receta"]
@@ -253,6 +345,9 @@ class Command(BaseCommand):
                 bucket[key] += source_row[key]
 
         matched_rows = list(grouped_rows.values())
+        sales_map, sales_source = _sales_map(month_start, month_end)
+        production_map, production_source = _production_map(month_start, month_end)
+        merma_map, merma_cost_map, merma_source = _merma_maps(month_start, month_end)
 
         payload = {
             "mode": "dry_run" if options.get("dry_run") else "import",
@@ -263,6 +358,11 @@ class Command(BaseCommand):
             "closure_lines": len(matched_rows),
             "unmatched_rows": unmatched_rows[:50],
             "stopped_at_conversion_helper": stopped_at_conversion_helper,
+            "operational_sources": {
+                "ventas": sales_source,
+                "produccion": production_source,
+                "merma": merma_source,
+            },
         }
         if options.get("dry_run"):
             self.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
@@ -294,6 +394,19 @@ class Command(BaseCommand):
                     "source_path": str(input_path),
                     "source_file": input_path.name,
                     "source_sheet": sheet_name,
+                    "scope": "inventory_only",
+                    "imported_columns": [
+                        "inventario_inicial",
+                        "inventario_final_point_cedis",
+                        "inventario_final_point_sucursales",
+                        "inventario_final_point_total",
+                    ],
+                    "excluded_columns": [
+                        "produccion_mes_desde_excel",
+                        "venta_total_equivalente_desde_excel",
+                        "merma_total_equivalente_desde_excel",
+                    ],
+                    "operational_sources": payload["operational_sources"],
                     "rows_read": len(rows),
                     "matched_rows": len(matched_source_rows),
                     "closure_lines": len(matched_rows),
@@ -304,43 +417,49 @@ class Command(BaseCommand):
             closure.save()
 
             for row in matched_rows:
-                final_difference = row["dif_con_merma"]
+                receta = row["receta"]
+                producido = production_map.get(receta.id, Decimal("0"))
+                vendido = sales_map.get(receta.id, Decimal("0"))
+                merma = merma_map.get(receta.id, Decimal("0"))
+                inventario_teorico = row["inventario_inicial"] + producido - vendido - merma
+                diferencia_inventario = inventario_teorico - row["fisico_total"]
                 physical_cells_have_values = any(
                     _has_value(ws[f"{column}{source_row['row_number']}"].value)
                     for source_row in row["source_rows"]
                     for column in ["I", "J", "K"]
                 )
                 status = _audit_status(
-                    final_difference=final_difference,
-                    total_waste=row["merma_total"],
+                    final_difference=diferencia_inventario,
+                    total_waste=merma,
                     has_physical_inventory=physical_cells_have_values,
                 )
                 ProductoMonthClosureLine.objects.create(
                     closure=closure,
-                    receta_padre=row["receta"],
+                    receta_padre=receta,
                     inventario_inicial_teorico=row["inventario_inicial"],
-                    produccion_mes=row["produccion"],
-                    venta_directa_enteros=row["venta"],
+                    produccion_mes=producido,
+                    venta_directa_enteros=vendido,
                     venta_derivada_equivalente=Decimal("0"),
-                    venta_total_equivalente=row["venta"],
-                    merma_directa_enteros=row["merma_total"],
+                    venta_total_equivalente=vendido,
+                    merma_directa_enteros=merma,
                     merma_derivada_equivalente=Decimal("0"),
-                    merma_total_equivalente=row["merma_total"],
-                    inventario_final_teorico=row["inventario_teorico"],
+                    merma_total_equivalente=merma,
+                    inventario_final_teorico=inventario_teorico,
                     inventario_final_point_cedis=row["cedis"],
                     inventario_final_point_sucursales=row["sucursales"],
                     inventario_final_point_total=row["fisico_total"],
-                    diferencia_teorico_vs_point=final_difference,
+                    diferencia_teorico_vs_point=diferencia_inventario,
                     estado_auditoria=status,
-                    detalle_auditoria=_audit_detail(status, final_difference),
+                    detalle_auditoria=_audit_detail(status, diferencia_inventario),
                     metadata={
                         "historical_excel": {
+                            "scope": "inventory_only",
                             "source_rows": row["source_rows"],
-                            "conversion_entero_rebanada": str(row["conversion"]),
-                            "dif_teorico_vs_fisico": str(row["dif_teorico_fisico"]),
-                            "merma_ventas": str(row["merma_ventas"]),
-                            "merma_logistica": str(row["merma_logistica"]),
-                            "inventario_final_excel": str(row["inventario_final_excel"]),
+                            "inventario_inicial": str(row["inventario_inicial"]),
+                            "inventario_final_point_cedis": str(row["cedis"]),
+                            "inventario_final_point_sucursales": str(row["sucursales"]),
+                            "inventario_final_point_total": str(row["fisico_total"]),
+                            "operational_sources": payload["operational_sources"],
                         }
                     },
                 )

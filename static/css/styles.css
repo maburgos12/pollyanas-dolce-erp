@@ -4764,29 +4764,31 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   table-layout: fixed;
 }
 .production-table-wrap .production-col-receta { width: 13%; }
-.production-table-wrap .production-col-categoria { width: 7%; }
-.production-table-wrap .production-col-small { width: 6%; }
+.production-table-wrap .production-col-categoria { width: 8%; }
+.production-table-wrap .production-col-small { width: 5.8%; }
 .production-table-wrap .production-col-dif { width: 8%; }
-.production-table-wrap .production-col-merma { width: 8%; }
+.production-table-wrap .production-col-merma { width: 6.8%; }
 .production-table-wrap .production-col-enteros { width: 6%; }
-.production-table-wrap .production-col-costo { width: 7%; }
-.production-table-wrap .production-col-percent { width: 4%; }
-.production-table-wrap .production-col-inv { width: 5%; }
-.production-table-wrap .production-col-estado { width: 9%; }
+.production-table-wrap .production-col-costo { width: 6.6%; }
+.production-table-wrap .production-col-percent { width: 4.8%; }
+.production-table-wrap .production-col-inv { width: 5.2%; }
+.production-table-wrap .production-col-estado { width: 8.4%; }
 
 .production-table-wrap td,
 .production-table-wrap th {
-  overflow: hidden;
-  text-overflow: ellipsis;
   vertical-align: middle;
-  padding: 6px 8px;
+  padding: 6px clamp(3px, 0.45vw, 8px);
 }
 .production-table-wrap th {
-  white-space: nowrap;
+  white-space: normal;
   word-break: normal;
-  overflow-wrap: normal;
-  font-size: 0.55rem;
+  overflow-wrap: anywhere;
+  font-size: clamp(0.5rem, 0.58vw, 0.68rem);
+  line-height: 1.12;
   letter-spacing: 0;
+}
+.production-table-wrap td {
+  font-size: clamp(0.68rem, 0.78vw, 0.92rem);
 }
 .production-table-wrap td:first-child {
   white-space: normal;
@@ -4803,7 +4805,6 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   text-align: left;
 }
 .production-table-wrap th:nth-child(n+3) {
-  white-space: nowrap;
   text-align: right;
 }
 .production-table-wrap td:nth-child(n+3) {
