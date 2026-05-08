@@ -401,6 +401,13 @@ EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", default=False)
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "15"))
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "smtp").strip().lower()
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "config.email_backends.ResendEmailBackend"
+    if EMAIL_PROVIDER == "resend"
+    else "django.core.mail.backends.smtp.EmailBackend",
+)
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "webmaster@localhost")
 DIRECTOR_EMAIL = os.getenv("DIRECTOR_EMAIL", DEFAULT_FROM_EMAIL)
 CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS = [
@@ -408,6 +415,10 @@ CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS = [
     for email in os.getenv("CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS", "").split(",")
     if email.strip()
 ]
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM = os.getenv("RESEND_FROM", DEFAULT_FROM_EMAIL)
+RESEND_BASE_URL = os.getenv("RESEND_BASE_URL", "https://api.resend.com")
+RESEND_TIMEOUT_SECONDS = float(os.getenv("RESEND_TIMEOUT_SECONDS", "30"))
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 POS_BRIDGE_AGENT_MODEL = os.getenv("POS_BRIDGE_AGENT_MODEL", "gpt-4o-mini")
