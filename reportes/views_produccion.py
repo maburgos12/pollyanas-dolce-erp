@@ -300,7 +300,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             equivalence.receta_porcion_id: equivalence
             for equivalence in RecetaEquivalencia.objects.filter(
                 receta_porcion_id__in=slice_activity.keys(),
-                receta_porcion__categoria__iexact="Rebanada",
+                tipo_relacion="CONVERSION",
                 activo=True,
             )
         }

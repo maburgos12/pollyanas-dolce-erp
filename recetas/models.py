@@ -137,6 +137,19 @@ class RecetaEquivalencia(models.Model):
     )
     factor_conversion = models.DecimalField(max_digits=18, decimal_places=6, default=Decimal("1"))
     activo = models.BooleanField(default=True, db_index=True)
+    TIPO_CONVERSION = "CONVERSION"
+    TIPO_COSTEO = "COSTEO"
+    TIPO_CHOICES = [
+        ("CONVERSION", "Conversión entero→porción"),
+        ("COSTEO", "Complemento de costeo"),
+    ]
+    tipo_relacion = models.CharField(
+        max_length=20,
+        choices=TIPO_CHOICES,
+        default="CONVERSION",
+        db_index=True,
+        help_text="CONVERSION: rebanada real de entero. COSTEO: complemento para costo total.",
+    )
     fuente = models.CharField(max_length=80, blank=True, default="")
     metadata = models.JSONField(default=dict, blank=True)
     creado_en = models.DateTimeField(default=timezone.now)
