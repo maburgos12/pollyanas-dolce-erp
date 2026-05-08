@@ -165,8 +165,24 @@
             <td class="text-end">{{ group.total.producido|floatformat:"-3"|intcomma }}</td>
             <td class="text-end"><span class="{% if group.total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.dif|floatformat:"-3"|intcomma }}</span></td>
             <td class="text-end">{{ group.total.merma_reportada|floatformat:"-3"|intcomma }}</td>
-            <td class="text-end">{{ group.total.convertido|floatformat:0|intcomma }}</td>
-            <td class="text-end">{{ group.total.enteros_equivalentes|floatformat:"-1"|intcomma }}</td>
+            <td class="text-end">
+              {% if group.total.conversion_entrada %}
+              {{ group.total.conversion_entrada|floatformat:0|intcomma }}
+              {% elif group.total.conversion_salida %}
+              <span class="text-danger">-{{ group.total.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if group.total.enteros_equivalentes %}
+              {{ group.total.enteros_equivalentes|floatformat:"-1"|intcomma }}
+              {% elif group.total.conversion_salida %}
+              <span class="text-danger">-{{ group.total.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
             <td class="text-end">${{ group.total.costo_merma|floatformat:2|intcomma }}</td>
             <td class="text-center">
               {% if group.total.pct_merma is None %}
@@ -241,8 +257,24 @@
             <td class="text-end">{{ grand_total.producido|floatformat:"-3"|intcomma }}</td>
             <td class="text-end"><span class="{% if grand_total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.dif|floatformat:"-3"|intcomma }}</span></td>
             <td class="text-end">{{ grand_total.merma_reportada|floatformat:"-3"|intcomma }}</td>
-            <td class="text-end">{{ grand_total.convertido|floatformat:0|intcomma }}</td>
-            <td class="text-end">{{ grand_total.enteros_equivalentes|floatformat:"-1"|intcomma }}</td>
+            <td class="text-end">
+              {% if grand_total.conversion_entrada %}
+              {{ grand_total.conversion_entrada|floatformat:0|intcomma }}
+              {% elif grand_total.conversion_salida %}
+              <span class="text-danger">-{{ grand_total.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if grand_total.enteros_equivalentes %}
+              {{ grand_total.enteros_equivalentes|floatformat:"-1"|intcomma }}
+              {% elif grand_total.conversion_salida %}
+              <span class="text-danger">-{{ grand_total.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
             <td class="text-end">${{ grand_total.costo_merma|floatformat:2|intcomma }}</td>
             <td class="text-center">
               {% if grand_total.pct_merma is None %}
