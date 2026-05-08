@@ -4774,21 +4774,25 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 .production-table-wrap .production-col-inv { width: 5.2%; }
 .production-table-wrap .production-col-estado { width: 8.4%; }
 
-.production-table-wrap td,
-.production-table-wrap th {
+.production-table-wrap table.table td,
+.production-table-wrap table.table th,
+.production-table-wrap table.table thead th {
+  display: table-cell;
   overflow: hidden;
   vertical-align: middle;
   padding: 6px clamp(3px, 0.45vw, 8px);
 }
-.production-table-wrap th {
+.production-table-wrap table.table th,
+.production-table-wrap table.table thead th {
   white-space: normal;
   word-break: normal;
   overflow-wrap: anywhere;
   font-size: clamp(0.5rem, 0.58vw, 0.68rem);
   line-height: 1.12;
   letter-spacing: 0;
+  text-transform: none;
 }
-.production-table-wrap td {
+.production-table-wrap table.table td {
   font-size: clamp(0.68rem, 0.78vw, 0.92rem);
   text-overflow: clip;
 }
@@ -4802,14 +4806,14 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   word-break: break-word;
   line-height: 1.3;
 }
-.production-table-wrap th:first-child,
-.production-table-wrap th:nth-child(2) {
+.production-table-wrap table.table th:first-child,
+.production-table-wrap table.table th:nth-child(2) {
   text-align: left;
 }
-.production-table-wrap th:nth-child(n+3) {
+.production-table-wrap table.table th:nth-child(n+3) {
   text-align: right;
 }
-.production-table-wrap td:nth-child(n+3) {
+.production-table-wrap table.table td:nth-child(n+3) {
   white-space: nowrap;
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -4882,12 +4886,13 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   .production-table-wrap .production-col-dif { width: 12%; }
   .production-table-wrap .production-col-merma { width: 10%; }
   .production-table-wrap .production-col-inv { width: 10%; }
-  .production-table-wrap th {
+  .production-table-wrap table.table th,
+  .production-table-wrap table.table thead th {
     font-size: 0.38rem;
     line-height: 1.08;
     padding-inline: 1px;
   }
-  .production-table-wrap td:nth-child(n+3) {
+  .production-table-wrap table.table td:nth-child(n+3) {
     font-size: 0.58rem;
     padding-inline: 2px;
   }
