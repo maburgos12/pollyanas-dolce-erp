@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import csv
+import textwrap
 from calendar import monthrange
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -14,6 +17,9 @@ from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.generic import TemplateView
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
@@ -49,6 +55,35 @@ CATEGORY_ORDER = [
     "Café",
 ]
 CATEGORY_ORDER_INDEX = {name.lower(): index for index, name in enumerate(CATEGORY_ORDER)}
+
+PRODUCTION_EXPORT_COLUMNS = [
+    ("categoria", "Categoría", "text"),
+    ("receta", "Receta", "text"),
+    ("vendido", "Vendido", "number"),
+    ("producido", "Producido", "number"),
+    ("dif", "Dif. operativa", "number"),
+    ("merma_reportada", "Merma", "number"),
+    ("conversion_entrada", "Conv.", "number"),
+    ("enteros_equivalentes", "Eq.", "number"),
+    ("costo_merma", "Costo merma", "currency"),
+    ("pct_merma", "% merma", "percent"),
+    ("inventario_inicial", "Inv. inicial", "number"),
+    ("inventario_final_teorico", "Inv. final teórico", "number"),
+    ("inventario_final_point_total", "Inv. físico registrado", "number"),
+    ("diferencia_inventario", "Inv. Δ", "number"),
+    ("estado_inventario", "Estado", "text"),
+]
+
+PDF_EXPORT_COLUMNS = [
+    ("vendido", "Vta."),
+    ("producido", "Prod."),
+    ("dif", "Dif."),
+    ("merma_reportada", "Merma"),
+    ("pct_merma", "%"),
+    ("inventario_final_teorico", "Fin."),
+    ("inventario_final_point_total", "Físico"),
+    ("diferencia_inventario", "Inv. Δ"),
+]
 
 
 @dataclass(frozen=True)
@@ -144,6 +179,149 @@ def _first_available_date() -> dict[str, date | None]:
     }
 
 
+def _filename_period(context: dict[str, Any]) -> str:
+    return str(context.get("selected_period") or timezone.localdate().strftime("%Y-%m"))
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _format_decimal(value: Any, *, places: int = 2, trim: bool = True) -> str:
+    decimal_value = _decimal_or_none(value)
+    if decimal_value is None:
+        return ""
+    formatted = f"{decimal_value:,.{places}f}"
+    if trim and "." in formatted:
+        formatted = formatted.rstrip("0").rstrip(".")
+    return formatted
+
+
+def _export_raw_value(row: dict[str, Any], key: str) -> Any:
+    if key == "dif" and row.get("produccion_referencia"):
+        return "Referencia"
+    return row.get(key)
+
+
+def _export_display_value(row: dict[str, Any], key: str, kind: str) -> str:
+    value = _export_raw_value(row, key)
+    if value is None or value == "":
+        return ""
+    if kind == "currency":
+        return f"${_format_decimal(value, places=2, trim=False)}"
+    if kind == "percent":
+        return f"{_format_decimal(value, places=2, trim=False)}%"
+    if kind == "number":
+        if isinstance(value, str):
+            return value
+        return _format_decimal(value, places=2)
+    return str(value)
+
+
+def _export_rows(context: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for group in context.get("groups") or []:
+        subtotal = dict(group.get("total") or {})
+        subtotal.update(
+            {
+                "_row_type": "subtotal",
+                "categoria": group.get("categoria") or group.get("familia") or "",
+                "receta": "Subtotal",
+                "estado_inventario": "Subtotal",
+            }
+        )
+        rows.append(subtotal)
+        for detail in group.get("rows") or []:
+            row = dict(detail)
+            row["_row_type"] = "detail"
+            rows.append(row)
+
+    total = dict(context.get("grand_total") or {})
+    total.update(
+        {
+            "_row_type": "total",
+            "categoria": "Gran total",
+            "receta": "Total",
+            "estado_inventario": "Total",
+        }
+    )
+    rows.append(total)
+    return rows
+
+
+def _pdf_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _pdf_bytes(*, title: str, lines: list[str]) -> bytes:
+    page_width = 792
+    page_height = 612
+    line_height = 12
+    max_lines = 43
+    pages = [lines[index : index + max_lines] for index in range(0, len(lines), max_lines)] or [[]]
+    font_id = 3 + (len(pages) * 2)
+    page_ids = [3 + (index * 2) for index in range(len(pages))]
+
+    objects: list[bytes] = [
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+        (
+            "2 0 obj << /Type /Pages /Count {count} /Kids [{kids}] >> endobj".format(
+                count=len(pages),
+                kids=" ".join(f"{page_id} 0 R" for page_id in page_ids),
+            )
+        ).encode(),
+    ]
+
+    for index, page_lines in enumerate(pages):
+        page_id = page_ids[index]
+        content_id = page_id + 1
+        content_parts = ["BT", "/F1 8 Tf", f"{line_height} TL", "36 560 Td"]
+        page_title = title if index == 0 else f"{title} - pág. {index + 1}"
+        for raw in [page_title, "", *page_lines]:
+            content_parts.append(f"({_pdf_escape(raw)}) Tj")
+            content_parts.append("T*")
+        content_parts.append("ET")
+        content = "\n".join(content_parts).encode("latin-1", errors="replace")
+        objects.append(
+            (
+                f"{page_id} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_width} {page_height}] "
+                f"/Resources << /Font << /F1 {font_id} 0 R >> >> /Contents {content_id} 0 R >> endobj"
+            ).encode()
+        )
+        objects.append(
+            b"%d 0 obj << /Length " % content_id
+            + str(len(content)).encode()
+            + b" >> stream\n"
+            + content
+            + b"\nendstream endobj"
+        )
+
+    objects.append(f"{font_id} 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj".encode())
+
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(output))
+        output.extend(obj)
+        output.extend(b"\n")
+    xref_pos = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF".encode()
+    )
+    return bytes(output)
+
+
 class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
     template_name = "reportes/producido_vs_vendido.html"
 
@@ -163,7 +341,147 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                     "totals": context["grand_total"],
                 }
             )
+        export_format = (request.GET.get("export") or "").strip().lower()
+        if export_format == "csv":
+            return self._export_csv(context)
+        if export_format == "xlsx":
+            return self._export_xlsx(context)
+        if export_format == "pdf":
+            return self._export_pdf(context)
         return self.render_to_response(context)
+
+    def _export_csv(self, context: dict[str, Any]) -> HttpResponse:
+        period = _filename_period(context)
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="producido_vs_vendido_{period}.csv"'
+        writer = csv.writer(response)
+        writer.writerow([label for _, label, _ in PRODUCTION_EXPORT_COLUMNS])
+        for row in _export_rows(context):
+            writer.writerow(
+                [
+                    _export_display_value(row, key, kind)
+                    for key, _, kind in PRODUCTION_EXPORT_COLUMNS
+                ]
+            )
+        return response
+
+    def _export_xlsx(self, context: dict[str, Any]) -> HttpResponse:
+        period = _filename_period(context)
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Producido vs Vendido"
+
+        title_font = Font(bold=True, size=14, color="7B1A48")
+        header_fill = PatternFill("solid", fgColor="F5E6ED")
+        header_font = Font(bold=True, color="7B1A48")
+        subtotal_fill = PatternFill("solid", fgColor="F5E6ED")
+        total_fill = PatternFill("solid", fgColor="3D0A24")
+        white_bold = Font(bold=True, color="FFFFFF")
+
+        sheet["A1"] = f"Producido vs Vendido - {context.get('selected_period_label') or period}"
+        sheet["A1"].font = title_font
+        sheet["A2"] = (
+            f"Ventas: {context['fuentes']['ventas']} | "
+            f"Producción: {context['fuentes']['produccion']} | "
+            f"Merma: {context['fuentes']['merma']} | "
+            f"Inventario: {context['fuentes']['inventario']}"
+        )
+        sheet["A3"] = f"Categoría: {context.get('selected_categoria') or 'Todas'}"
+
+        header_row = 5
+        for col_idx, (_, label, _) in enumerate(PRODUCTION_EXPORT_COLUMNS, start=1):
+            cell = sheet.cell(row=header_row, column=col_idx, value=label)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        for row_idx, row in enumerate(_export_rows(context), start=header_row + 1):
+            for col_idx, (key, _, kind) in enumerate(PRODUCTION_EXPORT_COLUMNS, start=1):
+                raw_value = _export_raw_value(row, key)
+                cell = sheet.cell(row=row_idx, column=col_idx)
+                if raw_value is None or raw_value == "":
+                    cell.value = None
+                elif kind == "currency":
+                    cell.value = _decimal_or_none(raw_value)
+                    cell.number_format = '$#,##0.00'
+                elif kind == "percent":
+                    decimal_value = _decimal_or_none(raw_value)
+                    cell.value = decimal_value / Decimal("100") if decimal_value is not None else None
+                    cell.number_format = '0.00%'
+                elif kind == "number" and not isinstance(raw_value, str):
+                    cell.value = _decimal_or_none(raw_value)
+                    cell.number_format = '#,##0.##'
+                else:
+                    cell.value = str(raw_value)
+                cell.alignment = Alignment(
+                    horizontal="left" if kind == "text" else "right",
+                    vertical="center",
+                    wrap_text=True,
+                )
+
+            if row.get("_row_type") == "subtotal":
+                for cell in sheet[row_idx]:
+                    cell.fill = subtotal_fill
+                    cell.font = Font(bold=True, color="7B1A48")
+            elif row.get("_row_type") == "total":
+                for cell in sheet[row_idx]:
+                    cell.fill = total_fill
+                    cell.font = white_bold
+
+        sheet.freeze_panes = "A6"
+        widths = {
+            "A": 22,
+            "B": 34,
+            "I": 15,
+            "L": 16,
+            "M": 18,
+            "O": 20,
+        }
+        for col_idx in range(1, len(PRODUCTION_EXPORT_COLUMNS) + 1):
+            letter = get_column_letter(col_idx)
+            sheet.column_dimensions[letter].width = widths.get(letter, 12)
+
+        buffer = BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="producido_vs_vendido_{period}.xlsx"'
+        return response
+
+    def _export_pdf(self, context: dict[str, Any]) -> HttpResponse:
+        period = _filename_period(context)
+        lines = [
+            f"Periodo: {context.get('selected_period_label') or period}",
+            f"Categoria: {context.get('selected_categoria') or 'Todas'}",
+            (
+                f"Fuentes - Ventas: {context['fuentes']['ventas']} | "
+                f"Produccion: {context['fuentes']['produccion']} | "
+                f"Merma: {context['fuentes']['merma']} | "
+                f"Inventario: {context['fuentes']['inventario']}"
+            ),
+            "",
+        ]
+        for row in _export_rows(context):
+            prefix = "TOTAL" if row.get("_row_type") == "total" else "SUBTOTAL" if row.get("_row_type") == "subtotal" else "RECETA"
+            name_line = f"{prefix}: {row.get('categoria') or ''} - {row.get('receta') or ''}".strip()
+            lines.extend(textwrap.wrap(name_line, width=118) or [""])
+            metrics = " | ".join(
+                f"{label} {_export_display_value(row, key, 'percent' if key == 'pct_merma' else 'number') or '-'}"
+                for key, label in PDF_EXPORT_COLUMNS
+            )
+            status = _export_display_value(row, "estado_inventario", "text") or "-"
+            lines.extend(textwrap.wrap(f"{metrics} | Estado {status}", width=118, subsequent_indent="  "))
+            costo = _export_display_value(row, "costo_merma", "currency") or "$0.00"
+            lines.append(f"Costo merma: {costo}")
+            lines.append("")
+
+        pdf = _pdf_bytes(title="Producido vs Vendido", lines=lines)
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="producido_vs_vendido_{period}.pdf"'
+        return response
 
     def _build_context(self, request: HttpRequest) -> dict[str, Any]:
         period = _parse_period(request.GET.get("periodo") or request.GET.get("period"))

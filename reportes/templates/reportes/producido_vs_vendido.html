@@ -19,7 +19,11 @@
         <h1 class="card-header">Producido vs Vendido</h1>
         <p class="executive-section-copy">Comparativo operativo por receta y categoría para {{ selected_period_label }}.</p>
       </div>
-      <button class="btn btn-secondary" type="button" id="export-production-csv">Exportar CSV</button>
+      <div class="production-export-actions">
+        <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=csv">CSV</a>
+        <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=xlsx">Excel XLSX</a>
+        <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=pdf">PDF</a>
+      </div>
     </div>
     <div class="production-source-list" aria-label="Fuentes de datos">
       <span class="badge bg-primary">Ventas: {{ fuentes.ventas }}</span>
@@ -107,7 +111,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
         </div>
         <div class="kpi-body">
-          <div class="kpi-number {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}">${{ grand_total.costo_merma|floatformat:2|intcomma }}</div>
+          <div class="kpi-number kpi-number-currency {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}">${{ grand_total.costo_merma|floatformat:2|intcomma }}</div>
           <div class="kpi-label">Costo merma</div>
         </div>
       </div>
@@ -152,7 +156,7 @@
             <th class="text-center" title="% merma">%</th>
             <th class="text-end" title="Inventario inicial">Ini.</th>
             <th class="text-end" title="Inventario final teórico">Fin.</th>
-            <th class="text-end" title="Inventario físico Point">Fís.</th>
+            <th class="text-end" title="Inventario físico registrado">Físico</th>
             <th class="text-end" title="Diferencia inventario">Inv Δ</th>
             <th title="Estado">Est.</th>
           </tr>
@@ -315,31 +319,4 @@
     {% endif %}
   </section>
 </div>
-{% endblock %}
-
-{% block extra_js %}
-<script>
-  (function () {
-    const button = document.getElementById('export-production-csv');
-    const table = document.getElementById('production-table');
-    if (!button || !table) return;
-    button.addEventListener('click', function () {
-      const rows = Array.from(table.querySelectorAll('tr')).map((tr) => {
-        return Array.from(tr.children).map((cell) => {
-          const value = cell.innerText.replace(/\s+/g, ' ').trim().replace(/"/g, '""');
-          return `"${value}"`;
-        }).join(',');
-      });
-      const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `producido_vs_vendido_{{ selected_period }}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    });
-  })();
-</script>
 {% endblock %}
