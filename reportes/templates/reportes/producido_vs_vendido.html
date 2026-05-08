@@ -97,7 +97,7 @@
         </div>
         <div class="kpi-body">
           <div class="kpi-number {% if grand_total.dif < 0 %}is-danger{% else %}is-success{% endif %}">{{ grand_total.dif|floatformat:0|intcomma }}</div>
-          <div class="kpi-label">Diferencia</div>
+          <div class="kpi-label">Dif. operativa</div>
         </div>
       </div>
     </article>
@@ -144,7 +144,7 @@
             <th title="Categoría">Cat.</th>
             <th class="text-end" title="Vendido">Vta.</th>
             <th class="text-end" title="Producido">Prod.</th>
-            <th class="text-end" title="Diferencia producido menos vendido">Dif</th>
+            <th class="text-end" title="Diferencia operativa producido menos vendido; excluye filas de referencia">Dif</th>
             <th class="text-end" title="Merma reportada">Merma</th>
             <th class="text-end" title="Convertido">Conv.</th>
             <th class="text-end" title="Enteros equivalentes">Eq.</th>
@@ -163,7 +163,13 @@
             <td colspan="2">{{ group.categoria }}</td>
             <td class="text-end">{{ group.total.vendido|floatformat:"-3"|intcomma }}</td>
             <td class="text-end">{{ group.total.producido|floatformat:"-3"|intcomma }}</td>
-            <td class="text-end"><span class="{% if group.total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.dif|floatformat:"-3"|intcomma }}</span></td>
+            <td class="text-end">
+              {% if group.total.produccion_referencia %}
+              <span class="muted">Referencia</span>
+              {% else %}
+              <span class="{% if group.total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.dif|floatformat:"-3"|intcomma }}</span>
+              {% endif %}
+            </td>
             <td class="text-end">{{ group.total.merma_reportada|floatformat:"-3"|intcomma }}</td>
             <td class="text-end">
               {% if group.total.conversion_entrada %}
@@ -207,7 +213,15 @@
             <td>{{ row.categoria }}</td>
             <td class="text-end">{% if row.vendido is None %}<span class="muted">—</span>{% else %}{{ row.vendido|floatformat:"-3"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.producido is None %}<span class="muted">—</span>{% else %}{{ row.producido|floatformat:"-3"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.dif is None %}<span class="muted">—</span>{% else %}<span class="{% if row.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.dif|floatformat:"-3"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">
+              {% if row.produccion_referencia %}
+              <span class="muted">Referencia</span>
+              {% elif row.dif is None %}
+              <span class="muted">—</span>
+              {% else %}
+              <span class="{% if row.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.dif|floatformat:"-3"|intcomma }}</span>
+              {% endif %}
+            </td>
             <td class="text-end">{% if row.merma_reportada is None %}<span class="muted">—</span>{% else %}{{ row.merma_reportada|floatformat:"-3"|intcomma }}{% endif %}</td>
             <td class="text-end">
               {% if row.conversion_entrada %}

@@ -112,6 +112,10 @@ def _category_sort_key(value: str | None) -> tuple[int, str]:
     return (CATEGORY_ORDER_INDEX.get(label.lower(), len(CATEGORY_ORDER)), label.lower())
 
 
+def _is_production_reference_category(value: str | None) -> bool:
+    return _category_label(value).lower() == "rebanada"
+
+
 def _sum_or_none(rows: list[dict[str, Any]], key: str) -> Decimal | None:
     values = [row[key] for row in rows if row.get(key) is not None]
     if not values:
@@ -566,9 +570,16 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         vendido = sales_map.get(recipe.id)
         producido = production_map.get(recipe.id)
         merma_reportada = merma_map.get(recipe.id)
+        categoria = _category_label(recipe.categoria)
+        produccion_referencia = _is_production_reference_category(categoria)
         dif = None
+        dif_referencia = None
         if producido is not None and vendido is not None:
-            dif = producido - vendido
+            raw_dif = producido - vendido
+            if produccion_referencia:
+                dif_referencia = raw_dif
+            else:
+                dif = raw_dif
         costo_unitario = cost_map.get(recipe.id, ZERO)
         costo_merma = merma_cost_map.get(recipe.id)
         if costo_merma is None and merma_reportada is not None and costo_unitario:
@@ -576,7 +587,6 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         pct_merma = None
         if merma_reportada is not None and vendido and vendido > ZERO:
             pct_merma = (merma_reportada / vendido) * Decimal("100")
-        categoria = _category_label(recipe.categoria)
         row = {
             "receta_id": recipe.id,
             "receta": recipe.nombre,
@@ -585,6 +595,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "vendido": vendido,
             "producido": producido,
             "dif": dif,
+            "dif_referencia": dif_referencia,
+            "produccion_referencia": produccion_referencia,
             "merma_reportada": merma_reportada,
             "costo_merma": costo_merma,
             "pct_merma": pct_merma,
@@ -646,6 +658,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "inventario_final_teorico": _sum_or_none(rows, "inventario_final_teorico"),
             "inventario_final_point_total": _sum_or_none(rows, "inventario_final_point_total"),
             "diferencia_inventario": _sum_or_none(rows, "diferencia_inventario"),
+            "produccion_referencia": bool(rows) and all(row.get("produccion_referencia") for row in rows),
+            "dif_referencia": sum((row["dif_referencia"] for row in rows if row.get("dif_referencia") is not None), ZERO),
         }
         totals["pct_merma"] = (
             (totals["merma_reportada"] / totals["vendido"]) * Decimal("100")
