@@ -4759,36 +4759,69 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 }
 .production-filter-action { align-self: end; }
 
+.production-report .production-kpi-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .production-report .kpi-card {
   overflow: hidden;
+  min-width: 0;
+  padding: clamp(14px, 1.4vw, 18px);
 }
 
 .production-report .kpi-card-inner {
+  display: grid;
+  grid-template-columns: clamp(36px, 4vw, 52px) minmax(0, 1fr);
   align-items: center;
+  gap: clamp(10px, 1.2vw, 16px);
+  width: 100%;
   min-width: 0;
 }
 
 .production-report .kpi-icon {
-  flex: 0 0 44px;
+  width: clamp(36px, 4vw, 52px);
+  height: clamp(36px, 4vw, 52px);
+  flex: 0 0 auto;
 }
 
 .production-report .kpi-body {
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
 }
 
 .production-report .kpi-number {
   width: 100%;
   max-width: 100%;
-  font-size: clamp(30px, 2.2vw, 46px);
-  white-space: nowrap;
-  overflow: hidden;
+  display: block;
+  font-size: clamp(1.7rem, 2.35vw, 2.85rem) !important;
+  line-height: 0.95;
+  white-space: nowrap !important;
+  overflow: hidden !important;
   text-overflow: clip;
   font-variant-numeric: tabular-nums;
 }
 
 .production-report .kpi-number-currency {
-  font-size: clamp(26px, 2vw, 40px);
+  font-size: clamp(1.45rem, 1.8vw, 2.15rem) !important;
+  letter-spacing: 0;
+}
+
+.production-report .kpi-label {
+  line-height: 1.1;
+}
+
+@media (max-width: 1320px) {
+  .production-report .production-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .production-report .production-kpi-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .production-table-wrap {
@@ -4802,16 +4835,16 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   width: 100%;
   table-layout: fixed;
 }
-.production-table-wrap .production-col-receta { width: 13%; }
-.production-table-wrap .production-col-categoria { width: 8%; }
-.production-table-wrap .production-col-small { width: 5.8%; }
-.production-table-wrap .production-col-dif { width: 8%; }
-.production-table-wrap .production-col-merma { width: 6.8%; }
-.production-table-wrap .production-col-enteros { width: 6%; }
-.production-table-wrap .production-col-costo { width: 6.6%; }
-.production-table-wrap .production-col-percent { width: 6.2%; }
-.production-table-wrap .production-col-inv { width: 5.2%; }
-.production-table-wrap .production-col-estado { width: 7%; }
+.production-table-wrap .production-col-receta { width: 11.5%; }
+.production-table-wrap .production-col-categoria { width: 7%; }
+.production-table-wrap .production-col-small { width: 5.3%; }
+.production-table-wrap .production-col-dif { width: 6.7%; }
+.production-table-wrap .production-col-merma { width: 5.8%; }
+.production-table-wrap .production-col-enteros { width: 5.5%; }
+.production-table-wrap .production-col-costo { width: 6.4%; }
+.production-table-wrap .production-col-percent { width: 6%; }
+.production-table-wrap .production-col-inv { width: 4.8%; }
+.production-table-wrap .production-col-estado { width: 11.8%; }
 
 .production-table-wrap table.table td,
 .production-table-wrap table.table th,
@@ -4883,18 +4916,34 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 }
 .production-table-wrap table.table th:nth-child(15),
 .production-table-wrap table.table td.production-state-cell {
-  white-space: normal;
-  text-align: center;
+  white-space: normal !important;
+  text-align: center !important;
   padding-inline: 4px;
 }
 
 .production-table-wrap table.table td.production-state-cell {
-  overflow: visible;
+  overflow: hidden !important;
   word-break: normal;
   overflow-wrap: anywhere;
   hyphens: auto;
-  font-size: clamp(0.64rem, 0.72vw, 0.82rem);
-  line-height: 1.16;
+  font-size: clamp(0.62rem, 0.7vw, 0.78rem);
+  line-height: 1.12;
+}
+
+.production-table-wrap .production-state-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 112px;
+  min-height: 24px;
+  margin-inline: auto;
+  white-space: normal !important;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  hyphens: auto;
+  text-align: center;
 }
 .production-subtotal-row td {
   background: var(--gris-suave);
