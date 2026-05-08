@@ -135,6 +135,76 @@ def _style_export_table(ws, *, header_row: int, max_col: int | None = None, max_
 def _apply_column_widths(ws, widths: dict[str, int]) -> None:
     for column, width in widths.items():
         ws.column_dimensions[column].width = width
+
+
+def _xlsx_workbook_response(wb: Workbook, filename: str) -> HttpResponse:
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    response = HttpResponse(
+        out.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _build_solicitudes_sucursal_workbook(fecha_operacion: date) -> Workbook:
+    solicitudes = (
+        SolicitudReabastoCedis.objects.filter(fecha_operacion=fecha_operacion)
+        .exclude(estado=SolicitudReabastoCedis.ESTADO_CANCELADA)
+        .select_related("sucursal")
+        .order_by("sucursal__codigo", "sucursal__nombre")
+    )
+    sucursales = list({sol.sucursal_id: sol.sucursal for sol in solicitudes if sol.sucursal_id}.values())
+    sucursales.sort(key=lambda suc: ((suc.codigo or ""), suc.nombre or ""))
+    lineas = (
+        SolicitudReabastoCedisLinea.objects.filter(solicitud__in=solicitudes)
+        .select_related("solicitud__sucursal", "receta")
+        .order_by("receta__nombre", "solicitud__sucursal__codigo")
+    )
+    matrix: dict[int, dict] = {}
+    for linea in lineas:
+        receta_id = linea.receta_id
+        row = matrix.setdefault(
+            receta_id,
+            {
+                "producto": linea.receta.nombre,
+                "cantidades": {suc.id: Decimal("0") for suc in sucursales},
+                "total": Decimal("0"),
+            },
+        )
+        cantidad = _to_decimal_safe(linea.solicitado)
+        row["cantidades"][linea.solicitud.sucursal_id] = cantidad
+        row["total"] += cantidad
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Solicitudes por sucursal"
+    max_col = max(len(sucursales) + 2, 2)
+    _style_export_title(ws, "Solicitudes por sucursal", max_col=max_col)
+    ws.append(["Fecha de solicitud", fecha_operacion.isoformat()])
+    ws.append(["Fecha de aplicación del plan", fecha_operacion.isoformat()])
+    ws.append([])
+    ws.append(["Producto", *[suc.nombre for suc in sucursales], "Total"])
+    for row in matrix.values():
+        ws.append(
+            [
+                row["producto"],
+                *[float(row["cantidades"].get(suc.id, Decimal("0"))) for suc in sucursales],
+                float(row["total"]),
+            ]
+        )
+    _style_export_table(ws, header_row=5, max_col=max_col)
+    _apply_column_widths(
+        ws,
+        {
+            "A": 42,
+            **{get_column_letter(idx + 2): 14 for idx in range(len(sucursales))},
+            get_column_letter(max_col): 14,
+        },
+    )
+    return wb
 RECENT_POINT_SOURCE = "/Report/VentasCategorias"
 NONBLOCKING_PRODUCT_PLACEHOLDER_LABELS = {
     "armado",
@@ -20688,61 +20758,8 @@ def reabasto_cedis_consolidado_export(request: HttpRequest) -> HttpResponse:
     rows = _consolidado_reabasto_por_fecha(fecha_operacion)
 
     if export_format in {"solicitudes", "matriz", "matrix"}:
-        solicitudes = (
-            SolicitudReabastoCedis.objects.filter(fecha_operacion=fecha_operacion)
-            .exclude(estado=SolicitudReabastoCedis.ESTADO_CANCELADA)
-            .select_related("sucursal")
-            .order_by("sucursal__codigo", "sucursal__nombre")
-        )
-        sucursales = list({sol.sucursal_id: sol.sucursal for sol in solicitudes if sol.sucursal_id}.values())
-        sucursales.sort(key=lambda suc: ((suc.codigo or ""), suc.nombre or ""))
-        lineas = (
-            SolicitudReabastoCedisLinea.objects.filter(solicitud__in=solicitudes)
-            .select_related("solicitud__sucursal", "receta")
-            .order_by("receta__nombre", "solicitud__sucursal__codigo")
-        )
-        matrix: dict[int, dict] = {}
-        for linea in lineas:
-            receta_id = linea.receta_id
-            row = matrix.setdefault(
-                receta_id,
-                {
-                    "producto": linea.receta.nombre,
-                    "cantidades": {suc.id: Decimal("0") for suc in sucursales},
-                    "total": Decimal("0"),
-                },
-            )
-            cantidad = _to_decimal_safe(linea.solicitado)
-            row["cantidades"][linea.solicitud.sucursal_id] = cantidad
-            row["total"] += cantidad
-
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Solicitudes por sucursal"
-        _style_export_title(ws, "Solicitudes por sucursal", max_col=max(len(sucursales) + 2, 2))
-        ws.append(["Fecha de solicitud", fecha_operacion.isoformat()])
-        ws.append(["Fecha de aplicación del plan", fecha_operacion.isoformat()])
-        ws.append([])
-        ws.append(["Producto", *[suc.nombre for suc in sucursales], "Total"])
-        for row in matrix.values():
-            ws.append(
-                [
-                    row["producto"],
-                    *[float(row["cantidades"].get(suc.id, Decimal("0"))) for suc in sucursales],
-                    float(row["total"]),
-                ]
-            )
-        _style_export_table(ws, header_row=5, max_col=len(sucursales) + 2)
-        _apply_column_widths(ws, {"A": 42, **{get_column_letter(idx + 2): 14 for idx in range(len(sucursales))}, get_column_letter(len(sucursales) + 2): 14})
-        out = BytesIO()
-        wb.save(out)
-        out.seek(0)
-        response = HttpResponse(
-            out.getvalue(),
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        response["Content-Disposition"] = f'attachment; filename="cedis_solicitudes_sucursales_{fecha_operacion.isoformat()}.xlsx"'
-        return response
+        wb = _build_solicitudes_sucursal_workbook(fecha_operacion)
+        return _xlsx_workbook_response(wb, f"cedis_solicitudes_sucursales_{fecha_operacion.isoformat()}.xlsx")
 
     if export_format == "csv":
         response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -20801,15 +20818,7 @@ def reabasto_cedis_consolidado_export(request: HttpRequest) -> HttpResponse:
         )
     _style_export_table(ws, header_row=5, max_col=6)
     _apply_column_widths(ws, {"A": 42, "B": 14, "C": 16, "D": 16, "E": 18, "F": 22})
-    out = BytesIO()
-    wb.save(out)
-    out.seek(0)
-    response = HttpResponse(
-        out.getvalue(),
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-    response["Content-Disposition"] = f'attachment; filename="cedis_consolidado_{fecha_operacion.isoformat()}.xlsx"'
-    return response
+    return _xlsx_workbook_response(wb, f"cedis_consolidado_{fecha_operacion.isoformat()}.xlsx")
 
 
 @login_required
