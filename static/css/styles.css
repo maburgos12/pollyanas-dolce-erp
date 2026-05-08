@@ -4882,4 +4882,13 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   .production-table-wrap .production-col-dif { width: 12%; }
   .production-table-wrap .production-col-merma { width: 10%; }
   .production-table-wrap .production-col-inv { width: 10%; }
+  .production-table-wrap th {
+    font-size: 0.38rem;
+    line-height: 1.08;
+    padding-inline: 1px;
+  }
+  .production-table-wrap td:nth-child(n+3) {
+    font-size: 0.58rem;
+    padding-inline: 2px;
+  }
 }
