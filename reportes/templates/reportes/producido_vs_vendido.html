@@ -132,6 +132,11 @@
           <col class="production-col-enteros">
           <col class="production-col-costo">
           <col class="production-col-percent">
+          <col class="production-col-inv">
+          <col class="production-col-inv">
+          <col class="production-col-inv">
+          <col class="production-col-inv">
+          <col class="production-col-estado">
         </colgroup>
         <thead>
           <tr>
@@ -139,12 +144,17 @@
             <th>Categoría</th>
             <th class="text-end">Vendido</th>
             <th class="text-end">Producido</th>
-            <th class="text-end">Dif (Prod-Vend)</th>
-            <th class="text-end">Merma reportada</th>
+            <th class="text-end" title="Diferencia producido menos vendido">Dif prod-vend</th>
+            <th class="text-end" title="Merma reportada">Merma</th>
             <th class="text-end">Convertido</th>
-            <th class="text-end">Enteros equiv.</th>
-            <th class="text-end">Costo merma</th>
+            <th class="text-end" title="Enteros equivalentes">Enteros</th>
+            <th class="text-end" title="Costo de merma">Costo</th>
             <th class="text-center">% Merma</th>
+            <th class="text-end">Inv inicial</th>
+            <th class="text-end">Inv final</th>
+            <th class="text-end" title="Inventario físico Point">Físico</th>
+            <th class="text-end">Dif inv</th>
+            <th>Estado</th>
           </tr>
         </thead>
         <tbody>
@@ -169,6 +179,11 @@
               <span class="badge bg-success">{{ group.total.pct_merma|floatformat:2 }}%</span>
               {% endif %}
             </td>
+            <td class="text-end">{{ group.total.inventario_inicial|floatformat:1|intcomma }}</td>
+            <td class="text-end">{{ group.total.inventario_final_teorico|floatformat:1|intcomma }}</td>
+            <td class="text-end">{{ group.total.inventario_final_point_total|floatformat:1|intcomma }}</td>
+            <td class="text-end"><span class="{% if group.total.diferencia_inventario > 0 %}text-danger{% elif group.total.diferencia_inventario < 0 %}text-warning{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:1|intcomma }}</span></td>
+            <td class="production-state-cell">Subtotal</td>
           </tr>
           {% for row in group.rows %}
           <tr>
@@ -207,6 +222,11 @@
               <span class="badge bg-success">{{ row.pct_merma|floatformat:2 }}%</span>
               {% endif %}
             </td>
+            <td class="text-end">{% if row.inventario_inicial is None %}<span class="muted">—</span>{% else %}{{ row.inventario_inicial|floatformat:1|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted">—</span>{% else %}{{ row.inventario_final_teorico|floatformat:1|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.inventario_final_point_total is None %}<span class="muted">—</span>{% else %}{{ row.inventario_final_point_total|floatformat:1|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">—</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-danger{% elif row.diferencia_inventario < 0 %}text-warning{% else %}text-success{% endif %}">{{ row.diferencia_inventario|floatformat:1|intcomma }}</span>{% endif %}</td>
+            <td class="production-state-cell">{% if row.estado_inventario %}{{ row.estado_inventario }}{% else %}<span class="muted">—</span>{% endif %}</td>
           </tr>
           {% endfor %}
           {% endfor %}
@@ -230,6 +250,11 @@
               <span class="badge bg-success">{{ grand_total.pct_merma|floatformat:2 }}%</span>
               {% endif %}
             </td>
+            <td class="text-end">{{ grand_total.inventario_inicial|floatformat:1|intcomma }}</td>
+            <td class="text-end">{{ grand_total.inventario_final_teorico|floatformat:1|intcomma }}</td>
+            <td class="text-end">{{ grand_total.inventario_final_point_total|floatformat:1|intcomma }}</td>
+            <td class="text-end"><span class="{% if grand_total.diferencia_inventario > 0 %}text-danger{% elif grand_total.diferencia_inventario < 0 %}text-warning{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:1|intcomma }}</span></td>
+            <td class="production-state-cell">Total</td>
           </tr>
         </tbody>
       </table>

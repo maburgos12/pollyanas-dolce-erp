@@ -187,11 +187,22 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             row["convertido"] = conv.get("convertido", ZERO)
             row["enteros_equivalentes"] = conv.get("enteros_equivalentes", ZERO)
             row["conversion_factor"] = conv.get("factor", ZERO)
+            inventory = closure_map["inventario"].get(row["receta_id"]) or {}
+            row["inventario_inicial"] = inventory.get("inventario_inicial")
+            row["inventario_final_teorico"] = inventory.get("inventario_final_teorico")
+            row["inventario_final_point_total"] = inventory.get("inventario_final_point_total")
+            row["diferencia_inventario"] = inventory.get("diferencia_inventario")
+            row["estado_inventario"] = inventory.get("estado_inventario", "")
             row["json"].update(
                 {
                     "convertido": str(row["convertido"]),
                     "enteros_equivalentes": str(row["enteros_equivalentes"]),
                     "conversion_factor": str(row["conversion_factor"]),
+                    "inventario_inicial": str(row["inventario_inicial"] or ""),
+                    "inventario_final_teorico": str(row["inventario_final_teorico"] or ""),
+                    "inventario_final_point_total": str(row["inventario_final_point_total"] or ""),
+                    "diferencia_inventario": str(row["diferencia_inventario"] or ""),
+                    "estado_inventario": row["estado_inventario"],
                 }
             )
         groups, grand_total = self._group_rows(rows)
@@ -231,6 +242,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 "ventas": sales_source,
                 "produccion": production_source,
                 "merma": merma_source,
+                "inventario": closure_map["source"],
             },
             "banners": banners,
             "source_dates": source_dates,
@@ -362,15 +374,26 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "MermaMensualSucursal",
         )
 
-    def _closure_map(self, period: PeriodSelection) -> dict[str, dict[int, Decimal]]:
+    def _closure_map(self, period: PeriodSelection) -> dict[str, Any]:
         closure = ProductoMonthClosure.objects.filter(month_start=period.month_start).first()
         if closure is None:
-            return {"producido": {}, "vendido": {}, "merma": {}}
+            return {"producido": {}, "vendido": {}, "merma": {}, "inventario": {}, "source": "sin_cierre"}
         lines = ProductoMonthClosureLine.objects.filter(closure=closure)
+        inventory_map = {}
+        for line in lines:
+            inventory_map[line.receta_padre_id] = {
+                "inventario_inicial": _decimal(line.inventario_inicial_teorico),
+                "inventario_final_teorico": _decimal(line.inventario_final_teorico),
+                "inventario_final_point_total": _decimal(line.inventario_final_point_total),
+                "diferencia_inventario": _decimal(line.diferencia_teorico_vs_point),
+                "estado_inventario": line.get_estado_auditoria_display(),
+            }
         return {
             "producido": _aggregate_by_recipe(lines, "produccion_mes", recipe_field="receta_padre_id"),
             "vendido": _aggregate_by_recipe(lines, "venta_total_equivalente", recipe_field="receta_padre_id"),
             "merma": _aggregate_by_recipe(lines, "merma_total_equivalente", recipe_field="receta_padre_id"),
+            "inventario": inventory_map,
+            "source": "ProductoMonthClosureLine",
         }
 
     def _build_row(
@@ -447,6 +470,19 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 (row["enteros_equivalentes"] for row in rows if row["enteros_equivalentes"] is not None),
                 ZERO,
             ),
+            "inventario_inicial": sum((row["inventario_inicial"] for row in rows if row["inventario_inicial"] is not None), ZERO),
+            "inventario_final_teorico": sum(
+                (row["inventario_final_teorico"] for row in rows if row["inventario_final_teorico"] is not None),
+                ZERO,
+            ),
+            "inventario_final_point_total": sum(
+                (row["inventario_final_point_total"] for row in rows if row["inventario_final_point_total"] is not None),
+                ZERO,
+            ),
+            "diferencia_inventario": sum(
+                (row["diferencia_inventario"] for row in rows if row["diferencia_inventario"] is not None),
+                ZERO,
+            ),
         }
         totals["pct_merma"] = (
             (totals["merma_reportada"] / totals["vendido"]) * Decimal("100")
@@ -476,6 +512,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             banners.append("Producción: sin registros para este periodo.")
         if merma_source == "sin_datos":
             banners.append("Merma: sin registros consolidados para este periodo.")
+        if source_dates.get("cierre"):
+            banners.append(f"Cierre mensual: inventarios disponibles desde {source_dates['cierre']:%Y-%m}.")
         return banners
 
     def _categories(self) -> list[str]:
