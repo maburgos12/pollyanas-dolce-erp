@@ -183,6 +183,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             if value.get("conversion_entrada") or value.get("conversion_salida")
         )
         recipe_ids.update(closure_map["inventario"])
+        missing_slice_equivalences = self._missing_slice_equivalences(sales_map)
 
         recipes_qs = Receta.objects.filter(
             id__in=recipe_ids,
@@ -240,6 +241,13 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             merma_source=merma_source,
             source_dates=source_dates,
         )
+        if missing_slice_equivalences:
+            names = ", ".join(item["receta"] for item in missing_slice_equivalences[:8])
+            extra = "" if len(missing_slice_equivalences) <= 8 else f" y {len(missing_slice_equivalences) - 8} más"
+            banners.append(
+                "Conversiones: hay recetas de rebanada vendidas sin equivalencia activa: "
+                f"{names}{extra}. Configurar RecetaEquivalencia para convertirlas a enteros."
+            )
         periodos_qs = (
             FactProduccionDiaria.objects.annotate(mes=TruncMonth("fecha"))
             .values_list("mes", flat=True)
@@ -263,6 +271,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "groups": groups,
             "grand_total": grand_total,
             "conversion_map": conversion_map,
+            "missing_slice_equivalences": missing_slice_equivalences,
             "json_rows": [row["json"] for row in rows],
             "fuentes": {
                 "ventas": sales_source,
@@ -322,6 +331,34 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 parent_data["conversion_salida"] += enteros
                 parent_data["factor"] = factor
         return result
+
+    def _missing_slice_equivalences(self, sales_map: dict[int, Decimal]) -> list[dict[str, Any]]:
+        slice_recipes = Receta.objects.filter(
+            id__in=sales_map.keys(),
+            categoria__iexact="Rebanada",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+        ).order_by("nombre")
+        active_equivalence_ids = set(
+            RecetaEquivalencia.objects.filter(
+                receta_porcion_id__in=[recipe.id for recipe in slice_recipes],
+                activo=True,
+            ).values_list("receta_porcion_id", flat=True)
+        )
+        missing = []
+        for recipe in slice_recipes:
+            if recipe.id in active_equivalence_ids:
+                continue
+            vendido = _decimal(sales_map.get(recipe.id))
+            if not vendido:
+                continue
+            missing.append(
+                {
+                    "receta_id": recipe.id,
+                    "receta": recipe.nombre,
+                    "vendido": vendido,
+                }
+            )
+        return missing
 
     def _sales_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
         facts = PointSalesDailyProductFact.objects.filter(
