@@ -4776,6 +4776,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 
 .production-table-wrap td,
 .production-table-wrap th {
+  overflow: hidden;
   vertical-align: middle;
   padding: 6px clamp(3px, 0.45vw, 8px);
 }
@@ -4789,6 +4790,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 }
 .production-table-wrap td {
   font-size: clamp(0.68rem, 0.78vw, 0.92rem);
+  text-overflow: clip;
 }
 .production-table-wrap td:first-child {
   white-space: normal;
@@ -4810,6 +4812,14 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 .production-table-wrap td:nth-child(n+3) {
   white-space: nowrap;
   text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(0.58rem, 0.68vw, 0.86rem);
+}
+.production-table-wrap .badge {
+  max-width: 100%;
+  min-width: 0;
+  padding-inline: 0.35rem;
+  white-space: nowrap;
 }
 .production-table-wrap .production-state-cell {
   white-space: normal;
