@@ -402,6 +402,11 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "webmaster@localhost")
 DIRECTOR_EMAIL = os.getenv("DIRECTOR_EMAIL", DEFAULT_FROM_EMAIL)
+CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS = [
+    email.strip()
+    for email in os.getenv("CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS", "").split(",")
+    if email.strip()
+]
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 POS_BRIDGE_AGENT_MODEL = os.getenv("POS_BRIDGE_AGENT_MODEL", "gpt-4o-mini")
