@@ -4763,14 +4763,16 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   width: 100%;
   table-layout: fixed;
 }
-.production-table-wrap .production-col-receta { width: 15%; }
-.production-table-wrap .production-col-categoria { width: 10%; }
-.production-table-wrap .production-col-small { width: 8%; }
-.production-table-wrap .production-col-dif { width: 11%; }
-.production-table-wrap .production-col-merma { width: 11%; }
-.production-table-wrap .production-col-enteros { width: 9%; }
-.production-table-wrap .production-col-costo { width: 10%; }
-.production-table-wrap .production-col-percent { width: 5%; }
+.production-table-wrap .production-col-receta { width: 13%; }
+.production-table-wrap .production-col-categoria { width: 7%; }
+.production-table-wrap .production-col-small { width: 6%; }
+.production-table-wrap .production-col-dif { width: 8%; }
+.production-table-wrap .production-col-merma { width: 8%; }
+.production-table-wrap .production-col-enteros { width: 6%; }
+.production-table-wrap .production-col-costo { width: 7%; }
+.production-table-wrap .production-col-percent { width: 4%; }
+.production-table-wrap .production-col-inv { width: 5%; }
+.production-table-wrap .production-col-estado { width: 9%; }
 
 .production-table-wrap td,
 .production-table-wrap th {
@@ -4783,7 +4785,7 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   white-space: nowrap;
   word-break: normal;
   overflow-wrap: normal;
-  font-size: 0.7rem;
+  font-size: 0.55rem;
   letter-spacing: 0;
 }
 .production-table-wrap td:first-child {
@@ -4807,6 +4809,14 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
 .production-table-wrap td:nth-child(n+3) {
   white-space: nowrap;
   text-align: right;
+}
+.production-table-wrap .production-state-cell {
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+  text-align: left;
+  font-size: 0.72rem;
+  line-height: 1.2;
 }
 .production-subtotal-row td {
   background: var(--gris-suave);
