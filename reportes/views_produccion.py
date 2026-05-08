@@ -311,24 +311,39 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             sales_map = _aggregate_by_recipe(facts, "total_cantidad")
             source = "PointSalesDailyProductFact"
             if not sucursal_id:
-                fpd_rows = (
-                    FactProduccionDiaria.objects.filter(
-                        fecha__gte=period.month_start,
-                        fecha__lte=period.month_end,
-                        receta_id__isnull=False,
-                        vendido__gt=0,
-                    )
-                    .values("receta_id")
-                    .annotate(total=Sum("vendido"))
-                )
-                filled = 0
-                for row in fpd_rows:
-                    receta_id = int(row["receta_id"])
-                    if receta_id not in sales_map or sales_map[receta_id] == ZERO:
-                        sales_map[receta_id] = _decimal(row["total"])
-                        filled += 1
-                if filled:
-                    source = f"{source}+FactProduccionDiaria({filled})"
+                fallback_sources = [
+                    (
+                        FactProduccionDiaria.objects.filter(
+                            fecha__gte=period.month_start,
+                            fecha__lte=period.month_end,
+                            receta_id__isnull=False,
+                            vendido__gt=0,
+                        ),
+                        "vendido",
+                        "FactProduccionDiaria",
+                    ),
+                    (
+                        PointDailySale.objects.filter(
+                            sale_date__gte=period.month_start,
+                            sale_date__lte=period.month_end,
+                            receta_id__isnull=False,
+                        ),
+                        "quantity",
+                        "PointDailySale",
+                    ),
+                ]
+                source_parts = [source]
+                for fallback_qs, field_name, source_name in fallback_sources:
+                    fallback_map = _aggregate_by_recipe(fallback_qs, field_name)
+                    filled = 0
+                    for receta_id, value in fallback_map.items():
+                        if receta_id not in sales_map or sales_map[receta_id] == ZERO:
+                            sales_map[receta_id] = value
+                            filled += 1
+                    if filled:
+                        source_parts.append(f"{source_name}({filled})")
+                if len(source_parts) > 1:
+                    source = "+".join(source_parts)
             return sales_map, source
 
         sales = PointDailySale.objects.filter(
