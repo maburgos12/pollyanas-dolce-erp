@@ -194,11 +194,14 @@
             <td class="text-end">{% if row.dif is None %}<span class="muted">—</span>{% else %}<span class="{% if row.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.dif|floatformat:"-3"|intcomma }}</span>{% endif %}</td>
             <td class="text-end">{% if row.merma_reportada is None %}<span class="muted">—</span>{% else %}{{ row.merma_reportada|floatformat:"-3"|intcomma }}{% endif %}</td>
             <td class="text-end">
-              {% if row.convertido %}
-              {{ row.convertido|floatformat:0|intcomma }}
+              {% if row.conversion_entrada %}
+              {{ row.conversion_entrada|floatformat:0|intcomma }}
               {% if row.enteros_equivalentes %}
               <small class="text-muted d-block">≈{{ row.enteros_equivalentes|floatformat:1 }} enteros</small>
               {% endif %}
+              {% elif row.conversion_salida %}
+              <span class="text-danger">-{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              <small class="text-muted d-block">a rebanada</small>
               {% else %}
               <span class="muted">—</span>
               {% endif %}
@@ -206,6 +209,8 @@
             <td class="text-end">
               {% if row.enteros_equivalentes %}
               {{ row.enteros_equivalentes|floatformat:"-1"|intcomma }}
+              {% elif row.conversion_salida %}
+              <span class="text-danger">-{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span>
               {% else %}
               <span class="muted">—</span>
               {% endif %}

@@ -177,7 +177,11 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             recipe_ids.update(closure_map["inventario"])
         recipe_ids.update(recipe_id for recipe_id, value in merma_map.items() if value)
         conversion_map = self._conversion_map(period)
-        recipe_ids.update(recipe_id for recipe_id, value in conversion_map.items() if value.get("convertido"))
+        recipe_ids.update(
+            recipe_id
+            for recipe_id, value in conversion_map.items()
+            if value.get("conversion_entrada") or value.get("conversion_salida")
+        )
         recipe_ids.update(closure_map["inventario"])
 
         recipes_qs = Receta.objects.filter(
@@ -197,6 +201,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             conv = conversion_map.get(row["receta_id"]) or {}
             row["convertido"] = conv.get("convertido", ZERO)
             row["enteros_equivalentes"] = conv.get("enteros_equivalentes", ZERO)
+            row["conversion_entrada"] = conv.get("conversion_entrada", ZERO)
+            row["conversion_salida"] = conv.get("conversion_salida", ZERO)
             row["conversion_factor"] = conv.get("factor", ZERO)
             inventory = closure_map["inventario"].get(row["receta_id"]) or {}
             row["inventario_inicial"] = inventory.get("inventario_inicial")
@@ -215,6 +221,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 {
                     "convertido": str(row["convertido"]),
                     "enteros_equivalentes": str(row["enteros_equivalentes"]),
+                    "conversion_entrada": str(row["conversion_entrada"]),
+                    "conversion_salida": str(row["conversion_salida"]),
                     "conversion_factor": str(row["conversion_factor"]),
                     "inventario_inicial": str(row["inventario_inicial"] or ""),
                     "inventario_final_teorico": str(row["inventario_final_teorico"] or ""),
@@ -267,7 +275,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         }
 
     def _conversion_map(self, period: PeriodSelection) -> dict[int, dict[str, Decimal]]:
-        rows = (
+        rows = list(
             PointConversionLine.objects.filter(
                 movement_at__date__gte=period.month_start,
                 movement_at__date__lte=period.month_end,
@@ -278,7 +286,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             .annotate(total=Sum("quantity"))
         )
         equivalences = {
-            equivalence.receta_porcion_id: equivalence.factor_conversion
+            equivalence.receta_porcion_id: equivalence
             for equivalence in RecetaEquivalencia.objects.filter(
                 receta_porcion_id__in=[row["receta_id"] for row in rows if row.get("receta_id")],
                 activo=True,
@@ -290,13 +298,37 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             if not receta_id:
                 continue
             convertido = _decimal(row["total"])
-            factor = _decimal(equivalences.get(receta_id)) or Decimal("1")
+            equivalence = equivalences.get(receta_id)
+            factor = _decimal(equivalence.factor_conversion if equivalence else None) or Decimal("1")
             enteros = (convertido / factor).quantize(Decimal("0.01")) if factor else ZERO
-            result[int(receta_id)] = {
-                "convertido": convertido,
-                "enteros_equivalentes": enteros,
-                "factor": factor,
-            }
+            portion_data = result.setdefault(
+                int(receta_id),
+                {
+                    "convertido": ZERO,
+                    "enteros_equivalentes": ZERO,
+                    "conversion_entrada": ZERO,
+                    "conversion_salida": ZERO,
+                    "factor": factor,
+                },
+            )
+            portion_data["convertido"] += convertido
+            portion_data["enteros_equivalentes"] += enteros
+            portion_data["conversion_entrada"] += convertido
+            portion_data["factor"] = factor
+
+            if equivalence and equivalence.receta_padre_id:
+                parent_data = result.setdefault(
+                    int(equivalence.receta_padre_id),
+                    {
+                        "convertido": ZERO,
+                        "enteros_equivalentes": ZERO,
+                        "conversion_entrada": ZERO,
+                        "conversion_salida": ZERO,
+                        "factor": factor,
+                    },
+                )
+                parent_data["conversion_salida"] += enteros
+                parent_data["factor"] = factor
         return result
 
     def _sales_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
@@ -468,8 +500,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         return (
             row["inventario_inicial"]
             + (row["producido"] or ZERO)
+            + (row["conversion_entrada"] or ZERO)
             - (row["vendido"] or ZERO)
             - (row["merma_reportada"] or ZERO)
+            - (row["conversion_salida"] or ZERO)
         )
 
     def _group_rows(self, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -504,6 +538,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 (row["enteros_equivalentes"] for row in rows if row["enteros_equivalentes"] is not None),
                 ZERO,
             ),
+            "conversion_entrada": sum((row["conversion_entrada"] for row in rows if row["conversion_entrada"] is not None), ZERO),
+            "conversion_salida": sum((row["conversion_salida"] for row in rows if row["conversion_salida"] is not None), ZERO),
             "inventario_inicial": _sum_or_none(rows, "inventario_inicial"),
             "inventario_final_teorico": _sum_or_none(rows, "inventario_final_teorico"),
             "inventario_final_point_total": _sum_or_none(rows, "inventario_final_point_total"),
