@@ -571,7 +571,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         producido = production_map.get(recipe.id)
         merma_reportada = merma_map.get(recipe.id)
         categoria = _category_label(recipe.categoria)
-        produccion_referencia = _is_production_reference_category(categoria)
+        produccion_referencia = not bool(recipe.pasa_modulo_produccion)
         dif = None
         dif_referencia = None
         if producido is not None and vendido is not None:

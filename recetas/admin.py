@@ -39,9 +39,19 @@ class RecetaCodigoPointAliasInline(admin.TabularInline):
 
 @admin.register(Receta)
 class RecetaAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "codigo_point", "temporalidad", "temporalidad_detalle", "sheet_name", "pendientes_matching")
+    list_display = (
+        "nombre",
+        "codigo_point",
+        "modo_costeo",
+        "pasa_modulo_produccion",
+        "excluir_cierre",
+        "temporalidad",
+        "temporalidad_detalle",
+        "sheet_name",
+        "pendientes_matching",
+    )
     search_fields = ("nombre", "codigo_point", "sheet_name", "temporalidad_detalle")
-    list_filter = ("temporalidad", "sheet_name")
+    list_filter = ("pasa_modulo_produccion", "modo_costeo", "excluir_cierre", "temporalidad", "sheet_name")
     inlines = [LineaRecetaInline, RecetaCodigoPointAliasInline]
 
 @admin.register(LineaReceta)

@@ -57,6 +57,11 @@ class Receta(models.Model):
     temporalidad_detalle = models.CharField(max_length=120, blank=True, default="")
     usa_presentaciones = models.BooleanField(default=False)
     excluir_cierre = models.BooleanField(default=False, db_index=True)
+    pasa_modulo_produccion = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="Indica si la receta debe cuadrar contra el módulo de producción en reportes operativos.",
+    )
     sheet_name = models.CharField(max_length=120, blank=True, default="")
     rendimiento_cantidad = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     rendimiento_unidad = models.ForeignKey(
