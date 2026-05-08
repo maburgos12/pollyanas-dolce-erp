@@ -16,6 +16,7 @@ from inventario.models import MovimientoInventario
 from maestros.models import CostoInsumo
 from pos_bridge.historical_freeze import assert_not_frozen
 from pos_bridge.models import PointDailySale, PointProductionLine, PointSalesDailyProductFact, PointTransferLine, PointWasteLine
+from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import (
     AnalyticAuditLog,
@@ -260,6 +261,15 @@ def rebuild_sales_facts(*, start_date: date, end_date: date) -> int:
     )
 
     fact_rows: list[FactVentaDiaria] = []
+    sales_matcher = PointSalesMatchingService()
+    authoritative_recipe_cache: dict[tuple[str, str], int | None] = {}
+
+    def resolve_authoritative_recipe_id(product_code: str, point_name: str) -> int | None:
+        key = (str(product_code or "").strip(), str(point_name or "").strip())
+        if key not in authoritative_recipe_cache:
+            receta = sales_matcher.resolve_receta(codigo_point=key[0], point_name=key[1])
+            authoritative_recipe_cache[key] = receta.id if receta else None
+        return authoritative_recipe_cache[key]
 
     authoritative_pairs = branch_day_keys_by_source.get(FactVentaDiaria.SOURCE_AUTHORITATIVE, set())
     if authoritative_pairs:
@@ -289,6 +299,11 @@ def rebuild_sales_facts(*, start_date: date, end_date: date) -> int:
             if key not in authoritative_pairs:
                 continue
             recipe_id = row.get("product_id")
+            if not recipe_id:
+                recipe_id = resolve_authoritative_recipe_id(
+                    str(row.get("product_code") or ""),
+                    str(row.get("point_name") or ""),
+                )
             if recipe_id:
                 recipe_ids.add(int(recipe_id))
             product_code = str(row.get("product_code") or "").strip() or f"recipe:{recipe_id or 'none'}"

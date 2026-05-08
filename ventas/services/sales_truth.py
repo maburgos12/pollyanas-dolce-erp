@@ -235,13 +235,17 @@ def sync_authoritative_from_vps(periodo: str, sucursal_id: int | None = None, *,
             errors.append(f"{row.id}: sin sucursal ERP ligada")
             continue
         product_code = _authoritative_product_code(row)
+        product_id = row.receta_id or _resolve_recipe_for_authoritative_row(
+            product_code,
+            row.producto_nombre_historico or "",
+        )
         obj = VentaAutoritativaPoint(
             branch=branch,
             sale_date=row.sale_date,
             product_code=product_code,
             category=row.categoria or "",
             point_name=row.producto_nombre_historico or "",
-            product_id=row.receta_id,
+            product_id=product_id,
             quantity=_decimal(row.total_cantidad),
             gross_amount=ZERO,
             discount_amount=_decimal(row.total_descuento),
