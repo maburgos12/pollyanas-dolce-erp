@@ -71,8 +71,8 @@
   </section>
   {% endif %}
 
-  <section class="kpi-grid">
-    <article class="kpi-card">
+  <section class="kpi-grid production-kpi-grid">
+    <article class="kpi-card production-kpi-card">
       <div class="kpi-card-inner">
         <div class="kpi-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg>
@@ -83,7 +83,7 @@
         </div>
       </div>
     </article>
-    <article class="kpi-card">
+    <article class="kpi-card production-kpi-card">
       <div class="kpi-card-inner">
         <div class="kpi-icon is-success">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
@@ -94,7 +94,7 @@
         </div>
       </div>
     </article>
-    <article class="kpi-card">
+    <article class="kpi-card production-kpi-card">
       <div class="kpi-card-inner">
         <div class="kpi-icon {% if grand_total.dif < 0 %}is-danger{% else %}is-success{% endif %}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16"/><path d="m14 6 6 6-6 6"/></svg>
@@ -105,7 +105,7 @@
         </div>
       </div>
     </article>
-    <article class="kpi-card">
+    <article class="kpi-card production-kpi-card production-kpi-card-currency">
       <div class="kpi-card-inner">
         <div class="kpi-icon {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
@@ -209,7 +209,7 @@
             <td class="text-end">{% if group.total.inventario_final_teorico is None %}<span class="muted">—</span>{% else %}{{ group.total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if group.total.inventario_final_point_total is None %}<span class="muted">—</span>{% else %}{{ group.total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">—</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-danger{% elif group.total.diferencia_inventario < 0 %}text-warning{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
-            <td class="production-state-cell">Subtotal</td>
+            <td class="production-state-cell"><span class="production-state-label">Subtotal</span></td>
           </tr>
           {% for row in group.rows %}
           <tr>
@@ -265,7 +265,7 @@
             <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted">—</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.inventario_final_point_total is None %}<span class="muted">—</span>{% else %}{{ row.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">—</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-danger{% elif row.diferencia_inventario < 0 %}text-warning{% else %}text-success{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
-            <td class="production-state-cell">{% if row.estado_inventario %}{{ row.estado_inventario }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td class="production-state-cell">{% if row.estado_inventario %}<span class="production-state-label">{{ row.estado_inventario }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
           </tr>
           {% endfor %}
           {% endfor %}
@@ -309,7 +309,7 @@
             <td class="text-end">{% if grand_total.inventario_final_teorico is None %}<span class="muted">—</span>{% else %}{{ grand_total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if grand_total.inventario_final_point_total is None %}<span class="muted">—</span>{% else %}{{ grand_total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">—</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-danger{% elif grand_total.diferencia_inventario < 0 %}text-warning{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
-            <td class="production-state-cell">Total</td>
+            <td class="production-state-cell"><span class="production-state-label">Total</span></td>
           </tr>
         </tbody>
       </table>
