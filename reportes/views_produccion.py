@@ -176,14 +176,14 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         if not sucursal_id and not recipe_ids:
             recipe_ids.update(closure_map["inventario"])
         recipe_ids.update(recipe_id for recipe_id, value in merma_map.items() if value)
-        conversion_map = self._conversion_map(sales_map)
+        conversion_map = self._conversion_map(sales_map, merma_map)
         recipe_ids.update(
             recipe_id
             for recipe_id, value in conversion_map.items()
             if value.get("conversion_entrada") or value.get("conversion_salida")
         )
         recipe_ids.update(closure_map["inventario"])
-        missing_slice_equivalences = self._missing_slice_equivalences(sales_map)
+        missing_slice_equivalences = self._missing_slice_equivalences(sales_map, merma_map)
 
         recipes_qs = Receta.objects.filter(
             id__in=recipe_ids,
@@ -245,7 +245,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             names = ", ".join(item["receta"] for item in missing_slice_equivalences[:8])
             extra = "" if len(missing_slice_equivalences) <= 8 else f" y {len(missing_slice_equivalences) - 8} más"
             banners.append(
-                "Conversiones: hay recetas de rebanada vendidas sin equivalencia activa: "
+                "Conversiones: hay recetas de rebanada con venta o merma sin equivalencia activa: "
                 f"{names}{extra}. Configurar RecetaEquivalencia para convertirlas a enteros."
             )
         periodos_qs = (
@@ -283,21 +283,33 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "source_dates": source_dates,
         }
 
-    def _conversion_map(self, sales_map: dict[int, Decimal]) -> dict[int, dict[str, Decimal]]:
+    def _conversion_map(
+        self,
+        sales_map: dict[int, Decimal],
+        merma_map: dict[int, Decimal] | None = None,
+    ) -> dict[int, dict[str, Decimal]]:
+        slice_activity = defaultdict(Decimal)
+        for receta_id, value in sales_map.items():
+            if value:
+                slice_activity[int(receta_id)] += _decimal(value)
+        for receta_id, value in (merma_map or {}).items():
+            if value:
+                slice_activity[int(receta_id)] += _decimal(value)
+
         equivalences = {
             equivalence.receta_porcion_id: equivalence
             for equivalence in RecetaEquivalencia.objects.filter(
-                receta_porcion_id__in=sales_map.keys(),
+                receta_porcion_id__in=slice_activity.keys(),
                 receta_porcion__categoria__iexact="Rebanada",
                 activo=True,
             )
         }
         result = {}
-        for receta_id, vendido_porcion in sales_map.items():
+        for receta_id, unidades_rebanada in slice_activity.items():
             equivalence = equivalences.get(receta_id)
             if not equivalence:
                 continue
-            convertido = _decimal(vendido_porcion)
+            convertido = _decimal(unidades_rebanada)
             if not convertido:
                 continue
             factor = _decimal(equivalence.factor_conversion if equivalence else None) or Decimal("1")
@@ -332,9 +344,21 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 parent_data["factor"] = factor
         return result
 
-    def _missing_slice_equivalences(self, sales_map: dict[int, Decimal]) -> list[dict[str, Any]]:
+    def _missing_slice_equivalences(
+        self,
+        sales_map: dict[int, Decimal],
+        merma_map: dict[int, Decimal] | None = None,
+    ) -> list[dict[str, Any]]:
+        slice_activity = defaultdict(Decimal)
+        for receta_id, value in sales_map.items():
+            if value:
+                slice_activity[int(receta_id)] += _decimal(value)
+        for receta_id, value in (merma_map or {}).items():
+            if value:
+                slice_activity[int(receta_id)] += _decimal(value)
+
         slice_recipes = Receta.objects.filter(
-            id__in=sales_map.keys(),
+            id__in=slice_activity.keys(),
             categoria__iexact="Rebanada",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
         ).order_by("nombre")
@@ -348,14 +372,16 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         for recipe in slice_recipes:
             if recipe.id in active_equivalence_ids:
                 continue
-            vendido = _decimal(sales_map.get(recipe.id))
-            if not vendido:
+            unidades_rebanada = _decimal(slice_activity.get(recipe.id))
+            if not unidades_rebanada:
                 continue
             missing.append(
                 {
                     "receta_id": recipe.id,
                     "receta": recipe.nombre,
-                    "vendido": vendido,
+                    "vendido": _decimal(sales_map.get(recipe.id)),
+                    "merma_reportada": _decimal((merma_map or {}).get(recipe.id)),
+                    "unidades_rebanada": unidades_rebanada,
                 }
             )
         return missing
