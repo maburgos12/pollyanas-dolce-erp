@@ -17,6 +17,36 @@ from pos_bridge.models import PointBranch, PointInventorySnapshot
 
 
 ZERO = Decimal("0.000")
+DAILY_CLOSE_CATEGORY_ORDER = [
+    "Bollo",
+    "Pastel Mini",
+    "Pastel Chico",
+    "Pastel Mediano",
+    "Pastel Grande",
+    "Pay Mediano",
+    "Pay Grande",
+    "Pastel Rebanada",
+    "Pay Rebanada",
+]
+
+
+def _normalize(value: str | None) -> str:
+    return " ".join((value or "").strip().lower().replace("_", " ").split())
+
+
+def _branch_label(branch: Sucursal) -> str:
+    return (branch.nombre or branch.codigo or "").replace("_", " ").strip() or branch.codigo
+
+
+def _report_category(row: dict) -> str:
+    category = (row.get("category") or "").strip()
+    product_name = _normalize(row.get("product_name"))
+    category_norm = _normalize(category)
+    if category_norm == "rebanada":
+        return "Pay Rebanada" if "pay" in product_name else "Pastel Rebanada"
+    if category_norm == "bollo":
+        return "Bollo"
+    return category
 
 
 class DailyInventoryCloseService:
@@ -38,7 +68,7 @@ class DailyInventoryCloseService:
             branches.append(cedis)
         return branches
 
-    def build_close(self, *, fecha_operacion: date) -> dict:
+    def build_close(self, *, fecha_operacion: date, category_filter: list[str] | None = None) -> dict:
         target_branches = self._target_branches(fecha_operacion)
         target_codes = [branch.codigo for branch in target_branches]
         point_branches = list(
@@ -89,7 +119,27 @@ class DailyInventoryCloseService:
             row["stocks"][branch_code] = stock
             row["captured_at_by_branch"][branch_code] = timezone.localtime(snapshot.captured_at, self.local_tz)
 
-        rows = sorted(product_map.values(), key=lambda item: (item["product_name"] or "", item["sku"] or ""))
+        category_filter_set = {_normalize(category) for category in category_filter or []}
+        order_lookup = {_normalize(category): idx for idx, category in enumerate(DAILY_CLOSE_CATEGORY_ORDER)}
+        rows = []
+        for row in product_map.values():
+            report_category = _report_category(row)
+            row["report_category"] = report_category
+            if category_filter_set and _normalize(report_category) not in category_filter_set:
+                continue
+            rows.append(row)
+
+        if category_filter_set:
+            rows = sorted(
+                rows,
+                key=lambda item: (
+                    order_lookup.get(_normalize(item.get("report_category")), 999),
+                    item.get("product_name") or "",
+                    item.get("sku") or "",
+                ),
+            )
+        else:
+            rows = sorted(rows, key=lambda item: (item["product_name"] or "", item["sku"] or ""))
         for row in rows:
             row["total_stock"] = sum((row["stocks"].get(code, ZERO) for code in target_codes), ZERO).quantize(ZERO)
 
@@ -101,8 +151,9 @@ class DailyInventoryCloseService:
         return {
             "fecha_operacion": fecha_operacion,
             "timezone_name": self.timezone_name,
-            "branches": [{"code": branch.codigo, "name": branch.nombre} for branch in target_branches],
+            "branches": [{"code": branch.codigo, "name": branch.nombre, "label": _branch_label(branch)} for branch in target_branches],
             "rows": rows,
+            "category_filter": category_filter or [],
             "missing_branch_codes": [code for code in target_codes if code not in branch_codes_with_capture],
             "first_capture_at": timezone.localtime(first_capture, self.local_tz) if first_capture else None,
             "last_capture_at": timezone.localtime(last_capture, self.local_tz) if last_capture else None,
@@ -126,7 +177,8 @@ class DailyInventoryCloseService:
         ws.cell(row=4, column=1, value="Ultima captura Point")
         ws.cell(row=4, column=2, value=payload["last_capture_at"].strftime("%Y-%m-%d %H:%M") if payload["last_capture_at"] else "Sin captura")
 
-        header = ["SKU", "Producto", "Categoria", *branch_codes, "Total cierre"]
+        branch_labels = [branch.get("label") or branch["code"].replace("_", " ") for branch in payload["branches"]]
+        header = ["SKU", "Producto", "Categoria", *branch_labels, "Total cierre"]
         ws.append(header)
         header_row = 5
         fill = PatternFill("solid", fgColor="1F2937")
@@ -140,7 +192,7 @@ class DailyInventoryCloseService:
                 [
                     row["sku"],
                     row["product_name"],
-                    row["category"],
+                    row.get("report_category") or row["category"],
                     *[float(row["stocks"].get(code, ZERO)) for code in branch_codes],
                     float(row["total_stock"]),
                 ]

@@ -77,17 +77,21 @@ def consolidado_cedis_revision(request):
     if not can_view_recetas(request.user):
         raise PermissionDenied
     fecha_operacion = _parse_date(request.GET.get("fecha"))
-    resumen = ConsolidadoNocturnoCedisService().get_resumen(fecha_operacion=fecha_operacion)
-    inventario_cierre = _inventory_close_payload(fecha_operacion)
+    active_tab = "inventario" if request.GET.get("tab") == "inventario" else "productos"
+    resumen = ConsolidadoNocturnoCedisService().get_resumen(fecha_operacion=fecha_operacion) if active_tab == "productos" else {}
+    inventario_cierre = _inventory_close_payload(fecha_operacion) if active_tab == "inventario" else None
     return render(
         request,
         "recetas/consolidado_cedis_revision.html",
         {
             **resumen,
+            "active_tab": active_tab,
             "inventario_cierre": inventario_cierre,
             "fecha_prev": fecha_operacion - timedelta(days=1),
             "fecha_next": fecha_operacion + timedelta(days=1),
-            "recetas_disponibles": Receta.objects.order_by("nombre").only("id", "nombre", "codigo_point")[:700],
+            "recetas_disponibles": Receta.objects.order_by("nombre").only("id", "nombre", "codigo_point")[:700]
+            if active_tab == "productos"
+            else [],
         },
     )
 

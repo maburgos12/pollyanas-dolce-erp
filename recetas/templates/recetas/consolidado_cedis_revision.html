@@ -57,26 +57,71 @@
 
   .cedis-inventory-shell {
     overflow-x: auto;
+    padding-bottom: 8px;
     width: 100%;
   }
 
   .cedis-inventory-table {
-    min-width: 1120px;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 1580px;
     table-layout: fixed;
-    width: 100%;
+    width: max-content;
   }
 
   .cedis-inventory-table th,
   .cedis-inventory-table td {
     font-size: 12px;
-    padding: 6px 8px;
+    line-height: 1.2;
+    padding: 7px 10px;
     vertical-align: middle;
+  }
+
+  .cedis-inventory-table th {
+    overflow-wrap: normal;
+    text-align: center;
+    white-space: normal;
+    word-break: normal;
+  }
+
+  .cedis-inventory-table td {
     white-space: nowrap;
   }
 
+  .cedis-inventory-table .inventory-sku {
+    width: 132px;
+  }
+
   .cedis-inventory-table .inventory-product {
+    min-width: 320px;
     white-space: normal;
-    width: 260px;
+    width: 320px;
+  }
+
+  .cedis-inventory-table .inventory-category {
+    min-width: 150px;
+    white-space: normal;
+    width: 150px;
+  }
+
+  .cedis-inventory-table .inventory-branch {
+    min-width: 112px;
+    width: 112px;
+  }
+
+  .cedis-inventory-table .inventory-total {
+    background: #fff;
+    box-shadow: -8px 0 12px rgba(255, 255, 255, 0.86);
+    min-width: 132px;
+    position: sticky;
+    right: 0;
+    width: 132px;
+    z-index: 1;
+  }
+
+  .cedis-inventory-table thead .inventory-total {
+    background: #f8e8f0;
+    z-index: 2;
   }
 
   .cedis-inventory-meta {
@@ -189,8 +234,8 @@
       </div>
     </form>
     <div class="toolbar" style="margin-top: 12px;">
-      <a class="btn btn-secondary" href="?fecha={{ fecha_prev|date:'Y-m-d' }}">Día anterior</a>
-      <a class="btn btn-secondary" href="?fecha={{ fecha_next|date:'Y-m-d' }}">Día siguiente</a>
+      <a class="btn btn-secondary" href="?fecha={{ fecha_prev|date:'Y-m-d' }}&tab={{ active_tab }}">Día anterior</a>
+      <a class="btn btn-secondary" href="?fecha={{ fecha_next|date:'Y-m-d' }}&tab={{ active_tab }}">Día siguiente</a>
       <form method="post" action="{% url 'recetas:consolidado_cedis_generar' %}">
         {% csrf_token %}
         <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
@@ -199,11 +244,12 @@
       </form>
     </div>
     <nav class="cedis-tabs" aria-label="Secciones Consolidado CEDIS">
-      <a class="cedis-tab-link" href="#productos-consolidados">Productos consolidados</a>
-      <a class="cedis-tab-link is-active" href="#inventario-final-cierre">Inventario final del día</a>
+      <a class="cedis-tab-link {% if active_tab == 'productos' %}is-active{% endif %}" href="?fecha={{ fecha_operacion|date:'Y-m-d' }}&tab=productos">Productos consolidados</a>
+      <a class="cedis-tab-link {% if active_tab == 'inventario' %}is-active{% endif %}" href="?fecha={{ fecha_operacion|date:'Y-m-d' }}&tab=inventario">Inventario final del día</a>
     </nav>
   </div>
 
+  {% if active_tab == "productos" %}
   <div class="kpi-grid kpi-mini">
     <article class="kpi-card"><div class="kpi-number">{{ cobertura.sucursales_esperadas }}</div><div class="kpi-label">Esperadas</div></article>
     <article class="kpi-card"><div class="kpi-number">{{ cobertura.sucursales_con_solicitud }}</div><div class="kpi-label">Con solicitud</div></article>
@@ -217,7 +263,9 @@
     <p class="muted mb-0">Consolidado #{{ consolidado.id }} · {{ consolidado.get_estado_display }} · Plan {% if plan %}#{{ plan.id }}{% else %}-{% endif %}</p>
   </div>
   {% endif %}
+  {% endif %}
 
+  {% if active_tab == "inventario" %}
   <div class="card" id="inventario-final-cierre">
     <div class="card-header">Inventario final del día</div>
     <div class="toolbar mb-2">
@@ -247,27 +295,36 @@
     {% endif %}
     <div class="cedis-inventory-shell">
       <table class="table table-striped align-middle cedis-inventory-table">
+        <colgroup>
+          <col class="inventory-sku">
+          <col class="inventory-product">
+          <col class="inventory-category">
+          {% for branch in inventario_cierre.branches %}
+          <col class="inventory-branch">
+          {% endfor %}
+          <col class="inventory-total">
+        </colgroup>
         <thead>
           <tr>
-            <th>SKU</th>
+            <th class="inventory-sku">SKU</th>
             <th class="inventory-product">Producto</th>
-            <th>Categoría</th>
+            <th class="inventory-category">Categoría</th>
             {% for branch in inventario_cierre.branches %}
-            <th class="text-end">{{ branch.code }}</th>
+            <th class="inventory-branch">{{ branch.label }}</th>
             {% endfor %}
-            <th class="text-end">Total cierre</th>
+            <th class="inventory-total">Total cierre</th>
           </tr>
         </thead>
         <tbody>
           {% for row in inventario_cierre.table_rows %}
           <tr>
-            <td>{{ row.sku }}</td>
+            <td class="inventory-sku">{{ row.sku }}</td>
             <td class="inventory-product">{{ row.product_name }}</td>
-            <td>{{ row.category|default:"-" }}</td>
+            <td class="inventory-category">{{ row.category|default:"-" }}</td>
             {% for stock in row.stock_cells %}
             <td class="text-end">{{ stock|floatformat:3 }}</td>
             {% endfor %}
-            <td class="text-end"><strong>{{ row.total_stock|floatformat:3 }}</strong></td>
+            <td class="text-end inventory-total"><strong>{{ row.total_stock|floatformat:3 }}</strong></td>
           </tr>
           {% empty %}
           <tr><td colspan="14" class="muted">No hay inventario Point capturado para esta fecha.</td></tr>
@@ -276,7 +333,9 @@
       </table>
     </div>
   </div>
+  {% endif %}
 
+  {% if active_tab == "productos" %}
   <form method="post" action="{% url 'recetas:consolidado_cedis_autorizar_plan' %}">
     {% csrf_token %}
     <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
@@ -359,5 +418,6 @@
     </div>
     {% endif %}
   </form>
+  {% endif %}
 </div>
 {% endblock %}

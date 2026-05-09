@@ -29,7 +29,7 @@ class InventarioFinalCierreEmailTests(TestCase):
             "timezone_name": "America/Mazatlan",
             "last_capture_at": datetime(2026, 5, 8, 23, 5, tzinfo=ZoneInfo("America/Mazatlan")),
             "rows": [{"stocks": {"MATRIZ": Decimal("1.000")}}],
-            "branches": [{"code": "MATRIZ", "name": "Matriz"}],
+            "branches": [{"code": "MATRIZ", "name": "Matriz", "label": "Matriz"}],
             "missing_branch_codes": [],
         }
         service = Mock()
@@ -49,3 +49,34 @@ class InventarioFinalCierreEmailTests(TestCase):
         self.assertEqual(len(email.attachments), 2)
         self.assertEqual(email.attachments[0][0], "inventario_final_cierre_2026-05-08.xlsx")
         self.assertEqual(email.attachments[1][0], "inventario_final_cierre_2026-05-08.pdf")
+
+    def test_can_send_filtered_key_categories(self):
+        get_user_model().objects.create_user(
+            username="carolina.cayetano",
+            email="produccion.carolina@pollyanasdolce.com",
+        )
+        payload = {
+            "fecha_operacion": date(2026, 5, 8),
+            "timezone_name": "America/Mazatlan",
+            "last_capture_at": datetime(2026, 5, 8, 23, 5, tzinfo=ZoneInfo("America/Mazatlan")),
+            "rows": [{"stocks": {"MATRIZ": Decimal("1.000")}, "report_category": "Bollo"}],
+            "branches": [{"code": "MATRIZ", "name": "Matriz", "label": "Matriz"}],
+            "missing_branch_codes": [],
+        }
+        service = Mock()
+        service.build_close.return_value = payload
+        service.build_workbook.return_value = Workbook()
+        service.build_pdf_bytes.return_value = b"%PDF-1.4 test"
+
+        with patch("recetas.tasks.daily_inventory_close.DailyInventoryCloseService", return_value=service):
+            result = inventario_final_cierre_email(
+                fecha_operacion="2026-05-08",
+                category_filter="reposteria_cierre",
+            )
+
+        self.assertEqual(result["status"], "enviado")
+        self.assertIn("Bollo", result["category_filter"])
+        service.build_close.assert_called_once()
+        self.assertIn("Bollo", service.build_close.call_args.kwargs["category_filter"])
+        self.assertIn("categorias clave", mail.outbox[0].subject)
+        self.assertIn("Categorias incluidas: Bollo", mail.outbox[0].body)

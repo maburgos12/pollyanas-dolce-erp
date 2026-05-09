@@ -8,7 +8,7 @@ from celery import shared_task
 from django.core.mail import EmailMessage
 from django.utils import timezone
 
-from pos_bridge.services.daily_inventory_close_service import DailyInventoryCloseService
+from pos_bridge.services.daily_inventory_close_service import DAILY_CLOSE_CATEGORY_ORDER, DailyInventoryCloseService
 from recetas.tasks.consolidado_nocturno import _consolidado_cedis_recipients, _from_email
 
 
@@ -16,16 +16,23 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(name="recetas.inventario_final_cierre_email")
-def inventario_final_cierre_email(fecha_operacion: str | None = None) -> dict:
+def inventario_final_cierre_email(
+    fecha_operacion: str | None = None,
+    category_filter: list[str] | str | None = None,
+) -> dict:
     local_today = timezone.localdate()
     target_date = date.fromisoformat(fecha_operacion) if fecha_operacion else local_today - timedelta(days=1)
+    if category_filter == "reposteria_cierre":
+        category_filter = DAILY_CLOSE_CATEGORY_ORDER
+    elif isinstance(category_filter, str):
+        category_filter = [item.strip() for item in category_filter.split(",") if item.strip()]
     recipients = _consolidado_cedis_recipients()
     if not recipients:
         logger.warning("No se envio inventario final cierre: Carolina Cayetano no tiene correo configurado.")
         return {"status": "omitido", "reason": "sin_destinatarios", "recipients": []}
 
     service = DailyInventoryCloseService()
-    payload = service.build_close(fecha_operacion=target_date)
+    payload = service.build_close(fecha_operacion=target_date, category_filter=category_filter)
     workbook = service.build_workbook(payload)
     xlsx_buffer = BytesIO()
     workbook.save(xlsx_buffer)
@@ -33,6 +40,8 @@ def inventario_final_cierre_email(fecha_operacion: str | None = None) -> dict:
     pdf_bytes = service.build_pdf_bytes(payload)
 
     subject = f"Inventario final al cierre - {target_date:%d/%m/%Y}"
+    if category_filter:
+        subject += " - categorias clave"
     last_capture = payload["last_capture_at"].strftime("%d/%m/%Y %H:%M") if payload["last_capture_at"] else "Sin captura"
     body = (
         "Carolina,\n\n"
@@ -42,6 +51,8 @@ def inventario_final_cierre_email(fecha_operacion: str | None = None) -> dict:
         f"Ultima captura Point usada: {last_capture}\n"
         f"Productos incluidos: {len(payload['rows'])}\n"
     )
+    if category_filter:
+        body += "Categorias incluidas: " + ", ".join(category_filter) + "\n"
     if payload["missing_branch_codes"]:
         body += f"Sucursales sin captura: {', '.join(payload['missing_branch_codes'])}\n"
     body += "\n-- ERP Pollyana's Dolce"
@@ -65,5 +76,6 @@ def inventario_final_cierre_email(fecha_operacion: str | None = None) -> dict:
         "fecha_operacion": target_date.isoformat(),
         "recipients": recipients,
         "rows": len(payload["rows"]),
+        "category_filter": category_filter or [],
         "missing_branch_codes": payload["missing_branch_codes"],
     }
