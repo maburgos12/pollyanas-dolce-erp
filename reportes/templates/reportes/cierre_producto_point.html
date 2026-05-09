@@ -279,7 +279,7 @@
   </section>
 
   <details class="bi-details">
-    <summary>Ver auditoría técnica de conversiones e incidencias</summary>
+    <summary>Ver auditoría técnica del mes {{ selected_month }}: conversiones e incidencias</summary>
     <section class="bi-grid-2">
       <article class="bi-panel">
       <div class="bi-panel-head">
@@ -350,10 +350,12 @@
     <div class="bi-panel-head">
       <div>
         <div class="bi-kicker">Auditoría de líneas</div>
-        <h2 class="bi-panel-title">Detalle del cierre mensual</h2>
-        <p class="bi-panel-copy">Cada línea representa una receta padre conciliada para el balance mensual bloqueable.</p>
+        <h2 class="bi-panel-title">Detalle del cierre mensual {{ selected_month }}</h2>
+        <p class="bi-panel-copy">Balance bloqueable del mes {{ selected_month }}: inventario inicial + producción - venta - merma = final teórico por receta padre.</p>
       </div>
       <div class="bi-panel-actions">
+        <span class="bi-pill is-muted">Fuente: {{ movement_source_label }}</span>
+        {% if closure.month_end %}<span class="bi-pill is-muted">Corte {{ closure.month_end|date:"Y-m-d" }}</span>{% endif %}
         <span class="bi-pill is-muted">{{ closure.lines.count|intcomma }} líneas</span>
       </div>
     </div>
@@ -371,7 +373,7 @@
             <th class="text-end">Producción</th>
             <th class="text-end">Venta</th>
             <th class="text-end">Merma total</th>
-            <th class="text-end">Final teórico</th>
+            <th class="text-end">Final teórico {{ selected_month }}</th>
             <th>Lectura</th>
           </tr>
         </thead>
