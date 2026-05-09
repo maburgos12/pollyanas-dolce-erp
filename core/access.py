@@ -23,6 +23,154 @@ ROLE_ORDER = [
     ROLE_LECTURA,
 ]
 
+ACCESS_NONE = "none"
+ACCESS_VIEW = "view"
+ACCESS_MANAGE = "manage"
+ACCESS_LEVELS = {
+    ACCESS_NONE: 0,
+    ACCESS_VIEW: 1,
+    ACCESS_MANAGE: 2,
+}
+
+ACCESS_MODULES = [
+    ("direccion", "Dirección"),
+    ("ventas", "Ventas"),
+    ("crm", "CRM"),
+    ("produccion", "Producción"),
+    ("logistica", "Logística"),
+    ("fallas", "Fallas / Mantenimiento"),
+    ("compras", "Compras"),
+    ("inventario", "Inventario"),
+    ("recetas", "Recetas"),
+    ("maestros", "Maestros"),
+    ("reportes", "Reportes"),
+    ("activos", "Activos"),
+    ("rrhh", "RRHH"),
+    ("control", "Control"),
+    ("auditoria", "Auditoría"),
+    ("sistema", "Sistema"),
+]
+
+ACCESS_SUBMODULES = {
+    "direccion": [
+        ("dashboard", "Dashboard"),
+        ("operacion_dg", "Operación DG"),
+        ("bi", "BI ejecutivo"),
+        ("cierre_diario", "Cierre diario"),
+        ("producido_vendido", "Producido vs Vendido"),
+        ("proyectos_inversion", "Proyectos inversión"),
+        ("rentabilidad", "Rentabilidad"),
+    ],
+    "ventas": [
+        ("eventos", "Eventos"),
+        ("tendencias", "Tendencias"),
+        ("pronostico", "Pronóstico"),
+    ],
+    "crm": [
+        ("dashboard", "Dashboard"),
+        ("clientes", "Clientes"),
+        ("pedidos", "Pedidos"),
+    ],
+    "produccion": [
+        ("plan", "Plan de producción"),
+        ("reabasto_cedis", "Reabasto CEDIS"),
+        ("consolidado_cedis", "Consolidado CEDIS"),
+        ("cedis_semanal", "Producción CEDIS semanal"),
+    ],
+    "logistica": [
+        ("dashboard", "Dashboard"),
+        ("ejecutivo", "Ejecutivo"),
+        ("tickets", "Tickets"),
+        ("flota", "Flota"),
+        ("rutas", "Rutas"),
+        ("unidades", "Unidades"),
+        ("reportes", "Reportes"),
+        ("bitacoras", "Bitácoras"),
+        ("capturas", "Capturas"),
+    ],
+    "fallas": [
+        ("dashboard", "Dashboard"),
+        ("reportar", "Reportar falla"),
+        ("mis_reportes", "Mis reportes"),
+        ("gestion", "Gestión de fallas"),
+    ],
+    "compras": [
+        ("dashboard", "Dashboard"),
+        ("solicitudes", "Solicitudes"),
+        ("ordenes", "Órdenes"),
+        ("recepciones", "Recepciones"),
+    ],
+    "inventario": [
+        ("dashboard", "Dashboard"),
+        ("existencias", "Existencias"),
+        ("movimientos", "Movimientos"),
+        ("ajustes", "Ajustes"),
+        ("alertas", "Alertas"),
+        ("conteo_fisico", "Conteo físico"),
+    ],
+    "recetas": [
+        ("catalogo", "Catálogo de recetas"),
+        ("costeo", "Costeo"),
+        ("margenes", "Monitor de márgenes"),
+        ("matching", "Matching"),
+        ("mrp", "MRP"),
+    ],
+    "maestros": [
+        ("proveedores", "Proveedores"),
+        ("insumos", "Insumos"),
+        ("point", "Revisión Point"),
+    ],
+    "reportes": [
+        ("consumo", "Consumo"),
+        ("ventas", "Ventas"),
+        ("financiero", "Financiero"),
+        ("faltantes", "Faltantes"),
+        ("presupuesto", "Presupuesto maestro"),
+    ],
+    "activos": [
+        ("dashboard", "Dashboard"),
+        ("catalogo", "Activos"),
+        ("planes", "Planes"),
+        ("ordenes", "Órdenes"),
+        ("reportes", "Reportes"),
+    ],
+    "rrhh": [
+        ("empleados", "Empleados"),
+        ("nomina", "Nómina"),
+    ],
+    "control": [
+        ("discrepancias", "Discrepancias"),
+        ("captura_movil", "Captura móvil"),
+    ],
+    "auditoria": [
+        ("bitacora", "Bitácora"),
+    ],
+    "sistema": [
+        ("usuarios", "Usuarios y accesos"),
+        ("orquestacion", "Orquestación"),
+        ("ia", "IA privada"),
+        ("integraciones", "Integraciones"),
+    ],
+}
+
+LOCK_BY_MODULE = {
+    "maestros": "lock_maestros",
+    "recetas": "lock_recetas",
+    "produccion": "lock_recetas",
+    "compras": "lock_compras",
+    "inventario": "lock_inventario",
+    "direccion": "lock_reportes",
+    "reportes": "lock_reportes",
+    "control": "lock_reportes",
+    "ventas": "lock_crm",
+    "crm": "lock_crm",
+    "logistica": "lock_logistica",
+    "fallas": "lock_logistica",
+    "rrhh": "lock_rrhh",
+    "auditoria": "lock_auditoria",
+    "sistema": "lock_auditoria",
+}
+
 
 def _group_names(user: AbstractBaseUser) -> set[str]:
     if not user or not user.is_authenticated:
@@ -91,94 +239,178 @@ def primary_role(user: AbstractBaseUser) -> str:
     return ""
 
 
+def _normalize_access(value: str) -> str:
+    value = (value or ACCESS_NONE).strip().lower()
+    if value not in ACCESS_LEVELS:
+        return ACCESS_NONE
+    return value
+
+
+def _max_access(*values: str) -> str:
+    best = ACCESS_NONE
+    for value in values:
+        value = _normalize_access(value)
+        if ACCESS_LEVELS[value] > ACCESS_LEVELS[best]:
+            best = value
+    return best
+
+
+def _explicit_access_map(user: AbstractBaseUser) -> dict[str, str]:
+    if not user or not user.is_authenticated:
+        return {}
+    cached = getattr(user, "_module_access_map_cache", None)
+    if cached is not None:
+        return dict(cached)
+    from core.models import UserModuleAccess
+
+    access_map = {
+        item.module: _normalize_access(item.access)
+        for item in UserModuleAccess.objects.filter(user=user).only("module", "access")
+    }
+    setattr(user, "_module_access_map_cache", dict(access_map))
+    return access_map
+
+
+def _role_module_access(user: AbstractBaseUser, module: str) -> str:
+    module = (module or "").strip().lower()
+    groups = {name.upper() for name in _group_names(user)}
+    if ROLE_DG in groups or ROLE_ADMIN in groups:
+        return ACCESS_MANAGE
+    if ROLE_LECTURA in groups:
+        return ACCESS_VIEW
+    if ROLE_COMPRAS in groups:
+        if module == "compras":
+            return ACCESS_MANAGE
+        if module in {"maestros", "recetas", "inventario", "reportes"}:
+            return ACCESS_VIEW
+    if ROLE_ALMACEN in groups:
+        if module == "inventario":
+            return ACCESS_MANAGE
+        if module in {"maestros", "recetas", "compras"}:
+            return ACCESS_VIEW
+    if ROLE_PRODUCCION in groups:
+        if module == "produccion":
+            return ACCESS_MANAGE
+        if module in {"recetas", "reportes"}:
+            return ACCESS_VIEW
+    if ROLE_VENTAS in groups:
+        if module in {"ventas", "crm"}:
+            return ACCESS_MANAGE
+    if ROLE_LOGISTICA in groups:
+        if module == "logistica":
+            return ACCESS_MANAGE
+    if ROLE_RRHH in groups and module == "rrhh":
+        return ACCESS_MANAGE
+    return ACCESS_NONE
+
+
+def _module_locked(user: AbstractBaseUser, module: str) -> bool:
+    lock_field = LOCK_BY_MODULE.get((module or "").split(".", 1)[0])
+    return bool(lock_field and _is_locked(user, lock_field))
+
+
 def get_module_access(user: AbstractBaseUser, module: str) -> str:
     """
-    Retorna 'none', 'view' o 'manage' para un usuario y módulo.
+    Retorna 'none', 'view' o 'manage' para un usuario y modulo.
 
     Prioridad:
     1. Superuser: manage
-    2. Permiso explícito en UserModuleAccess
+    2. Permiso explicito en UserModuleAccess
     3. Fallback derivado del rol actual
     """
     if not user or not user.is_authenticated:
-        return "none"
+        return ACCESS_NONE
     if user.is_superuser:
-        return "manage"
+        return ACCESS_MANAGE
 
     module = (module or "").strip().lower()
-    try:
-        from core.models import UserModuleAccess
+    if _module_locked(user, module):
+        return ACCESS_NONE
+    explicit = _explicit_access_map(user)
+    if module in explicit:
+        return explicit[module]
+    return _role_module_access(user, module)
 
-        explicit = UserModuleAccess.objects.get(user=user, module=module)
-        return explicit.access
-    except UserModuleAccess.DoesNotExist:
-        pass
 
-    groups = {name.upper() for name in _group_names(user)}
-    role_module_map = {
-        ROLE_DG: "manage",
-        ROLE_ADMIN: "manage",
-        ROLE_COMPRAS: "manage" if module == "compras" else "view",
-        ROLE_VENTAS: "manage" if module == "ventas" else "none",
-        ROLE_PRODUCCION: "manage" if module == "produccion" else "none",
-        ROLE_RRHH: "manage" if module == "rrhh" else "none",
-        ROLE_LOGISTICA: "manage" if module == "logistica" else "none",
-    }
-    for group in groups:
-        if group in role_module_map:
-            return role_module_map[group]
-    return "none"
+def get_effective_module_access(user: AbstractBaseUser, module: str) -> str:
+    access = get_module_access(user, module)
+    if access != ACCESS_NONE:
+        return access
+    children = [
+        get_submodule_access(user, module, submodule)
+        for submodule, _label in ACCESS_SUBMODULES.get(module, [])
+    ]
+    return _max_access(access, *children)
+
+
+def get_submodule_access(user: AbstractBaseUser, module: str, submodule: str) -> str:
+    if not user or not user.is_authenticated:
+        return ACCESS_NONE
+    if user.is_superuser:
+        return ACCESS_MANAGE
+    module = (module or "").strip().lower()
+    submodule = (submodule or "").strip().lower()
+    if _module_locked(user, module):
+        return ACCESS_NONE
+    key = f"{module}.{submodule}"
+    explicit = _explicit_access_map(user)
+    if key in explicit:
+        return explicit[key]
+    if module in explicit:
+        return explicit[module]
+    return _role_module_access(user, module)
+
+
+def can_view_module(user: AbstractBaseUser, module: str) -> bool:
+    return get_effective_module_access(user, module) in (ACCESS_VIEW, ACCESS_MANAGE)
+
+
+def can_manage_module(user: AbstractBaseUser, module: str) -> bool:
+    return get_effective_module_access(user, module) == ACCESS_MANAGE
+
+
+def can_view_submodule(user: AbstractBaseUser, module: str, submodule: str) -> bool:
+    return get_submodule_access(user, module, submodule) in (ACCESS_VIEW, ACCESS_MANAGE)
+
+
+def can_manage_submodule(user: AbstractBaseUser, module: str, submodule: str) -> bool:
+    return get_submodule_access(user, module, submodule) == ACCESS_MANAGE
 
 
 def can_view(user: AbstractBaseUser, module: str) -> bool:
-    return get_module_access(user, module) in ("view", "manage")
+    return can_view_module(user, module)
 
 
 def can_manage(user: AbstractBaseUser, module: str) -> bool:
-    return get_module_access(user, module) == "manage"
+    return can_manage_module(user, module)
 
 
 def can_view_compras(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_COMPRAS, ROLE_ALMACEN, ROLE_LECTURA) and not _is_locked(
-        user, "lock_compras"
-    )
+    return can_view_module(user, "compras")
 
 
 def can_manage_compras(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_ADMIN, ROLE_COMPRAS) and not _is_locked(user, "lock_compras")
+    return can_manage_module(user, "compras")
 
 
 def can_view_inventario(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_ALMACEN, ROLE_COMPRAS, ROLE_LECTURA) and not _is_locked(
-        user, "lock_inventario"
-    )
+    return can_view_module(user, "inventario")
 
 
 def can_manage_inventario(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_ADMIN, ROLE_ALMACEN) and not _is_locked(user, "lock_inventario")
+    return can_manage_module(user, "inventario")
 
 
 def can_view_reportes(user: AbstractBaseUser) -> bool:
-    return has_any_role(
-        user,
-        ROLE_DG,
-        ROLE_ADMIN,
-        ROLE_COMPRAS,
-        ROLE_ALMACEN,
-        ROLE_PRODUCCION,
-        ROLE_VENTAS,
-        ROLE_LOGISTICA,
-        ROLE_RRHH,
-        ROLE_LECTURA,
-    ) and not _is_locked(user, "lock_reportes")
+    return can_view_module(user, "reportes") or can_view_module(user, "direccion")
 
 
 def can_view_rentabilidad(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_LECTURA) and not _is_locked(user, "lock_reportes")
+    return can_view_submodule(user, "direccion", "rentabilidad")
 
 
 def can_manage_rentabilidad(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_reportes")
+    return can_manage_submodule(user, "direccion", "rentabilidad")
 
 
 def can_view_product_closure(user: AbstractBaseUser) -> bool:
@@ -200,81 +432,77 @@ def can_lock_product_closure(user: AbstractBaseUser) -> bool:
 
 
 def can_view_maestros(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_COMPRAS, ROLE_ALMACEN, ROLE_LECTURA) and not _is_locked(
-        user, "lock_maestros"
-    )
+    return can_view_module(user, "maestros")
 
 
 def can_view_recetas(user: AbstractBaseUser) -> bool:
-    return has_any_role(
-        user,
-        ROLE_DG,
-        ROLE_ADMIN,
-        ROLE_COMPRAS,
-        ROLE_ALMACEN,
-        ROLE_PRODUCCION,
-        ROLE_VENTAS,
-        ROLE_LECTURA,
-    ) and not _is_locked(user, "lock_recetas")
+    return can_view_module(user, "recetas")
 
 
 def can_view_audit(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_auditoria")
+    return can_view_module(user, "auditoria")
 
 
 def can_manage_users(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN)
+    return can_manage_submodule(user, "sistema", "usuarios")
 
 
 def can_view_orquestacion(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_auditoria")
+    return can_view_submodule(user, "sistema", "orquestacion")
 
 
 def can_manage_orquestacion(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_auditoria")
+    return can_manage_submodule(user, "sistema", "orquestacion")
 
 
 def can_view_crm(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_VENTAS, ROLE_LECTURA) and not _is_locked(user, "lock_crm")
+    return can_view_module(user, "crm")
 
 
 def can_manage_crm(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_ADMIN, ROLE_VENTAS) and not _is_locked(user, "lock_crm")
+    return can_manage_module(user, "crm")
+
+
+def can_view_ventas_eventos(user: AbstractBaseUser) -> bool:
+    return can_view_module(user, "ventas")
 
 
 def can_view_ventas(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_VENTAS, ROLE_LECTURA) and not _is_locked(user, "lock_ventas")
+    return can_view_ventas_eventos(user)
 
+
+def can_manage_ventas_eventos(user: AbstractBaseUser) -> bool:
+    return can_manage_module(user, "ventas")
 
 
 def can_view_logistica(user: AbstractBaseUser) -> bool:
     if is_repartidor_only(user):
         return False
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_LOGISTICA, ROLE_LECTURA) and not _is_locked(user, "lock_logistica")
+    return can_view_module(user, "logistica")
 
 
 def can_manage_logistica(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_ADMIN, ROLE_LOGISTICA) and not _is_locked(user, "lock_logistica")
+    return can_manage_module(user, "logistica")
 
 
 def can_view_rrhh(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN, ROLE_RRHH, ROLE_LECTURA) and not _is_locked(user, "lock_rrhh")
+    return can_view_module(user, "rrhh")
 
 
 def can_manage_rrhh(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_ADMIN, ROLE_RRHH) and not _is_locked(user, "lock_rrhh")
+    return can_manage_module(user, "rrhh")
 
 
 def can_view_activos(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_inventario")
+    return can_view_module(user, "activos")
 
 
 def can_view_control(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN) and not _is_locked(user, "lock_reportes")
+    return can_view_module(user, "control")
 
 
 def can_view_sistema(user: AbstractBaseUser) -> bool:
-    return has_any_role(user, ROLE_DG, ROLE_ADMIN)
+    return can_view_module(user, "sistema")
 
 
 def can_capture_piso(user: AbstractBaseUser) -> bool:

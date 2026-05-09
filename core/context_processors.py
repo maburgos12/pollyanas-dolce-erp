@@ -24,19 +24,19 @@ from core.access import (
     can_view_rentabilidad,
     can_view_sistema,
     can_view_ventas,
+    can_view_ventas_eventos,
+    can_manage_ventas_eventos,
+    can_view_module,
     is_repartidor_only,
     is_branch_capture_only,
 )
+from core.navigation import build_nav_groups
 
 
 def ui_access(request):
     user = getattr(request, "user", None)
-    can_view_fallas = False
-    if user and user.is_authenticated:
-        if user.is_superuser or user.is_staff:
-            can_view_fallas = True
-        elif not is_repartidor_only(user):
-            can_view_fallas = user.groups.filter(name__in=["compras_logistica", "dg"]).exists()
+    current_path = getattr(request, "path", "")
+    can_view_fallas = can_view_module(user, "fallas")
     return {
         "ui_access": {
             "can_view_maestros": can_view_maestros(user),
@@ -63,9 +63,12 @@ def ui_access(request):
             "can_manage_rrhh": can_manage_rrhh(user),
             "can_capture_piso": can_capture_piso(user),
             "can_view_ventas": can_view_ventas(user),
+            "can_view_ventas_eventos": can_view_ventas_eventos(user),
+            "can_manage_ventas_eventos": can_manage_ventas_eventos(user),
             "can_view_fallas": can_view_fallas,
             "branch_capture_only": is_branch_capture_only(user),
             "repartidor_only": is_repartidor_only(user),
             "role_label": _get_role_label(user),
-        }
+        },
+        "ui_nav_groups": build_nav_groups(user, current_path),
     }

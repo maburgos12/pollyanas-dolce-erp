@@ -314,10 +314,10 @@ class PickupAvailabilityService:
         snapshot_age_seconds = int((now - snapshot.captured_at).total_seconds()) if snapshot else None
         is_fresh = snapshot is not None and snapshot_age_seconds is not None and snapshot_age_seconds <= freshness_seconds
 
-        if snapshot is None or not is_fresh:
-            status = self.STATUS_UNKNOWN
-        elif available_to_promise <= ZERO:
+        if available_to_promise <= ZERO:
             status = self.STATUS_OUT_OF_STOCK
+        elif snapshot is None or not is_fresh:
+            status = self.STATUS_UNKNOWN
         elif available_to_promise <= self.low_stock_threshold:
             status = self.STATUS_LOW_STOCK
         else:

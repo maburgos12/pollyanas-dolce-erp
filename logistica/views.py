@@ -13,7 +13,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
-from core.access import can_manage_logistica, can_view_logistica
+from core.access import can_manage_submodule, can_view_logistica, can_view_submodule
 from core.audit import log_event
 from core.models import Sucursal
 from crm.models import PedidoCliente
@@ -64,46 +64,51 @@ def _parse_date(raw: str | None):
         return None
 
 
-def _module_tabs(active: str) -> list[dict]:
-    return [
-        {"label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
-        {"label": "Ejecutivo", "url_name": "logistica:dashboard_ejecutivo", "active": active == "ejecutivo"},
-        {"label": "Tickets", "url_name": "logistica:tickets_kanban", "active": active == "tickets"},
-        {"label": "Flota", "url_name": "logistica:flota_resumen", "active": active == "flota"},
-        {"label": "Reportes", "url_name": "logistica:reportes_lista", "active": active == "reportes"},
-        {"label": "Bitácoras", "url_name": "logistica:bitacoras_lista", "active": active == "bitacoras"},
-        {"label": "Rutas", "url_name": "logistica:rutas", "active": active == "rutas"},
-        {"label": "Unidades", "url_name": "logistica:unidades_list", "active": active == "unidades"},
-        {"label": "Capturas PWA", "url_name": "logistica:capturas_pwa", "active": active == "capturas"},
+def _module_tabs(active: str, user=None) -> list[dict]:
+    tabs = [
+        {"key": "dashboard", "label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
+        {"key": "ejecutivo", "label": "Ejecutivo", "url_name": "logistica:dashboard_ejecutivo", "active": active == "ejecutivo"},
+        {"key": "tickets", "label": "Tickets", "url_name": "logistica:tickets_kanban", "active": active == "tickets"},
+        {"key": "flota", "label": "Flota", "url_name": "logistica:flota_resumen", "active": active == "flota"},
+        {"key": "reportes", "label": "Reportes", "url_name": "logistica:reportes_lista", "active": active == "reportes"},
+        {"key": "bitacoras", "label": "Bitácoras", "url_name": "logistica:bitacoras_lista", "active": active == "bitacoras"},
+        {"key": "rutas", "label": "Rutas", "url_name": "logistica:rutas", "active": active == "rutas"},
+        {"key": "unidades", "label": "Unidades", "url_name": "logistica:unidades_list", "active": active == "unidades"},
+        {"key": "capturas", "label": "Capturas PWA", "url_name": "logistica:capturas_pwa", "active": active == "capturas"},
     ]
+    if user is None:
+        return tabs
+    return [tab for tab in tabs if can_view_submodule(user, "logistica", tab["key"])]
 
 
-def _user_in_groups(user, groups: list[str]) -> bool:
+def tiene_acceso_logistica(user, roles: list[str] | None = None) -> bool:
     if not user.is_authenticated:
         return False
-    if user.is_staff or user.is_superuser:
-        return True
-    return user.groups.filter(name__in=groups).exists()
+    if roles is None:
+        return can_view_logistica(user)
+    role_checks = {
+        "dg": lambda: can_view_submodule(user, "logistica", "ejecutivo"),
+        "compras_logistica": lambda: can_manage_submodule(user, "logistica", "tickets"),
+        "supervisor_logistica": lambda: can_manage_submodule(user, "logistica", "unidades"),
+        "repartidor": lambda: can_view_submodule(user, "logistica", "capturas"),
+    }
+    return any(role_checks.get(role, lambda: False)() for role in roles)
 
 
 def _can_view_logistica_ejecutivo(user) -> bool:
-    return _user_in_groups(user, ["dg"])
+    return can_view_submodule(user, "logistica", "ejecutivo")
 
 
 def _can_manage_tickets_logistica(user) -> bool:
-    return _user_in_groups(user, ["compras_logistica", "supervisor_logistica", "dg"])
+    return can_manage_submodule(user, "logistica", "tickets")
 
 
 def _can_view_flota_resumen(user) -> bool:
-    return _user_in_groups(user, ["dg", "supervisor_logistica"])
+    return can_view_submodule(user, "logistica", "flota")
 
 
 def _can_manage_unidades(user) -> bool:
-    if not user.is_authenticated:
-        return False
-    if user.is_staff or user.is_superuser:
-        return True
-    return user.groups.filter(name__in=["supervisor_logistica", "dg"]).exists()
+    return can_manage_submodule(user, "logistica", "unidades")
 
 
 def _logistica_enterprise_chain(
@@ -609,7 +614,7 @@ def _logistica_focus_summary(*, selected_focus: str, rutas_count: int) -> dict[s
 
 @login_required
 def dashboard(request):
-    if not can_view_logistica(request.user):
+    if not can_view_submodule(request.user, "logistica", "dashboard"):
         raise PermissionDenied("No tienes permisos para ver Logística")
 
     today = timezone.localdate()
@@ -714,7 +719,7 @@ def dashboard(request):
         dashboard_query["q"] = q
 
     context = {
-        "module_tabs": _module_tabs("dashboard"),
+        "module_tabs": _module_tabs("dashboard", request.user),
         "rutas_total": rutas_total,
         "rutas_hoy": rutas_hoy,
         "rutas_en_ruta": rutas_en_ruta,
@@ -768,7 +773,7 @@ def _render_unidad_form(request, *, unidad=None, errors=None):
         request,
         "logistica/unidad_form.html",
         {
-            "module_tabs": _module_tabs("unidades"),
+            "module_tabs": _module_tabs("unidades", request.user),
             "unidad": unidad,
             "sucursales": Sucursal.objects.filter(activa=True).order_by("codigo", "nombre"),
             "errors": errors or {},
@@ -778,8 +783,8 @@ def _render_unidad_form(request, *, unidad=None, errors=None):
 
 @login_required
 def unidades_list(request):
-    if not _can_manage_unidades(request.user):
-        raise PermissionDenied("No tienes permisos para gestionar unidades de Logística")
+    if not can_view_submodule(request.user, "logistica", "unidades"):
+        raise PermissionDenied("No tienes permisos para ver unidades de Logística")
 
     query = (request.GET.get("q") or "").strip()
     qs = Unidad.objects.select_related("sucursal").order_by("codigo")
@@ -791,7 +796,7 @@ def unidades_list(request):
         request,
         "logistica/unidades_list.html",
         {
-            "module_tabs": _module_tabs("unidades"),
+            "module_tabs": _module_tabs("unidades", request.user),
             "unidades": unidades,
             "query": query,
         },
@@ -870,7 +875,7 @@ def _decorate_inspeccion(inspeccion: InspeccionVehiculo):
 
 @login_required
 def capturas_pwa(request):
-    if not can_view_logistica(request.user):
+    if not can_view_submodule(request.user, "logistica", "capturas"):
         raise PermissionDenied("No tienes permisos para ver capturas de Logística")
 
     today = timezone.localdate()
@@ -917,7 +922,7 @@ def capturas_pwa(request):
         inspecciones_rows.append(inspeccion)
 
     context = {
-        "module_tabs": _module_tabs("capturas"),
+        "module_tabs": _module_tabs("capturas", request.user),
         "query": query,
         "tipo": tipo,
         "today": today,
@@ -1007,11 +1012,11 @@ def unidad_toggle(request, pk):
 
 @login_required
 def rutas(request):
-    if not can_view_logistica(request.user):
+    if not can_view_submodule(request.user, "logistica", "rutas"):
         raise PermissionDenied("No tienes permisos para ver Logística")
 
     if request.method == "POST":
-        if not can_manage_logistica(request.user):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
             raise PermissionDenied("No tienes permisos para gestionar Logística")
 
         nombre = (request.POST.get("nombre") or "").strip()
@@ -1135,8 +1140,8 @@ def rutas(request):
     governance_rows = _logistica_governance_rows(document_stage_rows, owner_default="Logística / Planeación")
 
     context = {
-        "module_tabs": _module_tabs("rutas"),
-        "can_manage_logistica": can_manage_logistica(request.user),
+        "module_tabs": _module_tabs("rutas", request.user),
+        "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
         "rutas": rutas_qs.order_by("-fecha_ruta", "-id")[:200],
         "q": q,
         "estatus": estatus,
@@ -1199,13 +1204,13 @@ def rutas(request):
 
 @login_required
 def ruta_detail(request, pk: int):
-    if not can_view_logistica(request.user):
+    if not can_view_submodule(request.user, "logistica", "rutas"):
         raise PermissionDenied("No tienes permisos para ver Logística")
 
     ruta = get_object_or_404(RutaEntrega, pk=pk)
 
     if request.method == "POST":
-        if not can_manage_logistica(request.user):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
             raise PermissionDenied("No tienes permisos para gestionar Logística")
 
         action = (request.POST.get("action") or "").strip().lower()
@@ -1443,8 +1448,8 @@ def ruta_detail(request, pk: int):
     governance_rows = _logistica_governance_rows(document_stage_rows, owner_default="Logística / Operación")
 
     context = {
-        "module_tabs": _module_tabs("rutas"),
-        "can_manage_logistica": can_manage_logistica(request.user),
+        "module_tabs": _module_tabs("rutas", request.user),
+        "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
         "ruta": ruta,
         "entregas": entregas_qs,
         "pedidos": pedidos_disponibles,
@@ -1533,7 +1538,7 @@ def dashboard_ejecutivo(request):
         turno.horas_abierto = int(((now - turno.hora_salida).total_seconds() // 3600)) if turno.hora_salida else 0
 
     context = {
-        "module_tabs": _module_tabs("ejecutivo"),
+        "module_tabs": _module_tabs("ejecutivo", request.user),
         "today": today,
         "tickets_abiertos": ReporteUnidad.objects.filter(estatus=ReporteUnidad.ESTATUS_ABIERTO).count(),
         "tickets_criticos": ReporteUnidad.objects.filter(
@@ -1567,7 +1572,7 @@ def tickets_kanban(request):
     base_qs = ReporteUnidad.objects.select_related("unidad", "repartidor__user").order_by("-fecha_reporte")
     today = timezone.localdate()
     context = {
-        "module_tabs": _module_tabs("tickets"),
+        "module_tabs": _module_tabs("tickets", request.user),
         "tickets_abiertos": base_qs.filter(estatus=ReporteUnidad.ESTATUS_ABIERTO),
         "tickets_en_proceso": base_qs.filter(estatus=ReporteUnidad.ESTATUS_EN_PROCESO),
         "tickets_programados": base_qs.filter(estatus=ReporteUnidad.ESTATUS_PROGRAMADO),
@@ -1665,7 +1670,7 @@ def flota_resumen(request):
         )
 
     context = {
-        "module_tabs": _module_tabs("flota"),
+        "module_tabs": _module_tabs("flota", request.user),
         "unidades_resumen": unidades_resumen,
         "today": today,
     }
@@ -1674,7 +1679,7 @@ def flota_resumen(request):
 
 @login_required
 def unidad_detalle(request, pk):
-    if not _can_manage_tickets_logistica(request.user):
+    if not can_view_submodule(request.user, "logistica", "unidades"):
         raise PermissionDenied("No tienes permisos para ver la ficha de unidad")
 
     today = timezone.localdate()
@@ -1702,7 +1707,7 @@ def unidad_detalle(request, pk):
     documento_tarjeta = _decorate_documento(documentos_qs.filter(tipo=DocumentoUnidad.TIPO_TARJETA_CIRCULACION).first())
 
     context = {
-        "module_tabs": _module_tabs("unidades"),
+        "module_tabs": _module_tabs("unidades", request.user),
         "unidad": unidad,
         "documentos": documentos,
         "tipos_servicio": TipoServicioUnidad.objects.filter(activo=True).order_by("nombre"),
@@ -1738,7 +1743,7 @@ def _redirect_unidad_tab(pk: int, anchor: str):
 
 @login_required
 def unidad_documento_nuevo(request, pk):
-    if not _can_manage_tickets_logistica(request.user):
+    if not _can_manage_unidades(request.user):
         raise PermissionDenied("No tienes permisos para agregar documentos de unidad")
     unidad = get_object_or_404(Unidad, pk=pk)
     if request.method == "POST":
@@ -1759,7 +1764,7 @@ def unidad_documento_nuevo(request, pk):
 
 @login_required
 def unidad_servicio_nuevo(request, pk):
-    if not _can_manage_tickets_logistica(request.user):
+    if not _can_manage_unidades(request.user):
         raise PermissionDenied("No tienes permisos para registrar servicios de unidad")
     unidad = get_object_or_404(Unidad, pk=pk)
     if request.method == "POST":
@@ -1781,7 +1786,7 @@ def unidad_servicio_nuevo(request, pk):
 
 @login_required
 def unidad_lavado_nuevo(request, pk):
-    if not _can_manage_tickets_logistica(request.user):
+    if not _can_manage_unidades(request.user):
         raise PermissionDenied("No tienes permisos para registrar lavados de unidad")
     unidad = get_object_or_404(Unidad, pk=pk)
     if request.method == "POST":
@@ -1798,7 +1803,7 @@ def unidad_lavado_nuevo(request, pk):
 
 @login_required
 def unidad_reparacion_nueva(request, pk):
-    if not _can_manage_tickets_logistica(request.user):
+    if not _can_manage_unidades(request.user):
         raise PermissionDenied("No tienes permisos para registrar reparaciones de unidad")
     unidad = get_object_or_404(Unidad, pk=pk)
     if request.method == "POST":
@@ -1823,7 +1828,7 @@ def unidad_reparacion_nueva(request, pk):
 
 @login_required
 def reportes_lista(request):
-    if not _can_manage_tickets_logistica(request.user):
+    if not can_view_submodule(request.user, "logistica", "reportes"):
         raise PermissionDenied("No tienes permisos para ver reportes de Logística")
 
     qs = ReporteUnidad.objects.select_related("unidad", "repartidor__user").order_by("-fecha_reporte")
@@ -1848,7 +1853,7 @@ def reportes_lista(request):
         request,
         "logistica/reportes_lista.html",
         {
-            "module_tabs": _module_tabs("reportes"),
+            "module_tabs": _module_tabs("reportes", request.user),
             "reportes": reportes,
             "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
             "estatus_choices": ReporteUnidad.ESTATUS_CHOICES,
@@ -1866,7 +1871,7 @@ def reportes_lista(request):
 
 @login_required
 def bitacoras_lista(request):
-    if not _can_manage_tickets_logistica(request.user):
+    if not can_view_submodule(request.user, "logistica", "bitacoras"):
         raise PermissionDenied("No tienes permisos para ver bitácoras de Logística")
 
     qs = BitacoraSalidaLlegada.objects.select_related("unidad", "repartidor__user").order_by("-hora_salida")
@@ -1894,7 +1899,7 @@ def bitacoras_lista(request):
         request,
         "logistica/bitacoras_lista.html",
         {
-            "module_tabs": _module_tabs("bitacoras"),
+            "module_tabs": _module_tabs("bitacoras", request.user),
             "bitacoras": bitacoras,
             "bitacoras_page": page,
             "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),

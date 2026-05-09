@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from activos.models import Activo
-from core.access import is_repartidor_only
+from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_repartidor_only
 from core.models import Sucursal, sucursales_operativas_q
 
 from .models import BitacoraFalla, CategoriaFalla, ReporteFalla
@@ -52,11 +52,7 @@ def _sucursal_usuario(user):
 def _puede_reportar_fallas(user) -> bool:
     if not user or not user.is_authenticated or is_repartidor_only(user):
         return False
-    if user.is_staff or user.is_superuser:
-        return True
-    if _group_names(user) & GRUPOS_REPORTE_FALLAS:
-        return True
-    return bool(_sucursal_usuario(user))
+    return can_view_submodule(user, "fallas", "reportar")
 
 
 class EsPersonalSucursal(permissions.BasePermission):
@@ -78,17 +74,13 @@ class EsComprasODG(permissions.BasePermission):
 def _puede_gestionar_fallas(user) -> bool:
     if not user.is_authenticated:
         return False
-    if user.is_staff or user.is_superuser:
-        return True
-    return user.groups.filter(name__in=GRUPOS_GESTION_FALLAS | GRUPOS_AREA_FALLAS).exists()
+    return can_view_module(user, "fallas")
 
 
 def _puede_cambiar_estatus_fallas(user) -> bool:
     if not user.is_authenticated:
         return False
-    if user.is_staff or user.is_superuser:
-        return True
-    return bool(_group_names(user) & GRUPOS_GESTION_FALLAS)
+    return can_manage_submodule(user, "fallas", "gestion")
 
 
 def _filtrar_reportes_por_usuario(qs, user):
@@ -326,7 +318,7 @@ def dashboard_stats(request):
 
 @login_required
 def dashboard_view(request):
-    if not _puede_gestionar_fallas(request.user):
+    if not can_view_submodule(request.user, "fallas", "dashboard"):
         raise PermissionDenied
     grupos = _group_names(request.user)
     es_dg = request.user.is_superuser or bool(grupos & GRUPOS_GESTION_FALLAS)
@@ -410,7 +402,7 @@ def pwa_reporte(request):
 
 @login_required
 def pwa_mis_reportes(request):
-    if not _puede_reportar_fallas(request.user):
+    if not can_view_submodule(request.user, "fallas", "mis_reportes"):
         raise PermissionDenied
 
     qs = ReporteFalla.objects.select_related("sucursal", "categoria", "reportado_por").order_by("-fecha_reporte")
