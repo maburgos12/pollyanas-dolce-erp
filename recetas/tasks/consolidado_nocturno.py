@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from io import BytesIO
-from datetime import date
+from datetime import date, timedelta
 
 from celery import shared_task
 from django.conf import settings
@@ -64,6 +64,14 @@ def enviar_solicitudes_sucursal_cedis(
         )
         return {"status": "omitido", "reason": "sin_destinatarios", "recipients": []}
 
+    metadata = consolidado.metadata or {}
+    transfer_request_date_raw = metadata.get("transfer_request_date") or (
+        consolidado.fecha_operacion - timedelta(days=1)
+    ).isoformat()
+    try:
+        transfer_request_date_label = date.fromisoformat(str(transfer_request_date_raw)).strftime("%d/%m/%Y")
+    except ValueError:
+        transfer_request_date_label = str(transfer_request_date_raw)
     workbook = _build_solicitudes_sucursal_workbook(consolidado.fecha_operacion)
     attachment = BytesIO()
     workbook.save(attachment)
@@ -73,7 +81,8 @@ def enviar_solicitudes_sucursal_cedis(
     body = (
         "Carolina,\n\n"
         "Adjunto va el Excel de solicitudes por sucursal generado automaticamente por el ERP.\n\n"
-        f"Fecha de solicitud: {consolidado.fecha_operacion:%d/%m/%Y}\n"
+        f"Fecha de solicitud: {transfer_request_date_label}\n"
+        f"Fecha de aplicación del plan: {consolidado.fecha_operacion:%d/%m/%Y}\n"
         f"Productos consolidados: {consolidado.productos_consolidados}\n"
         f"Sucursales con solicitud: {consolidado.sucursales_con_solicitud}/{consolidado.sucursales_esperadas}\n\n"
         "Tambien puedes revisarlo en el ERP:\n"
@@ -114,12 +123,15 @@ def consolidado_nocturno_cedis(
     enviar_excel_carolina: bool = True,
     forzar_envio_excel: bool = False,
 ) -> dict:
-    target_date = date.fromisoformat(fecha_operacion) if fecha_operacion else timezone.localdate()
+    local_today = timezone.localdate()
+    target_date = date.fromisoformat(fecha_operacion) if fecha_operacion else local_today + timedelta(days=1)
+    transfer_request_date = target_date - timedelta(days=1)
     consolidado = ConsolidadoNocturnoCedisService().consolidar(
         fecha_operacion=target_date,
         sincronizar_point=sincronizar_point,
         sincronizar_inventario_cedis=sincronizar_inventario_cedis,
         forzar_recalculo=forzar_recalculo,
+        fecha_transferencias=transfer_request_date,
     )
     email_result = {"status": "desactivado"}
     if enviar_excel_carolina:

@@ -47,8 +47,10 @@ class ConsolidadoNocturnoCedisService:
         sincronizar_point: bool = True,
         sincronizar_inventario_cedis: bool = True,
         forzar_recalculo: bool = False,
+        fecha_transferencias: date | None = None,
     ) -> ConsolidadoNocturnoCEDIS:
         fecha_operacion = fecha_operacion or timezone.localdate()
+        fecha_transferencias = fecha_transferencias or (fecha_operacion - timedelta(days=1))
         consolidado_existente = ConsolidadoNocturnoCEDIS.objects.filter(fecha_operacion=fecha_operacion).first()
         if consolidado_existente and consolidado_existente.plan_produccion_id and not forzar_recalculo:
             return consolidado_existente
@@ -75,7 +77,7 @@ class ConsolidadoNocturnoCedisService:
                             exc,
                         )
             sync_job = self.open_transfer_sync_service.sync_open_transfers(
-                fecha=fecha_operacion,
+                fecha=fecha_transferencias,
                 triggered_by=usuario,
             )
 
@@ -107,6 +109,7 @@ class ConsolidadoNocturnoCedisService:
                         "inventory_sync_job_id": inventory_sync_job.id if inventory_sync_job else None,
                         "inventory_sync_error": inventory_sync_error,
                         "inventory_sync_skipped_reason": inventory_sync_skipped_reason,
+                        "transfer_request_date": fecha_transferencias.isoformat(),
                         "sync_job_id": sync_job.id if sync_job else None,
                         "coverage_branch_ids": cobertura["branch_ids"],
                         "source_order": [
