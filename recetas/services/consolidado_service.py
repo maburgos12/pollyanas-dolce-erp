@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
@@ -25,6 +26,9 @@ from recetas.models import (
 from recetas.views.reabasto import _consolidado_reabasto_por_fecha, _upsert_plan_reabasto_cedis
 
 
+logger = logging.getLogger(__name__)
+
+
 class ConsolidadoNocturnoCedisService:
     def __init__(self, open_transfer_sync_service: OpenTransferSyncService | None = None):
         self.open_transfer_sync_service = open_transfer_sync_service or OpenTransferSyncService()
@@ -46,10 +50,18 @@ class ConsolidadoNocturnoCedisService:
             sincronizar_point = False
 
         inventory_sync_job = None
+        inventory_sync_error = ""
         sync_job = None
         if sincronizar_point:
             if sincronizar_inventario_cedis:
-                inventory_sync_job = self._sincronizar_inventario_cedis(usuario=usuario)
+                try:
+                    inventory_sync_job = self._sincronizar_inventario_cedis(usuario=usuario)
+                except Exception as exc:  # noqa: BLE001 - no debe bloquear solicitudes de sucursales
+                    inventory_sync_error = str(exc)
+                    logger.exception(
+                        "No se pudo sincronizar inventario CEDIS antes del consolidado %s; se continuará con solicitudes.",
+                        fecha_operacion,
+                    )
             sync_job = self.open_transfer_sync_service.sync_open_transfers(
                 fecha=fecha_operacion,
                 triggered_by=usuario,
@@ -79,6 +91,7 @@ class ConsolidadoNocturnoCedisService:
                     "total_plan_produccion": Decimal(str(total_plan or 0)),
                     "metadata": {
                         "inventory_sync_job_id": inventory_sync_job.id if inventory_sync_job else None,
+                        "inventory_sync_error": inventory_sync_error,
                         "sync_job_id": sync_job.id if sync_job else None,
                         "coverage_branch_ids": cobertura["branch_ids"],
                         "source_order": [
