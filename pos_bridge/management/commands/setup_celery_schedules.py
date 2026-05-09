@@ -89,6 +89,25 @@ class Command(BaseCommand):
             },
         )
 
+        inventory_close_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="23",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="pos_bridge: inventario cierre diario",
+            defaults={
+                "task": "pos_bridge.inventory_sync",
+                "crontab": inventory_close_cron,
+                "interval": None,
+                "kwargs": json.dumps({"capture_costs": False}),
+                "enabled": True,
+            },
+        )
+
         waste_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="45",
             hour="2",
@@ -180,6 +199,25 @@ class Command(BaseCommand):
                 "crontab": cedis_consolidado_cron,
                 "interval": None,
                 "kwargs": json.dumps({"sincronizar_point": True}),
+                "enabled": True,
+            },
+        )
+
+        inventory_close_email_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="1",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="recetas: inventario final cierre email",
+            defaults={
+                "task": "recetas.inventario_final_cierre_email",
+                "crontab": inventory_close_email_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
                 "enabled": True,
             },
         )

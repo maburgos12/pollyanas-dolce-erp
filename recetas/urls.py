@@ -130,6 +130,11 @@ urlpatterns = [
     path("reabasto-cedis/generar-plan/", views.reabasto_cedis_generar_plan, name="reabasto_cedis_generar_plan"),
     path("reabasto-cedis/generar-compras/", views.reabasto_cedis_generar_compras, name="reabasto_cedis_generar_compras"),
     path("consolidado-cedis/", consolidado_views.consolidado_cedis_revision, name="consolidado_cedis_revision"),
+    path(
+        "consolidado-cedis/inventario-cierre/exportar/",
+        consolidado_views.consolidado_cedis_inventario_cierre_export,
+        name="consolidado_cedis_inventario_cierre_export",
+    ),
     path("consolidado-cedis/generar/", consolidado_views.consolidado_cedis_generar, name="consolidado_cedis_generar"),
     path(
         "consolidado-cedis/autorizar-plan/",

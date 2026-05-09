@@ -2,15 +2,18 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from core.access import can_view_recetas
+from pos_bridge.services.daily_inventory_close_service import DailyInventoryCloseService
 from recetas.models import ConsolidadoNocturnoCEDIS, PlanProduccionItem, Receta
 from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
 from recetas.tasks.consolidado_nocturno import consolidado_nocturno_cedis
@@ -54,22 +57,66 @@ def _plan_completamente_autorizado(plan) -> bool:
     return True
 
 
+def _inventory_close_payload(fecha_operacion: date) -> dict:
+    payload = DailyInventoryCloseService().build_close(fecha_operacion=fecha_operacion)
+    branch_codes = [branch["code"] for branch in payload["branches"]]
+    table_rows = []
+    for row in payload["rows"]:
+        table_rows.append(
+            {
+                **row,
+                "stock_cells": [row["stocks"].get(code, Decimal("0.000")) for code in branch_codes],
+            }
+        )
+    payload["table_rows"] = table_rows
+    return payload
+
+
 @login_required
 def consolidado_cedis_revision(request):
     if not can_view_recetas(request.user):
         raise PermissionDenied
     fecha_operacion = _parse_date(request.GET.get("fecha"))
     resumen = ConsolidadoNocturnoCedisService().get_resumen(fecha_operacion=fecha_operacion)
+    inventario_cierre = _inventory_close_payload(fecha_operacion)
     return render(
         request,
         "recetas/consolidado_cedis_revision.html",
         {
             **resumen,
+            "inventario_cierre": inventario_cierre,
             "fecha_prev": fecha_operacion - timedelta(days=1),
             "fecha_next": fecha_operacion + timedelta(days=1),
             "recetas_disponibles": Receta.objects.order_by("nombre").only("id", "nombre", "codigo_point")[:700],
         },
     )
+
+
+@login_required
+def consolidado_cedis_inventario_cierre_export(request):
+    if not can_view_recetas(request.user):
+        raise PermissionDenied
+    fecha_operacion = _parse_date(request.GET.get("fecha"))
+    export_format = (request.GET.get("format") or "xlsx").strip().lower()
+    service = DailyInventoryCloseService()
+    payload = service.build_close(fecha_operacion=fecha_operacion)
+    filename_base = f"inventario_final_cierre_{fecha_operacion.isoformat()}"
+
+    if export_format == "pdf":
+        response = HttpResponse(service.build_pdf_bytes(payload), content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename_base}.pdf"'
+        return response
+
+    workbook = service.build_workbook(payload)
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename_base}.xlsx"'
+    return response
 
 
 @login_required

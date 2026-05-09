@@ -29,9 +29,11 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "pos_bridge: ventas cerradas diario",
                 "pos_bridge: cierre producto mensual",
                 "pos_bridge: inventario completo diario",
+                "pos_bridge: inventario cierre diario",
                 "pos_bridge: mermas diario",
                 "pos_bridge: produccion diario",
                 "pos_bridge: transferencias diario",
+                "pos_bridge: transferencias abiertas diario",
                 "pos_bridge: inventario realtime",
                 "pos_bridge: recetas semanal",
                 "pos_bridge: retry jobs fallidos",
@@ -40,9 +42,12 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "pos_bridge: sync precios catalogo semanal",
                 "proyecciones: producción día siguiente",
                 "proyecciones: producción semana siguiente",
+                "proyecciones: forecast quincenal semanal",
                 "inventario: consumos BOM día anterior",
                 "core: verificar datos mes anterior",
                 "core: cierre automático mes anterior",
+                "recetas: consolidado nocturno CEDIS",
+                "recetas: inventario final cierre email",
                 "reportes: refresh analytics operativo",
                 "orquestacion: plan diario faltante",
                 "orquestacion: cadena plan demanda-produccion-compras",
@@ -50,11 +55,20 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "orquestacion: guardia ajustes inventario",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 22)
+        self.assertEqual(PeriodicTask.objects.count(), 27)
         realtime = PeriodicTask.objects.get(name="pos_bridge: inventario realtime")
         self.assertEqual(realtime.interval.every, 5)
+        inventory_close = PeriodicTask.objects.get(name="pos_bridge: inventario cierre diario")
+        self.assertEqual(inventory_close.task, "pos_bridge.inventory_sync")
+        self.assertEqual(inventory_close.crontab.hour, "23")
+        self.assertEqual(inventory_close.crontab.minute, "0")
+        self.assertEqual(inventory_close.kwargs, '{"capture_costs": false}')
+        close_email = PeriodicTask.objects.get(name="recetas: inventario final cierre email")
+        self.assertEqual(close_email.task, "recetas.inventario_final_cierre_email")
+        self.assertEqual(close_email.crontab.hour, "1")
+        self.assertEqual(close_email.crontab.minute, "0")
         monthly = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
-        self.assertEqual(monthly.crontab.day_of_month, "2")
+        self.assertEqual(monthly.crontab.day_of_month, "1")
         self.assertEqual(monthly.crontab.hour, "5")
         product_prices = PeriodicTask.objects.get(name="pos_bridge: sync precios catalogo semanal")
         self.assertEqual(product_prices.task, "pos_bridge.sync_product_prices_task")

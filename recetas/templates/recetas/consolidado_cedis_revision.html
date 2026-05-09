@@ -35,6 +35,57 @@
     width: 100%;
   }
 
+  .cedis-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .cedis-tab-link {
+    border: 1px solid var(--border-color, #d1d5db);
+    border-radius: 6px;
+    color: inherit;
+    padding: 8px 12px;
+    text-decoration: none;
+  }
+
+  .cedis-tab-link.is-active {
+    background: #111827;
+    color: #fff;
+  }
+
+  .cedis-inventory-shell {
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  .cedis-inventory-table {
+    min-width: 1120px;
+    table-layout: fixed;
+    width: 100%;
+  }
+
+  .cedis-inventory-table th,
+  .cedis-inventory-table td {
+    font-size: 12px;
+    padding: 6px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  .cedis-inventory-table .inventory-product {
+    white-space: normal;
+    width: 260px;
+  }
+
+  .cedis-inventory-meta {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    margin-bottom: 12px;
+  }
+
   .cedis-check-button {
     align-items: center;
     display: inline-flex;
@@ -147,6 +198,10 @@
         <button class="btn btn-primary" type="submit">Sincronizar y consolidar</button>
       </form>
     </div>
+    <nav class="cedis-tabs" aria-label="Secciones Consolidado CEDIS">
+      <a class="cedis-tab-link" href="#productos-consolidados">Productos consolidados</a>
+      <a class="cedis-tab-link is-active" href="#inventario-final-cierre">Inventario final del día</a>
+    </nav>
   </div>
 
   <div class="kpi-grid kpi-mini">
@@ -163,10 +218,69 @@
   </div>
   {% endif %}
 
+  <div class="card" id="inventario-final-cierre">
+    <div class="card-header">Inventario final del día</div>
+    <div class="toolbar mb-2">
+      <a class="btn btn-secondary" href="{% url 'recetas:consolidado_cedis_inventario_cierre_export' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}&format=xlsx">Generar Excel</a>
+      <a class="btn btn-secondary" href="{% url 'recetas:consolidado_cedis_inventario_cierre_export' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}&format=pdf">Generar PDF</a>
+    </div>
+    <div class="cedis-inventory-meta">
+      <div>
+        <div class="muted">Fecha operativa</div>
+        <strong>{{ inventario_cierre.fecha_operacion|date:'d/m/Y' }}</strong>
+      </div>
+      <div>
+        <div class="muted">Zona horaria</div>
+        <strong>{{ inventario_cierre.timezone_name }}</strong>
+      </div>
+      <div>
+        <div class="muted">Última captura Point</div>
+        <strong>{% if inventario_cierre.last_capture_at %}{{ inventario_cierre.last_capture_at|date:'d/m/Y H:i' }}{% else %}Sin captura{% endif %}</strong>
+      </div>
+      <div>
+        <div class="muted">Productos</div>
+        <strong>{{ inventario_cierre.table_rows|length }}</strong>
+      </div>
+    </div>
+    {% if inventario_cierre.missing_branch_codes %}
+    <div class="alert alert-warning">Sin captura para: {{ inventario_cierre.missing_branch_codes|join:", " }}.</div>
+    {% endif %}
+    <div class="cedis-inventory-shell">
+      <table class="table table-striped align-middle cedis-inventory-table">
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th class="inventory-product">Producto</th>
+            <th>Categoría</th>
+            {% for branch in inventario_cierre.branches %}
+            <th class="text-end">{{ branch.code }}</th>
+            {% endfor %}
+            <th class="text-end">Total cierre</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in inventario_cierre.table_rows %}
+          <tr>
+            <td>{{ row.sku }}</td>
+            <td class="inventory-product">{{ row.product_name }}</td>
+            <td>{{ row.category|default:"-" }}</td>
+            {% for stock in row.stock_cells %}
+            <td class="text-end">{{ stock|floatformat:3 }}</td>
+            {% endfor %}
+            <td class="text-end"><strong>{{ row.total_stock|floatformat:3 }}</strong></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="14" class="muted">No hay inventario Point capturado para esta fecha.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <form method="post" action="{% url 'recetas:consolidado_cedis_autorizar_plan' %}">
     {% csrf_token %}
     <input type="hidden" name="fecha_operacion" value="{{ fecha_operacion|date:'Y-m-d' }}">
-    <div class="card">
+    <div class="card" id="productos-consolidados">
       <div class="card-header">Productos consolidados</div>
       <div class="cedis-table-shell">
         <table class="table table-striped align-middle cedis-consolidado-table">
