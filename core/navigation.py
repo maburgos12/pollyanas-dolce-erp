@@ -103,6 +103,13 @@ NAV_GROUPS = [
             ("sistema", "orquestacion", "Orquestación", "/orquestacion/", ["/orquestacion/"]),
             ("sistema", "ia", "IA privada", "/ia-privada/", ["/ia-privada/"]),
             ("sistema", "integraciones", "Integraciones", "/integraciones/", ["/integraciones/"]),
+            (
+                "sistema",
+                "horarios_especiales",
+                "Horarios Especiales",
+                "/horarios-especiales/",
+                ["/horarios-especiales/"],
+            ),
         ],
     },
 ]

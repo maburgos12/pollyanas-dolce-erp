@@ -60,6 +60,10 @@ urlpatterns = [
     path("mantenimiento/app/", pwa_mantenimiento, name="pwa-mantenimiento"),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
+    path(
+        "horarios-especiales/",
+        include(("horarios_especiales.urls", "horarios_especiales"), namespace="horarios_especiales"),
+    ),
     path("orquestacion/", include(("orquestacion.urls", "orquestacion"), namespace="orquestacion")),
     path("rentabilidad/", views_rentabilidad.dashboard_rentabilidad, name="rentabilidad_dashboard"),
     path("rentabilidad/<int:pk>/", views_rentabilidad.detalle_sucursal, name="rentabilidad_detalle"),
