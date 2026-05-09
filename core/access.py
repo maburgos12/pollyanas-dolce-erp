@@ -150,6 +150,7 @@ ACCESS_SUBMODULES = {
         ("orquestacion", "Orquestación"),
         ("ia", "IA privada"),
         ("integraciones", "Integraciones"),
+        ("horarios_especiales", "Horarios Especiales"),
     ],
 }
 
