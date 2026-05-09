@@ -2,1149 +2,616 @@
 
 {% block title %}Usuarios y Accesos - Pollyanas Dolce ERP{% endblock %}
 {% block page_title %}Administración · Usuarios y Accesos{% endblock %}
+
 {% block extra_css %}
 <style>
-  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-  .form-group-full { grid-column: 1 / -1; }
-  .form-checkbox-row { display: flex; align-items: end; }
-  .form-checkbox-row label { margin-bottom: 0; display: inline-flex; align-items: center; gap: 8px; }
-  .locks-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-  .lock-item { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 0; }
-  .filters-inline { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-  .filters-inline input { max-width: 420px; }
-  .users-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-  .role-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
-  .role-card, .readiness-card { border: 1px solid var(--rosa-deep); border-radius: 12px; background: #fff; padding: 14px 16px; }
-  .role-card strong, .readiness-card strong { display: block; font-size: 24px; color: var(--vino); }
+  .users-shell { display: grid; gap: 16px; }
+  .users-toolbar { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+  .users-toolbar-copy { max-width: 760px; }
+  .users-toolbar-title { margin: 0 0 6px; color: var(--vino); font-size: 22px; font-weight: 800; }
+  .users-toolbar-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .users-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .users-kpi-card { border: 1px solid var(--rosa-deep); border-radius: 8px; background: #fff; padding: 14px 16px; min-height: 96px; }
+  .users-kpi-number { display: block; color: var(--vino); font-size: 26px; font-weight: 800; line-height: 1; }
+  .users-kpi-label { margin-top: 8px; color: var(--texto); font-weight: 700; }
+  .users-kpi-detail { margin-top: 4px; color: var(--texto-light); font-size: 13px; }
+  .users-focus-summary { border: 1px solid var(--rosa-deep); border-radius: 8px; background: #fffafc; padding: 12px 14px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+  .users-focus-summary strong { color: var(--vino); }
+  .users-filters { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(150px, .45fr) minmax(170px, .5fr) minmax(190px, .55fr) auto auto; gap: 10px; align-items: end; }
+  .users-table th, .users-table td { vertical-align: middle; }
+  .users-table .users-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .users-primary-cell strong { display: block; color: var(--vino); }
+  .users-primary-cell span { display: block; color: var(--texto-light); font-size: 12px; }
   .module-chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
-  .module-chip { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: var(--gris-suave); color: var(--texto); font-size: 12px; font-weight: 700; }
+  .module-chip { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: var(--gris-suave); color: var(--texto); font-size: 12px; font-weight: 700; white-space: nowrap; }
   .module-chip.manage { background: #e8f5e9; color: #2e7d32; }
   .module-chip.blocked { background: #ffebee; color: #c62828; }
   .module-chip.view { background: #e3f2fd; color: #1565c0; }
   .module-chip.none { background: #f2f2f2; color: #666; }
-  .permissions-row[hidden] { display: none; }
-  .permissions-panel { border: 1px solid var(--rosa-deep); border-radius: 14px; background: #fffafc; padding: 16px; }
-  .permissions-panel-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 12px; }
-  .permissions-panel-header strong { display: block; color: var(--vino); font-size: 18px; }
+  .module-chip.pending { background: #fff8e1; color: #8a5a00; }
+  .users-advanced { border: 1px solid var(--rosa-deep); border-radius: 8px; background: #fff; overflow: hidden; }
+  .users-advanced > summary { cursor: pointer; list-style: none; padding: 16px 18px; display: flex; justify-content: space-between; gap: 12px; align-items: center; color: var(--vino); font-weight: 800; }
+  .users-advanced > summary::-webkit-details-marker { display: none; }
+  .users-advanced > summary::after { content: "Abrir"; color: var(--texto-light); font-size: 13px; font-weight: 700; }
+  .users-advanced[open] > summary::after { content: "Cerrar"; }
+  .users-advanced-body { border-top: 1px solid var(--rosa); padding: 16px 18px 18px; display: grid; gap: 18px; }
+  .users-section-title { margin: 0 0 10px; color: var(--vino); font-size: 16px; font-weight: 800; }
+  .users-compact-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .users-compact-card { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px 14px; background: #fff; }
+  .users-compact-card strong { display: block; color: var(--vino); font-size: 22px; }
+  .users-workflow-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .users-step { border: 1px solid var(--rosa); border-radius: 8px; padding: 12px 14px; background: #fff; }
+  .users-step-kicker { color: var(--vino); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+  .users-step-title { margin-top: 4px; font-weight: 800; }
+  .users-step-meta { margin-top: 8px; }
+  .users-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .users-form-full { grid-column: 1 / -1; }
+  .users-check-row { display: flex; align-items: end; }
+  .users-check-row label { margin-bottom: 0; display: inline-flex; align-items: center; gap: 8px; }
+  .locks-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .lock-item { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 0; }
   .permissions-table th { background: var(--vino); color: #fff; }
   .permissions-table td, .permissions-table th { vertical-align: middle; }
-  .permissions-radio { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 48px; cursor: pointer; }
+  .permissions-radio { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 46px; cursor: pointer; }
   .permissions-radio input { width: 20px; height: 20px; accent-color: var(--vino); }
-  .permissions-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
-  .governance-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-  .governance-card { border: 1px solid var(--rosa-deep); border-radius: 12px; background: #fff; padding: 14px 16px; }
-  .governance-card strong { display: block; font-size: 24px; color: var(--vino); }
-  .coverage-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-  .coverage-card { border: 1px solid var(--rosa-deep); border-radius: 12px; background: #fff; padding: 14px 16px; }
-  .coverage-card strong { display: block; font-size: 24px; color: var(--vino); }
-  .focus-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-  .focus-card { border: 1px solid var(--rosa-deep); border-radius: 12px; background: #fff; padding: 14px 16px; }
-  .focus-card.is-active { border-color: var(--vino); box-shadow: 0 8px 22px rgba(139,34,82,0.10); }
-  .focus-card strong { display: block; font-size: 24px; color: var(--vino); }
-  .stage-row { border: 1px solid var(--rosa); border-radius: 12px; padding: 14px 16px; background: #fff; display: grid; grid-template-columns: 88px minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 14px; align-items: center; }
-  .stage-step { font-family: "Playfair Display", serif; font-size: 28px; color: var(--vino); }
-  .focus-summary { border: 1px solid var(--rosa-deep); border-radius: 12px; background: var(--rosa); padding: 14px 16px; margin-bottom: 18px; display:flex; justify-content:space-between; align-items:center; gap:16px; }
-  .blocker-list { display: grid; gap: 10px; }
-  .blocker-row { border: 1px solid var(--rosa); border-radius: 12px; padding: 14px 16px; background: #fff; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 14px; align-items: center; }
-  .blocker-meta strong { display: block; color: var(--vino); }
-  .blocker-meta small { color: var(--texto-light); }
-  .blocker-action { display: flex; justify-content: flex-end; }
-  .coverage-row { border: 1px solid var(--rosa); border-radius: 12px; padding: 14px 16px; background: #fff; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto; gap: 14px; align-items: center; }
-  @media (max-width: 900px) {
-    .grid-2 { grid-template-columns: 1fr; }
-    .locks-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .filters-inline { flex-direction: column; align-items: stretch; }
-    .filters-inline input { max-width: none; }
-    .users-kpi-grid, .role-grid, .governance-grid, .coverage-grid, .focus-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .blocker-row, .coverage-row, .stage-row, .focus-summary { grid-template-columns: 1fr; display:grid; }
-    .permissions-panel-header, .permissions-actions { flex-direction: column; align-items: stretch; }
-    .permissions-table { min-width: 720px; }
+  .users-modal { width: min(960px, calc(100vw - 28px)); max-height: calc(100vh - 40px); border: 0; border-radius: 10px; padding: 0; box-shadow: 0 22px 60px rgba(48, 22, 33, .28); }
+  .users-modal::backdrop { background: rgba(48, 22, 33, .44); }
+  .users-modal.users-modal-wide { width: min(1120px, calc(100vw - 28px)); }
+  .users-modal-header { position: sticky; top: 0; z-index: 1; background: #fff; border-bottom: 1px solid var(--rosa); padding: 16px 18px; display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+  .users-modal-title { margin: 0; color: var(--vino); font-size: 20px; font-weight: 800; }
+  .users-modal-body { padding: 18px; overflow: auto; }
+  .users-modal-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+  .users-icon-button { border: 1px solid var(--rosa-deep); background: #fff; color: var(--vino); border-radius: 8px; min-width: 42px; min-height: 42px; cursor: pointer; font-weight: 800; }
+  @media (max-width: 1000px) {
+    .users-kpi-grid, .users-compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .users-filters { grid-template-columns: 1fr 1fr; }
+    .users-workflow-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 700px) {
+    .users-kpi-grid, .users-compact-grid, .users-filters, .users-form-grid { grid-template-columns: 1fr; }
+    .locks-grid { grid-template-columns: 1fr; }
+    .users-toolbar-actions, .users-table .users-actions, .users-modal-actions { justify-content: stretch; }
+    .users-toolbar-actions .btn, .users-table .users-actions .btn, .users-modal-actions .btn { width: 100%; }
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<section class="card enterprise-focus-alert {% if users_maturity_summary.attention_steps %}enterprise-focus-alert-warning{% else %}enterprise-focus-alert-success{% endif %}">
-  <div class="enterprise-focus-alert-copy">
-    <div class="enterprise-focus-alert-title">Prioridad ERP actual</div>
-    <div class="enterprise-focus-alert-summary">{{ users_maturity_summary.next_priority_title }}</div>
-    <div class="enterprise-focus-alert-detail">{{ users_maturity_summary.next_priority_detail }}</div>
-    <div class="muted">Cobertura {{ users_maturity_summary.coverage_pct }}% · Etapas estabilizadas {{ users_maturity_summary.completed_steps }} · Etapas con atención {{ users_maturity_summary.attention_steps }}</div>
-  </div>
-  <div class="enterprise-focus-alert-actions">
-    <a class="btn btn-primary" href="{{ users_maturity_summary.next_priority_url }}">{{ users_maturity_summary.next_priority_cta }}</a>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Resumen del módulo</div>
-  <div class="kpi-grid">
-    <article class="kpi-card">
-      <div class="kpi-label">Responsable principal</div>
-      <div style="font-weight:700; margin-top:8px;">{{ erp_command_center.owner }}</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
-      <div class="kpi-label">Semáforo global</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
-      <div class="kpi-label">Bloqueos abiertos</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente paso</div>
-      <div class="muted" style="margin:8px 0 10px;">{{ erp_command_center.next_step }}</div>
-      <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
-    </article>
-  </div>
-</section>
-
-{% if users_focus_cards %}
-<div class="card">
-  <div class="card-header">Cockpit de habilitación ERP</div>
-  <div class="focus-grid">
-    {% for card in users_focus_cards %}
-    <article class="focus-card {% if card.is_active %}is-active{% endif %}">
-      <strong>{{ card.count }}</strong>
-      <div style="font-weight:700; margin-bottom:6px;">{{ card.label }}</div>
-      <div class="muted">{{ card.detail }}</div>
-      <div class="mt-2">
-        <a class="btn btn-secondary btn-small" href="{{ card.url }}">Abrir</a>
+<div class="users-shell">
+  <section class="card">
+    <div class="users-toolbar">
+      <div class="users-toolbar-copy">
+        <h2 class="users-toolbar-title">Mesa de trabajo de usuarios</h2>
+        <div class="muted">
+          Alta, edición, roles, candados y permisos explícitos. Los cambios se guardan directo y quedan en bitácora.
+        </div>
       </div>
+      <div class="users-toolbar-actions">
+        <button class="btn btn-primary" type="button" data-modal-open="create-user-modal">Nuevo usuario</button>
+        <a class="btn btn-secondary" href="{% url 'users_access' %}?enterprise_gap=SIN_DEPARTAMENTO">Ver bloqueados</a>
+        <a class="btn btn-secondary" href="{% url 'users_access' %}">Limpiar vista</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="users-kpi-grid" aria-label="Resumen operativo de usuarios">
+    <article class="users-kpi-card">
+      <span class="users-kpi-number">{{ enterprise_ready_summary.listo_erp }}</span>
+      <div class="users-kpi-label">Listos ERP</div>
+      <div class="users-kpi-detail">Usuarios operables sin bloqueo crítico.</div>
     </article>
-    {% endfor %}
-  </div>
+    <article class="users-kpi-card">
+      <span class="users-kpi-number">{{ enterprise_ready_summary.bloqueados }}</span>
+      <div class="users-kpi-label">Bloqueados</div>
+      <div class="users-kpi-detail">Requieren rol, área, sucursal o acceso.</div>
+    </article>
+    <article class="users-kpi-card">
+      <span class="users-kpi-number">{{ enterprise_ready_summary.restricciones }}</span>
+      <div class="users-kpi-label">Con restricciones</div>
+      <div class="users-kpi-detail">Operan con candados parciales.</div>
+    </article>
+    <article class="users-kpi-card">
+      <span class="users-kpi-number">{{ operational_coverage.sucursales_gap|add:operational_coverage.departamentos_gap }}</span>
+      <div class="users-kpi-label">Gaps de cobertura</div>
+      <div class="users-kpi-detail">Sucursales o áreas sin responsable suficiente.</div>
+    </article>
+  </section>
+
   {% if users_focus_summary %}
-  <div class="focus-summary">
+  <section class="users-focus-summary">
     <div>
       <strong>{{ users_focus_summary.title }}</strong>
-      <div class="muted">{{ users_focus_summary.detail }}</div>
-      <div class="muted">Usuarios visibles: {{ users_focus_summary.count }}</div>
+      <div class="muted">{{ users_focus_summary.detail }} · Usuarios visibles: {{ users_focus_summary.count }}</div>
     </div>
-    <div>
-      <a class="btn btn-secondary btn-small" href="{{ users_focus_summary.clear_url }}">Quitar foco</a>
-    </div>
-  </div>
+    <a class="btn btn-secondary btn-small" href="{{ users_focus_summary.clear_url }}">Quitar foco</a>
+  </section>
   {% endif %}
-  <div class="blocker-list">
-    {% for row in users_stage_rows %}
-    <article class="stage-row">
-      <div class="stage-step">{{ row.step }}</div>
-      <div class="blocker-meta">
-        <strong>{{ row.title }}</strong>
-        <small>{{ row.detail }}</small>
-      </div>
-      <div class="module-chip-list">
-        <span class="module-chip blocked">Abiertos {{ row.open_count }}</span>
-        <span class="module-chip manage">Controlados {{ row.closed_count }}</span>
-      </div>
-      <div class="blocker-action">
-        <a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
 
-<div class="card table-card">
-  <div class="card-header">Flujo de usuarios y accesos</div>
-  <div class="table-responsive">
-    <table class="table align-middle">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Objetivo</th>
-          <th>Control dominante</th>
-          <th>Salida esperada</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>01 · Identidad</strong></td>
-          <td>Crear usuario, sucursal, área y perfil operativo.</td>
-          <td>Gobierno de identidad ERP.</td>
-          <td>Usuario listo para entrar al sistema con contexto correcto.</td>
-        </tr>
-        <tr>
-          <td><strong>02 · Rol</strong></td>
-          <td>Asignar grupo, permisos y candados de módulo.</td>
-          <td>RBAC por función y alcance.</td>
-          <td>Acceso controlado sin interferencia entre áreas.</td>
-        </tr>
-        <tr>
-          <td><strong>03 · Habilitación</strong></td>
-          <td>Confirmar que puede operar solo en los módulos que le corresponden.</td>
-          <td>Matriz de habilitación ERP.</td>
-          <td>Operación trazable y segregada por responsabilidad.</td>
-        </tr>
-        <tr>
-          <td><strong>04 · Auditoría</strong></td>
-          <td>Revisar cobertura, bloqueos y excepciones.</td>
-          <td>Bitácora y gobierno de accesos.</td>
-          <td>Control continuo y cumplimiento de permisos.</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
-{% if users_enterprise_chain %}
-<div class="card">
-  <div class="card-header">Cadena de habilitación ERP</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for item in users_enterprise_chain %}
-    <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-      <div class="enterprise-pill-title">{{ item.step }} · {{ item.title }}</div>
-      <div class="enterprise-pill-text">{{ item.detail }}</div>
-      <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
-      <div class="muted">{{ item.status }}</div>
-      <div style="margin-top:10px;">
-        <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
+  <section class="card">
+    <div class="card-header">Usuarios</div>
+    <form method="get" class="users-filters">
+      <div class="form-group">
+        <label for="users_q">Buscar</label>
+        <input id="users_q" type="text" name="q" value="{{ search_query }}" placeholder="Usuario, nombre o correo">
       </div>
-    </article>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
-{% if users_trunk_chain_rows %}
-<div class="card">
-  <div class="card-header">Cadena troncal de habilitación</div>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Depende de</th>
-          <th>Responsable</th>
-          <th>Cierre</th>
-          <th>Estatus</th>
-          <th>Dependencia</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in users_trunk_chain_rows %}
-        <tr>
-          <td>
-            <strong>{{ row.step }} · {{ row.title }}</strong>
-            <div class="text-muted">{{ row.detail }}</div>
-          </td>
-          <td>{{ row.depends_on }}</td>
-          <td>{{ row.owner }}</td>
-          <td>
-            <span class="module-chip manage">
-              {{ row.completion }}%
-            </span>
-          </td>
-          <td>
-            <span class="module-chip {% if row.tone == 'success' %}manage{% elif row.tone == 'warning' %}pending{% else %}blocked{% endif %}">
-              {{ row.status }}
-            </span>
-          </td>
-          <td>
-            <span class="module-chip {% if row.dependency_status == 'Listo para avanzar' %}manage{% elif row.dependency_status|slice:':13' == 'Condicionado ' %}blocked{% else %}pending{% endif %}">
-              {{ row.dependency_status }}
-            </span>
-          </td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">Abrir</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% endif %}
-
-{% if users_trunk_closure_cards %}
-<div class="card">
-  <div class="card-header">Cierre troncal ERP consolidado</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for card in users_trunk_closure_cards %}
-    <article class="enterprise-pill-card {% if card.tone == 'danger' %}is-danger{% elif card.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-      <div class="enterprise-pill-title">{{ card.step }} · {{ card.title }}</div>
-      <div class="enterprise-pill-text">Responsable: {{ card.owner }}</div>
-      <div class="module-chip-list" style="margin-top:10px;">
-        <span class="module-chip {% if card.tone == 'success' %}manage{% elif card.tone == 'warning' %}pending{% else %}blocked{% endif %}">{{ card.status }}</span>
-        <span class="module-chip manage">Cierre {{ card.completion }}%</span>
-        <span class="module-chip {% if card.blockers %}blocked{% else %}manage{% endif %}">Bloqueos {{ card.blockers }}</span>
-      </div>
-      <div class="muted" style="margin-top:10px;">Depende de {{ card.depends_on }}</div>
-      <div class="muted" style="margin-top:6px;">{{ card.next_step }}</div>
-      <div style="margin-top:10px;">
-        <a class="btn btn-secondary btn-small" href="{{ card.url }}">{{ card.cta }}</a>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
-{% if users_critical_path_rows %}
-<div class="card">
-  <div class="card-header">Prioridades de cierre</div>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Prioridad</th>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Depende de</th>
-          <th>Lectura ejecutiva</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in users_critical_path_rows %}
-        <tr>
-          <td>{{ row.rank }}</td>
-          <td><strong>{{ row.module }}</strong></td>
-          <td>{{ row.owner }}</td>
-          <td>{{ row.blockers }}</td>
-          <td>{{ row.progress_pct }}%</td>
-          <td>{{ row.depends_on }}</td>
-          <td>{{ row.detail }}</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% endif %}
-
-{% if users_executive_radar_rows %}
-<div class="card">
-  <div class="card-header">Resumen de seguimiento</div>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueo dominante</th>
-          <th>Depende de</th>
-          <th>Cierre</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in users_executive_radar_rows %}
-        <tr>
-          <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
-          <td>{{ row.owner }}</td>
-          <td>{{ row.dominant_blocker }}</td>
-          <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
-          <td>{{ row.progress_pct }}%</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% endif %}
-
-<div class="card">
-  <div class="card-header">Madurez de accesos ERP</div>
-  <div class="users-kpi-grid">
-    <article class="kpi-card">
-      <div class="kpi-number is-success">{{ users_maturity_summary.completed_steps }}</div>
-      <div class="kpi-label">Etapas estabilizadas</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number is-warning">{{ users_maturity_summary.attention_steps }}</div>
-      <div class="kpi-label">Etapas con atención</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ users_maturity_summary.coverage_pct }}%</div>
-      <div class="kpi-label">Cobertura de habilitación</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente prioridad</div>
-      <div style="font-weight:700; margin:8px 0 6px;">{{ users_maturity_summary.next_priority_title }}</div>
-      <div class="muted">{{ users_maturity_summary.next_priority_detail }}</div>
-      <div class="mt-2">
-        <a class="btn btn-secondary btn-small" href="{{ users_maturity_summary.next_priority_url }}">{{ users_maturity_summary.next_priority_cta }}</a>
-      </div>
-    </article>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Criterios de cierre</div>
-  <div class="enterprise-kpi-strip enterprise-kpi-strip-compact">
-    <article class="enterprise-kpi-card">
-      <div class="enterprise-kpi-label">Cierre global</div>
-      <div class="kpi-number">{{ users_release_gate_completion }}%</div>
-      <div class="muted">Usuarios listos para operar sobre la cadena mínima de identidad, cobertura y RBAC.</div>
-    </article>
-  </div>
-  <div class="blocker-list">
-    {% for row in users_release_gate_rows %}
-    <article class="stage-row">
-      <div class="stage-step">{{ row.step }}</div>
-      <div class="blocker-meta">
-        <strong>{{ row.title }}</strong>
-        <small>{{ row.detail }}</small>
-      </div>
-      <div class="module-chip-list">
-        <span class="module-chip manage">Cerrados {{ row.completed }}</span>
-        <span class="module-chip {% if row.tone == 'success' %}manage{% else %}blocked{% endif %}">Abiertos {{ row.open_count }}</span>
-      </div>
-      <div class="blocker-action">
-        <a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Flujo de usuarios y accesos</div>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Cierre</th>
-          <th>Lectura ejecutiva</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in users_workflow_stage_rows %}
-        <tr>
-          <td><strong>{{ row.step }} · {{ row.title }}</strong></td>
-          <td>{{ row.owner }}</td>
-          <td>
-            <span class="module-chip {% if row.tone == 'success' %}manage{% else %}blocked{% endif %}">
-              {{ row.completion }}%
-            </span>
-          </td>
-          <td>{{ row.detail }}</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">Abrir</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Cadena de control RBAC</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for item in users_handoff_map %}
-    <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-      <div class="enterprise-pill-title">{{ item.label }}</div>
-      <div class="enterprise-pill-text">{{ item.detail }}</div>
-      <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %}" style="margin-top:10px;">{{ item.count }}</div>
-      <div class="muted">{{ item.status }}</div>
-      <div style="margin-top:10px;">
-        <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Entrega de accesos a downstream</div>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Destino</th>
-          <th>Responsable</th>
-          <th>Estatus</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Depende de</th>
-          <th>Criterio de salida</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in users_handoff_map %}
-        <tr>
-          <td>{{ item.label }}</td>
-          <td>{{ item.owner }}</td>
-          <td>{{ item.status }}</td>
-          <td>{{ item.count }}</td>
-          <td>{{ item.completion }}%</td>
-          <td>{{ item.depends_on }}</td>
-          <td>{{ item.exit_criteria }}</td>
-          <td>{{ item.next_step }}</td>
-          <td><a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Control del módulo</div>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Frente</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in users_erp_governance_rows %}
-        <tr>
-          <td><strong>{{ row.front }}</strong></td>
-          <td>{{ row.owner }}</td>
-          <td>{{ row.blockers }}</td>
-          <td>{{ row.completion }}%</td>
-          <td>{{ row.detail }}</td>
-          <td>{{ row.next_step }}</td>
-          <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Salud operativa</div>
-  <div class="users-kpi-grid">
-    {% for card in users_operational_health_cards %}
-    <article class="kpi-card">
-      <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
-      <div class="kpi-label">{{ card.label }}</div>
-    </article>
-    {% endfor %}
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Gobierno de accesos</div>
-  <div class="governance-grid">
-    <article class="governance-card">
-      <strong>{{ enterprise_ready_summary.listo_erp }}</strong>
-      <span>Listos ERP</span>
-    </article>
-    <article class="governance-card">
-      <strong>{{ enterprise_ready_summary.bloqueados }}</strong>
-      <span>Bloqueados</span>
-    </article>
-    <article class="governance-card">
-      <strong>{{ enterprise_ready_summary.restricciones }}</strong>
-      <span>Con restricciones</span>
-    </article>
-    <article class="governance-card">
-      <strong>{{ enterprise_ready_summary.inactivos }}</strong>
-      <span>Inactivos</span>
-    </article>
-  </div>
-  <div class="role-grid">
-    {% for item in enterprise_blocker_summary %}
-    <article class="role-card">
-      <strong>{{ item.count }}</strong>
-      <span>{{ item.label }}</span>
-      <div class="mt-2">
-        <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}?enterprise_gap={{ item.code }}">Abrir</a>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-  {% if enterprise_blocker_rows %}
-  <div class="blocker-list">
-    {% for row in enterprise_blocker_rows %}
-    <article class="blocker-row">
-      <div class="blocker-meta">
-        <strong>{{ row.username }} · {{ row.full_name }}</strong>
-        <small>{{ row.primary_blocker.label }} · {{ row.primary_blocker.detail }}</small>
-      </div>
-      <div class="module-chip-list">
-        {% for blocker in row.blockers %}
-          <span class="module-chip blocked">{{ blocker.label }}</span>
-        {% endfor %}
-      </div>
-      <div class="blocker-action">
-        <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}?edit={{ row.id }}">Resolver</a>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-  {% endif %}
-</div>
-
-<div class="card">
-  <div class="card-header">Cobertura Operativa</div>
-  <div class="coverage-grid">
-    <article class="coverage-card">
-      <strong>{{ operational_coverage.sucursales_ok }}</strong>
-      <span>Sucursales cubiertas</span>
-    </article>
-    <article class="coverage-card">
-      <strong>{{ operational_coverage.sucursales_gap }}</strong>
-      <span>Sucursales con gap</span>
-    </article>
-    <article class="coverage-card">
-      <strong>{{ operational_coverage.departamentos_ok }}</strong>
-      <span>Áreas cubiertas</span>
-    </article>
-    <article class="coverage-card">
-      <strong>{{ operational_coverage.departamentos_gap }}</strong>
-      <span>Áreas sin responsable</span>
-    </article>
-  </div>
-  <div class="blocker-list">
-    {% for row in operational_coverage.sucursal_rows %}
-    {% if row.status_tone != 'success' %}
-    <article class="coverage-row">
-      <div class="blocker-meta">
-        <strong>Sucursal · {{ row.label }}</strong>
-        <small>{{ row.detail }}</small>
-      </div>
-      <div class="module-chip-list">
-        <span class="module-chip {% if row.status_tone == 'success' %}manage{% else %}blocked{% endif %}">{{ row.status_label }}</span>
-        <span class="module-chip">Responsables {{ row.assigned_count }}</span>
-        <span class="module-chip">Captura {{ row.capture_count }}</span>
-      </div>
-      <div class="blocker-action">
-        <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}{{ row.query }}">Abrir</a>
-      </div>
-    </article>
-    {% endif %}
-    {% endfor %}
-    {% for row in operational_coverage.departamento_rows %}
-    {% if row.status_tone != 'success' %}
-    <article class="coverage-row">
-      <div class="blocker-meta">
-        <strong>Área · {{ row.label }}</strong>
-        <small>{{ row.detail }}</small>
-      </div>
-      <div class="module-chip-list">
-        <span class="module-chip {% if row.status_tone == 'success' %}manage{% else %}blocked{% endif %}">{{ row.status_label }}</span>
-        <span class="module-chip">Usuarios {{ row.assigned_count }}</span>
-        <span class="module-chip">Managers {{ row.manager_count }}</span>
-      </div>
-      <div class="blocker-action">
-        <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}{{ row.query }}">Abrir</a>
-      </div>
-    </article>
-    {% endif %}
-    {% endfor %}
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Control RBAC</div>
-  <div class="users-kpi-grid">
-    {% for label, count in readiness_summary.items %}
-    <article class="readiness-card">
-      <strong>{{ count }}</strong>
-      <span>{{ label }}</span>
-      <div class="mt-2">
-        <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}?estado={{ label|urlencode }}">Abrir</a>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-  <div class="role-grid">
-    {% for item in role_summary %}
-    <article class="role-card">
-      <strong>{{ item.count }}</strong>
-      <span>{{ item.role }}</span>
-      <div class="mt-2">
-        <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}?role={{ item.role }}">Abrir</a>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Matriz de Roles</div>
-  <div class="table-responsive">
-    <table>
-      <thead>
-        <tr>
-          <th>Rol</th>
-          <th>Maestros</th>
-          <th>Recetas</th>
-          <th>Compras</th>
-          <th>Inventario</th>
-          <th>Reportes</th>
-          <th>CRM</th>
-          <th>Logística</th>
-          <th>RRHH</th>
-          <th>Usuarios</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in role_capability_matrix %}
-        <tr>
-          <td><strong>{{ row.role }}</strong></td>
-          {% for module, capability in row.modules %}
-          <td>
-            {% if capability == 'Gestiona' %}
-              <span class="badge badge-success">{{ capability }}</span>
-            {% elif capability == 'Ver' %}
-              <span class="badge badge-primary">{{ capability }}</span>
-            {% else %}
-              <span class="muted">-</span>
-            {% endif %}
-          </td>
+      <div class="form-group">
+        <label for="users_role">Rol</label>
+        <select id="users_role" name="role" class="input-field">
+          <option value="">Todos</option>
+          {% for role, role_label in role_options %}
+            <option value="{{ role }}" {% if role_filter == role %}selected{% endif %}>{{ role_label }}</option>
           {% endfor %}
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Requisitos operativos por rol</div>
-  <div class="role-grid">
-    {% for item in role_operational_requirements %}
-    <article class="role-card">
-      <strong>{{ item.role }}</strong>
-      <div class="mt-2">
-        {% for requirement in item.requirements %}
-          <div class="muted">{{ requirement }}</div>
-        {% endfor %}
+        </select>
       </div>
-    </article>
-    {% endfor %}
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Crear Usuario</div>
-  <form method="post" class="grid-2">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="create_user">
-
-    <div class="form-group">
-      <label for="create_username">Usuario</label>
-      <input id="create_username" name="username" type="text" required>
-    </div>
-    <div class="form-group">
-      <label for="create_password">Contraseña inicial</label>
-      <input id="create_password" name="password" type="password" minlength="8" required>
-    </div>
-
-    <div class="form-group">
-      <label for="create_first_name">Nombre</label>
-      <input id="create_first_name" name="first_name" type="text">
-    </div>
-    <div class="form-group">
-      <label for="create_last_name">Apellido</label>
-      <input id="create_last_name" name="last_name" type="text">
-    </div>
-
-    <div class="form-group">
-      <label for="create_email">Correo</label>
-      <input id="create_email" name="email" type="email">
-    </div>
-    <div class="form-group">
-      <label for="create_telefono">Teléfono</label>
-      <input id="create_telefono" name="telefono" type="text">
-    </div>
-
-    <div class="form-group">
-      <label for="create_departamento_id">Departamento</label>
-      <select id="create_departamento_id" name="departamento_id">
-        <option value="">Sin departamento</option>
-        {% for d in departamentos %}
-          <option value="{{ d.id }}">{{ d.nombre }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="form-group">
-      <label for="create_sucursal_id">Sucursal</label>
-      <select id="create_sucursal_id" name="sucursal_id">
-        <option value="">Sin sucursal</option>
-        {% for s in sucursales %}
-          <option value="{{ s.id }}">{{ s.nombre }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label for="create_role">Rol principal</label>
-      <select id="create_role" name="role" required>
-        <option value="">Selecciona rol...</option>
-        {% for role, role_label in role_options %}
-          <option value="{{ role }}">{{ role_label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="form-group form-checkbox-row">
-      <label>
-        <input type="checkbox" name="is_active" value="1" checked>
-        Usuario activo
-      </label>
-    </div>
-    <div class="form-group form-checkbox-row">
-      <label>
-        <input type="checkbox" name="modo_captura_sucursal" value="1">
-        Solo módulo cierre sucursal
-      </label>
-    </div>
-
-    <div class="form-group form-group-full">
-      <label>Candados por módulo (si activas uno, ese usuario no entra al módulo)</label>
-      <div class="locks-grid">
-        {% for lock_field, lock_label in lock_fields %}
-          <label class="lock-item">
-            <input type="checkbox" name="{{ lock_field }}" value="1">
-            {{ lock_label }}
-          </label>
-        {% endfor %}
+      <div class="form-group">
+        <label for="users_estado">Estado</label>
+        <select id="users_estado" name="estado" class="input-field">
+          <option value="">Todos</option>
+          {% for label, count in readiness_summary.items %}
+            <option value="{{ label }}" {% if readiness_filter == label %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
       </div>
-    </div>
+      <div class="form-group">
+        <label for="users_gap">Bloqueo</label>
+        <select id="users_gap" name="enterprise_gap" class="input-field">
+          <option value="">Todos</option>
+          {% for item in enterprise_blocker_summary %}
+            <option value="{{ item.code }}" {% if enterprise_gap_filter == item.code %}selected{% endif %}>{{ item.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn btn-primary" type="submit">Filtrar</button>
+      <a class="btn btn-secondary" href="{% url 'users_access' %}">Limpiar</a>
+    </form>
 
-    <div class="form-group form-group-full">
-      <button class="btn btn-primary" type="submit">Crear usuario y accesos</button>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle users-table">
+        <thead>
+          <tr>
+            <th>Usuario</th>
+            <th>Rol y alcance</th>
+            <th>Estado</th>
+            <th>Uso ERP</th>
+            <th>Bloqueo dominante</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in users %}
+          <tr>
+            <td class="users-primary-cell">
+              <strong>{{ row.username }}</strong>
+              <span>{{ row.full_name }}</span>
+              <span>{{ row.email }}</span>
+            </td>
+            <td>
+              <div><strong>{{ row.role|default:"Sin rol" }}</strong></div>
+              <div class="muted">{{ row.departamento_label }} · {{ row.sucursal_label }}</div>
+              {% if row.modo_captura_sucursal %}
+                <span class="badge badge-warning">Solo captura</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.status_tone == 'success' %}
+                <span class="badge badge-success">{{ row.status_label }}</span>
+              {% elif row.status_tone == 'warning' %}
+                <span class="badge badge-warning">{{ row.status_label }}</span>
+              {% else %}
+                <span class="badge badge-danger">{{ row.status_label }}</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="module-chip-list">
+                {% for label in row.manageable_modules %}
+                  <span class="module-chip manage">{{ label }}</span>
+                {% empty %}
+                  {% for label in row.visible_modules %}
+                    <span class="module-chip view">{{ label }}</span>
+                  {% empty %}
+                    <span class="module-chip none">Sin acceso</span>
+                  {% endfor %}
+                {% endfor %}
+              </div>
+            </td>
+            <td>
+              <strong>{{ row.primary_blocker.label }}</strong>
+              <div class="muted">{{ row.primary_blocker.action }}</div>
+            </td>
+            <td>
+              <div class="users-actions">
+                <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}?edit={{ row.id }}">Editar</a>
+                <button class="btn btn-secondary btn-small" type="button" data-modal-open="permissions-{{ row.id }}">Permisos</button>
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6">Sin usuarios para el filtro actual.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-  </form>
+  </section>
+
+  <details class="users-advanced">
+    <summary>Gobierno, cobertura y matrices avanzadas</summary>
+    <div class="users-advanced-body">
+      <section>
+        <h3 class="users-section-title">Flujo operativo</h3>
+        <div class="users-workflow-grid">
+          {% for row in users_stage_rows %}
+          <article class="users-step">
+            <div class="users-step-kicker">{{ row.step }}</div>
+            <div class="users-step-title">{{ row.title }}</div>
+            <div class="muted">{{ row.detail }}</div>
+            <div class="users-step-meta module-chip-list">
+              <span class="module-chip {% if row.open_count %}blocked{% else %}manage{% endif %}">Abiertos {{ row.open_count }}</span>
+              <span class="module-chip manage">Controlados {{ row.closed_count }}</span>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section>
+        <h3 class="users-section-title">Cobertura operativa</h3>
+        <div class="users-compact-grid">
+          <article class="users-compact-card"><strong>{{ operational_coverage.sucursales_ok }}</strong><span>Sucursales cubiertas</span></article>
+          <article class="users-compact-card"><strong>{{ operational_coverage.sucursales_gap }}</strong><span>Sucursales con gap</span></article>
+          <article class="users-compact-card"><strong>{{ operational_coverage.departamentos_ok }}</strong><span>Áreas cubiertas</span></article>
+          <article class="users-compact-card"><strong>{{ operational_coverage.departamentos_gap }}</strong><span>Áreas sin responsable</span></article>
+        </div>
+      </section>
+
+      <section>
+        <h3 class="users-section-title">RBAC por estado y rol</h3>
+        <div class="users-compact-grid">
+          {% for label, count in readiness_summary.items %}
+          <article class="users-compact-card">
+            <strong>{{ count }}</strong>
+            <span>{{ label }}</span>
+            <div class="mt-2"><a class="btn btn-secondary btn-small" href="{% url 'users_access' %}?estado={{ label|urlencode }}">Abrir</a></div>
+          </article>
+          {% endfor %}
+        </div>
+        <div class="table-responsive mt-3">
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Rol</th>
+                <th>Maestros</th>
+                <th>Recetas</th>
+                <th>Compras</th>
+                <th>Inventario</th>
+                <th>Reportes</th>
+                <th>CRM</th>
+                <th>Logística</th>
+                <th>RRHH</th>
+                <th>Usuarios</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in role_capability_matrix %}
+              <tr>
+                <td><strong>{{ row.role }}</strong></td>
+                {% for module, capability in row.modules %}
+                <td>
+                  {% if capability == 'Gestiona' %}
+                    <span class="badge badge-success">{{ capability }}</span>
+                  {% elif capability == 'Ver' %}
+                    <span class="badge badge-primary">{{ capability }}</span>
+                  {% else %}
+                    <span class="muted">-</span>
+                  {% endif %}
+                </td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h3 class="users-section-title">Autorización y auditoría</h3>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Operación</th>
+                <th>Quién autoriza</th>
+                <th>Cómo se guarda</th>
+                <th>Control</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Alta de usuario</strong></td>
+                <td>DG o ADMIN</td>
+                <td>Usuario, rol, perfil, sucursal, área y candados en un solo guardado.</td>
+                <td>Bitácora `auth.User` CREATE.</td>
+              </tr>
+              <tr>
+                <td><strong>Edición de usuario</strong></td>
+                <td>DG o ADMIN</td>
+                <td>Datos, rol, estado, contraseña opcional, alcance y candados.</td>
+                <td>Bitácora `auth.User` UPDATE.</td>
+              </tr>
+              <tr>
+                <td><strong>Permisos por módulo</strong></td>
+                <td>Superusuario o DG</td>
+                <td>Permiso explícito por módulo: sin acceso, solo ver, ver y editar.</td>
+                <td>Bitácora `core.UserModuleAccess` UPDATE.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </details>
 </div>
 
-<div class="card">
-  <div class="card-header">Listado de Usuarios</div>
-  <form method="get" class="filters-inline">
-    <input type="text" name="q" value="{{ search_query }}" placeholder="Buscar por usuario, nombre o correo...">
-    <select name="role" class="input-field">
-      <option value="">Todos los roles</option>
-      {% for role, role_label in role_options %}
-        <option value="{{ role }}" {% if role_filter == role %}selected{% endif %}>{{ role_label }}</option>
-      {% endfor %}
-    </select>
-    <select name="estado" class="input-field">
-      <option value="">Todos los estados</option>
-      {% for label, count in readiness_summary.items %}
-        <option value="{{ label }}" {% if readiness_filter == label %}selected{% endif %}>{{ label }}</option>
-      {% endfor %}
-    </select>
-    <select name="enterprise_gap" class="input-field">
-      <option value="">Todos los bloqueos ERP</option>
-      {% for item in enterprise_blocker_summary %}
-        <option value="{{ item.code }}" {% if enterprise_gap_filter == item.code %}selected{% endif %}>{{ item.label }}</option>
-      {% endfor %}
-    </select>
-    <button class="btn btn-primary" type="submit">Buscar</button>
-    <a class="btn btn-secondary" href="{% url 'users_access' %}">Limpiar</a>
-  </form>
-
-  <table>
-    <thead>
-      <tr>
-        <th>Usuario</th>
-        <th>Nombre</th>
-        <th>Rol</th>
-        <th>Departamento</th>
-        <th>Sucursal</th>
-        <th>Uso ERP</th>
-        <th>Modo sucursal</th>
-        <th>Estado ERP</th>
-        <th>Bloqueo dominante</th>
-        <th>Candados</th>
-        <th>Acción</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in users %}
-      <tr>
-        <td>{{ row.username }}</td>
-        <td>{{ row.full_name }}</td>
-        <td>{{ row.role|default:"-" }}</td>
-        <td>{{ row.departamento_label }}</td>
-        <td>{{ row.sucursal_label }}</td>
-        <td>
-          <div class="module-chip-list">
-            {% for label in row.manageable_modules %}
-              <span class="module-chip manage">{{ label }}</span>
-            {% empty %}
-              {% for label in row.visible_modules %}
-                <span class="module-chip">{{ label }}</span>
-              {% empty %}
-                <span class="module-chip">Sin acceso</span>
-              {% endfor %}
-            {% endfor %}
-          </div>
-        </td>
-        <td>
-          {% if row.modo_captura_sucursal %}
-            <span class="badge badge-warning">Solo captura</span>
-          {% else %}
-            <span class="badge badge-primary">Normal</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if row.status_tone == 'success' %}
-            <span class="badge badge-success">{{ row.status_label }}</span>
-          {% elif row.status_tone == 'warning' %}
-            <span class="badge badge-warning">{{ row.status_label }}</span>
-          {% else %}
-            <span class="badge badge-danger">{{ row.status_label }}</span>
-          {% endif %}
-        </td>
-        <td>
-          <strong>{{ row.primary_blocker.label }}</strong>
-          <div class="muted">{{ row.primary_blocker.action }}</div>
-        </td>
-        <td>
-          {% if row.blocked_modules %}
-            <div class="module-chip-list">
-              {% for label in row.blocked_modules %}
-                <span class="module-chip blocked">{{ label }}</span>
-              {% endfor %}
-            </div>
-          {% else %}
-            <span class="badge badge-success">Sin candados</span>
-          {% endif %}
-        </td>
-        <td>
-          <a class="btn btn-secondary btn-small" href="{% url 'users_access' %}?edit={{ row.id }}">Editar</a>
-          <button class="btn btn-secondary btn-small" type="button" data-permissions-toggle="permissions-{{ row.id }}">
-            Permisos
-          </button>
-        </td>
-      </tr>
-      <tr id="permissions-{{ row.id }}" class="permissions-row" hidden>
-        <td colspan="11">
-          <section class="permissions-panel">
-            <div class="permissions-panel-header">
-              <div>
-                <strong>Matriz de permisos · {{ row.username }}</strong>
-                <span class="muted">Define si el usuario no entra, solo consulta, o puede editar por módulo.</span>
-              </div>
-              <button class="btn btn-secondary btn-small" type="button" data-permissions-toggle="permissions-{{ row.id }}">
-                Cerrar
-              </button>
-            </div>
-            <form method="post" action="{% url 'usuario_permisos_update' row.id %}">
-              {% csrf_token %}
-              <div class="table-responsive">
-                <table class="permissions-table">
-                  <thead>
-                    <tr>
-                      <th>Módulo</th>
-                      <th>Acceso actual</th>
-                      <th>Sin acceso</th>
-                      <th>Solo ver</th>
-                      <th>Ver y editar</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for access_row in row.module_access_rows %}
-                    <tr>
-                      <td>
-                        <strong>{{ access_row.label }}</strong>
-                        {% if access_row.is_explicit %}
-                          <div class="muted">Permiso personalizado</div>
-                        {% else %}
-                          <div class="muted">Derivado del rol</div>
-                        {% endif %}
-                      </td>
-                      <td>
-                        <span class="module-chip {{ access_row.badge_tone }}">{{ access_row.badge_label }}</span>
-                      </td>
-                      <td>
-                        <label class="permissions-radio" aria-label="{{ access_row.label }} sin acceso">
-                          <input type="radio" name="access_{{ access_row.module }}" value="none" {% if access_row.access == 'none' %}checked{% endif %}>
-                        </label>
-                      </td>
-                      <td>
-                        <label class="permissions-radio" aria-label="{{ access_row.label }} solo ver">
-                          <input type="radio" name="access_{{ access_row.module }}" value="view" {% if access_row.access == 'view' %}checked{% endif %}>
-                        </label>
-                      </td>
-                      <td>
-                        <label class="permissions-radio" aria-label="{{ access_row.label }} ver y editar">
-                          <input type="radio" name="access_{{ access_row.module }}" value="manage" {% if access_row.access == 'manage' %}checked{% endif %}>
-                        </label>
-                      </td>
-                    </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-              <div class="permissions-actions">
-                <button class="btn btn-primary" type="submit">Guardar permisos</button>
-              </div>
-            </form>
-          </section>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="11">Sin usuarios para el filtro actual.</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+<dialog id="create-user-modal" class="users-modal">
+  <div class="users-modal-header">
+    <div>
+      <h2 class="users-modal-title">Nuevo usuario</h2>
+      <div class="muted">Captura identidad, alcance y rol inicial.</div>
+    </div>
+    <button class="users-icon-button" type="button" data-modal-close aria-label="Cerrar">×</button>
+  </div>
+  <div class="users-modal-body">
+    <form method="post" class="users-form-grid">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="create_user">
+      <div class="form-group">
+        <label for="create_username">Usuario</label>
+        <input id="create_username" name="username" type="text" required>
+      </div>
+      <div class="form-group">
+        <label for="create_password">Contraseña inicial</label>
+        <input id="create_password" name="password" type="password" minlength="8" required>
+      </div>
+      <div class="form-group">
+        <label for="create_first_name">Nombre</label>
+        <input id="create_first_name" name="first_name" type="text">
+      </div>
+      <div class="form-group">
+        <label for="create_last_name">Apellido</label>
+        <input id="create_last_name" name="last_name" type="text">
+      </div>
+      <div class="form-group">
+        <label for="create_email">Correo</label>
+        <input id="create_email" name="email" type="email">
+      </div>
+      <div class="form-group">
+        <label for="create_telefono">Teléfono</label>
+        <input id="create_telefono" name="telefono" type="text">
+      </div>
+      <div class="form-group">
+        <label for="create_departamento_id">Departamento</label>
+        <select id="create_departamento_id" name="departamento_id">
+          <option value="">Sin departamento</option>
+          {% for d in departamentos %}
+            <option value="{{ d.id }}">{{ d.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="create_sucursal_id">Sucursal</label>
+        <select id="create_sucursal_id" name="sucursal_id">
+          <option value="">Sin sucursal</option>
+          {% for s in sucursales %}
+            <option value="{{ s.id }}">{{ s.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="create_role">Rol principal</label>
+        <select id="create_role" name="role" required>
+          <option value="">Selecciona rol...</option>
+          {% for role, role_label in role_options %}
+            <option value="{{ role }}">{{ role_label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group users-check-row">
+        <label><input type="checkbox" name="is_active" value="1" checked> Usuario activo</label>
+      </div>
+      <div class="form-group users-check-row">
+        <label><input type="checkbox" name="modo_captura_sucursal" value="1"> Solo módulo cierre sucursal</label>
+      </div>
+      <div class="form-group users-form-full">
+        <label>Candados por módulo</label>
+        <div class="locks-grid">
+          {% for lock_field, lock_label in lock_fields %}
+            <label class="lock-item"><input type="checkbox" name="{{ lock_field }}" value="1"> {{ lock_label }}</label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="users-modal-actions users-form-full">
+        <button class="btn btn-secondary" type="button" data-modal-close>Cancelar</button>
+        <button class="btn btn-primary" type="submit">Crear usuario y accesos</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 
 {% if edit_row %}
-<div class="card">
-  <div class="card-header">Editar Usuario · {{ edit_row.username }}</div>
-  <div class="blocker-list mb-3">
-    <article class="blocker-row">
-      <div class="blocker-meta">
-        <strong>{{ edit_row.status_label }}</strong>
-        <small>{{ edit_row.primary_blocker.detail }}</small>
-      </div>
-      <div class="module-chip-list">
-        {% for blocker in edit_row.blockers %}
-          <span class="module-chip blocked">{{ blocker.label }}</span>
-        {% empty %}
-          <span class="module-chip manage">Sin bloqueos críticos</span>
-        {% endfor %}
-      </div>
-      <div class="blocker-action">
-        <span class="muted">{{ edit_row.primary_blocker.action }}</span>
-      </div>
-    </article>
+<dialog id="edit-user-modal" class="users-modal" data-auto-open="true">
+  <div class="users-modal-header">
+    <div>
+      <h2 class="users-modal-title">Editar usuario · {{ edit_row.username }}</h2>
+      <div class="muted">{{ edit_row.status_label }} · {{ edit_row.primary_blocker.action }}</div>
+    </div>
+    <button class="users-icon-button" type="button" data-modal-close aria-label="Cerrar">×</button>
   </div>
-  <div class="module-chip-list mb-3">
-    {% for label in edit_row.manageable_modules %}
-      <span class="module-chip manage">{{ label }}</span>
-    {% empty %}
-      {% for label in edit_row.visible_modules %}
-        <span class="module-chip">{{ label }}</span>
+  <div class="users-modal-body">
+    <div class="module-chip-list mb-3">
+      {% for blocker in edit_row.blockers %}
+        <span class="module-chip blocked">{{ blocker.label }}</span>
       {% empty %}
-        <span class="module-chip">Sin acceso</span>
+        <span class="module-chip manage">Sin bloqueos críticos</span>
       {% endfor %}
-    {% endfor %}
-    {% for label in edit_row.blocked_modules %}
-      <span class="module-chip blocked">{{ label }}</span>
-    {% endfor %}
-  </div>
-  <form method="post" class="grid-2">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="update_user">
-    <input type="hidden" name="user_id" value="{{ edit_row.id }}">
-
-    <div class="form-group">
-      <label>Usuario</label>
-      <input type="text" value="{{ edit_row.username }}" disabled>
+      {% for label in edit_row.blocked_modules %}
+        <span class="module-chip blocked">{{ label }}</span>
+      {% endfor %}
     </div>
-    <div class="form-group">
-      <label for="edit_new_password">Nueva contraseña (opcional)</label>
-      <input id="edit_new_password" name="new_password" type="password" minlength="8">
-    </div>
-
-    <div class="form-group">
-      <label for="edit_first_name">Nombre</label>
-      <input id="edit_first_name" name="first_name" type="text" value="{{ edit_row.first_name }}">
-    </div>
-    <div class="form-group">
-      <label for="edit_last_name">Apellido</label>
-      <input id="edit_last_name" name="last_name" type="text" value="{{ edit_row.last_name }}">
-    </div>
-
-    <div class="form-group">
-      <label for="edit_email">Correo</label>
-      <input id="edit_email" name="email" type="email" value="{% if edit_row.email != '-' %}{{ edit_row.email }}{% endif %}">
-    </div>
-    <div class="form-group">
-      <label for="edit_telefono">Teléfono</label>
-      <input id="edit_telefono" name="telefono" type="text" value="{{ edit_row.telefono }}">
-    </div>
-
-    <div class="form-group">
-      <label for="edit_departamento_id">Departamento</label>
-      <select id="edit_departamento_id" name="departamento_id">
-        <option value="">Sin departamento</option>
-        {% for d in departamentos %}
-          <option value="{{ d.id }}" {% if edit_row.departamento_id == d.id %}selected{% endif %}>{{ d.nombre }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="form-group">
-      <label for="edit_sucursal_id">Sucursal</label>
-      <select id="edit_sucursal_id" name="sucursal_id">
-        <option value="">Sin sucursal</option>
-        {% for s in sucursales %}
-          <option value="{{ s.id }}" {% if edit_row.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label for="edit_role">Rol principal</label>
-      <select id="edit_role" name="role" required>
-        <option value="">Selecciona rol...</option>
-        {% for role, role_label in role_options %}
-          <option value="{{ role }}" {% if edit_row.role == role %}selected{% endif %}>{{ role_label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="form-group form-checkbox-row">
-      <label>
-        <input type="checkbox" name="is_active" value="1" {% if edit_row.is_active %}checked{% endif %}>
-        Usuario activo
-      </label>
-    </div>
-    <div class="form-group form-checkbox-row">
-      <label>
-        <input type="checkbox" name="modo_captura_sucursal" value="1" {% if edit_row.modo_captura_sucursal %}checked{% endif %}>
-        Solo módulo cierre sucursal
-      </label>
-    </div>
-
-    <div class="form-group form-group-full">
-      <label>Candados por módulo</label>
-      <div class="locks-grid">
-        {% for lock_row in edit_row.lock_rows %}
-          <label class="lock-item">
-            <input type="checkbox" name="{{ lock_row.field }}" value="1" {% if lock_row.value %}checked{% endif %}>
-            {{ lock_row.label }}
-          </label>
-        {% endfor %}
+    <form method="post" class="users-form-grid">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_user">
+      <input type="hidden" name="user_id" value="{{ edit_row.id }}">
+      <div class="form-group">
+        <label>Usuario</label>
+        <input type="text" value="{{ edit_row.username }}" disabled>
       </div>
-    </div>
-
-    <div class="form-group form-group-full">
-      <button class="btn btn-primary" type="submit">Guardar cambios</button>
-      <a class="btn btn-secondary" href="{% url 'users_access' %}">Cerrar edición</a>
-    </div>
-  </form>
-</div>
+      <div class="form-group">
+        <label for="edit_new_password">Nueva contraseña (opcional)</label>
+        <input id="edit_new_password" name="new_password" type="password" minlength="8">
+      </div>
+      <div class="form-group">
+        <label for="edit_first_name">Nombre</label>
+        <input id="edit_first_name" name="first_name" type="text" value="{{ edit_row.first_name }}">
+      </div>
+      <div class="form-group">
+        <label for="edit_last_name">Apellido</label>
+        <input id="edit_last_name" name="last_name" type="text" value="{{ edit_row.last_name }}">
+      </div>
+      <div class="form-group">
+        <label for="edit_email">Correo</label>
+        <input id="edit_email" name="email" type="email" value="{% if edit_row.email != '-' %}{{ edit_row.email }}{% endif %}">
+      </div>
+      <div class="form-group">
+        <label for="edit_telefono">Teléfono</label>
+        <input id="edit_telefono" name="telefono" type="text" value="{{ edit_row.telefono }}">
+      </div>
+      <div class="form-group">
+        <label for="edit_departamento_id">Departamento</label>
+        <select id="edit_departamento_id" name="departamento_id">
+          <option value="">Sin departamento</option>
+          {% for d in departamentos %}
+            <option value="{{ d.id }}" {% if edit_row.departamento_id == d.id %}selected{% endif %}>{{ d.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="edit_sucursal_id">Sucursal</label>
+        <select id="edit_sucursal_id" name="sucursal_id">
+          <option value="">Sin sucursal</option>
+          {% for s in sucursales %}
+            <option value="{{ s.id }}" {% if edit_row.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="edit_role">Rol principal</label>
+        <select id="edit_role" name="role" required>
+          <option value="">Selecciona rol...</option>
+          {% for role, role_label in role_options %}
+            <option value="{{ role }}" {% if edit_row.role == role %}selected{% endif %}>{{ role_label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group users-check-row">
+        <label><input type="checkbox" name="is_active" value="1" {% if edit_row.is_active %}checked{% endif %}> Usuario activo</label>
+      </div>
+      <div class="form-group users-check-row">
+        <label><input type="checkbox" name="modo_captura_sucursal" value="1" {% if edit_row.modo_captura_sucursal %}checked{% endif %}> Solo módulo cierre sucursal</label>
+      </div>
+      <div class="form-group users-form-full">
+        <label>Candados por módulo</label>
+        <div class="locks-grid">
+          {% for lock_row in edit_row.lock_rows %}
+            <label class="lock-item"><input type="checkbox" name="{{ lock_row.field }}" value="1" {% if lock_row.value %}checked{% endif %}> {{ lock_row.label }}</label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="users-modal-actions users-form-full">
+        <a class="btn btn-secondary" href="{% url 'users_access' %}">Cerrar edición</a>
+        <button class="btn btn-primary" type="submit">Guardar cambios</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 {% endif %}
+
+{% for row in users %}
+<dialog id="permissions-{{ row.id }}" class="users-modal users-modal-wide">
+  <div class="users-modal-header">
+    <div>
+      <h2 class="users-modal-title">Permisos · {{ row.username }}</h2>
+      <div class="muted">Sin acceso, solo consulta o edición por módulo. Estos permisos sustituyen el acceso derivado del rol.</div>
+    </div>
+    <button class="users-icon-button" type="button" data-modal-close aria-label="Cerrar">×</button>
+  </div>
+  <div class="users-modal-body">
+    <form method="post" action="{% url 'usuario_permisos_update' row.id %}">
+      {% csrf_token %}
+      <div class="table-responsive">
+        <table class="table permissions-table">
+          <thead>
+            <tr>
+              <th>Módulo</th>
+              <th>Acceso actual</th>
+              <th>Sin acceso</th>
+              <th>Solo ver</th>
+              <th>Ver y editar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for access_row in row.module_access_rows %}
+            <tr>
+              <td>
+                <strong>{{ access_row.label }}</strong>
+                {% if access_row.is_explicit %}
+                  <div class="muted">Permiso personalizado</div>
+                {% else %}
+                  <div class="muted">Derivado del rol</div>
+                {% endif %}
+              </td>
+              <td><span class="module-chip {{ access_row.badge_tone }}">{{ access_row.badge_label }}</span></td>
+              <td><label class="permissions-radio" aria-label="{{ access_row.label }} sin acceso"><input type="radio" name="access_{{ access_row.module }}" value="none" {% if access_row.access == 'none' %}checked{% endif %}></label></td>
+              <td><label class="permissions-radio" aria-label="{{ access_row.label }} solo ver"><input type="radio" name="access_{{ access_row.module }}" value="view" {% if access_row.access == 'view' %}checked{% endif %}></label></td>
+              <td><label class="permissions-radio" aria-label="{{ access_row.label }} ver y editar"><input type="radio" name="access_{{ access_row.module }}" value="manage" {% if access_row.access == 'manage' %}checked{% endif %}></label></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="users-modal-actions">
+        <button class="btn btn-secondary" type="button" data-modal-close>Cancelar</button>
+        <button class="btn btn-primary" type="submit">Guardar permisos</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+{% endfor %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
-  document.querySelectorAll("[data-permissions-toggle]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const targetId = button.getAttribute("data-permissions-toggle");
-      const panel = document.getElementById(targetId);
-      if (!panel) return;
-      panel.hidden = !panel.hidden;
-      if (!panel.hidden) {
-        panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      }
+  (function () {
+    function openDialog(id) {
+      const dialog = document.getElementById(id);
+      if (!dialog || typeof dialog.showModal !== "function") return;
+      if (!dialog.open) dialog.showModal();
+    }
+
+    document.querySelectorAll("[data-modal-open]").forEach((button) => {
+      button.addEventListener("click", () => openDialog(button.getAttribute("data-modal-open")));
     });
-  });
+
+    document.querySelectorAll("[data-modal-close]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const dialog = button.closest("dialog");
+        if (dialog) dialog.close();
+      });
+    });
+
+    document.querySelectorAll("dialog[data-auto-open='true']").forEach((dialog) => {
+      if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
+    });
+  })();
 </script>
 {% endblock %}
