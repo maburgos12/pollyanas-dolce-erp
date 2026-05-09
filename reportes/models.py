@@ -1284,6 +1284,37 @@ class DashboardFullSnapshot(models.Model):
         return f"Dashboard {self.months_window}m"
 
 
+class DgOperacionSnapshot(models.Model):
+    STATUS_READY = "READY"
+    STATUS_ERROR = "ERROR"
+    STATUS_STALE = "STALE"
+    STATUS_CHOICES = [
+        (STATUS_READY, "Listo"),
+        (STATUS_ERROR, "Error"),
+        (STATUS_STALE, "Desactualizado"),
+    ]
+
+    fecha_operacion = models.DateField(unique=True, db_index=True)
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_READY, db_index=True)
+    source_cutoff_at = models.DateTimeField(null=True, blank=True)
+    generated_at = models.DateTimeField(default=timezone.now, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    last_error = models.TextField(blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha_operacion"]
+        verbose_name = "Snapshot Operación DG"
+        verbose_name_plural = "Snapshots Operación DG"
+        indexes = [
+            models.Index(fields=["status", "fecha_operacion"], name="rdg_ops_status_date_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Operación DG {self.fecha_operacion:%Y-%m-%d} [{self.status}]"
+
+
 class ProductionExecutionLog(models.Model):
     fecha = models.DateField(db_index=True)
     receta = models.ForeignKey(

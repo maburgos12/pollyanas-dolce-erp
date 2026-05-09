@@ -244,6 +244,25 @@ class Command(BaseCommand):
             },
         )
 
+        dg_operacion_snapshot_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute=str((analytics_refresh_minute + 10) % 60),
+            hour=str((analytics_refresh_hour + 1) % 24 if analytics_refresh_minute >= 50 else analytics_refresh_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="reportes: snapshot operacion dg",
+            defaults={
+                "task": "reportes.refresh_dg_operacion_snapshot",
+                "crontab": dg_operacion_snapshot_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         realtime_minutes = _env_int(
             "POS_BRIDGE_REALTIME_INTERVAL_MINUTES",
             10,

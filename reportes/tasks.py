@@ -24,6 +24,19 @@ def snapshot_historical_costing_task():
     }
 
 
+@shared_task(name="reportes.refresh_dg_operacion_snapshot", bind=True, max_retries=1, default_retry_delay=300)
+def task_refresh_dg_operacion_snapshot(self):
+    from reportes.services_dg_operacion_snapshot import refresh_dg_operacion_snapshot
+
+    snapshot = refresh_dg_operacion_snapshot()
+    return {
+        "status": snapshot.status,
+        "fecha_operacion": snapshot.fecha_operacion.isoformat(),
+        "snapshot_id": snapshot.id,
+        "generated_at": snapshot.generated_at.isoformat() if snapshot.generated_at else "",
+    }
+
+
 @shared_task(name="reportes.cierre_produccion_nocturno", bind=True, max_retries=1, default_retry_delay=300)
 def task_cierre_produccion_nocturno(self):
     """

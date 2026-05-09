@@ -18963,12 +18963,46 @@ def _export_dg_operacion_dashboard_xlsx(payload: Dict[str, Any]) -> HttpResponse
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def dg_operacion_dashboard(request: HttpRequest) -> HttpResponse:
     dg_filters = _plan_status_dashboard_filters(request)
-    payload = _build_dg_operacion_dashboard_payload(
-        start_date=dg_filters["start_date"],
-        end_date=dg_filters["end_date"],
-        group_by=dg_filters["group_by"],
-        fecha_operacion=_parse_date_safe(request.GET.get("fecha_operacion")),
-    )
+    fecha_operacion = _parse_date_safe(request.GET.get("fecha_operacion"))
+    has_plan_filters = bool(dg_filters["start_date"] or dg_filters["end_date"] or dg_filters["group_by"] != "day")
+    if not has_plan_filters:
+        from reportes.services_dg_operacion_snapshot import (
+            get_dg_operacion_snapshot_payload,
+            get_latest_dg_operacion_snapshot_payload,
+            refresh_dg_operacion_snapshot,
+        )
+
+        snapshot_date = fecha_operacion
+        payload = None
+        if snapshot_date is None:
+            latest_snapshot = get_latest_dg_operacion_snapshot_payload()
+            if latest_snapshot is not None:
+                snapshot_date, payload = latest_snapshot
+        if snapshot_date is None:
+            snapshot_date = _expected_dg_operacion_cut_date()
+        if payload is None:
+            payload = get_dg_operacion_snapshot_payload(snapshot_date)
+        if payload is None:
+            refresh_dg_operacion_snapshot(fecha_operacion=snapshot_date)
+            payload = get_dg_operacion_snapshot_payload(snapshot_date)
+        if payload is not None:
+            payload["dg_snapshot_source"] = "database"
+        else:
+            payload = _build_dg_operacion_dashboard_payload(
+                start_date=dg_filters["start_date"],
+                end_date=dg_filters["end_date"],
+                group_by=dg_filters["group_by"],
+                fecha_operacion=fecha_operacion,
+            )
+            payload["dg_snapshot_source"] = "live"
+    else:
+        payload = _build_dg_operacion_dashboard_payload(
+            start_date=dg_filters["start_date"],
+            end_date=dg_filters["end_date"],
+            group_by=dg_filters["group_by"],
+            fecha_operacion=fecha_operacion,
+        )
+        payload["dg_snapshot_source"] = "live"
 
     return render(
         request,
