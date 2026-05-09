@@ -194,6 +194,73 @@ h4 {
   height: 16px;
 }
 
+.nav-icon--auto {
+  position: relative;
+  color: currentColor;
+}
+
+.nav-icon--auto::before,
+.nav-icon--auto::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border: 1.8px solid currentColor;
+  border-radius: 3px;
+}
+
+.nav-icon--auto::after {
+  inset: 7px 3px 3px 7px;
+  border-left: 0;
+  border-top: 0;
+  opacity: 0.75;
+}
+
+.nav-icon--auto[data-module="ventas"]::before,
+.nav-icon--auto[data-module="crm"]::before {
+  inset: 4px 3px 3px;
+  border: 0;
+  border-bottom: 1.8px solid currentColor;
+  border-radius: 0;
+  box-shadow: 4px -3px 0 -2px currentColor, 8px -7px 0 -2px currentColor;
+}
+
+.nav-icon--auto[data-module="ventas"]::after,
+.nav-icon--auto[data-module="crm"]::after {
+  inset: auto 2px 3px 3px;
+  width: 11px;
+  height: 8px;
+  border: 1.8px solid currentColor;
+  border-top: 0;
+  border-left: 0;
+  border-radius: 0;
+  transform: skewY(-25deg);
+}
+
+.nav-icon--auto[data-module="logistica"]::before {
+  inset: 5px 2px 4px 2px;
+  border-radius: 2px;
+}
+
+.nav-icon--auto[data-module="logistica"]::after {
+  inset: auto 2px 2px auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  border: 1.6px solid currentColor;
+}
+
+.nav-icon--auto[data-module="fallas"]::before {
+  inset: 2px 4px;
+  border-radius: 50% 50% 3px 3px;
+}
+
+.nav-icon--auto[data-module="fallas"]::after {
+  inset: 10px 7px 3px;
+  border: 0;
+  border-radius: 999px;
+  background: currentColor;
+}
+
 .sidebar-footer {
   margin-top: auto;
   padding: 14px 18px 18px;

@@ -37,7 +37,7 @@
                         {% for item in group.items %}
                         <li>
                             <a href="{{ item.url }}" class="{% if item.active %}active{% endif %}">
-                                <span class="nav-icon" aria-hidden="true">{{ item.initial }}</span>
+                                <span class="nav-icon nav-icon--auto" data-module="{{ item.module }}" aria-hidden="true"></span>
                                 <span>{{ item.label }}</span>
                             </a>
                         </li>
