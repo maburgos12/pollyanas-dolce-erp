@@ -92,6 +92,25 @@ class ConsolidadoNocturnoCedisService:
             cobertura = self._calcular_cobertura(fecha_operacion)
             total_sugerido = sum((Decimal(str(row.get("total_sugerido") or 0)) for row in rows), Decimal("0"))
             total_solicitado = sum((Decimal(str(row.get("total_solicitado") or 0)) for row in rows), Decimal("0"))
+            metadata = {}
+            if consolidado_existente and isinstance(consolidado_existente.metadata, dict):
+                metadata.update(consolidado_existente.metadata)
+            metadata.update(
+                {
+                    "inventory_sync_job_id": inventory_sync_job.id if inventory_sync_job else None,
+                    "inventory_sync_error": inventory_sync_error,
+                    "inventory_sync_skipped_reason": inventory_sync_skipped_reason,
+                    "transfer_request_date": fecha_transferencias.isoformat(),
+                    "sync_job_id": sync_job.id if sync_job else None,
+                    "coverage_branch_ids": cobertura["branch_ids"],
+                    "source_order": [
+                        "point_inventory_cedis",
+                        "point_open_transfers",
+                        "erp_solicitudes_reabasto_cedis",
+                        "plan_produccion",
+                    ],
+                }
+            )
             consolidado, _ = ConsolidadoNocturnoCEDIS.objects.update_or_create(
                 fecha_operacion=fecha_operacion,
                 defaults={
@@ -105,20 +124,7 @@ class ConsolidadoNocturnoCedisService:
                     "total_sugerido": total_sugerido,
                     "total_solicitado": total_solicitado,
                     "total_plan_produccion": Decimal(str(total_plan or 0)),
-                    "metadata": {
-                        "inventory_sync_job_id": inventory_sync_job.id if inventory_sync_job else None,
-                        "inventory_sync_error": inventory_sync_error,
-                        "inventory_sync_skipped_reason": inventory_sync_skipped_reason,
-                        "transfer_request_date": fecha_transferencias.isoformat(),
-                        "sync_job_id": sync_job.id if sync_job else None,
-                        "coverage_branch_ids": cobertura["branch_ids"],
-                        "source_order": [
-                            "point_inventory_cedis",
-                            "point_open_transfers",
-                            "erp_solicitudes_reabasto_cedis",
-                            "plan_produccion",
-                        ],
-                    },
+                    "metadata": metadata,
                     "creado_por": usuario,
                 },
             )

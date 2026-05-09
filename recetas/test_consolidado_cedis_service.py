@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
-from recetas.models import Receta, SolicitudReabastoCedis, SolicitudReabastoCedisLinea
+from recetas.models import ConsolidadoNocturnoCEDIS, Receta, SolicitudReabastoCedis, SolicitudReabastoCedisLinea
 from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
 from recetas.tasks.consolidado_nocturno import consolidado_nocturno_cedis
 
@@ -95,6 +95,15 @@ class ConsolidadoNocturnoCedisServiceTests(TestCase):
             solicitado=Decimal("4"),
             sugerido=Decimal("4"),
         )
+        ConsolidadoNocturnoCEDIS.objects.create(
+            fecha_operacion=fecha,
+            metadata={
+                "solicitudes_sucursal_email": {
+                    "status": "enviado",
+                    "sent_at": "2026-05-09T05:30:24-07:00",
+                }
+            },
+        )
 
         consolidado = ConsolidadoNocturnoCedisService().consolidar(
             fecha_operacion=fecha,
@@ -106,6 +115,7 @@ class ConsolidadoNocturnoCedisServiceTests(TestCase):
 
         self.assertEqual(consolidado.productos_consolidados, 1)
         self.assertEqual(consolidado.total_solicitado, Decimal("4"))
+        self.assertEqual(consolidado.metadata["solicitudes_sucursal_email"]["status"], "enviado")
 
     def test_task_uses_previous_day_as_transfer_request_date_for_explicit_plan_date(self):
         captured = {}
