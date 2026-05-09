@@ -17,7 +17,7 @@ from control.models import MermaPOS
 from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_compras
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
-from core.models import Departamento, Sucursal, UserProfile
+from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from core.management.commands.ejecutar_rutina_diaria_erp import _prefer_public_database_url_if_needed
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
@@ -688,6 +688,43 @@ class DashboardHomologacionContextTests(TestCase):
         self.assertIn("production_snapshot", response.context)
         self.assertIn("production_summary", response.context)
         self.assertIn("forecast_summary", response.context)
+
+    def test_dashboard_exec_panels_are_visible_with_sales_forecast_submodule_access(self):
+        user = get_user_model().objects.create_user(username="ventas_forecast", password="test12345")
+        UserModuleAccess.objects.create(user=user, module="ventas", access="none")
+        UserModuleAccess.objects.create(user=user, module="ventas.pronostico", access="view")
+        UserModuleAccess.objects.create(user=user, module="ventas.tendencias", access="view")
+        UserModuleAccess.objects.create(user=user, module="reportes", access="none")
+        UserProfile.objects.create(user=user, lock_reportes=True)
+        self.client.force_login(user)
+
+        executive_panels = {
+            "forecast_panel": {
+                "forecast_amount": Decimal("741810.63"),
+                "forecast_quantity": Decimal("5979"),
+                "target_week_label": "11 May - 17 May",
+            },
+            "yoy_panel": {
+                "hero_row": {"amount_delta_pct": Decimal("-1.3")},
+                "hero_note": "2026-05 · comparación al mismo corte del año anterior",
+            },
+            "profitability_panel": {},
+            "production_sales_panel": {},
+            "inventory_ledger_panel": {},
+        }
+
+        with patch("core.views.build_executive_bi_panels", return_value=executive_panels) as build_panels:
+            response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        build_panels.assert_called_once_with(months=6)
+        self.assertFalse(response.context["can_view_reportes"])
+        self.assertFalse(response.context["dashboard_exec_ready"])
+        self.assertEqual(response.context["forecast_panel"]["forecast_amount"], Decimal("741810.63"))
+        self.assertEqual(response.context["yoy_panel"]["hero_row"]["amount_delta_pct"], Decimal("-1.3"))
+        self.assertContains(response, "$741,810.63")
+        self.assertContains(response, "5,979 piezas · 11 May - 17 May")
+        self.assertContains(response, "-1.3%")
 
     def test_dashboard_daily_sales_snapshot_uses_canonical_daily_totals_and_tops_without_stage(self):
         sucursal = self._create_sucursal("DASHSNAP", "Sucursal Snapshot Dashboard")

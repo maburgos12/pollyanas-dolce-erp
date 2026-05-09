@@ -50,33 +50,87 @@
 
     .dashboard-summary-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(2, minmax(320px, 1fr));
+        gap: 16px;
+        align-items: stretch;
     }
 
     .dashboard-summary-grid .executive-kpi-card {
-        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 178px;
+        padding: 26px 32px;
+        border-radius: 28px;
+        overflow: hidden;
+    }
+
+    .dashboard-summary-grid .kpi-number {
+        max-width: 100%;
+        font-family: "Nunito", "Montserrat", system-ui, sans-serif;
+        font-size: clamp(2.2rem, 3.6vw, 3.6rem);
+        font-variant-numeric: tabular-nums;
+        font-weight: 900;
+        line-height: 0.95;
+        letter-spacing: 0;
+        margin-bottom: 10px;
+        white-space: nowrap;
+    }
+
+    .dashboard-summary-grid .kpi-label {
+        color: var(--texto-light);
+        font-size: clamp(1rem, 1.35vw, 1.32rem);
+        font-weight: 900;
+        letter-spacing: 0.1em;
+        line-height: 1.15;
+        margin-bottom: 12px;
+        text-transform: uppercase;
+    }
+
+    .dashboard-summary-grid .executive-kpi-note {
+        color: var(--texto-light);
+        font-size: clamp(1rem, 1.45vw, 1.28rem);
+        line-height: 1.28;
+    }
+
+    .dashboard-summary-grid .executive-kpi-card-action {
+        margin-top: auto;
+        padding-top: 22px;
+    }
+
+    .dashboard-summary-grid .executive-kpi-card-action .btn {
+        width: 100%;
+        min-height: 50px;
+        justify-content: center;
+        border-radius: 999px;
+        font-size: 1rem;
+        font-weight: 900;
+    }
+
+    .dashboard-summary-grid.dashboard-summary-grid-secondary {
+        margin-top: 16px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .dashboard-summary-grid.dashboard-summary-grid-secondary .executive-kpi-card {
+        min-height: 124px;
         padding: 16px 18px;
         border-radius: 18px;
     }
 
-    .dashboard-summary-grid .kpi-number {
-        font-size: clamp(1.65rem, 2vw, 2.35rem);
-        line-height: 1;
-        margin-bottom: 6px;
+    .dashboard-summary-grid.dashboard-summary-grid-secondary .kpi-number {
+        font-size: clamp(1.6rem, 2vw, 2.3rem);
+        white-space: normal;
     }
 
-    .dashboard-summary-grid .kpi-label {
+    .dashboard-summary-grid.dashboard-summary-grid-secondary .kpi-label {
+        font-size: 0.82rem;
+        letter-spacing: 0.08em;
         margin-bottom: 4px;
     }
 
-    .dashboard-summary-grid .executive-kpi-note {
+    .dashboard-summary-grid.dashboard-summary-grid-secondary .executive-kpi-note {
         font-size: 0.92rem;
         line-height: 1.35;
-    }
-
-    .dashboard-summary-grid.dashboard-summary-grid-secondary {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .dashboard-summary-grid .executive-kpi-card.executive-kpi-card-soft {
@@ -85,7 +139,7 @@
 
     @media (max-width: 1180px) {
         .dashboard-summary-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(260px, 1fr));
         }
 
         .dashboard-summary-grid.dashboard-summary-grid-secondary {
@@ -100,6 +154,15 @@
 
         .dashboard-summary-grid {
             grid-template-columns: 1fr;
+        }
+
+        .dashboard-summary-grid .executive-kpi-card {
+            min-height: 158px;
+            padding: 22px;
+        }
+
+        .dashboard-summary-grid .kpi-number {
+            font-size: clamp(2rem, 11vw, 3rem);
         }
 
         .executive-shell-dashboard .dashboard-hero-badges {
@@ -150,51 +213,70 @@
     <div class="dashboard-summary-grid">
         <article class="kpi-card executive-kpi-card">
             <div class="kpi-number is-primary">{% if daily_sales_snapshot %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}$0.00{% endif %}</div>
-            <div class="kpi-label">Venta del último corte</div>
+            <div class="kpi-label">Venta último corte</div>
             <div class="muted executive-kpi-note">
                 {% if daily_sales_snapshot %}
                     {{ daily_sales_snapshot.date_label }} · {{ daily_sales_snapshot.source_label }}
-                    {% if daily_sales_snapshot.mapping_coverage_pct is not None %}
-                        · Cobertura ERP {{ daily_sales_snapshot.mapping_coverage_pct|floatformat:1 }}%
-                    {% endif %}
                 {% else %}
                     Sin corte disponible
                 {% endif %}
             </div>
+            {% if can_manage_orquestacion %}
+            <div class="executive-kpi-card-action">
+                <form method="post" action="{% url 'reportes:bi_force_refresh' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <input type="hidden" name="refresh_scope" value="cutoff">
+                    <input type="hidden" name="reference_date" value="{% if sales_refresh_status and sales_refresh_status.visible_cut_date_iso %}{{ sales_refresh_status.visible_cut_date_iso }}{% elif daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% endif %}">
+                    <input type="hidden" name="lookback_days" value="1">
+                    <button
+                        type="submit"
+                        class="btn btn-secondary btn-sm {% if sales_refresh_status and sales_refresh_status.button_disabled %}is-loading{% endif %}"
+                        {% if sales_refresh_status and sales_refresh_status.button_disabled %}disabled aria-disabled="true" aria-busy="true"{% endif %}
+                    >
+                        {% if sales_refresh_status and sales_refresh_status.button_disabled %}
+                            {{ sales_refresh_status.button_label|default:"Actualizando corte..." }}
+                        {% else %}
+                            Actualizar corte
+                        {% endif %}
+                    </button>
+                </form>
+            </div>
+            {% endif %}
         </article>
         <article class="kpi-card executive-kpi-card">
             <div class="kpi-number {% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}is-primary{% else %}is-warning{% endif %}">{% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}${{ daily_sales_snapshot.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
             <div class="kpi-label">Ticket promedio</div>
-            <div class="muted executive-kpi-note">{% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}{{ daily_sales_snapshot.total_tickets }} tickets confirmados para el último corte{% else %}Point todavía no entregó tickets válidos para este corte.{% endif %}</div>
+            <div class="muted executive-kpi-note">{% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}{{ daily_sales_snapshot.total_tickets|intcomma }} tickets confirmados{% else %}Point todavía no entregó tickets válidos para este corte.{% endif %}</div>
         </article>
         <article class="kpi-card executive-kpi-card">
-            <div class="kpi-number {% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}is-primary{% else %}is-warning{% endif %}">{% if daily_sales_snapshot and daily_sales_snapshot.tickets_available %}{{ daily_sales_snapshot.total_tickets|intcomma }}{% else %}0{% endif %}</div>
-            <div class="kpi-label">Tickets del corte</div>
-            <div class="muted executive-kpi-note">{% if daily_sales_snapshot %}Promedio por sucursal: ${{ daily_sales_snapshot.avg_branch_amount|floatformat:2|intcomma }}{% else %}Sin corte operativo{% endif %}</div>
-        </article>
-        <article class="kpi-card executive-kpi-card">
-            <div class="kpi-number is-primary">{% if daily_sales_snapshot %}${{ daily_sales_snapshot.month_amount|floatformat:2|intcomma }}{% else %}$0.00{% endif %}</div>
-            <div class="kpi-label">Venta acumulada del mes</div>
+            <div class="kpi-number is-success">{% if forecast_panel %}${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}{% else %}$0.00{% endif %}</div>
+            <div class="kpi-label">Pronóstico próxima semana</div>
             <div class="muted executive-kpi-note">
-                {% if daily_sales_snapshot %}
-                    {{ daily_sales_snapshot.month_units|floatformat:0 }} unidades
-                    {% if daily_sales_snapshot.month_tickets_available %}
-                        · {{ daily_sales_snapshot.month_tickets|intcomma }} tickets
-                        {% if daily_sales_snapshot.month_avg_ticket %}
-                            · ticket medio ${{ daily_sales_snapshot.month_avg_ticket|floatformat:2|intcomma }}
-                        {% endif %}
-                    {% else %}
-                        · tickets N/D
-                    {% endif %}
-                    {% if daily_sales_snapshot.unmapped_amount > 0 %}
-                        · ${{ daily_sales_snapshot.unmapped_amount|floatformat:2|intcomma }} sin mapear al ERP
-                    {% endif %}
+                {% if forecast_panel %}
+                    {{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas · {{ forecast_panel.target_week_label }}
                 {% else %}
-                    Sin mes operativo
+                    Sin pronóstico disponible
                 {% endif %}
             </div>
         </article>
-    <div class="dashboard-summary-grid dashboard-summary-grid-secondary mt-3">
+        {% with hero=yoy_panel.hero_row %}
+        <article class="kpi-card executive-kpi-card">
+            <div class="kpi-number {% if hero and hero.amount_delta_pct is not None and hero.amount_delta_pct < 0 %}is-warning{% else %}is-success{% endif %}">
+                {% if hero and hero.amount_delta_pct is not None %}{{ hero.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+            </div>
+            <div class="kpi-label">Mes vs año anterior</div>
+            <div class="muted executive-kpi-note">
+                {% if yoy_panel %}
+                    {{ yoy_panel.hero_note }}
+                {% else %}
+                    Sin comparación disponible
+                {% endif %}
+            </div>
+        </article>
+        {% endwith %}
+    </div>
+    <div class="dashboard-summary-grid dashboard-summary-grid-secondary">
         <article class="kpi-card executive-kpi-card">
             <div class="kpi-number {% if production_snapshot and production_snapshot.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{% if production_snapshot %}{{ production_snapshot.plan_hoy_estado }}{% else %}Sin plan{% endif %}</div>
             <div class="kpi-label">Producción del día</div>

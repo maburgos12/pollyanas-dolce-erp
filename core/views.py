@@ -160,6 +160,18 @@ def _dashboard_materialized_executive_context(months_window: object) -> dict[str
     return payload
 
 
+def _can_view_dashboard_executive_panels(user) -> bool:
+    forecast_access = get_module_access(user, "ventas.pronostico")
+    trends_access = get_module_access(user, "ventas.tendencias")
+    sales_access = get_module_access(user, "ventas")
+    return (
+        can_view_reportes(user)
+        or forecast_access in ("view", "manage")
+        or trends_access in ("view", "manage")
+        or sales_access in ("view", "manage")
+    )
+
+
 def csrf_failure(request: HttpRequest, reason: str = "", template_name: str | None = None) -> HttpResponse:
     fallback_url = reverse("login")
     referer = (request.META.get("HTTP_REFERER") or "").strip()
@@ -3379,7 +3391,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     except Exception:
         logger.exception("Dashboard daily decisions failed")
 
-    if ctx.get("can_view_reportes"):
+    if _can_view_dashboard_executive_panels(u):
         try:
             try:
                 months_window = int(request.GET.get("months") or "6")
@@ -3395,7 +3407,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     "production_sales_panel": executive_panels["production_sales_panel"],
                     "inventory_ledger_panel": executive_panels["inventory_ledger_panel"],
                     "months_window": months_window,
-                    "dashboard_exec_ready": True,
+                    "dashboard_exec_ready": bool(ctx.get("can_view_reportes")),
                 }
             )
         except Exception:
