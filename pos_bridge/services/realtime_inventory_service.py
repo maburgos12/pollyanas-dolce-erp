@@ -15,7 +15,7 @@ logger = get_pos_bridge_logger()
 
 OPERATION_START = time(7, 0)
 OPERATION_END = time(22, 0)
-CEDIS_AUTOMATION_GUARD_START = time(21, 55)
+CEDIS_AUTOMATION_GUARD_START = time(21, 45)
 CEDIS_AUTOMATION_GUARD_END = time(22, 45)
 
 
