@@ -17,6 +17,33 @@ ERP operativo de Pollyana's Dolce, cadena de pastelerías en Sinaloa, México.
 
 ## Reglas obligatorias antes de cualquier tarea
 
+### Protocolo de Git y ramas para cualquier IA
+Antes de modificar archivos, Codex, Claude u otra IA debe leer este `AGENTS.md`
+y aplicar el runbook [docs/OPERACION_GIT_AGENTES.md](docs/OPERACION_GIT_AGENTES.md).
+
+Comandos obligatorios de arranque:
+```bash
+git status --short --branch
+git log --oneline --decorate -5
+```
+
+Reglas de trabajo:
+- La base normal para una tarea nueva es `main` actualizado, salvo que Mauricio
+  indique explicitamente continuar una rama existente.
+- Si el working tree tiene cambios sin confirmar, no iniciar una tarea nueva
+  encima de esos cambios. Primero reportar rama actual, commits ahead/behind y
+  archivos pendientes clasificados por modulo.
+- No mezclar tareas en una misma rama. Una rama debe corresponder a un objetivo
+  operativo concreto.
+- No tocar archivos ya modificados por otra tarea si no pertenecen al alcance
+  actual.
+- No commitear capturas, logs, dumps de contexto, salidas Playwright/MCP ni
+  archivos temporales. Guardarlos en `_archive/` o fuera del repo.
+- Antes de cualquier commit, mostrar `git status --short` y confirmar que solo
+  entran archivos del alcance.
+- Para trabajo de produccion, el cierre correcto incluye commit, push, deploy en
+  VPS y verificacion runtime cuando Mauricio lo pida o el cambio lo requiera.
+
 ### NO hacer sin confirmación explícita de Mauricio:
 - Eliminar migraciones existentes
 - Hacer reset o drop de la base de datos

@@ -30,6 +30,7 @@ logs/bloque1_dato_maestro_*/
 
 # Local automation/smoke artifacts
 .playwright-cli/
+.playwright-mcp/
 output/
 storage/pos_bridge/logs/*
 storage/pos_bridge/raw_exports/*
@@ -70,6 +71,32 @@ backups/
 test-results/
 .tmp/
 
+# Ruflo local runtime state
+.swarm/
+.claude/memory.db
+.claude-flow/daemon-state.json
+.claude-flow/daemon.pid
+.claude-flow/metrics/
+.claude-flow/security/
+.claude-flow/swarm/
+
 # Archivos operativos de jobs puntuales
 job588_*.csv
 job588_*.tsv
+
+# Artefactos temporales generados en la raiz por auditorias/IA
+/*.png
+/*_context.txt
+/*_ctx.txt
+/*_debug.txt
+/*_full.txt
+/*_output.txt
+/*_sources.txt
+/*_tpl.txt
+/*_view.txt
+/*.part_*.txt
+/*_actual.html
+/*-snapshot.md
+/PointProductionLine.*
+/fallback
+/pronostico-*.json
