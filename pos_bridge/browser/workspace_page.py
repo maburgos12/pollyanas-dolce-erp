@@ -37,6 +37,22 @@ class PointWorkspacePage:
             """
         )
 
+    def _wait_for_workspaces(self) -> list[dict]:
+        deadline_ms = self.settings.timeout_ms
+        interval_ms = min(1000, max(250, deadline_ms // 10))
+        elapsed_ms = 0
+
+        while elapsed_ms <= deadline_ms:
+            workspaces = self.list_workspaces()
+            if workspaces:
+                return workspaces
+            if elapsed_ms == deadline_ms:
+                break
+            wait_ms = min(interval_ms, deadline_ms - elapsed_ms)
+            self.page.wait_for_timeout(wait_ms)
+            elapsed_ms += wait_ms
+        return []
+
     def select_workspace(self, branch_hint: str | None = None) -> dict:
         try:
             self.wait_until_loaded()
@@ -50,7 +66,7 @@ class PointWorkspacePage:
                     "already_inside_workspace": True,
                 }
             raise
-        workspaces = self.list_workspaces()
+        workspaces = self._wait_for_workspaces()
         if not workspaces:
             current_url = self.page.url
             if current_url and "/Account/workSpaces" not in current_url:
@@ -60,7 +76,18 @@ class PointWorkspacePage:
                     "workspace_url": current_url,
                     "already_inside_workspace": True,
                 }
-            raise NavigationError("No se detectaron tarjetas de sucursal en Point.")
+            diagnostics = self.page.evaluate(
+                """() => ({
+                    title: document.title,
+                    bodyText: (document.body?.innerText || '').slice(0, 500),
+                    selWsNodes: document.querySelectorAll('[onclick*="selWS"]').length,
+                    url: window.location.href,
+                })"""
+            )
+            raise NavigationError(
+                "No se detectaron tarjetas de sucursal en Point.",
+                context={"current_url": current_url, "diagnostics": diagnostics},
+            )
 
         selected = None
         if branch_hint:
