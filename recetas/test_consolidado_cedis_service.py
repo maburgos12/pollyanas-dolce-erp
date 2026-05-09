@@ -5,6 +5,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -66,3 +67,33 @@ class ConsolidadoNocturnoCedisServiceTests(TestCase):
         run_inventory_mock.assert_not_called()
         self.assertEqual(consolidado.productos_consolidados, 1)
         self.assertIn("snapshot_cedis_fresco", consolidado.metadata["inventory_sync_skipped_reason"])
+
+    def test_consolidar_invalidates_empty_consolidado_cache(self):
+        user = get_user_model().objects.create_user(username="cache_tester")
+        sucursal = Sucursal.objects.create(nombre="Matriz", codigo="MATRIZ", activa=True)
+        receta = Receta.objects.create(nombre="Pastel cache", codigo_point="P002")
+        fecha = timezone.localdate()
+        cache.set(f"reabasto:consolidado:{fecha.isoformat()}", [], 300)
+        solicitud = SolicitudReabastoCedis.objects.create(
+            fecha_operacion=fecha,
+            sucursal=sucursal,
+            estado=SolicitudReabastoCedis.ESTADO_ENVIADA,
+            creado_por=user,
+        )
+        SolicitudReabastoCedisLinea.objects.create(
+            solicitud=solicitud,
+            receta=receta,
+            solicitado=Decimal("4"),
+            sugerido=Decimal("4"),
+        )
+
+        consolidado = ConsolidadoNocturnoCedisService().consolidar(
+            fecha_operacion=fecha,
+            usuario=user,
+            sincronizar_point=False,
+            sincronizar_inventario_cedis=False,
+            forzar_recalculo=True,
+        )
+
+        self.assertEqual(consolidado.productos_consolidados, 1)
+        self.assertEqual(consolidado.total_solicitado, Decimal("4"))

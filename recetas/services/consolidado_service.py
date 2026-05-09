@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Count, Max, Q
 from django.utils import timezone
@@ -28,6 +29,10 @@ from recetas.views.reabasto import _consolidado_reabasto_por_fecha, _upsert_plan
 
 
 logger = logging.getLogger(__name__)
+
+
+def _consolidado_cache_key(fecha_operacion: date) -> str:
+    return f"reabasto:consolidado:{fecha_operacion.isoformat()}"
 
 
 class ConsolidadoNocturnoCedisService:
@@ -78,8 +83,10 @@ class ConsolidadoNocturnoCedisService:
             if sincronizar_point:
                 self._crear_solicitudes_desde_point(fecha_operacion=fecha_operacion, usuario=usuario, sync_job=sync_job)
 
+            cache.delete(_consolidado_cache_key(fecha_operacion))
             rows = _consolidado_reabasto_por_fecha(fecha_operacion)
             plan, _, total_plan = _upsert_plan_reabasto_cedis(fecha_operacion, usuario)
+            cache.delete(_consolidado_cache_key(fecha_operacion))
             cobertura = self._calcular_cobertura(fecha_operacion)
             total_sugerido = sum((Decimal(str(row.get("total_sugerido") or 0)) for row in rows), Decimal("0"))
             total_solicitado = sum((Decimal(str(row.get("total_solicitado") or 0)) for row in rows), Decimal("0"))
