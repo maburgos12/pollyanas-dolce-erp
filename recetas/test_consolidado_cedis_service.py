@@ -98,10 +98,8 @@ class ConsolidadoNocturnoCedisServiceTests(TestCase):
         ConsolidadoNocturnoCEDIS.objects.create(
             fecha_operacion=fecha,
             metadata={
-                "solicitudes_sucursal_email": {
-                    "status": "enviado",
-                    "sent_at": "2026-05-09T05:30:24-07:00",
-                }
+                "solicitudes_sucursal_email_sent_at": "2026-05-09T05:30:24-07:00",
+                "solicitudes_sucursal_email_recipients": ["produccion.carolina@pollyanasdolce.com"],
             },
         )
 
@@ -115,7 +113,8 @@ class ConsolidadoNocturnoCedisServiceTests(TestCase):
 
         self.assertEqual(consolidado.productos_consolidados, 1)
         self.assertEqual(consolidado.total_solicitado, Decimal("4"))
-        self.assertEqual(consolidado.metadata["solicitudes_sucursal_email"]["status"], "enviado")
+        self.assertEqual(consolidado.metadata["solicitudes_sucursal_email_sent_at"], "2026-05-09T05:30:24-07:00")
+        self.assertEqual(consolidado.metadata["solicitudes_sucursal_email_recipients"], ["produccion.carolina@pollyanasdolce.com"])
 
     def test_task_uses_previous_day_as_transfer_request_date_for_explicit_plan_date(self):
         captured = {}
