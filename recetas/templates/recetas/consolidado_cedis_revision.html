@@ -113,15 +113,11 @@
     background: #fff;
     box-shadow: -8px 0 12px rgba(255, 255, 255, 0.86);
     min-width: 132px;
-    position: sticky;
-    right: 0;
     width: 132px;
-    z-index: 1;
   }
 
   .cedis-inventory-table thead .inventory-total {
     background: #f8e8f0;
-    z-index: 2;
   }
 
   .cedis-inventory-meta {
@@ -299,20 +295,20 @@
           <col class="inventory-sku">
           <col class="inventory-product">
           <col class="inventory-category">
+          <col class="inventory-total">
           {% for branch in inventario_cierre.branches %}
           <col class="inventory-branch">
           {% endfor %}
-          <col class="inventory-total">
         </colgroup>
         <thead>
           <tr>
             <th class="inventory-sku">SKU</th>
             <th class="inventory-product">Producto</th>
             <th class="inventory-category">Categoría</th>
+            <th class="inventory-total">Total cierre</th>
             {% for branch in inventario_cierre.branches %}
             <th class="inventory-branch">{{ branch.label }}</th>
             {% endfor %}
-            <th class="inventory-total">Total cierre</th>
           </tr>
         </thead>
         <tbody>
@@ -321,10 +317,10 @@
             <td class="inventory-sku">{{ row.sku }}</td>
             <td class="inventory-product">{{ row.product_name }}</td>
             <td class="inventory-category">{{ row.category|default:"-" }}</td>
+            <td class="text-end inventory-total"><strong>{{ row.total_stock|floatformat:3 }}</strong></td>
             {% for stock in row.stock_cells %}
             <td class="text-end">{{ stock|floatformat:3 }}</td>
             {% endfor %}
-            <td class="text-end inventory-total"><strong>{{ row.total_stock|floatformat:3 }}</strong></td>
           </tr>
           {% empty %}
           <tr><td colspan="14" class="muted">No hay inventario Point capturado para esta fecha.</td></tr>
