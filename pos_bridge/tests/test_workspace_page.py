@@ -44,6 +44,39 @@ class PointWorkspacePageTests(SimpleTestCase):
         page.wait_for_function.assert_called_once()
         self.assertIn("eval(targetOnclick)", page.evaluate.call_args.args[0])
 
+    def test_select_workspace_waits_for_cards_before_failing(self):
+        page = Mock()
+        page.url = "https://app.pointmeup.com/Account/workSpaces"
+
+        def _evaluate(script, arg=None):
+            if "eval(targetOnclick)" in script:
+                page.url = "https://app.pointmeup.com/Home/Index"
+                return None
+            raise AssertionError(f"Unexpected evaluate call: {script}")
+
+        page.evaluate.side_effect = _evaluate
+
+        workspace_page = PointWorkspacePage(page, self._settings())
+        workspace_page.wait_until_loaded = Mock()
+        workspace_page.list_workspaces = Mock(
+            side_effect=[
+                [],
+                [
+                    {
+                        "onclick": 'selWS("83852AED-D4FB-E611-814F-06B55B5505BA",1,"Matriz")',
+                        "text": "Matriz",
+                        "containerText": "Matriz",
+                    }
+                ],
+            ]
+        )
+
+        result = workspace_page.select_workspace(branch_hint="MATRIZ")
+
+        self.assertEqual(result["workspace_label"], "Matriz")
+        page.wait_for_timeout.assert_called_once()
+        self.assertEqual(workspace_page.list_workspaces.call_count, 2)
+
     def test_select_workspace_raises_if_point_does_not_change_context(self):
         page = Mock()
         page.url = "https://app.pointmeup.com/Account/workSpaces"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import time
+from datetime import timedelta, time
 from urllib import error, request
 
 from django.utils import timezone
@@ -47,6 +47,20 @@ class RealtimeInventoryService:
         return True
 
     def has_running_inventory_job(self) -> bool:
+        stale_before = timezone.now() - timedelta(minutes=90)
+        stale_jobs = PointSyncJob.objects.filter(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_RUNNING,
+            started_at__lt=stale_before,
+            finished_at__isnull=True,
+        )
+        stale_count = stale_jobs.update(
+            status=PointSyncJob.STATUS_FAILED,
+            finished_at=timezone.now(),
+            error_message="Marcado como fallido automaticamente: job RUNNING stale bloqueaba inventario realtime.",
+        )
+        if stale_count:
+            logger.warning("Se cerraron %s jobs inventory RUNNING stale antes del sync realtime.", stale_count)
         return PointSyncJob.objects.filter(
             job_type=PointSyncJob.JOB_TYPE_INVENTORY,
             status=PointSyncJob.STATUS_RUNNING,
