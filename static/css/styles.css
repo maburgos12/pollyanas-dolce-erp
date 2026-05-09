@@ -160,13 +160,12 @@ h4 {
 .sidebar-nav a {
   display: flex;
   align-items: center;
-  gap: 10px;
   text-decoration: none;
   color: rgba(255, 255, 255, 0.95);
-  padding: 10px 12px;
-  border-radius: 12px;
+  padding: 8px 12px 8px 36px;
+  border-radius: 0;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   transition: background-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
 }
 
@@ -293,7 +292,7 @@ h4 {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 0 1rem;
+  padding: 10px 12px;
   background: none;
   border: none;
   border-radius: 0;
@@ -301,13 +300,29 @@ h4 {
   cursor: pointer;
   font: inherit;
   line-height: 1;
-  margin-top: 1.25rem;
-  margin-bottom: 0.25rem;
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+.sidebar-group-toggle[aria-expanded="true"],
+.sidebar-group-toggle:hover {
+  background: rgba(255, 244, 247, 0.14);
+}
+
+.sidebar-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .sidebar-group-toggle .sidebar-section-label {
   margin: 0;
   padding: 0;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .sidebar-group-toggle .toggle-chevron {

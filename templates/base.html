@@ -26,7 +26,10 @@
                 {% if ui_nav_groups and not ui_access.branch_capture_only %}
                     {% for group in ui_nav_groups %}
                     <button class="sidebar-group-toggle" data-group="{{ group.key }}" aria-expanded="{% if group.active or forloop.first %}true{% else %}false{% endif %}">
-                        <span class="sidebar-section-label">{{ group.label }}</span>
+                        <span class="sidebar-group-title">
+                            <span class="nav-icon nav-icon--auto" data-module="{{ group.key }}" aria-hidden="true"></span>
+                            <span class="sidebar-section-label">{{ group.label }}</span>
+                        </span>
                         <span class="toggle-chevron" aria-hidden="true">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M6 9l6 6 6-6"/>
@@ -37,7 +40,6 @@
                         {% for item in group.items %}
                         <li>
                             <a href="{{ item.url }}" class="{% if item.active %}active{% endif %}">
-                                <span class="nav-icon nav-icon--auto" data-module="{{ item.module }}" aria-hidden="true"></span>
                                 <span>{{ item.label }}</span>
                             </a>
                         </li>
@@ -607,18 +609,6 @@
     <script>
     // ── Sidebar colapsable ─────────────────────────────────────────
     (function () {
-        var STORAGE_KEY = 'erp_sidebar_groups';
-
-        function loadState() {
-            try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
-            catch (e) { return {}; }
-        }
-
-        function saveState(state) {
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-            catch (e) {}
-        }
-
         function setGroup(btn, expanded) {
             var group = btn.dataset.group;
             var list = document.getElementById('group-' + group);
@@ -631,6 +621,12 @@
             }
         }
 
+        function closeOtherGroups(currentBtn) {
+            buttons.forEach(function (btn) {
+                if (btn !== currentBtn) setGroup(btn, false);
+            });
+        }
+
         // Auto-expand group that contains the active item
         function autoExpandActive() {
             var active = document.querySelector('#sidebar-nav .sidebar-collapsible a.active');
@@ -640,26 +636,20 @@
             var id = list.id; // "group-operacion"
             var group = id.replace('group-', '');
             var btn = document.querySelector('[data-group="' + group + '"]');
-            if (btn) setGroup(btn, true);
+            if (btn) {
+                closeOtherGroups(btn);
+                setGroup(btn, true);
+            }
         }
 
-        var state = loadState();
         var buttons = document.querySelectorAll('.sidebar-group-toggle');
 
         buttons.forEach(function (btn) {
-            var group = btn.dataset.group;
-            // Restore saved state if exists, else use aria-expanded default
-            if (state.hasOwnProperty(group)) {
-                setGroup(btn, state[group]);
-            }
-
             btn.addEventListener('click', function () {
                 var expanded = btn.getAttribute('aria-expanded') === 'true';
                 var newState = !expanded;
+                if (newState) closeOtherGroups(btn);
                 setGroup(btn, newState);
-                var s = loadState();
-                s[group] = newState;
-                saveState(s);
             });
         });
 
