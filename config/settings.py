@@ -2,7 +2,6 @@
 import os
 import socket
 import sys
-from urllib.parse import urlparse
 
 import dj_database_url
 from celery.schedules import crontab
@@ -54,50 +53,10 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-def resolve_effective_database_url() -> str:
-    """
-    Fuera de Railway, permite usar DATABASE_PUBLIC_URL cuando DATABASE_URL
-    apunta al host privado (*.railway.internal) y ese DNS no resuelve localmente.
-    """
-    db_url = (os.getenv("DATABASE_URL") or "").strip()
-    public_url = (os.getenv("DATABASE_PUBLIC_URL") or "").strip()
-    if not db_url:
-        return ""
-    if RUNNING_ON_RAILWAY or not public_url or "railway.internal" not in db_url:
-        return db_url
-
-    try:
-        host = (urlparse(db_url).hostname or "").strip()
-    except Exception:
-        host = ""
-    if not host:
-        return db_url
-
-    try:
-        socket.getaddrinfo(host, None)
-    except OSError:
-        os.environ["DATABASE_URL"] = public_url
-        return public_url
-
-    return db_url
-
-
-RUNNING_ON_RAILWAY = any(
-    os.getenv(name)
-    for name in (
-        "RAILWAY_PROJECT_ID",
-        "RAILWAY_SERVICE_ID",
-        "RAILWAY_ENVIRONMENT_ID",
-        "RAILWAY_PUBLIC_DOMAIN",
-    )
-)
-APP_ENV = os.getenv("APP_ENV", "production" if RUNNING_ON_RAILWAY else "development").strip().lower()
+APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
 IS_DEVELOPMENT_ENV = APP_ENV in {"development", "dev", "local", "test"}
 RUNNING_TESTS = "test" in sys.argv or bool(os.getenv("PYTEST_CURRENT_TEST"))
-DEBUG = env_bool("DEBUG", default=(IS_DEVELOPMENT_ENV and not RUNNING_ON_RAILWAY))
-
-if RUNNING_ON_RAILWAY and DEBUG:
-    raise ValueError("DEBUG must remain disabled when RUNNING_ON_RAILWAY is detected.")
+DEBUG = env_bool("DEBUG", default=IS_DEVELOPMENT_ENV)
 
 if APP_ENV in {"production", "staging"} and DEBUG:
     raise ValueError("DEBUG must remain disabled when APP_ENV is production or staging.")
@@ -122,18 +81,8 @@ ONYX_PORTAL_URL = os.getenv("ONYX_PORTAL_URL", "https://ai.pollyanasdolce.com").
 
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,healthcheck.railway.app,.up.railway.app",
+    "localhost,127.0.0.1",
 )
-railway_public_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
-railway_private_domain = os.getenv("RAILWAY_PRIVATE_DOMAIN")
-if railway_public_domain and railway_public_domain not in ALLOWED_HOSTS:
-    ALLOWED_HOSTS.append(railway_public_domain)
-if railway_private_domain and railway_private_domain not in ALLOWED_HOSTS:
-    ALLOWED_HOSTS.append(railway_private_domain)
-if RUNNING_ON_RAILWAY:
-    for railway_host in ("healthcheck.railway.app", ".up.railway.app", ".railway.internal"):
-        if railway_host not in ALLOWED_HOSTS:
-            ALLOWED_HOSTS.append(railway_host)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -209,7 +158,7 @@ TEMPLATES = [{
 # 1. DATABASE_URL
 # 2. DB_HOST + DB_NAME/DB_USER/DB_PASSWORD/DB_PORT
 # SQLite no es una ruta operativa valida para este ERP.
-DATABASE_URL = resolve_effective_database_url()
+DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
 if DATABASE_URL:
     DATABASES = {
         "default": dj_database_url.config(
@@ -295,10 +244,6 @@ PICKUP_RESERVATION_TTL_MINUTES = env_int("PICKUP_RESERVATION_TTL_MINUTES", 15)
 CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", default=False)
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "")
-if railway_public_domain:
-    trusted_origin = f"https://{railway_public_domain}"
-    if trusted_origin not in CSRF_TRUSTED_ORIGINS:
-        CSRF_TRUSTED_ORIGINS.append(trusted_origin)
 
 CSRF_FAILURE_VIEW = "core.views.csrf_failure"
 for trusted_origin in (
@@ -448,11 +393,7 @@ ERP_AUTO_PURCHASE_ENABLED = env_bool("ERP_AUTO_PURCHASE_ENABLED", default=True)
 ERP_AUTO_PURCHASE_MIN_SHORTAGE = os.getenv("ERP_AUTO_PURCHASE_MIN_SHORTAGE", "0.001")
 ERP_OPERATION_ALERTS_ENABLED = env_bool("ERP_OPERATION_ALERTS_ENABLED", default=True)
 
-IS_SECURE_ENV = not DEBUG and (RUNNING_ON_RAILWAY or APP_ENV in {"staging", "production"})
-if RUNNING_ON_RAILWAY:
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    USE_X_FORWARDED_HOST = True
-    USE_X_FORWARDED_PORT = True
+IS_SECURE_ENV = not DEBUG and APP_ENV in {"staging", "production"}
 SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000" if not DEBUG else "0"))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=not DEBUG)
 SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=not DEBUG)
