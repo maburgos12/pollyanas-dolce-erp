@@ -214,6 +214,20 @@ h4 {
   opacity: 0.75;
 }
 
+.nav-icon--auto[data-module="direccion"]::before {
+  inset: 3px;
+  border-radius: 2px;
+  box-shadow:
+    5px 0 0 -2px currentColor,
+    0 5px 0 -2px currentColor,
+    5px 5px 0 -2px currentColor;
+}
+
+.nav-icon--auto[data-module="direccion"]::after {
+  display: none;
+}
+
+.nav-icon--auto[data-module="comercial"]::before,
 .nav-icon--auto[data-module="ventas"]::before,
 .nav-icon--auto[data-module="crm"]::before {
   inset: 4px 3px 3px;
@@ -223,6 +237,7 @@ h4 {
   box-shadow: 4px -3px 0 -2px currentColor, 8px -7px 0 -2px currentColor;
 }
 
+.nav-icon--auto[data-module="comercial"]::after,
 .nav-icon--auto[data-module="ventas"]::after,
 .nav-icon--auto[data-module="crm"]::after {
   inset: auto 2px 3px 3px;
@@ -233,6 +248,21 @@ h4 {
   border-left: 0;
   border-radius: 0;
   transform: skewY(-25deg);
+}
+
+.nav-icon--auto[data-module="produccion"]::before,
+.nav-icon--auto[data-module="operacion"]::before {
+  inset: 3px 2px;
+  border-radius: 2px;
+}
+
+.nav-icon--auto[data-module="produccion"]::after,
+.nav-icon--auto[data-module="operacion"]::after {
+  inset: 6px 5px 4px;
+  border: 0;
+  border-top: 1.8px solid currentColor;
+  border-bottom: 1.8px solid currentColor;
+  border-radius: 0;
 }
 
 .nav-icon--auto[data-module="logistica"]::before {
@@ -258,6 +288,22 @@ h4 {
   border: 0;
   border-radius: 999px;
   background: currentColor;
+}
+
+.nav-icon--auto[data-module="administracion"]::before,
+.nav-icon--auto[data-module="sistema"]::before {
+  inset: 3px 3px 4px;
+  border-radius: 2px;
+}
+
+.nav-icon--auto[data-module="administracion"]::after,
+.nav-icon--auto[data-module="sistema"]::after {
+  inset: 5px 4px auto;
+  height: 3px;
+  border: 0;
+  border-top: 1.8px solid currentColor;
+  border-bottom: 1.8px solid currentColor;
+  border-radius: 0;
 }
 
 .sidebar-footer {
