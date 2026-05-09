@@ -14,10 +14,10 @@ from unittest.mock import MagicMock, patch
 
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra
 from control.models import MermaPOS
-from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_compras
+from core.access import ROLE_ADMIN, ROLE_COMPRAS, can_view_compras, can_view_submodule, get_module_access
 from core.branch_catalog import eligible_operational_branch_qs
 from core.middleware import CanonicalLocalHostMiddleware
-from core.models import Departamento, Sucursal, UserProfile
+from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from core.management.commands.ejecutar_rutina_diaria_erp import _prefer_public_database_url_if_needed
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
@@ -1206,6 +1206,43 @@ class UsersAccessTests(TestCase):
         self.assertIn("users_executive_radar_rows", response.context)
         self.assertIn("erp_command_center", response.context)
         self.assertIn("completion", response.context["users_trunk_chain_rows"][0])
+        self.assertContains(response, "Módulos y submódulos")
+        self.assertContains(response, "access__logistica.rutas")
+
+    def test_module_permission_update_saves_submodules(self):
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse("usuario_permisos_update", args=[self.compras.id]),
+            {
+                "access__logistica": "none",
+                "access__logistica.rutas": "view",
+                "access__logistica.tickets": "none",
+            },
+        )
+        self.assertRedirects(response, reverse("users_access"))
+        self.assertEqual(
+            UserModuleAccess.objects.get(user=self.compras, module="logistica").access,
+            "none",
+        )
+        self.assertEqual(
+            UserModuleAccess.objects.get(user=self.compras, module="logistica.rutas").access,
+            "view",
+        )
+        self.assertTrue(can_view_submodule(self.compras, "logistica", "rutas"))
+        self.assertFalse(can_view_submodule(self.compras, "logistica", "tickets"))
+
+    def test_explicit_none_overrides_role_module_access(self):
+        ventas = get_user_model().objects.create_user(
+            username="ventas_user",
+            email="ventas_user@example.com",
+            password="test12345",
+        )
+        ventas.groups.add(Group.objects.get_or_create(name="VENTAS")[0])
+        self.assertEqual(get_module_access(ventas, "ventas"), "manage")
+        UserModuleAccess.objects.create(user=ventas, module="ventas", access="none", updated_by=self.admin)
+        if hasattr(ventas, "_module_access_map_cache"):
+            delattr(ventas, "_module_access_map_cache")
+        self.assertEqual(get_module_access(ventas, "ventas"), "none")
 
     def test_non_admin_cannot_open_users_access_page(self):
         self.client.force_login(self.compras)
@@ -1263,13 +1300,13 @@ class UsersAccessTests(TestCase):
         response = self.client.get(reverse("users_access"), {"coverage": "sucursal", "scope_id": sucursal.id})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Cobertura operativa")
-        self.assertContains(response, "Gap operativo")
+        self.assertContains(response, "Gaps de cobertura")
 
     def test_users_access_edit_view_shows_profile_diagnosis(self):
         self.client.force_login(self.admin)
         response = self.client.get(reverse("users_access"), {"edit": self.compras.id})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Editar Usuario")
+        self.assertContains(response, "Editar usuario")
         self.assertContains(response, "Sin departamento")
         self.assertNotContains(response, "Sin bloqueos críticos")
 

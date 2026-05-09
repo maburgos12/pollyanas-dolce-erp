@@ -52,6 +52,11 @@
   .lock-item { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 0; }
   .permissions-table th { background: var(--vino); color: #fff; }
   .permissions-table td, .permissions-table th { vertical-align: middle; }
+  .permissions-module-row td { background: #f7f2f4; border-top: 2px solid var(--rosa-deep); }
+  .permissions-module-row strong { color: var(--vino); text-transform: uppercase; letter-spacing: .02em; }
+  .permissions-submodule-row td:first-child { padding-left: 34px; }
+  .permissions-submodule-row strong { font-size: 13px; }
+  .permissions-submodule-row .muted { font-size: 12px; }
   .permissions-radio { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 46px; cursor: pointer; }
   .permissions-radio input { width: 20px; height: 20px; accent-color: var(--vino); }
   .users-modal { width: min(960px, calc(100vw - 28px)); max-height: calc(100vh - 40px); border: 0; border-radius: 10px; padding: 0; box-shadow: 0 22px 60px rgba(48, 22, 33, .28); }
@@ -541,7 +546,7 @@
   <div class="users-modal-header">
     <div>
       <h2 class="users-modal-title">Permisos · {{ row.username }}</h2>
-      <div class="muted">Sin acceso, solo consulta o edición por módulo. Estos permisos sustituyen el acceso derivado del rol.</div>
+      <div class="muted">Selecciona módulos y pestañas internas. Un permiso explícito sustituye el acceso derivado del rol.</div>
     </div>
     <button class="users-icon-button" type="button" data-modal-close aria-label="Cerrar">×</button>
   </div>
@@ -552,7 +557,7 @@
         <table class="table permissions-table">
           <thead>
             <tr>
-              <th>Módulo</th>
+              <th>Módulos y submódulos</th>
               <th>Acceso actual</th>
               <th>Sin acceso</th>
               <th>Solo ver</th>
@@ -561,7 +566,7 @@
           </thead>
           <tbody>
             {% for access_row in row.module_access_rows %}
-            <tr>
+            <tr class="permissions-module-row">
               <td>
                 <strong>{{ access_row.label }}</strong>
                 {% if access_row.is_explicit %}
@@ -571,10 +576,26 @@
                 {% endif %}
               </td>
               <td><span class="module-chip {{ access_row.badge_tone }}">{{ access_row.badge_label }}</span></td>
-              <td><label class="permissions-radio" aria-label="{{ access_row.label }} sin acceso"><input type="radio" name="access_{{ access_row.module }}" value="none" {% if access_row.access == 'none' %}checked{% endif %}></label></td>
-              <td><label class="permissions-radio" aria-label="{{ access_row.label }} solo ver"><input type="radio" name="access_{{ access_row.module }}" value="view" {% if access_row.access == 'view' %}checked{% endif %}></label></td>
-              <td><label class="permissions-radio" aria-label="{{ access_row.label }} ver y editar"><input type="radio" name="access_{{ access_row.module }}" value="manage" {% if access_row.access == 'manage' %}checked{% endif %}></label></td>
+              <td><label class="permissions-radio" aria-label="{{ access_row.label }} sin acceso"><input type="radio" name="{{ access_row.input_name }}" value="none" {% if access_row.access == 'none' %}checked{% endif %}></label></td>
+              <td><label class="permissions-radio" aria-label="{{ access_row.label }} solo ver"><input type="radio" name="{{ access_row.input_name }}" value="view" {% if access_row.access == 'view' %}checked{% endif %}></label></td>
+              <td><label class="permissions-radio" aria-label="{{ access_row.label }} ver y editar"><input type="radio" name="{{ access_row.input_name }}" value="manage" {% if access_row.access == 'manage' %}checked{% endif %}></label></td>
             </tr>
+              {% for submodule in access_row.submodules %}
+              <tr class="permissions-submodule-row">
+                <td>
+                  <strong>{{ submodule.label }}</strong>
+                  {% if submodule.is_explicit %}
+                    <div class="muted">Pestaña personalizada</div>
+                  {% else %}
+                    <div class="muted">Hereda del módulo o rol</div>
+                  {% endif %}
+                </td>
+                <td><span class="module-chip {{ submodule.badge_tone }}">{{ submodule.badge_label }}</span></td>
+                <td><label class="permissions-radio" aria-label="{{ submodule.label }} sin acceso"><input type="radio" name="{{ submodule.input_name }}" value="none" {% if submodule.access == 'none' %}checked{% endif %}></label></td>
+                <td><label class="permissions-radio" aria-label="{{ submodule.label }} solo ver"><input type="radio" name="{{ submodule.input_name }}" value="view" {% if submodule.access == 'view' %}checked{% endif %}></label></td>
+                <td><label class="permissions-radio" aria-label="{{ submodule.label }} ver y editar"><input type="radio" name="{{ submodule.input_name }}" value="manage" {% if submodule.access == 'manage' %}checked{% endif %}></label></td>
+              </tr>
+              {% endfor %}
             {% endfor %}
           </tbody>
         </table>

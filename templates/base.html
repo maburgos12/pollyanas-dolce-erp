@@ -23,6 +23,28 @@
             </div>
 
             <nav id="sidebar-nav">
+                {% if ui_nav_groups and not ui_access.branch_capture_only %}
+                    {% for group in ui_nav_groups %}
+                    <button class="sidebar-group-toggle" data-group="{{ group.key }}" aria-expanded="{% if group.active or forloop.first %}true{% else %}false{% endif %}">
+                        <span class="sidebar-section-label">{{ group.label }}</span>
+                        <span class="toggle-chevron" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M6 9l6 6 6-6"/>
+                            </svg>
+                        </span>
+                    </button>
+                    <ul class="sidebar-nav sidebar-nav-group sidebar-collapsible {% if not group.active and not forloop.first %}sidebar-collapsed{% endif %}" id="group-{{ group.key }}">
+                        {% for item in group.items %}
+                        <li>
+                            <a href="{{ item.url }}" class="{% if item.active %}active{% endif %}">
+                                <span class="nav-icon" aria-hidden="true">{{ item.initial }}</span>
+                                <span>{{ item.label }}</span>
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% endfor %}
+                {% else %}
 
                 {# ── MODO CAPTURA DE SUCURSAL ──────────────────────── #}
                 {% if ui_access.branch_capture_only %}
@@ -532,6 +554,7 @@
                 {% endif %}
 
                 {% endif %}{# end branch_capture_only #}
+                {% endif %}{# end dynamic navigation #}
             </nav>
 
             <div class="sidebar-footer">

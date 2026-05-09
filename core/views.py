@@ -22,6 +22,11 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from core.access import (
+    ACCESS_MANAGE,
+    ACCESS_MODULES,
+    ACCESS_NONE,
+    ACCESS_SUBMODULES,
+    ACCESS_VIEW,
     ROLE_ADMIN,
     ROLE_DG,
     ROLE_ORDER,
@@ -43,7 +48,10 @@ from core.access import (
     can_view_rrhh,
     can_view_reportes,
     can_view_orquestacion,
+    can_view_module,
+    get_effective_module_access,
     get_module_access,
+    get_submodule_access,
     is_branch_capture_only,
 )
 from core.cache_versions import get_or_set_versioned_cache
@@ -219,18 +227,11 @@ def _assign_single_role(user, role_name: str) -> None:
 
 def _user_access_scope(user, profile) -> dict:
     modules = [
-        ("Maestros", can_view_maestros(user), False),
-        ("Recetas", can_view_recetas(user), False),
-        ("Compras", can_view_compras(user), can_manage_compras(user)),
-        ("Inventario", can_view_inventario(user), can_manage_inventario(user)),
-        ("Reportes", can_view_reportes(user), False),
-        ("CRM", can_view_crm(user), can_manage_crm(user)),
-        ("Logística", can_view_logistica(user), can_manage_logistica(user)),
-        ("RRHH", can_view_rrhh(user), can_manage_rrhh(user)),
-        ("Bitácora", can_view_audit(user), False),
+        (label, get_effective_module_access(user, module))
+        for module, label in ACCESS_MODULES
     ]
-    visible = [label for label, can_view, _can_manage in modules if can_view]
-    manageable = [label for label, _can_view, can_manage in modules if can_manage]
+    visible = [label for label, access in modules if access in {ACCESS_VIEW, ACCESS_MANAGE}]
+    manageable = [label for label, access in modules if access == ACCESS_MANAGE]
     blocked = [label for key, label in LOCK_FIELDS if profile and bool(getattr(profile, key, False))]
     if not user.is_active:
         readiness_label = "Inactivo"
@@ -259,25 +260,56 @@ def _module_access_rows(user) -> list[dict]:
         for item in getattr(user, "module_access", []).all()
     }
     rows = []
-    for module, label in UserModuleAccess.MODULOS:
+    for module, label in ACCESS_MODULES:
         access = explicit_access.get(module) or get_module_access(user, module)
-        if access == UserModuleAccess.ACCESS_MANAGE:
+        effective_access = get_effective_module_access(user, module)
+        if effective_access == ACCESS_MANAGE:
             badge_label = "Gestiona"
             badge_tone = "manage"
-        elif access == UserModuleAccess.ACCESS_VIEW:
+        elif effective_access == ACCESS_VIEW:
             badge_label = "Solo ve"
             badge_tone = "view"
         else:
             badge_label = "Sin acceso"
             badge_tone = "none"
+        submodules = []
+        for submodule, submodule_label in ACCESS_SUBMODULES.get(module, []):
+            access_key = f"{module}.{submodule}"
+            sub_access = explicit_access.get(access_key) or get_submodule_access(user, module, submodule)
+            if sub_access == ACCESS_MANAGE:
+                sub_badge_label = "Gestiona"
+                sub_badge_tone = "manage"
+            elif sub_access == ACCESS_VIEW:
+                sub_badge_label = "Solo ve"
+                sub_badge_tone = "view"
+            else:
+                sub_badge_label = "Sin acceso"
+                sub_badge_tone = "none"
+            submodules.append(
+                {
+                    "module": module,
+                    "submodule": submodule,
+                    "access_key": access_key,
+                    "input_name": f"access__{access_key}",
+                    "label": submodule_label,
+                    "access": sub_access,
+                    "badge_label": sub_badge_label,
+                    "badge_tone": sub_badge_tone,
+                    "is_explicit": access_key in explicit_access,
+                }
+            )
         rows.append(
             {
                 "module": module,
+                "access_key": module,
+                "input_name": f"access__{module}",
                 "label": label,
                 "access": access,
+                "effective_access": effective_access,
                 "badge_label": badge_label,
                 "badge_tone": badge_tone,
                 "is_explicit": module in explicit_access,
+                "submodules": submodules,
             }
         )
     return rows
@@ -4155,26 +4187,26 @@ def ai_private_hub_view(request: HttpRequest) -> HttpResponse:
 def usuario_permisos_update(request: HttpRequest, user_id: int) -> HttpResponse:
     if not request.user.is_authenticated:
         return redirect("/login/")
-    if not (request.user.is_superuser or request.user.groups.filter(name__in=["DG", "dg"]).exists()):
+    if not can_manage_users(request.user):
         return HttpResponseForbidden()
     if request.method != "POST":
         return redirect("users_access")
 
     user_model = get_user_model()
     target_user = get_object_or_404(user_model, pk=user_id)
-    modulos = [module for module, _label in UserModuleAccess.MODULOS]
+    access_keys = []
+    for module, _label in ACCESS_MODULES:
+        access_keys.append(module)
+        for submodule, _submodule_label in ACCESS_SUBMODULES.get(module, []):
+            access_keys.append(f"{module}.{submodule}")
 
-    for module in modulos:
-        access_value = request.POST.get(f"access_{module}", UserModuleAccess.ACCESS_NONE)
-        if access_value not in {
-            UserModuleAccess.ACCESS_NONE,
-            UserModuleAccess.ACCESS_VIEW,
-            UserModuleAccess.ACCESS_MANAGE,
-        }:
-            access_value = UserModuleAccess.ACCESS_NONE
+    for access_key in access_keys:
+        access_value = request.POST.get(f"access__{access_key}", request.POST.get(f"access_{access_key}", ACCESS_NONE))
+        if access_value not in {ACCESS_NONE, ACCESS_VIEW, ACCESS_MANAGE}:
+            access_value = ACCESS_NONE
         UserModuleAccess.objects.update_or_create(
             user=target_user,
-            module=module,
+            module=access_key,
             defaults={
                 "access": access_value,
                 "updated_by": request.user,
@@ -4188,7 +4220,7 @@ def usuario_permisos_update(request: HttpRequest, user_id: int) -> HttpResponse:
         target_user.id,
         {
             "username": target_user.username,
-            "modules": modulos,
+            "modules": access_keys,
         },
     )
     messages.success(
