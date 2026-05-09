@@ -26,7 +26,7 @@
     <div class="bi-hero-main">
       <div class="bi-kicker">Point · Conciliación mensual</div>
       <h1 class="bi-hero-title">Cierre teórico de producto terminado</h1>
-      <p class="bi-copy">Conciliación automática del mes: inventario inicial teórico + producción - venta equivalente - merma equivalente contra inventario final Point de CEDIS y sucursales.</p>
+      <p class="bi-copy">Libro mensual bloqueable: inventario inicial + producción - venta - merma = inventario final teórico. La lectura operativa diaria queda en Producido vs Vendido.</p>
       <div class="bi-hero-highlights">
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Mes visible</div>
@@ -34,9 +34,9 @@
           <div class="bi-hero-highlight-meta">{% if closure %}{{ closure.lines.count|intcomma }} SKUs conciliados{% else %}Sin cierre construido{% endif %}</div>
         </article>
         <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Venta equivalente</div>
-          <div class="bi-hero-highlight-value">{{ total_sales|floatformat:2|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">Incluye enteros + rebanadas regresadas a entero</div>
+          <div class="bi-hero-highlight-label">Estado</div>
+          <div class="bi-hero-highlight-value">{% if closure %}{{ closure.get_status_display }}{% else %}Pendiente{% endif %}</div>
+          <div class="bi-hero-highlight-meta">{{ movement_source_label }}</div>
         </article>
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Inventario final teórico</div>
@@ -76,7 +76,7 @@
         </div>
         <div class="bi-control">
           <label>Alcance</label>
-          <div class="bi-pill is-muted">Point teórico</div>
+          <div class="bi-pill is-muted">Producto terminado</div>
         </div>
         <div class="bi-control">
           <button type="submit">Ver cierre</button>
@@ -101,16 +101,16 @@
 
       <div class="bi-summary-band">
         <div class="bi-summary-chip">
-          <span>Modelo</span>
-          <strong>Teórico + Point físico</strong>
+          <span>Fuente movimientos</span>
+          <strong>{{ movement_source_label }}</strong>
         </div>
         <div class="bi-summary-chip">
-          <span>Conversión</span>
-          <strong>Rebanada → entero padre</strong>
+          <span>Opening</span>
+          <strong>{{ total_opening|floatformat:2|intcomma }}</strong>
         </div>
         <div class="bi-summary-chip">
-          <span>Fuente venta</span>
-          <strong>POINT_BRIDGE_SALES</strong>
+          <span>Alcance</span>
+          <strong>Producto terminado</strong>
         </div>
         {% if closure %}
         <div class="bi-summary-chip">
@@ -155,9 +155,9 @@
     <article class="bi-panel">
       <div class="bi-panel-head">
         <div>
-          <div class="bi-kicker">Lectura operativa</div>
-          <h2 class="bi-panel-title">Señal del cierre mensual</h2>
-          <p class="bi-panel-copy">El tablero resume la composición del cierre teórico y deja visible qué parte proviene de venta/merma directa contra presentaciones derivadas.</p>
+          <div class="bi-kicker">Cierre mensual</div>
+          <h2 class="bi-panel-title">Estado del cierre mensual</h2>
+          <p class="bi-panel-copy">Este módulo congela el balance mensual de producto terminado. El detalle de consumo diario y comparación de operación se revisa en Producido vs Vendido.</p>
         </div>
         <div class="bi-panel-actions">
           <span class="bi-pill {{ closure_status_tone }}">{{ closure.get_status_display }}</span>
@@ -173,28 +173,7 @@
         el {{ lock_event.locked_at|slice:":16"|default:"sin marca de tiempo" }}.
       </div>
       {% endif %}
-      <div class="bi-insight-grid">
-        <article class="bi-insight-card">
-          <div class="bi-insight-label">Venta directa</div>
-          <div class="bi-insight-value">{{ total_direct_sales|floatformat:2|intcomma }}</div>
-          <div class="bi-insight-meta">Salida registrada como entero en Point/ERP.</div>
-        </article>
-        <article class="bi-insight-card">
-          <div class="bi-insight-label">Venta derivada</div>
-          <div class="bi-insight-value">{{ total_derived_sales|floatformat:2|intcomma }}</div>
-          <div class="bi-insight-meta">Rebanadas homologadas a entero padre.</div>
-        </article>
-        <article class="bi-insight-card">
-          <div class="bi-insight-label">Merma derivada</div>
-          <div class="bi-insight-value">{{ total_derived_waste|floatformat:2|intcomma }}</div>
-          <div class="bi-insight-meta">Merma de presentaciones derivadas llevada a la receta padre.</div>
-        </article>
-        <article class="bi-insight-card">
-          <div class="bi-insight-label">Diferencia física</div>
-          <div class="bi-insight-value">{{ total_closing_difference|floatformat:2|intcomma }}</div>
-          <div class="bi-insight-meta">Teórico menos inventario final Point.</div>
-        </article>
-      </div>
+      <div class="bi-note">Fuente de movimientos: {{ movement_source_label }}. {{ movement_source_detail }}</div>
       {% if automation_reviews %}
       <div class="bi-note">
         {% for review in automation_reviews %}
@@ -250,7 +229,7 @@
       <div class="bi-panel-head">
         <div>
           <div class="bi-kicker">Histórico cercano</div>
-          <h2 class="bi-panel-title">Construcciones recientes</h2>
+          <h2 class="bi-panel-title">Meses disponibles</h2>
           <p class="bi-panel-copy">Visibilidad rápida de cierres disponibles para navegación mensual.</p>
         </div>
       </div>
@@ -299,8 +278,10 @@
     </div>
   </section>
 
-  <section class="bi-grid-2">
-    <article class="bi-panel">
+  <details class="bi-details">
+    <summary>Ver auditoría técnica de conversiones e incidencias</summary>
+    <section class="bi-grid-2">
+      <article class="bi-panel">
       <div class="bi-panel-head">
         <div>
           <div class="bi-kicker">Conversión</div>
@@ -337,9 +318,9 @@
           </tbody>
         </table>
       </div>
-    </article>
+      </article>
 
-    <article class="bi-panel">
+      <article class="bi-panel">
       <div class="bi-panel-head">
         <div>
           <div class="bi-kicker">Riesgo de catálogo</div>
@@ -361,15 +342,16 @@
         </article>
         {% endfor %}
       </div>
-    </article>
-  </section>
+      </article>
+    </section>
+  </details>
 
   <section class="bi-panel">
     <div class="bi-panel-head">
       <div>
         <div class="bi-kicker">Auditoría de líneas</div>
         <h2 class="bi-panel-title">Detalle del cierre mensual</h2>
-        <p class="bi-panel-copy">Cada línea representa una receta padre conciliada contra el inventario final Point separado por CEDIS y sucursales.</p>
+        <p class="bi-panel-copy">Cada línea representa una receta padre conciliada para el balance mensual bloqueable.</p>
       </div>
       <div class="bi-panel-actions">
         <span class="bi-pill is-muted">{{ closure.lines.count|intcomma }} líneas</span>
@@ -380,23 +362,17 @@
         <colgroup>
           <col class="col-receta-padre">
           <col class="col-metric"><col class="col-metric"><col class="col-metric"><col class="col-metric">
-          <col class="col-metric"><col class="col-metric"><col class="col-metric"><col class="col-metric">
-          <col class="col-metric"><col class="col-metric"><col class="col-estado">
+          <col class="col-metric"><col class="col-estado">
         </colgroup>
         <thead>
           <tr>
             <th>Receta padre</th>
-            <th class="text-end">Inv inicial</th>
+            <th class="text-end">Inicial</th>
             <th class="text-end">Producción</th>
-            <th class="text-end">Venta directa</th>
-            <th class="text-end">Venta derivada</th>
-            <th class="text-end">Merma</th>
-            <th class="text-end">Inv teórico</th>
-            <th class="text-end">CEDIS</th>
-            <th class="text-end">Sucursales</th>
-            <th class="text-end">Point total</th>
-            <th class="text-end">Diferencia</th>
-            <th>Estado</th>
+            <th class="text-end">Venta</th>
+            <th class="text-end">Merma total</th>
+            <th class="text-end">Final teórico</th>
+            <th>Lectura</th>
           </tr>
         </thead>
         <tbody>
@@ -408,14 +384,9 @@
             </td>
             <td class="text-end bi-closure-metric-cell">{{ line.inventario_inicial_teorico|floatformat:2|intcomma }}</td>
             <td class="text-end bi-closure-metric-cell">{{ line.produccion_mes|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.venta_directa_enteros|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.venta_derivada_equivalente|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ line.venta_total_equivalente|floatformat:2|intcomma }}</td>
             <td class="text-end bi-closure-metric-cell">{{ line.merma_total_equivalente|floatformat:2|intcomma }}</td>
             <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_teorico|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_point_cedis|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_point_sucursales|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_point_total|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell {% if line.diferencia_teorico_vs_point > 0 %}danger{% elif line.diferencia_teorico_vs_point < 0 %}warning{% endif %}">{{ line.diferencia_teorico_vs_point|floatformat:2|intcomma }}</td>
             <td class="bi-closure-reading-cell">
               <span class="bi-tone {% if line.estado_auditoria == 'CUADRA' or line.estado_auditoria == 'CUADRA_CON_MERMA' %}success{% elif line.estado_auditoria == 'SOBRANTE_FISICO' %}warning{% else %}danger{% endif %}">{{ line.get_estado_auditoria_display }}</span>
               <div class="bi-subtle">{{ line.detalle_auditoria }}</div>

@@ -20,6 +20,7 @@ from recetas.models import (
 )
 from recetas.utils.cierre_equivalencias import resolve_closure_recipe_quantity
 from recetas.utils.normalizacion import normalizar_nombre
+from reportes.models import FactProduccionDiaria
 
 ZERO = Decimal("0")
 POINT_BRIDGE_SALES_SOURCE = "POINT_BRIDGE_SALES"
@@ -175,6 +176,7 @@ class ProductMonthClosureService:
         month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
         prev_month_end = month_start - timedelta(days=1)
 
+        fact_meta = self._ensure_month_facts(month_start=month_start, month_end=month_end)
         opening_source, opening_reference_date, openings, opening_meta = self._load_opening(month_start=month_start)
         production = self._load_production(month_start=month_start, month_end=month_end)
         sales, sales_meta = self._load_sales(month_start=month_start, month_end=month_end)
@@ -187,6 +189,14 @@ class ProductMonthClosureService:
 
         line_rows: list[dict[str, object]] = []
         validation = self._build_validation_summary(opening_meta=opening_meta)
+        if fact_meta.get("status") == "generated":
+            validation["warnings"].append(
+                "Se genero FactProduccionDiaria desde staging PostgreSQL antes de construir el cierre."
+            )
+        elif fact_meta.get("status") == "generation_failed":
+            validation["warnings"].append(
+                "No se pudo generar FactProduccionDiaria; el cierre uso respaldos disponibles."
+            )
         sales_validation = self._build_sales_validation_summary(
             month_start=month_start,
             month_end=month_end,
@@ -329,6 +339,7 @@ class ProductMonthClosureService:
             "metadata": {
                 "opening_meta": opening_meta,
                 "sales_meta": sales_meta,
+                "fact_meta": fact_meta,
                 "closing_inventory_meta": closing_meta,
                 "recipe_count": len(recipe_ids),
                 "validation": validation,
@@ -778,6 +789,14 @@ class ProductMonthClosureService:
         return False
 
     def _load_production(self, *, month_start: date, month_end: date):
+        fact_buckets = self._load_movement_from_production_facts(
+            month_start=month_start,
+            month_end=month_end,
+            field_name="producido",
+        )
+        if fact_buckets:
+            return fact_buckets
+
         buckets: dict[int, _AggregateBucket] = {}
         rows = (
             PointProductionLine.objects.select_related("receta")
@@ -810,6 +829,19 @@ class ProductMonthClosureService:
         return buckets
 
     def _load_sales(self, *, month_start: date, month_end: date):
+        fact_buckets = self._load_movement_from_production_facts(
+            month_start=month_start,
+            month_end=month_end,
+            field_name="vendido",
+        )
+        if fact_buckets:
+            return fact_buckets, {
+                "source": "FactProduccionDiaria",
+                "mode": "production_facts",
+                "start_date": month_start.isoformat(),
+                "end_date": month_end.isoformat(),
+            }
+
         sales_source_mode = str(
             getattr(settings, "PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE", "AUTO")
         ).strip().upper() or "AUTO"
@@ -965,6 +997,14 @@ class ProductMonthClosureService:
         }
 
     def _load_waste(self, *, month_start: date, month_end: date):
+        fact_buckets = self._load_movement_from_production_facts(
+            month_start=month_start,
+            month_end=month_end,
+            field_name="merma",
+        )
+        if fact_buckets:
+            return fact_buckets
+
         start_dt = timezone.make_aware(datetime.combine(month_start, time.min), timezone.get_current_timezone())
         end_dt = timezone.make_aware(datetime.combine(month_end, time.max), timezone.get_current_timezone())
         buckets: dict[int, _AggregateBucket] = {}
@@ -977,6 +1017,108 @@ class ProductMonthClosureService:
             parent_receta, qty, issue_note, is_derived = self._canonical_recipe_quantity(
                 receta=row.receta,
                 quantity=Decimal(str(row.quantity or 0)),
+            )
+            if parent_receta is None:
+                continue
+            bucket = buckets.setdefault(parent_receta.id, _AggregateBucket())
+            bucket.value += qty
+            bucket.row_count += 1
+            if is_derived:
+                bucket.derived_value += qty
+            else:
+                bucket.direct_value += qty
+            if issue_note:
+                bucket.has_catalog_issue = True
+                bucket.issue_notes.add(issue_note)
+        return buckets
+
+    def _ensure_month_facts(self, *, month_start: date, month_end: date) -> dict[str, object]:
+        existing_rows = FactProduccionDiaria.objects.filter(fecha__gte=month_start, fecha__lte=month_end).count()
+        if existing_rows:
+            return {
+                "status": "existing",
+                "source": "FactProduccionDiaria",
+                "fact_rows": existing_rows,
+                "month_start": month_start.isoformat(),
+                "month_end": month_end.isoformat(),
+            }
+
+        staging_counts = {
+            "point_daily_sales": PointDailySale.objects.filter(
+                sale_date__gte=month_start,
+                sale_date__lte=month_end,
+                receta_id__isnull=False,
+            ).count(),
+            "point_production_lines": PointProductionLine.objects.filter(
+                production_date__gte=month_start,
+                production_date__lte=month_end,
+                receta_id__isnull=False,
+                is_insumo=False,
+            ).count(),
+            "point_waste_lines": PointWasteLine.objects.filter(
+                movement_at__date__gte=month_start,
+                movement_at__date__lte=month_end,
+                receta_id__isnull=False,
+            ).count(),
+        }
+        if not any(staging_counts.values()):
+            return {
+                "status": "missing",
+                "source": "FactProduccionDiaria",
+                "fact_rows": 0,
+                "staging_counts": staging_counts,
+                "month_start": month_start.isoformat(),
+                "month_end": month_end.isoformat(),
+            }
+
+        try:
+            from reportes.analytics_service import rebuild_production_facts, rebuild_sales_facts
+
+            sales_fact_rows = rebuild_sales_facts(start_date=month_start, end_date=month_end)
+            production_fact_rows = rebuild_production_facts(start_date=month_start, end_date=month_end)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "status": "generation_failed",
+                "source": "FactProduccionDiaria",
+                "fact_rows": 0,
+                "staging_counts": staging_counts,
+                "error": str(exc),
+                "month_start": month_start.isoformat(),
+                "month_end": month_end.isoformat(),
+            }
+
+        return {
+            "status": "generated",
+            "source": "FactProduccionDiaria",
+            "sales_fact_rows": sales_fact_rows,
+            "production_fact_rows": production_fact_rows,
+            "staging_counts": staging_counts,
+            "month_start": month_start.isoformat(),
+            "month_end": month_end.isoformat(),
+        }
+
+    def _load_movement_from_production_facts(
+        self,
+        *,
+        month_start: date,
+        month_end: date,
+        field_name: str,
+    ) -> dict[int, _AggregateBucket]:
+        buckets: dict[int, _AggregateBucket] = {}
+        rows = (
+            FactProduccionDiaria.objects.select_related("receta")
+            .filter(
+                fecha__gte=month_start,
+                fecha__lte=month_end,
+                receta__isnull=False,
+                **{f"{field_name}__gt": 0},
+            )
+            .order_by("id")
+        )
+        for row in rows:
+            parent_receta, qty, issue_note, is_derived = self._canonical_recipe_quantity(
+                receta=row.receta,
+                quantity=Decimal(str(getattr(row, field_name) or 0)),
             )
             if parent_receta is None:
                 continue
@@ -1167,6 +1309,8 @@ class ProductMonthClosureService:
             )
         elif mode == "official_monthly_report":
             warnings.append("El cierre usa el reporte oficial mensual agregado de Point.")
+        elif mode == "production_facts":
+            warnings.append("El cierre usa FactProduccionDiaria consolidado desde PostgreSQL ERP.")
 
         return {
             "sales_source_mode": mode,
@@ -1228,6 +1372,8 @@ class ProductMonthClosureService:
             message += " La venta usa reporte oficial mensual de Point."
         elif (sales_meta or {}).get("mode") == "official_point_daily_sales":
             message += " La venta usa PointDailySale oficial por sucursal y dia."
+        elif (sales_meta or {}).get("mode") == "production_facts":
+            message += " La venta usa FactProduccionDiaria consolidado desde PostgreSQL ERP."
         elif (sales_meta or {}).get("mode") == "bridge_history":
             message += " La venta usa VentaHistorica POINT_BRIDGE_SALES."
         closing_inventory = dict(validation.get("closing_inventory") or {})

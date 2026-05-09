@@ -5435,10 +5435,33 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
 
     notes_rows = [row.strip() for row in (closure.notes or "").splitlines() if row.strip()] if closure else []
     opening_meta = (closure.metadata or {}).get("opening_meta", {}) if closure else {}
+    sales_meta = (closure.metadata or {}).get("sales_meta", {}) if closure else {}
+    fact_meta = (closure.metadata or {}).get("fact_meta", {}) if closure else {}
     validation = (closure.metadata or {}).get("validation", {}) if closure else {}
     automation_reviews = list(validation.get("automation_reviews") or []) if closure else []
     unmatched_products = list(opening_meta.get("unmatched_products") or [])[:8]
     lock_event = (closure.metadata or {}).get("lock_event", {}) if closure else {}
+    fact_status = str(fact_meta.get("status") or "").strip()
+    sales_mode = str(sales_meta.get("mode") or "").strip()
+    if fact_status in {"existing", "generated"}:
+        movement_source_label = "FactProduccionDiaria"
+        movement_source_detail = (
+            "Facts ya publicados en PostgreSQL."
+            if fact_status == "existing"
+            else "Facts mensuales generados desde staging PostgreSQL."
+        )
+    elif sales_mode == "official_monthly_report":
+        movement_source_label = "Reporte mensual Point"
+        movement_source_detail = "Fallback agregado usado antes de publicar facts del mes."
+    elif sales_mode == "official_point_daily_sales":
+        movement_source_label = "PointDailySale oficial"
+        movement_source_detail = "Fallback diario oficial por sucursal."
+    elif sales_mode == "bridge_history":
+        movement_source_label = "VentaHistorica"
+        movement_source_detail = "Fallback legacy; requiere validacion manual."
+    else:
+        movement_source_label = "Sin fuente publicada"
+        movement_source_detail = "Construye el cierre para resolver la fuente mensual."
     lock_guard_errors: list[str] = []
     if closure:
         if closure.is_locked:
@@ -5523,6 +5546,10 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         "notes_rows": notes_rows,
         "unmatched_products": unmatched_products,
         "lock_event": lock_event,
+        "sales_meta": sales_meta,
+        "fact_meta": fact_meta,
+        "movement_source_label": movement_source_label,
+        "movement_source_detail": movement_source_detail,
         "lock_guard_errors": lock_guard_errors,
         "validation": validation,
         "automation_reviews": automation_reviews,

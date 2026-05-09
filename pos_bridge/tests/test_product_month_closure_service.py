@@ -22,6 +22,7 @@ from recetas.models import (
     RecetaPresentacionDerivada,
     VentaHistorica,
 )
+from reportes.models import FactProduccionDiaria
 from pos_bridge.models.movements import PointProductionLine
 
 
@@ -33,11 +34,13 @@ class ProductMonthClosureServiceTests(TestCase):
             codigo="CEDIS",
             defaults={"nombre": "CEDIS", "activa": True},
         )
-        self.point_branch = PointBranch.objects.create(
+        self.point_branch, _ = PointBranch.objects.get_or_create(
             external_id="CEDIS",
-            name="CEDIS",
-            erp_branch=self.sucursal,
+            defaults={"name": "CEDIS", "erp_branch": self.sucursal},
         )
+        if self.point_branch.erp_branch_id != self.sucursal.id:
+            self.point_branch.erp_branch = self.sucursal
+            self.point_branch.save(update_fields=["erp_branch"])
         self.sync_job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_INVENTORY,
             status=PointSyncJob.STATUS_SUCCESS,
@@ -61,6 +64,114 @@ class ProductMonthClosureServiceTests(TestCase):
             nombre_derivado=self.derived.nombre,
             unidades_por_padre=Decimal("10"),
         )
+
+    def test_build_prefers_production_facts_when_available(self):
+        previous = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 8, 1),
+            month_end=date(2025, 8, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_BOOTSTRAP_SEED,
+            opening_reference_date=date(2025, 8, 31),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=previous,
+            receta_padre=self.parent,
+            inventario_final_teorico=Decimal("20"),
+        )
+        FactProduccionDiaria.objects.create(
+            fecha=date(2025, 9, 10),
+            sucursal=self.sucursal,
+            receta=self.parent,
+            producido=Decimal("12"),
+            vendido=Decimal("8"),
+            merma=Decimal("2"),
+        )
+        VentaHistorica.objects.create(
+            receta=self.parent,
+            sucursal=self.sucursal,
+            fecha=date(2025, 9, 10),
+            cantidad=Decimal("999"),
+            fuente="POINT_BRIDGE_SALES",
+        )
+
+        closure = self.service.build(month="2025-09")
+
+        line = closure.lines.get(receta_padre=self.parent)
+        self.assertEqual(line.produccion_mes, Decimal("12"))
+        self.assertEqual(line.venta_total_equivalente, Decimal("8"))
+        self.assertEqual(line.merma_total_equivalente, Decimal("2"))
+        self.assertEqual(line.inventario_final_teorico, Decimal("22"))
+        self.assertEqual((closure.metadata or {}).get("fact_meta", {}).get("status"), "existing")
+        self.assertEqual((closure.metadata or {}).get("sales_meta", {}).get("mode"), "production_facts")
+
+    def test_build_generates_production_facts_from_staging_when_missing(self):
+        previous = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 3, 1),
+            month_end=date(2026, 3, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_BOOTSTRAP_SEED,
+            opening_reference_date=date(2026, 3, 31),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=previous,
+            receta_padre=self.parent,
+            inventario_final_teorico=Decimal("20"),
+        )
+        product = PointProduct.objects.create(
+            external_id="parent-facts-1",
+            sku=self.parent.codigo_point,
+            name=self.parent.nombre,
+            category="Pasteles",
+        )
+        PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=product,
+            receta=self.parent,
+            sync_job=self.sync_job,
+            sale_date=date(2026, 4, 10),
+            quantity=Decimal("8"),
+            tickets=0,
+            gross_amount=Decimal("800"),
+            discount_amount=Decimal("0"),
+            total_amount=Decimal("800"),
+            tax_amount=Decimal("0"),
+            net_amount=Decimal("800"),
+            source_endpoint="/Report/PrintReportes?idreporte=3",
+        )
+        PointProductionLine.objects.create(
+            branch=self.point_branch,
+            erp_branch=self.sucursal,
+            receta=self.parent,
+            production_external_id="prod-facts-1",
+            detail_external_id="detail-facts-1",
+            source_hash="prod-facts-hash-1",
+            production_date=date(2026, 4, 11),
+            item_name=self.parent.nombre,
+            item_code=self.parent.codigo_point,
+            produced_quantity=Decimal("12"),
+        )
+        PointWasteLine.objects.create(
+            branch=self.point_branch,
+            erp_branch=self.sucursal,
+            receta=self.parent,
+            sync_job=self.sync_job,
+            movement_external_id="waste-facts-1",
+            source_hash="waste-facts-hash-1",
+            movement_at=timezone.make_aware(datetime(2026, 4, 12, 12, 0)),
+            item_name=self.parent.nombre,
+            item_code=self.parent.codigo_point,
+            quantity=Decimal("2"),
+        )
+
+        closure = self.service.build(month="2026-04")
+
+        line = closure.lines.get(receta_padre=self.parent)
+        self.assertEqual(line.produccion_mes, Decimal("12"))
+        self.assertEqual(line.venta_total_equivalente, Decimal("8"))
+        self.assertEqual(line.merma_total_equivalente, Decimal("2"))
+        self.assertEqual(line.inventario_final_teorico, Decimal("22"))
+        self.assertEqual((closure.metadata or {}).get("fact_meta", {}).get("status"), "generated")
+        self.assertTrue(FactProduccionDiaria.objects.filter(fecha=date(2026, 4, 10), receta=self.parent).exists())
 
     def test_build_uses_previous_closure_and_rolls_slice_sales_and_waste_to_parent(self):
         previous = ProductoMonthClosure.objects.create(
