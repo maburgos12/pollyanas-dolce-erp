@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Max, Q
 from django.utils import timezone
 
 from core.models import sucursales_operativas
-from pos_bridge.models import PointSyncJob, PointTransferLine
+from pos_bridge.models import PointInventorySnapshot, PointSyncJob, PointTransferLine
 from pos_bridge.services.open_transfer_sync_service import (
     OpenTransferSyncService,
     resolve_requesting_erp_branch,
@@ -51,17 +52,23 @@ class ConsolidadoNocturnoCedisService:
 
         inventory_sync_job = None
         inventory_sync_error = ""
+        inventory_sync_skipped_reason = ""
         sync_job = None
         if sincronizar_point:
             if sincronizar_inventario_cedis:
-                try:
-                    inventory_sync_job = self._sincronizar_inventario_cedis(usuario=usuario)
-                except Exception as exc:  # noqa: BLE001 - no debe bloquear solicitudes de sucursales
-                    inventory_sync_error = str(exc)
-                    logger.exception(
-                        "No se pudo sincronizar inventario CEDIS antes del consolidado %s; se continuará con solicitudes.",
-                        fecha_operacion,
-                    )
+                freshness = self._cedis_inventory_freshness()
+                if freshness["fresh"]:
+                    inventory_sync_skipped_reason = freshness["reason"]
+                else:
+                    try:
+                        inventory_sync_job = self._sincronizar_inventario_cedis(usuario=usuario)
+                    except Exception as exc:  # noqa: BLE001 - no debe bloquear solicitudes de sucursales
+                        inventory_sync_error = str(exc)
+                        logger.warning(
+                            "No se pudo sincronizar inventario CEDIS antes del consolidado %s; se continuará con solicitudes: %s",
+                            fecha_operacion,
+                            exc,
+                        )
             sync_job = self.open_transfer_sync_service.sync_open_transfers(
                 fecha=fecha_operacion,
                 triggered_by=usuario,
@@ -92,6 +99,7 @@ class ConsolidadoNocturnoCedisService:
                     "metadata": {
                         "inventory_sync_job_id": inventory_sync_job.id if inventory_sync_job else None,
                         "inventory_sync_error": inventory_sync_error,
+                        "inventory_sync_skipped_reason": inventory_sync_skipped_reason,
                         "sync_job_id": sync_job.id if sync_job else None,
                         "coverage_branch_ids": cobertura["branch_ids"],
                         "source_order": [
@@ -106,6 +114,28 @@ class ConsolidadoNocturnoCedisService:
             )
             self._marcar_plan_automatico(plan=plan, total_plan=total_plan)
             return consolidado
+
+    def _cedis_inventory_freshness(self) -> dict[str, object]:
+        freshness_minutes = int(getattr(settings, "CONSOLIDADO_CEDIS_INVENTORY_FRESHNESS_MINUTES", 180))
+        cutoff = timezone.now() - timedelta(minutes=freshness_minutes)
+        latest = (
+            PointInventorySnapshot.objects.filter(
+                Q(branch__name__iexact="CEDIS") | Q(branch__external_id__iexact="8")
+            )
+            .aggregate(captured_at=Max("captured_at"))
+            .get("captured_at")
+        )
+        if latest and latest >= cutoff:
+            return {
+                "fresh": True,
+                "latest": latest,
+                "reason": f"snapshot_cedis_fresco:{latest.isoformat()}",
+            }
+        return {
+            "fresh": False,
+            "latest": latest,
+            "reason": "snapshot_cedis_vencido_o_inexistente",
+        }
 
     def _sincronizar_inventario_cedis(self, *, usuario=None) -> PointSyncJob:
         sync_job = run_inventory_sync(
