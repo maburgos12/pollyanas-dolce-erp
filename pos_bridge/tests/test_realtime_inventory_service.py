@@ -37,6 +37,13 @@ class RealtimeInventoryServiceTests(SimpleTestCase):
         self.assertEqual(jobs, [])
         self.assertEqual(service.sync_service.calls, [])
 
+    def test_run_sync_skips_during_cedis_automation_guard(self):
+        service = RealtimeInventoryService(sync_service=FakeSyncService())
+        with patch("pos_bridge.services.realtime_inventory_service.is_within_cedis_automation_guard", return_value=True):
+            jobs = service.run_sync(force=False)
+        self.assertEqual(jobs, [])
+        self.assertEqual(service.sync_service.calls, [])
+
     def test_run_sync_iterates_configured_branches(self):
         fake_sync = FakeSyncService()
         with patch.dict(os.environ, {"POS_BRIDGE_REALTIME_BRANCHES": "MATRIZ,COLOSIO"}, clear=False):

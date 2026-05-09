@@ -15,6 +15,8 @@ logger = get_pos_bridge_logger()
 
 OPERATION_START = time(7, 0)
 OPERATION_END = time(22, 0)
+CEDIS_AUTOMATION_GUARD_START = time(21, 55)
+CEDIS_AUTOMATION_GUARD_END = time(22, 45)
 
 
 def _env_list(name: str) -> list[str]:
@@ -25,6 +27,11 @@ def _env_list(name: str) -> list[str]:
 def is_within_operation_hours() -> bool:
     now_local = timezone.localtime(timezone.now()).time()
     return OPERATION_START <= now_local <= OPERATION_END
+
+
+def is_within_cedis_automation_guard() -> bool:
+    now_local = timezone.localtime(timezone.now()).time()
+    return CEDIS_AUTOMATION_GUARD_START <= now_local <= CEDIS_AUTOMATION_GUARD_END
 
 
 class RealtimeInventoryService:
@@ -41,6 +48,9 @@ class RealtimeInventoryService:
         self.realtime_branches = _env_list("POS_BRIDGE_REALTIME_BRANCHES")
 
     def should_run(self) -> bool:
+        if is_within_cedis_automation_guard():
+            logger.info("Ventana CEDIS nocturna activa, se omite sync realtime de inventario.")
+            return False
         if not is_within_operation_hours():
             logger.info("Fuera de horario operativo, se omite sync realtime de inventario.")
             return False
