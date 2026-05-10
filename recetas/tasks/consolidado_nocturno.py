@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from io import BytesIO
 from datetime import date, timedelta
 
@@ -63,6 +64,21 @@ def _consolidado_cedis_cc(recipients: list[str]) -> list[str]:
         if (email or "").strip().lower() not in recipient_set
     ]
     return _dedupe_emails(cc)
+
+
+def _retrieve_resend_last_event(email_id: str) -> str:
+    if not email_id:
+        return ""
+    last_error = None
+    for attempt in range(5):
+        try:
+            resend_status = retrieve_resend_email(email_id)
+            return str(resend_status.get("last_event") or "")
+        except Exception as exc:  # noqa: BLE001 - Resend puede tardar segundos en indexar el correo
+            last_error = exc
+            if attempt < 4:
+                time.sleep(3)
+    raise RuntimeError(str(last_error))
 
 
 def enviar_solicitudes_sucursal_cedis(
@@ -133,8 +149,7 @@ def enviar_solicitudes_sucursal_cedis(
         resend_last_event = ""
         if resend_email_id:
             try:
-                resend_status = retrieve_resend_email(resend_email_id)
-                resend_last_event = str(resend_status.get("last_event") or "")
+                resend_last_event = _retrieve_resend_last_event(resend_email_id)
             except Exception as exc:  # noqa: BLE001 - no bloquea el reporte ya aceptado por Resend
                 logger.warning(
                     "No se pudo verificar estatus Resend del consolidado CEDIS %s para %s: %s",
