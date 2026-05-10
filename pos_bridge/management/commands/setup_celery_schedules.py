@@ -47,6 +47,25 @@ class Command(BaseCommand):
             },
         )
 
+        intraday_sales_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="8-22",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="pos_bridge: ventas intradia actual",
+            defaults={
+                "task": "pos_bridge.daily_sales_sync",
+                "crontab": intraday_sales_cron,
+                "interval": None,
+                "kwargs": json.dumps({"days": 1, "lag_days": 0}),
+                "enabled": True,
+            },
+        )
+
         monthly_closure_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
             hour="5",
