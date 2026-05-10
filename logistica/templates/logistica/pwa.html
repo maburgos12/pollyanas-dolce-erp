@@ -1480,7 +1480,7 @@
                 <h3>${escapeHtml(reporte.tipo_display || reporte.tipo)} · ${escapeHtml(reporte.estatus_display || reporte.estatus)}</h3>
                 <p class="meta">ID ${escapeHtml(reporte.id)} · ${escapeHtml(reporte.repartidor_nombre || "")} · ${formatDate(reporte.fecha_reporte)}</p>
                 <p>${escapeHtml((reporte.descripcion || "").slice(0, 140))}${(reporte.descripcion || "").length > 140 ? "..." : ""}</p>
-                <p class="muted">Reafirmado ${escapeHtml(reporte.reafirmaciones_count || 0)} vez${Number(reporte.reafirmaciones_count || 0) === 1 ? "" : "es"}.</p>
+                <p class="muted">Reafirmado ${escapeHtml(reporte.reafirmaciones_count || 0)} ${Number(reporte.reafirmaciones_count || 0) === 1 ? "vez" : "veces"}.</p>
                 <button class="secondary-btn" type="button" onclick="reafirmarReporte(${Number(reporte.id)})">Volver a reportar</button>
               </article>
             `).join("")}
