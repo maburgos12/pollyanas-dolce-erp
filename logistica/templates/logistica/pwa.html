@@ -762,6 +762,53 @@
         border-color: var(--success);
         color: var(--success);
       }
+      .weekly-summary,
+      .duplicate-report-card {
+        border: 1px solid var(--border);
+        background: var(--surface);
+        border-radius: 14px;
+        padding: 14px;
+        margin: 12px 0;
+      }
+      .weekly-summary.verde {
+        border-color: var(--success);
+      }
+      .weekly-summary.amarillo {
+        border-color: var(--gold);
+      }
+      .weekly-summary.rojo {
+        border-color: var(--danger);
+      }
+      .weekly-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin: 12px 0;
+      }
+      .weekly-metric {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        color: var(--text);
+      }
+      .weekly-metric strong {
+        display: block;
+        color: var(--gold);
+        font-size: 20px;
+      }
+      .duplicate-report-card {
+        border-color: #C9A84C66;
+      }
+      .duplicate-report-card h3 {
+        margin: 0 0 6px;
+        color: var(--gold);
+        font-size: 16px;
+      }
+      .duplicate-report-card .meta {
+        color: var(--text-muted);
+        font-size: 12px;
+        margin: 0 0 8px;
+      }
     </style>
   </head>
   <body>
@@ -777,6 +824,9 @@
         perfil: null,
         pantallaActual: "login",
         reportes: [],
+        reportesAbiertosUnidad: [],
+        reportesAbiertosLoading: false,
+        resumenSemanal: null,
         bitacoras: [],
         bitacoraSalida: null,
         unidades: [],
@@ -793,7 +843,9 @@
           longitud: "",
           geoStatus: "idle",
           geoLabel: "",
-          fotoError: ""
+          fotoError: "",
+          reportesAbiertos: [],
+          reportesAbiertosLoading: false
         }
       };
 
@@ -942,6 +994,13 @@
 
       function todayIso() {
         return new Date().toISOString().slice(0, 10);
+      }
+
+      function localDateKey(date = new Date()) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
       }
 
       function isGeoReady(draft) {
@@ -1246,8 +1305,46 @@
         return state.bitacoraSalida;
       }
 
+      async function loadResumenSemanal() {
+        const today = new Date();
+        if (today.getDay() !== 1) return null;
+        const mondayKey = localDateKey(today);
+        if (localStorage.getItem(`pd_resumen_semanal_visto_${mondayKey}`)) return null;
+        const response = await apiFetch("/resumen-semanal/");
+        state.resumenSemanal = response.ok ? await response.json() : null;
+        return state.resumenSemanal;
+      }
+
+      function dismissResumenSemanal() {
+        const mondayKey = localDateKey();
+        localStorage.setItem(`pd_resumen_semanal_visto_${mondayKey}`, "true");
+        state.resumenSemanal = null;
+        renderDashboard();
+      }
+
+      function resumenSemanalCard() {
+        const resumen = state.resumenSemanal;
+        if (!resumen) return "";
+        const m = resumen.metricas || {};
+        return `
+          <section class="weekly-summary ${escapeHtml(resumen.semaforo || "amarillo")}">
+            <h2 style="margin:0;color:var(--gold);">Resumen de tu semana</h2>
+            <p class="muted">${escapeHtml(resumen.periodo_inicio || "")} al ${escapeHtml(resumen.periodo_fin || "")}</p>
+            <p>${escapeHtml(resumen.mensaje || "")}</p>
+            <div class="weekly-grid">
+              <div class="weekly-metric"><strong>${escapeHtml(m.turnos_cerrados ?? 0)}/${escapeHtml(m.turnos_total ?? 0)}</strong>Turnos cerrados</div>
+              <div class="weekly-metric"><strong>${escapeHtml(m.inspecciones_diarias ?? 0)}</strong>Inspecciones diarias</div>
+              <div class="weekly-metric"><strong>${escapeHtml(m.reportes_creados ?? 0)}</strong>Reportes nuevos</div>
+              <div class="weekly-metric"><strong>${escapeHtml(m.reportes_reafirmados ?? 0)}</strong>Reportes reafirmados</div>
+            </div>
+            <button class="secondary-btn" type="button" onclick="dismissResumenSemanal()">Entendido</button>
+          </section>
+        `;
+      }
+
       async function renderDashboard() {
         await loadReportes();
+        await loadResumenSemanal();
         let turnoActivo = null;
         try {
           turnoActivo = await loadTurnoActivo();
@@ -1259,6 +1356,7 @@
           ? `<span class="badge turno abierto">ABIERTO</span>`
           : `<span class="badge turno">Sin turno</span>`;
         render(shell(`
+          ${resumenSemanalCard()}
           <p class="unit-line">Selecciona la unidad al iniciar cada captura.</p>
           <button class="dashboard-help" onclick="showScreen('ayuda')" type="button">? Ayuda rapida</button>
           <div class="dash-grid">
@@ -1337,6 +1435,8 @@
           geoStatus: "idle",
           geoLabel: "",
           fotoError: "",
+          reportesAbiertos: [],
+          reportesAbiertosLoading: false,
         };
         showScreen("nuevo_reporte");
       }
@@ -1350,6 +1450,52 @@
         return unidad ? `${unidad.codigo} · ${unidad.descripcion || ""}` : "-";
       }
 
+      async function cargarReportesAbiertosUnidad() {
+        const draft = state.reporteDraft;
+        if (!draft?.unidad) {
+          draft.reportesAbiertos = [];
+          draft.reportesAbiertosLoading = false;
+          return [];
+        }
+        draft.reportesAbiertosLoading = true;
+        const tipoParam = draft.tipo ? `&tipo=${encodeURIComponent(draft.tipo)}` : "";
+        const response = await apiFetch(`/reportes/abiertos-unidad/?unidad_id=${encodeURIComponent(draft.unidad)}${tipoParam}`);
+        draft.reportesAbiertosLoading = false;
+        draft.reportesAbiertos = response.ok ? await response.json() : [];
+        return draft.reportesAbiertos;
+      }
+
+      function reportesAbiertosUnidadHtml(draft) {
+        if (!draft.unidad) return "";
+        if (draft.reportesAbiertosLoading) return `<p class="unit-line">Revisando reportes abiertos de esta unidad...</p>`;
+        if (!draft.reportesAbiertos?.length) {
+          return `<p class="muted">No hay reportes abiertos ${draft.tipo ? "de este tipo " : ""}para esta unidad. Si es algo nuevo, continúa.</p>`;
+        }
+        return `
+          <section class="card report-card">
+            <h2 style="color:var(--gold);margin-top:0;">Reportes abiertos de esta unidad</h2>
+            <p class="muted">Si tu problema ya está aquí, usa “Volver a reportar” para insistir sin crear un ticket duplicado.</p>
+            ${draft.reportesAbiertos.map((reporte) => `
+              <article class="duplicate-report-card">
+                <h3>${escapeHtml(reporte.tipo_display || reporte.tipo)} · ${escapeHtml(reporte.estatus_display || reporte.estatus)}</h3>
+                <p class="meta">ID ${escapeHtml(reporte.id)} · ${escapeHtml(reporte.repartidor_nombre || "")} · ${formatDate(reporte.fecha_reporte)}</p>
+                <p>${escapeHtml((reporte.descripcion || "").slice(0, 140))}${(reporte.descripcion || "").length > 140 ? "..." : ""}</p>
+                <p class="muted">Reafirmado ${escapeHtml(reporte.reafirmaciones_count || 0)} vez${Number(reporte.reafirmaciones_count || 0) === 1 ? "" : "es"}.</p>
+                <button class="secondary-btn" type="button" onclick="reafirmarReporte(${Number(reporte.id)})">Volver a reportar</button>
+              </article>
+            `).join("")}
+          </section>
+        `;
+      }
+
+      async function seleccionarUnidadReporte(value) {
+        state.reporteDraft.unidad = value;
+        state.reporteDraft.reportesAbiertos = [];
+        renderNuevoReporte();
+        await cargarReportesAbiertosUnidad();
+        renderNuevoReporte();
+      }
+
       async function renderNuevoReporte(error = "") {
         const draft = state.reporteDraft;
         let body = "";
@@ -1360,7 +1506,7 @@
             ${progressDots(1)}
             <div class="field">
               <label for="unidad_reporte">Unidad que vas a usar</label>
-              <select id="unidad_reporte" required onchange="state.reporteDraft.unidad = this.value; renderNuevoReporte()">
+              <select id="unidad_reporte" required onchange="seleccionarUnidadReporte(this.value)">
                 <option value="">Selecciona unidad</option>
                 ${state.unidades.map((unidad) => `<option value="${unidad.id}" ${String(draft.unidad) === String(unidad.id) ? "selected" : ""}>${escapeHtml(unidad.codigo)} · ${escapeHtml(unidad.descripcion || "")}</option>`).join("")}
               </select>
@@ -1372,6 +1518,7 @@
                 </button>
               `).join("")}
             </div>
+            ${reportesAbiertosUnidadHtml(draft)}
             <div class="actions">
               <button class="secondary-btn" onclick="showScreen('dashboard')">Cancelar</button>
               <button class="primary-btn" onclick="nextReporteStep()" ${draft.unidad && draft.tipo ? "" : "disabled"}>Siguiente</button>
@@ -1438,6 +1585,9 @@
         state.reporteDraft.tipo = value;
         state.reporteDraft.tipoLabel = label;
         renderNuevoReporte();
+        if (state.reporteDraft.unidad) {
+          cargarReportesAbiertosUnidad().then(() => renderNuevoReporte());
+        }
       }
 
       function selectSeveridad(value) {
@@ -1494,6 +1644,26 @@
             <h1 class="screen-title">Reporte enviado</h1>
             <p class="unit-line">✅ Reporte enviado · ID: ${escapeHtml(creado.id || "-")}</p>
             <p class="muted">Compras recibió el ticket y dará seguimiento.</p>
+            <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
+          </section>
+        `));
+      }
+
+      async function reafirmarReporte(reporteId) {
+        const payload = new FormData();
+        payload.append("comentario", "Reafirmado desde PWA por repartidor.");
+        const response = await apiFetch(`/reportes/${reporteId}/reafirmar/`, {
+          method: "POST",
+          body: payload
+        });
+        if (!response.ok) return renderNuevoReporte("No se pudo reafirmar el reporte. Intenta de nuevo.");
+        const data = await response.json();
+        render(shell(`
+          <section class="confirm">
+            <div class="confirm-mark">✅</div>
+            <h1 class="screen-title">Reporte reafirmado</h1>
+            <p class="unit-line">${escapeHtml(data.mensaje || "Se avisó nuevamente sobre este ticket.")}</p>
+            <p class="muted">No se creó un ticket duplicado. El responsable verá que este reporte sigue pendiente.</p>
             <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
           </section>
         `));

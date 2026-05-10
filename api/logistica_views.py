@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
@@ -18,7 +19,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from core.access import can_manage_logistica, can_view_logistica
 from core.audit import log_event
 from crm.models import PedidoCliente
-from logistica.models import BitacoraRepartidor, BitacoraSalidaLlegada, EntregaRuta, InspeccionDiaria, InspeccionVehiculo, Repartidor, ReporteUnidad, RutaEntrega, Unidad
+from logistica.models import BitacoraRepartidor, BitacoraSalidaLlegada, EntregaRuta, InspeccionDiaria, InspeccionVehiculo, Repartidor, ReporteUnidad, ReporteUnidadReafirmacion, RutaEntrega, Unidad
 
 from .logistica_serializers import (
     LogisticaBitacoraSerializer,
@@ -33,6 +34,7 @@ from .logistica_serializers import (
     LogisticaRepartidorSerializer,
     LogisticaReporteCreateSerializer,
     LogisticaReportePatchSerializer,
+    LogisticaReporteReafirmacionSerializer,
     LogisticaReporteSerializer,
     LogisticaRutaSerializer,
     LogisticaUnidadSerializer,
@@ -117,6 +119,13 @@ def _licencia_turno_bloqueo(repartidor: Repartidor) -> dict | None:
     return None
 
 
+def _reportes_with_reafirmaciones(qs):
+    return qs.annotate(
+        reafirmaciones_count=Count("reafirmaciones", distinct=True),
+        ultima_reafirmacion=Max("reafirmaciones__creado_en"),
+    )
+
+
 class LogisticaTokenView(TokenObtainPairView):
     parser_classes = [JSONParser, FormParser]
 
@@ -136,11 +145,68 @@ class LogisticaMiPerfilView(_LogisticaBaseView):
             "ultimos_servicios": [],
         }
         if repartidor and repartidor.unidad_asignada_id:
-            servicios = ReporteUnidad.objects.filter(unidad=repartidor.unidad_asignada).exclude(
+            servicios = _reportes_with_reafirmaciones(ReporteUnidad.objects.filter(unidad=repartidor.unidad_asignada)).exclude(
                 estatus=ReporteUnidad.ESTATUS_ABIERTO
             )[:10]
             data["ultimos_servicios"] = LogisticaReporteSerializer(servicios, many=True).data
         return Response(data, status=status.HTTP_200_OK)
+
+
+class LogisticaResumenSemanalView(_LogisticaBaseView):
+    def get(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        today = timezone.localdate()
+        current_week_start = today - timedelta(days=today.weekday())
+        start = current_week_start - timedelta(days=7)
+        end = current_week_start
+        bitacoras = BitacoraSalidaLlegada.objects.filter(repartidor=repartidor, hora_salida__date__gte=start, hora_salida__date__lt=end)
+        inspecciones = InspeccionDiaria.objects.filter(repartidor=repartidor, fecha__gte=start, fecha__lt=end)
+        reportes = ReporteUnidad.objects.filter(repartidor=repartidor, fecha_reporte__date__gte=start, fecha_reporte__date__lt=end)
+        reafirmaciones = ReporteUnidadReafirmacion.objects.filter(repartidor=repartidor, creado_en__date__gte=start, creado_en__date__lt=end)
+
+        turnos_total = bitacoras.count()
+        turnos_cerrados = bitacoras.filter(cerrada=True).count()
+        turnos_abiertos = bitacoras.filter(cerrada=False).count()
+        fotos_salida = bitacoras.exclude(foto_tablero_salida="").count()
+        fotos_llegada = bitacoras.exclude(foto_tablero_llegada="").count()
+        inspecciones_total = inspecciones.count()
+        inspecciones_fallas = inspecciones.filter(tiene_fallas=True).count()
+        reportes_total = reportes.count()
+        reafirmaciones_total = reafirmaciones.count()
+
+        if turnos_abiertos:
+            semaforo = "rojo"
+            mensaje = "Tienes turnos sin cerrar de la semana pasada. Regulariza el cierre antes de iniciar nuevos turnos."
+        elif turnos_total and turnos_cerrados == turnos_total and inspecciones_total >= turnos_total:
+            semaforo = "verde"
+            mensaje = "Buen cierre semanal: turnos cerrados e inspecciones diarias registradas."
+        else:
+            semaforo = "amarillo"
+            mensaje = "Semana con datos incompletos. Revisa que cada turno tenga inspección diaria y cierre completo."
+
+        return Response(
+            {
+                "periodo_inicio": start.isoformat(),
+                "periodo_fin": (end - timedelta(days=1)).isoformat(),
+                "semaforo": semaforo,
+                "mensaje": mensaje,
+                "metricas": {
+                    "turnos_total": turnos_total,
+                    "turnos_cerrados": turnos_cerrados,
+                    "turnos_abiertos": turnos_abiertos,
+                    "fotos_salida": fotos_salida,
+                    "fotos_llegada": fotos_llegada,
+                    "inspecciones_diarias": inspecciones_total,
+                    "inspecciones_con_fallas": inspecciones_fallas,
+                    "reportes_creados": reportes_total,
+                    "reportes_reafirmados": reafirmaciones_total,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class LogisticaReporteCreateView(_LogisticaBaseView):
@@ -164,12 +230,68 @@ class LogisticaReporteCreateView(_LogisticaBaseView):
         return Response(LogisticaReporteSerializer(reporte).data, status=status.HTTP_201_CREATED)
 
 
+class LogisticaReportesUnidadAbiertosView(_LogisticaBaseView):
+    def get(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+        unidad_id = request.query_params.get("unidad_id")
+        if not unidad_id:
+            return Response({"detail": "unidad_id es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+        reportes = _reportes_with_reafirmaciones(
+            ReporteUnidad.objects.filter(unidad_id=unidad_id)
+            .exclude(estatus=ReporteUnidad.ESTATUS_CERRADO)
+            .select_related("unidad", "repartidor__user", "asignado_a")
+        )
+        tipo = (request.query_params.get("tipo") or "").strip()
+        if tipo:
+            reportes = reportes.filter(tipo=tipo)
+        return Response(LogisticaReporteSerializer(reportes[:20], many=True).data, status=status.HTTP_200_OK)
+
+
+class LogisticaReporteReafirmarView(_LogisticaBaseView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request, reporte_id: int):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _is_repartidor(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden reafirmar reportes."}, status=status.HTTP_403_FORBIDDEN)
+        reporte = get_object_or_404(
+            ReporteUnidad.objects.select_related("unidad", "repartidor__user", "asignado_a").exclude(estatus=ReporteUnidad.ESTATUS_CERRADO),
+            pk=reporte_id,
+        )
+        reafirmacion = ReporteUnidadReafirmacion.objects.create(
+            reporte=reporte,
+            repartidor=repartidor,
+            comentario=(request.data.get("comentario") or "").strip(),
+            latitud=request.data.get("latitud") or None,
+            longitud=request.data.get("longitud") or None,
+            ip_registro=request.META.get("REMOTE_ADDR"),
+        )
+        log_event(
+            request.user,
+            "CREATE",
+            "logistica.ReporteUnidadReafirmacion",
+            str(reafirmacion.id),
+            {"reporte": reporte.id, "unidad": reporte.unidad.codigo},
+        )
+        reporte = _reportes_with_reafirmaciones(ReporteUnidad.objects.filter(pk=reporte.pk).select_related("unidad", "repartidor__user", "asignado_a")).first()
+        return Response(
+            {
+                "reafirmacion": LogisticaReporteReafirmacionSerializer(reafirmacion).data,
+                "reporte": LogisticaReporteSerializer(reporte).data,
+                "mensaje": f"Reporte reafirmado. Ya van {reporte.reafirmaciones_count} avisos sobre este ticket.",
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class LogisticaMisReportesView(_LogisticaBaseView):
     def get(self, request):
         repartidor = _get_repartidor_for_user(request.user)
         if not repartidor:
             return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
-        reportes = ReporteUnidad.objects.filter(repartidor=repartidor).select_related("unidad", "repartidor__user", "asignado_a")
+        reportes = _reportes_with_reafirmaciones(ReporteUnidad.objects.filter(repartidor=repartidor).select_related("unidad", "repartidor__user", "asignado_a"))
         return Response(LogisticaReporteSerializer(reportes, many=True).data, status=status.HTTP_200_OK)
 
 
@@ -178,7 +300,7 @@ class LogisticaTodosReportesView(_LogisticaBaseView):
         if not _can_view_all_reportes(request.user):
             return Response({"detail": "No tienes permisos para consultar todos los reportes."}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = ReporteUnidad.objects.select_related("unidad", "repartidor__user", "asignado_a")
+        qs = _reportes_with_reafirmaciones(ReporteUnidad.objects.select_related("unidad", "repartidor__user", "asignado_a"))
         estatus_filtro = (request.query_params.get("estatus") or "").strip()
         severidad = (request.query_params.get("severidad") or "").strip()
         if estatus_filtro:
