@@ -262,6 +262,28 @@ class ReporteUnidad(models.Model):
         return f"{self.unidad.codigo} · {self.get_tipo_display()} · {self.get_estatus_display()}"
 
 
+class ReporteUnidadReafirmacion(models.Model):
+    reporte = models.ForeignKey(ReporteUnidad, on_delete=models.CASCADE, related_name="reafirmaciones")
+    repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT, related_name="reafirmaciones_reporte")
+    comentario = models.TextField(blank=True)
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    ip_registro = models.GenericIPAddressField(null=True, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
+        verbose_name = "Reafirmación de reporte"
+        verbose_name_plural = "Reafirmaciones de reportes"
+        indexes = [
+            models.Index(fields=["reporte", "creado_en"]),
+            models.Index(fields=["repartidor", "creado_en"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Reporte {self.reporte_id} reafirmado por {self.repartidor}"
+
+
 class BitacoraRepartidor(models.Model):
     repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT, related_name="bitacoras")
     fecha = models.DateField(default=timezone.localdate)

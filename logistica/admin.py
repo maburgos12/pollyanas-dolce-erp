@@ -12,6 +12,7 @@ from .models import (
     ReparacionUnidad,
     Repartidor,
     ReporteUnidad,
+    ReporteUnidadReafirmacion,
     RutaEntrega,
     ServicioRealizadoUnidad,
     TipoServicioUnidad,
@@ -121,6 +122,15 @@ class ReporteUnidadAdmin(admin.ModelAdmin):
     )
     readonly_fields = ("fecha_reporte", "actualizado_en")
     autocomplete_fields = ("repartidor", "unidad", "asignado_a")
+
+
+@admin.register(ReporteUnidadReafirmacion)
+class ReporteUnidadReafirmacionAdmin(admin.ModelAdmin):
+    list_display = ("reporte", "repartidor", "creado_en", "ip_registro")
+    list_filter = ("creado_en", "reporte__unidad", "repartidor__sucursal")
+    search_fields = ("reporte__unidad__codigo", "repartidor__user__username", "comentario", "ip_registro")
+    readonly_fields = ("creado_en", "ip_registro")
+    autocomplete_fields = ("reporte", "repartidor")
 
 
 @admin.register(BitacoraRepartidor)

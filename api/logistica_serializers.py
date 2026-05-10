@@ -12,6 +12,7 @@ from logistica.models import (
     InspeccionVehiculo,
     Repartidor,
     ReporteUnidad,
+    ReporteUnidadReafirmacion,
     RutaEntrega,
     Unidad,
 )
@@ -173,6 +174,8 @@ class LogisticaReporteSerializer(serializers.ModelSerializer):
     severidad_display = serializers.CharField(source="get_severidad_display", read_only=True)
     estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
     asignado_a_nombre = serializers.SerializerMethodField()
+    reafirmaciones_count = serializers.SerializerMethodField()
+    ultima_reafirmacion = serializers.SerializerMethodField()
 
     class Meta:
         model = ReporteUnidad
@@ -203,6 +206,8 @@ class LogisticaReporteSerializer(serializers.ModelSerializer):
             "notas_compras",
             "notificacion_escalada",
             "actualizado_en",
+            "reafirmaciones_count",
+            "ultima_reafirmacion",
         ]
         read_only_fields = [
             "id",
@@ -217,6 +222,8 @@ class LogisticaReporteSerializer(serializers.ModelSerializer):
             "asignado_a_nombre",
             "notificacion_escalada",
             "actualizado_en",
+            "reafirmaciones_count",
+            "ultima_reafirmacion",
         ]
 
     def get_repartidor_nombre(self, obj):
@@ -226,6 +233,17 @@ class LogisticaReporteSerializer(serializers.ModelSerializer):
         if not obj.asignado_a_id:
             return ""
         return obj.asignado_a.get_full_name() or obj.asignado_a.username
+
+    def get_reafirmaciones_count(self, obj):
+        if hasattr(obj, "reafirmaciones_count"):
+            return obj.reafirmaciones_count
+        return obj.reafirmaciones.count()
+
+    def get_ultima_reafirmacion(self, obj):
+        if hasattr(obj, "ultima_reafirmacion"):
+            return obj.ultima_reafirmacion
+        ultima = obj.reafirmaciones.order_by("-creado_en").values_list("creado_en", flat=True).first()
+        return ultima
 
 
 class LogisticaReporteCreateSerializer(serializers.ModelSerializer):
@@ -239,6 +257,27 @@ class LogisticaReporteCreateSerializer(serializers.ModelSerializer):
         if not unidad or not unidad.activa:
             raise serializers.ValidationError("Selecciona una unidad activa para levantar reportes.")
         return ReporteUnidad.objects.create(repartidor=repartidor, unidad=unidad, **validated_data)
+
+
+class LogisticaReporteReafirmacionSerializer(serializers.ModelSerializer):
+    repartidor_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReporteUnidadReafirmacion
+        fields = [
+            "id",
+            "reporte",
+            "repartidor",
+            "repartidor_nombre",
+            "comentario",
+            "latitud",
+            "longitud",
+            "creado_en",
+        ]
+        read_only_fields = ["id", "reporte", "repartidor", "repartidor_nombre", "creado_en"]
+
+    def get_repartidor_nombre(self, obj):
+        return obj.repartidor.user.get_full_name() or obj.repartidor.user.username
 
 
 class LogisticaReportePatchSerializer(serializers.ModelSerializer):
