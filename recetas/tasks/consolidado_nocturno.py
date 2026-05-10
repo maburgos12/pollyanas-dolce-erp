@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.core.mail import EmailMessage
 from django.utils import timezone
 
+from config.email_backends import retrieve_resend_email
 from recetas.models import ConsolidadoNocturnoCEDIS
 from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
 from recetas.views.reabasto import _build_solicitudes_sucursal_workbook
@@ -43,6 +44,27 @@ def _consolidado_cedis_recipients() -> list[str]:
     return deduped
 
 
+def _dedupe_emails(emails: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for email in emails:
+        normalized = (email or "").strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            deduped.append(email.strip())
+    return deduped
+
+
+def _consolidado_cedis_cc(recipients: list[str]) -> list[str]:
+    recipient_set = {(email or "").strip().lower() for email in recipients}
+    cc = [
+        email
+        for email in (getattr(settings, "CONSOLIDADO_CEDIS_EXPORT_CC", []) or [])
+        if (email or "").strip().lower() not in recipient_set
+    ]
+    return _dedupe_emails(cc)
+
+
 def enviar_solicitudes_sucursal_cedis(
     *,
     consolidado: ConsolidadoNocturnoCEDIS,
@@ -58,6 +80,7 @@ def enviar_solicitudes_sucursal_cedis(
         }
 
     recipients = _consolidado_cedis_recipients()
+    cc_recipients = _consolidado_cedis_cc(recipients)
     if not recipients:
         logger.warning(
             "No se envio solicitudes CEDIS: Carolina Cayetano no tiene correo y no hay CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS."
@@ -94,6 +117,7 @@ def enviar_solicitudes_sucursal_cedis(
         body=body,
         from_email=_from_email() or recipients[0],
         to=recipients,
+        cc=cc_recipients,
     )
     email.attach(
         filename,
@@ -103,15 +127,36 @@ def enviar_solicitudes_sucursal_cedis(
     email.send(fail_silently=False)
 
     sent_at = timezone.now().isoformat()
+    resend_email_id = getattr(email, "resend_email_id", "")
+    resend_status = {}
+    resend_last_event = ""
+    if resend_email_id:
+        try:
+            resend_status = retrieve_resend_email(resend_email_id)
+            resend_last_event = str(resend_status.get("last_event") or "")
+        except Exception as exc:  # noqa: BLE001 - no bloquea el reporte ya aceptado por Resend
+            logger.warning("No se pudo verificar estatus Resend del consolidado CEDIS %s: %s", consolidado.id, exc)
     metadata.update(
         {
             "solicitudes_sucursal_email_sent_at": sent_at,
             "solicitudes_sucursal_email_recipients": recipients,
+            "solicitudes_sucursal_email_cc": cc_recipients,
             "solicitudes_sucursal_email_filename": filename,
+            "solicitudes_sucursal_resend_email_id": resend_email_id,
+            "solicitudes_sucursal_resend_last_event": resend_last_event,
         }
     )
     ConsolidadoNocturnoCEDIS.objects.filter(pk=consolidado.pk).update(metadata=metadata)
-    return {"status": "enviado", "sent_at": sent_at, "recipients": recipients, "filename": filename}
+    status = "entregado" if resend_last_event == "delivered" else "enviado"
+    return {
+        "status": status,
+        "sent_at": sent_at,
+        "recipients": recipients,
+        "cc": cc_recipients,
+        "filename": filename,
+        "resend_email_id": resend_email_id,
+        "resend_last_event": resend_last_event,
+    }
 
 
 @shared_task(name="recetas.consolidado_nocturno_cedis")

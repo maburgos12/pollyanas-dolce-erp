@@ -360,6 +360,11 @@ CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS = [
     for email in os.getenv("CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS", "").split(",")
     if email.strip()
 ]
+CONSOLIDADO_CEDIS_EXPORT_CC = [
+    email.strip()
+    for email in os.getenv("CONSOLIDADO_CEDIS_EXPORT_CC", DIRECTOR_EMAIL).split(",")
+    if email.strip()
+]
 CONSOLIDADO_CEDIS_INVENTORY_FRESHNESS_MINUTES = int(
     os.getenv("CONSOLIDADO_CEDIS_INVENTORY_FRESHNESS_MINUTES", "180")
 )

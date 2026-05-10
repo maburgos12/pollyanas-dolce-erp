@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from types import SimpleNamespace
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from openpyxl import Workbook
 
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
 from recetas.models import ConsolidadoNocturnoCEDIS, Receta, SolicitudReabastoCedis, SolicitudReabastoCedisLinea
 from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
-from recetas.tasks.consolidado_nocturno import consolidado_nocturno_cedis
+from recetas.tasks.consolidado_nocturno import consolidado_nocturno_cedis, enviar_solicitudes_sucursal_cedis
 
 
 class ConsolidadoNocturnoCedisServiceTests(TestCase):
@@ -145,3 +147,33 @@ class ConsolidadoNocturnoCedisServiceTests(TestCase):
         self.assertEqual(captured["fecha_operacion"].isoformat(), "2026-05-09")
         self.assertEqual(captured["fecha_transferencias"].isoformat(), "2026-05-08")
         self.assertEqual(result["fecha_operacion"], "2026-05-09")
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="erp@pollyanasdolce.com",
+        CONSOLIDADO_CEDIS_EXPORT_CC=["mauricio@pollyanasdolce.com"],
+    )
+    def test_email_solicitudes_copies_director_and_stores_audit_metadata(self):
+        get_user_model().objects.create_user(
+            username="carolina.cayetano",
+            email="produccion.carolina@pollyanasdolce.com",
+        )
+        consolidado = ConsolidadoNocturnoCEDIS.objects.create(
+            fecha_operacion=date(2026, 5, 10),
+            productos_consolidados=37,
+            sucursales_con_solicitud=7,
+            sucursales_esperadas=9,
+            metadata={"transfer_request_date": "2026-05-09"},
+        )
+
+        with patch("recetas.tasks.consolidado_nocturno._build_solicitudes_sucursal_workbook", return_value=Workbook()):
+            result = enviar_solicitudes_sucursal_cedis(consolidado=consolidado, forzar_envio=True)
+
+        self.assertEqual(result["recipients"], ["produccion.carolina@pollyanasdolce.com"])
+        self.assertEqual(result["cc"], ["mauricio@pollyanasdolce.com"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["produccion.carolina@pollyanasdolce.com"])
+        self.assertEqual(mail.outbox[0].cc, ["mauricio@pollyanasdolce.com"])
+        consolidado.refresh_from_db()
+        self.assertEqual(consolidado.metadata["solicitudes_sucursal_email_cc"], ["mauricio@pollyanasdolce.com"])
+        self.assertEqual(consolidado.metadata["solicitudes_sucursal_email_recipients"], ["produccion.carolina@pollyanasdolce.com"])

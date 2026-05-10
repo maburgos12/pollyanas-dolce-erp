@@ -62,9 +62,13 @@ class ResendEmailBackend(BaseEmailBackend):
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 status_code = response.getcode()
+                body = response.read().decode("utf-8", errors="replace")
                 if status_code >= 400:
-                    body = response.read().decode("utf-8", errors="replace")
                     raise RuntimeError(f"Resend API error ({status_code}): {body[:300]}")
+                resend_response = json.loads(body or "{}")
+                message.resend_response = resend_response
+                message.resend_email_id = resend_response.get("id")
+                message.resend_status_code = status_code
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Resend API error ({exc.code}): {body[:300]}") from exc
@@ -122,3 +126,26 @@ class ResendEmailBackend(BaseEmailBackend):
                 }
             )
         return attachments
+
+
+def retrieve_resend_email(email_id: str) -> dict:
+    api_key = getattr(settings, "RESEND_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("RESEND_API_KEY no configurado.")
+    base_url = getattr(settings, "RESEND_BASE_URL", "https://api.resend.com").rstrip("/")
+    timeout = float(getattr(settings, "RESEND_TIMEOUT_SECONDS", 30))
+    request = urllib.request.Request(
+        f"{base_url}/emails/{email_id}",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "PollyanasERP/1.0",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            return json.loads(body or "{}")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Resend API error ({exc.code}): {body[:300]}") from exc
