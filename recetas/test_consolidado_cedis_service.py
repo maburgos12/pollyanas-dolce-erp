@@ -171,9 +171,14 @@ class ConsolidadoNocturnoCedisServiceTests(TestCase):
 
         self.assertEqual(result["recipients"], ["produccion.carolina@pollyanasdolce.com"])
         self.assertEqual(result["cc"], ["mauricio@pollyanasdolce.com"])
-        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(len(mail.outbox), 2)
         self.assertEqual(mail.outbox[0].to, ["produccion.carolina@pollyanasdolce.com"])
-        self.assertEqual(mail.outbox[0].cc, ["mauricio@pollyanasdolce.com"])
+        self.assertEqual(mail.outbox[0].cc, [])
+        self.assertEqual(mail.outbox[1].to, ["mauricio@pollyanasdolce.com"])
         consolidado.refresh_from_db()
         self.assertEqual(consolidado.metadata["solicitudes_sucursal_email_cc"], ["mauricio@pollyanasdolce.com"])
         self.assertEqual(consolidado.metadata["solicitudes_sucursal_email_recipients"], ["produccion.carolina@pollyanasdolce.com"])
+        self.assertEqual(
+            [row["email"] for row in consolidado.metadata["solicitudes_sucursal_email_deliveries"]],
+            ["produccion.carolina@pollyanasdolce.com", "mauricio@pollyanasdolce.com"],
+        )

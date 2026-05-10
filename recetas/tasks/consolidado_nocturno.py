@@ -112,30 +112,63 @@ def enviar_solicitudes_sucursal_cedis(
         "https://erp.pollyanasdolce.com/recetas/consolidado-cedis/\n\n"
         "-- ERP Pollyana's Dolce"
     )
-    email = EmailMessage(
-        subject=subject,
-        body=body,
-        from_email=_from_email() or recipients[0],
-        to=recipients,
-        cc=cc_recipients,
-    )
-    email.attach(
-        filename,
-        attachment.getvalue(),
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-    email.send(fail_silently=False)
+    attachment_bytes = attachment.getvalue()
+    delivery_results: list[dict] = []
+
+    def send_copy(target: str, role: str) -> dict:
+        email = EmailMessage(
+            subject=subject,
+            body=body,
+            from_email=_from_email() or recipients[0],
+            to=[target],
+        )
+        email.attach(
+            filename,
+            attachment_bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        email.send(fail_silently=False)
+
+        resend_email_id = getattr(email, "resend_email_id", "")
+        resend_last_event = ""
+        if resend_email_id:
+            try:
+                resend_status = retrieve_resend_email(resend_email_id)
+                resend_last_event = str(resend_status.get("last_event") or "")
+            except Exception as exc:  # noqa: BLE001 - no bloquea el reporte ya aceptado por Resend
+                logger.warning(
+                    "No se pudo verificar estatus Resend del consolidado CEDIS %s para %s: %s",
+                    consolidado.id,
+                    target,
+                    exc,
+                )
+        return {
+            "email": target,
+            "role": role,
+            "resend_email_id": resend_email_id,
+            "resend_last_event": resend_last_event,
+        }
+
+    for recipient in recipients:
+        delivery_results.append(send_copy(recipient, "primary"))
+
+    for cc_recipient in cc_recipients:
+        try:
+            delivery_results.append(send_copy(cc_recipient, "copy"))
+        except Exception as exc:  # noqa: BLE001 - una copia no debe impedir el envio principal
+            logger.warning("No se pudo enviar copia CEDIS a %s: %s", cc_recipient, exc)
+            delivery_results.append(
+                {
+                    "email": cc_recipient,
+                    "role": "copy",
+                    "error": str(exc),
+                }
+            )
 
     sent_at = timezone.now().isoformat()
-    resend_email_id = getattr(email, "resend_email_id", "")
-    resend_status = {}
-    resend_last_event = ""
-    if resend_email_id:
-        try:
-            resend_status = retrieve_resend_email(resend_email_id)
-            resend_last_event = str(resend_status.get("last_event") or "")
-        except Exception as exc:  # noqa: BLE001 - no bloquea el reporte ya aceptado por Resend
-            logger.warning("No se pudo verificar estatus Resend del consolidado CEDIS %s: %s", consolidado.id, exc)
+    primary_delivery = next((row for row in delivery_results if row.get("role") == "primary"), {})
+    resend_email_id = primary_delivery.get("resend_email_id", "")
+    resend_last_event = primary_delivery.get("resend_last_event", "")
     metadata.update(
         {
             "solicitudes_sucursal_email_sent_at": sent_at,
@@ -144,6 +177,7 @@ def enviar_solicitudes_sucursal_cedis(
             "solicitudes_sucursal_email_filename": filename,
             "solicitudes_sucursal_resend_email_id": resend_email_id,
             "solicitudes_sucursal_resend_last_event": resend_last_event,
+            "solicitudes_sucursal_email_deliveries": delivery_results,
         }
     )
     ConsolidadoNocturnoCEDIS.objects.filter(pk=consolidado.pk).update(metadata=metadata)
@@ -156,6 +190,7 @@ def enviar_solicitudes_sucursal_cedis(
         "filename": filename,
         "resend_email_id": resend_email_id,
         "resend_last_event": resend_last_event,
+        "deliveries": delivery_results,
     }
 
 
