@@ -24,6 +24,10 @@ class InventarioFinalCierreEmailTests(TestCase):
             username="carolina.cayetano",
             email="produccion.carolina@pollyanasdolce.com",
         )
+        get_user_model().objects.create_user(
+            username="johana.lopez",
+            email="ventas.johanna@pollyanasdolce.com",
+        )
         payload = {
             "fecha_operacion": date(2026, 5, 8),
             "timezone_name": "America/Mazatlan",
@@ -42,9 +46,11 @@ class InventarioFinalCierreEmailTests(TestCase):
 
         self.assertEqual(result["status"], "enviado")
         self.assertEqual(result["recipients"], ["produccion.carolina@pollyanasdolce.com"])
+        self.assertEqual(result["cc"], ["ventas.johanna@pollyanasdolce.com", "maburgos12@pollyanasdolce.com"])
         self.assertEqual(len(mail.outbox), 1)
         email = mail.outbox[0]
         self.assertEqual(email.to, ["produccion.carolina@pollyanasdolce.com"])
+        self.assertEqual(email.cc, ["ventas.johanna@pollyanasdolce.com", "maburgos12@pollyanasdolce.com"])
         self.assertIn("Inventario final al cierre", email.subject)
         self.assertEqual(len(email.attachments), 2)
         self.assertEqual(email.attachments[0][0], "inventario_final_cierre_2026-05-08.xlsx")

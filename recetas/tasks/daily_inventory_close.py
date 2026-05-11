@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from io import BytesIO
 
 from celery import shared_task
+from django.contrib.auth import get_user_model
 from django.core.mail import EmailMessage
 from django.utils import timezone
 
@@ -13,6 +14,42 @@ from recetas.tasks.consolidado_nocturno import _consolidado_cedis_recipients, _f
 
 
 logger = logging.getLogger(__name__)
+INVENTARIO_CIERRE_PRIMARY_USERNAMES = ("carolina.cayetano", "produccion.carolina@pollyanasdolce.com")
+INVENTARIO_CIERRE_CC_USERNAMES = ("johana.lopez",)
+INVENTARIO_CIERRE_CC_EMAILS = ("ventas.johanna@pollyanasdolce.com", "maburgos12@pollyanasdolce.com")
+
+
+def _dedupe_emails(values: list[str]) -> list[str]:
+    seen = set()
+    emails = []
+    for value in values:
+        email = (value or "").strip()
+        key = email.lower()
+        if not email or key in seen:
+            continue
+        seen.add(key)
+        emails.append(email)
+    return emails
+
+
+def _emails_for_usernames(usernames: tuple[str, ...]) -> list[str]:
+    User = get_user_model()
+    users = User.objects.filter(username__in=usernames, is_active=True).only("username", "email")
+    return [user.email for user in users if user.email]
+
+
+def _inventario_cierre_recipient_groups() -> tuple[list[str], list[str]]:
+    primary = _dedupe_emails(
+        [
+            *_consolidado_cedis_recipients(),
+            *_emails_for_usernames(INVENTARIO_CIERRE_PRIMARY_USERNAMES),
+            "produccion.carolina@pollyanasdolce.com",
+        ]
+    )
+    cc = _dedupe_emails([*_emails_for_usernames(INVENTARIO_CIERRE_CC_USERNAMES), *INVENTARIO_CIERRE_CC_EMAILS])
+    primary_keys = {email.lower() for email in primary}
+    cc = [email for email in cc if email.lower() not in primary_keys]
+    return primary, cc
 
 
 @shared_task(name="recetas.inventario_final_cierre_email")
@@ -26,10 +63,10 @@ def inventario_final_cierre_email(
         category_filter = DAILY_CLOSE_CATEGORY_ORDER
     elif isinstance(category_filter, str):
         category_filter = [item.strip() for item in category_filter.split(",") if item.strip()]
-    recipients = _consolidado_cedis_recipients()
+    recipients, cc = _inventario_cierre_recipient_groups()
     if not recipients:
-        logger.warning("No se envio inventario final cierre: Carolina Cayetano no tiene correo configurado.")
-        return {"status": "omitido", "reason": "sin_destinatarios", "recipients": []}
+        logger.warning("No se envio inventario final cierre: no hay destinatarios configurados.")
+        return {"status": "omitido", "reason": "sin_destinatarios", "recipients": [], "cc": []}
 
     service = DailyInventoryCloseService()
     payload = service.build_close(fecha_operacion=target_date, category_filter=category_filter)
@@ -62,6 +99,7 @@ def inventario_final_cierre_email(
         body=body,
         from_email=_from_email() or recipients[0],
         to=recipients,
+        cc=cc,
     )
     filename_base = f"inventario_final_cierre_{target_date.isoformat()}"
     email.attach(
@@ -75,6 +113,7 @@ def inventario_final_cierre_email(
         "status": "enviado",
         "fecha_operacion": target_date.isoformat(),
         "recipients": recipients,
+        "cc": cc,
         "rows": len(payload["rows"]),
         "category_filter": category_filter or [],
         "missing_branch_codes": payload["missing_branch_codes"],
