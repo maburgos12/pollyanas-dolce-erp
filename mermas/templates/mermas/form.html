@@ -40,7 +40,11 @@
             <h1>Registrar merma</h1>
             <span>{{ now|date:"d/m/Y H:i" }}</span>
         </div>
+        {% if can_dashboard %}
         <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Panel</a>
+        {% else %}
+        <a class="secondary-link" href="{% url 'logout' %}">Salir</a>
+        {% endif %}
     </header>
 
     {% if messages %}

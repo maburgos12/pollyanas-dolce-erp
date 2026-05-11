@@ -48,7 +48,11 @@
             <h1>{{ registro.folio }}</h1>
             <div class="muted">{{ registro.sucursal.nombre }} · {{ registro.iniciado_en|date:"d/m/Y H:i" }}</div>
         </div>
+        {% if can_dashboard %}
         <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Panel</a>
+        {% else %}
+        <a class="secondary-link" href="{% url 'mermas:app' %}">Nuevo</a>
+        {% endif %}
     </header>
 
     {% if messages %}

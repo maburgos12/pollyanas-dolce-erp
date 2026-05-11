@@ -195,6 +195,7 @@ def crear_registro(request):
             "sucursales": sucursales,
             "productos_iniciales": productos_iniciales,
             "now": timezone.localtime(),
+            "can_dashboard": _can_dashboard(request.user),
         },
     )
 
@@ -211,6 +212,7 @@ def detalle(request, pk):
             "registro": registro,
             "repartidores": repartidores,
             "can_manage_mermas": _can_manage_mermas(request.user),
+            "can_dashboard": _can_dashboard(request.user),
         },
     )
 
