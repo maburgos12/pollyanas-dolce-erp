@@ -6,6 +6,7 @@ app_name = "mermas"
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
+    path("app/", views.crear_registro, name="app"),
     path("nuevo/", views.crear_registro, name="crear"),
     path("productos/buscar/", views.buscar_productos, name="buscar_productos"),
     path("<int:pk>/", views.detalle, name="detalle"),
