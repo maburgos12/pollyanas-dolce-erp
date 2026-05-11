@@ -132,6 +132,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "core.middleware.BranchCaptureOnlyMiddleware",
     "core.middleware.RepartidorOnlyMiddleware",
+    "core.middleware.MermasOnlyMiddleware",
     "core.middleware.PerformanceLoggingMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",

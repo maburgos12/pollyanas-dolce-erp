@@ -10,29 +10,63 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from core.access import can_capture_piso, can_manage_module, can_view_module
-from core.models import Sucursal, sucursales_operativas
+from core.access import ACCESS_MANAGE, ACCESS_VIEW
+from core.models import Sucursal, UserModuleAccess, sucursales_operativas
 from logistica.models import Repartidor
 from recetas.models import Receta
 
 from .models import MermaEvidencia, MermaProducto, MermaRegistro
 
 
-def _can_view_mermas(user) -> bool:
-    return can_capture_piso(user) or can_view_module(user, "mermas") or can_view_module(user, "control")
+def _explicit_access(user, *scopes: str) -> str:
+    if not user or not user.is_authenticated:
+        return UserModuleAccess.ACCESS_NONE
+    if user.is_superuser:
+        return ACCESS_MANAGE
+    modules = ["mermas", *[f"mermas.{scope}" for scope in scopes]]
+    access_levels = list(
+        UserModuleAccess.objects.filter(user=user, module__in=modules).values_list("access", flat=True)
+    )
+    if ACCESS_MANAGE in access_levels:
+        return ACCESS_MANAGE
+    if ACCESS_VIEW in access_levels:
+        return ACCESS_VIEW
+    return UserModuleAccess.ACCESS_NONE
+
+
+def _can_dashboard(user) -> bool:
+    return _explicit_access(user, "dashboard") in {ACCESS_VIEW, ACCESS_MANAGE}
+
+
+def _can_capture(user) -> bool:
+    return _explicit_access(user, "captura") in {ACCESS_VIEW, ACCESS_MANAGE}
+
+
+def _can_receive(user) -> bool:
+    return _explicit_access(user, "recepcion") == ACCESS_MANAGE
 
 
 def _can_manage_mermas(user) -> bool:
-    return can_manage_module(user, "mermas") or can_manage_module(user, "control")
+    return _explicit_access(user) == ACCESS_MANAGE
 
 
-def _require_view(user):
-    if not _can_view_mermas(user):
+def _require_dashboard(user):
+    if not _can_dashboard(user):
+        raise PermissionDenied("No tienes acceso al panel de mermas.")
+
+
+def _require_capture(user):
+    if not _can_capture(user):
+        raise PermissionDenied("No tienes acceso a la app de captura de mermas.")
+
+
+def _require_mermas(user):
+    if not (_can_dashboard(user) or _can_capture(user) or _can_receive(user)):
         raise PermissionDenied("No tienes acceso al módulo de mermas.")
 
 
-def _require_manage(user):
-    if not _can_manage_mermas(user):
+def _require_receive(user):
+    if not _can_receive(user):
         raise PermissionDenied("No tienes permiso para recepción CEDIS de mermas.")
 
 
@@ -53,7 +87,7 @@ def _registros_visibles(user):
         .prefetch_related("productos", "evidencias")
         .all()
     )
-    if _can_manage_mermas(user) or can_view_module(user, "control"):
+    if _can_dashboard(user) or _can_receive(user) or _can_manage_mermas(user):
         return qs
     sucursal = _sucursal_usuario(user)
     if sucursal:
@@ -63,7 +97,7 @@ def _registros_visibles(user):
 
 @login_required
 def dashboard(request):
-    _require_view(request.user)
+    _require_dashboard(request.user)
     registros = _registros_visibles(request.user)
     estatus = request.GET.get("estatus", "").strip()
     sucursal_id = request.GET.get("sucursal", "").strip()
@@ -132,7 +166,7 @@ def _producto_rows_from_post(post):
 
 @login_required
 def crear_registro(request):
-    _require_view(request.user)
+    _require_capture(request.user)
     sucursal_usuario = _sucursal_usuario(request.user)
     sucursales = sucursales_operativas()
     if sucursal_usuario and not _can_manage_mermas(request.user):
@@ -201,7 +235,7 @@ def crear_registro(request):
 
 @login_required
 def detalle(request, pk):
-    _require_view(request.user)
+    _require_mermas(request.user)
     registro = get_object_or_404(_registros_visibles(request.user), pk=pk)
     repartidores = Repartidor.objects.select_related("user", "unidad_asignada").order_by("user__first_name", "user__username")
     return render(
@@ -218,7 +252,7 @@ def detalle(request, pk):
 @login_required
 @require_POST
 def enviar_cedis(request, pk):
-    _require_view(request.user)
+    _require_capture(request.user)
     registro = get_object_or_404(_registros_visibles(request.user), pk=pk)
     if registro.estatus != MermaRegistro.ESTATUS_CAPTURA:
         return HttpResponseBadRequest("La merma ya no está abierta para envío.")
@@ -235,7 +269,7 @@ def enviar_cedis(request, pk):
 @login_required
 @require_POST
 def recibir_cedis(request, pk):
-    _require_manage(request.user)
+    _require_receive(request.user)
     registro = get_object_or_404(MermaRegistro.objects.prefetch_related("productos"), pk=pk)
     if registro.estatus != MermaRegistro.ESTATUS_ENVIADO_CEDIS:
         return HttpResponseBadRequest("Solo se pueden recibir mermas enviadas a CEDIS.")
@@ -279,7 +313,7 @@ def recibir_cedis(request, pk):
 @login_required
 @require_GET
 def buscar_productos(request):
-    _require_view(request.user)
+    _require_capture(request.user)
     q = request.GET.get("q", "").strip()
     productos = Receta.objects.all()
     if q:

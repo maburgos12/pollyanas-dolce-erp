@@ -279,6 +279,17 @@ def _explicit_access_map(user: AbstractBaseUser) -> dict[str, str]:
     return access_map
 
 
+def is_mermas_only(user: AbstractBaseUser) -> bool:
+    if not user or not user.is_authenticated or user.is_superuser or user.is_staff:
+        return False
+    active_modules = {
+        module
+        for module, access in _explicit_access_map(user).items()
+        if _normalize_access(access) != ACCESS_NONE
+    }
+    return bool(active_modules) and all(module.split(".", 1)[0] == "mermas" for module in active_modules) and not _group_names(user)
+
+
 def _role_module_access(user: AbstractBaseUser, module: str) -> str:
     module = (module or "").strip().lower()
     groups = {name.upper() for name in _group_names(user)}
@@ -304,10 +315,8 @@ def _role_module_access(user: AbstractBaseUser, module: str) -> str:
     if ROLE_VENTAS in groups:
         if module in {"ventas", "crm"}:
             return ACCESS_MANAGE
-        if module == "mermas":
-            return ACCESS_VIEW
     if ROLE_LOGISTICA in groups:
-        if module in {"logistica", "mermas"}:
+        if module == "logistica":
             return ACCESS_MANAGE
     if ROLE_RRHH in groups and module == "rrhh":
         return ACCESS_MANAGE

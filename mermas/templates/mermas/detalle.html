@@ -5,33 +5,34 @@
 
 {% block extra_css %}
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap');
     .merma-app-body .sidebar { display: none; }
     .merma-app-body .layout-wrapper { display: block; }
-    .merma-app-body .main-content { margin-left: 0; width: 100%; min-height: 100vh; background: #f8fafc; }
+    .merma-app-body .main-content { margin-left: 0; width: 100%; min-height: 100vh; background: #0f0f14; font-family: "Nunito", system-ui, sans-serif; color: #e8e0d5; }
     .merma-shell { max-width: 640px; margin: 0 auto; padding: 14px 14px 44px; }
     .topbar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
-    .topbar h1 { margin: 0; font-size: 1.25rem; color: #0f172a; }
-    .muted { color: #64748b; font-size: .88rem; }
-    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
-    .card h2 { margin: 0 0 12px; font-size: .98rem; color: #1f2937; }
-    .kv { display: grid; grid-template-columns: 130px 1fr; gap: 8px; margin-bottom: 8px; color: #334155; }
-    .kv strong { color: #0f172a; }
-    .badge { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: .78rem; font-weight: 900; }
-    .badge.warn { background: #fef3c7; color: #92400e; }
-    .badge.bad { background: #fee2e2; color: #991b1b; }
+    .topbar h1 { margin: 0; font-family: "Playfair Display", Georgia, serif; font-size: 1.45rem; color: #f4eadc; letter-spacing: 0; }
+    .muted { color: #b8ab9a; font-size: .88rem; }
+    .card { background: #1a1a24; border: 1px solid #2a2a38; border-radius: 12px; padding: 14px; margin-bottom: 12px; box-shadow: 0 12px 28px rgba(0,0,0,.18); }
+    .card h2 { margin: 0 0 12px; font-family: "Playfair Display", Georgia, serif; font-size: 1.08rem; color: #e8e0d5; letter-spacing: 0; }
+    .kv { display: grid; grid-template-columns: 130px 1fr; gap: 8px; margin-bottom: 8px; color: #d7c8b8; }
+    .kv strong { color: #f4eadc; }
+    .badge { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: #2a2a38; color: #e8e0d5; font-size: .78rem; font-weight: 900; }
+    .badge.warn { background: #3d3218; color: #f6d77e; }
+    .badge.bad { background: #3a1829; color: #f8dce9; }
     .data-table { width: 100%; border-collapse: collapse; }
-    .data-table th, .data-table td { padding: 9px 6px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
-    .data-table th { color: #475569; font-size: .74rem; text-transform: uppercase; }
+    .data-table th, .data-table td { padding: 9px 6px; border-bottom: 1px solid #2a2a38; text-align: left; vertical-align: top; }
+    .data-table th { color: #C9A84C; font-size: .74rem; text-transform: uppercase; }
     .field { display: grid; gap: 6px; margin-bottom: 12px; }
-    .field label { color: #334155; font-size: .86rem; font-weight: 800; }
-    .field input, .field select, .field textarea { width: 100%; min-height: 42px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 10px; font: inherit; background: #fff; }
+    .field label { color: #d7c8b8; font-size: .86rem; font-weight: 900; }
+    .field input, .field select, .field textarea { width: 100%; min-height: 48px; border: 1px solid #2a2a38; border-radius: 10px; padding: 10px 12px; font: inherit; background: #0f0f14; color: #e8e0d5; }
     .field textarea { min-height: 82px; resize: vertical; }
-    .check-row { display: flex; align-items: center; gap: 8px; font-weight: 800; color: #334155; }
+    .check-row { display: flex; align-items: center; gap: 8px; font-weight: 900; color: #d7c8b8; }
     .check-row input { width: 20px; height: 20px; }
-    .primary-btn { width: 100%; min-height: 46px; border: 0; border-radius: 8px; background: #0f766e; color: #fff; font-weight: 900; }
-    .secondary-link { color: #475569; text-decoration: none; font-weight: 800; }
+    .primary-btn { width: 100%; min-height: 52px; border: 0; border-radius: 10px; background: #8B2252; color: #fff; font-weight: 900; }
+    .secondary-link { color: #C9A84C; text-decoration: none; font-weight: 900; }
     .messages { margin-bottom: 10px; }
-    .message { padding: 10px 12px; border-radius: 8px; background: #dcfce7; color: #166534; font-weight: 700; }
+    .message { padding: 10px 12px; border-radius: 10px; background: #183829; color: #d8f6e6; border: 1px solid #286d4e; font-weight: 800; }
     .evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     .evidence-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0; }
     @media (max-width: 520px) {
