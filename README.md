@@ -125,6 +125,7 @@ Base URL: `https://pollyanas-dolce-erp-production.up.railway.app/api/`
 
 - [Guía de rutina diaria](docs/OPERACION_RUTINA_DIARIA_ERP.md)
 - [Plantilla operativa semanal](docs/PLANTILLA_OPERATIVA_DIARIA_SEMANAL.md)
+- [ERP Doctor: auditoría local y producción solo lectura](docs/ERP_DOCTOR.md)
 - [Operación de integraciones API](docs/OPERACION_INTEGRACIONES_API.md)
 - [Operación de aliases](docs/OPERACION_ALIASES_API.md)
 - [Arquitectura de orquestación Paperclip + ERP](docs/ARQUITECTURA_ORQUESTACION_PAPERCLIP_ERP.md)
