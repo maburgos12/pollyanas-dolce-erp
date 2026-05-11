@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -212,8 +213,12 @@ class DailyInventoryCloseService:
         return wb
 
     def build_pdf_bytes(self, payload: dict) -> bytes:
+        def _pdf_safe(text: str) -> str:
+            normalized = unicodedata.normalize("NFKD", str(text or ""))
+            return normalized.encode("ascii", errors="ignore").decode("ascii")
+
         def _escape(text: str) -> str:
-            return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+            return _pdf_safe(text).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
         def _label(branch: dict) -> str:
             return str(branch.get("label") or branch.get("code") or "").replace("_", " ")
@@ -250,9 +255,12 @@ class DailyInventoryCloseService:
             f"Ultima captura Point: {last_capture}",
             f"Productos con inventario: {len(payload['rows'])}",
             f"Total inventario cierre: {total}",
-            "Totales por sucursal: "
-            + " | ".join(f"{_label(branch)} {_num(branch_totals[branch['code']], 7).strip()}" for branch in payload["branches"]),
         ]
+        branch_total_parts = [
+            f"{_label(branch)} {_num(branch_totals[branch['code']], 7).strip()}" for branch in payload["branches"]
+        ]
+        summary_lines.append("Totales por sucursal: " + " | ".join(branch_total_parts[:5]))
+        summary_lines.append("Sucursales cont.: " + " | ".join(branch_total_parts[5:]))
         if payload["missing_branch_codes"]:
             summary_lines.append("Sin captura: " + ", ".join(payload["missing_branch_codes"]))
 
