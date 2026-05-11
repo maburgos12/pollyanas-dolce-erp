@@ -98,6 +98,21 @@ class DailyInventoryCloseServiceTests(TestCase):
         self.assertEqual(sheet["E6"].value, 10.0)
         self.assertEqual(sheet["F6"].value, 14.0)
 
+    def test_build_pdf_exports_readable_paginated_matrix(self):
+        self._snapshot(branch=self.matriz_branch, stock="4", captured_at="2026-05-08T23:00:00")
+        self._snapshot(branch=self.cedis_branch, stock="10", captured_at="2026-05-08T23:05:00")
+
+        payload = DailyInventoryCloseService().build_close(fecha_operacion=datetime(2026, 5, 8).date())
+        pdf_bytes = DailyInventoryCloseService().build_pdf_bytes(payload)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF-1.4"))
+        self.assertGreater(len(pdf_bytes), 1200)
+        self.assertIn(b"Inventario final al cierre", pdf_bytes)
+        self.assertIn(b"SKU", pdf_bytes)
+        self.assertIn(b"PRODUCTO", pdf_bytes)
+        self.assertIn(b"TOTAL", pdf_bytes)
+        self.assertIn(b"Pastel Chocolate", pdf_bytes)
+
     def test_category_filter_orders_key_categories_and_splits_rebanada(self):
         self._snapshot(branch=self.matriz_branch, stock="1", captured_at="2026-05-08T23:00:00")
         pay_rebanada = PointProduct.objects.create(

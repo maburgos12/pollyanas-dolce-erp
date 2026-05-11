@@ -215,44 +215,115 @@ class DailyInventoryCloseService:
         def _escape(text: str) -> str:
             return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
+        def _label(branch: dict) -> str:
+            return str(branch.get("label") or branch.get("code") or "").replace("_", " ")
+
+        def _short(text: str, width: int) -> str:
+            value = " ".join(str(text or "").replace("\n", " ").split())
+            if len(value) <= width:
+                return value.ljust(width)
+            return (value[: max(0, width - 1)] + "…")[:width]
+
+        def _num(value: Decimal, width: int = 8) -> str:
+            return f"{value:,.1f}".replace(",", "")[-width:].rjust(width)
+
+        def _text_line(x: int, y: int, text: str, *, font: str = "F1", size: int = 7) -> str:
+            return f"BT /{font} {size} Tf 1 0 0 1 {x} {y} Tm ({_escape(text)}) Tj ET"
+
         branch_totals = {branch["code"]: ZERO for branch in payload["branches"]}
         for row in payload["rows"]:
             for code, stock in row["stocks"].items():
                 branch_totals[code] = (branch_totals.get(code, ZERO) + stock).quantize(ZERO)
         total = sum(branch_totals.values(), ZERO).quantize(ZERO)
         last_capture = payload["last_capture_at"].strftime("%Y-%m-%d %H:%M") if payload["last_capture_at"] else "Sin captura"
-        lines = [
+        branch_codes = [branch["code"] for branch in payload["branches"]]
+        branch_headers = [_short(_label(branch).upper(), 7) for branch in payload["branches"]]
+        header = (
+            f"{'SKU':<10} {'PRODUCTO':<30} {'CATEGORIA':<16} {'TOTAL':>8} "
+            + " ".join(branch_headers)
+        )
+        separator = "-" * len(header)
+
+        summary_lines = [
             f"Fecha operativa: {payload['fecha_operacion'].isoformat()}",
             f"Zona horaria: {payload['timezone_name']}",
             f"Ultima captura Point: {last_capture}",
             f"Productos con inventario: {len(payload['rows'])}",
             f"Total inventario cierre: {total}",
-            "",
-            "Totales por sucursal:",
+            "Totales por sucursal: "
+            + " | ".join(f"{_label(branch)} {_num(branch_totals[branch['code']], 7).strip()}" for branch in payload["branches"]),
         ]
-        lines.extend([f"{code}: {branch_totals[code]}" for code in branch_totals])
         if payload["missing_branch_codes"]:
-            lines.append("")
-            lines.append("Sin captura: " + ", ".join(payload["missing_branch_codes"]))
+            summary_lines.append("Sin captura: " + ", ".join(payload["missing_branch_codes"]))
 
-        content_lines = ["BT", "/F1 12 Tf", "36 560 Td"]
-        first = True
-        for raw in ["Inventario final al cierre", *lines[:36]]:
-            if first:
-                content_lines.append(f"({_escape(str(raw))}) Tj")
-                first = False
-            else:
-                content_lines.append("T*")
-                content_lines.append(f"({_escape(str(raw))}) Tj")
-        content_lines.append("ET")
-        content = "\n".join(content_lines).encode("latin-1", errors="replace")
-        objects = [
+        row_lines = []
+        for row in payload["rows"]:
+            row_lines.append(
+                f"{_short(row.get('sku'), 10)} "
+                f"{_short(row.get('product_name'), 30)} "
+                f"{_short(row.get('report_category') or row.get('category'), 16)} "
+                f"{_num(row.get('total_stock') or ZERO)} "
+                + " ".join(_num(row["stocks"].get(code, ZERO), 7) for code in branch_codes)
+            )
+
+        first_page_rows = 38
+        next_page_rows = 45
+        chunks = [row_lines[:first_page_rows]]
+        remaining = row_lines[first_page_rows:]
+        while remaining:
+            chunks.append(remaining[:next_page_rows])
+            remaining = remaining[next_page_rows:]
+
+        page_contents: list[bytes] = []
+        total_pages = max(1, len(chunks))
+        for page_index, chunk in enumerate(chunks or [[]], start=1):
+            y = 570
+            lines = [
+                _text_line(30, y, "Inventario final al cierre", font="F2", size=14),
+                _text_line(700, y, f"Pagina {page_index}/{total_pages}", font="F2", size=8),
+            ]
+            y -= 18
+            if page_index == 1:
+                for summary in summary_lines:
+                    lines.append(_text_line(30, y, summary, font="F2", size=8))
+                    y -= 12
+                y -= 4
+            lines.append(_text_line(30, y, header, font="F1", size=6))
+            y -= 9
+            lines.append(_text_line(30, y, separator, font="F1", size=6))
+            y -= 9
+            for row_line in chunk:
+                lines.append(_text_line(30, y, row_line, font="F1", size=6))
+                y -= 10
+            page_contents.append("\n".join(lines).encode("latin-1", errors="replace"))
+
+        objects: list[bytes] = [
             b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
-            b"2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj",
-            b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 792 612] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
-            b"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
-            b"5 0 obj << /Length " + str(len(content)).encode() + b" >> stream\n" + content + b"\nendstream endobj",
+            b"3 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> endobj",
+            b"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> endobj",
         ]
+        page_ids = []
+        content_ids = []
+        next_obj_id = 5
+        for content in page_contents:
+            page_id = next_obj_id
+            content_id = next_obj_id + 1
+            next_obj_id += 2
+            page_ids.append(page_id)
+            content_ids.append(content_id)
+            objects.append(
+                f"{page_id} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 792 612] "
+                f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {content_id} 0 R >> endobj".encode()
+            )
+            objects.append(
+                b"%d 0 obj << /Length " % content_id
+                + str(len(content)).encode()
+                + b" >> stream\n"
+                + content
+                + b"\nendstream endobj"
+            )
+        objects.insert(1, f"2 0 obj << /Type /Pages /Count {len(page_ids)} /Kids ".encode() + b"[" + b" ".join(f"{page_id} 0 R".encode() for page_id in page_ids) + b"] >> endobj")
+
         output = bytearray(b"%PDF-1.4\n")
         offsets = [0]
         for obj in objects:
@@ -260,11 +331,15 @@ class DailyInventoryCloseService:
             output.extend(obj)
             output.extend(b"\n")
         xref_pos = len(output)
-        output.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+        size = max(4, *(page_ids or [0]), *(content_ids or [0])) + 1
+        offset_by_id = {0: 0}
+        for offset, obj in zip(offsets[1:], objects):
+            obj_id = int(obj.split(b" ", 1)[0])
+            offset_by_id[obj_id] = offset
+        output.extend(f"xref\n0 {size}\n".encode())
         output.extend(b"0000000000 65535 f \n")
-        for offset in offsets[1:]:
+        for obj_id in range(1, size):
+            offset = offset_by_id.get(obj_id, 0)
             output.extend(f"{offset:010d} 00000 n \n".encode())
-        output.extend(
-            f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF".encode()
-        )
+        output.extend(f"trailer << /Size {size} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF".encode())
         return bytes(output)
