@@ -30,7 +30,7 @@ DB_TUNNEL_HINT = (
 CRITICAL_BEAT_TASKS = [
     {
         "label": "snapshot_historical_costing",
-        "names": ["snapshot_historical_costing", "reportes: snapshot costeo historico mensual"],
+        "names": ["recetas: snapshot costeo historico mensual", "reportes: snapshot costeo historico mensual"],
         "task": "reportes.snapshot_historical_costing_task",
         "expected_cron": {"minute": "0", "hour": "2", "day_of_month": "1"},
     },
