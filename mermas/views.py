@@ -187,7 +187,7 @@ def crear_registro(request):
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, exc.messages[0] if hasattr(exc, "messages") else str(exc))
 
-    productos_iniciales = Receta.objects.order_by("nombre")[:80]
+    productos_iniciales = Receta.objects.order_by("nombre")
     return render(
         request,
         "mermas/form.html",
@@ -284,5 +284,5 @@ def buscar_productos(request):
     productos = Receta.objects.all()
     if q:
         productos = productos.filter(Q(nombre__icontains=q) | Q(codigo_point__icontains=q))
-    productos = productos.order_by("nombre")[:80]
+    productos = productos.order_by("nombre")[:200]
     return render(request, "mermas/partials/product_options.html", {"productos": productos})

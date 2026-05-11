@@ -1,5 +1,5 @@
 {% for producto in productos %}
-<option value="{{ producto.id }}">{{ producto.nombre }}{% if producto.codigo_point %} · {{ producto.codigo_point }}{% endif %}</option>
+<option value="{{ producto.id }}">{{ producto.nombre }}{% if producto.codigo_point %} · Point {{ producto.codigo_point }}{% endif %}{% if producto.familia %} · {{ producto.familia }}{% endif %}{% if producto.categoria %} · {{ producto.categoria }}{% endif %}</option>
 {% empty %}
 <option value="">Sin productos coincidentes</option>
 {% endfor %}
