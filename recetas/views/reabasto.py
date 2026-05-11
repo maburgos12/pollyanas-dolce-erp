@@ -20759,7 +20759,7 @@ def reabasto_cedis_consolidado_export(request: HttpRequest) -> HttpResponse:
 
     if export_format in {"solicitudes", "matriz", "matrix"}:
         wb = _build_solicitudes_sucursal_workbook(fecha_operacion)
-        return _xlsx_workbook_response(wb, f"cedis_solicitudes_sucursales_{fecha_operacion.isoformat()}.xlsx")
+        return _xlsx_workbook_response(wb, f"solicitudes_sucursales_a_cedis_{fecha_operacion.isoformat()}.xlsx")
 
     if export_format == "csv":
         response = HttpResponse(content_type="text/csv; charset=utf-8")

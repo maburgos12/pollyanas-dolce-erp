@@ -99,7 +99,7 @@ def enviar_solicitudes_sucursal_cedis(
     cc_recipients = _consolidado_cedis_cc(recipients)
     if not recipients:
         logger.warning(
-            "No se envio solicitudes CEDIS: Carolina Cayetano no tiene correo y no hay CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS."
+            "No se envio solicitudes de sucursales a CEDIS: Carolina Cayetano no tiene correo y no hay CONSOLIDADO_CEDIS_EXPORT_RECIPIENTS."
         )
         return {"status": "omitido", "reason": "sin_destinatarios", "recipients": []}
 
@@ -115,11 +115,11 @@ def enviar_solicitudes_sucursal_cedis(
     attachment = BytesIO()
     workbook.save(attachment)
     attachment.seek(0)
-    filename = f"cedis_solicitudes_sucursales_{consolidado.fecha_operacion.isoformat()}.xlsx"
-    subject = f"Solicitudes por sucursal CEDIS - {consolidado.fecha_operacion:%d/%m/%Y}"
+    filename = f"solicitudes_sucursales_a_cedis_{consolidado.fecha_operacion.isoformat()}.xlsx"
+    subject = f"Solicitudes de sucursales a CEDIS - {consolidado.fecha_operacion:%d/%m/%Y}"
     body = (
         "Carolina,\n\n"
-        "Adjunto va el Excel de solicitudes por sucursal generado automaticamente por el ERP.\n\n"
+        "Adjunto va el Excel de solicitudes que las sucursales hicieron a CEDIS, generado automaticamente por el ERP.\n\n"
         f"Fecha de solicitud: {transfer_request_date_label}\n"
         f"Fecha de aplicación del plan: {consolidado.fecha_operacion:%d/%m/%Y}\n"
         f"Productos consolidados: {consolidado.productos_consolidados}\n"
@@ -236,7 +236,7 @@ def consolidado_nocturno_cedis(
                 forzar_envio=forzar_envio_excel,
             )
         except Exception as exc:  # noqa: BLE001 - el correo no debe invalidar el consolidado ya generado
-            logger.exception("Error enviando Excel de solicitudes CEDIS para %s", target_date)
+            logger.exception("Error enviando Excel de solicitudes de sucursales a CEDIS para %s", target_date)
             email_result = {"status": "error_envio", "error": str(exc)}
     return {
         "consolidado_id": consolidado.id,
