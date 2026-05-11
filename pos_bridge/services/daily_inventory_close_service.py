@@ -222,7 +222,7 @@ class DailyInventoryCloseService:
             value = " ".join(str(text or "").replace("\n", " ").split())
             if len(value) <= width:
                 return value.ljust(width)
-            return (value[: max(0, width - 1)] + "…")[:width]
+            return value[:width]
 
         def _num(value: Decimal, width: int = 8) -> str:
             return f"{value:,.1f}".replace(",", "")[-width:].rjust(width)
