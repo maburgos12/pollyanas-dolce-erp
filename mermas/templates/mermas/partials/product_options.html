@@ -1,0 +1,5 @@
+{% for producto in productos %}
+<option value="{{ producto.id }}">{{ producto.nombre }}{% if producto.codigo_point %} · {{ producto.codigo_point }}{% endif %}</option>
+{% empty %}
+<option value="">Sin productos coincidentes</option>
+{% endfor %}

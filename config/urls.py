@@ -57,6 +57,7 @@ urlpatterns = [
     path("rrhh/", include(("rrhh.urls", "rrhh"), namespace="rrhh")),
     path("logistica/", include(("logistica.urls", "logistica"), namespace="logistica")),
     path("fallas/", include(("fallas.urls", "fallas"), namespace="fallas")),
+    path("mermas/", include(("mermas.urls", "mermas"), namespace="mermas")),
     path("mantenimiento/app/", pwa_mantenimiento, name="pwa-mantenimiento"),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),

@@ -37,6 +37,7 @@ def ui_access(request):
     user = getattr(request, "user", None)
     current_path = getattr(request, "path", "")
     can_view_fallas = can_view_module(user, "fallas")
+    can_view_mermas = can_capture_piso(user) or can_view_module(user, "mermas") or can_view_module(user, "control")
     return {
         "ui_access": {
             "can_view_maestros": can_view_maestros(user),
@@ -66,6 +67,7 @@ def ui_access(request):
             "can_view_ventas_eventos": can_view_ventas_eventos(user),
             "can_manage_ventas_eventos": can_manage_ventas_eventos(user),
             "can_view_fallas": can_view_fallas,
+            "can_view_mermas": can_view_mermas,
             "branch_capture_only": is_branch_capture_only(user),
             "repartidor_only": is_repartidor_only(user),
             "role_label": _get_role_label(user),

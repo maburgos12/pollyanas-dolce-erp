@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Registrar merma{% endblock %}
+{% block body_class %}merma-app-body{% endblock %}
+
+{% block extra_css %}
+<style>
+    .merma-app-body .sidebar { display: none; }
+    .merma-app-body .layout-wrapper { display: block; }
+    .merma-app-body .main-content { margin-left: 0; width: 100%; min-height: 100vh; background: #f8fafc; }
+    .merma-shell { max-width: 540px; margin: 0 auto; padding: 14px 14px 120px; }
+    .app-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .app-header h1 { margin: 0; font-size: 1.28rem; color: #0f172a; }
+    .app-header span { color: #64748b; font-size: .85rem; }
+    .form-block { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+    .form-block h2 { margin: 0 0 12px; font-size: .98rem; color: #1f2937; }
+    .field { display: grid; gap: 6px; margin-bottom: 12px; }
+    .field label { color: #334155; font-size: .86rem; font-weight: 800; }
+    .field input, .field select, .field textarea { width: 100%; min-height: 42px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 10px; font: inherit; background: #fff; }
+    .field textarea { min-height: 82px; resize: vertical; }
+    .product-row { display: grid; grid-template-columns: 1fr 110px 36px; gap: 8px; align-items: end; margin-bottom: 8px; }
+    .icon-btn { width: 36px; height: 42px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #475569; font-weight: 800; }
+    .add-btn { width: 100%; min-height: 42px; border-radius: 8px; border: 1px dashed #94a3b8; background: #f8fafc; color: #0f172a; font-weight: 800; }
+    .sticky-submit { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,.96); border-top: 1px solid #e2e8f0; padding: 12px 14px; }
+    .sticky-submit-inner { max-width: 540px; margin: 0 auto; display: grid; gap: 8px; }
+    .primary-btn { min-height: 46px; border: 0; border-radius: 8px; background: #0f766e; color: #fff; font-weight: 900; }
+    .secondary-link { text-align: center; color: #475569; text-decoration: none; font-weight: 700; }
+    .messages { margin-bottom: 10px; }
+    .message { padding: 10px 12px; border-radius: 8px; background: #fee2e2; color: #991b1b; font-weight: 700; }
+    @media (max-width: 420px) {
+        .product-row { grid-template-columns: 1fr 88px 36px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="merma-shell">
+    <header class="app-header">
+        <div>
+            <h1>Registrar merma</h1>
+            <span>{{ now|date:"d/m/Y H:i" }}</span>
+        </div>
+        <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Panel</a>
+    </header>
+
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}<div class="message">{{ message }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <section class="form-block">
+            <h2>Salida de sucursal</h2>
+            <div class="field">
+                <label for="sucursal">Sucursal</label>
+                <select id="sucursal" name="sucursal" required>
+                    {% for sucursal in sucursales %}
+                    <option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field">
+                <label for="ticket_point">Ticket Point</label>
+                <input id="ticket_point" name="ticket_point" autocomplete="off" placeholder="Folio o referencia del ticket">
+            </div>
+            <div class="field">
+                <label for="ticket_fotos">Foto del ticket</label>
+                <input id="ticket_fotos" name="ticket_fotos" type="file" accept="image/*" capture="environment" multiple required>
+            </div>
+            <div class="field">
+                <label for="producto_fotos">Foto del producto</label>
+                <input id="producto_fotos" name="producto_fotos" type="file" accept="image/*" capture="environment" multiple required>
+            </div>
+        </section>
+
+        <section class="form-block">
+            <h2>Productos</h2>
+            <datalist id="productos-list">
+                {% include "mermas/partials/product_options.html" with productos=productos_iniciales %}
+            </datalist>
+            <div id="productos-wrapper">
+                <div class="product-row">
+                    <div class="field">
+                        <label>Producto</label>
+                        <input name="producto_texto[]" list="productos-nombres" placeholder="Buscar o escribir producto" required>
+                        <input name="receta_id[]" type="hidden">
+                    </div>
+                    <div class="field">
+                        <label>Cantidad</label>
+                        <input name="cantidad[]" type="number" min="0.001" step="0.001" inputmode="decimal" required>
+                    </div>
+                    <button class="icon-btn" type="button" data-remove-product aria-label="Quitar producto">×</button>
+                </div>
+            </div>
+            <datalist id="productos-nombres">
+                {% for producto in productos_iniciales %}
+                <option data-id="{{ producto.id }}" value="{{ producto.nombre }}"></option>
+                {% endfor %}
+            </datalist>
+            <button class="add-btn" type="button" id="add-product">Agregar producto</button>
+        </section>
+
+        <section class="form-block">
+            <h2>Nota de sucursal</h2>
+            <div class="field">
+                <label for="nota_sucursal">Observaciones</label>
+                <textarea id="nota_sucursal" name="nota_sucursal" placeholder="Condición del producto, motivo o contexto"></textarea>
+            </div>
+        </section>
+
+        <div class="sticky-submit">
+            <div class="sticky-submit-inner">
+                <button class="primary-btn" type="submit">Guardar merma</button>
+                <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Cancelar</a>
+            </div>
+        </div>
+    </form>
+</main>
+
+<script>
+(() => {
+    const wrapper = document.getElementById("productos-wrapper");
+    const add = document.getElementById("add-product");
+    const dataList = document.getElementById("productos-nombres");
+    const syncHiddenId = (row) => {
+        const input = row.querySelector('input[name="producto_texto[]"]');
+        const hidden = row.querySelector('input[name="receta_id[]"]');
+        const option = Array.from(dataList.options).find((item) => item.value === input.value);
+        hidden.value = option ? option.dataset.id : "";
+    };
+    const wireRow = (row) => {
+        row.querySelector('[data-remove-product]').addEventListener("click", () => {
+            if (wrapper.querySelectorAll(".product-row").length > 1) row.remove();
+        });
+        row.querySelector('input[name="producto_texto[]"]').addEventListener("change", () => syncHiddenId(row));
+    };
+    wireRow(wrapper.querySelector(".product-row"));
+    add.addEventListener("click", () => {
+        const clone = wrapper.querySelector(".product-row").cloneNode(true);
+        clone.querySelectorAll("input").forEach((input) => input.value = "");
+        wrapper.appendChild(clone);
+        wireRow(clone);
+    });
+})();
+</script>
+{% endblock %}

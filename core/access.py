@@ -39,6 +39,7 @@ ACCESS_MODULES = [
     ("produccion", "Producción"),
     ("logistica", "Logística"),
     ("fallas", "Fallas / Mantenimiento"),
+    ("mermas", "Mermas"),
     ("compras", "Compras"),
     ("inventario", "Inventario"),
     ("recetas", "Recetas"),
@@ -93,6 +94,11 @@ ACCESS_SUBMODULES = {
         ("reportar", "Reportar falla"),
         ("mis_reportes", "Mis reportes"),
         ("gestion", "Gestión de fallas"),
+    ],
+    "mermas": [
+        ("dashboard", "Dashboard"),
+        ("captura", "Captura de sucursal"),
+        ("recepcion", "Recepción CEDIS"),
     ],
     "compras": [
         ("dashboard", "Dashboard"),
@@ -167,6 +173,7 @@ LOCK_BY_MODULE = {
     "crm": "lock_crm",
     "logistica": "lock_logistica",
     "fallas": "lock_logistica",
+    "mermas": "lock_logistica",
     "rrhh": "lock_rrhh",
     "auditoria": "lock_auditoria",
     "sistema": "lock_auditoria",
@@ -297,8 +304,10 @@ def _role_module_access(user: AbstractBaseUser, module: str) -> str:
     if ROLE_VENTAS in groups:
         if module in {"ventas", "crm"}:
             return ACCESS_MANAGE
+        if module == "mermas":
+            return ACCESS_VIEW
     if ROLE_LOGISTICA in groups:
-        if module == "logistica":
+        if module in {"logistica", "mermas"}:
             return ACCESS_MANAGE
     if ROLE_RRHH in groups and module == "rrhh":
         return ACCESS_MANAGE

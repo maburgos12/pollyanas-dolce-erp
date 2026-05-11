@@ -77,6 +77,8 @@ NAV_GROUPS = [
             ("logistica", "reportes", "Reportes", "/logistica/reportes/", ["/logistica/reportes/"]),
             ("logistica", "bitacoras", "Bitácoras", "/logistica/bitacoras/", ["/logistica/bitacoras/"]),
             ("logistica", "capturas", "Capturas", "/logistica/capturas/", ["/logistica/capturas/"]),
+            ("mermas", "dashboard", "Mermas", "/mermas/", ["/mermas/"]),
+            ("mermas", "captura", "Captura merma", "/mermas/nuevo/", ["/mermas/nuevo/"]),
         ],
     },
     {

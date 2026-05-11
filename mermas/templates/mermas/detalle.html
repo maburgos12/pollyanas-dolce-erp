@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}{{ registro.folio }}{% endblock %}
+{% block body_class %}merma-app-body{% endblock %}
+
+{% block extra_css %}
+<style>
+    .merma-app-body .sidebar { display: none; }
+    .merma-app-body .layout-wrapper { display: block; }
+    .merma-app-body .main-content { margin-left: 0; width: 100%; min-height: 100vh; background: #f8fafc; }
+    .merma-shell { max-width: 640px; margin: 0 auto; padding: 14px 14px 44px; }
+    .topbar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+    .topbar h1 { margin: 0; font-size: 1.25rem; color: #0f172a; }
+    .muted { color: #64748b; font-size: .88rem; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+    .card h2 { margin: 0 0 12px; font-size: .98rem; color: #1f2937; }
+    .kv { display: grid; grid-template-columns: 130px 1fr; gap: 8px; margin-bottom: 8px; color: #334155; }
+    .kv strong { color: #0f172a; }
+    .badge { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: .78rem; font-weight: 900; }
+    .badge.warn { background: #fef3c7; color: #92400e; }
+    .badge.bad { background: #fee2e2; color: #991b1b; }
+    .data-table { width: 100%; border-collapse: collapse; }
+    .data-table th, .data-table td { padding: 9px 6px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
+    .data-table th { color: #475569; font-size: .74rem; text-transform: uppercase; }
+    .field { display: grid; gap: 6px; margin-bottom: 12px; }
+    .field label { color: #334155; font-size: .86rem; font-weight: 800; }
+    .field input, .field select, .field textarea { width: 100%; min-height: 42px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 10px; font: inherit; background: #fff; }
+    .field textarea { min-height: 82px; resize: vertical; }
+    .check-row { display: flex; align-items: center; gap: 8px; font-weight: 800; color: #334155; }
+    .check-row input { width: 20px; height: 20px; }
+    .primary-btn { width: 100%; min-height: 46px; border: 0; border-radius: 8px; background: #0f766e; color: #fff; font-weight: 900; }
+    .secondary-link { color: #475569; text-decoration: none; font-weight: 800; }
+    .messages { margin-bottom: 10px; }
+    .message { padding: 10px 12px; border-radius: 8px; background: #dcfce7; color: #166534; font-weight: 700; }
+    .evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .evidence-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0; }
+    @media (max-width: 520px) {
+        .kv { grid-template-columns: 1fr; gap: 2px; }
+        .evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="merma-shell">
+    <header class="topbar">
+        <div>
+            <h1>{{ registro.folio }}</h1>
+            <div class="muted">{{ registro.sucursal.nombre }} · {{ registro.iniciado_en|date:"d/m/Y H:i" }}</div>
+        </div>
+        <a class="secondary-link" href="{% url 'mermas:dashboard' %}">Panel</a>
+    </header>
+
+    {% if messages %}
+    <div class="messages">{% for message in messages %}<div class="message">{{ message }}</div>{% endfor %}</div>
+    {% endif %}
+
+    <section class="card">
+        <h2>Estado</h2>
+        <div class="kv"><strong>Estatus</strong><span class="badge {% if registro.alerta_ventas %}bad{% elif registro.estatus == 'ENVIADO_CEDIS' %}warn{% endif %}">{{ registro.get_estatus_display }}</span></div>
+        <div class="kv"><strong>Ticket</strong><span>{{ registro.ticket_point|default:"-" }}</span></div>
+        <div class="kv"><strong>Registró</strong><span>{{ registro.registrado_por.get_full_name|default:registro.registrado_por.username }}</span></div>
+        <div class="kv"><strong>Repartidor</strong><span>{{ registro.repartidor|default:"Pendiente" }}</span></div>
+        {% if registro.recibido_por %}
+        <div class="kv"><strong>Recibió</strong><span>{{ registro.recibido_por.get_full_name|default:registro.recibido_por.username }}</span></div>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <h2>Productos</h2>
+        <table class="data-table">
+            <thead><tr><th>Producto</th><th>Enviado</th><th>Recibido</th><th>Estado</th></tr></thead>
+            <tbody>
+            {% for producto in registro.productos.all %}
+                <tr>
+                    <td>{{ producto.nombre_producto }}</td>
+                    <td>{{ producto.cantidad_enviada|floatformat:3 }}</td>
+                    <td>{% if producto.cantidad_recibida != None %}{{ producto.cantidad_recibida|floatformat:3 }}{% else %}-{% endif %}</td>
+                    <td>{% if producto.conforme == True %}Validado{% elif producto.conforme == False %}Diferencia{% else %}Pendiente{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    {% if registro.estatus == "CAPTURA" %}
+    <section class="card">
+        <h2>Enviar a CEDIS</h2>
+        <form method="post" action="{% url 'mermas:enviar' registro.pk %}">
+            {% csrf_token %}
+            <div class="field">
+                <label for="repartidor">Repartidor</label>
+                <select id="repartidor" name="repartidor" required>
+                    <option value="">Seleccionar repartidor</option>
+                    {% for repartidor in repartidores %}
+                    <option value="{{ repartidor.id }}">{{ repartidor }}{% if repartidor.unidad_asignada %} · {{ repartidor.unidad_asignada }}{% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button class="primary-btn" type="submit">Marcar como enviado a CEDIS</button>
+        </form>
+    </section>
+    {% endif %}
+
+    {% if registro.estatus == "ENVIADO_CEDIS" and can_manage_mermas %}
+    <section class="card">
+        <h2>Recepción CEDIS</h2>
+        <form method="post" enctype="multipart/form-data" action="{% url 'mermas:recibir' registro.pk %}">
+            {% csrf_token %}
+            <label class="check-row"><input type="checkbox" name="repartidor_confirmado" checked> Repartidor confirmado</label>
+            <br>
+            {% for producto in registro.productos.all %}
+            <div class="card">
+                <strong>{{ producto.nombre_producto }}</strong>
+                <div class="muted">Enviado: {{ producto.cantidad_enviada|floatformat:3 }}</div>
+                <br>
+                <label class="check-row"><input type="checkbox" name="correcto_{{ producto.pk }}" checked> Correcto</label>
+                <div class="field">
+                    <label for="cantidad_recibida_{{ producto.pk }}">Cantidad recibida si hay diferencia</label>
+                    <input id="cantidad_recibida_{{ producto.pk }}" name="cantidad_recibida_{{ producto.pk }}" type="number" min="0" step="0.001" inputmode="decimal" placeholder="{{ producto.cantidad_enviada|floatformat:3 }}">
+                </div>
+                <div class="field">
+                    <label for="nota_producto_{{ producto.pk }}">Nota del producto</label>
+                    <input id="nota_producto_{{ producto.pk }}" name="nota_producto_{{ producto.pk }}" placeholder="Motivo o comentario">
+                </div>
+            </div>
+            {% endfor %}
+            <div class="field">
+                <label for="nota_recepcion">Nota de recepción</label>
+                <textarea id="nota_recepcion" name="nota_recepcion" placeholder="Observaciones generales de CEDIS"></textarea>
+            </div>
+            <div class="field">
+                <label for="cedis_fotos">Evidencia física recibida</label>
+                <input id="cedis_fotos" name="cedis_fotos" type="file" accept="image/*" capture="environment" multiple>
+            </div>
+            <button class="primary-btn" type="submit">Finalizar recepción</button>
+        </form>
+    </section>
+    {% endif %}
+
+    <section class="card">
+        <h2>Evidencias</h2>
+        {% if registro.evidencias.all %}
+        <div class="evidence-grid">
+            {% for evidencia in registro.evidencias.all %}
+            <a href="{{ evidencia.archivo.url }}" target="_blank" rel="noopener"><img src="{{ evidencia.archivo.url }}" alt="{{ evidencia.get_tipo_display }}"></a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="muted">Sin evidencias registradas.</div>
+        {% endif %}
+    </section>
+</main>
+{% endblock %}

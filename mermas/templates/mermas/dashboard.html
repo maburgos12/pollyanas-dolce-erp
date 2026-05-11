@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}Mermas{% endblock %}
+
+{% block extra_css %}
+<style>
+    .mermas-page { max-width: 1240px; margin: 0 auto; padding: 18px 20px 36px; }
+    .mermas-header { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; margin-bottom: 18px; }
+    .mermas-header h1 { margin: 0; font-size: 1.45rem; color: #1f2937; }
+    .mermas-header p { margin: 6px 0 0; color: #64748b; max-width: 720px; }
+    .mermas-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .mermas-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #cbd5e1; text-decoration: none; color: #0f172a; background: #fff; font-weight: 700; }
+    .mermas-btn.primary { background: #0f766e; border-color: #0f766e; color: #fff; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .metric-card, .panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+    .metric-card { padding: 14px; }
+    .metric-label { color: #64748b; font-size: .78rem; font-weight: 800; text-transform: uppercase; }
+    .metric-value { margin-top: 6px; color: #0f172a; font-size: 1.7rem; font-weight: 800; }
+    .panel { padding: 14px; min-width: 0; }
+    .panel h2 { margin: 0 0 12px; font-size: 1rem; color: #1f2937; }
+    .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .filters { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 12px; }
+    .filters label { display: grid; gap: 5px; color: #475569; font-size: .82rem; font-weight: 700; }
+    .filters select { min-width: 190px; height: 38px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 10px; background: #fff; }
+    .data-table { width: 100%; border-collapse: collapse; }
+    .data-table th, .data-table td { padding: 10px 8px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
+    .data-table th { color: #475569; font-size: .76rem; text-transform: uppercase; letter-spacing: .02em; }
+    .data-table td { color: #1f2937; font-size: .9rem; }
+    .badge { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 999px; background: #e2e8f0; color: #334155; font-weight: 800; font-size: .75rem; }
+    .badge.warn { background: #fef3c7; color: #92400e; }
+    .badge.bad { background: #fee2e2; color: #991b1b; }
+    .empty { color: #64748b; padding: 10px 0; }
+    @media (max-width: 980px) {
+        .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .panel-grid { grid-template-columns: 1fr; }
+        .mermas-header { flex-direction: column; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="mermas-page">
+    <header class="mermas-header">
+        <div>
+            <h1>Panel de mermas</h1>
+            <p>Seguimiento operativo desde salida de sucursal hasta recepción CEDIS, con evidencias, repartidor y diferencias para ventas.</p>
+        </div>
+        <div class="mermas-actions">
+            <a class="mermas-btn primary" href="{% url 'mermas:crear' %}">Abrir app de captura</a>
+        </div>
+    </header>
+
+    <section class="metrics-grid">
+        <article class="metric-card"><div class="metric-label">Hoy</div><div class="metric-value">{{ summary.hoy }}</div></article>
+        <article class="metric-card"><div class="metric-label">Enviado CEDIS</div><div class="metric-value">{{ summary.enviado }}</div></article>
+        <article class="metric-card"><div class="metric-label">Diferencias</div><div class="metric-value">{{ summary.diferencias }}</div></article>
+        <article class="metric-card"><div class="metric-label">Productos</div><div class="metric-value">{{ summary.productos }}</div></article>
+        <article class="metric-card"><div class="metric-label">Cantidad</div><div class="metric-value">{{ summary.cantidad|floatformat:1 }}</div></article>
+    </section>
+
+    <section class="panel-grid">
+        <article class="panel">
+            <h2>Cola para CEDIS</h2>
+            {% if cola_cedis %}
+            <table class="data-table">
+                <thead><tr><th>Folio</th><th>Sucursal</th><th>Repartidor</th><th>Salida</th></tr></thead>
+                <tbody>
+                {% for item in cola_cedis %}
+                    <tr>
+                        <td><a href="{% url 'mermas:detalle' item.pk %}">{{ item.folio }}</a></td>
+                        <td>{{ item.sucursal.nombre }}</td>
+                        <td>{{ item.repartidor|default:"Sin asignar" }}</td>
+                        <td>{{ item.enviado_en|date:"d/m H:i" }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}<div class="empty">No hay registros pendientes de recibir.</div>{% endif %}
+        </article>
+
+        <article class="panel">
+            <h2>Diferencias para ventas</h2>
+            {% if diferencias %}
+            <table class="data-table">
+                <thead><tr><th>Folio</th><th>Sucursal</th><th>Recibió</th><th>Nota</th></tr></thead>
+                <tbody>
+                {% for item in diferencias %}
+                    <tr>
+                        <td><a href="{% url 'mermas:detalle' item.pk %}">{{ item.folio }}</a></td>
+                        <td>{{ item.sucursal.nombre }}</td>
+                        <td>{{ item.recibido_por.get_full_name|default:item.recibido_por.username }}</td>
+                        <td>{{ item.nota_recepcion|truncatechars:70 }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}<div class="empty">Sin diferencias abiertas.</div>{% endif %}
+        </article>
+    </section>
+
+    <section class="panel">
+        <h2>Sucursales con movimiento</h2>
+        {% if sucursales_foco %}
+        <table class="data-table">
+            <thead><tr><th>Sucursal</th><th>Registros</th><th>Productos</th></tr></thead>
+            <tbody>
+            {% for row in sucursales_foco %}
+                <tr>
+                    <td>{{ row.sucursal__nombre }}</td>
+                    <td>{{ row.registros }}</td>
+                    <td>{{ row.productos }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}<div class="empty">Aún no hay movimiento de mermas.</div>{% endif %}
+    </section>
+
+    <section class="panel" style="margin-top:14px;">
+        <h2>Seguimiento detallado</h2>
+        <form class="filters" method="get">
+            <label>Estatus
+                <select name="estatus">
+                    <option value="">Todos</option>
+                    {% for value,label in estatus_choices %}
+                    <option value="{{ value }}" {% if filters.estatus == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Sucursal
+                <select name="sucursal">
+                    <option value="">Todas</option>
+                    {% for sucursal in sucursales %}
+                    <option value="{{ sucursal.id }}" {% if filters.sucursal == sucursal.id|stringformat:"s" %}selected{% endif %}>{{ sucursal.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button class="mermas-btn" type="submit">Filtrar</button>
+        </form>
+        <table class="data-table">
+            <thead>
+                <tr><th>Folio</th><th>Sucursal</th><th>Estado</th><th>Ticket</th><th>Productos</th><th>Registró</th><th>Último movimiento</th></tr>
+            </thead>
+            <tbody>
+            {% for item in registros %}
+                <tr>
+                    <td><a href="{% url 'mermas:detalle' item.pk %}">{{ item.folio }}</a></td>
+                    <td>{{ item.sucursal.nombre }}</td>
+                    <td><span class="badge {% if item.alerta_ventas %}bad{% elif item.estatus == 'ENVIADO_CEDIS' %}warn{% endif %}">{{ item.get_estatus_display }}</span></td>
+                    <td>{{ item.ticket_point|default:"-" }}</td>
+                    <td>{{ item.total_productos }}</td>
+                    <td>{{ item.registrado_por.get_full_name|default:item.registrado_por.username }}</td>
+                    <td>{{ item.updated_at|date:"d/m/Y H:i" }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="7" class="empty">No hay registros con esos filtros.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</main>
+{% endblock %}

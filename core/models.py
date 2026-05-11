@@ -73,6 +73,7 @@ class UserModuleAccess(models.Model):
     MODULOS = [
         ("logistica", "Logística"),
         ("fallas", "Fallas / Mantenimiento"),
+        ("mermas", "Mermas"),
         ("compras", "Compras"),
         ("ventas", "Ventas"),
         ("reportes", "Reportes"),
