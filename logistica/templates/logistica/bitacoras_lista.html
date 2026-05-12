@@ -24,6 +24,10 @@
   .log-badge.warn { background: #fff4d8; color: #9a6a00; }
   .log-badge.danger { background: #ffe8ec; color: #bc3b56; }
   .log-thumb { width: 64px; height: 46px; object-fit: cover; border-radius: 8px; border: 1px solid #efc7d8; }
+  .log-fuel { display: grid; gap: 3px; min-width: 118px; }
+  .log-fuel strong { color: #6f3150; }
+  .log-fuel a { color: #8B2252; font-weight: 800; text-decoration: none; }
+  .log-summary { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   tr.log-overdue td { background: #fff8e6; }
   .log-muted { color: #77656d; font-size: 13px; }
   .log-pager { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
@@ -61,11 +65,15 @@
   <section class="logi-box logi-table-box">
     <div class="logi-table-head">
       <h2 class="logi-table-title">Resultados</h2>
-      <span class="muted">{{ bitacoras_page.paginator.count|intcomma }} bitácoras</span>
+      <div class="log-summary">
+        <span class="muted">{{ bitacoras_page.paginator.count|intcomma }} bitácoras</span>
+        <span class="log-badge warn">{{ cargas_combustible|intcomma }} cargas</span>
+        <span class="log-badge ok">Combustible ${{ combustible_total|floatformat:2|intcomma }}</span>
+      </div>
     </div>
     <div class="logi-table-wrap">
       <table class="table table-striped">
-        <thead><tr><th>Folio</th><th>Unidad</th><th>Repartidor</th><th>Hora salida</th><th>Hora llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Nivel gas</th><th>Estatus</th><th>Fotos</th></tr></thead>
+        <thead><tr><th>Folio</th><th>Unidad</th><th>Repartidor</th><th>Hora salida</th><th>Hora llegada</th><th>KM salida</th><th>KM llegada</th><th>KM recorridos</th><th>Nivel gas</th><th>Combustible</th><th>Estatus</th><th>Fotos</th></tr></thead>
         <tbody>
           {% for bitacora in bitacoras %}
           <tr class="{% if not bitacora.cerrada and bitacora.horas_abierta > 8 %}log-overdue{% endif %}">
@@ -78,6 +86,20 @@
             <td>{{ bitacora.km_llegada|default:"-"|intcomma }}</td>
             <td>{{ bitacora.km_recorridos|default:"-"|intcomma }}</td>
             <td>{{ bitacora.nivel_gas_salida }} → {{ bitacora.nivel_gas_llegada|default:"-" }}</td>
+            <td>
+              {% if bitacora.litros_cargados or bitacora.costo_combustible or bitacora.foto_ticket_combustible %}
+                <div class="log-fuel">
+                  <strong>{{ bitacora.litros_cargados|default:"0" }} L · ${{ bitacora.costo_combustible|default:"0"|floatformat:2|intcomma }}</strong>
+                  {% if bitacora.foto_ticket_combustible %}
+                    <a href="{{ bitacora.foto_ticket_combustible.url }}" target="_blank" rel="noopener">Ver ticket</a>
+                  {% else %}
+                    <span class="log-muted">Sin ticket</span>
+                  {% endif %}
+                </div>
+              {% else %}
+                <span class="log-muted">Sin carga</span>
+              {% endif %}
+            </td>
             <td>{% if bitacora.cerrada %}<span class="log-badge ok">Cerrada</span>{% else %}<span class="log-badge danger">ABIERTO</span>{% if bitacora.horas_abierta > 8 %}<br><span class="log-badge warn">{{ bitacora.horas_abierta }} h</span>{% endif %}{% endif %}</td>
             <td>
               {% if bitacora.foto_tablero_salida %}<a href="{{ bitacora.foto_tablero_salida.url }}" target="_blank" rel="noopener"><img class="log-thumb" src="{{ bitacora.foto_tablero_salida.url }}" alt="Tablero salida"></a>{% endif %}
@@ -85,7 +107,7 @@
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="11" class="muted">No hay bitácoras con esos filtros.</td></tr>
+          <tr><td colspan="12" class="muted">No hay bitácoras con esos filtros.</td></tr>
           {% endfor %}
         </tbody>
       </table>

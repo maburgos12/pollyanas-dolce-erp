@@ -1893,6 +1893,10 @@ def bitacoras_lista(request):
     if fecha_hasta:
         qs = qs.filter(fecha__lte=fecha_hasta)
 
+    combustible_total = qs.aggregate(total=Sum("costo_combustible")).get("total") or Decimal("0")
+    cargas_combustible = qs.filter(
+        Q(litros_cargados__isnull=False) | Q(costo_combustible__isnull=False) | Q(foto_ticket_combustible__isnull=False)
+    ).count()
     page = Paginator(qs, 20).get_page(request.GET.get("page"))
     bitacoras = [_decorate_bitacora(bitacora) for bitacora in page]
     return render(
@@ -1902,6 +1906,8 @@ def bitacoras_lista(request):
             "module_tabs": _module_tabs("bitacoras", request.user),
             "bitacoras": bitacoras,
             "bitacoras_page": page,
+            "combustible_total": combustible_total,
+            "cargas_combustible": cargas_combustible,
             "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
             "repartidores": Repartidor.objects.select_related("user").order_by("user__first_name", "user__username"),
             "filters": {
