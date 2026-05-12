@@ -53,7 +53,7 @@ def _can_manage_mermas(user) -> bool:
 
 
 def _require_dashboard(user):
-    if not _can_dashboard(user):
+    if not (_can_dashboard(user) or _can_receive(user)):
         raise PermissionDenied("No tienes acceso al panel de mermas.")
 
 
@@ -138,6 +138,7 @@ def dashboard(request):
             "estatus_choices": MermaRegistro.ESTATUS_CHOICES,
             "filters": {"estatus": estatus, "sucursal": sucursal_id},
             "can_manage_mermas": _can_manage_mermas(request.user),
+            "can_capture_mermas": _can_capture(request.user),
         },
     )
 

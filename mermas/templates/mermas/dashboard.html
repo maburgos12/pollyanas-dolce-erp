@@ -50,9 +50,11 @@
             <h1>Panel de mermas</h1>
             <p>Seguimiento operativo desde salida de sucursal hasta recepción CEDIS, con evidencias, repartidor y diferencias para ventas.</p>
         </div>
+        {% if can_capture_mermas %}
         <div class="mermas-actions">
             <a class="mermas-btn primary" href="{% url 'mermas:crear' %}">Abrir app de captura</a>
         </div>
+        {% endif %}
     </header>
 
     <section class="metrics-grid">
