@@ -168,6 +168,27 @@ def _producto_rows_from_post(post):
 
 
 @login_required
+def app_home(request):
+    if _can_capture(request.user):
+        return crear_registro(request)
+    if _can_receive(request.user):
+        registros = (
+            _registros_visibles(request.user)
+            .filter(estatus=MermaRegistro.ESTATUS_ENVIADO_CEDIS)
+            .order_by("enviado_en", "id")
+        )
+        return render(
+            request,
+            "mermas/app_recepcion.html",
+            {
+                "registros": registros,
+                "now": timezone.localtime(),
+            },
+        )
+    raise PermissionDenied("No tienes acceso a la app de mermas.")
+
+
+@login_required
 def crear_registro(request):
     _require_capture(request.user)
     sucursal_usuario = _sucursal_usuario(request.user)
@@ -248,6 +269,9 @@ def detalle(request, pk):
             "registro": registro,
             "repartidores": repartidores,
             "can_manage_mermas": _can_manage_mermas(request.user),
+            "can_receive_mermas": _can_receive(request.user),
+            "can_capture_mermas": _can_capture(request.user),
+            "can_dashboard": _can_dashboard(request.user),
         },
     )
 
