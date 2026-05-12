@@ -36,6 +36,16 @@
     .field textarea { min-height: 82px; resize: vertical; }
     .check-row { display: flex; align-items: center; gap: 8px; font-weight: 900; color: #d7c8b8; }
     .check-row input { width: 20px; height: 20px; }
+    .receipt-head { display: grid; grid-template-columns: minmax(0, 1fr) 92px 104px; gap: 8px; margin: 14px 0 8px; color: #d7c8b8; font-size: .86rem; font-weight: 900; }
+    .receipt-row { display: grid; grid-template-columns: minmax(0, 1fr) 92px 104px; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .receipt-product, .receipt-qty { min-height: 52px; display: flex; align-items: center; border: 1px solid #2a2a38; border-radius: 10px; background: #0f0f14; color: #f0e7dc; font-weight: 900; padding: 10px 12px; }
+    .receipt-qty { color: #f6d77e; justify-content: center; font-size: 1.04rem; }
+    .receipt-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .receipt-choice { min-height: 52px; border: 1px solid #2a2a38; border-radius: 10px; background: #15151d; color: #e8e0d5; font-size: 1.05rem; font-weight: 900; }
+    .receipt-choice.active.ok { background: #183829; border-color: #2f8b61; color: #d8f6e6; }
+    .receipt-choice.active.bad { background: #3a1829; border-color: #8B2252; color: #f8dce9; }
+    .difference-box { display: none; margin: -2px 0 12px; padding: 12px; border: 1px solid #2a2a38; border-radius: 10px; background: #15151d; }
+    .difference-box.show { display: block; }
     .primary-btn { width: 100%; min-height: 52px; border: 0; border-radius: 10px; background: #8B2252; color: #fff; font-weight: 900; }
     .secondary-link { color: #C9A84C; text-decoration: none; font-weight: 900; }
     .messages { margin-bottom: 10px; }
@@ -44,6 +54,7 @@
     .evidence-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0; }
     @media (max-width: 520px) {
         .kv { grid-template-columns: 1fr; gap: 2px; }
+        .receipt-head, .receipt-row { grid-template-columns: minmax(0, 1fr) 74px 92px; }
         .evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 </style>
@@ -123,19 +134,31 @@
             {% csrf_token %}
             <label class="check-row"><input type="checkbox" name="repartidor_confirmado" checked> Repartidor confirmado</label>
             <br>
+            <div class="receipt-head" aria-hidden="true">
+                <span>Producto</span>
+                <span>Cantidad</span>
+                <span>Validar</span>
+            </div>
             {% for producto in registro.productos.all %}
-            <div class="card">
-                <strong>{{ producto.nombre_producto }}</strong>
-                <div class="muted">Enviado: {{ producto.cantidad_enviada|floatformat:3 }}</div>
-                <br>
-                <label class="check-row"><input type="checkbox" name="correcto_{{ producto.pk }}" checked> Correcto</label>
+            <div class="receipt-item">
+                <div class="receipt-row">
+                    <div class="receipt-product">{{ producto.nombre_producto }}</div>
+                    <div class="receipt-qty">{{ producto.cantidad_enviada|floatformat:3 }}</div>
+                    <div class="receipt-actions" data-receipt-actions="{{ producto.pk }}">
+                        <button class="receipt-choice active ok" type="button" data-receipt-choice="ok" aria-label="Producto correcto">✓</button>
+                        <button class="receipt-choice bad" type="button" data-receipt-choice="bad" aria-label="Producto incorrecto">×</button>
+                    </div>
+                </div>
+                <input type="hidden" name="correcto_{{ producto.pk }}" value="on">
+                <div class="difference-box" id="difference_{{ producto.pk }}">
                 <div class="field">
-                    <label for="cantidad_recibida_{{ producto.pk }}">Cantidad recibida si hay diferencia</label>
+                    <label for="cantidad_recibida_{{ producto.pk }}">Cantidad real recibida</label>
                     <input id="cantidad_recibida_{{ producto.pk }}" name="cantidad_recibida_{{ producto.pk }}" type="number" min="0" step="0.001" inputmode="decimal" placeholder="{{ producto.cantidad_enviada|floatformat:3 }}">
                 </div>
                 <div class="field">
                     <label for="nota_producto_{{ producto.pk }}">Nota del producto</label>
                     <input id="nota_producto_{{ producto.pk }}" name="nota_producto_{{ producto.pk }}" placeholder="Motivo o comentario">
+                </div>
                 </div>
             </div>
             {% endfor %}
@@ -147,7 +170,7 @@
                 <label for="cedis_fotos">Evidencia física recibida</label>
                 <input id="cedis_fotos" name="cedis_fotos" type="file" accept="image/*" capture="environment" multiple>
             </div>
-            <button class="primary-btn" type="submit">Finalizar recepción</button>
+            <button class="primary-btn" type="submit">Guardar cambios de recepción</button>
         </form>
     </section>
     {% endif %}
@@ -165,4 +188,22 @@
         {% endif %}
     </section>
 </main>
+<script>
+(() => {
+    document.querySelectorAll("[data-receipt-actions]").forEach((group) => {
+        const productId = group.dataset.receiptActions;
+        const hidden = document.querySelector(`input[name="correcto_${productId}"]`);
+        const diffBox = document.getElementById(`difference_${productId}`);
+        const qtyInput = document.getElementById(`cantidad_recibida_${productId}`);
+        const buttons = group.querySelectorAll("[data-receipt-choice]");
+        const setState = (state) => {
+            hidden.value = state === "ok" ? "on" : "";
+            diffBox.classList.toggle("show", state === "bad");
+            if (state === "ok") qtyInput.value = "";
+            buttons.forEach((button) => button.classList.toggle("active", button.dataset.receiptChoice === state));
+        };
+        buttons.forEach((button) => button.addEventListener("click", () => setState(button.dataset.receiptChoice)));
+    });
+})();
+</script>
 {% endblock %}
