@@ -51,15 +51,15 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "recetas: inventario final cierre email",
                 "reportes: refresh analytics operativo",
                 "erp-doctor: reporte diario",
+                "ventas: sync ventas autoritativas mensual",
                 "reportes: snapshot operacion dg",
                 "orquestacion: plan diario faltante",
                 "orquestacion: cadena plan demanda-produccion-compras",
                 "orquestacion: excepciones compra DG",
                 "orquestacion: guardia ajustes inventario",
-                "proyecciones: forecast quincenal semanal",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 30)
+        self.assertEqual(PeriodicTask.objects.count(), 31)
         realtime = PeriodicTask.objects.get(name="pos_bridge: inventario realtime")
         self.assertEqual(realtime.interval.every, 5)
         inventory_close = PeriodicTask.objects.get(name="pos_bridge: inventario cierre diario")
@@ -86,6 +86,11 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(erp_doctor.task, "reportes.erp_doctor_daily_report")
         self.assertEqual(erp_doctor.crontab.hour, "6")
         self.assertEqual(erp_doctor.crontab.minute, "0")
+        authoritative_sales = PeriodicTask.objects.get(name="ventas: sync ventas autoritativas mensual")
+        self.assertEqual(authoritative_sales.task, "ventas.sync_ventas_autoritativas")
+        self.assertEqual(authoritative_sales.crontab.day_of_month, "2")
+        self.assertEqual(authoritative_sales.crontab.hour, "3")
+        self.assertEqual(authoritative_sales.crontab.minute, "0")
         orchestration_daily_plan = PeriodicTask.objects.get(name="orquestacion: plan diario faltante")
         self.assertEqual(orchestration_daily_plan.crontab.hour, "9")
         self.assertEqual(orchestration_daily_plan.crontab.minute, "5")

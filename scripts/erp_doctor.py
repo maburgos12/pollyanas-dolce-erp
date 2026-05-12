@@ -36,7 +36,7 @@ CRITICAL_BEAT_TASKS = [
         "label": "snapshot_historical_costing",
         "names": ["recetas: snapshot costeo historico mensual", "reportes: snapshot costeo historico mensual"],
         "task": "reportes.snapshot_historical_costing_task",
-        "expected_cron": {"minute": "0", "hour": "2", "day_of_month": "1"},
+        "expected_cron": {"minute": "0", "hour": "1", "day_of_month": "1"},
     },
     {
         "label": "sync_ventas_autoritativas",
@@ -730,9 +730,14 @@ def build_report(args: argparse.Namespace | SimpleNamespace) -> dict:
         checks.extend(check_celery())
         checks.extend(check_docker())
         if args.full or args.fix:
-            checks.append(check_celery_beat_schedules(fix=args.fix))
+            beat_check = check_celery_beat_schedules(fix=args.fix)
             if args.fix:
-                checks.append(check_celery_beat_schedules(fix=False))
+                final_beat_check = check_celery_beat_schedules(fix=False)
+                final_beat_check.fixed = beat_check.fixed
+                final_beat_check.fix_action = beat_check.fix_action
+                checks.append(final_beat_check)
+            else:
+                checks.append(beat_check)
         if args.full:
             checks.extend(check_tests())
         checks.append(check_browser_route())
