@@ -284,10 +284,12 @@ def _explicit_access_map(user: AbstractBaseUser) -> dict[str, str]:
 def is_mermas_only(user: AbstractBaseUser) -> bool:
     if not user or not user.is_authenticated or user.is_superuser or user.is_staff:
         return False
+    groups = _group_names(user)
+    allowed_app_groups = {ROLE_REPARTIDOR.lower(), ROLE_REPARTIDOR}
     try:
         from mermas.models import PersonalEnviosSucursal
 
-        if PersonalEnviosSucursal.objects.filter(user=user, activo=True).exists() and not _group_names(user):
+        if PersonalEnviosSucursal.objects.filter(user=user, activo=True).exists() and groups.issubset(allowed_app_groups):
             return True
     except Exception:
         pass
@@ -296,7 +298,7 @@ def is_mermas_only(user: AbstractBaseUser) -> bool:
         for module, access in _explicit_access_map(user).items()
         if _normalize_access(access) != ACCESS_NONE
     }
-    return bool(active_modules) and all(module.split(".", 1)[0] == "mermas" for module in active_modules) and not _group_names(user)
+    return bool(active_modules) and all(module.split(".", 1)[0] == "mermas" for module in active_modules) and groups.issubset(allowed_app_groups)
 
 
 def _role_module_access(user: AbstractBaseUser, module: str) -> str:
