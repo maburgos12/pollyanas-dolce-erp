@@ -302,6 +302,9 @@ def recibir_cedis(request, pk):
         return HttpResponseBadRequest("Solo se pueden recibir mermas enviadas a CEDIS.")
     nota = request.POST.get("nota_recepcion", "").strip()
     repartidor_confirmado = request.POST.get("repartidor_confirmado") == "on"
+    repartidor_entrega = None
+    if not repartidor_confirmado:
+        repartidor_entrega = get_object_or_404(Repartidor, pk=request.POST.get("repartidor_entrega"))
     try:
         with transaction.atomic():
             for producto in registro.productos.all():
@@ -328,6 +331,7 @@ def recibir_cedis(request, pk):
             registro.marcar_recibido(
                 user=request.user,
                 repartidor_confirmado=repartidor_confirmado,
+                repartidor_entrega=repartidor_entrega,
                 nota=nota,
             )
     except ValidationError as exc:

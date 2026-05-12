@@ -37,6 +37,13 @@ class MermaRegistro(models.Model):
         blank=True,
         related_name="mermas_transportadas",
     )
+    repartidor_entrega = models.ForeignKey(
+        "logistica.Repartidor",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="mermas_entregadas_cedis",
+    )
     enviado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -109,9 +116,10 @@ class MermaRegistro(models.Model):
         self.save(update_fields=["repartidor", "estatus", "enviado_por", "enviado_en", "updated_at"])
 
     @transaction.atomic
-    def marcar_recibido(self, *, user, repartidor_confirmado, nota):
+    def marcar_recibido(self, *, user, repartidor_confirmado, repartidor_entrega, nota):
         tiene_diferencia = self.productos.filter(conforme=False).exists()
         self.repartidor_confirmado = repartidor_confirmado
+        self.repartidor_entrega = self.repartidor if repartidor_confirmado else repartidor_entrega
         self.nota_recepcion = nota or ""
         self.recibido_por = user
         self.recibido_en = timezone.now()
@@ -120,6 +128,7 @@ class MermaRegistro(models.Model):
         self.save(
             update_fields=[
                 "repartidor_confirmado",
+                "repartidor_entrega",
                 "nota_recepcion",
                 "recibido_por",
                 "recibido_en",

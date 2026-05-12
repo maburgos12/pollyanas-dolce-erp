@@ -86,6 +86,9 @@
         <div class="kv"><strong>Ticket</strong><span>{{ registro.ticket_point|default:"-" }}</span></div>
         <div class="kv"><strong>Registró</strong><span>{{ registro.registrado_por.get_full_name|default:registro.registrado_por.username }}</span></div>
         <div class="kv"><strong>Repartidor</strong><span>{{ registro.repartidor|default:"Pendiente" }}</span></div>
+        {% if registro.repartidor_entrega and not registro.repartidor_confirmado %}
+        <div class="kv"><strong>Entregó</strong><span>{{ registro.repartidor_entrega }}</span></div>
+        {% endif %}
         {% if registro.recibido_por %}
         <div class="kv"><strong>Recibió</strong><span>{{ registro.recibido_por.get_full_name|default:registro.recibido_por.username }}</span></div>
         {% endif %}
@@ -132,7 +135,16 @@
         <h2>Recepción CEDIS</h2>
         <form method="post" enctype="multipart/form-data" action="{% url 'mermas:recibir' registro.pk %}">
             {% csrf_token %}
-            <label class="check-row"><input type="checkbox" name="repartidor_confirmado" checked> Repartidor confirmado</label>
+            <label class="check-row"><input type="checkbox" id="repartidor_confirmado" name="repartidor_confirmado" checked> Repartidor confirmado</label>
+            <div class="field difference-box" id="repartidor_entrega_box">
+                <label for="repartidor_entrega">Repartidor que entregó realmente</label>
+                <select id="repartidor_entrega" name="repartidor_entrega">
+                    <option value="">Seleccionar repartidor</option>
+                    {% for repartidor in repartidores %}
+                    <option value="{{ repartidor.id }}">{{ repartidor }}{% if repartidor.unidad_asignada %} · {{ repartidor.unidad_asignada }}{% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <br>
             <div class="receipt-head" aria-hidden="true">
                 <span>Producto</span>
@@ -190,6 +202,19 @@
 </main>
 <script>
 (() => {
+    const repartidorConfirmado = document.getElementById("repartidor_confirmado");
+    const repartidorEntregaBox = document.getElementById("repartidor_entrega_box");
+    const repartidorEntrega = document.getElementById("repartidor_entrega");
+    if (repartidorConfirmado && repartidorEntregaBox && repartidorEntrega) {
+        const syncRepartidor = () => {
+            const show = !repartidorConfirmado.checked;
+            repartidorEntregaBox.classList.toggle("show", show);
+            repartidorEntrega.required = show;
+            if (!show) repartidorEntrega.value = "";
+        };
+        repartidorConfirmado.addEventListener("change", syncRepartidor);
+        syncRepartidor();
+    }
     document.querySelectorAll("[data-receipt-actions]").forEach((group) => {
         const productId = group.dataset.receiptActions;
         const hidden = document.querySelector(`input[name="correcto_${productId}"]`);
