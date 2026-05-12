@@ -190,3 +190,30 @@ class MermaEvidencia(models.Model):
 
     def __str__(self) -> str:
         return f"{self.get_tipo_display()} - {self.registro.folio}"
+
+
+class PersonalEnviosSucursal(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="personal_envios_sucursales",
+    )
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="personal_envios_sucursales",
+    )
+    telefono = models.CharField(max_length=30, blank=True, default="")
+    activo = models.BooleanField(default=True, db_index=True)
+    notas = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["user__first_name", "user__last_name", "user__username"]
+        verbose_name = "Personal Envíos a Sucursales"
+        verbose_name_plural = "Personal Envíos a Sucursales"
+
+    def __str__(self) -> str:
+        return self.user.get_full_name() or self.user.username

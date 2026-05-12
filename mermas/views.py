@@ -15,7 +15,7 @@ from core.models import Sucursal, UserModuleAccess, sucursales_operativas
 from logistica.models import Repartidor
 from recetas.models import Receta
 
-from .models import MermaEvidencia, MermaProducto, MermaRegistro
+from .models import MermaEvidencia, MermaProducto, MermaRegistro, PersonalEnviosSucursal
 
 
 def _explicit_access(user, *scopes: str) -> str:
@@ -43,7 +43,9 @@ def _can_capture(user) -> bool:
 
 
 def _can_receive(user) -> bool:
-    return _explicit_access(user, "recepcion") == ACCESS_MANAGE
+    if _explicit_access(user, "recepcion") == ACCESS_MANAGE:
+        return True
+    return PersonalEnviosSucursal.objects.filter(user=user, activo=True).exists()
 
 
 def _can_manage_mermas(user) -> bool:

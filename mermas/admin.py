@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import MermaEvidencia, MermaProducto, MermaRegistro
+from .models import MermaEvidencia, MermaProducto, MermaRegistro, PersonalEnviosSucursal
 
 
 class MermaProductoInline(admin.TabularInline):
@@ -33,3 +33,14 @@ class MermaProductoAdmin(admin.ModelAdmin):
 class MermaEvidenciaAdmin(admin.ModelAdmin):
     list_display = ("registro", "tipo", "subido_por", "creado_en")
     list_filter = ("tipo", "creado_en")
+
+
+@admin.register(PersonalEnviosSucursal)
+class PersonalEnviosSucursalAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "user", "sucursal", "telefono", "activo")
+    list_filter = ("activo", "sucursal")
+    search_fields = ("user__first_name", "user__last_name", "user__username", "telefono")
+
+    @admin.display(description="Nombre")
+    def nombre(self, obj):
+        return obj.user.get_full_name() or obj.user.username
