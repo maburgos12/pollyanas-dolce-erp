@@ -53,7 +53,7 @@ def _can_manage_mermas(user) -> bool:
 
 
 def _require_dashboard(user):
-    if not (_can_dashboard(user) or _can_receive(user)):
+    if not _can_dashboard(user):
         raise PermissionDenied("No tienes acceso al panel de mermas.")
 
 
@@ -303,9 +303,12 @@ def recibir_cedis(request, pk):
     nota = request.POST.get("nota_recepcion", "").strip()
     repartidor_confirmado = request.POST.get("repartidor_confirmado") == "on"
     repartidor_entrega = None
-    if not repartidor_confirmado:
-        repartidor_entrega = get_object_or_404(Repartidor, pk=request.POST.get("repartidor_entrega"))
     try:
+        if not repartidor_confirmado:
+            repartidor_entrega_id = request.POST.get("repartidor_entrega")
+            if not repartidor_entrega_id:
+                raise ValidationError("Selecciona el repartidor que entregó realmente.")
+            repartidor_entrega = get_object_or_404(Repartidor, pk=repartidor_entrega_id)
         with transaction.atomic():
             for producto in registro.productos.all():
                 cantidad_raw = request.POST.get(f"cantidad_recibida_{producto.pk}", "").strip()
