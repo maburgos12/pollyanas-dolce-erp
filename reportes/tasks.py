@@ -101,7 +101,7 @@ def task_alerta_produccion_sin_registros(self):
             subject=subject,
             message=body,
             from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "erp@pollyanasdolce.com"),
-            recipient_list=["mauricio@pollyanasdolce.com"],
+            recipient_list=["maburgos12@pollyanasdolce.com"],
             fail_silently=False,
         )
     except Exception as exc:

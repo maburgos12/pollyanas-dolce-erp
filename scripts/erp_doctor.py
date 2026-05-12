@@ -796,7 +796,7 @@ def send_email_report(report: dict) -> bool:
     from django.core.mail import send_mail
 
     today = datetime.now().date().isoformat()
-    recipient = os.getenv("ERP_DOCTOR_EMAIL", "mauricio@pollyanasdolce.com")
+    recipient = os.getenv("ERP_DOCTOR_EMAIL", "maburgos12@pollyanasdolce.com")
     send_mail(
         subject=f"ERP Doctor - {report['status']} {today}",
         message=build_email_body(report),
