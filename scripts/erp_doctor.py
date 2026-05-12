@@ -11,6 +11,8 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from types import SimpleNamespace
 from pathlib import Path
 
 APP_ENV_WAS_INJECTED = not bool(os.environ.get("APP_ENV"))
@@ -18,6 +20,8 @@ if APP_ENV_WAS_INJECTED:
     os.environ["APP_ENV"] = "local"
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 DEFAULT_TIMEOUT = 120
 PRODUCTION_HOST = "root@68.183.165.47"
 PRODUCTION_KEY = Path.home() / ".ssh" / "agente_dg_ops"
@@ -83,6 +87,8 @@ class CheckResult:
     duration_ms: int = 0
     summary: str = ""
     details: list[object] = field(default_factory=list)
+    fixed: bool = False
+    fix_action: str | None = None
 
 
 def python_bin() -> str:
@@ -463,162 +469,172 @@ if missing:
     return checks
 
 
-def check_celery_beat_schedules() -> CheckResult:
-    py = python_bin()
-    started = time.monotonic()
-    payload = json.dumps(CRITICAL_BEAT_TASKS, ensure_ascii=False)
-    script = f"""
-import json
-import os
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-import django
-django.setup()
-from django.db.models import Q
-from django_celery_beat.models import PeriodicTask
+def _setup_django() -> None:
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    import django
+    from django.apps import apps
 
-critical = json.loads({payload!r})
-details = []
-global_status = "OK"
+    if not apps.ready:
+        django.setup()
 
-def cron_dict(task):
-    if not task.crontab_id:
-        return None
-    cron = task.crontab
-    return {{
-        "minute": cron.minute,
-        "hour": cron.hour,
-        "day_of_week": cron.day_of_week,
-        "day_of_month": cron.day_of_month,
-        "month_of_year": cron.month_of_year,
-        "timezone": str(cron.timezone),
-    }}
 
-def interval_dict(task):
-    if not task.interval_id:
-        return None
-    return {{"every": task.interval.every, "period": task.interval.period}}
+def _format_schedule_detail(task) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    cron = None
+    interval = None
+    if task.crontab_id:
+        cron_obj = task.crontab
+        cron = {
+            "minute": cron_obj.minute,
+            "hour": cron_obj.hour,
+            "day_of_week": cron_obj.day_of_week,
+            "day_of_month": cron_obj.day_of_month,
+            "month_of_year": cron_obj.month_of_year,
+            "timezone": str(cron_obj.timezone),
+        }
+    if task.interval_id:
+        interval = {
+            "every": task.interval.every,
+            "period": task.interval.period,
+        }
+    return cron, interval
 
-for item in critical:
-    names = item["names"]
-    expected_cron = item.get("expected_cron") or {{}}
-    qs = PeriodicTask.objects.select_related("crontab", "interval").filter(
-        Q(name__in=names) | Q(task=item["task"])
+
+def _select_periodic_task(item: dict[str, object]):
+    from django.db.models import Q
+    from django_celery_beat.models import PeriodicTask
+
+    names = list(item["names"])
+    matches = list(
+        PeriodicTask.objects.select_related("crontab", "interval").filter(
+            Q(name__in=names) | Q(task=item["task"])
+        )
     )
-    matches = list(qs)
     selected = next((task for name in names for task in matches if task.name == name), None)
     if selected is None and matches:
         selected = matches[0]
-    if selected is None:
-        details.append({{
-            "label": item["label"],
-            "status": "WARN",
-            "summary": "no encontrada en Beat",
-            "expected_names": names,
-            "task": item["task"],
-        }})
-        global_status = "WARN"
-        continue
+    return selected
 
-    cron = cron_dict(selected)
-    interval = interval_dict(selected)
-    mismatches = []
-    if cron is None and expected_cron:
-        mismatches.append("sin crontab")
-    elif cron:
-        for key, expected in expected_cron.items():
-            if str(cron.get(key)) != str(expected):
-                mismatches.append(f"{{key}}={{cron.get(key)}} esperado={{expected}}")
 
-    if not selected.enabled:
-        status = "WARN"
-        summary = "enabled=False - revisar"
-    elif mismatches:
-        status = "WARN"
-        summary = "frecuencia distinta: " + ", ".join(mismatches)
-    else:
-        status = "OK"
-        summary = "enabled"
-
-    if status == "WARN":
-        global_status = "WARN"
-
-    details.append({{
-        "label": item["label"],
-        "status": status,
-        "summary": summary,
-        "name": selected.name,
-        "task": selected.task,
-        "enabled": selected.enabled,
-        "cron": cron,
-        "interval": interval,
-        "expected_names": names,
-        "expected_cron": expected_cron,
-    }})
-
-print(json.dumps({{"status": global_status, "details": details}}, ensure_ascii=False))
-"""
-    command = [py, "-c", script]
-    command_text = shlex.join(command)
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=os.environ.copy(),
-            text=True,
-            capture_output=True,
-            timeout=120,
+def check_celery_beat_schedules(fix: bool = False) -> CheckResult:
+    started = time.monotonic()
+    host, port, db_config_error = get_default_db_connection_info()
+    if db_config_error:
+        db_config_error.name = "Celery Beat - schedules criticos"
+        db_config_error.summary = "No fue posible leer la configuracion de DB antes de consultar Beat."
+        return db_config_error
+    assert host is not None
+    assert port is not None
+    if not db_is_reachable(host, port, timeout=2.0):
+        return skipped(
+            "Celery Beat - schedules criticos",
+            f"DB no alcanzable (host: {host}:{port}); no se puede consultar ni corregir PeriodicTask.",
+            "django_celery_beat PeriodicTask ORM",
         )
-    except subprocess.TimeoutExpired as exc:
+    try:
+        _setup_django()
+        from django_celery_beat.models import PeriodicTask
+    except Exception as exc:  # noqa: BLE001
         return CheckResult(
             name="Celery Beat - schedules criticos",
             severity="FAIL",
             status="FAIL",
-            command=command_text,
+            command="django_celery_beat PeriodicTask ORM",
             duration_ms=int((time.monotonic() - started) * 1000),
-            summary="Timeout consultando django_celery_beat_periodictask.",
-            details=trim_output((exc.stdout or "") + "\n" + (exc.stderr or "")),
+            summary="Error al inicializar Django para consultar Beat.",
+            details=[str(exc)],
         )
 
-    duration_ms = int((time.monotonic() - started) * 1000)
-    if completed.returncode != 0:
-        return CheckResult(
-            name="Celery Beat - schedules criticos",
-            severity="FAIL",
-            status="FAIL",
-            command=command_text,
-            exit_code=completed.returncode,
-            duration_ms=duration_ms,
-            summary="Error al consultar django_celery_beat_periodictask.",
-            details=trim_output(completed.stdout + "\n" + completed.stderr),
-        )
+    details: list[dict[str, object]] = []
+    fixed_actions: list[str] = []
+    global_status = "OK"
 
     try:
-        payload_result = json.loads(completed.stdout.strip())
-    except json.JSONDecodeError as exc:
+        for item in CRITICAL_BEAT_TASKS:
+            names = list(item["names"])
+            expected_cron = dict(item.get("expected_cron") or {})
+            selected = _select_periodic_task(item)
+            if selected is None:
+                details.append({
+                    "label": item["label"],
+                    "status": "WARN",
+                    "summary": "no encontrada en Beat",
+                    "expected_names": names,
+                    "task": item["task"],
+                    "fixed": False,
+                })
+                global_status = "WARN"
+                continue
+
+            item_fixed = False
+            item_fix_action = None
+            if fix and not selected.enabled:
+                item_fix_action = f"Beat task '{selected.name}' estaba disabled -> reactivada."
+                print(f"[FIX] {item_fix_action}", file=sys.stderr)
+                PeriodicTask.objects.filter(pk=selected.pk).update(enabled=True)
+                selected = _select_periodic_task(item)
+                item_fixed = True
+                fixed_actions.append(item_fix_action)
+
+            cron, interval = _format_schedule_detail(selected)
+            mismatches = []
+            if cron is None and expected_cron:
+                mismatches.append("sin crontab")
+            elif cron:
+                for key, expected in expected_cron.items():
+                    if str(cron.get(key)) != str(expected):
+                        mismatches.append(f"{key}={cron.get(key)} esperado={expected}")
+
+            if not selected.enabled:
+                item_status = "WARN"
+                summary = "enabled=False - revisar"
+            elif mismatches:
+                item_status = "WARN"
+                summary = "frecuencia distinta: " + ", ".join(mismatches)
+            else:
+                item_status = "OK"
+                summary = "enabled"
+
+            if item_status == "WARN":
+                global_status = "WARN"
+
+            details.append({
+                "label": item["label"],
+                "status": item_status,
+                "summary": summary,
+                "name": selected.name,
+                "task": selected.task,
+                "enabled": selected.enabled,
+                "cron": cron,
+                "interval": interval,
+                "expected_names": names,
+                "expected_cron": expected_cron,
+                "fixed": item_fixed,
+                "fix_action": item_fix_action,
+            })
+    except Exception as exc:  # noqa: BLE001
         return CheckResult(
             name="Celery Beat - schedules criticos",
             severity="FAIL",
             status="FAIL",
-            command=command_text,
-            exit_code=completed.returncode,
-            duration_ms=duration_ms,
-            summary="No fue posible interpretar la consulta de Beat como JSON.",
-            details=[str(exc), *trim_output(completed.stdout + "\n" + completed.stderr)],
+            command="django_celery_beat PeriodicTask ORM",
+            duration_ms=int((time.monotonic() - started) * 1000),
+            summary="Error al consultar django_celery_beat_periodictask.",
+            details=[str(exc)],
         )
 
-    status = payload_result["status"]
-    details = payload_result["details"]
     warn_count = sum(1 for item in details if item["status"] == "WARN")
     ok_count = sum(1 for item in details if item["status"] == "OK")
     return CheckResult(
         name="Celery Beat - schedules criticos",
-        severity=status,
-        status=status,
-        command=command_text,
-        exit_code=completed.returncode,
-        duration_ms=duration_ms,
+        severity=global_status,
+        status=global_status,
+        command="django_celery_beat PeriodicTask ORM",
+        exit_code=0,
+        duration_ms=int((time.monotonic() - started) * 1000),
         summary=f"{ok_count} OK, {warn_count} WARN sobre {len(details)} schedules criticos.",
         details=details,
+        fixed=bool(fixed_actions),
+        fix_action="; ".join(fixed_actions) if fixed_actions else None,
     )
 
 
@@ -700,7 +716,7 @@ def production_readonly_checks() -> list[CheckResult]:
     ]
 
 
-def build_report(args: argparse.Namespace) -> dict:
+def build_report(args: argparse.Namespace | SimpleNamespace) -> dict:
     checks: list[CheckResult] = []
     if args.production_readonly:
         checks.extend(production_readonly_checks())
@@ -713,8 +729,11 @@ def build_report(args: argparse.Namespace) -> dict:
         checks.extend(check_js())
         checks.extend(check_celery())
         checks.extend(check_docker())
+        if args.full or args.fix:
+            checks.append(check_celery_beat_schedules(fix=args.fix))
+            if args.fix:
+                checks.append(check_celery_beat_schedules(fix=False))
         if args.full:
-            checks.append(check_celery_beat_schedules())
             checks.extend(check_tests())
         checks.append(check_browser_route())
 
@@ -733,6 +752,81 @@ def build_report(args: argparse.Namespace) -> dict:
         "status": status,
         "checks": [asdict(check) for check in checks],
     }
+
+
+def report_findings(report: dict) -> tuple[list[str], list[str]]:
+    findings = [
+        f"{check['name']}: {check['status']} - {check['summary']}"
+        for check in report["checks"]
+        if check["status"] in {"WARN", "FAIL"}
+    ]
+    clear = [
+        check["name"]
+        for check in report["checks"]
+        if check["status"] in {"OK", "SKIPPED"}
+    ]
+    return findings, clear
+
+
+def build_email_body(report: dict) -> str:
+    findings, clear = report_findings(report)
+    lines = [
+        f"Estado global: {report['status']}",
+        "",
+        "Checks con hallazgos:",
+    ]
+    if findings:
+        lines.extend(f"- {item}" for item in findings)
+    else:
+        lines.append("- Ninguno")
+    lines.extend([
+        "",
+        "Checks sin hallazgos (OK/SKIPPED): " + (", ".join(clear) if clear else "Ninguno"),
+        "",
+        "-- ERP Pollyana's Dolce",
+    ])
+    return "\n".join(lines)
+
+
+def send_email_report(report: dict) -> bool:
+    if report["status"] == "OK":
+        return False
+    _setup_django()
+    from django.conf import settings
+    from django.core.mail import send_mail
+
+    today = datetime.now().date().isoformat()
+    recipient = os.getenv("ERP_DOCTOR_EMAIL", "mauricio@pollyanasdolce.com")
+    send_mail(
+        subject=f"ERP Doctor - {report['status']} {today}",
+        message=build_email_body(report),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "erp@pollyanasdolce.com"),
+        recipient_list=[recipient],
+        fail_silently=False,
+    )
+    return True
+
+
+def run_doctor(
+    *,
+    quick: bool = True,
+    full: bool = False,
+    fix: bool = False,
+    production_readonly: bool = False,
+    email: bool = False,
+) -> dict:
+    args = SimpleNamespace(
+        quick=quick,
+        full=full,
+        fix=fix,
+        production_readonly=production_readonly,
+    )
+    report = build_report(args)
+    email_sent = False
+    if email:
+        email_sent = send_email_report(report)
+    report["email_sent"] = email_sent
+    return report
 
 
 def print_human(report: dict) -> None:
@@ -770,6 +864,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     mode.add_argument("--full", action="store_true", help="Auditoria mas completa, incluyendo herramientas opcionales y smoke tests.")
     parser.add_argument("--json", action="store_true", help="Salida estructurada JSON.")
     parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Corrige solo hallazgos seguros y reversibles, como reactivar PeriodicTask criticas deshabilitadas.",
+    )
+    parser.add_argument(
+        "--email",
+        action="store_true",
+        help="Envia reporte por email si el estado global es WARN o FAIL.",
+    )
+    parser.add_argument(
         "--production-readonly",
         action="store_true",
         help="Ejecuta diagnosticos seguros de solo lectura contra el VPS de produccion.",
@@ -782,7 +886,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    report = build_report(args)
+    report = run_doctor(
+        quick=args.quick,
+        full=args.full,
+        fix=args.fix,
+        production_readonly=args.production_readonly,
+        email=args.email,
+    )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

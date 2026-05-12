@@ -263,6 +263,25 @@ class Command(BaseCommand):
             },
         )
 
+        erp_doctor_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour="6",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="erp-doctor: reporte diario",
+            defaults={
+                "task": "reportes.erp_doctor_daily_report",
+                "crontab": erp_doctor_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         dg_operacion_snapshot_cron, _ = CrontabSchedule.objects.get_or_create(
             minute=str((analytics_refresh_minute + 10) % 60),
             hour=str((analytics_refresh_hour + 1) % 24 if analytics_refresh_minute >= 50 else analytics_refresh_hour),

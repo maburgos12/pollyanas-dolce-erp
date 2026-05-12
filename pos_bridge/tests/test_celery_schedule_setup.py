@@ -27,6 +27,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
             task_names,
             {
                 "pos_bridge: ventas cerradas diario",
+                "pos_bridge: ventas intradia actual",
                 "pos_bridge: cierre producto mensual",
                 "pos_bridge: inventario completo diario",
                 "pos_bridge: inventario cierre diario",
@@ -49,13 +50,16 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "recetas: consolidado nocturno CEDIS",
                 "recetas: inventario final cierre email",
                 "reportes: refresh analytics operativo",
+                "erp-doctor: reporte diario",
+                "reportes: snapshot operacion dg",
                 "orquestacion: plan diario faltante",
                 "orquestacion: cadena plan demanda-produccion-compras",
                 "orquestacion: excepciones compra DG",
                 "orquestacion: guardia ajustes inventario",
+                "proyecciones: forecast quincenal semanal",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 27)
+        self.assertEqual(PeriodicTask.objects.count(), 30)
         realtime = PeriodicTask.objects.get(name="pos_bridge: inventario realtime")
         self.assertEqual(realtime.interval.every, 5)
         inventory_close = PeriodicTask.objects.get(name="pos_bridge: inventario cierre diario")
@@ -78,6 +82,10 @@ class SetupCelerySchedulesCommandTests(TestCase):
         analytics_refresh = PeriodicTask.objects.get(name="reportes: refresh analytics operativo")
         self.assertEqual(analytics_refresh.crontab.hour, "3")
         self.assertEqual(analytics_refresh.crontab.minute, "35")
+        erp_doctor = PeriodicTask.objects.get(name="erp-doctor: reporte diario")
+        self.assertEqual(erp_doctor.task, "reportes.erp_doctor_daily_report")
+        self.assertEqual(erp_doctor.crontab.hour, "6")
+        self.assertEqual(erp_doctor.crontab.minute, "0")
         orchestration_daily_plan = PeriodicTask.objects.get(name="orquestacion: plan diario faltante")
         self.assertEqual(orchestration_daily_plan.crontab.hour, "9")
         self.assertEqual(orchestration_daily_plan.crontab.minute, "5")

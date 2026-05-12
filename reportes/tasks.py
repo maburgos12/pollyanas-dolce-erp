@@ -112,3 +112,6 @@ def task_alerta_produccion_sin_registros(self):
         "date": target.isoformat(),
         "registros": 0,
     }
+
+
+from reportes.tasks_doctor import erp_doctor_daily_report  # noqa: E402,F401
