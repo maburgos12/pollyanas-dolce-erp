@@ -119,6 +119,10 @@ def _licencia_turno_bloqueo(repartidor: Repartidor) -> dict | None:
     return None
 
 
+def _gas_rank(value: str | None) -> int | None:
+    return {"vacio": 0, "1/4": 1, "1/2": 2, "3/4": 3, "lleno": 4}.get(value or "")
+
+
 def _reportes_with_reafirmaciones(qs):
     return qs.annotate(
         reafirmaciones_count=Count("reafirmaciones", distinct=True),
@@ -204,6 +208,70 @@ class LogisticaResumenSemanalView(_LogisticaBaseView):
                     "reportes_creados": reportes_total,
                     "reportes_reafirmados": reafirmaciones_total,
                 },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaCombustibleAlertaView(_LogisticaBaseView):
+    def get(self, request):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response({"detail": "No tienes perfil de repartidor registrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        pendientes = []
+        bitacoras = (
+            BitacoraSalidaLlegada.objects.select_related("unidad")
+            .filter(repartidor=repartidor, cerrada=True)
+            .exclude(nivel_gas_llegada="")
+            .order_by("-hora_llegada", "-id")
+        )
+        for bitacora in bitacoras:
+            gas_salida = _gas_rank(bitacora.nivel_gas_salida)
+            gas_llegada = _gas_rank(bitacora.nivel_gas_llegada)
+            if gas_salida is None or gas_llegada is None or gas_llegada <= gas_salida:
+                continue
+            tiene_combustible = any(
+                [
+                    bitacora.litros_cargados is not None,
+                    bitacora.costo_combustible is not None,
+                    bool(bitacora.foto_ticket_combustible),
+                ]
+            )
+            if tiene_combustible:
+                continue
+            pendientes.append(
+                {
+                    "id": bitacora.id,
+                    "folio": bitacora.folio,
+                    "unidad_codigo": bitacora.unidad.codigo,
+                    "fecha": timezone.localtime(bitacora.hora_llegada or bitacora.hora_salida).date().isoformat()
+                    if bitacora.hora_llegada or bitacora.hora_salida
+                    else bitacora.fecha.isoformat(),
+                    "nivel_gas_salida": bitacora.nivel_gas_salida,
+                    "nivel_gas_llegada": bitacora.nivel_gas_llegada,
+                }
+            )
+
+        if pendientes:
+            return Response(
+                {
+                    "tipo": "pendiente",
+                    "pendiente": True,
+                    "pendientes_count": len(pendientes),
+                    "pendientes": pendientes[:5],
+                    "mensaje": "No registraste carga de combustible.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {
+                "tipo": "recordatorio",
+                "pendiente": False,
+                "pendientes_count": 0,
+                "pendientes": [],
+                "mensaje": "Recuerda registrar la gasolina si cargas combustible durante tu turno.",
             },
             status=status.HTTP_200_OK,
         )
